@@ -56,7 +56,7 @@ enum Call {
     Leverage {
         symbol: String,
         leverage: f64,
-        commit: bool,
+        side: Option<PositionSide>,
     },
     Margin {
         symbol: String,
@@ -79,6 +79,8 @@ struct Job {
     ids: Vec<String>,
     error: Option<String>,
     continue_on_error: bool,
+    // A trigger move cancels before placing; a failed placement must say so.
+    replaces_cancelled: bool,
 }
 struct Observation {
     order: Order,
@@ -290,13 +292,18 @@ impl Trading {
                 command,
                 symbol,
                 leverage,
-            } => (command, self.leverage(cx, &symbol, leverage)),
+                side,
+            } => (command, self.leverage(cx, &symbol, leverage, side)),
             Command::SetMarginType {
                 command,
                 symbol,
                 isolated,
             } => (command, self.margin(cx, &symbol, isolated)),
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 let plan = if cx.store.positions().iter().any(|p| p.contracts > 0.0)
                     || cx
                         .store
@@ -359,14 +366,13 @@ impl Trading {
         }
         if let Some(step) = job.steps.pop_front() {
             cx.command_progress(command, step.receipts);
-            let (url, headers, body) =
-                step.params
-                    .into_request(step.method, step.path, credentials, cx.now);
-            cx.request(
+            crate::issue(
+                cx,
+                credentials,
                 step.method,
-                url,
-                headers,
-                body,
+                step.path,
+                step.params,
+                None,
                 Pending::Trade(Request {
                     command,
                     call: step.call,
@@ -391,7 +397,8 @@ impl Trading {
         request: Request,
         error: &str,
     ) {
-        self.finish(cx, credentials, request.command, Err(error.into()));
+        let places = request.places_order();
+        self.finish(cx, credentials, request.command, places, Err(error.into()));
     }
 
     pub fn on_response(
@@ -401,6 +408,7 @@ impl Trading {
         request: Request,
         response: Response<'_>,
     ) {
+        let places = request.places_order();
         let result = (|| {
             let absent_ok = matches!(
                 &request.call,
@@ -492,11 +500,25 @@ impl Trading {
                 Call::Leverage {
                     symbol,
                     leverage,
-                    commit,
+                    side,
                 } => {
-                    if commit {
-                        cx.store.update_setting(&symbol, |s| s.leverage = leverage);
-                    }
+                    cx.store.update_setting(&symbol, |s| match side {
+                        Some(PositionSide::Long) => {
+                            s.leverage = leverage;
+                            s.buy_leverage = Some(leverage);
+                        }
+                        Some(PositionSide::Short) => s.sell_leverage = Some(leverage),
+                        None => {
+                            s.leverage = leverage;
+                            s.buy_leverage = Some(leverage);
+                            s.sell_leverage = Some(leverage);
+                        }
+                    });
+                    cx.store.update_positions(|p| {
+                        if p.symbol == symbol && side.is_none_or(|side| p.side == side) {
+                            p.leverage = leverage;
+                        }
+                    });
                     Ok(Vec::new())
                 }
                 Call::Margin { symbol, isolated } => {
@@ -515,7 +537,7 @@ impl Trading {
                 }
             }
         })();
-        self.finish(cx, credentials, request.command, result);
+        self.finish(cx, credentials, request.command, places, result);
     }
 
     fn finish(
@@ -523,6 +545,7 @@ impl Trading {
         cx: &mut Cx<'_, Pending>,
         credentials: Option<&Credentials>,
         command: CommandId,
+        places: bool,
         result: Result<Vec<String>, String>,
     ) {
         let Some(job) = self.jobs.get_mut(&command) else {
@@ -531,6 +554,11 @@ impl Trading {
         match result {
             Ok(ids) => job.ids.extend(ids),
             Err(error) => {
+                let error = if places && job.replaces_cancelled {
+                    format!("original bracket cancelled; replacement failed: {error}")
+                } else {
+                    error
+                };
                 cx.command_error(command, error.clone());
                 job.error.get_or_insert(error);
             }
@@ -854,7 +882,7 @@ impl Trading {
             if amount.is_some()
                 || !matches!(
                     meta.native_kind.as_str(),
-                    "STOP_MARKET" | "TAKE_PROFIT_MARKET"
+                    "STOP_MARKET" | "TAKE_PROFIT_MARKET" | "TRIGGER_MARKET"
                 )
             {
                 return Err(
@@ -865,10 +893,12 @@ impl Trading {
             if !next.is_finite() || next <= 0.0 || next == o.price {
                 return Err("Trigger price must change after rounding".into());
             }
-            let kind = if meta.native_kind == "STOP_MARKET" {
-                OrderType::StopLoss
-            } else {
-                OrderType::TakeProfit
+            // TRIGGER_MARKET (attached brackets) has no native direction; the
+            // mapped kind is its SL/TP side relative to mark.
+            let kind = match meta.native_kind.as_str() {
+                "STOP_MARKET" => OrderType::StopLoss,
+                "TAKE_PROFIT_MARKET" => OrderType::TakeProfit,
+                _ => o.kind,
             };
             let source = o
                 .trigger_type
@@ -920,12 +950,23 @@ impl Trading {
             };
             let mut replacement = self.format(cx, &opts)?;
             for step in &mut replacement {
-                step.params = std::mem::take(&mut step.params)
-                    .str("positionSide", &meta.position_side)
-                    .str("type", &meta.native_kind);
+                let params =
+                    std::mem::take(&mut step.params).str("positionSide", &meta.position_side);
+                // Like TS, a moved bracket takes the type placement picks today,
+                // but a reduce-only bracket stays reduce-only whatever that type.
+                step.params = if meta.native_kind == "TRIGGER_MARKET" {
+                    if o.reduce_only && !cx.store.hedged() && o.close != Some(true) {
+                        params.boolean("reduceOnly", true)
+                    } else {
+                        params
+                    }
+                } else {
+                    params.str("type", &meta.native_kind)
+                };
             }
             let mut job = self.cancel(cx, &[id.into()])?;
             job.continue_on_error = false;
+            job.replaces_cancelled = true;
             if let Some(Step {
                 call: Call::Cancel { absent_ok, .. },
                 ..
@@ -1021,7 +1062,13 @@ impl Trading {
         }];
         Ok(job)
     }
-    fn leverage(&self, cx: &Cx<'_, Pending>, symbol: &str, input: f64) -> Result<Job, String> {
+    fn leverage(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        input: f64,
+        side: Option<PositionSide>,
+    ) -> Result<Job, String> {
         let market = cx.store.market(symbol).ok_or("Market not found")?;
         let input = positive(Some(input), "Leverage")?;
         if !market.limits.leverage.min.is_finite()
@@ -1031,29 +1078,31 @@ impl Trading {
             return Err("Market leverage limits are invalid".into());
         }
         let leverage = input.clamp(market.limits.leverage.min, market.limits.leverage.max);
-        let sides: &[&str] = if cx.store.hedged() {
-            &["LONG", "SHORT"]
+        let side = if cx.store.hedged() {
+            Some(side.ok_or("Side is required when position mode is hedged")?)
         } else {
-            &["BOTH"]
+            None
         };
-        let mut job = Job::default();
-        for (index, side) in sides.iter().enumerate() {
-            job.steps.push_back(Step {
-                receipts: Vec::new(),
-                method: Method::Post,
-                path: "/openApi/swap/v2/trade/leverage",
-                params: Params::new()
-                    .str("symbol", &market.id)
-                    .str("side", side)
-                    .num("leverage", leverage),
-                call: Call::Leverage {
-                    symbol: symbol.into(),
-                    leverage,
-                    commit: index + 1 == sides.len(),
-                },
-            });
-        }
-        Ok(job)
+        Ok(one(
+            Method::Post,
+            "/openApi/swap/v2/trade/leverage",
+            Params::new()
+                .str("symbol", &market.id)
+                .str(
+                    "side",
+                    match side {
+                        Some(PositionSide::Long) => "LONG",
+                        Some(PositionSide::Short) => "SHORT",
+                        None => "BOTH",
+                    },
+                )
+                .num("leverage", leverage),
+            Call::Leverage {
+                symbol: symbol.into(),
+                leverage,
+                side,
+            },
+        ))
     }
     fn margin(&self, cx: &Cx<'_, Pending>, symbol: &str, isolated: bool) -> Result<Job, String> {
         let market = cx.store.market(symbol).ok_or("Market not found")?;

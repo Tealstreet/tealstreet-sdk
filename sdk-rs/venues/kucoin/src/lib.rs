@@ -12,6 +12,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Balance, Candle, Market, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, Store, TimerId,
     Venue,
@@ -51,7 +52,7 @@ pub enum Pending {
     },
     Bullet {
         channel: usize,
-        attempt: u8,
+        generation: u64,
     },
     Depth {
         symbol: String,
@@ -76,12 +77,12 @@ struct Connection {
     open: bool,
     ready: bool,
     subscribed: bool,
-    last: f64,
+    generation: u64,
+    token_pending: bool,
+    supervisor: Supervisor,
     ping_interval: f64,
     ping_timeout: f64,
-    ping: Option<TimerId>,
     pong: Option<TimerId>,
-    reconnect: Option<TimerId>,
 }
 impl Connection {
     fn new(role: Role) -> Self {
@@ -91,12 +92,16 @@ impl Connection {
             open: false,
             ready: false,
             subscribed: false,
-            last: 0.0,
+            generation: 0,
+            token_pending: false,
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms: Some(10_000.0),
+                idle_timeout_ms: 90_000.0,
+                ..Config::default()
+            }),
             ping_interval: 18000.0,
             ping_timeout: 10000.0,
-            ping: None,
             pong: None,
-            reconnect: None,
         }
     }
 }
@@ -318,8 +323,17 @@ impl Kucoin {
             cx.stream_response(request, at);
         }
     }
-    fn token(&mut self, cx: &mut Cx<'_, Pending>, channel: usize, attempt: u8) {
-        let pending = Pending::Bullet { channel, attempt };
+    fn token(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+        let c = &mut self.connections[channel];
+        if c.token_pending || c.socket.is_some() {
+            return;
+        }
+        c.token_pending = true;
+        c.supervisor.connecting(cx);
+        let pending = Pending::Bullet {
+            channel,
+            generation: c.generation,
+        };
         if matches!(self.connections[channel].role, Role::Private) {
             self.signed(cx, Method::Post, "/api/v1/bullet-private", None, pending);
         } else {
@@ -355,7 +369,7 @@ impl Kucoin {
             cx.store.set_orders(vec![]);
         }
         for channel in 0..self.connections.len() {
-            self.token(cx, channel, 0);
+            self.token(cx, channel);
         }
     }
     fn subscription(
@@ -480,12 +494,33 @@ impl Kucoin {
                 format!(r#"{{"id":{},"type":"ping"}}"#, self.message_id),
             );
             c.pong = Some(cx.set_timer(c.ping_timeout));
-            c.ping = Some(cx.set_timer(c.ping_interval));
         }
     }
     fn reconnect_later(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
-        if self.connections[channel].reconnect.is_none() {
-            self.connections[channel].reconnect = Some(cx.set_timer(1000.0));
+        let c = &mut self.connections[channel];
+        if let Some(socket) = c.socket.take() {
+            cx.close(socket);
+        }
+        c.open = false;
+        c.ready = false;
+        c.subscribed = false;
+        c.token_pending = false;
+        c.generation = c.generation.wrapping_add(1);
+        if let Some(timer) = c.pong.take() {
+            cx.clear_timer(timer);
+        }
+        c.supervisor.retry(cx);
+        if matches!(c.role, Role::Detail) {
+            for book in self.books.values_mut() {
+                if let Some(timer) = book.retry.take() {
+                    cx.clear_timer(timer);
+                }
+                book.synced = false;
+                book.loading = false;
+                self.book_generation += 1;
+                book.generation = self.book_generation;
+                book.buffer.clear();
+            }
         }
     }
     fn fetch_depth(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -708,6 +743,10 @@ impl Kucoin {
 }
 
 impl Venue for Kucoin {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -748,7 +787,7 @@ impl Venue for Kucoin {
             return;
         };
         self.connections[channel].open = true;
-        self.connections[channel].last = cx.now;
+        self.connections[channel].supervisor.opened(cx);
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let Some(channel) = self
@@ -758,7 +797,7 @@ impl Venue for Kucoin {
         else {
             return;
         };
-        self.connections[channel].last = cx.now;
+        self.connections[channel].supervisor.received(cx.now);
         let Ok(message) = serde_json::from_str::<Message>(text) else {
             return;
         };
@@ -767,6 +806,9 @@ impl Venue for Kucoin {
                 return;
             }
             self.connections[channel].ready = true;
+            let c = &mut self.connections[channel];
+            c.supervisor.authenticated(cx);
+            c.supervisor.set_ping_interval(cx, Some(c.ping_interval));
             if let Some(timer) = self.connections[channel].pong.take() {
                 cx.clear_timer(timer);
             }
@@ -831,26 +873,6 @@ impl Venue for Kucoin {
         else {
             return;
         };
-        let c = &mut self.connections[channel];
-        c.open = false;
-        c.ready = false;
-        c.subscribed = false;
-        c.socket = None;
-        for timer in [c.ping.take(), c.pong.take()].into_iter().flatten() {
-            cx.clear_timer(timer);
-        }
-        if matches!(c.role, Role::Detail) {
-            for book in self.books.values_mut() {
-                if let Some(timer) = book.retry.take() {
-                    cx.clear_timer(timer);
-                }
-                book.synced = false;
-                book.loading = false;
-                self.book_generation += 1;
-                book.generation = self.book_generation;
-                book.buffer.clear();
-            }
-        }
         self.reconnect_later(cx, channel);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
@@ -903,7 +925,16 @@ impl Venue for Kucoin {
             Pending::Depth { symbol, generation } => {
                 self.depth_response(cx, symbol, generation, status, body)
             }
-            Pending::Bullet { channel, attempt } => {
+            Pending::Bullet {
+                channel,
+                generation,
+            } => {
+                if generation != self.connections[channel].generation
+                    || !self.connections[channel].token_pending
+                {
+                    return;
+                }
+                self.connections[channel].token_pending = false;
                 let parsed = success(status, body)
                     .and_then(|e| {
                         e.data
@@ -916,7 +947,9 @@ impl Venue for Kucoin {
                     Ok(bullet) => {
                         let Some(server) = bullet.instance_servers.first().filter(|s| {
                             s.endpoint.starts_with("wss://")
+                                && s.ping_interval.is_finite()
                                 && s.ping_interval >= 1000.0
+                                && s.ping_timeout.is_finite()
                                 && s.ping_timeout >= 1000.0
                         }) else {
                             cx.log(LogLevel::Error, "invalid KuCoin websocket server");
@@ -926,6 +959,7 @@ impl Venue for Kucoin {
                         let c = &mut self.connections[channel];
                         c.ping_interval = server.ping_interval;
                         c.ping_timeout = server.ping_timeout;
+                        c.supervisor.set_auth_timeout(cx, Some(server.ping_timeout));
                         let separator = if server.endpoint.contains('?') {
                             '&'
                         } else {
@@ -955,11 +989,7 @@ impl Venue for Kucoin {
                     }
                     Err(error) => {
                         cx.log(LogLevel::Warning, error);
-                        if attempt < 3 {
-                            self.token(cx, channel, attempt + 1);
-                        } else {
-                            self.reconnect_later(cx, channel);
-                        }
+                        self.reconnect_later(cx, channel);
                     }
                 }
             }
@@ -1030,13 +1060,18 @@ impl Venue for Kucoin {
             Pending::Depth { symbol, generation } => {
                 self.depth_failed(cx, &symbol, generation, error)
             }
-            Pending::Bullet { channel, attempt } => {
-                cx.log(LogLevel::Warning, error);
-                if attempt < 3 {
-                    self.token(cx, channel, attempt + 1);
-                } else {
-                    self.reconnect_later(cx, channel);
+            Pending::Bullet {
+                channel,
+                generation,
+            } => {
+                if generation != self.connections[channel].generation
+                    || !self.connections[channel].token_pending
+                {
+                    return;
                 }
+                self.connections[channel].token_pending = false;
+                cx.log(LogLevel::Warning, error);
+                self.reconnect_later(cx, channel);
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             _ => cx.log(LogLevel::Error, error),
@@ -1061,15 +1096,21 @@ impl Venue for Kucoin {
             return;
         }
         for channel in 0..self.connections.len() {
-            if self.connections[channel].reconnect == Some(timer) {
-                self.connections[channel].reconnect = None;
-                self.token(cx, channel, 0);
-                return;
-            }
-            if self.connections[channel].ping == Some(timer) {
-                self.connections[channel].ping = None;
-                self.ping(cx, channel);
-                return;
+            match self.connections[channel].supervisor.on_timer(cx, timer) {
+                Tick::Reconnect => {
+                    self.token(cx, channel);
+                    return;
+                }
+                Tick::TimedOut(_) => {
+                    self.reconnect_later(cx, channel);
+                    return;
+                }
+                Tick::Ping => {
+                    self.ping(cx, channel);
+                    return;
+                }
+                Tick::Handled => return,
+                Tick::Unhandled => {}
             }
             if self.connections[channel].pong == Some(timer) {
                 self.connections[channel].pong = None;
@@ -1215,12 +1256,7 @@ impl Venue for Kucoin {
         self.books.get(symbol).filter(|b| b.synced).map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, b)| b.synced)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
 

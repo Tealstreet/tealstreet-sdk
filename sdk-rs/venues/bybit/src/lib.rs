@@ -1353,48 +1353,34 @@ impl BybitLinear {
     }
 }
 
-fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerRow<'_>, variant: Variant) {
-    let field = |value: &Option<Str<'_>>| present(value).map(float);
-    let bid = field(&d.bid1_price);
-    let ask = field(&d.ask1_price);
-    let last = field(&d.last_price);
-    let mark = field(&d.mark_price);
-    let index = field(&d.index_price);
-    let percentage = field(&d.price24h_pcnt).map(|p| p * 100.0);
-    let open_interest = field(&d.open_interest);
+fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerDelta<'_>, variant: Variant) {
+    let percentage = d.price24h_pcnt.map(|p| p * 100.0);
+    let open_interest = d.open_interest;
     let funding_rate = if variant.is_spot() {
         Some(0.0)
     } else {
-        field(&d.funding_rate)
+        d.funding_rate
     };
     let funding_time = if variant.is_spot() {
         Some(0.0)
     } else {
-        field(&d.next_funding_time)
+        d.next_funding_time
     };
     let inverse =
         variant == Variant::Linear && Category::for_symbol(&d.symbol) == Category::Inverse;
-    let volume = field(if inverse {
-        &d.turnover24h
-    } else {
-        &d.volume24h
-    });
-    let quote_volume = field(if inverse {
-        &d.volume24h
-    } else {
-        &d.turnover24h
-    });
+    let volume = if inverse { d.turnover24h } else { d.volume24h };
+    let quote_volume = if inverse { d.volume24h } else { d.turnover24h };
     cx.store.update_ticker(&d.symbol, |t| {
         let set = |slot: &mut f64, value: Option<f64>| {
             if let Some(value) = value {
                 *slot = value;
             }
         };
-        set(&mut t.bid, bid);
-        set(&mut t.ask, ask);
-        set(&mut t.last, last);
-        set(&mut t.mark, mark);
-        set(&mut t.index, index);
+        set(&mut t.bid, d.bid1_price);
+        set(&mut t.ask, d.ask1_price);
+        set(&mut t.last, d.last_price);
+        set(&mut t.mark, d.mark_price);
+        set(&mut t.index, d.index_price);
         set(&mut t.percentage, percentage);
         set(&mut t.open_interest, open_interest);
         set(&mut t.funding_rate, funding_rate);
@@ -1866,7 +1852,6 @@ impl Venue for BybitLinear {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, state)| matches!(state.sync, Sync::Synced { .. }))
                 .map(|(symbol, state)| (symbol.as_str(), &state.book)),
         )
     }
@@ -1876,6 +1861,119 @@ impl Venue for BybitLinear {
 mod public_decoder_tests {
     use super::*;
     use safe_cex_engine::{Engine, Event};
+
+    #[test]
+    fn numeric_ticker_deltas_preserve_sparse_fields_and_product_conversions() {
+        for (variant, category, symbol) in [
+            (Variant::Linear, Category::Linear, "BTCUSDT"),
+            (Variant::Linear, Category::Inverse, "BTCUSD"),
+            (Variant::Linear, Category::Option, "BTC-27MAR26-100000-C"),
+            (Variant::Inverse, Category::Inverse, "BTCUSD"),
+            (Variant::Spot, Category::Spot, "BTCUSDT"),
+            (Variant::Demo, Category::Linear, "BTCUSDT"),
+            (Variant::Hyrotrader, Category::Linear, "BTCUSDT"),
+        ] {
+            let socket = SocketId(1);
+            let mut venue = BybitLinear::new(Options {
+                variant,
+                enable_inverse_markets: category == Category::Inverse && variant == Variant::Linear,
+                enable_option_markets: category == Category::Option,
+                endpoints: variant.is_hyro().then(|| Endpoints {
+                    rest: "https://hyro.example".into(),
+                    public_ws: "wss://hyro.example/v5/public/linear".into(),
+                    private_ws: "wss://hyro.example/v5/private".into(),
+                }),
+                public_data_only: true,
+                ..Options::default()
+            });
+            venue.select_category(category);
+            venue.public.socket = Some(socket);
+            let mut engine = Engine::new(venue);
+            engine.store_mut().set_tickers(vec![Ticker {
+                id: symbol.into(),
+                symbol: symbol.into(),
+                bid: 9.0,
+                ask: 11.0,
+                last: 10.0,
+                mark: 10.0,
+                index: 10.0,
+                percentage: 2.0,
+                open_interest: 3.0,
+                funding_rate: 0.01,
+                funding_time: 123.0,
+                volume: 4.0,
+                quote_volume: 5.0,
+                ..Ticker::default()
+            }]);
+            let delta = format!(
+                r#"{{"topic":"tickers.{symbol}","data":{{"symbol":"{symbol}","lastPrice":"\u0031\u0032","bid1Price":null,"ask1Price":"","price24hPcnt":"0.015","volume24h":"30","turnover24h":"60","fundingRate":"0.02","nextFundingTime":"456"}}}}"#
+            );
+            engine.handle(
+                0.0,
+                Event::WsMessage {
+                    socket,
+                    text: &delta,
+                },
+            );
+            let ticker = engine.store().ticker(symbol).unwrap();
+            assert_eq!((ticker.bid, ticker.ask, ticker.last), (9.0, 11.0, 12.0));
+            assert_eq!(
+                (ticker.mark, ticker.index, ticker.open_interest),
+                (10.0, 10.0, 3.0)
+            );
+            assert_eq!(ticker.percentage, 1.5);
+            assert_eq!(
+                (ticker.volume, ticker.quote_volume),
+                if variant == Variant::Linear && category == Category::Inverse {
+                    (60.0, 30.0)
+                } else {
+                    (30.0, 60.0)
+                },
+                "{variant:?}/{category:?}"
+            );
+            assert_eq!(
+                (ticker.funding_rate, ticker.funding_time),
+                if variant.is_spot() {
+                    (0.0, 0.0)
+                } else {
+                    (0.02, 456.0)
+                }
+            );
+            let before = ticker.clone();
+            for data in [
+                r#""lastPrice":"99","delta":false"#,
+                r#""lastPrice":"99","lastPrice":"100""#,
+                r#""lastPrice":"99","gamma":null,"gamma":null"#,
+                r#""lastPrice":99"#,
+            ] {
+                let malformed = format!(
+                    r#"{{"topic":"tickers.{symbol}","data":{{"symbol":"{symbol}",{data}}}}}"#
+                );
+                engine.handle(
+                    1.0,
+                    Event::WsMessage {
+                        socket,
+                        text: &malformed,
+                    },
+                );
+                assert_eq!(engine.store().ticker(symbol), Some(&before), "{malformed}");
+            }
+            let whitespace = format!(
+                r#"{{"topic":"tickers.{symbol}","data":{{"symbol":"{symbol}","lastPrice":" ","bid1Price":"bad"}}}}"#
+            );
+            engine.handle(
+                2.0,
+                Event::WsMessage {
+                    socket,
+                    text: &whitespace,
+                },
+            );
+            let ticker = engine.store().ticker(symbol).unwrap();
+            assert!(ticker.last.is_nan());
+            assert!(ticker.bid.is_nan());
+            assert_eq!(ticker.ask, 11.0);
+        }
+    }
 
     #[test]
     fn malformed_book_data_cannot_partially_change_the_book_or_advance_its_sequence() {

@@ -415,6 +415,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
             command: 9,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         }),
     );
     let out = actions(&mut e);
@@ -530,6 +531,7 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
                 command: 901,
                 symbol: "BTCUSDT".into(),
                 leverage: 12.0,
+                side: None,
             }),
         );
         let request = actions(&mut e)
@@ -578,4 +580,28 @@ fn documented_empty_bal_data_is_a_valid_zero_balance() {
     }
     assert!(e.store().loaded().balance && e.store().loaded().positions);
     assert_eq!(e.store().balance().total, 0.0);
+}
+
+#[test]
+fn partially_effective_algo_remains_visible_and_accepts_later_live_updates() {
+    let (mut e, _, business, pending) = startup();
+    complete(&mut e, pending, "");
+    let algo = r#"{"instId":"BTC-USDT-SWAP","algoId":"algo123","ordType":"conditional","state":"partially_effective","side":"sell","sz":"4","accFillSz":"0","slTriggerPx":"36000","slOrdPx":"-1","tpTriggerPx":"42000","tpOrdPx":"-1","reduceOnly":"true"}"#;
+    ws(
+        &mut e,
+        business,
+        &format!(r#"{{"arg":{{"channel":"orders-algo"}},"data":[{algo}]}}"#),
+    );
+    assert!(e.store().order("algo123_sl").is_some());
+    assert!(e.store().order("algo123_tp").is_some());
+    ws(
+        &mut e,
+        business,
+        &format!(
+            r#"{{"arg":{{"channel":"orders-algo"}},"data":[{}]}}"#,
+            algo.replace("partially_effective", "live")
+                .replace("42000", "43000")
+        ),
+    );
+    assert_eq!(e.store().order("algo123_tp").unwrap().price, 43000.0);
 }

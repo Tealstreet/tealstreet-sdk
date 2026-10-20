@@ -20,6 +20,8 @@ const RECONCILE_INTERVAL_MS: f64 = 5_000.0;
 const ORDERS_RETRY_MS: f64 = 15_000.0;
 const ORDERS_PAGE_LIMIT: u32 = 50;
 const POSITIONS_PAGE_LIMIT: u32 = 200;
+const EXECUTION_CACHE_LIMIT: usize = 4096;
+const TERMINAL_ORDER_CACHE_LIMIT: usize = 4096;
 /// Reject reasons that are the user's own cancel, not an error.
 const QUIET_REJECT_REASONS: [&str; 2] = ["EC_PerCancelRequest", "EC_NoError"];
 
@@ -52,6 +54,7 @@ pub struct Mapped {
     /// opening trigger. Full stops have zero amount in the store.
     pub position_bound: bool,
     fill_cursor: FillCursor,
+    terminal: bool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -81,6 +84,7 @@ struct PositionsJoin {
 
 struct OrdersJoin {
     generation: u32,
+    revision: u32,
     issued_at: f64,
     pending: usize,
     rows: Vec<Mapped>,
@@ -117,6 +121,10 @@ pub struct AccountState {
     pub orders_snapshot_version: u32,
     fill_cursors: HashMap<String, FillCursor>,
     terminal_fills: VecDeque<String>,
+    executions: HashSet<(String, String)>,
+    recent_executions: VecDeque<(String, String)>,
+    terminal_orders: HashSet<String>,
+    recent_terminal_orders: VecDeque<String>,
     recent_fill_cursors: VecDeque<String>,
     ready: bool,
     revision: u32,
@@ -128,6 +136,7 @@ pub struct AccountState {
     /// `unifiedMarginStatus` 1 is a classic account: USDT only, CONTRACT wallet.
     classic: bool,
     tick_timer: Option<TimerId>,
+    partial_stop_refresh: Option<TimerId>,
     position_version: u32,
     positions_generation: u32,
     positions: Option<PositionsJoin>,
@@ -523,6 +532,10 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     Some(Mapped {
         orders,
         position_bound,
+        terminal: matches!(
+            o.order_status.as_ref(),
+            "Cancelled" | "Filled" | "Deactivated" | "Rejected" | "PartiallyFilledCanceled"
+        ),
         fill_cursor: FillCursor {
             quantity: filled,
             value: finite(float_of(&o.cum_exec_value))
@@ -855,6 +868,59 @@ impl BybitLinear {
         }
     }
 
+    pub(crate) fn schedule_partial_stop_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.variant == crate::Variant::Inverse {
+            return;
+        }
+        if let Some(timer) = self.account.partial_stop_refresh.take() {
+            cx.clear_timer(timer);
+        }
+        self.account.partial_stop_refresh = Some(cx.set_timer(250.0));
+    }
+
+    pub(crate) fn note_order_terminal(&mut self, ids: &[String]) {
+        // Terminal rows can be removed, or share the snapshot issue timestamp.
+        self.account.revision = self.account.revision.wrapping_add(1);
+        for id in ids {
+            self.remember_terminal_order(id);
+        }
+    }
+
+    fn remember_terminal_order(&mut self, id: &str) {
+        if !(self.variant == crate::Variant::Demo || self.variant.is_hyro()) {
+            return;
+        }
+        self.cache_terminal_order(id);
+    }
+
+    pub(crate) fn note_partial_stop_canceled(&mut self, id: &str) {
+        self.account.revision = self.account.revision.wrapping_add(1);
+        // The replacement refresh can read a replica still serving the canceled leg.
+        self.cache_terminal_order(id);
+    }
+
+    fn cache_terminal_order(&mut self, id: &str) {
+        if !self.account.terminal_orders.insert(id.to_owned()) {
+            return;
+        }
+        self.account.recent_terminal_orders.push_back(id.to_owned());
+        while self.account.recent_terminal_orders.len() > TERMINAL_ORDER_CACHE_LIMIT {
+            if let Some(old) = self.account.recent_terminal_orders.pop_front() {
+                self.account.terminal_orders.remove(&old);
+            }
+        }
+    }
+
+    fn stale_terminal_snapshot(&mut self, mapped: &Mapped) -> bool {
+        let parent = &mapped.orders[0];
+        if mapped.terminal {
+            self.remember_terminal_order(&parent.id);
+            false
+        } else {
+            parent.status == OrderStatus::Open && self.account.terminal_orders.contains(&parent.id)
+        }
+    }
+
     pub(crate) fn private_ready(&self) -> bool {
         !self.variant.is_hyro() || self.account.ready
     }
@@ -891,6 +957,9 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_private_closed(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(timer) = self.account.partial_stop_refresh.take() {
+            cx.clear_timer(timer);
+        }
         self.account.authed = false;
         if !self.variant.is_hyro() {
             self.account.session_version += 1;
@@ -995,6 +1064,9 @@ impl BybitLinear {
         let mut orders = Vec::new();
         self.account.position_bound.clear();
         for mapped in snapshot.orders.expect("checked above") {
+            if self.stale_terminal_snapshot(&mapped) {
+                continue;
+            }
             let id = mapped.orders[0].id.clone();
             // Recovery establishes the baseline. Healthy polls cannot consume
             // executions whose order events have not arrived yet.
@@ -1172,6 +1244,7 @@ impl BybitLinear {
         let coins = self.settle_coins();
         self.account.orders = Some(OrdersJoin {
             generation,
+            revision: self.account.revision,
             issued_at: cx.now,
             pending: coins.len(),
             rows: Vec::new(),
@@ -1230,6 +1303,22 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account.partial_stop_refresh == Some(timer) {
+            self.account.partial_stop_refresh = None;
+            if self.variant.is_hyro() {
+                if self.account.authed && self.account.handshake.is_none() {
+                    if self.account.snapshot.is_some() {
+                        self.account.revision = self.account.revision.wrapping_add(1);
+                    } else {
+                        self.start_hyro_snapshot(cx);
+                    }
+                }
+            } else {
+                self.account.orders_follow_up |= self.account.orders.is_some();
+                self.fetch_orders(cx);
+            }
+            return;
+        }
         if self.account.handshake_timer == Some(timer) {
             self.account.handshake_timer = None;
             self.fail_hyro(cx, "private handshake acknowledgement timed out");
@@ -1329,7 +1418,7 @@ impl BybitLinear {
                         .filter(|r| self.trades_row(&r.category, &r.symbol))
                         .collect();
                     for row in rows {
-                        on_execution(cx, row);
+                        on_execution(cx, row, &mut self.account);
                     }
                 }
             }
@@ -1438,7 +1527,18 @@ impl BybitLinear {
         let Some(mut mapped) = map_order(row, cx.store, cx.now) else {
             return;
         };
+        if self.stale_terminal_snapshot(&mapped) {
+            return;
+        }
         self.note_position_bound(&mapped);
+        if mapped.terminal {
+            let ids = mapped
+                .orders
+                .iter()
+                .map(|order| order.id.clone())
+                .collect::<Vec<_>>();
+            self.note_order_terminal(&ids);
+        }
         match status {
             "Cancelled" | "Filled" | "Deactivated" | "Rejected" | "PartiallyFilledCanceled" => {
                 if let Some(reason) = present(&row.reject_reason)
@@ -1847,10 +1947,17 @@ impl BybitLinear {
             self.finish_hyro_snapshot(cx);
             return;
         }
+        if join.revision != self.account.revision {
+            self.fetch_orders(cx);
+            return;
+        }
         self.account.orders_snapshot_version += 1;
         self.account.position_bound.clear();
         let mut orders = Vec::new();
         for mapped in join.rows {
+            if self.stale_terminal_snapshot(&mapped) {
+                continue;
+            }
             if mapped.position_bound {
                 self.account
                     .position_bound
@@ -2037,7 +2144,7 @@ fn next_cursor(body: &str, current: &str, empty_page: bool) -> Option<String> {
 }
 
 /// One execution is one fill: its own quantity at its own price.
-fn on_execution(cx: &mut Cx<'_, Pending>, row: &ExecutionRow<'_>) {
+fn on_execution(cx: &mut Cx<'_, Pending>, row: &ExecutionRow<'_>, account: &mut AccountState) {
     if !matches!(
         row.exec_type.as_deref(),
         Some("Trade" | "AdlTrade" | "BustTrade")
@@ -2045,14 +2152,30 @@ fn on_execution(cx: &mut Cx<'_, Pending>, row: &ExecutionRow<'_>) {
         return;
     }
     let amount = or_zero(&row.exec_qty);
-    let Some(side) = order_side(row.side.as_deref()).filter(|_| amount > 0.0) else {
+    let price = or_zero(&row.exec_price);
+    let Some(side) = order_side(row.side.as_deref())
+        .filter(|_| amount.is_finite() && amount > 0.0 && price.is_finite() && price > 0.0)
+    else {
         return;
     };
+    // Legacy frames without an execution ID cannot be deduplicated safely.
+    if let Some(id) = present(&row.exec_id) {
+        let key = (row.symbol.to_string(), id.to_owned());
+        if !account.executions.insert(key.clone()) {
+            return;
+        }
+        account.recent_executions.push_back(key);
+        while account.recent_executions.len() > EXECUTION_CACHE_LIMIT {
+            if let Some(old) = account.recent_executions.pop_front() {
+                account.executions.remove(&old);
+            }
+        }
+    }
     cx.fill(Fill {
         order_id: row.order_id.to_string(),
         symbol: row.symbol.to_string(),
         side,
-        price: or_zero(&row.exec_price),
+        price,
         amount,
     });
 }

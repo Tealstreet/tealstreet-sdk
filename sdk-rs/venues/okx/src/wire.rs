@@ -125,6 +125,14 @@ pub struct Config<'a> {
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
+pub struct LeverageRow<'a> {
+    pub inst_id: &'a str,
+    pub mgn_mode: &'a str,
+    pub lever: &'a str,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
 pub struct PositionRow<'a> {
     pub inst_type: &'a str,
     pub margin: &'a str,

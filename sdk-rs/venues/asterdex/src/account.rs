@@ -2,6 +2,7 @@
 use crate::sign::Query;
 use crate::{AsterDex, Pending};
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, num,
@@ -15,9 +16,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 pub struct AccountState {
     pub socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
+    key_epoch: u64,
+    key_pending: bool,
     keepalive: Option<TimerId>,
     tick: Option<TimerId>,
     positions_timer: Option<TimerId>,
@@ -36,20 +37,57 @@ pub struct AccountState {
     last_event: f64,
     executions: HashSet<(String, u64)>,
     execution_order: VecDeque<(String, u64)>,
+    execution_fills: HashMap<String, f64>,
+    execution_fill_order: VecDeque<String>,
+    orders_seeded: bool,
     pub terminal: HashMap<String, (f64, Order)>,
     canceled_ids: HashMap<String, f64>,
     native_order_times: HashMap<String, f64>,
     balances: HashMap<String, (f64, f64)>,
     known_assets: HashSet<String>,
     currencies: HashMap<String, Balance>,
+    mode: ModeLoad,
+    mode_timer: Option<TimerId>,
+    mode_failures: u32,
+    order_position_sides: HashMap<String, PositionSide>,
+}
+
+/// Hedge routing depends on the account mode; placements wait for its first read.
+#[derive(Default, PartialEq)]
+enum ModeLoad {
+    #[default]
+    Unrequested,
+    Loading,
+    Known,
+}
+
+impl AccountState {
+    fn execution_progress(&mut self, id: &str, filled: f64) -> f64 {
+        let previous = self.execution_fills.get(id).copied().unwrap_or(0.0);
+        if !self.execution_fills.contains_key(id) {
+            self.execution_fill_order.push_back(id.to_owned());
+        }
+        self.execution_fills
+            .insert(id.to_owned(), filled.max(previous));
+        while self.execution_fill_order.len() > 10_000 {
+            if let Some(old) = self.execution_fill_order.pop_front() {
+                self.execution_fills.remove(&old);
+            }
+        }
+        previous
+    }
 }
 
 pub enum Request {
     Info {
         command: u32,
     },
-    ListenKey,
-    Keepalive,
+    ListenKey {
+        epoch: u64,
+    },
+    Keepalive {
+        epoch: u64,
+    },
     Mode {
         version: u64,
     },
@@ -60,11 +98,13 @@ pub enum Request {
         version: u64,
         rows: Vec<Position>,
         settings: Vec<(String, MarketSetting)>,
+        skipped: Vec<String>,
         invalid: bool,
     },
     Orders {
         version: u64,
         rows: Vec<Order>,
+        skipped: Vec<String>,
         invalid: bool,
     },
 }
@@ -78,6 +118,8 @@ pub(crate) struct OrderRow<'a> {
     pub status: Cow<'a, str>,
     #[serde(default)]
     pub time: f64,
+    #[serde(default, borrow)]
+    pub position_side: Option<Cow<'a, str>>,
 }
 fn new_status<'a>() -> Cow<'a, str> {
     Cow::Borrowed("NEW")
@@ -184,6 +226,21 @@ fn side(ps: &str, amount: f64) -> PositionSide {
         PositionSide::Long
     }
 }
+/// The skipped leg's position id when its side is readable, else its symbol (every leg).
+fn skipped_position_key(symbol: &str, position_side: Option<&str>) -> String {
+    match position_side {
+        Some("LONG") => position_id(symbol, PositionSide::Long, PositionMode::Hedged),
+        Some("SHORT") => position_id(symbol, PositionSide::Short, PositionMode::Hedged),
+        _ => symbol.to_owned(),
+    }
+}
+fn hedge_side(text: Option<&str>) -> Option<PositionSide> {
+    match text {
+        Some("LONG") => Some(PositionSide::Long),
+        Some("SHORT") => Some(PositionSide::Short),
+        _ => None,
+    }
+}
 fn status(text: &str) -> Option<OrderStatus> {
     Some(match text {
         "NEW" | "PARTIALLY_FILLED" => OrderStatus::Open,
@@ -281,9 +338,20 @@ impl AsterDex {
         );
     }
     pub(crate) fn start_account(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.supervisor = Supervisor::new(Config {
+            idle_timeout_ms: 20_000.0,
+            ping_interval_ms: Some(5_000.0),
+            ..Config::default()
+        });
         self.refresh_balance(cx);
         self.refresh_positions(cx);
         self.request_refresh_orders(cx);
+        self.account.mode = ModeLoad::Loading;
+        self.request_mode(cx);
+        self.request_listen_key(cx);
+        self.account.tick = Some(cx.set_poll_timer(3_000.0));
+    }
+    fn request_mode(&mut self, cx: &mut Cx<'_, Pending>) {
         let path = self.path("positionSide/dual");
         self.signed(
             cx,
@@ -294,17 +362,34 @@ impl AsterDex {
                 version: self.account.mode_version,
             }),
         );
-        self.request_listen_key(cx);
-        self.account.tick = Some(cx.set_poll_timer(3_000.0));
+    }
+    /// Placements are refused until the startup position-mode read lands.
+    pub(crate) fn position_mode_pending(&self) -> bool {
+        self.account.mode == ModeLoad::Loading
+    }
+    pub(crate) fn order_position_side(&self, id: &str) -> Option<PositionSide> {
+        self.account.order_position_sides.get(id).copied()
+    }
+    pub(crate) fn record_order_position_side(&mut self, id: &str, side: PositionSide) {
+        self.account
+            .order_position_sides
+            .insert(id.to_owned(), side);
     }
     fn request_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.key_pending || self.account.socket.is_some() {
+            return;
+        }
+        self.account.key_pending = true;
+        self.account.supervisor.connecting(cx);
         let path = self.path("listenKey");
         self.signed(
             cx,
             Method::Post,
             &path,
             Query::new(),
-            Pending::Account(Request::ListenKey),
+            Pending::Account(Request::ListenKey {
+                epoch: self.account.key_epoch,
+            }),
         );
     }
     /// A completed settings write invalidates older position/settings snapshots.
@@ -314,6 +399,7 @@ impl AsterDex {
 
     pub(crate) fn on_mode_changed(&mut self, cx: &mut Cx<'_, Pending>, hedged: bool) {
         cx.store.set_hedged(hedged);
+        self.mode_known(cx);
         self.account.mode_version = self.account.mode_version.wrapping_add(1);
         self.account.position_version += 1;
         self.refresh_positions(cx);
@@ -352,6 +438,7 @@ impl AsterDex {
                 version: self.account.position_version,
                 rows: Vec::new(),
                 settings: Vec::new(),
+                skipped: Vec::new(),
                 invalid: false,
             }),
         );
@@ -369,6 +456,7 @@ impl AsterDex {
             Pending::Account(Request::Orders {
                 version: self.account.order_revision,
                 rows: Vec::new(),
+                skipped: Vec::new(),
                 invalid: false,
             }),
         );
@@ -399,41 +487,61 @@ impl AsterDex {
         item: &str,
     ) {
         match request {
-            Request::Orders { rows, invalid, .. } => match serde_json::from_str::<OrderRow>(item)
-                .ok()
-                .and_then(|o| order_from_wire(&o))
-            {
-                Some(o) => rows.push(o),
-                None => *invalid = true,
-            },
-            Request::Positions {
+            Request::Orders {
                 rows,
-                settings,
+                skipped,
                 invalid,
                 ..
             } => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Identity {
+                    order_id: wire::Id,
+                }
+                let row = serde_json::from_str::<OrderRow>(item).ok();
+                match row.as_ref().and_then(|o| Some((o, order_from_wire(o)?))) {
+                    Some((row, order)) => {
+                        if let Some(side) = hedge_side(row.position_side.as_deref()) {
+                            self.account
+                                .order_position_sides
+                                .insert(order.id.clone(), side);
+                        }
+                        rows.push(order);
+                    }
+                    None => match serde_json::from_str::<Identity>(item) {
+                        Ok(row) => skipped.push(row.order_id.to_string()),
+                        Err(_) => *invalid = true,
+                    },
+                }
+            }
+            Request::Positions {
+                rows,
+                settings,
+                skipped,
+                invalid,
+                ..
+            } => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Identity<'a> {
+                    #[serde(borrow)]
+                    symbol: Cow<'a, str>,
+                    #[serde(default, borrow)]
+                    position_side: Option<Cow<'a, str>>,
+                }
                 let Ok(p) = serde_json::from_str::<RestPosition>(item) else {
-                    *invalid = true;
+                    match serde_json::from_str::<Identity>(item) {
+                        Ok(row) if !row.symbol.is_empty() => skipped.push(skipped_position_key(
+                            &row.symbol,
+                            row.position_side.as_deref(),
+                        )),
+                        _ => *invalid = true,
+                    }
                     return;
                 };
                 let r = p.row;
-                let values = [
-                    &*r.position_amt,
-                    &*r.entry_price,
-                    &*r.un_realized_profit,
-                    &*r.notional,
-                    &*r.liquidation_price,
-                ]
-                .map(finite);
-                let [
-                    Some(amount),
-                    Some(entry),
-                    Some(upnl),
-                    Some(notional),
-                    Some(liquidation),
-                ] = values
-                else {
-                    *invalid = true;
+                let Some(amount) = finite(&r.position_amt) else {
+                    skipped.push(skipped_position_key(&r.symbol, Some(&r.position_side)));
                     return;
                 };
                 let leverage = r
@@ -456,6 +564,17 @@ impl AsterDex {
                 if amount == 0.0 {
                     return;
                 }
+                let values = [
+                    &*r.entry_price,
+                    &*r.un_realized_profit,
+                    &*r.notional,
+                    &*r.liquidation_price,
+                ]
+                .map(finite);
+                let [Some(entry), Some(upnl), Some(notional), Some(liquidation)] = values else {
+                    skipped.push(skipped_position_key(&r.symbol, Some(&r.position_side)));
+                    return;
+                };
                 let mode = if r.position_side == "BOTH" || r.position_side.is_empty() {
                     PositionMode::Oneway
                 } else {
@@ -531,7 +650,11 @@ impl AsterDex {
                 };
                 cx.done(command, result);
             }
-            Request::ListenKey => {
+            Request::ListenKey { epoch } => {
+                if epoch != self.account.key_epoch {
+                    return;
+                }
+                self.account.key_pending = false;
                 if valid
                     && let Ok(key) = serde_json::from_str::<ListenKey>(body)
                     && !key.listen_key.is_empty()
@@ -553,10 +676,13 @@ impl AsterDex {
                     }
                     self.account.keepalive = Some(cx.set_timer(30.0 * 60_000.0));
                 } else {
-                    self.account.reconnect = Some(cx.set_timer(5_000.0));
+                    self.close_private(cx);
                 }
             }
-            Request::Keepalive => {
+            Request::Keepalive { epoch } => {
+                if epoch != self.account.key_epoch {
+                    return;
+                }
                 if valid {
                     self.account.keepalive = Some(cx.set_timer(30.0 * 60_000.0));
                 } else {
@@ -564,13 +690,31 @@ impl AsterDex {
                 }
             }
             Request::Mode { version } => {
+                if version != self.account.mode_version {
+                    return;
+                }
                 if valid
-                    && version == self.account.mode_version
                     && let Ok(mode) = serde_json::from_str::<Mode>(body)
                     && let Some(value) = mode.dual_side_position.value()
                 {
                     cx.store.set_hedged(value);
+                    self.mode_known(cx);
+                } else {
+                    let delay = 1_000.0 * 2f64.powi(self.account.mode_failures.min(5) as i32);
+                    self.account.mode_failures = self.account.mode_failures.saturating_add(1);
+                    let reason = error.as_deref().unwrap_or("unrecognized dualSidePosition");
+                    cx.log(
+                        LogLevel::Error,
+                        format!(
+                            "Aster position mode read failed ({reason}); order placement is held until it loads, retrying in {}s",
+                            delay / 1_000.0
+                        ),
+                    );
+                    if self.account.mode_timer.is_none() {
+                        self.account.mode_timer = Some(cx.set_timer(delay));
+                    }
                 }
+                return;
             }
             Request::Balance { version } => {
                 self.account.balance_in_flight = false;
@@ -620,13 +764,27 @@ impl AsterDex {
             }
             Request::Positions {
                 version,
-                rows,
+                mut rows,
                 settings,
+                skipped,
                 invalid,
             } => {
                 self.account.positions_in_flight = false;
                 self.account.last_positions = cx.now;
+                log_skipped(cx, "position", &skipped, invalid && valid);
                 if valid && !invalid && version == self.account.position_version {
+                    // A skipped row cannot prove its leg flat; keep what the store knows.
+                    let kept = cx
+                        .store
+                        .positions()
+                        .iter()
+                        .filter(|p| {
+                            skipped.iter().any(|key| *key == p.id || *key == p.symbol)
+                                && !rows.iter().any(|row| row.id == p.id)
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    rows.extend(kept);
                     cx.store.set_positions(rows);
                     for (symbol, setting) in settings {
                         cx.store.update_setting(&symbol, |s| *s = setting);
@@ -640,10 +798,12 @@ impl AsterDex {
             Request::Orders {
                 version,
                 mut rows,
+                skipped,
                 invalid,
             } => {
                 self.account.orders_in_flight = false;
                 self.account.last_orders = cx.now;
+                log_skipped(cx, "open order", &skipped, invalid && valid);
                 if valid && !invalid {
                     if version != self.account.order_revision {
                         // A snapshot predating a stream event cannot overwrite any order domain.
@@ -665,10 +825,29 @@ impl AsterDex {
                             rows.retain(|o| o.id != terminal.id);
                             rows.push(terminal.clone());
                         }
+                        for id in &skipped {
+                            if !rows.iter().any(|o| &o.id == id)
+                                && let Some(known) = cx.store.order(id)
+                                && (known.status != OrderStatus::Open
+                                    || !self.account.canceled_ids.contains_key(id))
+                            {
+                                rows.push(known.clone());
+                            }
+                        }
                         self.account
                             .native_order_times
                             .retain(|id, _| rows.iter().any(|o| &o.id == id));
+                        self.account
+                            .order_position_sides
+                            .retain(|id, _| rows.iter().any(|o| &o.id == id));
+                        if !self.account.orders_seeded {
+                            for order in &rows {
+                                self.account.execution_progress(&order.id, order.filled);
+                            }
+                            self.account.orders_seeded = true;
+                        }
                         cx.store.set_orders(rows);
+                        cx.orders_reconciled(None);
                     }
                 }
             }
@@ -677,14 +856,20 @@ impl AsterDex {
             cx.log(LogLevel::Warning, format!("Aster account read: {error}"));
         }
     }
+    fn mode_known(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.mode = ModeLoad::Known;
+        self.account.mode_failures = 0;
+        if let Some(timer) = self.account.mode_timer.take() {
+            cx.clear_timer(timer);
+        }
+    }
     pub(crate) fn on_account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
             return false;
         }
         self.account.open = true;
-        self.account.last_received = cx.now;
+        self.account.supervisor.opened(cx);
         cx.send(socket, r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
-        self.account.watchdog = Some(cx.set_timer(5_000.0));
         self.request_refresh_orders(cx);
         true
     }
@@ -693,12 +878,12 @@ impl AsterDex {
             cx.close(socket);
         }
         self.account.open = false;
-        if let Some(t) = self.account.watchdog.take() {
-            cx.clear_timer(t);
+        self.account.key_epoch = self.account.key_epoch.wrapping_add(1);
+        self.account.key_pending = false;
+        if let Some(timer) = self.account.keepalive.take() {
+            cx.clear_timer(timer);
         }
-        if self.account.reconnect.is_none() {
-            self.account.reconnect = Some(cx.set_timer(1_000.0));
-        }
+        self.account.supervisor.retry(cx);
     }
     pub(crate) fn on_account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
@@ -708,10 +893,25 @@ impl AsterDex {
         true
     }
     pub(crate) fn on_account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.reconnect == Some(timer) {
-            self.account.reconnect = None;
-            self.request_listen_key(cx);
-        } else if self.account.keepalive == Some(timer) {
+        match self.account.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => {
+                self.request_listen_key(cx);
+                return true;
+            }
+            Tick::TimedOut(_) => {
+                self.close_private(cx);
+                return true;
+            }
+            Tick::Ping => {
+                if let Some(socket) = self.account.socket {
+                    cx.send(socket, r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
+                }
+                return true;
+            }
+            Tick::Handled => return true,
+            Tick::Unhandled => {}
+        }
+        if self.account.keepalive == Some(timer) {
             self.account.keepalive = None;
             let path = self.path("listenKey");
             self.signed(
@@ -719,18 +919,10 @@ impl AsterDex {
                 Method::Put,
                 &path,
                 Query::new(),
-                Pending::Account(Request::Keepalive),
+                Pending::Account(Request::Keepalive {
+                    epoch: self.account.key_epoch,
+                }),
             );
-        } else if self.account.watchdog == Some(timer) {
-            self.account.watchdog = None;
-            if cx.now - self.account.last_received > 20_000.0 {
-                self.close_private(cx);
-            } else {
-                if let Some(socket) = self.account.socket {
-                    cx.send(socket, r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
-                }
-                self.account.watchdog = Some(cx.set_timer(5_000.0));
-            }
         } else if self.account.tick == Some(timer) {
             self.account.tick = None;
             if cx.now - self.account.last_balance >= 25_000.0 {
@@ -752,6 +944,11 @@ impl AsterDex {
         } else if self.account.balance_timer == Some(timer) {
             self.account.balance_timer = None;
             self.refresh_balance(cx);
+        } else if self.account.mode_timer == Some(timer) {
+            self.account.mode_timer = None;
+            if self.account.mode == ModeLoad::Loading {
+                self.request_mode(cx);
+            }
         } else {
             return false;
         }
@@ -766,7 +963,7 @@ impl AsterDex {
         if self.account.socket != Some(socket) {
             return false;
         }
-        self.account.last_received = cx.now;
+        self.account.supervisor.received(cx.now);
         #[derive(Deserialize)]
         struct Head<'a> {
             #[serde(borrow, default)]
@@ -799,6 +996,8 @@ impl AsterDex {
                 ot: None,
                 o: Some(event.kind),
                 status: event.status,
+                x: None,
+                t: None,
                 p: event.p,
                 sp: event.sp,
                 ap: None,
@@ -814,27 +1013,22 @@ impl AsterDex {
                 r: None,
             }
         };
-        let Some(kind) = o.ot.as_deref().or(o.o.as_deref()).and_then(order_type) else {
-            return;
-        };
-        let Some(status) = status(&o.status) else {
-            return;
-        };
-        let [Some(amount), Some(filled), Some(price)] = [&*o.q, &*o.z, &*o.p].map(finite) else {
-            return;
-        };
         let id = o.i.to_string();
         #[derive(Deserialize)]
-        struct TradeHead {
-            o: TradeIdentity,
+        struct TradeHead<'a> {
+            #[serde(borrow)]
+            o: TradeIdentity<'a>,
         }
         #[derive(Deserialize)]
-        struct TradeIdentity {
+        struct TradeIdentity<'a> {
             #[serde(default)]
             t: Option<u64>,
+            #[serde(default, borrow)]
+            ps: Option<Cow<'a, str>>,
         }
-        let execution = serde_json::from_str::<TradeHead>(text)
-            .ok()
+        let head = serde_json::from_str::<TradeHead>(text).ok();
+        let position_side = head.as_ref().and_then(|h| hedge_side(h.o.ps.as_deref()));
+        let execution = head
             .and_then(|h| h.o.t)
             .or_else(|| serde_json::from_str::<TradeIdentity>(text).ok()?.t);
         let fill = matches!(o.status.as_ref(), "PARTIALLY_FILLED" | "FILLED")
@@ -868,6 +1062,29 @@ impl AsterDex {
                 });
             }
         }
+        // REST progress describes order state, not executions already delivered to the caller.
+        if let (Some((price, qty)), Some(filled)) = (fill, finite(&o.z)) {
+            let execution_previous = self.account.execution_progress(&id, filled);
+            if execution.is_none() && filled > execution_previous {
+                cx.fill(Fill {
+                    order_id: id.clone(),
+                    symbol: o.s.to_string(),
+                    side: order_side(&o.side),
+                    price,
+                    amount: qty.min(filled - execution_previous),
+                });
+            }
+        }
+        // Liquidation/ADL rows have no order model; their executions are delivered above.
+        let Some(kind) = o.ot.as_deref().or(o.o.as_deref()).and_then(order_type) else {
+            return;
+        };
+        let Some(status) = status(&o.status) else {
+            return;
+        };
+        let [Some(amount), Some(filled), Some(price)] = [&*o.q, &*o.z, &*o.p].map(finite) else {
+            return;
+        };
         if status == OrderStatus::Open
             && (self.account.terminal.contains_key(&id)
                 || self.account.canceled_ids.contains_key(&id))
@@ -901,6 +1118,9 @@ impl AsterDex {
             return;
         }
         self.account.native_order_times.insert(id.clone(), time);
+        if let Some(side) = position_side {
+            self.account.order_position_sides.insert(id.clone(), side);
+        }
         self.account.order_revision += 1;
         let stop = o.sp.as_deref().and_then(finite).filter(|x| *x > 0.0);
         let order = Order {
@@ -929,18 +1149,6 @@ impl AsterDex {
         }
         if status != OrderStatus::Open {
             self.account.terminal.insert(id.clone(), (cx.now, order));
-        }
-        if execution.is_none()
-            && filled > previous_filled
-            && let Some((price, qty)) = fill
-        {
-            cx.fill(Fill {
-                order_id: id,
-                symbol: o.s.to_string(),
-                side: order_side(&o.side),
-                price,
-                amount: qty,
-            });
         }
         if let Some(t) = self.account.orders_timer.take() {
             cx.clear_timer(t);
@@ -1128,6 +1336,25 @@ impl AsterDex {
         if multi && self.account.balance_timer.is_none() {
             self.account.balance_timer = Some(cx.set_timer(1000.0));
         }
+    }
+}
+/// One summary per read; an unidentifiable row withholds the whole snapshot.
+fn log_skipped(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String], unidentified: bool) {
+    if !skipped.is_empty() {
+        cx.log(
+            LogLevel::Warning,
+            format!(
+                "Aster skipped {} malformed {kind} row(s): {}",
+                skipped.len(),
+                skipped.join(", ")
+            ),
+        );
+    }
+    if unidentified {
+        cx.log(
+            LogLevel::Warning,
+            format!("Aster {kind} snapshot kept previous state: a row had no identity"),
+        );
     }
 }
 #[derive(Deserialize)]

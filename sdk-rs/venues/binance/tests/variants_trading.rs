@@ -157,6 +157,7 @@ fn spot_derivative_settings_rejected_without_http() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 5.0,
+            side: None,
         },
         Command::SetMarginType {
             command: 2,
@@ -166,6 +167,7 @@ fn spot_derivative_settings_rejected_without_http() {
         Command::SetPositionMode {
             command: 3,
             hedged: true,
+            symbol: None,
         },
     ] {
         h.event(Event::Command(c));
@@ -269,29 +271,13 @@ fn plain_trigger_intent_rejects_both_variants_before_any_batch_write() {
 }
 
 fn seed_spot_maker(h: &mut Harness) {
-    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType, TimeInForce};
-    let order = Order {
-        id: "original-caller".into(),
-        parent_id: None,
-        status: OrderStatus::Open,
-        symbol: "BTCUSDT".into(),
-        kind: OrderType::Limit,
-        side: OrderSide::Buy,
-        price: 99.0,
-        amount: 2.0,
-        filled: 0.0,
-        remaining: 2.0,
-        reduce_only: false,
-        close: Some(false),
-        client_order_id: Some("original-caller".into()),
-        time_in_force: Some(TimeInForce::PostOnly),
-        last_update: 1.0,
-        trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: None,
-    };
-    h.engine.store_mut().set_orders(vec![order]);
+    let socket = h.socket("ws-api/v3").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "ws-api/v3",
+        r#"{"id":"tealstreet-user-data-10","status":200,"result":{"subscriptionId":0}}"#,
+    );
+    h.message("ws-api/v3", r#"{"subscriptionId":0,"event":{"e":"executionReport","i":1,"s":"BTCUSDT","c":"original-caller","S":"BUY","o":"LIMIT_MAKER","X":"NEW","x":"NEW","p":"99","L":"0","q":"2","z":"0","l":"0"}}"#);
 }
 
 #[test]
@@ -369,6 +355,69 @@ fn inverse_short_or_rejected_batch_cannot_advance_the_remaining_brackets() {
         assert!(h.requests.is_empty(), "{body}");
         assert!(h.result(77).unwrap().is_err(), "{body}");
     }
+}
+
+#[test]
+fn inverse_partial_rejection_retains_all_proven_ids_on_the_error() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Partial {
+        message: String,
+        partial_order_ids: Vec<String>,
+    }
+    for (body, expected) in [
+        (
+            r#"[{"orderId":1},{"orderId":2},{"code":-2010,"msg":"insufficient margin"},{"orderId":4},{"orderId":5}]"#,
+            vec!["1", "2", "4", "5"],
+        ),
+        (r#"[{"orderId":1},{"orderId":2}]"#, vec!["1", "2"]),
+    ] {
+        let mut h = ready(Variant::CoinM);
+        let mut o = order(Variant::CoinM, r#""stopLoss":90,"takeProfit":110"#);
+        o.amount = 11.0;
+        place(&mut h, vec![o]);
+        let request = h.take("/dapi/v1/batchOrders");
+        h.reply(request.id, 200, "", body);
+        let error = h.result(77).unwrap().as_ref().unwrap_err();
+        let details: Partial = serde_json::from_str(error).expect("host-readable partial error");
+        assert_eq!(details.partial_order_ids, expected);
+        assert!(!details.message.is_empty());
+        assert!(h.requests.is_empty(), "remaining bracket steps must stop");
+    }
+}
+
+#[test]
+fn inverse_later_step_failure_preserves_previously_placed_ids() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Partial {
+        message: String,
+        partial_order_ids: Vec<String>,
+    }
+    let mut h = ready(Variant::CoinM);
+    let orders = (0..6)
+        .map(|_| order(Variant::CoinM, r#""reduceOnly":false"#))
+        .collect();
+    place(&mut h, orders);
+    let first = h.take("/dapi/v1/batchOrders");
+    h.reply(
+        first.id,
+        200,
+        "",
+        r#"[{"orderId":1},{"orderId":2},{"orderId":3},{"orderId":4},{"orderId":5}]"#,
+    );
+    let second = h.take("/dapi/v1/order");
+    h.reply(
+        second.id,
+        400,
+        "",
+        r#"{"code":-2010,"msg":"insufficient margin"}"#,
+    );
+    let details: Partial = serde_json::from_str(h.result(77).unwrap().as_ref().unwrap_err())
+        .expect("retain earlier successful steps");
+    assert_eq!(details.partial_order_ids, ["1", "2", "3", "4", "5"]);
+    assert_eq!(details.message, "insufficient margin");
+    assert!(h.requests.is_empty());
 }
 
 #[test]

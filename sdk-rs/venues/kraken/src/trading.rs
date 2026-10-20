@@ -1,6 +1,7 @@
 //! Commands are validated in full before the first write and submitted once.
 use crate::{Kraken, Pending, sign};
 use safe_cex_engine::model::*;
+use safe_cex_engine::num;
 use safe_cex_engine::{Command, CommandId, Cx, Method, Response};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
@@ -149,6 +150,7 @@ impl Kraken {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => (
                 *command,
                 self.prepare_setting(cx, symbol, Some(*leverage), true),
@@ -171,7 +173,11 @@ impl Kraken {
                 };
                 (*command, result)
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 cx.done(
                     *command,
                     if *hedged {
@@ -226,7 +232,10 @@ impl Kraken {
             steps.push_back(Step::Place(Box::new(self.prepare_order(cx, opts)?)));
             if opts.stop_loss.is_some() || opts.take_profit.is_some() {
                 if opts.kind != OrderType::Limit {
-                    return Err("Kraken brackets require a limit entry".into());
+                    return Err(
+                        "Kraken does not support take-profit/stop-loss legs on a market entry; use a limit entry or place TP/SL separately"
+                            .into(),
+                    );
                 }
                 for (kind, price) in [
                     (OrderType::StopLoss, opts.stop_loss),
@@ -519,7 +528,11 @@ impl Kraken {
         if !leverage.is_finite() || leverage <= 0.0 {
             return Err("Invalid Kraken leverage".into());
         }
-        let leverage = leverage.clamp(market.limits.leverage.min, market.limits.leverage.max);
+        let leverage = num::clamp_leverage(
+            leverage,
+            market.limits.leverage.min,
+            market.limits.leverage.max,
+        )?;
         Ok((
             VecDeque::from([Step::Setting {
                 symbol: symbol.into(),

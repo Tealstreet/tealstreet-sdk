@@ -192,6 +192,68 @@ fn a_full_position_stop_is_a_conditional_order_for_the_position_size() {
 }
 
 #[test]
+fn close_flag_with_explicit_amount_preserves_pm_stop_size() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        for hedged in [false, true] {
+            for has_position in [false, true] {
+                let mut h = ready();
+                h.engine.store_mut().set_orders(vec![]);
+                h.engine.store_mut().set_hedged(hedged);
+                if !has_position {
+                    h.engine.store_mut().set_positions(vec![]);
+                }
+                let mut stop = limit(0.004, 85000.0);
+                stop.kind = kind;
+                stop.side = OrderSide::Sell;
+                stop.close = Some(true);
+                stop.reduce_only = Some(true);
+                h.event(Event::Command(Command::PlaceOrders {
+                    command: 5,
+                    orders: vec![stop],
+                }));
+                let request = h.take("/papi/v1/um/conditional/order");
+                assert_eq!(request.method, Method::Post);
+                assert_eq!(
+                    param(&request.url, "quantity").as_deref(),
+                    Some("0.004"),
+                    "{kind:?}, hedged={hedged}, position={has_position}"
+                );
+                assert_eq!(param(&request.url, "closePosition"), None);
+                assert_eq!(
+                    param(&request.url, "positionSide").as_deref(),
+                    Some(if hedged { "LONG" } else { "BOTH" })
+                );
+                assert_eq!(
+                    param(&request.url, "reduceOnly").as_deref(),
+                    (!hedged).then_some("true")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn explicit_pm_stop_size_does_not_cancel_an_existing_full_stop() {
+    let mut h = ready();
+    let mut existing = h.engine.store().orders()[1].clone();
+    existing.kind = OrderType::StopLoss;
+    existing.amount = 0.0;
+    existing.remaining = 0.0;
+    existing.close = Some(true);
+    h.engine.store_mut().set_orders(vec![existing.clone()]);
+    let mut stop = limit(0.004, 85000.0);
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.close = Some(true);
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 6,
+        orders: vec![stop],
+    }));
+    assert_eq!(h.take("/papi/v1/um/conditional/order").method, Method::Post);
+    assert_eq!(h.engine.store().order(&existing.id), Some(&existing));
+}
+
+#[test]
 fn cancels_by_client_id_and_cancel_all_covers_conditional_orders() {
     let mut h = ready();
     h.event(Event::Command(Command::CancelOrders {
@@ -204,13 +266,13 @@ fn cancels_by_client_id_and_cancel_all_covers_conditional_orders() {
         param(&regular.url, "origClientOrderId").as_deref(),
         Some("x-s3vFFRQpresting")
     );
-    h.reply(regular.id, 200, "", "{}");
+    h.reply(regular.id, 200, "", r#"{"symbol":"BTCUSDT","orderId":1917641,"clientOrderId":"x-s3vFFRQpresting","origQty":"0.40","executedQty":"0","status":"CANCELED"}"#);
     let conditional = h.take("/papi/v1/um/conditional/order");
     assert_eq!(
         param(&conditional.url, "newClientStrategyId").as_deref(),
         Some("abc")
     );
-    h.reply(conditional.id, 200, "", "{}");
+    h.reply(conditional.id, 200, "", r#"{"symbol":"BTCUSDT","strategyId":123445,"newClientStrategyId":"abc","strategyStatus":"CANCELED"}"#);
     assert_eq!(
         h.engine.store().order("abc").unwrap().status,
         OrderStatus::Canceled

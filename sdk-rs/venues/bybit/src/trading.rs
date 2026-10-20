@@ -53,9 +53,14 @@ enum Call {
         fallback: Vec<(String, Vec<OrderIdentityReceipt>)>,
     },
     TradingStop,
+    PartialStop,
     Amend,
     Cancel {
         ids: Vec<String>,
+    },
+    CancelPartialStop {
+        id: String,
+        batch: bool,
     },
     CancelAll {
         ids: Vec<String>,
@@ -208,8 +213,89 @@ fn already_gone(message: &str) -> bool {
     message.contains("order not exists") || message.contains("too late to cancel")
 }
 
+fn partial_stop_cancel_accepted(body: &str, id: &str, batch: bool) -> Result<(), String> {
+    let malformed = || {
+        "Partial stop cancellation was not confirmed: malformed or mismatched acknowledgement"
+            .to_owned()
+    };
+    if batch {
+        #[derive(serde::Deserialize)]
+        struct Reply {
+            #[serde(rename = "retExtInfo")]
+            statuses: Statuses,
+        }
+        #[derive(serde::Deserialize)]
+        struct Statuses {
+            list: Vec<Status>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Status {
+            code: i64,
+            msg: Option<String>,
+        }
+        let reply: Reply = serde_json::from_str(body).map_err(|_| malformed())?;
+        let [status] = reply.statuses.list.as_slice() else {
+            return Err(malformed());
+        };
+        if status.code != 0 && !already_gone(status.msg.as_deref().unwrap_or_default()) {
+            return Err(status
+                .msg
+                .clone()
+                .unwrap_or_else(|| "Partial stop cancellation was rejected".into()));
+        }
+    } else {
+        #[derive(serde::Deserialize)]
+        struct Reply {
+            result: Identity,
+        }
+        #[derive(serde::Deserialize)]
+        struct Identity {
+            #[serde(rename = "orderId")]
+            id: String,
+        }
+        let reply: Reply = serde_json::from_str(body).map_err(|_| malformed())?;
+        if reply.result.id != id {
+            return Err(malformed());
+        }
+    }
+    Ok(())
+}
+
 fn is_virtual(id: &str) -> bool {
     id.ends_with(STOP_LOSS_SUFFIX) || id.ends_with(TAKE_PROFIT_SUFFIX)
+}
+
+fn cancel_all_affected(body: &str) -> Result<Vec<String>, &'static str> {
+    #[derive(serde::Deserialize)]
+    struct Reply {
+        result: Affected,
+    }
+    #[derive(serde::Deserialize)]
+    struct Affected {
+        list: Vec<Identity>,
+        success: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Identity {
+        order_id: String,
+    }
+    let reply = serde_json::from_str::<Reply>(body).map_err(
+        |_| "Bybit cancel-all outcome is unknown: missing or malformed affected-order list",
+    )?;
+    if reply.result.success.is_some_and(|success| success != "1") {
+        return Err("Bybit cancel-all was not successful");
+    }
+    let mut ids = Vec::with_capacity(reply.result.list.len());
+    for row in reply.result.list {
+        if row.order_id.trim().is_empty() || is_virtual(&row.order_id) {
+            return Err("Bybit cancel-all outcome is unknown: invalid affected native order ID");
+        }
+        ids.push(row.order_id);
+    }
+    ids.sort_unstable();
+    ids.dedup();
+    Ok(ids)
 }
 
 fn single(path: &'static str, body: String, call: Call) -> Job {
@@ -255,7 +341,11 @@ impl BybitLinear {
         }
         if self.variant.is_hyro() {
             match command {
-                Command::SetPositionMode { command, hedged } => {
+                Command::SetPositionMode {
+                    command,
+                    hedged,
+                    symbol: _,
+                } => {
                     return Some((
                         *command,
                         if *hedged {
@@ -496,7 +586,7 @@ impl BybitLinear {
                         .store
                         .orders()
                         .iter()
-                        .filter(|o| o.symbol == symbol)
+                        .filter(|o| o.symbol == symbol && !is_virtual(&o.id))
                         .map(|o| o.id.clone())
                         .collect();
                     let body = Body::new()
@@ -511,6 +601,7 @@ impl BybitLinear {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => (
                 command,
                 plan_leverage(cx, self.paths.category, symbol, leverage),
@@ -530,7 +621,11 @@ impl BybitLinear {
                     Ok(single("/v5/account/set-margin-mode", body, call)),
                 )
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 if self.category == Category::Inverse {
                     let mut coins = std::collections::BTreeSet::new();
                     for market in cx.store.markets() {
@@ -794,6 +889,10 @@ impl BybitLinear {
                 }
             }
             (Call::Amend | Call::TradingStop, Err((_, message))) if not_modified(&message) => {}
+            (Call::PartialStop, Ok(_)) => self.schedule_partial_stop_refresh(cx),
+            (Call::PartialStop, Err((_, message))) if not_modified(&message) => {
+                self.schedule_partial_stop_refresh(cx);
+            }
             (Call::TradingStop, Ok(_)) => {
                 // No order id comes back; the stop's row arrives on the stream.
             }
@@ -830,6 +929,19 @@ impl BybitLinear {
                 errors.push(format!("Failed to place batch orders: {}", describe(error)));
                 fallback_steps = fallback;
             }
+            (Call::CancelPartialStop { id, batch }, Ok(body)) => {
+                match partial_stop_cancel_accepted(body, &id, batch) {
+                    Ok(()) => {
+                        self.note_partial_stop_canceled(&id);
+                        mark_canceled(cx, &[id], self.local_order_lifecycle());
+                    }
+                    Err(message) => errors.push(message),
+                }
+            }
+            (Call::CancelPartialStop { id, .. }, Err((_, message))) if already_gone(&message) => {
+                self.note_partial_stop_canceled(&id);
+                mark_canceled(cx, &[id], self.local_order_lifecycle());
+            }
             (Call::Cancel { ids: requested }, Ok(body)) => {
                 let statuses = serde_json::from_str::<Batch>(body)
                     .ok()
@@ -854,31 +966,57 @@ impl BybitLinear {
                         _ => canceled.push(id.clone()),
                     }
                 }
+                if !canceled.is_empty() {
+                    self.note_order_terminal(&canceled);
+                }
                 mark_canceled(cx, &canceled, self.local_order_lifecycle());
             }
-            (Call::Cancel { ids } | Call::CancelAll { ids }, Err((_, message)))
-                if already_gone(&message) =>
-            {
+            (Call::Cancel { ids }, Err((_, message))) if already_gone(&message) => {
+                self.note_order_terminal(&ids);
                 mark_canceled(cx, &ids, self.local_order_lifecycle());
             }
             (Call::CancelAll { ids }, Ok(body)) => {
-                #[derive(serde::Deserialize)]
-                struct Reply {
-                    result: Option<Success>,
-                }
-                #[derive(serde::Deserialize)]
-                struct Success {
-                    success: Option<String>,
-                }
-                let rejected = serde_json::from_str::<Reply>(body)
-                    .ok()
-                    .and_then(|r| r.result)
-                    .and_then(|r| r.success)
-                    .is_some_and(|s| s != "1");
-                if rejected {
-                    errors.push("Bybit cancel-all was not successful".into());
-                } else {
-                    mark_canceled(cx, &ids, self.local_order_lifecycle());
+                match cancel_all_affected(body) {
+                    Ok(affected) => {
+                        // Futures select at most 500 native orders. The affected
+                        // list, including uncaptured arrivals, is the only proof.
+                        let omitted = ids
+                            .iter()
+                            .filter(|id| {
+                                !affected.contains(id)
+                                    && cx.store.order(id).is_some_and(|order| {
+                                        !matches!(
+                                            order.status,
+                                            OrderStatus::Closed | OrderStatus::Canceled
+                                        )
+                                    })
+                            })
+                            .count();
+                        if !affected.is_empty() {
+                            self.note_order_terminal(&affected);
+                            mark_canceled(cx, &affected, self.local_order_lifecycle());
+                        }
+                        if self.local_order_lifecycle() {
+                            // Clean up captured terminal rows without inventing native cancel proof.
+                            let terminal: Vec<_> = ids
+                                .iter()
+                                .filter(|id| {
+                                    cx.store.order(id).is_some_and(|order| {
+                                        matches!(
+                                            order.status,
+                                            OrderStatus::Closed | OrderStatus::Canceled
+                                        )
+                                    })
+                                })
+                                .cloned()
+                                .collect();
+                            mark_canceled(cx, &terminal, true);
+                        }
+                        if omitted != 0 {
+                            errors.push(format!("Bybit cancel-all left {omitted} live order(s) unconfirmed; reconcile before retrying"));
+                        }
+                    }
+                    Err(message) => errors.push(message.into()),
                 }
             }
             (Call::Leverage { symbol, leverage }, outcome)
@@ -1492,7 +1630,133 @@ impl BybitLinear {
             .finish())
     }
 
-    /// Bybit amends in place, so the order keeps its id and client id.
+    fn plan_partial_stop_amend(
+        &self,
+        cx: &Cx<'_, Pending>,
+        order: &Order,
+        price: Option<f64>,
+        amount: Option<f64>,
+    ) -> Result<Job, String> {
+        if order.status != OrderStatus::Open {
+            return Err("Only an open Partial position stop can be amended".into());
+        }
+        if price.is_some_and(|value| !value.is_finite() || value <= 0.0)
+            || amount.is_some_and(|value| !value.is_finite() || value < 0.0)
+        {
+            return Err("Amended stop price must be positive and quantity nonnegative".into());
+        }
+        let mark = cx
+            .store
+            .ticker(&order.symbol)
+            .map(|ticker| ticker.mark)
+            .filter(|mark| mark.is_finite() && *mark > 0.0);
+        let base = || {
+            Body::new()
+                .str("category", self.category_for(&order.symbol).as_str())
+                .str("symbol", &order.symbol)
+        };
+        if let Some(mark) =
+            mark.filter(|_| self.variant != crate::Variant::Inverse || price.is_some())
+        {
+            // Projection and the replacement price deliberately use the raw drag value.
+            let price = price.unwrap_or(order.price);
+            if !price.is_finite() || price <= 0.0 {
+                return Err("A Partial position stop needs a positive replacement price".into());
+            }
+            let kind = match order.side {
+                OrderSide::Sell if price > mark => OrderType::TakeProfit,
+                OrderSide::Buy if price <= mark => OrderType::TakeProfit,
+                _ => OrderType::StopLoss,
+            };
+            let market = cx
+                .store
+                .market(&order.symbol)
+                .ok_or_else(|| format!("Market {} not found", order.symbol))?;
+            let amount = num::adjust(amount.unwrap_or(order.amount), market.precision.amount);
+            if !amount.is_finite() || amount < 0.0 {
+                return Err(
+                    "A Partial position stop needs a nonnegative replacement quantity".into(),
+                );
+            }
+            let partial = amount != 0.0;
+            let trigger = (kind == order.kind).then_some(order.trigger_type).flatten();
+            let (level, by, size, reference) = if kind == OrderType::StopLoss {
+                (
+                    "stopLoss",
+                    "slTriggerBy",
+                    "slSize",
+                    if trigger == Some(StopTriggerType::LastPrice) {
+                        "LastPrice"
+                    } else {
+                        "MarkPrice"
+                    },
+                )
+            } else {
+                (
+                    "takeProfit",
+                    "tpTriggerBy",
+                    "tpSize",
+                    if trigger == Some(StopTriggerType::MarkPrice) {
+                        "MarkPrice"
+                    } else {
+                        "LastPrice"
+                    },
+                )
+            };
+            let body = base()
+                .int(
+                    "positionIdx",
+                    self.stop_position_idx(cx, &order.symbol, order.side),
+                )
+                .str("tpslMode", if partial { "Partial" } else { "Full" })
+                .str(level, &number(price))
+                .str(by, reference)
+                .opt_str(size, partial.then(|| number(amount)).as_deref())
+                .finish();
+            let mut job = self.plan_cancel(std::slice::from_ref(order));
+            for planned in job.steps.iter_mut().flat_map(|step| &mut step.requests) {
+                planned.call = Call::CancelPartialStop {
+                    id: order.id.clone(),
+                    batch: self.paths.batch_orders,
+                };
+            }
+            job.steps.push_back(Step {
+                delay_ms: 0.0,
+                requests: vec![Planned {
+                    receipts: Vec::new(),
+                    path: "/v5/position/trading-stop",
+                    body,
+                    call: Call::PartialStop,
+                }],
+            });
+            return Ok(job);
+        }
+        // Missing mark (or inverse amount-only): TS updates the original leg directly.
+        let level = if order.kind == OrderType::StopLoss {
+            "stopLoss"
+        } else {
+            "takeProfit"
+        };
+        let size = if order.kind == OrderType::StopLoss {
+            "slSize"
+        } else {
+            "tpSize"
+        };
+        let mut body = base().int(
+            "positionIdx",
+            self.position_idx(cx, &order.symbol, order.side, order.reduce_only),
+        );
+        if self.variant != crate::Variant::Inverse {
+            body = body.str("tpslMode", "Partial");
+        }
+        body = body.opt_str(level, price.map(number).as_deref());
+        if self.variant != crate::Variant::Inverse {
+            body = body.str(size, &number(amount.unwrap_or(order.amount)));
+        }
+        Ok(trading_stop_job(body.finish()))
+    }
+
+    /// Partial position stops cancel/recreate; ordinary orders amend in place.
     fn plan_amend(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1508,6 +1772,16 @@ impl BybitLinear {
             .store
             .market(&order.symbol)
             .ok_or_else(|| format!("Market {} not found", order.symbol))?;
+        let stop = matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit);
+        if stop
+            && !is_virtual(id)
+            && self.category_for(&order.symbol) != Category::Spot
+            && self.category_for(&order.symbol) != Category::Option
+            && self.account.position_bound.contains(id)
+            && order.amount != 0.0
+        {
+            return self.plan_partial_stop_amend(cx, order, price, amount);
+        }
         let price = price.map(|p| num::adjust(p, market.precision.price));
         let amount = amount.map(|a| {
             if self.category_for(&order.symbol) == Category::Inverse {
@@ -1527,7 +1801,6 @@ impl BybitLinear {
                 .str("symbol", &order.symbol)
         };
         let amend = |body: Body| Ok(single("/v5/order/amend", body.finish(), Call::Amend));
-        let stop = matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit);
         if is_virtual(id) {
             // An attached TP/SL is a field of its parent order.
             let price = price.ok_or("Only the price of an attached TP/SL can change")?;
@@ -1566,7 +1839,7 @@ impl BybitLinear {
             return Ok(trading_stop_job(self.trailing_stop(cx, &opts)?));
         }
         if stop && self.account.position_bound.contains(id) && order.amount == 0.0 {
-            // Full stops modify the position; Partial stops amend by order ID.
+            // Full stops keep their existing position update path.
             if amount.is_some() {
                 return Err("A full-position stop has no adjustable quantity".into());
             }

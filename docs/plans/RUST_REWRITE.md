@@ -90,7 +90,7 @@ Little-endian. The header and every section payload start 8-byte aligned so
 | 2 | section count |
 | 8 | engine time (ms, f64) |
 
-Each section: `u16 kind`, `u16 reserved`, `u32 payload bytes` (padded to 8),
+Each section: `u16 kind`, `u16 revision`, `u32 payload bytes` (padded to 8),
 then the payload. Absent optional numbers are `NaN`; absent strings are
 `0xFFFFFFFF`. Strings are indices into the frame's `STRINGS` section.
 
@@ -115,6 +115,31 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 17 | `DERIVATIVE_PRODUCTS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 kind[n]` (1 Future, 2 Call, 3 Put); `u32 strings[n][5]` (underlying, settleAsset, premiumAsset, style, settlement); aligned f64 expiry[n], strike[n]; unknown terms are absent |
 | 18 | `POSITION_GREEKS` (optional replace with POSITIONS) | `u32 n`; `u32 strings[n][2]` (position ID, units); aligned f64 delta[n], gamma[n], vega[n], theta[n] |
 | 19 | `ACCOUNT_READ` (optional marker) | Empty payload; a current private-state read, rather than a new streaming observation. Apply values without advancing order/position freshness IDs; the normal stream retains its pending changes. |
+
+The envelope remains FORMAT 1; native `sections()` and JS reject other formats.
+Section revision 0 preserves the layouts above. Revision 1 has explicit fixed
+extensions (all absent optional numbers are NaN and strings are `0xFFFFFFFF`):
+
+- MARKETS appends `u32 prettySymbol[n]` references, preserving absent and empty.
+- TICKERS appends f64 `midPrice[n]` after the eleven original columns, then
+  `u32 symbol[n]`, `u32 id[n]`. TICKER_DELTAS bit 11 updates/clears midpoint;
+  the first eleven bits retain their meanings.
+- ORDERS appends four f64 columns: remainingNative, filledInPlacementUnits,
+  remainingNotional, conditionalOrderPrice; then `u32 bracketTriggers[n]`
+  (TP low byte, SL next byte, zero absent, trigger enum plus one), and
+  `u32 symbol[n]`.
+- POSITIONS appends mandatory `u32 positionId[n]`, then `u32 symbol[n]`.
+- FILLS appends `u32 symbol[n]` after its execution rows.
+- SETTINGS appends mandatory f64 buyLeverage/sellLeverage columns, then
+  `u32 symbol[n]`.
+
+Writers use revision 0 for MARKETS without display labels and TICKERS/DELTAS
+without midpoint fields. Unknown enum values decode as absent. Unknown section
+kinds can be skipped; unsupported revisions of known kinds require a snapshot.
+Symbol tails preserve rows on absent markets without synthesizing markets.
+Settings retain symbol identity across table changes; market-only flushes wait
+until pending MARKETS is delivered. TickerState owns its baseline, including
+identity strings, so transferring source frames cannot detach its state.
 
 Prediction venues map each outcome token to one ordinary market, with shares
 as base size and collateral as quote. Optional typed metadata sections preserve
@@ -172,7 +197,9 @@ byte-identical behaviour.
 On the same recording, in a worker-equivalent harness, TS posting its objects
 as it does today against Rust transferring frames:
 
-- CPU time: Rust < TS.
+- CPU time: Rust < TS. A CPU objective under 10 ms TS allows Rust 1 ms
+  above TS: at that size tied runs differ by up to 0.9 ms
+  (`RUST_GATE_TIMING.md`).
 - Peak and steady memory (Wasm linear memory plus JS heap retained by the
   worker): Rust < TS.
 

@@ -30,15 +30,34 @@ snapshot and recover gaps. Daily candles seed the full current day and replace
 cumulative native five-minute buckets. REST lists stream through typed rows.
 Failed or partially invalid snapshots preserve the previous account state;
 user cumulative fills emit only positive increments at the incremental price.
+An order or position row that cannot map (a bracket or TWAP placed on
+Coinbase's site, an unknown side) is skipped and logged; the store keeps its
+copy of that ID (a snapshot whose only rows lack any live identity keeps all
+known orders), and a skipped position never becomes a synthesized flat one. A
+flat position row without a side still clears the position. Unmappable updates
+for orders the engine never held are ignored. Skipped live orders are
+still included in cancel-symbol. Portfolio discovery retries a probe only on
+408/429/5xx; any other failure moves to the next portfolio.
 
 Positions and store order amounts use base units. CFM placement and query sizes
 remain native contract counts; contract size converts store sizes and quote
 notionals. Spot leverage is one; derivatives retain the documented account
 leverage and fixed cross/one-way model. Unsupported account mutations fail.
-Market IOC, GTC/PostOnly limits and last-price stop-limit orders are supported.
-Reduce/close requests require explicit size and observed opposite-position
-capacity, reserved across queued and in-flight writes. This client bound cannot
-prevent concurrent external account writes; no native reduce-only flag exists.
+Market IOC (a GTC market order is sent as IOC), GTC/PostOnly limits and
+last-price stop-limit orders are supported. Derivative reduce/close requests
+require explicit size and observed opposite-position capacity, reserved across
+queued and in-flight writes. Protective stops and other closing orders reserve
+that capacity separately, so a full-size stop and take-profit can coexist;
+executed and unidentified reductions count against both. This client bound
+cannot prevent concurrent external account writes; no native reduce-only flag
+exists. Spot reduce-only is sent as a plain order. A definite 4xx placement
+rejection releases its reservation with Coinbase's message; a lost response,
+408 or 5xx keeps it until the client ID appears or 30 s pass with a later order
+snapshot (and, for derivatives, a later position read). Saved read-only keys
+sign account and history reads once `key_permissions` shows both keys on the same portfolio;
+otherwise the read key is refused with an error and reads use the trading key
+on the primary route; a later 401 on a read-key request does the same instead
+of deactivating the account. Writes and the user stream keep the trading key.
 Caller IDs are nonempty strings of at most 128 characters without whitespace
 or control characters, preserved verbatim for one plain Limit/Market order.
 Spot edits require exact current zero-fill LIMIT decimal provenance. INTX
@@ -287,3 +306,7 @@ canonical `order_id`, and instrument-history rows must all match the requested
 Starbase instrument. Account decoding also preserves Coinbase's optional
 `total_*_usd` cross-collateral fields under explicit USD names; that does not
 resolve the unlabelled PnL-unit blocker.
+
+## Rust socket supervision
+
+The Rust public socket uses `engine::socket::Supervisor` with a 10-second connection deadline, 20-second validated-traffic watchdog and capped exponential reconnect delay with jitter. Native `heartbeats` subscriptions provide idle traffic; there is no invented client ping. The separate 10-second initial-book snapshot deadline, connection-wide sequences, recovery routing and daily candle backfill remain enforced. Short open/close flaps retain the failure count.

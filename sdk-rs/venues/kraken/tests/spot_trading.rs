@@ -391,6 +391,7 @@ fn inherited_history_lookup_and_settings_settle_explicitly() {
             command: 12,
             symbol: "XBT/USD".into(),
             leverage: 2.,
+            side: None,
         }),
     );
     assert!(done(&mut e, 12).is_err());
@@ -483,4 +484,28 @@ fn zero_disabled_brackets_match_ts_without_a_protective_write() {
             result: Ok(_)
         })
     )));
+}
+#[test]
+fn trade_permission_denied_fails_the_order_without_deactivating_a_read_key() {
+    let (mut e, _, _) = ready(false);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 31,
+            orders: vec![opts("limit", 98.)],
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &r,
+        r#"{"error":["EGeneral:Permission denied"],"result":{}}"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+    );
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 31, result: Err(m) }) if m.contains("Permission denied"))));
 }

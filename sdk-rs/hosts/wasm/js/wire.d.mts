@@ -23,7 +23,7 @@ export const SECTION: {
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
   'bid', 'ask', 'last', 'mark', 'index', 'percentage',
-  'openInterest', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume',
+  'openInterest', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume', 'midPrice',
 ];
 export type TickerField = (typeof TICKER_FIELDS)[number];
 export const MARKET_COLUMNS: readonly [
@@ -43,9 +43,9 @@ export const POSITION_COLUMNS: readonly [
 export type PositionColumn = (typeof POSITION_COLUMNS)[number];
 
 export interface OrderEnums {
-  status: 'open' | 'closed' | 'canceled' | 'creating' | 'updating' | 'canceling';
-  type: 'market' | 'limit' | 'conditional' | 'stop_market' | 'take_profit_market' | 'trailing_stop_market';
-  side: 'buy' | 'sell';
+  status: 'open' | 'closed' | 'canceled' | 'creating' | 'updating' | 'canceling' | undefined;
+  type: 'market' | 'limit' | 'conditional' | 'stop_market' | 'take_profit_market' | 'trailing_stop_market' | undefined;
+  side: 'buy' | 'sell' | undefined;
   reduceOnly: boolean;
   close: boolean | undefined;
   rejectReason: 'PostOnly' | 'InsufficientBalance' | 'ReduceOnly' | undefined;
@@ -55,11 +55,20 @@ export interface OrderEnums {
 export function orderEnums(word: number): OrderEnums;
 
 export interface PositionEnums {
-  side: 'long' | 'short';
+  side: 'long' | 'short' | undefined;
   marginType: 'isolated' | 'cross' | undefined;
   positionMode: 'hedged' | 'oneway' | undefined;
 }
 export function positionEnums(word: number): PositionEnums;
+export const ORDER_STATUS: ReadonlyArray<OrderEnums['status']>;
+export const ORDER_TYPE: ReadonlyArray<OrderEnums['type']>;
+export const ORDER_SIDE: ReadonlyArray<OrderEnums['side']>;
+export const TIME_IN_FORCE: ReadonlyArray<OrderEnums['timeInForce']>;
+export const TRIGGER_TYPE: ReadonlyArray<OrderEnums['triggerType']>;
+export const REJECT_REASON: ReadonlyArray<OrderEnums['rejectReason']>;
+export const POSITION_SIDE: ReadonlyArray<PositionEnums['side']>;
+export const MARGIN_TYPE: ReadonlyArray<PositionEnums['marginType']>;
+export const POSITION_MODE: ReadonlyArray<PositionEnums['positionMode']>;
 
 export type Columns<K extends string> = { [column in K]: Float64Array };
 
@@ -68,6 +77,7 @@ export type MarketTable = { count: number; flags: Uint32Array } & Columns<Market
   symbol(i: number): string;
   base(i: number): string;
   quote(i: number): string;
+  prettySymbol?(i: number): string | undefined;
 };
 export interface InstrumentClassificationTable {
   count: number;
@@ -115,7 +125,12 @@ export interface PredictionHoldingTable {
   flags: Uint32Array;
 }
 export interface TickerIdentity { id: string; symbol: string }
-export type TickerTable = { count: number; market: Uint32Array; identity?(i: number): TickerIdentity } & Columns<TickerField>;
+export type TickerTable = {
+  count: number;
+  market: Uint32Array;
+  identity?(i: number): TickerIdentity;
+  midPrice?: Float64Array;
+} & Columns<Exclude<TickerField, 'midPrice'>>;
 export interface BookRows {
   market: number;
   /** `[price, amount, total]` per level, best first. */
@@ -139,11 +154,16 @@ export type OrderTable = { count: number; market: Uint32Array; enums: Uint32Arra
   /** Optional trailing column; absent in legacy frames, NaN for rows without native units. */
   remainingNative?: Float64Array;
   filledInPlacementUnits?: Float64Array;
+  remainingNotional?: Float64Array;
+  conditionalOrderPrice?: Float64Array;
+  tpTriggerType?(i: number): OrderEnums['triggerType'];
+  slTriggerType?(i: number): OrderEnums['triggerType'];
+  symbol?(i: number): string | undefined;
   id(i: number): string;
   clientOrderId(i: number): string | undefined;
   parentId(i: number): string | undefined;
 };
-export type PositionTable = { count: number; market: Uint32Array; enums: Uint32Array; id(i: number): string | undefined } & Columns<PositionColumn>;
+export type PositionTable = { count: number; market: Uint32Array; enums: Uint32Array; id(i: number): string | undefined; symbol?(i: number): string | undefined } & Columns<PositionColumn>;
 export interface CoinBalance { base: string; amount: number; notional: number }
 export interface CurrencyBalance {
   used: number;
@@ -166,6 +186,7 @@ export interface SettingTable {
   leverage: Float64Array;
   buyLeverage?: Float64Array;
   sellLeverage?: Float64Array;
+  symbol?(i: number): string | undefined;
   marginType(i: number): 'isolated' | 'cross' | undefined;
 }
 export interface FillRows {
@@ -174,6 +195,7 @@ export interface FillRows {
   side: Uint32Array;
   /** `[price, amount]` per execution. */
   rows: Float64Array;
+  symbol?(i: number): string | undefined;
   /** Optional financial tails; NaN means unreported, including legacy rows. */
   realizedPnl?: Float64Array;
   fee?: Float64Array;
@@ -185,6 +207,7 @@ export class Frame {
   readonly buffer: ArrayBuffer;
   /** Engine time of the flush, ms. */
   readonly time: number;
+  /** NONE is absent; other references require a valid STRINGS entry. */
   string(index: number): string | undefined;
   accountRead(): boolean;
   markets(): MarketTable | undefined;
@@ -193,7 +216,8 @@ export class Frame {
   derivativeProducts(): DerivativeProductTable | undefined;
   positionGreeks(): PositionGreekTable | undefined;
   predictionHoldings(): PredictionHoldingTable | undefined;
-  tickers(): TickerTable | undefined;
+  /** Owned copies survive source transfer; identities remain lazily decoded. */
+  tickers(owned?: boolean): TickerTable | undefined;
   tickerDeltas(): Float64Array | undefined;
   books(): Generator<BookRows>;
   bookDeltas(): Generator<BookDeltaRows>;
@@ -206,7 +230,7 @@ export class Frame {
   fills(): FillRows | undefined;
 }
 
-/** Live ticker columns: adopts each replacement table and applies deltas in place. */
+/** Owned ticker columns and identities remain valid after transferring source frames. */
 export class TickerState {
   count: number;
   market: Uint32Array;

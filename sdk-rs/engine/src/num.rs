@@ -1,5 +1,16 @@
 //! Precision helpers for venue numbers.
 
+/// Venue metadata is untrusted; `f64::clamp` panics on unordered bounds.
+pub fn clamp_leverage(value: f64, min: f64, max: f64) -> Result<f64, &'static str> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err("Invalid leverage");
+    }
+    if !min.is_finite() || !max.is_finite() || min <= 0.0 || min > max {
+        return Err("Invalid market leverage limits");
+    }
+    Ok(value.clamp(min, max))
+}
+
 /// Parse a venue numeric string; malformed input reads as 0 rather than NaN so
 /// it can never poison store arithmetic.
 pub fn parse(text: &str) -> f64 {
@@ -53,6 +64,26 @@ pub fn format(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leverage_bounds_cannot_panic_or_produce_invalid_writes() {
+        assert_eq!(clamp_leverage(5.0, 1.0, 20.0), Ok(5.0));
+        assert_eq!(clamp_leverage(25.0, 1.0, 20.0), Ok(20.0));
+        assert_eq!(clamp_leverage(0.5, 1.0, 20.0), Ok(1.0));
+        for (min, max) in [
+            (1.0, 0.0),
+            (20.0, 1.0),
+            (0.0, 20.0),
+            (f64::NAN, 20.0),
+            (1.0, f64::NAN),
+            (1.0, f64::INFINITY),
+        ] {
+            assert!(clamp_leverage(5.0, min, max).is_err());
+        }
+        for value in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(clamp_leverage(value, 1.0, 20.0).is_err());
+        }
+    }
 
     #[test]
     fn adjusts_to_step_without_float_noise() {

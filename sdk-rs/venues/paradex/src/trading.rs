@@ -471,7 +471,7 @@ impl Trading {
                     operations: VecDeque::new(),
                     results: vec![],
                     errors: vec![],
-                    attempt_all: false,
+                    attempt_all: true,
                     placement: true,
                 },
             );
@@ -482,7 +482,7 @@ impl Trading {
             Command::PlaceOrders { command, orders } => (
                 command,
                 place_operations(&orders, cx, account, &HashMap::new(), price_bands, true),
-                false,
+                true,
                 true,
             ),
             Command::CancelOrders { command, ids } => {
@@ -555,18 +555,31 @@ impl Trading {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => {
                 let result = (|| {
                     if !leverage.is_finite() {
                         return Err("Paradex leverage must be finite".into());
                     }
                     let m = cx.store.market(&symbol).ok_or("unknown Paradex market")?;
-                    let leverage = leverage
-                        .floor()
-                        .clamp(m.limits.leverage.min.max(1.), m.limits.leverage.max.max(1.));
+                    if !m.limits.leverage.min.is_finite() || !m.limits.leverage.max.is_finite() {
+                        return Err("Paradex leverage limits must be finite".into());
+                    }
+                    let min = m.limits.leverage.min.max(1.).ceil();
+                    let max = m.limits.leverage.max.max(1.).floor();
+                    if !min.is_finite()
+                        || !max.is_finite()
+                        || min > max
+                        || max > f64::from(u32::MAX)
+                    {
+                        return Err(
+                            "Paradex leverage limits must contain a supported integer".into()
+                        );
+                    }
+                    let leverage = leverage.floor().clamp(min, max);
                     #[derive(Serialize)]
                     struct Leverage {
-                        leverage: f64,
+                        leverage: u32,
                         margin_type: &'static str,
                     }
                     Ok(VecDeque::from([Operation {
@@ -576,7 +589,7 @@ impl Trading {
                         path: format!("/account/margin/{}", encode(&symbol)),
                         body: Some(
                             serde_json::to_string(&Leverage {
-                                leverage,
+                                leverage: leverage as u32,
                                 margin_type: "CROSS",
                             })
                             .unwrap(),
@@ -599,7 +612,11 @@ impl Trading {
                 );
                 return true;
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 cx.done(
                     command,
                     if hedged {
@@ -726,15 +743,16 @@ impl Trading {
             );
         } else {
             let state = self.jobs.remove(&job).unwrap();
-            let result = if state.errors.is_empty() {
-                if state.placement {
-                    serde_json::to_string(&state.results).map_err(|e| e.to_string())
+            let result =
+                if state.errors.is_empty() || (state.placement && !state.results.is_empty()) {
+                    if state.placement {
+                        serde_json::to_string(&state.results).map_err(|e| e.to_string())
+                    } else {
+                        Ok("[]".into())
+                    }
                 } else {
-                    Ok("[]".into())
-                }
-            } else {
-                Err(state.errors.join("; "))
-            };
+                    Err(state.errors.join("; "))
+                };
             cx.done(state.command, result);
         }
     }
@@ -763,14 +781,33 @@ impl Trading {
             }
             return;
         }
+        if let Kind::Place {
+            expected, batch, ..
+        } = &request.kind
+        {
+            let result = crate::success(response)
+                .and_then(|()| decode_placement(response.body, expected, *batch));
+            let result = match result {
+                Ok(PlacementResult {
+                    ids,
+                    error: Some(error),
+                }) => {
+                    if let Some(job) = self.jobs.get_mut(&request.job) {
+                        job.results.extend(ids);
+                    }
+                    Err(error)
+                }
+                Ok(PlacementResult { ids, error: None }) => Ok(ids),
+                Err(error) => Err(error),
+            };
+            self.complete(cx, account, request, result, false);
+            return;
+        }
         let rails = match &request.kind {
             Kind::Rails(symbol) => Some(symbol.clone()),
             _ => None,
         };
         let result = crate::success(response).and_then(|()| match &request.kind {
-            Kind::Place {
-                expected, batch, ..
-            } => decode_placement(response.body, expected, *batch),
             Kind::Amend { id, .. } => {
                 let row: Identity = serde_json::from_str(response.body)
                     .map_err(|_| "invalid Paradex amend response")?;
@@ -881,10 +918,17 @@ impl Trading {
         match result {
             Ok(ids) => job.results.extend(ids),
             Err(error) => {
-                if matches!(request.kind, Kind::Place { child: true, .. }) {
+                if let Kind::Place {
+                    child, expected, ..
+                } = &request.kind
+                {
                     cx.log(
-                        LogLevel::Warning,
-                        format!("Paradex TP/SL placement failed: {error}"),
+                        LogLevel::Error,
+                        if *child {
+                            format!("Paradex TP/SL placement failed: {error}")
+                        } else {
+                            format!("Paradex placement failed for client IDs {expected:?}: {error}")
+                        },
                     );
                     while job
                         .operations
@@ -893,9 +937,12 @@ impl Trading {
                     {
                         job.operations.pop_front();
                     }
+                    if !child {
+                        job.errors.push(error);
+                    }
                 } else {
                     job.errors.push(error);
-                    if !job.attempt_all {
+                    if !job.attempt_all || matches!(request.kind, Kind::Quotes(_)) {
                         job.preparing = None;
                         job.operations.clear();
                     }
@@ -1178,11 +1225,15 @@ struct Identity {
     #[serde(default)]
     client_id: Option<String>,
 }
+struct PlacementResult {
+    ids: Vec<String>,
+    error: Option<String>,
+}
 fn decode_placement(
     body: &str,
     expected: &[Option<String>],
     batch: bool,
-) -> Result<Vec<String>, String> {
+) -> Result<PlacementResult, String> {
     #[derive(Deserialize)]
     struct Failure {
         #[serde(default)]
@@ -1229,7 +1280,7 @@ fn decode_placement(
         .iter()
         .filter(|id| !found.contains_key(*id))
         .collect();
-    if !errors.is_empty() {
+    let error = if !errors.is_empty() {
         if errors.len() != missing.len()
             || errors
                 .iter()
@@ -1237,23 +1288,23 @@ fn decode_placement(
         {
             return Err("Paradex batch success/error counts are inconsistent".into());
         }
-        return Err(format!(
-            "Paradex batch rejected {} unidentified client IDs: {}",
-            missing.len(),
+        Some(format!(
+            "Paradex batch rejected client IDs {missing:?}: {}",
             errors
                 .iter()
                 .map(|e| format!("{}: {}", e.error, e.message))
                 .collect::<Vec<_>>()
                 .join("; ")
-        ));
-    }
-    if !missing.is_empty() {
+        ))
+    } else if !missing.is_empty() {
         return Err("Paradex placement missing client results".into());
-    }
-    Ok(expected
-        .iter()
-        .map(|id| found.remove(id).unwrap())
-        .collect())
+    } else {
+        None
+    };
+    Ok(PlacementResult {
+        ids: expected.iter().filter_map(|id| found.remove(id)).collect(),
+        error,
+    })
 }
 fn decode_cancels(body: &str, ids: &[String]) -> Result<(), String> {
     #[derive(Deserialize)]
@@ -1298,7 +1349,8 @@ mod tests {
                 &expected,
                 true
             )
-            .unwrap(),
+            .unwrap()
+            .ids,
             ["1", "2"]
         );
         for body in [

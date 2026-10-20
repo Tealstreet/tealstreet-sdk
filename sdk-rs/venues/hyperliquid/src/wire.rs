@@ -3,21 +3,37 @@ use serde::Deserialize;
 use std::borrow::Cow;
 
 pub fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Number(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
+    struct Number;
+    impl<'de> serde::de::Visitor<'de> for Number {
+        type Value = f64;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a finite number or numeric string")
+        }
+        fn visit_f64<E: serde::de::Error>(self, n: f64) -> Result<f64, E> {
+            if n.is_finite() {
+                Ok(n)
+            } else {
+                Err(E::custom("nonfinite number"))
+            }
+        }
+        fn visit_i64<E: serde::de::Error>(self, n: i64) -> Result<f64, E> {
+            self.visit_f64(n as f64)
+        }
+        fn visit_u64<E: serde::de::Error>(self, n: u64) -> Result<f64, E> {
+            self.visit_f64(n as f64)
+        }
+        fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<f64, E> {
+            self.visit_f64(s.trim().parse().map_err(E::custom)?)
+        }
+        fn visit_borrowed_str<E: serde::de::Error>(self, s: &'de str) -> Result<f64, E> {
+            self.visit_str(s)
+        }
+        fn visit_string<E: serde::de::Error>(self, s: String) -> Result<f64, E> {
+            self.visit_str(&s)
+        }
     }
-    let n = match N::deserialize(d)? {
-        N::Number(n) => Ok(n),
-        N::Text(s) => s.trim().parse().map_err(serde::de::Error::custom),
-    }?;
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
+    d.deserialize_any(Number)
 }
 // Preserve field absence without accepting explicit invalid/null values that
 // the existing required-number decoder rejects.
@@ -368,4 +384,159 @@ pub struct SpotCtx {
     pub coin: String,
     #[serde(flatten)]
     pub context: AssetCtx,
+}
+
+#[cfg(test)]
+mod numeric_tests {
+    use super::*;
+    use serde::de::value::{
+        BorrowedStrDeserializer, Error, F64Deserializer, I64Deserializer, StrDeserializer,
+        StringDeserializer, U64Deserializer,
+    };
+
+    #[derive(Deserialize)]
+    struct Number(#[serde(deserialize_with = "number")] f64);
+
+    #[test]
+    fn numeric_tokens_and_strings_preserve_rounding_and_signed_zero() {
+        for token in [
+            "0",
+            "-0",
+            "-0.0",
+            "1",
+            "-1",
+            "0.125",
+            "1e-4",
+            "9007199254740993",
+            "18446744073709551615",
+            "-9223372036854775808",
+            "18446744073709551616",
+        ] {
+            let expected = token.parse::<f64>().unwrap().to_bits();
+            let raw = serde_json::from_str::<Number>(token).unwrap().0;
+            let quoted = serde_json::from_str::<Number>(&format!("\" \\t{token} \\n\""))
+                .unwrap()
+                .0;
+            assert_eq!(raw.to_bits(), expected, "{token}");
+            assert_eq!(quoted.to_bits(), expected, "quoted {token}");
+        }
+        let escaped = serde_json::from_str::<Number>(r#""\u2003-\u0030.0\u2003""#)
+            .unwrap()
+            .0;
+        assert_eq!(escaped.to_bits(), (-0.0f64).to_bits());
+    }
+
+    #[test]
+    fn numeric_visitor_accepts_borrowed_owned_and_integer_inputs() {
+        for actual in [
+            number(StrDeserializer::<Error>::new(" -0 ")).unwrap(),
+            number(BorrowedStrDeserializer::<Error>::new(" -0 ")).unwrap(),
+            number(StringDeserializer::<Error>::new(" -0 ".into())).unwrap(),
+        ] {
+            assert_eq!(actual.to_bits(), (-0.0f64).to_bits());
+        }
+        for value in [i64::MIN, -9_007_199_254_740_993, 0, i64::MAX] {
+            assert_eq!(
+                number(I64Deserializer::<Error>::new(value))
+                    .unwrap()
+                    .to_bits(),
+                (value as f64).to_bits()
+            );
+        }
+        for value in [0, 9_007_199_254_740_993, u64::MAX] {
+            assert_eq!(
+                number(U64Deserializer::<Error>::new(value))
+                    .unwrap()
+                    .to_bits(),
+                (value as f64).to_bits()
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_values_reject_nonfinite_and_non_numeric_shapes() {
+        for raw in [
+            "null",
+            "true",
+            "false",
+            "[]",
+            "{}",
+            "1e400",
+            r#""NaN""#,
+            r#""nan""#,
+            r#""inf""#,
+            r#""-inf""#,
+            r#""Infinity""#,
+            r#""1e400""#,
+            r#""""#,
+            r#"" ""#,
+            r#""--1""#,
+            r#""1x""#,
+        ] {
+            assert!(serde_json::from_str::<Number>(raw).is_err(), "{raw}");
+        }
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(number(F64Deserializer::<Error>::new(value)).is_err());
+        }
+    }
+
+    #[test]
+    fn direct_and_flattened_contexts_preserve_numeric_forms_and_optional_defaults() {
+        let raw = r#"{"midPx":" \t0.125 ","markPx":"\u0031.5","oraclePx":" -0 ","prevDayPx":9007199254740993,"dayNtlVlm":"18446744073709551615","dayBaseVlm":-9223372036854775808,"openInterest":3,"funding":" -1.25e-4 "}"#;
+        let direct: AssetCtx = serde_json::from_str(raw).unwrap();
+        let flattened: SpotCtx = serde_json::from_str(raw).unwrap();
+        for ctx in [&direct, &flattened.context] {
+            assert_eq!(ctx.mid_px, Some(0.125));
+            assert_eq!(ctx.mark_px, 1.5);
+            assert_eq!(ctx.oracle_px.to_bits(), (-0.0f64).to_bits());
+            assert_eq!(
+                ctx.prev_day_px.to_bits(),
+                (9_007_199_254_740_993u64 as f64).to_bits()
+            );
+            assert_eq!(ctx.day_ntl_vlm.to_bits(), (u64::MAX as f64).to_bits());
+            assert_eq!(ctx.day_base_vlm.to_bits(), (i64::MIN as f64).to_bits());
+            assert_eq!(ctx.open_interest, 3.0);
+            assert_eq!(ctx.funding, -0.000125);
+        }
+        for raw in ["{}", r#"{"midPx":null}"#] {
+            let direct: AssetCtx = serde_json::from_str(raw).unwrap();
+            let flattened: SpotCtx = serde_json::from_str(raw).unwrap();
+            for ctx in [&direct, &flattened.context] {
+                assert_eq!(ctx.mid_px, None);
+                assert_eq!(ctx.mark_px, 0.0);
+                assert_eq!(ctx.day_ntl_vlm, 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn direct_and_flattened_contexts_reject_supplied_invalid_numbers() {
+        for field in [
+            "midPx",
+            "markPx",
+            "oraclePx",
+            "prevDayPx",
+            "dayNtlVlm",
+            "dayBaseVlm",
+            "openInterest",
+            "funding",
+        ] {
+            for value in ["false", "[]", "{}", r#""NaN""#, r#""bad""#, r#""1e400""#] {
+                let raw = format!(r#"{{"{field}":{value}}}"#);
+                assert!(
+                    serde_json::from_str::<AssetCtx>(&raw).is_err(),
+                    "direct {raw}"
+                );
+                assert!(
+                    serde_json::from_str::<SpotCtx>(&raw).is_err(),
+                    "flattened {raw}"
+                );
+            }
+            if field != "midPx" {
+                let raw = format!(r#"{{"{field}":null}}"#);
+                assert!(serde_json::from_str::<AssetCtx>(&raw).is_err());
+                assert!(serde_json::from_str::<SpotCtx>(&raw).is_err());
+            }
+        }
+    }
 }

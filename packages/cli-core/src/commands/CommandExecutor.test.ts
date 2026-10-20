@@ -47,7 +47,7 @@ function makeExchange(): ExchangeLike {
 }
 
 describe('executeCommand — exchange-reported order failures', () => {
-  it.each(['reported', 'frozen', 'unreported'] as const)('prints an actual Buy failure once (%s)', async (mode) => {
+  it.each(['reported', 'frozen', 'unreported'] as const)('prints the Buy failure result even when the exchange reported it (%s)', async (mode) => {
     const adapter = makeAdapter();
     const exchange = makeExchange();
     (exchange.store as unknown as { tickers: unknown[] }).tickers = [{ symbol: 'BTCUSDT', last: 50_000 }];
@@ -68,8 +68,10 @@ describe('executeCommand — exchange-reported order failures', () => {
     (exchange as unknown as { placeOrder: ReturnType<typeof vi.fn> }).placeOrder = placeOrder;
     const result = await executeCommand('buy $100', 'BTCUSDT', undefined, exchange, adapter);
     expect(placeOrder).toHaveBeenCalledTimes(1);
-    expect(adapter.printError).toHaveBeenCalledTimes(1);
-    expect(adapter.printError).toHaveBeenCalledWith(mode === 'unreported' ? `Command failed: ${error.message}` : error.message);
+    // The exchange error listener filters and deduplicates (suppressed categories,
+    // once-per-account auth, 10s console dedupe), so the result line always prints.
+    expect(adapter.printError).toHaveBeenCalledWith(`Command failed: ${error.message}`);
+    expect(adapter.printError).toHaveBeenCalledTimes(mode === 'unreported' ? 1 : 2);
     expect(result).toMatchObject({ handled: true, success: false, error: error.message, errorReported: true, errorDetails: {
       code: 'COMMAND_TIMEOUT', command: 'placeOrders', outcome: 'unknown', clientOrderId: 'requested',
       actualClientOrderIds: ['actual'], partialOrderIds: ['accepted'],

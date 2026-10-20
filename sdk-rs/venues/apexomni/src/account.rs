@@ -5,6 +5,7 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::Store;
 use safe_cex_engine::{
     Command, CommandId, Cx, Fill, LogLevel, Response, SocketChannel, SocketId, TimerId,
@@ -107,6 +108,8 @@ struct Progress {
 
 #[derive(Default)]
 pub struct Account {
+    supervisor: Supervisor,
+    authenticated: bool,
     pub(crate) account_id: String,
     pub(crate) maker_fee: String,
     pub(crate) taker_fee: String,
@@ -116,11 +119,7 @@ pub struct Account {
     socket: Option<SocketId>,
     open: bool,
     opened_at: f64,
-    received: f64,
     ping_at: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
     tick: Option<TimerId>,
     orders_heal: Option<TimerId>,
     positions_heal: Option<TimerId>,
@@ -142,6 +141,18 @@ pub struct Account {
 }
 
 impl Account {
+    pub(crate) fn new() -> Self {
+        Self {
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms: Some(10_000.0),
+                idle_timeout_ms: 30_000.0,
+                ping_interval_ms: Some(5_000.0),
+                ..Config::default()
+            }),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn note_leverage(&mut self, symbol: &str, leverage: f64, now: f64) {
         self.revision += 1;
         self.leverage_versions
@@ -538,6 +549,8 @@ impl ApexOmni {
             "quote.omni.apex.exchange"
         };
         self.account.generation += 1;
+        self.account.authenticated = false;
+        self.account.supervisor.connecting(cx);
         self.account.socket = Some(cx.connect_channel(
             format!(
                 "wss://{host}/realtime_private?v=2&timestamp={}&requestId=rust-{}",
@@ -545,17 +558,13 @@ impl ApexOmni {
             ),
             SocketChannel::Private,
         ));
-        self.account.received = cx.now;
-        if let Some(timer) = self.account.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        self.account.watchdog = Some(cx.set_timer(5000.0));
     }
 
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
             return false;
         }
+        self.account.supervisor.opened(cx);
         let login = match sign::ws_login(&self.options, cx.now) {
             Ok(login) => login,
             Err(error) => {
@@ -567,19 +576,14 @@ impl ApexOmni {
         };
         self.account.open = true;
         self.account.opened_at = cx.now;
-        self.account.received = cx.now;
-        self.account.attempts = 0;
-        if let Some(timer) = self.account.watchdog.take() {
-            cx.clear_timer(timer);
-        }
         cx.send(socket, login);
+        // The production proxy expects all three subscriptions before a login ACK.
         cx.send(
             socket,
             r#"{"op":"subscribe","args":["ws_zk_accounts_v3","ws_user_v1","ws_notify_v1"]}"#,
         );
         cx.send(socket, r#"{"op":"ping"}"#);
         self.account.ping_at = cx.now;
-        self.account.watchdog = Some(cx.set_timer(5000.0));
         self.refresh_account(cx);
         true
     }
@@ -590,23 +594,32 @@ impl ApexOmni {
         }
         self.account.socket = None;
         self.account.open = false;
-        if let Some(timer) = self.account.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        if self.account.reconnect.is_none() {
-            self.account.attempts = self.account.attempts.saturating_add(1);
-            self.account.reconnect = Some(cx.set_timer(
-                (1000.0 * 2f64.powi(self.account.attempts.min(5) as i32 - 1)).min(30_000.0),
-            ));
-        }
+        self.account.supervisor.retry(cx);
         true
     }
 
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.reconnect == Some(timer) {
-            self.account.reconnect = None;
-            self.connect_private(cx);
-            return true;
+        match self.account.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => (),
+            Tick::Reconnect => {
+                self.connect_private(cx);
+                return true;
+            }
+            Tick::Ping => {
+                if let Some(socket) = self.account.socket {
+                    cx.send(socket, r#"{"op":"ping"}"#);
+                    self.account.ping_at = cx.now;
+                }
+                return true;
+            }
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.account.socket {
+                    cx.close(socket);
+                    self.account_close(cx, socket);
+                }
+                return true;
+            }
+            Tick::Handled => return true,
         }
         if self.account.tick == Some(timer) {
             self.account.tick = None;
@@ -624,21 +637,7 @@ impl ApexOmni {
             self.refresh_positions(cx);
             return true;
         }
-        if self.account.watchdog != Some(timer) {
-            return false;
-        }
-        self.account.watchdog = None;
-        if let Some(socket) = self.account.socket {
-            if cx.now - self.account.received >= 30_000.0 {
-                cx.close(socket);
-                self.account_close(cx, socket);
-            } else {
-                cx.send(socket, r#"{"op":"ping"}"#);
-                self.account.ping_at = cx.now;
-                self.account.watchdog = Some(cx.set_timer(5000.0));
-            }
-        }
-        true
+        false
     }
 
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1110,7 +1109,7 @@ impl ApexOmni {
         if self.account.socket != Some(socket) {
             return false;
         }
-        self.account.received = cx.now;
+        self.account.supervisor.received(cx.now);
         let Ok(message) = serde_json::from_str::<wire::Message<'_>>(text) else {
             return true;
         };
@@ -1132,6 +1131,15 @@ impl ApexOmni {
                 LogLevel::Warning,
                 format!("ApeX private socket rejected request: {}", message.ret_msg),
             );
+            if message.op == "login" {
+                cx.close(socket);
+                self.account_close(cx, socket);
+            }
+            return true;
+        }
+        if message.op == "login" && message.success == Some(true) {
+            self.account.authenticated = true;
+            self.account.supervisor.authenticated(cx);
         }
         if message.topic != "ws_zk_accounts_v3" {
             return true;
@@ -1139,6 +1147,13 @@ impl ApexOmni {
         let Some(contents) = message.contents else {
             return true;
         };
+        if !self.account.authenticated
+            && matches!(message.kind.as_ref(), "snapshot" | "delta")
+            && self.private_auth_payload(cx.store, &contents, cx.now)
+        {
+            self.account.authenticated = true;
+            self.account.supervisor.authenticated(cx);
+        }
         let snapshot = message.kind == "snapshot";
         if let Some(fills) = contents.fills {
             for fill in fills {
@@ -1187,6 +1202,65 @@ impl ApexOmni {
             self.account.positions_heal = Some(cx.set_timer(1000.0));
         }
         true
+    }
+
+    fn private_auth_payload(&self, store: &Store, contents: &wire::Contents<'_>, now: f64) -> bool {
+        let has_rows = contents.fills.is_some()
+            || contents.orders.is_some()
+            || contents.positions.is_some()
+            || contents.wallets.is_some();
+        has_rows
+            && contents
+                .wallets
+                .as_ref()
+                .is_none_or(|rows| rows.iter().all(wire::WalletRow::valid))
+            && contents.orders.as_ref().is_none_or(|rows| {
+                rows.iter().all(|row| {
+                    !row.id.trim().is_empty()
+                        && !row.symbol.trim().is_empty()
+                        && side(&row.side).is_some()
+                        && row.size.is_some_and(|size| size >= 0.0)
+                        && row
+                            .price
+                            .or(row.trigger_price)
+                            .is_some_and(|price| price >= 0.0)
+                        && matches!(
+                            row.status.as_ref(),
+                            "PENDING" | "OPEN" | "UNTRIGGERED" | "FILLED" | "EXPIRED" | "CANCELED"
+                        )
+                        && matches!(
+                            row.kind.as_ref(),
+                            "LIMIT"
+                                | "MARKET"
+                                | "STOP_LIMIT"
+                                | "STOP_MARKET"
+                                | "TAKE_PROFIT_LIMIT"
+                                | "TAKE_PROFIT_MARKET"
+                        )
+                        && map_order(store, row, now).is_ok()
+                })
+            })
+            && contents.positions.as_ref().is_none_or(|rows| {
+                rows.iter().all(|row| {
+                    !row.symbol.trim().is_empty()
+                        && matches!(row.side.as_ref(), "LONG" | "SHORT")
+                        && row.size.is_some_and(|size| size >= 0.0)
+                        && self.map_position(store, row, now).is_ok()
+                })
+            })
+            && contents.fills.as_ref().is_none_or(|rows| {
+                rows.iter().all(|row| {
+                    !row.symbol.trim().is_empty()
+                        && !row.order_id.trim().is_empty()
+                        && side(&row.side).is_some()
+                        && row.price.is_some_and(|price| price > 0.0)
+                        && row.size.is_some_and(|size| size > 0.0)
+                        && row
+                            .created_at
+                            .or(row.updated_at)
+                            .is_some_and(|time| time > 0.0)
+                })
+            })
     }
 
     fn account_fill(&mut self, cx: &mut Cx<'_, Pending>, raw: &wire::FillRow<'_>, snapshot: bool) {

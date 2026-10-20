@@ -110,8 +110,8 @@ const algo = (o) => ({
 ws(PRIVATE, position('BTCUSDT', '0.010', '95000.0', '12.5'));
 const eth = { s: 'ETHUSDT', c: 'web', S: 'BUY', o: 'LIMIT', q: '1.000', p: '3000.00', i: 1001, ot: 'LIMIT' };
 ws(PRIVATE, order({ ...eth, X: 'NEW' }));
-ws(PRIVATE, order({ ...eth, x: 'TRADE', X: 'PARTIALLY_FILLED', l: '0.400', z: '0.400', L: '2999.50', ap: '2999.50' }));
-ws(PRIVATE, order({ ...eth, x: 'TRADE', X: 'FILLED', l: '0.600', z: '1.000', L: '2999.00', ap: '2999.20' }));
+ws(PRIVATE, order({ ...eth, t: 10001, x: 'TRADE', X: 'PARTIALLY_FILLED', l: '0.400', z: '0.400', L: '2999.50', ap: '2999.50' }));
+ws(PRIVATE, order({ ...eth, t: 10002, x: 'TRADE', X: 'FILLED', l: '0.600', z: '1.000', L: '2999.00', ap: '2999.20' }));
 ws(PRIVATE, algo({ aid: 2001, s: 'ETHUSDT', S: 'SELL', o: 'STOP_MARKET', X: 'NEW', q: '0', tp: '2900.00', cp: true }));
 const maker = { s: 'ETHUSDT', c: 'maker', S: 'SELL', o: 'LIMIT', f: 'GTX', q: '0.500', p: '2999.00', i: 1002, ot: 'LIMIT' };
 ws(PRIVATE, order({ ...maker, X: 'NEW' }));
@@ -126,7 +126,7 @@ http('POST', '/fapi/v1/order', 'symbol=BTCUSDT&positionSide=BOTH&side=BUY&type=L
   { orderId: 1003, symbol: 'BTCUSDT', status: 'NEW', clientOrderId: 'x', price: '90500', origQty: '0.002' });
 ws(PRIVATE, order({ s: 'BTCUSDT', c: 'x', S: 'BUY', o: 'LIMIT', q: '0.002', p: '90500.0', i: 1003, ot: 'LIMIT', X: 'NEW' }));
 command({ op: 'cancelOrders', ids: ['1003'] });
-http('DELETE', '/fapi/v1/order', 'symbol=BTCUSDT&orderId=1003', { orderId: 1003, status: 'CANCELED' });
+http('DELETE', '/fapi/v1/order', 'symbol=BTCUSDT&orderId=1003', { orderId: 1003, symbol: 'BTCUSDT', status: 'CANCELED', origQty: '0.002', executedQty: '0' });
 command({ op: 'cancelSymbolOrders', symbol: 'ETHUSDT' });
 http('DELETE', '/fapi/v1/allOpenOrders', 'symbol=ETHUSDT', { code: 200, msg: 'The operation of cancel all open order is done.' });
 http('DELETE', '/fapi/v1/algoOpenOrders', 'symbol=ETHUSDT', { code: 200, msg: 'success' });

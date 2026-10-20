@@ -1,8 +1,9 @@
 //! Private stream and paged account reconciliation. Live revisions win over
 //! snapshots that started before them; failed pages never replace store data.
-use crate::{Connection, HEARTBEAT_MS, MexcFutures, Pending, WS, sign, wire::*};
+use crate::{Connection, MexcFutures, Pending, WS, sign, wire::*};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{Cx, Fill, FillFinancials, LogLevel, Method, Response, SocketId, TimerId};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -55,6 +56,8 @@ pub struct Snapshot {
 }
 #[derive(Default)]
 pub struct Account {
+    pub(crate) supervisor: Supervisor,
+    authenticated: bool,
     pub private: Connection,
     pub native_ids: HashMap<String, String>,
     pub settings_revision: HashMap<String, u64>,
@@ -82,6 +85,20 @@ pub struct Account {
     pub mode_ready: bool,
     pub fills: HashMap<String, f64>,
     pub paused_until: f64,
+}
+
+impl Account {
+    pub(crate) fn new() -> Self {
+        Self {
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms: Some(10_000.0),
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(8_000.0),
+                ..Config::default()
+            }),
+            ..Self::default()
+        }
+    }
 }
 
 impl MexcFutures {
@@ -179,8 +196,7 @@ impl MexcFutures {
             });
         }
         cx.store.set_hedged(true);
-        self.account.private.socket =
-            Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
+        self.connect_private(cx);
         self.signed(
             cx,
             Method::Get,
@@ -267,13 +283,17 @@ impl MexcFutures {
             Pending::Account(Request::Snapshot(snapshot)),
         );
     }
+    fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.authenticated = false;
+        self.account.supervisor.connecting(cx);
+        self.account.private.socket =
+            Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
+    }
     pub fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let c = self.credentials.as_ref().unwrap();
         self.account.private.open = true;
-        self.account.private.last_received = cx.now;
-        self.account.private.attempts = 0;
+        self.account.supervisor.opened(cx);
         cx.send(socket, r#"{"method":"ping"}"#);
-        self.account.private.heartbeat = Some(cx.set_timer(HEARTBEAT_MS));
         #[derive(serde::Serialize)]
         struct Param<'a> {
             #[serde(rename = "apiKey")]
@@ -301,12 +321,19 @@ impl MexcFutures {
         );
     }
     pub fn account_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
-        self.account.private.last_received = cx.now;
+        self.account.supervisor.received(cx.now);
         let Ok(m) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
         if m.channel == "rs.login" {
-            if m.success == Some(true) || m.data.is_some_and(|d| d.get() == r#""success""#) {
+            if m.success != Some(false)
+                && (m.success == Some(true) || m.data.is_some_and(|d| d.get() == r#""success""#))
+            {
+                if self.account.authenticated {
+                    return;
+                }
+                self.account.authenticated = true;
+                self.account.supervisor.authenticated(cx);
                 if let Some(socket) = self.account.private.socket {
                     cx.send(socket,r#"{"method":"personal.filter","param":{"filters":[{"filter":"order"},{"filter":"order.deal"},{"filter":"position"},{"filter":"asset"},{"filter":"plan.order"},{"filter":"stop.order"},{"filter":"stop.planorder"}]}}"#);
                 }
@@ -318,6 +345,10 @@ impl MexcFutures {
                     LogLevel::Error,
                     "MEXC private ws login failed, double check your key and secret",
                 );
+                if let Some(socket) = self.account.private.socket {
+                    cx.close(socket);
+                    self.account_close(cx, socket);
+                }
             }
             return;
         }
@@ -861,7 +892,37 @@ impl MexcFutures {
                             snapshot.orders.push(o);
                         }
                     } else {
-                        snapshot.bad = true;
+                        let id = if scope == Scope::Regular {
+                            if r.order_id.is_empty() {
+                                &r.id
+                            } else {
+                                &r.order_id
+                            }
+                        } else if r.id.is_empty() {
+                            &r.order_id
+                        } else {
+                            &r.id
+                        };
+                        if id.is_empty() {
+                            // Without an identity, this could be any missing
+                            // known order: the snapshot cannot prove absence.
+                            snapshot.bad = true;
+                            return;
+                        }
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("Skipping unmappable MEXC order {id} on {}", r.symbol),
+                        );
+                        // A typed but unmappable row is not proof that a known
+                        // order vanished. Keep that id while committing good rows.
+                        if let Some(previous) = cx.store.order(id)
+                            && snapshot
+                                .symbol
+                                .as_ref()
+                                .is_none_or(|symbol| *symbol == previous.symbol)
+                        {
+                            snapshot.orders.push(previous.clone());
+                        }
                     }
                 }
                 Err(_) => snapshot.bad = true,
@@ -1284,22 +1345,20 @@ impl MexcFutures {
             self.account.pending_stop_refresh.insert(symbol);
             self.refresh_stop_orders(cx);
         }
-        if self.account.private.reconnect == Some(timer) {
-            self.account.private.reconnect = None;
-            self.account.private.socket =
-                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
-        }
-        if self.account.private.heartbeat == Some(timer) {
-            self.account.private.heartbeat = None;
-            if let Some(socket) = self.account.private.socket {
-                if cx.now - self.account.private.last_received >= crate::SILENCE_MS {
-                    cx.close(socket);
-                    self.account_close(cx, socket);
-                } else {
+        match self.account.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => self.connect_private(cx),
+            Tick::Ping => {
+                if let Some(socket) = self.account.private.socket {
                     cx.send(socket, r#"{"method":"ping"}"#);
-                    self.account.private.heartbeat = Some(cx.set_timer(HEARTBEAT_MS));
                 }
             }
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.account.private.socket {
+                    cx.close(socket);
+                    self.account_close(cx, socket);
+                }
+            }
+            _ => (),
         }
     }
     pub fn account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -1308,13 +1367,7 @@ impl MexcFutures {
         }
         self.account.private.open = false;
         self.account.private.socket = None;
-        if let Some(t) = self.account.private.heartbeat.take() {
-            cx.clear_timer(t);
-        }
-        self.account.private.attempts += 1;
-        self.account.private.reconnect = Some(cx.set_timer(
-            (500.0 * 2f64.powi(self.account.private.attempts.min(6) as i32)).min(30_000.0),
-        ));
+        self.account.supervisor.retry(cx);
     }
 }
 pub fn side(n: f64) -> OrderSide {

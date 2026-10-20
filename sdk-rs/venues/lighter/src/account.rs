@@ -436,6 +436,19 @@ fn address(text: &str) -> Option<String> {
 fn ratio(n: f64) -> f64 {
     if n > 1.0 { n / 10000.0 } else { n }
 }
+// Account positions use ratio, percent, or integer fraction ticks. Public
+// market risk metadata keeps its separate fixed-tick contract in `ratio`.
+fn position_margin_ratio(value: f64) -> Option<f64> {
+    if !value.is_finite() || value <= 0.0 {
+        None
+    } else if value > 100.0 {
+        Some(value / 10000.0)
+    } else if value > 1.0 {
+        Some(value / 100.0)
+    } else {
+        Some(value)
+    }
+}
 fn margin(value: Option<&Atom<'_>>) -> Option<MarginType> {
     match value.map(|v| v.0.as_ref()) {
         Some("1" | "isolated" | "ISOLATED") => Some(MarginType::Isolated),
@@ -888,8 +901,7 @@ impl Lighter {
             .or_else(|| {
                 wire.initial_margin_fraction
                     .as_ref()
-                    .map(|n| ratio(n.0))
-                    .filter(|n| *n > 0.0)
+                    .and_then(|n| position_margin_ratio(n.0))
                     .map(|n| 1.0 / n)
             })
             .or_else(|| {
@@ -905,8 +917,13 @@ impl Lighter {
                     .find(|p| p.symbol == symbol)
                     .map(|p| p.leverage)
             })
-            .unwrap_or(market.limits.leverage.max)
-            .clamp(market.limits.leverage.min, market.limits.leverage.max);
+            .unwrap_or(market.limits.leverage.max);
+        let leverage = safe_cex_engine::num::clamp_leverage(
+            leverage,
+            market.limits.leverage.min,
+            market.limits.leverage.max,
+        )
+        .ok()?;
         let Some(size) = wire.size else {
             return Some((
                 cx.store
@@ -1019,7 +1036,31 @@ impl Lighter {
             ..Snapshot::default()
         };
         if let Some(raw) = wire.positions {
+            let mut invalid_limits = false;
             each_row(raw, |row: PositionWire<'_>, hint| {
+                let symbol = if !row.symbol.is_empty() {
+                    Some(row.symbol.as_ref())
+                } else {
+                    self.symbol_for_id(if row.market_id.0.is_empty() {
+                        hint.unwrap_or_default()
+                    } else {
+                        &row.market_id.0
+                    })
+                };
+                if symbol
+                    .and_then(|symbol| cx.store.market(symbol))
+                    .is_some_and(|market| {
+                        safe_cex_engine::num::clamp_leverage(
+                            1.0,
+                            market.limits.leverage.min,
+                            market.limits.leverage.max,
+                        )
+                        .is_err()
+                    })
+                {
+                    invalid_limits = true;
+                    return;
+                }
                 let known = margin(row.margin_mode.as_ref()).is_some()
                     && (row.leverage.as_ref().is_some_and(|n| n.0 > 0.0)
                         || row
@@ -1037,6 +1078,9 @@ impl Lighter {
                     }
                 }
             })?;
+            if invalid_limits {
+                return Err("Invalid Lighter market leverage limits".into());
+            }
         }
         Ok(snapshot)
     }
@@ -1838,7 +1882,7 @@ impl Lighter {
                 } else {
                     trade.bid_id.0.as_ref()
                 };
-                if order.is_empty() || timestamp <= 0.0 {
+                if order.is_empty() || timestamp <= 0.0 || timestamp > cx.now + 1000.0 {
                     return;
                 }
                 let symbol = symbol.to_owned();
@@ -1853,13 +1897,11 @@ impl Lighter {
                         self.account.seen_fills.remove(&id);
                     }
                 }
+                // Subscription history is baseline; delayed update executions remain live.
                 if frame.kind.starts_with("subscribed") {
                     return;
                 }
                 self.trade_execution_observed(order, timestamp);
-                if cx.now - timestamp > 5000.0 || timestamp > cx.now + 1000.0 {
-                    return;
-                }
                 cx.fill(Fill {
                     order_id: order.into(),
                     symbol,

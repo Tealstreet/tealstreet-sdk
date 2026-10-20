@@ -514,6 +514,7 @@ fn setting_commands_update_store_only_after_ack_and_failures_preserve_settings()
         command: 1,
         symbol: "BTCUSDT".into(),
         leverage: 500.0,
+        side: None,
     });
     let (request, p) = body(&mut h, "/set-leverage");
     assert_eq!(p["leverage"].as_f64(), Some(125.0));
@@ -537,6 +538,7 @@ fn setting_commands_update_store_only_after_ack_and_failures_preserve_settings()
     h.command(Command::SetPositionMode {
         command: 3,
         hedged: true,
+        symbol: None,
     });
     h.respond("/set-position-mode", 200, r#"{"code":"00000","data":{}}"#);
     assert!(h.engine.store().hedged());
@@ -734,6 +736,7 @@ fn isolated_hedge_leverage_ack_only_updates_the_requested_long_side() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         });
         let (request, p) = body(&mut h, "/set-leverage");
         assert_eq!(p[if uta_account { "posSide" } else { "holdSide" }], "long");
@@ -741,6 +744,222 @@ fn isolated_hedge_leverage_ack_only_updates_the_requested_long_side() {
         assert_eq!(h.engine.store().position("long").unwrap().leverage, 20.0);
         assert_eq!(h.engine.store().position("short").unwrap().leverage, 10.0);
     }
+}
+
+#[test]
+fn symbol_cancel_covers_acknowledged_placement_before_private_echo() {
+    let mut h = Harness::classic();
+    place(&mut h, vec![limit()]);
+    let placed = h.take("/batch-place-order");
+    batch_success(&mut h, placed.id, &["ack-only"]);
+    assert!(h.engine.store().order("ack-only").is_none());
+    h.engine.store_mut().set_orders(vec![]);
+    h.command(Command::CancelSymbolOrders {
+        command: 2,
+        symbol: "BTCUSDT".into(),
+    });
+    let cancel = h.take("/batch-cancel-orders");
+    let payload: Value = serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["orderIdList"][0]["orderId"], "ack-only");
+    batch_success(&mut h, cancel.id, &["ack-only"]);
+    assert!(h.done.iter().any(|(id, r)| *id == 2 && r.is_ok()));
+    h.command(Command::CancelSymbolOrders {
+        command: 3,
+        symbol: "BTCUSDT".into(),
+    });
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/batch-cancel-orders"))
+    );
+}
+
+#[test]
+fn retained_conditional_cancels_require_their_own_semantic_ack() {
+    for (uta_mode, kind, place_path, cancel_path) in [
+        (
+            false,
+            "stop_market",
+            "/place-tpsl-order",
+            "/cancel-plan-order",
+        ),
+        (
+            false,
+            "trailing_stop_market",
+            "/place-plan-order",
+            "/cancel-plan-order",
+        ),
+        (
+            true,
+            "limit",
+            "/api/v3/trade/place-order",
+            "/api/v3/trade/cancel-order",
+        ),
+        (
+            true,
+            "stop_market",
+            "/place-strategy-order",
+            "/cancel-strategy-order",
+        ),
+    ] {
+        for bad_ack in [
+            r#"{"code":"00000","data":{}}"#,
+            r#"{"code":"00000","data":{"orderId":"unrelated"}}"#,
+        ] {
+            let mut h = if uta_mode { uta() } else { Harness::classic() };
+            place(
+                &mut h,
+                vec![
+                    json!({"symbol":"BTCUSDT","type":kind,"side":"sell","amount":0.01,"price":95}),
+                ],
+            );
+            let placed = h.take(place_path);
+            h.reply(
+                placed.id,
+                200,
+                r#"{"code":"00000","data":{"orderId":"retained-conditional"}}"#,
+            );
+            h.engine.store_mut().set_orders(vec![]);
+            h.command(Command::CancelSymbolOrders {
+                command: 2,
+                symbol: "BTCUSDT".into(),
+            });
+            let (cancel, payload) = body(&mut h, cancel_path);
+            if kind == "trailing_stop_market" {
+                assert_eq!(payload["orderIdList"][0]["orderId"], "retained-conditional");
+                assert_eq!(payload["planType"], "track_plan");
+            } else {
+                assert_eq!(payload["orderId"], "retained-conditional");
+            }
+            if !uta_mode {
+                assert_eq!(payload["symbol"], "BTCUSDT");
+            }
+            h.reply(cancel, 200, bad_ack);
+            assert!(
+                h.done
+                    .iter()
+                    .any(|(id, result)| *id == 2 && result.is_err()),
+                "{kind}: {bad_ack}"
+            );
+            // An ambiguous cancel does not consume the only retained native route.
+            h.command(Command::CancelSymbolOrders {
+                command: 3,
+                symbol: "BTCUSDT".into(),
+            });
+            let (cancel, _) = body(&mut h, cancel_path);
+            h.reply(
+                cancel,
+                200,
+                r#"{"code":"00000","data":{"orderId":"retained-conditional"}}"#,
+            );
+            assert!(h.done.iter().any(|(id, result)| *id == 3 && result.is_ok()));
+            h.command(Command::CancelSymbolOrders {
+                command: 4,
+                symbol: "BTCUSDT".into(),
+            });
+            assert!(!h.requests.iter().any(|r| r.url.contains(cancel_path)));
+        }
+    }
+}
+
+#[test]
+fn ambiguous_placement_ack_cannot_be_followed_by_false_empty_cancel_all_success() {
+    let mut h = Harness::classic();
+    h.engine.store_mut().set_orders(vec![]);
+    place(&mut h, vec![limit()]);
+    let placed = h.take("/batch-place-order");
+    h.reply(placed.id, 200, r#"{"code":"00000","data":{}}"#);
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 1 && result.is_err())
+    );
+    h.command(Command::CancelSymbolOrders {
+        command: 2,
+        symbol: "BTCUSDT".into(),
+    });
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 2 && result.is_err()),
+        "a missing native ID must not mean the order was never placed"
+    );
+}
+
+#[test]
+fn delayed_post_write_recovery_preserves_authentication_backoff_and_recovery_hint() {
+    let mut h = Harness::classic();
+    place(&mut h, vec![limit()]);
+    let (request, _) = body(&mut h, "/batch-place-order");
+    batch_success(&mut h, request, &["recovery-order"]);
+    let write_check = h
+        .timers
+        .iter()
+        .rev()
+        .find(|(_, at)| *at == h.now + 5_000.0)
+        .unwrap()
+        .0;
+    let mut socket = h
+        .sockets
+        .iter()
+        .rev()
+        .find(|(_, url)| url.ends_with("/private"))
+        .unwrap()
+        .0;
+    let mut waiting = None;
+    for attempt in 0..4 {
+        h.now += 1.0;
+        h.event(Event::WsMessage {
+            socket,
+            text: r#"{"event":"login","code":"40009","msg":"bad key"}"#,
+        });
+        let nominal = 1000.0 * 2f64.powi(attempt);
+        let pending = *h
+            .timers
+            .iter()
+            .rev()
+            .find(|(_, at)| (nominal * 0.75..=nominal).contains(&(*at - h.now)))
+            .unwrap();
+        if attempt == 3 {
+            waiting = Some(pending);
+            break;
+        }
+        h.now = pending.1;
+        h.event(Event::TimerFired { timer: pending.0 });
+        socket = h
+            .sockets
+            .iter()
+            .rev()
+            .find(|(_, url)| url.ends_with("/private"))
+            .unwrap()
+            .0;
+        h.event(Event::WsOpened { socket });
+    }
+    let (retry, at) = waiting.unwrap();
+    assert!(at - h.now >= 6_000.0);
+    let before = h.sockets.len();
+    h.event(Event::TimerFired { timer: write_check });
+    assert_eq!(
+        h.sockets.len(),
+        before,
+        "write recovery must honor pending authentication backoff"
+    );
+    assert!(
+        h.timers.iter().any(|(timer, _)| *timer == retry),
+        "pending retry must remain armed"
+    );
+    h.now = at;
+    h.event(Event::TimerFired { timer: retry });
+    assert_eq!(h.sockets.len(), before + 1);
+    assert!(
+        h.socket_contexts
+            .last()
+            .unwrap()
+            .2
+            .as_ref()
+            .is_some_and(|c| c.feed == "private" && c.recover),
+        "deferred reconnect must retain recovery hint"
+    );
 }
 
 #[test]
@@ -885,5 +1104,49 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
             h.engine.store().order("123").unwrap().status,
             OrderStatus::Open
         );
+    }
+}
+
+#[test]
+fn acknowledged_cancel_route_survives_missing_store_preflight_but_not_an_unknown_mixed_id() {
+    use safe_cex_engine::{Action, Notice};
+
+    for mixed in [false, true] {
+        let mut h = Harness::classic();
+        place(&mut h, vec![limit()]);
+        let placed = h.take("/batch-place-order");
+        batch_success(&mut h, placed.id, &["ack-only"]);
+        assert!(h.engine.store().order("ack-only").is_none());
+        h.engine.drain_actions().for_each(drop);
+        h.engine.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 992,
+                ids: if mixed {
+                    vec!["ack-only".into(), "missing".into()]
+                } else {
+                    vec!["ack-only".into()]
+                },
+            }),
+        );
+        let out = h.engine.drain_actions().collect::<Vec<_>>();
+        if mixed {
+            assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+            assert!(out.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { command: 992, result: Err(error) })
+                    if error.contains("missing") && error.contains("not found")
+            )));
+        } else {
+            let cancel = out
+                .iter()
+                .find_map(|a| match a {
+                    Action::Http(r) if r.url.contains("/batch-cancel-orders") => Some(r),
+                    _ => None,
+                })
+                .expect("acknowledged native identity is sufficient before a stream echo");
+            let payload: Value = serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+            assert_eq!(payload["orderIdList"][0]["orderId"], "ack-only");
+        }
     }
 }

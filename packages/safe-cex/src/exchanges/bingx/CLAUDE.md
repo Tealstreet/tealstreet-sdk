@@ -678,3 +678,9 @@ rejected or ambiguous entry, so a remaining bracket leg cannot open exposure.
 Rare query reads use documented `startTs`/`endTs`/`pageSize`/`pageIndex` for fill
 history; saturated unpageable ranges fail explicitly instead of returning a
 partial success. See the crate's tests and `harness/gate.mjs` known fixes.
+
+## Rust leverage settings
+
+Hedged `setLeverage` requires Long/Short and writes only native `LONG`/`SHORT`;
+one-way uses `BOTH`. Acknowledgements, REST snapshots and config events retain
+separate buy/sell leverage. A rejected write changes neither leg.

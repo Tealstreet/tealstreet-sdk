@@ -416,6 +416,7 @@ fn serialized_settings_compose_latest_accepted_leverage_and_margin_mode() {
             command: 8,
             symbol: "ETH".into(),
             leverage: 12.0,
+            side: None,
         }),
     );
     let nonce = http(&mut e, "nextNonce");
@@ -450,6 +451,7 @@ fn uncertain_settings_write_fences_queued_composition_until_fresh_snapshot() {
             command: 8,
             symbol: "ETH".into(),
             leverage: 5.0,
+            side: None,
         }),
     );
     let nonce = http(&mut e, "nextNonce");
@@ -564,6 +566,7 @@ fn account_snapshot_started_during_settings_write_cannot_undo_acknowledgement() 
                 command: 8,
                 symbol: "ETH".into(),
                 leverage: 5.0,
+                side: None,
             },
             5.0,
             MarginType::Cross,
@@ -641,6 +644,7 @@ fn an_omitted_flat_market_does_not_clear_uncertain_settings_barrier() {
             command: 8,
             symbol: "BTC".into(),
             leverage: 5.0,
+            side: None,
         }),
     );
     let nonce = http(&mut e, "nextNonce");

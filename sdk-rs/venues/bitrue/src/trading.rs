@@ -4,16 +4,25 @@ use crate::{Bitrue, Job, Pending};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Command, CommandId, Cx, Method, Response};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Default)]
 pub(crate) struct Trading {
+    acknowledged: HashMap<String, Target>,
     queue: VecDeque<Command>,
     busy: bool,
+    census: Option<(Plan, u64)>,
+    unresolved_protection: HashMap<String, u64>,
 }
 pub struct Request {
     plan: Box<Plan>,
     step: Step,
+    protection: Option<ProtectionFence>,
+}
+struct ProtectionFence {
+    symbol: String,
+    revision: u64,
+    previous: Option<u64>,
 }
 struct Plan {
     command: CommandId,
@@ -24,6 +33,14 @@ struct Plan {
     affected: Vec<String>,
     guard: Option<Target>,
     refresh_result: bool,
+    protections: Vec<String>,
+    cancel_batch: bool,
+    cancel_errors: Vec<CancelFailure>,
+}
+#[derive(Serialize)]
+struct CancelFailure {
+    id: String,
+    error: String,
 }
 struct Step {
     method: Method,
@@ -33,11 +50,18 @@ struct Step {
     receipts: Vec<OrderIdentityReceipt>,
 }
 enum Effect {
-    Place { conditional: bool },
+    Place {
+        conditional: bool,
+        protective: bool,
+        target: Target,
+    },
     Cancel(Target),
     Inspect(Box<Amend>),
     Verify(Target),
-    Leverage { symbol: String, leverage: f64 },
+    Leverage {
+        symbol: String,
+        leverage: f64,
+    },
 }
 #[derive(Clone)]
 struct Target {
@@ -270,6 +294,9 @@ impl Plan {
             affected: vec![],
             guard: None,
             refresh_result: false,
+            protections: vec![],
+            cancel_batch: false,
+            cancel_errors: vec![],
         }
     }
     fn symbol(&mut self, symbol: &str) {
@@ -294,6 +321,20 @@ impl Plan {
                     identity: child.client_order_id.clone(),
                 }
             }));
+            if (payload.condition_order == Some(true)
+                || !payload.trigger_order_create_params.is_empty())
+                && !self.protections.contains(&order.symbol)
+            {
+                self.protections.push(order.symbol.clone());
+            }
+            let target = Target {
+                id: String::new(),
+                contract: payload.contract_name.clone(),
+                conditional: payload.condition_order.unwrap_or(false),
+                filled: 0.0,
+                amount: order.amount,
+                store_ids: vec![],
+            };
             self.creating.push(order);
             self.steps.push_back(Step {
                 receipts,
@@ -302,6 +343,9 @@ impl Plan {
                 body: Some(serde_json::to_string(&payload).expect("placement")),
                 effect: Effect::Place {
                     conditional: payload.condition_order.unwrap_or(false),
+                    protective: payload.condition_order.unwrap_or(false)
+                        || !payload.trigger_order_create_params.is_empty(),
+                    target,
                 },
             });
         }
@@ -380,12 +424,12 @@ impl Bitrue {
         let setting = cx.store.setting(&opts.symbol);
         let leverage = position
             .map(|p| p.leverage)
-            .or(setting.map(|s| s.leverage))
+            .or(setting.map(|s| s.leverage).filter(|v| *v > 0.0))
             .ok_or("Bitrue leverage metadata is not loaded")?;
         let margin = position
             .and_then(|p| p.margin_type)
             .or(setting.and_then(|s| s.margin_type))
-            .ok_or("Bitrue margin metadata is not loaded")?;
+            .unwrap_or(MarginType::Cross);
         positive(leverage, "leverage metadata")?;
         if leverage.fract() != 0.0 || leverage > 125.0 {
             return Err("Invalid Bitrue leverage metadata".into());
@@ -601,6 +645,12 @@ impl Bitrue {
         let mut plan = Plan::new(id);
         match command {
             Command::PlaceOrders { orders, .. } => {
+                if self.trading.acknowledged.len() >= 4096 {
+                    return Err(
+                        "Bitrue unobserved placement capacity exceeded; reconcile before placing"
+                            .into(),
+                    );
+                }
                 let mut seen = HashSet::new();
                 let mut rows = Vec::new();
                 for opts in orders {
@@ -641,28 +691,50 @@ impl Bitrue {
                     .push_back(target.lookup(Effect::Inspect(Box::new(amend))));
             }
             Command::CancelOrders { ids, .. } => {
+                plan.cancel_batch = true;
                 let mut seen = HashSet::new();
                 for id in &ids {
-                    let order = cx.store.order(id).ok_or_else(|| {
-                        format!("Order {id} not found; cancellation requires a reconciled order")
-                    })?;
-                    if terminal(order.status) || !seen.insert(id.clone()) {
+                    if !seen.insert(id.clone()) {
                         continue;
                     }
-                    if order
-                        .parent_id
-                        .as_ref()
-                        .is_some_and(|parent| ids.contains(parent))
-                    {
+                    let Some(order) = cx.store.order(id) else {
+                        if let Some(target) = self.trading.acknowledged.get(id) {
+                            if let Some(market) = cx.store.market_by_id(&target.contract) {
+                                plan.symbol(&market.symbol);
+                            }
+                            plan.steps.push_back(target.cancel());
+                            continue;
+                        }
+                        plan.cancel_errors.push(CancelFailure {
+                            id: id.clone(),
+                            error: "Order not found; cancellation requires a reconciled order"
+                                .into(),
+                        });
+                        continue;
+                    };
+                    if terminal(order.status) {
                         continue;
                     }
-                    let target = self.cancel_target(cx, order)?;
+                    let target = match self.cancel_target(cx, order) {
+                        Ok(target) => target,
+                        Err(error) => {
+                            plan.cancel_errors.push(CancelFailure {
+                                id: id.clone(),
+                                error,
+                            });
+                            continue;
+                        }
+                    };
                     plan.symbol(&order.symbol);
                     plan.affected.extend(target.store_ids.clone());
                     plan.steps.push_back(target.cancel());
                 }
             }
             Command::CancelSymbolOrders { symbol, .. } => {
+                if self.trading.unresolved_protection.contains_key(&symbol) {
+                    return Err("Bitrue protective placement outcome is uncertain; reconcile before cancel-all".into());
+                }
+                plan.cancel_batch = true;
                 let orders = cx
                     .store
                     .orders()
@@ -670,14 +742,26 @@ impl Bitrue {
                     .filter(|o| o.symbol == symbol && o.status == OrderStatus::Open);
                 let mut targets = Vec::new();
                 for order in orders {
-                    if order.parent_id.as_ref().is_some_and(|id| {
-                        cx.store
-                            .order(id)
-                            .is_some_and(|p| p.status == OrderStatus::Open)
-                    }) {
-                        continue;
+                    match self.cancel_target(cx, order) {
+                        Ok(target) => targets.push(target),
+                        Err(error) => plan.cancel_errors.push(CancelFailure {
+                            id: order.id.clone(),
+                            error,
+                        }),
                     }
-                    targets.push(self.cancel_target(cx, order)?);
+                }
+                if let Some(market) = cx.store.market(&symbol) {
+                    targets.extend(
+                        self.trading
+                            .acknowledged
+                            .values()
+                            .filter(|t| {
+                                t.contract == market.id
+                                    && !targets.iter().any(|other| other.id == t.id)
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                    );
                 }
                 plan.symbol(&symbol);
                 for target in targets {
@@ -696,10 +780,16 @@ impl Bitrue {
                     .store
                     .market(&symbol)
                     .ok_or("Unknown Bitrue leverage market")?;
-                let leverage = leverage.clamp(
-                    market.limits.leverage.min.max(1.0),
-                    market.limits.leverage.max.min(125.0),
-                );
+                if leverage > 125.0 {
+                    return Err("Bitrue leverage exceeds the venue ceiling of 125".into());
+                }
+                if let Some(max) = self.account.bracket_limits.get(&symbol)
+                    && leverage > *max
+                {
+                    return Err(format!("Bitrue maximum leverage does not exceed {max}"));
+                }
+                // The startup market limit is conservative, not authoritative. Submit
+                // the exact requested leverage and let the venue accept or reject it.
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Leverage<'a> {
@@ -726,6 +816,12 @@ impl Bitrue {
         Ok(plan)
     }
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) -> bool {
+        self.trading.acknowledged.retain(|id, _| {
+            !cx.store
+                .orders()
+                .iter()
+                .any(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
+        });
         let id = match &command {
             Command::PlaceOrders { command, .. }
             | Command::CancelOrders { command, .. }
@@ -739,7 +835,11 @@ impl Bitrue {
                 );
                 return true;
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 if *hedged {
                     cx.done(
                         *command,
@@ -795,9 +895,35 @@ impl Bitrue {
         }
     }
     fn trade_step(&mut self, cx: &mut Cx<'_, Pending>, mut plan: Plan) {
-        let Some(step) = plan.steps.pop_front() else {
-            self.trade_finish(cx, plan, None);
-            return;
+        let step = loop {
+            let Some(step) = plan.steps.pop_front() else {
+                self.trade_finish(cx, plan, None);
+                return;
+            };
+            if plan.cancel_batch
+                && let Effect::Cancel(target) = &step.effect
+            {
+                // A confirmed parent cancellation can close its native children.
+                // Keep each child as a fallback until that success is known.
+                if let Some(order) = cx.store.order(&target.id)
+                    && terminal(order.status)
+                {
+                    if order.status == OrderStatus::Canceled {
+                        plan.ids.push(target.id.clone());
+                    }
+                    continue;
+                }
+                for id in &target.store_ids {
+                    if cx
+                        .store
+                        .order(id)
+                        .is_some_and(|o| o.status == OrderStatus::Open)
+                    {
+                        cx.store.set_order_status(id, OrderStatus::Canceling);
+                    }
+                }
+            }
+            break step;
         };
         if matches!(step.effect, Effect::Place { .. } | Effect::Verify(_))
             && plan.guard.as_ref().is_some_and(|target| {
@@ -812,12 +938,39 @@ impl Bitrue {
                 Request {
                     plan: Box::new(plan),
                     step,
+                    protection: None,
                 },
                 "Bitrue replacement aborted after execution progress",
             );
             return;
         }
         cx.command_progress(plan.command, step.receipts.clone());
+        // An amend is not an engine placement scope. Fence its replacement before
+        // dispatch, since a lost create ACK may still leave native protection live.
+        let protection = if let Effect::Place {
+            protective: true,
+            target,
+            ..
+        } = &step.effect
+        {
+            let symbol = cx
+                .store
+                .market_by_id(&target.contract)
+                .map_or_else(|| target.contract.clone(), |market| market.symbol.clone());
+            self.account.orders_revision += 1;
+            let revision = self.account.orders_revision;
+            let previous = self
+                .trading
+                .unresolved_protection
+                .insert(symbol.clone(), revision);
+            Some(ProtectionFence {
+                symbol,
+                revision,
+                previous,
+            })
+        } else {
+            None
+        };
         let path = step.path.clone();
         let body = step.body.clone();
         self.send(
@@ -829,6 +982,7 @@ impl Bitrue {
             Job::Trade(Request {
                 plan: Box::new(plan),
                 step,
+                protection,
             }),
         );
     }
@@ -844,12 +998,46 @@ impl Bitrue {
                 cx.store.set_order_status(id, OrderStatus::Open);
             }
         }
+        if error.is_none() && !plan.protections.is_empty() {
+            // Protective ACK IDs and echoed client IDs are unreliable. A complete
+            // post-write census, including conditionals, owns the native open set.
+            self.account.orders_revision += 1;
+            for symbol in &plan.protections {
+                self.trading
+                    .unresolved_protection
+                    .insert(symbol.clone(), self.account.orders_revision);
+            }
+            let symbols = plan.symbols.clone();
+            self.trading.census = Some((plan, self.account.orders_revision));
+            self.refresh_orders(cx, symbols);
+            self.refresh_account(cx);
+            return;
+        }
         self.trading.busy = false;
+        let error = if plan.cancel_errors.is_empty() {
+            error
+        } else {
+            #[derive(Serialize)]
+            #[serde(rename_all = "camelCase")]
+            struct CancellationErrors<'a> {
+                message: &'static str,
+                canceled_order_ids: &'a [String],
+                failed_orders: &'a [CancelFailure],
+            }
+            Some(
+                serde_json::to_string(&CancellationErrors {
+                    message: "Bitrue cancellation failed for one or more orders",
+                    canceled_order_ids: &plan.ids,
+                    failed_orders: &plan.cancel_errors,
+                })
+                .expect("cancellation errors"),
+            )
+        };
         cx.done(
             plan.command,
             error.map_or_else(
                 || {
-                    Ok(if plan.refresh_result {
+                    Ok(if plan.refresh_result || plan.cancel_batch {
                         "[]".to_owned()
                     } else {
                         serde_json::to_string(&plan.ids).expect("order ids")
@@ -864,6 +1052,53 @@ impl Bitrue {
         }
         self.trade_next(cx);
     }
+    /// The command whose protective placement this order read would certify.
+    pub(crate) fn census_owner(&self, symbol: &str, revision: u64) -> Option<CommandId> {
+        self.trading.census.as_ref().and_then(|(plan, minimum)| {
+            (revision >= *minimum && plan.protections.iter().any(|s| s == symbol))
+                .then_some(plan.command)
+        })
+    }
+    pub(crate) fn trade_census(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        revision: u64,
+        success: bool,
+    ) -> bool {
+        let Some((mut plan, minimum)) = self.trading.census.take() else {
+            if success
+                && self
+                    .trading
+                    .unresolved_protection
+                    .get(symbol)
+                    .is_some_and(|minimum| revision >= *minimum)
+            {
+                self.trading.unresolved_protection.remove(symbol);
+            }
+            return success;
+        };
+        if revision < minimum || !plan.protections.iter().any(|s| s == symbol) {
+            self.trading.census = Some((plan, minimum));
+            return success;
+        }
+        if !success {
+            self.trade_finish(
+                cx,
+                plan,
+                Some("Bitrue protective placement outcome is uncertain; complete fresh order census is required".into()),
+            );
+            return false;
+        }
+        self.trading.unresolved_protection.remove(symbol);
+        plan.protections.retain(|s| s != symbol);
+        if plan.protections.is_empty() {
+            self.trade_finish(cx, plan, None);
+        } else {
+            self.trading.census = Some((plan, minimum));
+        }
+        true
+    }
     pub(crate) fn trade_item(
         &mut self,
         _cx: &mut Cx<'_, Pending>,
@@ -871,8 +1106,35 @@ impl Bitrue {
         _item: &str,
     ) {
     }
-    pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        self.trade_finish(cx, *request.plan, Some(error.into()));
+    pub(crate) fn trade_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        error: &str,
+    ) {
+        if matches!(request.step.effect, Effect::Place { .. }) {
+            self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
+        }
+        if request.plan.cancel_batch
+            && let Effect::Cancel(target) = &request.step.effect
+        {
+            request.plan.cancel_errors.push(CancelFailure {
+                id: target.id.clone(),
+                error: error.into(),
+            });
+            for id in &target.store_ids {
+                if cx
+                    .store
+                    .order(id)
+                    .is_some_and(|o| o.status == OrderStatus::Canceling)
+                {
+                    cx.store.set_order_status(id, OrderStatus::Open);
+                }
+            }
+            self.trade_step(cx, *request.plan);
+        } else {
+            self.trade_finish(cx, *request.plan, Some(error.into()));
+        }
     }
     pub(crate) fn trade_response(
         &mut self,
@@ -881,15 +1143,77 @@ impl Bitrue {
         response: Response<'_>,
     ) {
         if let Err(error) = check(&response) {
+            // Only documented, unambiguous pre-execution rejections undo this
+            // write's fence. Unknown/server outcomes require a fresh census.
+            #[derive(Deserialize)]
+            struct Rejected<'a> {
+                #[serde(borrow)]
+                code: Text<'a>,
+                #[serde(borrow)]
+                data: Option<&'a serde_json::value::RawValue>,
+            }
+            let rejected = (200..500).contains(&response.status)
+                && response.status != 408
+                && serde_json::from_str::<Rejected<'_>>(response.body).is_ok_and(|reply| {
+                    // Futures error list: signature, mandatory parameter, contract, balance.
+                    matches!(&*reply.code, "-1022" | "-1102" | "-1121" | "-2017")
+                        && reply.data.is_none_or(|data| data.get() == "null")
+                });
+            if rejected
+                && let Some(fence) = &request.protection
+                && self.trading.unresolved_protection.get(&fence.symbol) == Some(&fence.revision)
+            {
+                if let Some(previous) = fence.previous {
+                    self.trading
+                        .unresolved_protection
+                        .insert(fence.symbol.clone(), previous);
+                } else {
+                    self.trading.unresolved_protection.remove(&fence.symbol);
+                }
+            }
+            if let Effect::Leverage { symbol, .. } = &request.step.effect
+                && let Ok(reply) = serde_json::from_str::<crate::wire::Envelope<'_>>(response.body)
+            {
+                let message = reply.msg.to_ascii_lowercase();
+                if let Some((_, suffix)) = message.split_once("maximum leverage does not exceed") {
+                    let token: String = suffix
+                        .trim_start()
+                        .chars()
+                        .take_while(|c| c.is_ascii_digit() || *c == '.')
+                        .collect();
+                    if let Ok(max) = token.parse::<f64>()
+                        && max > 0.0
+                        && max <= 125.0
+                        && max.fract() == 0.0
+                    {
+                        self.account.bracket_limits.insert(symbol.clone(), max);
+                        cx.store.update_markets(|market| {
+                            if market.symbol == *symbol {
+                                market.limits.leverage.max = max;
+                            }
+                        });
+                    }
+                }
+            }
             self.trade_failed(cx, request, &error);
             return;
         }
         let result = match &request.step.effect {
-            Effect::Place { conditional } => {
+            Effect::Place {
+                conditional,
+                protective,
+                target,
+            } => {
                 let reply = serde_json::from_str::<Reply<Identity<'_>>>(response.body)
                     .map_err(|e| format!("Malformed Bitrue placement: {e}"));
                 match reply {
                     Ok(reply) if !reply.data.order_id.is_empty() => {
+                        let id = reply.data.order_id.to_string();
+                        if !protective && cx.store.order(&id).is_none() {
+                            let mut target = target.clone();
+                            target.id = id.clone();
+                            self.trading.acknowledged.insert(id, target);
+                        }
                         if !conditional {
                             request.plan.ids.push(reply.data.order_id.to_string());
                         }
@@ -902,6 +1226,7 @@ impl Bitrue {
             Effect::Cancel(target) => {
                 let reply = serde_json::from_str::<Reply<Identity<'_>>>(response.body);
                 if reply.is_ok_and(|r| r.data.order_id.to_string() == target.id) {
+                    self.trading.acknowledged.remove(&target.id);
                     self.account.orders_revision += 1;
                     for id in &target.store_ids {
                         self.remember_terminal(id);
@@ -914,6 +1239,9 @@ impl Bitrue {
                         }
                     }
                     self.remember_terminal(&target.id);
+                    if request.plan.cancel_batch {
+                        request.plan.ids.push(target.id.clone());
+                    }
                     Ok(())
                 } else {
                     Err("Bitrue cancellation did not confirm the requested order identity".into())
@@ -928,6 +1256,7 @@ impl Bitrue {
                     s.leverage = *leverage;
                     s.buy_leverage = Some(*leverage);
                     s.sell_leverage = Some(*leverage);
+                    s.margin_type.get_or_insert(MarginType::Cross);
                 });
                 cx.store.update_positions(|p| {
                     if p.symbol == *symbol {

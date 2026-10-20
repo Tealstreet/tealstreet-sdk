@@ -1,9 +1,9 @@
 //! The shared JSON command boundary for engine hosts.
 #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
 use crate::model::CancelOrderRef;
-use crate::model::PlaceOrderOpts;
 #[cfg(feature = "command-asterdex")]
 use crate::model::StpMode;
+use crate::model::{PlaceOrderOpts, PositionSide};
 use crate::{Command, Query};
 use serde::Deserialize;
 
@@ -82,6 +82,8 @@ enum CommandIn {
         command: u32,
         symbol: String,
         leverage: f64,
+        #[serde(default)]
+        side: Option<PositionSide>,
     },
     SetMarginType {
         command: u32,
@@ -91,6 +93,8 @@ enum CommandIn {
     SetPositionMode {
         command: u32,
         hedged: bool,
+        #[serde(default)]
+        symbol: Option<String>,
     },
     #[cfg(feature = "command-asterdex")]
     FetchStpMode {
@@ -113,6 +117,10 @@ enum CommandIn {
         mode: StpMode,
     },
     FetchLeverage {
+        command: u32,
+        symbol: String,
+    },
+    FetchMaxLeverage {
         command: u32,
         symbol: String,
     },
@@ -259,9 +267,15 @@ impl From<CommandIn> for Command {
                 symbol,
                 isolated,
             },
-            CommandIn::SetPositionMode { command, hedged } => {
-                Self::SetPositionMode { command, hedged }
-            }
+            CommandIn::SetPositionMode {
+                command,
+                hedged,
+                symbol,
+            } => Self::SetPositionMode {
+                command,
+                hedged,
+                symbol,
+            },
             #[cfg(feature = "command-asterdex")]
             CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
             CommandIn::FetchAccount { command } => Self::FetchAccount { command },
@@ -278,6 +292,9 @@ impl From<CommandIn> for Command {
             #[cfg(feature = "command-asterdex")]
             CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
+            CommandIn::FetchMaxLeverage { command, symbol } => {
+                Self::FetchMaxLeverage { command, symbol }
+            }
             CommandIn::FetchFills {
                 command,
                 symbol,
@@ -342,10 +359,12 @@ impl From<CommandIn> for Command {
                 command,
                 symbol,
                 leverage,
+                side,
             } => Self::SetLeverage {
                 command,
                 symbol,
                 leverage,
+                side,
             },
             CommandIn::FetchCandles {
                 command,
@@ -591,6 +610,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn maximum_leverage_read_is_distinct_from_current_account_leverage() {
+        let json = r#"{"op":"fetchMaxLeverage","command":82,"symbol":"E-BTC-USDT"}"#;
+        let expected = Command::FetchMaxLeverage {
+            command: 82,
+            symbol: "E-BTC-USDT".into(),
+        };
+        assert_eq!(decode_command(json).unwrap(), expected);
+        assert_eq!(
+            decode_host_input(json).unwrap(),
+            HostInput::Command(expected)
+        );
+        assert!(decode_command(r#"{"op":"fetchMaxLeverage","command":82}"#).is_err());
+    }
+
     fn assert_subscription_decoders_match(json: &str) {
         let host = decode_subscription(json).map(|selected| selected.expect("subscription input"));
         assert_eq!(
@@ -697,10 +731,62 @@ mod tests {
                 command: 37,
                 symbol: "BTCUSDT".into(),
                 leverage: 5.0,
+                side: None,
             })
         );
         assert!(decode_host_input(r#"{"op":"setLeverage","command":"37"}"#).is_err());
         assert!(decode_host_input(r#"{"op":"unknown"}"#).is_err());
         assert!(decode_command(r#"{"op":"setTickInterval","interval":1000}"#).is_err());
+    }
+
+    #[test]
+    fn leverage_side_is_optional_and_strictly_typed() {
+        for (text, side) in [("long", PositionSide::Long), ("short", PositionSide::Short)] {
+            let json = format!(
+                r#"{{"op":"setLeverage","command":7,"symbol":"BTCUSDT","leverage":3,"side":"{text}"}}"#
+            );
+            assert_eq!(
+                decode_command(&json).unwrap(),
+                Command::SetLeverage {
+                    command: 7,
+                    symbol: "BTCUSDT".into(),
+                    leverage: 3.0,
+                    side: Some(side),
+                }
+            );
+        }
+        for side in [r#""both""#, r#""buy""#, r#""SHORT""#, "1", "{}"] {
+            let json = format!(
+                r#"{{"op":"setLeverage","command":7,"symbol":"BTCUSDT","leverage":3,"side":{side}}}"#
+            );
+            assert!(decode_command(&json).is_err(), "{json}");
+        }
+    }
+
+    #[test]
+    fn position_mode_keeps_optional_market_scope() {
+        assert_eq!(
+            decode_command(
+                r#"{"op":"setPositionMode","command":9,"hedged":true,"symbol":"BTCUSDT"}"#
+            )
+            .unwrap(),
+            Command::SetPositionMode {
+                command: 9,
+                hedged: true,
+                symbol: Some("BTCUSDT".into()),
+            }
+        );
+        assert_eq!(
+            decode_command(r#"{"op":"setPositionMode","command":9,"hedged":false}"#).unwrap(),
+            Command::SetPositionMode {
+                command: 9,
+                hedged: false,
+                symbol: None,
+            }
+        );
+        assert!(
+            decode_command(r#"{"op":"setPositionMode","command":9,"hedged":true,"symbol":17}"#)
+                .is_err()
+        );
     }
 }

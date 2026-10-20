@@ -19,6 +19,7 @@ import type {
   OrderBook,
   OrderHistoryOptions,
   PlaceOrderOpts,
+  PositionSide,
   PublicTrade,
   UpdateOrderOpts,
   ValidateAccountResult,
@@ -26,6 +27,7 @@ import type {
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
 import type { CallableMethodsInWorker } from '../base';
 import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
+import type { EngineSnapshot } from '../base';
 
 import bs58 from 'bs58';
 
@@ -34,7 +36,7 @@ import { Frame, LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
 import { isErrorReported, markErrorReported } from '../../commandOutcome';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
-import { FrameApplier } from '../../store/frameApplier';
+import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
 import { nativePositionSize } from '../../utils/nativePositionSize';
@@ -232,6 +234,11 @@ export const setRustEngineTransport = (factory: () => Transport) => {
   engineTransport = factory;
 };
 
+const placementScopedCancelAllNames = new Set<ExchangeName>([
+  'phemex', 'okx', 'okxeu', 'okxdemo', 'okxeudemo', 'asterdex',
+  'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue',
+]);
+
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
 
@@ -279,6 +286,7 @@ export class RustEngineExchange extends BaseExchange {
   private hostInitialization?: Promise<void>;
   private startup?: Promise<void>;
   private startupFailure?: Error;
+  private readonly attemptedPlacementSymbols = new Set<string>();
   private readonly startupWaiters = new Set<() => void>();
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
@@ -310,6 +318,24 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
+    if (placementScopedCancelAllNames.has(exchangeName)) {
+      this.cancelAllOrders = async () => {
+        // Frames can lag placement ACKs. Keep attempted scopes for this account's
+        // lifetime, including uncertain/rejected outcomes and races with later places.
+        const symbols = new Set([...this.store.orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols]);
+        const failures: string[] = [];
+        for (const symbol of symbols) {
+          if (this.isDisposed) continue;
+          try {
+            await this.cancelSymbolOrders(symbol);
+          } catch (error) {
+            // A rejected scope must not prevent cancellation of later live orders.
+            failures.push(`${symbol}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+        if (failures.length) throw new Error(`${this.name} cancel-all failed: ${failures.join('; ')}`);
+      };
+    }
     if (exchangeName === 'polymarket') {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
@@ -338,7 +364,10 @@ export class RustEngineExchange extends BaseExchange {
       this.fetchFillsForOrderIds = async (ids) => {
         const quantities = new Map<string, number>();
         for (const id of new Set(ids)) {
-          const fills = await this.command<Execution[]>({ op: 'fetchFills', orderId: id, from: 0, limit: 1000 });
+          const fills = await this.command<Execution[]>(
+            { op: 'fetchFills', orderId: id, from: 0, limit: 1000 },
+            { report: false },
+          );
           for (const fill of fills) {
             if (fill.orderId === id) quantities.set(id, (quantities.get(id) ?? 0) + fill.qty);
           }
@@ -367,13 +396,13 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
     }
-    if (this.name === 'hyperliquidspot' || this.name === 'krakenspot') {
+    if (['hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse'].includes(this.name)) {
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
-    if (['woo', 'grvt', 'kucoin', 'kucoinspot'].includes(this.name)) {
+    if (['woo', 'grvt', 'kucoin', 'kucoinspot'].includes(this.name) || orderlyNames.has(this.name)) {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       };
@@ -612,7 +641,7 @@ export class RustEngineExchange extends BaseExchange {
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
-        ...(['backpack', 'bitrue', 'breakoutprop'].includes(this.name)
+        ...(['backpack', 'bitrue', 'breakoutprop', 'binance', 'binancepm', 'binancespot', 'binanceinverse'].includes(this.name)
           ? { recvWindow: this.options.extra?.recvWindow }
           : {}),
         applicationId,
@@ -816,7 +845,21 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   /** The whole current state as one frame, for a consumer that starts late. */
-  snapshotFrame = () => this.host?.snapshot();
+  snapshotFrame = () => {
+    this.host?.flush();
+    return this.host?.snapshot();
+  };
+
+  fetchEngineSnapshot = async (): Promise<EngineSnapshot> => this.captureEngineSnapshot();
+
+  private captureEngineSnapshot(): EngineSnapshot {
+    const frame = this.snapshotFrame();
+    if (!frame) throw new Error('Engine has not started');
+    const fetchedLeverage: Record<string, FetchedLeverage> = {};
+    for (const symbol of Object.keys(this.store.fetchedLeverage))
+      fetchedLeverage[symbol] = { ...this.store.fetchedLeverage[symbol] };
+    return { frame, fetchedLeverage };
+  }
 
   /** A late shared subscriber receives the current native book without waiting for a trade. */
   snapshotOrderBook = (symbol: string): OrderBook | undefined => {
@@ -827,83 +870,149 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   updateSymbolMetadata = async (symbol: string) => {
+    if (this.name === 'bitrue') {
+      if (!this.isPublicDataOnly) await this.fetchSymbolMaxLeverage(symbol);
+      return;
+    }
     if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
-    const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
-    this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: rails } });
+    const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
+    this.applier.applyLeverage(symbol, rails);
   };
 
-  private receiveFrame = (buffer: ArrayBuffer) => {
-    const frame = new Frame(buffer);
-    this.applier.apply(frame, !this.onFrame);
-    const status = frame.status();
-    const receivedLoaded = status?.loaded ?? this.nativeLoaded;
-    if (frame.markets() || frame.tickers() || frame.tickerDeltas()) {
-      for (const observer of this.publicFeedObservers) observer.updated(Boolean(frame.markets()));
+  private frameRecoveryPending = false;
+
+  private receiveFrame = (buffer: ArrayBuffer) => this.applyEngineFrame(buffer, true);
+
+  private applyEngineFrame(buffer: ArrayBuffer, recover: boolean) {
+    let frame: Frame;
+    try {
+      frame = new Frame(buffer);
+    } catch (error) {
+      this.applier.invalidateMarketIdentity();
+      console.error('Invalid engine frame', error);
+      if (recover) this.recoverEngineFrame();
+      return;
     }
-    if (
-      this.sharedPublicFeed &&
-      receivedLoaded & LOADED_FLAG.MARKETS &&
-      (frame.markets() || !this.requestSharedSnapshot)
-    ) {
+    const previousMarkets = this.store.markets;
+    let needsSnapshot = false;
+    try {
+      this.applier.apply(frame, !this.onFrame || this.feedBookListeners.size > 0);
+    } catch (error) {
+      needsSnapshot = error instanceof FrameApplyError;
+      console.error('Engine frame apply failed', error);
+    }
+    const read = <T>(section: () => T[]): T[] => {
+      try {
+        return section();
+      } catch (error) {
+        needsSnapshot = true;
+        console.error('Engine frame section failed', error);
+        return [];
+      }
+    };
+    let receivedLoaded = this.nativeLoaded;
+    try {
+      receivedLoaded = frame.status()?.loaded ?? receivedLoaded;
+      this.nativeLoaded = receivedLoaded;
+    } catch (error) {
+      needsSnapshot = true;
+      console.error('Engine status section failed', error);
+    }
+    const catalogChanged = previousMarkets !== this.store.markets;
+    if (this.publicFeedObservers.size) {
+      let publicChanged = catalogChanged;
+      try {
+        publicChanged ||= Boolean(frame.tickers() || frame.tickerDeltas());
+      } catch (error) {
+        needsSnapshot = true;
+        console.error('Engine public feed section failed', error);
+      }
+      if (publicChanged)
+        for (const observer of this.publicFeedObservers)
+          this.dispatchFrameEvent(() => observer.updated(catalogChanged));
+    }
+    let sharedFailure: Error | undefined;
+    let sendSharedSnapshot = false;
+    if (this.sharedPublicFeed && receivedLoaded & LOADED_FLAG.MARKETS && (catalogChanged || !this.requestSharedSnapshot)) {
       try {
         this.sharedPublicFeed.validateMarkets(this.store.markets);
+        if (!this.requestSharedSnapshot) {
+          this.requestSharedSnapshot = true;
+          sendSharedSnapshot = true;
+        }
       } catch (error) {
-        this.startupFailure = error instanceof Error ? error : new Error(String(error));
-        this.emitAndLogError(this.startupFailure);
-        this.dispose();
-        return;
-      }
-      if (!this.requestSharedSnapshot) {
-        this.requestSharedSnapshot = true;
-        this.sharedPublicFeed.send({ op: 'snapshot' });
+        sharedFailure = error instanceof Error ? error : new Error(String(error));
+        this.startupFailure = sharedFailure;
       }
     }
-    this.nativeLoaded = receivedLoaded;
-    for (const fill of this.applier.fills(frame)) this.emitter.emit('fill', fill);
+    for (const fill of read(() => this.applier.fills(frame)))
+      this.dispatchFrameEvent(() => this.emitter.emit('fill', fill));
     if (!this.onFrame || this.feedBookListeners.size) {
-      for (const { symbol, orderbook } of this.applier.books(frame)) {
+      for (const { symbol, orderbook } of read(() => this.applier.books(frame))) {
         const listeners = this.bookListeners.get(symbol);
         if (this.name !== 'asterdex')
           listeners?.forEach((listener) => {
-            if (!this.onFrame || this.feedBookListeners.has(listener)) listener(orderbook);
+            if (!this.onFrame || this.feedBookListeners.has(listener))
+              this.dispatchFrameEvent(() => listener(orderbook));
           });
         else if (listeners)
           for (const [id, listener] of [...listeners]) {
             if (listeners.has(id) && (!this.onFrame || this.feedBookListeners.has(listener)))
-              listener(
-                this.name === 'asterdex'
-                  ? {
-                      bids: orderbook.bids.map((level) => ({ ...level })),
-                      asks: orderbook.asks.map((level) => ({ ...level })),
-                    }
-                  : orderbook,
+              this.dispatchFrameEvent(() =>
+                listener({
+                  bids: orderbook.bids.map((level) => ({ ...level })),
+                  asks: orderbook.asks.map((level) => ({ ...level })),
+                }),
               );
           }
       }
     }
     if (!this.onFrame || this.feedCandleListeners.size) {
-      for (const { symbol, interval, candle } of this.applier.candles(frame)) {
+      for (const { symbol, interval, candle } of read(() => this.applier.candles(frame))) {
         this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => {
-          if (!this.onFrame || this.feedCandleListeners.has(listener)) listener(candle);
+          if (!this.onFrame || this.feedCandleListeners.has(listener))
+            this.dispatchFrameEvent(() => listener(candle));
         });
       }
     }
-    this.onFrame?.(buffer);
-    // Forward the catalog before a subscription can synchronously produce data.
-    if (!this.publicDemandReady && this.nativeLoaded & LOADED_FLAG.MARKETS && !this.isDisposed) {
-      this.publicDemandReady = true;
-      const books = [...this.bookListeners];
-      const candles = [...this.candleListeners];
-      for (const [symbol, listeners] of books)
-        if (this.bookListeners.get(symbol) === listeners && listeners.size) this.bookDemand(symbol, true);
-      for (const [key, listeners] of candles)
-        if (this.candleListeners.get(key) === listeners && listeners.size) {
-          const separator = key.lastIndexOf(':');
-          this.candleDemand(key.slice(0, separator), key.slice(separator + 1) as OHLCVOptions['interval'], true);
-        }
+    this.dispatchFrameEvent(() => this.onFrame?.(buffer));
+    if (sharedFailure) {
+      const failure = sharedFailure;
+      this.dispatchFrameEvent(() => this.emitAndLogError(failure));
+      this.dispose();
+    } else {
+      // Forward the catalog before a subscription can synchronously produce data.
+      if (!this.publicDemandReady && this.nativeLoaded & LOADED_FLAG.MARKETS && !this.isDisposed) {
+        this.publicDemandReady = true;
+        const books = [...this.bookListeners];
+        const candles = [...this.candleListeners];
+        for (const [symbol, listeners] of books)
+          if (this.bookListeners.get(symbol) === listeners && listeners.size) this.bookDemand(symbol, true);
+        for (const [key, listeners] of candles)
+          if (this.candleListeners.get(key) === listeners && listeners.size) {
+            const separator = key.lastIndexOf(':');
+            this.candleDemand(key.slice(0, separator), key.slice(separator + 1) as OHLCVOptions['interval'], true);
+          }
+      }
+      if (sendSharedSnapshot) this.dispatchFrameEvent(() => this.sharedPublicFeed?.send({ op: 'snapshot' }));
+      if (needsSnapshot && recover) this.recoverEngineFrame();
     }
     for (const wake of this.startupWaiters) wake();
-  };
+  }
+
+  private recoverEngineFrame() {
+    if (this.frameRecoveryPending || this.isDisposed || !this.host) return;
+    this.frameRecoveryPending = true;
+    try {
+      const snapshot = this.captureEngineSnapshot();
+      this.applyEngineFrame(snapshot.frame, false);
+      this.dispatchFrameEvent(() => this.applier.applyLeverageSnapshot(snapshot.fetchedLeverage));
+    } catch (error) {
+      console.error('Engine frame recovery failed', error);
+    } finally {
+      this.frameRecoveryPending = false;
+    }
+  }
 
   private receiveLog = (level: 'info' | 'warning' | 'error', message: string) => {
     if (this.name === 'breakoutprop' && level === 'error' && message.startsWith('DXtrade startup failed:')) {
@@ -999,7 +1108,11 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
-  private command = async <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
+  /** `report: false` is for background reads whose caller owns the failure's visibility. */
+  private command = async <T>(
+    command: { op: string; [field: string]: unknown },
+    { report = true }: { report?: boolean } = {},
+  ): Promise<T> => {
     try {
       if (this.engineFailure) throw this.engineFailure;
       if (this.isDisposed) throw new Error(`${this.name} engine disposed`);
@@ -1013,7 +1126,7 @@ export class RustEngineExchange extends BaseExchange {
       }
       return (await this.host.command(command)) as T;
     } catch (error) {
-      this.reportCommandError(error);
+      if (report) this.reportCommandError(error);
       throw error;
     }
   };
@@ -1077,6 +1190,9 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     if (this.name === 'asterdex') for (const order of orders) this.validateAsterStp(order.stpMode);
+    if (this.host && placementScopedCancelAllNames.has(this.name)) {
+      for (const order of orders) this.attemptedPlacementSymbols.add(order.symbol);
+    }
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 
@@ -1196,15 +1312,15 @@ export class RustEngineExchange extends BaseExchange {
     if (orderlyNames.has(this.name)) await this.command({ op: 'setLeverage', symbol: '', leverage });
     else {
       for (const position of await this.fetchPositions()) {
-        if (!this.isDisposed) await this.setLeverage(position.symbol, leverage);
+        if (!this.isDisposed) await this.setLeverage(position.symbol, leverage, position.side);
       }
     }
   };
 
-  setLeverage = async (symbol: string, leverage: number) => {
-    await this.command({ op: 'setLeverage', symbol, leverage });
+  setLeverage = async (symbol: string, leverage: number, side?: PositionSide) => {
+    await this.command({ op: 'setLeverage', symbol, leverage, ...(side !== undefined ? { side } : {}) });
     if (this.name === 'kucoinspot') {
-      this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: { buyLeverage: 1, sellLeverage: 1 } } });
+      this.applier.applyLeverage(symbol, { buyLeverage: 1, sellLeverage: 1 });
     }
   };
 
@@ -1213,8 +1329,8 @@ export class RustEngineExchange extends BaseExchange {
     await this.command({ op: 'setMarginType', symbol: symbol ?? '', isolated });
   };
 
-  changePositionMode = async (hedged: boolean) => {
-    await this.command({ op: 'setPositionMode', hedged });
+  changePositionMode = async (hedged: boolean, symbol?: string) => {
+    await this.command({ op: 'setPositionMode', hedged, ...(symbol !== undefined ? { symbol } : {}) });
   };
 
   private validateAsterStp = (mode?: AsterDEXStpMode): void => {
@@ -1362,6 +1478,12 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'breakoutprop') throw new Error('Not implemented');
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market not found for symbol: ${symbol}`);
+    if (this.name === 'bitrue' && !this.isPublicDataOnly) {
+      const leverage = await this.command<number>({ op: 'fetchMaxLeverage', symbol });
+      if (!Number.isFinite(leverage) || leverage < 1) throw new Error('Invalid Bitrue maximum leverage');
+      this.host?.flush();
+      return leverage;
+    }
     return market.limits.leverage.max;
   };
 
@@ -1427,6 +1549,11 @@ export class RustEngineExchange extends BaseExchange {
 
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
+      this.host?.flush();
+      const known = this.store.fetchedLeverage[symbol];
+      if (['bitget', 'bitgetinverse', 'bitgetusdc', 'bingx', 'mexc', 'phemex', 'weex'].includes(this.name)
+        && known && Number.isFinite(known.buyLeverage) && known.buyLeverage > 0
+        && Number.isFinite(known.sellLeverage) && known.sellLeverage > 0) return known;
       let leverage: FetchedLeverage;
       if (
         [
@@ -1439,16 +1566,25 @@ export class RustEngineExchange extends BaseExchange {
           'coinbase',
           'coinbasespot',
           'polymarket',
+          'okx',
+          'okxeu',
+          'okxdemo',
+          'okxeudemo',
         ].includes(this.name) ||
         orderlyNames.has(this.name)
       )
-        leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+        leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
       else {
-        const value = await this.fetchSymbolMaxLeverage(symbol);
-        leverage = { buyLeverage: value, sellLeverage: value };
+        const cached = this.store.fetchedLeverage[symbol];
+        if (
+          !cached ||
+          !Number.isFinite(cached.buyLeverage) || cached.buyLeverage <= 0 ||
+          !Number.isFinite(cached.sellLeverage) || cached.sellLeverage <= 0
+        ) return null;
+        return cached;
       }
       this.host?.flush();
-      this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: leverage } });
+      this.applier.applyLeverage(symbol, leverage);
       return leverage;
     } catch (error) {
       this.log(`Error fetching leverage for ${symbol}: ${error}`, LogSeverity.Warning);
@@ -1573,7 +1709,7 @@ export class RustEngineExchange extends BaseExchange {
   dispose() {
     this.sharedPublicFeed?.dispose();
     this.sharedPublicFeed = undefined;
-    for (const observer of this.publicFeedObservers) observer.closed();
+    for (const observer of this.publicFeedObservers) this.dispatchFrameEvent(() => observer.closed());
     this.publicFeedObservers.clear();
     this.feedBookListeners.clear();
     this.feedCandleListeners.clear();

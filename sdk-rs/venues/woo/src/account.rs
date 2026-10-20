@@ -6,6 +6,7 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, num,
 };
@@ -51,6 +52,8 @@ struct OrdersJoin {
 }
 #[derive(Default)]
 pub struct Account {
+    pub(crate) supervisor: Supervisor,
+    authenticated: bool,
     connection: Connection,
     started: bool,
     ready: bool,
@@ -67,6 +70,8 @@ pub struct Account {
     terminal: HashMap<String, (OrderStatus, f64)>,
     fills: HashMap<String, f64>,
     cumulative: HashMap<String, f64>,
+    execution_cumulative: HashMap<String, f64>,
+    orders_seeded: bool,
     equity: Option<f64>,
     metadata_at: HashMap<String, f64>,
     expected: HashMap<String, (f64, f64)>,
@@ -243,6 +248,20 @@ fn trigger(s: &str) -> Option<StopTriggerType> {
         _ => None,
     }
 }
+impl Account {
+    pub(crate) fn new() -> Self {
+        Self {
+            supervisor: Supervisor::new(Config {
+                auth_timeout_ms: Some(10_000.0),
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(6_000.0),
+                ..Config::default()
+            }),
+            ..Self::default()
+        }
+    }
+}
+
 impl Woo {
     pub(crate) fn account_revision(&self, key: &str) -> u64 {
         self.account.versions.get(key).copied().unwrap_or(0)
@@ -341,6 +360,8 @@ impl Woo {
         } else {
             "wss://wss.woox.io/v2/ws/private/stream/"
         };
+        self.account.authenticated = false;
+        self.account.supervisor.connecting(cx);
         self.account.connection.socket = Some(cx.connect_channel(
             format!("{host}{}",self.options.application_id.as_deref().unwrap_or("undefined")),
             SocketChannel::Private,
@@ -517,10 +538,8 @@ impl Woo {
         }
         let c = &mut self.account.connection;
         c.open = true;
-        c.received = cx.now;
-        c.attempts = 0;
         c.ping_at = cx.now;
-        c.watchdog = Some(cx.set_timer(6000.0));
+        self.account.supervisor.opened(cx);
         let Some(secret) = self.options.secret.as_deref() else {
             return true;
         };
@@ -556,12 +575,7 @@ impl Woo {
         let c = &mut self.account.connection;
         c.socket = None;
         c.open = false;
-        if let Some(t) = c.watchdog.take() {
-            cx.clear_timer(t);
-        }
-        c.attempts += 1;
-        c.reconnect =
-            Some(cx.set_timer((1000.0 * 2f64.powi(c.attempts.min(5) as i32 - 1)).min(30_000.0)));
+        self.account.supervisor.retry(cx);
         true
     }
     fn account_classification(
@@ -1129,6 +1143,15 @@ impl Woo {
                             row.status = *status;
                         }
                     }
+                    if !self.account.orders_seeded {
+                        for order in &combined {
+                            self.account
+                                .execution_cumulative
+                                .entry(order.id.clone())
+                                .or_insert(order.filled);
+                        }
+                        self.account.orders_seeded = true;
+                    }
                     cx.store.set_orders(combined);
                     self.account_metadata(cx);
                 }
@@ -1387,6 +1410,21 @@ impl Woo {
             .max(cx.store.order(&order.id).map_or(0.0, |o| o.filled));
         let cumulative = r.total_executed.or(r.executed);
         let delta = cumulative.map(|n| (n - baseline).max(0.0));
+        // REST progress describes order state, not executions already delivered to the caller.
+        let execution_baseline = self
+            .account
+            .execution_cumulative
+            .get(&order.id)
+            .copied()
+            .unwrap_or(0.0);
+        let execution_delta = cumulative.map(|n| {
+            let previous = if n > baseline {
+                baseline.max(execution_baseline)
+            } else {
+                execution_baseline
+            };
+            (n - previous).max(0.0)
+        });
         let key = if r.trade_id.is_empty() {
             None
         } else {
@@ -1396,9 +1434,9 @@ impl Woo {
             .as_ref()
             .is_none_or(|k| !self.account.fills.contains_key(k));
         let quantity = if key.is_some() {
-            r.executed_quantity.or(delta)
+            r.executed_quantity.or(execution_delta)
         } else {
-            delta
+            execution_delta
         };
         if cumulative.is_none()
             && key.is_some()
@@ -1421,6 +1459,14 @@ impl Woo {
                 .cumulative
                 .insert(order.id.clone(), baseline.max(n));
         }
+        if matches!(status, "FILLED" | "PARTIAL_FILLED" | "PARTIALLY_FILLED")
+            && price > 0.0
+            && let Some(n) = cumulative
+        {
+            self.account
+                .execution_cumulative
+                .insert(order.id.clone(), execution_baseline.max(n));
+        }
         self.account_upsert(cx, order.clone());
         if matches!(status, "FILLED" | "PARTIAL_FILLED" | "PARTIALLY_FILLED")
             && fresh
@@ -1429,6 +1475,11 @@ impl Woo {
         {
             if let Some(key) = key {
                 self.account.fills.insert(key, cx.now);
+            }
+            if cumulative.is_none() {
+                self.account
+                    .execution_cumulative
+                    .insert(order.id.clone(), execution_baseline + amount);
             }
             let fill = Fill {
                 order_id: order.id,
@@ -1457,7 +1508,7 @@ impl Woo {
         if self.account.connection.socket != Some(socket) {
             return false;
         }
-        self.account.connection.received = cx.now;
+        self.account.supervisor.received(cx.now);
         #[derive(Deserialize)]
         struct Message<'a> {
             #[serde(borrow, default)]
@@ -1481,6 +1532,11 @@ impl Woo {
             "pong" => return true,
             "auth" => {
                 if msg.success == Some(true) {
+                    if self.account.authenticated {
+                        return true;
+                    }
+                    self.account.authenticated = true;
+                    self.account.supervisor.authenticated(cx);
                     for topic in ["executionreport", "algoexecutionreportv2"] {
                         cx.send(
                             socket,
@@ -1497,6 +1553,8 @@ impl Woo {
                             msg.message.into_owned()
                         },
                     );
+                    cx.close(socket);
+                    self.account_close(cx, socket);
                 }
                 return true;
             }
@@ -1535,24 +1593,27 @@ impl Woo {
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.connection.reconnect == Some(timer) {
-            self.account.connection.reconnect = None;
-            self.account_connect(cx);
-            return true;
-        }
-        if self.account.connection.watchdog == Some(timer) {
-            if cx.now - self.account.connection.received >= 20_000.0 {
-                if let Some(s) = self.account.connection.socket {
-                    cx.close(s);
-                    self.account_close(cx, s);
-                }
-            } else {
-                if let Some(s) = self.account.connection.socket {
-                    cx.send(s, r#"{"event":"ping"}"#);
-                }
-                self.account.connection.watchdog = Some(cx.set_timer(6000.0));
+        match self.account.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => (),
+            Tick::Reconnect => {
+                self.account_connect(cx);
+                return true;
             }
-            return true;
+            Tick::Ping => {
+                if let Some(socket) = self.account.connection.socket {
+                    cx.send(socket, r#"{"event":"ping"}"#);
+                    self.account.connection.ping_at = cx.now;
+                }
+                return true;
+            }
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.account.connection.socket {
+                    cx.close(socket);
+                    self.account_close(cx, socket);
+                }
+                return true;
+            }
+            Tick::Handled => return true,
         }
         if self.account.refresh == Some(timer) {
             self.account.refresh = None;
@@ -1581,6 +1642,9 @@ impl Woo {
             }
             self.account
                 .cumulative
+                .retain(|id, _| retained.contains(id));
+            self.account
+                .execution_cumulative
                 .retain(|id, _| retained.contains(id));
             self.account.algos.retain(|id, _| retained.contains(id));
             self.account.versions.retain(|key, _| {

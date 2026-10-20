@@ -281,39 +281,35 @@ fn non_futures_account_never_marks_balance_or_positions_loaded() {
 fn private_watchdog_closes_then_reconnects_with_capped_backoff() {
     let (mut e, socket, _, _) = start();
     e.handle(30.0, Event::WsOpened { socket });
+    e.drain_actions().for_each(drop);
+    ws(&mut e, socket, 31.0, r#"{"event":"auth","success":true}"#);
     let watchdog = e
         .drain_actions()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, at_ms } = a {
-                (at_ms == 6030.0).then_some(timer)
-            } else {
-                None
-            }
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
         })
         .unwrap();
-    e.handle(21000.0, Event::TimerFired { timer: watchdog });
+    e.handle(21_000.0, Event::TimerFired { timer: watchdog });
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(
         actions
             .iter()
-            .any(|a| matches!(a,Action::WsClose{socket:s}if *s==socket))
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
     );
     let reconnect = actions
         .into_iter()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, at_ms } = a {
-                (at_ms == 22000.0).then_some(timer)
-            } else {
-                None
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (21_750.0..=22_000.0).contains(&at_ms) => {
+                Some(timer)
             }
+            _ => None,
         })
         .unwrap();
-    e.handle(22000.0, Event::TimerFired { timer: reconnect });
-    assert!(
-        e.drain_actions()
-            .any(|a| matches!(a,Action::WsConnect{url,channel:Some(SocketChannel::Private),context:None,..}if url == "wss://wss.woox.io/v2/ws/private/stream/app"))
-    );
+    e.handle(22_000.0, Event::TimerFired { timer: reconnect });
+    assert!(e.drain_actions().any(|a| matches!(a,Action::WsConnect{url,channel:Some(SocketChannel::Private),context:None,..}if url == "wss://wss.woox.io/v2/ws/private/stream/app")));
 }
+
 #[test]
 fn two_hedge_rails_in_one_snapshot_preserve_distinct_settings() {
     let (mut e, _, mut reads, _) = start();
@@ -507,6 +503,7 @@ fn old_position_read_cannot_restore_preconfirmation_leverage() {
             command: 9,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         }),
     );
     let r = requests(&mut e).remove(0);
@@ -535,6 +532,7 @@ fn old_position_read_cannot_restore_preconfirmation_mode() {
         Event::Command(Command::SetPositionMode {
             command: 9,
             hedged: true,
+            symbol: None,
         }),
     );
     let r = requests(&mut e).remove(0);
@@ -965,4 +963,55 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
         "completion retains one paused registration"
     );
     assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
+}
+
+#[test]
+fn rest_ahead_of_no_id_execution_emits_once_without_moving_position_twice() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    e.take_frame(60.0);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let regular = take(&mut reads, "/v1/orders?");
+    response(
+        &mut e,
+        &regular,
+        80.0,
+        &page(&ORDER.replace("0.005", "0.006")),
+    );
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    response(&mut e, &algo, 90.0, &algos(ALGO));
+    let frame = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.006,"executedPrice":59000}}"#;
+    ws(&mut e, socket, 100.0, frame);
+    ws(&mut e, socket, 101.0, frame);
+    let fills = fill_amounts(&mut e);
+    assert_eq!(fills.len(), 1);
+    assert!((fills[0] - 0.001).abs() < 1e-12);
+    assert_eq!(e.store().order("9007199254740993").unwrap().filled, 0.006);
+    assert_eq!(e.store().positions()[0].contracts, 0.01);
+}
+
+#[test]
+fn no_id_execution_after_blind_rest_interval_does_not_reprice_the_gap() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    e.take_frame(60.0);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let regular = take(&mut reads, "/v1/orders?");
+    response(
+        &mut e,
+        &regular,
+        80.0,
+        &page(&ORDER.replace("0.005", "0.010")),
+    );
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    response(&mut e, &algo, 90.0, &algos(ALGO));
+    let frame = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.011,"executedPrice":59000}}"#;
+    ws(&mut e, socket, 100.0, frame);
+    ws(&mut e, socket, 101.0, frame);
+    let fills = fill_amounts(&mut e);
+    assert_eq!(fills.len(), 1);
+    assert!((fills[0] - 0.001).abs() < 1e-12);
+    assert!((e.store().positions()[0].contracts - 0.011).abs() < 1e-12);
 }

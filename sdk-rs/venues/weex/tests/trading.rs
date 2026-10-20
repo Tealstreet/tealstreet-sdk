@@ -736,6 +736,7 @@ fn leverage_margin_and_position_mode_use_documented_account_routes() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 200.0,
+            side: None,
         },
     );
     let r = writes(&actions).pop().unwrap();
@@ -779,6 +780,7 @@ fn leverage_margin_and_position_mode_use_documented_account_routes() {
             command: 3,
             symbol: "BTCUSDT".into(),
             leverage: 50.0,
+            side: None,
         },
     );
     let r = writes(&actions).pop().unwrap();
@@ -792,6 +794,7 @@ fn leverage_margin_and_position_mode_use_documented_account_routes() {
         Command::SetPositionMode {
             command: 4,
             hedged: true,
+            symbol: None,
         },
     );
     let r = writes(&actions).pop().unwrap();
@@ -863,6 +866,7 @@ fn margin_change_preserves_symbol_mode_when_account_default_differs() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         },
     );
     let r = writes(&actions).pop().unwrap();
@@ -931,7 +935,7 @@ fn conditional_amount_replacement_preserves_trigger_and_execution() {
 }
 
 #[test]
-fn old_failed_command_cannot_rollback_newer_optimistic_owner() {
+fn overlapping_cancel_rejects_and_late_failure_cannot_rollback_the_retry() {
     let mut e = engine();
     e.store_mut().upsert_order(order("1", OrderType::Limit));
     let actions = command(
@@ -949,7 +953,11 @@ fn old_failed_command_cannot_rollback_newer_optimistic_owner() {
             ids: vec!["1".into()],
         },
     );
-    let second = writes(&actions).pop().unwrap();
+    assert!(writes(&actions).is_empty());
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandDone { command: 2, result: Err(error) })
+        if error == "Order amendment or cancellation is already in flight")));
+    assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Canceling);
     e.handle(
         1002.0,
         Event::HttpFailed {
@@ -957,7 +965,33 @@ fn old_failed_command_cannot_rollback_newer_optimistic_owner() {
             error: "first timeout",
         },
     );
-    e.drain_actions().for_each(drop);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(writes(&actions).is_empty());
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
+        if error == "first timeout")));
+    assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Open);
+    let actions = command(
+        &mut e,
+        Command::CancelOrders {
+            command: 3,
+            ids: vec!["1".into()],
+        },
+    );
+    let second = writes(&actions).pop().unwrap();
+    assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Canceling);
+    e.handle(
+        1003.0,
+        Event::HttpFailed {
+            request: first.id,
+            error: "late duplicate first timeout",
+        },
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Http(_) | Action::Notice(Notice::CommandDone { .. })
+    )));
     assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Canceling);
     let actions = response(&mut e, &second, json!([{"orderId":"1","success":true}]));
     assert_eq!(done(&actions).unwrap(), "[]");
@@ -1000,6 +1034,7 @@ fn import_orders_with_socket(
             command: 900,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         },
     );
     let req = writes(&actions).pop().unwrap();
@@ -1065,7 +1100,7 @@ fn imported_algo_bracket_children_preserve_both_working_types_on_amend() {
     assert_eq!(body(&replacement)["SlWorkingType"], "CONTRACT_PRICE");
 }
 #[test]
-fn unknown_imported_bracket_source_fails_before_cancel() {
+fn imported_regular_order_with_brackets_amends_with_row_or_default_working_types() {
     let mut e = engine();
     let mut old = order("1", OrderType::Limit);
     old.take_profit = Some(70000.0);
@@ -1080,13 +1115,67 @@ fn unknown_imported_bracket_source_fails_before_cancel() {
             amount: None,
         },
     );
-    assert!(writes(&actions).is_empty());
-    assert!(
-        done(&actions)
-            .unwrap_err()
-            .contains("cannot preserve imported")
+    let cancel = writes(&actions).pop().unwrap();
+    assert_eq!(cancel.method, Method::Delete);
+    let actions = response(&mut e, &cancel, json!([{"orderId":"1","success":true}]));
+    let replacement = writes(&actions).pop().unwrap();
+    let payload = body(&replacement);
+    assert_eq!(payload["tpTriggerPrice"], "70000");
+    assert_eq!(payload["slTriggerPrice"], "58000");
+    assert_eq!(payload["TpWorkingType"], "CONTRACT_PRICE");
+    assert_eq!(payload["SlWorkingType"], "MARK_PRICE");
+    let ack = single_ack(&replacement, 2);
+    assert_eq!(
+        done(&response(&mut e, &replacement, ack)).unwrap(),
+        r#"["2"]"#
     );
-    assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Open);
+}
+#[test]
+fn imported_regular_order_amend_keeps_row_reported_leg_working_types() {
+    let mut e = engine();
+    import_orders(
+        &mut e,
+        json!([{"orderId":"1","symbol":"BTCUSDT","side":"SELL","type":"LIMIT","status":"NEW","origQty":"0.2","executedQty":"0","price":"59000","tpTriggerPrice":"50000","slTriggerPrice":"61000","tpOrderType":"MARK_PRICE","workingType":"CONTRACT_PRICE","updateTime":1773295700000u64}]),
+        json!([]),
+    );
+    let actions = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "1".into(),
+            price: Some(59500.0),
+            amount: None,
+        },
+    );
+    let cancel = writes(&actions).pop().unwrap();
+    let actions = response(&mut e, &cancel, json!([{"orderId":"1","success":true}]));
+    let replacement = writes(&actions).pop().unwrap();
+    assert_eq!(body(&replacement)["TpWorkingType"], "MARK_PRICE");
+    assert_eq!(body(&replacement)["SlWorkingType"], "CONTRACT_PRICE");
+}
+#[test]
+fn accepted_conditional_echoing_algo_identity_is_reported_accepted() {
+    for ack in [
+        |client: &Value| json!({"algoId":"77","clientAlgoId":client,"success":true}),
+        |_: &Value| json!({"orderId":"77","success":true}),
+    ] {
+        let mut e = engine();
+        let mut conditional = opts("");
+        conditional.kind = OrderType::Conditional;
+        conditional.trigger_price = Some(68900.0);
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![conditional],
+            },
+        );
+        let r = writes(&actions).pop().unwrap();
+        assert!(r.url.ends_with("/algoOrder"));
+        let actions = response(&mut e, &r, ack(&body(&r)["clientAlgoId"]));
+        assert_eq!(done(&actions).unwrap(), r#"["77"]"#);
+        assert_eq!(e.store().order("77").unwrap().kind, OrderType::Conditional);
+    }
 }
 #[test]
 fn price_only_amend_replaces_only_the_unfilled_quantity() {
@@ -1170,6 +1259,7 @@ fn overlapping_settings_commands_fail_before_a_second_write_then_allow_retry() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         },
     );
     let first = writes(&actions).pop().unwrap();
@@ -1179,6 +1269,7 @@ fn overlapping_settings_commands_fail_before_a_second_write_then_allow_retry() {
             command: 2,
             symbol: "BTCUSDT".into(),
             leverage: 30.0,
+            side: None,
         },
     );
     assert!(writes(&actions).is_empty());
@@ -1194,6 +1285,7 @@ fn overlapping_settings_commands_fail_before_a_second_write_then_allow_retry() {
             command: 3,
             symbol: "BTCUSDT".into(),
             leverage: 30.0,
+            side: None,
         },
     );
     let second = writes(&actions).pop().unwrap();
@@ -1474,4 +1566,180 @@ fn receipts_match_algo_protection_and_attached_parent_ids_without_invented_child
             }]
         );
     }
+}
+#[test]
+fn isolated_side_leverage_keeps_the_other_payload_and_setting_leg() {
+    for side in [Some(PositionSide::Long), Some(PositionSide::Short), None] {
+        let mut e = engine();
+        e.store_mut().update_setting("BTCUSDT", |s| {
+            s.margin_type = Some(MarginType::Isolated);
+            s.leverage = 10.;
+            s.buy_leverage = Some(10.);
+            s.sell_leverage = Some(20.);
+        });
+        let a = command(
+            &mut e,
+            Command::SetLeverage {
+                command: 601,
+                symbol: "BTCUSDT".into(),
+                leverage: 37.,
+                side,
+            },
+        );
+        let r = &writes(&a)[0];
+        let long = if side == Some(PositionSide::Short) {
+            10.
+        } else {
+            37.
+        };
+        let short = if side == Some(PositionSide::Long) {
+            20.
+        } else {
+            37.
+        };
+        assert_eq!(
+            body(r),
+            json!({"symbol":"BTCUSDT","marginType":"ISOLATED","isolatedLongLeverage":long.to_string(),"isolatedShortLeverage":short.to_string()})
+        );
+        let a = response(&mut e, r, json!({"code":"200","msg":"success"}));
+        assert!(done(&a).is_ok());
+        let s = e.store().setting("BTCUSDT").unwrap();
+        assert_eq!((s.buy_leverage, s.sell_leverage), (Some(long), Some(short)));
+    }
+}
+
+#[test]
+fn weex_side_is_coupled_in_cross_and_rejections_keep_settings() {
+    let mut e = engine();
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 602,
+            symbol: "BTCUSDT".into(),
+            leverage: 37.,
+            side: Some(PositionSide::Short),
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(
+        body(r),
+        json!({"symbol":"BTCUSDT","marginType":"CROSSED","crossLeverage":"37"})
+    );
+    let a = response(&mut e, r, json!({"code":"200","msg":"success"}));
+    assert!(done(&a).is_ok());
+    assert_eq!(
+        e.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(37.)
+    );
+    e.store_mut().update_setting("BTCUSDT", |s| {
+        s.margin_type = Some(MarginType::Isolated);
+        s.sell_leverage = Some(20.);
+    });
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 603,
+            symbol: "BTCUSDT".into(),
+            leverage: 50.,
+            side: Some(PositionSide::Short),
+        },
+    );
+    let a = response(
+        &mut e,
+        &writes(&a)[0],
+        json!({"code":"400","msg":"rejected"}),
+    );
+    assert!(done(&a).is_err());
+    let s = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!((s.buy_leverage, s.sell_leverage), (Some(37.), Some(20.)));
+}
+
+#[test]
+fn targeted_weex_mode_changes_only_one_symbol_and_keeps_other_mode_in_requests() {
+    let mut e = engine();
+    let mut markets = e.store().markets().to_vec();
+    let mut eth = markets[0].clone();
+    eth.id = "ETHUSDT".into();
+    eth.symbol = "ETHUSDT".into();
+    eth.base = "ETH".into();
+    markets.push(eth);
+    e.store_mut().set_markets(markets);
+    e.store_mut().update_setting("ETHUSDT", |s| {
+        s.leverage = 10.;
+        s.margin_type = Some(MarginType::Isolated);
+    });
+    let a = command(
+        &mut e,
+        Command::SetPositionMode {
+            command: 801,
+            hedged: true,
+            symbol: Some("ETHUSDT".into()),
+        },
+    );
+    assert_eq!(writes(&a).len(), 1);
+    let r = &writes(&a)[0];
+    assert_eq!(
+        body(r),
+        json!({"symbol":"ETHUSDT","marginType":"ISOLATED","separatedType":"SEPARATED"})
+    );
+    let a = response(&mut e, r, json!({"code":"200","msg":"success"}));
+    assert!(done(&a).is_ok());
+    assert!(writes(&a).is_empty());
+    let a = command(
+        &mut e,
+        Command::SetPositionMode {
+            command: 802,
+            hedged: false,
+            symbol: Some("BTCUSDT".into()),
+        },
+    );
+    assert_eq!(writes(&a).len(), 1);
+    let r = &writes(&a)[0];
+    assert_eq!(body(r)["symbol"], "BTCUSDT");
+    let a = response(&mut e, r, json!({"code":"200","msg":"success"}));
+    assert!(done(&a).is_ok());
+    assert!(e.store().hedged());
+    let a = command(
+        &mut e,
+        Command::SetMarginType {
+            command: 803,
+            symbol: "ETHUSDT".into(),
+            isolated: false,
+        },
+    );
+    assert_eq!(body(&writes(&a)[0])["separatedType"], "SEPARATED");
+}
+
+#[test]
+fn weex_unknown_or_rejected_targeted_mode_does_not_emit_other_symbol_writes() {
+    for symbol in ["", "UNKNOWN"] {
+        let mut e = engine();
+        let a = command(
+            &mut e,
+            Command::SetPositionMode {
+                command: 804,
+                hedged: true,
+                symbol: Some(symbol.into()),
+            },
+        );
+        assert!(writes(&a).is_empty());
+        assert!(done(&a).is_err());
+    }
+    let mut e = engine();
+    let a = command(
+        &mut e,
+        Command::SetPositionMode {
+            command: 805,
+            hedged: true,
+            symbol: Some("BTCUSDT".into()),
+        },
+    );
+    let a = response(
+        &mut e,
+        &writes(&a)[0],
+        json!({"code":"400","msg":"rejected"}),
+    );
+    assert!(done(&a).is_err());
+    assert!(!e.store().hedged());
+    assert!(writes(&a).is_empty());
 }

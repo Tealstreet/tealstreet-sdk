@@ -74,7 +74,7 @@ import {
   POSITION_SIDE,
   TIME_IN_FORCE,
 } from './binance.types';
-import { USER_TRADES_MAX_WINDOW_MS } from './binance.utils';
+import { markBinanceOrdersCanceled, USER_TRADES_MAX_WINDOW_MS } from './binance.utils';
 import { BinancePrivateWebsocket } from './binance.ws-private';
 import { BinancePublicWebsocket } from './binance.ws-public';
 
@@ -1528,17 +1528,11 @@ export class BinanceExchange extends BaseExchange {
               });
             }
 
-            this.store.updateOrdersStatus(
-              request.orders.map((o) => ({ id: o.id })),
-              OrderStatus.Canceled,
-            );
+            markBinanceOrdersCanceled(this.store, request.orders);
           } catch (err: any) {
             // -2011 "Unknown order sent" means order is already gone - treat as success
             if (err?.code === -2011) {
-              this.store.updateOrdersStatus(
-                request.orders.map((o) => ({ id: o.id })),
-                OrderStatus.Canceled,
-              );
+              markBinanceOrdersCanceled(this.store, request.orders);
               return;
             }
             // Re-throw other errors
@@ -1558,11 +1552,11 @@ export class BinanceExchange extends BaseExchange {
               params: { algoId },
             });
 
-            this.store.updateOrderStatus({ id: order.id }, OrderStatus.Canceled);
+            markBinanceOrdersCanceled(this.store, [order]);
           } catch (err: any) {
             // -2011 "Unknown order sent" means order is already gone - treat as success
             if (err?.code === -2011) {
-              this.store.updateOrderStatus({ id: order.id }, OrderStatus.Canceled);
+              markBinanceOrdersCanceled(this.store, [order]);
               continue;
             }
             this.emitAndLogError(err?.response?.data?.msg || err?.message);
@@ -1587,10 +1581,10 @@ export class BinanceExchange extends BaseExchange {
       ]);
 
       if (regularResult.status === 'fulfilled') {
-        this.store.updateOrdersStatus(regularOrders, OrderStatus.Canceled);
+        markBinanceOrdersCanceled(this.store, regularOrders);
       }
       if (algoResult.status === 'fulfilled') {
-        this.store.updateOrdersStatus(algoOrders, OrderStatus.Canceled);
+        markBinanceOrdersCanceled(this.store, algoOrders);
       }
 
       if (regularResult.status === 'rejected') throw regularResult.reason;
