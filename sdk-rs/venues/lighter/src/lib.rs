@@ -8,10 +8,11 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
-    Candle, Limits, Market, MinMax, Position, PositionSide, Precision, Ticker,
+    Candle, Interval, Limits, Market, MinMax, Position, PositionSide, Precision, Ticker,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::{HashMap, HashSet};
 use wire::*;
@@ -81,7 +82,7 @@ pub enum Pending {
     Candles {
         command: Option<CommandId>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         rows: Vec<Candle>,
         failed: bool,
         revision: u64,
@@ -97,14 +98,26 @@ pub struct MarketMeta {
     pub initial_margin_fraction: f64,
     pub maintenance_margin_fraction: f64,
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 120_000.0,
+                idle_timeout_ms: 120_000.0,
+                ping_interval_ms: Some(10_000.0),
+                backoff_base_ms: 1_000.0,
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 #[derive(Default)]
 struct DepthState {
@@ -138,7 +151,7 @@ pub struct Lighter {
     spot_markets: HashSet<String>,
     public: Connection,
     books: HashMap<String, DepthState>,
-    candles: HashMap<(String, String), CandleState>,
+    candles: HashMap<(String, Interval), CandleState>,
     // Pending reads must distinguish subscriptions whose revisions restart at zero.
     subscription_generation: u64,
     ticker_revision: u64,
@@ -147,20 +160,10 @@ pub struct Lighter {
     startup: safe_cex_engine::startup::Backoff<bool>,
     poll: Option<TimerId>,
 }
-pub fn interval_ms(interval: &str) -> Option<f64> {
-    Some(
-        match interval {
-            "1m" => 60.0,
-            "5m" => 300.0,
-            "15m" => 900.0,
-            "30m" => 1800.0,
-            "1h" => 3600.0,
-            "4h" => 14400.0,
-            "12h" => 43200.0,
-            "1d" => 86400.0,
-            _ => return None,
-        } * 1000.0,
-    )
+// Lighter's resolutions are the TS spellings.
+fn supported(interval: Interval) -> bool {
+    use Interval::*;
+    matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1)
 }
 impl Lighter {
     pub fn new(options: Options) -> Self {
@@ -239,11 +242,13 @@ impl Lighter {
         );
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket =
             Some(cx.connect_channel(self.ws_url(), safe_cex_engine::SocketChannel::Public));
         self.public.open = false;
-        self.public.last_received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(10_000.0));
     }
     fn topic(&self, cx: &mut Cx<'_, Pending>, op: &str, channel: &str) {
         if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
@@ -316,29 +321,31 @@ impl Lighter {
         cx: &mut Cx<'_, Pending>,
         command: Option<CommandId>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         limit: Option<u32>,
         from: Option<f64>,
         to: Option<f64>,
     ) {
         let generation = self
             .candles
-            .get(&(symbol.clone(), interval.clone()))
+            .get(&(symbol.clone(), interval))
             .map(|state| state.generation);
         let revision = self
             .candles
-            .get(&(symbol.clone(), interval.clone()))
+            .get(&(symbol.clone(), interval))
             .map_or(0, |state| state.revision);
         let result = (|| {
-            let duration = interval_ms(&interval)
-                .ok_or("Lighter does not support this raw candle interval")?;
+            if !supported(interval) {
+                return Err(interval.unsupported("Lighter"));
+            }
+            let duration = interval.ms();
             let market = cx.store.market(&symbol).ok_or("Market not found")?;
             if from
                 .into_iter()
                 .chain(to)
                 .any(|t| !t.is_finite() || t < 0.0)
             {
-                return Err("Invalid candle time range");
+                return Err("Invalid candle time range".to_owned());
             }
             let count = limit.filter(|n| *n > 0).unwrap_or(500).min(1500);
             let end = to.unwrap_or(cx.now);
@@ -349,7 +356,7 @@ impl Lighter {
             }
             .max(0.0);
             if start > end {
-                return Err("Invalid candle time range");
+                return Err("Invalid candle time range".to_owned());
             }
             Ok(format!(
                 "{}/api/v1/candles?market_id={}&resolution={interval}&start_timestamp={start:.0}&end_timestamp={end:.0}&count_back={count}",
@@ -377,7 +384,7 @@ impl Lighter {
             }
             Err(error) => {
                 if let Some(c) = command {
-                    cx.done(c, Err(error.into()))
+                    cx.done(c, Err(error))
                 }
             }
         }
@@ -561,12 +568,12 @@ impl Lighter {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: &str,
-        interval: &str,
+        interval: Interval,
         candle: Candle,
     ) {
         if let Some(state) = self
             .candles
-            .get_mut(&(symbol.into(), interval.into()))
+            .get_mut(&(symbol.into(), interval))
             .filter(|s| s.subscribers > 0)
         {
             if state
@@ -629,6 +636,12 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account_tier: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -670,8 +683,7 @@ impl Venue for Lighter {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.last_received = cx.now;
+        self.public.supervisor.opened(cx);
         self.topic(cx, "subscribe", "market_stats/all");
         for market in cx.store.markets().to_vec() {
             self.topic(cx, "subscribe", &format!("ticker/{}", market.id));
@@ -708,7 +720,7 @@ impl Venue for Lighter {
         if self.public.socket != Some(socket) || !self.public.open {
             return;
         }
-        self.public.last_received = cx.now;
+        self.public.supervisor.received(cx.now);
         let Ok(frame) = serde_json::from_str::<Envelope<'_>>(text) else {
             return;
         };
@@ -760,7 +772,7 @@ impl Venue for Lighter {
             "candle" => {
                 if let (Some(symbol), Some(interval)) = (
                     id.and_then(|v| self.symbol_for_id(v)).map(str::to_owned),
-                    parts.next(),
+                    parts.next().and_then(Interval::parse),
                 ) && let Ok(rows) =
                     serde_json::from_str::<CandleMessage>(frame.data.map_or(text, |v| v.get()))
                 {
@@ -786,7 +798,7 @@ impl Venue for Lighter {
                             .filter(|((s, _), state)| *s == symbol && state.subscribers > 0)
                             .filter_map(|((_, i), state)| {
                                 let mut c = state.last?;
-                                let duration = interval_ms(i)? / 1000.0;
+                                let duration = i.ms() / 1000.0;
                                 let start = (time / duration).floor() * duration;
                                 if start < c.timestamp || trade.price <= 0.0 || trade.size < 0.0 {
                                     return None;
@@ -805,11 +817,11 @@ impl Venue for Lighter {
                                 c.low = c.low.min(trade.price);
                                 c.close = trade.price;
                                 c.volume += trade.size;
-                                Some((i.clone(), c))
+                                Some((*i, c))
                             })
                             .collect();
                         for (i, c) in updates {
-                            self.emit_candle(cx, &symbol, &i, c);
+                            self.emit_candle(cx, &symbol, i, c);
                         }
                     }
                 }
@@ -826,9 +838,6 @@ impl Venue for Lighter {
         }
         self.public.socket = None;
         self.public.open = false;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
         for (symbol, state) in &mut self.books {
             state.waiting = true;
             state.revision += 1;
@@ -836,10 +845,7 @@ impl Venue for Lighter {
             state.book.clear();
             cx.book_changed(symbol);
         }
-        self.public.attempts = self.public.attempts.saturating_add(1);
-        self.public.reconnect = Some(cx.set_timer(
-            (1_000.0 * 2_f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30_000.0),
-        ));
+        self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
@@ -1153,7 +1159,7 @@ impl Venue for Lighter {
                 if command.is_none()
                     && !self
                         .candles
-                        .get(&(symbol.clone(), interval.clone()))
+                        .get(&(symbol.clone(), interval))
                         .is_some_and(|s| Some(s.generation) == generation)
                 {
                     return;
@@ -1178,18 +1184,18 @@ impl Venue for Lighter {
                 if let Some(c) = command {
                     cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
                 } else {
-                    if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval.clone())) {
+                    if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) {
                         s.in_flight = false;
                     }
                     if self
                         .candles
-                        .get(&(symbol.clone(), interval.clone()))
+                        .get(&(symbol.clone(), interval))
                         .is_some_and(|state| state.revision != revision)
                     {
                         return;
                     }
                     if let Some(c) = rows.last() {
-                        self.emit_candle(cx, &symbol, &interval, *c);
+                        self.emit_candle(cx, &symbol, interval, *c);
                     }
                 }
             }
@@ -1226,25 +1232,23 @@ impl Venue for Lighter {
         if self.account_timer(cx, timer) || self.trade_timer(cx, timer) {
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect(cx);
-            return;
-        }
-        if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.last_received >= 120_000.0 {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => {}
+            Tick::Reconnect => return self.connect(cx),
+            Tick::Ping => {
+                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
+                    cx.send(s, r#"{"type":"ping"}"#);
+                }
+                return;
+            }
+            Tick::TimedOut(_) => {
                 if let Some(s) = self.public.socket {
                     cx.close(s);
                     self.on_close(cx, s, 1006);
                 }
                 return;
             }
-            if let Some(s) = self.public.socket.filter(|_| self.public.open) {
-                cx.send(s, r#"{"type":"ping"}"#);
-            }
-            self.public.watchdog = Some(cx.set_timer(10_000.0));
-            return;
+            Tick::Handled => return,
         }
         if self.poll == Some(timer) {
             self.poll = Some(cx.set_timer(2_000.0));
@@ -1292,7 +1296,7 @@ impl Venue for Lighter {
                         && cx.now - state.last_received >= 120_000.0
                     {
                         state.in_flight = true;
-                        Some((s.clone(), i.clone()))
+                        Some((s.clone(), *i))
                     } else {
                         None
                     }
@@ -1344,18 +1348,15 @@ impl Venue for Lighter {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                if interval_ms(&interval).is_none() {
-                    cx.log(LogLevel::Error, "Unsupported Lighter candle interval");
+                if !supported(interval) {
+                    cx.log(LogLevel::Error, interval.unsupported("Lighter"));
                     return;
                 }
                 let Some(m) = cx.store.market(&symbol) else {
                     return;
                 };
                 let id = m.id.clone();
-                let state = self
-                    .candles
-                    .entry((symbol.clone(), interval.clone()))
-                    .or_default();
+                let state = self.candles.entry((symbol.clone(), interval)).or_default();
                 state.subscribers += 1;
                 if state.subscribers == 1 {
                     self.subscription_generation = self.subscription_generation.wrapping_add(1);
@@ -1368,7 +1369,7 @@ impl Venue for Lighter {
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval.clone())) {
+                if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     s.subscribers = s.subscribers.saturating_sub(1);
                     if s.subscribers == 0 {
                         let id = cx.store.market(&symbol).unwrap().id.clone();

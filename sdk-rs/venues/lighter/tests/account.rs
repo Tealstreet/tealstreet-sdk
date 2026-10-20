@@ -485,58 +485,65 @@ fn direct_account_fill_arrays_accept_both_fill_and_trade_ids_without_duplicate_f
 }
 #[test]
 fn initial_and_reconnecting_private_handshakes_have_watchdogs_before_open() {
-    use safe_cex_engine::Engine;
+    use safe_cex_engine::{Engine, SocketChannel};
     use safe_cex_venue_lighter::Lighter;
+    let mut timers = Timers::new();
     let mut e = Engine::new(Lighter::new(options()));
     e.start(NOW);
     let meta = requests(&mut e).pop().unwrap();
     reply(&mut e, &meta, 200, META);
-    let lookup = requests(&mut e)
+    let lookup = drain(&mut e, &mut timers)
         .into_iter()
-        .find(|r| r.url.contains("/account?"))
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains("/account?") => Some(r),
+            _ => None,
+        })
         .unwrap();
     reply(&mut e, &lookup, 200, ACCOUNT);
-    for cycle in 0..2 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
+    let mut connected_at = NOW;
+    let mut actions = drain(&mut e, &mut timers);
+    for _ in 0..2 {
         let socket = actions
             .iter()
-            .find_map(|a| {
-                if let Action::WsConnect { socket, .. } = a {
-                    Some(*socket)
-                } else {
-                    None
-                }
+            .find_map(|a| match a {
+                Action::WsConnect {
+                    socket,
+                    channel: Some(SocketChannel::Private),
+                    ..
+                } => Some(*socket),
+                _ => None,
             })
             .expect("private connection");
-        let watchdog = actions
-            .iter()
-            .find_map(|a| {
-                if let Action::SetTimer { timer, at_ms } = a {
-                    (*at_ms == NOW + cycle as f64 * 181_000.0 + 10_000.0).then_some(*timer)
-                } else {
-                    None
-                }
-            })
-            .expect("handshake watchdog");
-        let timeout = NOW + (cycle + 1) as f64 * 180_000.0 + cycle as f64 * 1000.0;
-        e.handle(timeout, Event::TimerFired { timer: watchdog });
-        let actions = e.drain_actions().collect::<Vec<_>>();
-        assert!(
+        let closed = |actions: &[Action]| {
             actions
                 .iter()
-                .any(|a| matches!(a,Action::WsClose{socket:s}if *s==socket))
-        );
-        let reconnect = actions
-            .iter()
-            .find_map(|a| {
-                if let Action::SetTimer { timer, .. } = a {
-                    Some(*timer)
-                } else {
-                    None
+                .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+        };
+        assert!(!closed(&advance(
+            &mut e,
+            &mut timers,
+            connected_at + 179_999.0
+        )));
+        assert!(closed(&advance(
+            &mut e,
+            &mut timers,
+            connected_at + 180_000.0
+        )));
+        connected_at += 180_000.0;
+        actions = Vec::new();
+        while !actions.iter().any(|a| {
+            matches!(
+                a,
+                Action::WsConnect {
+                    channel: Some(SocketChannel::Private),
+                    ..
                 }
-            })
-            .unwrap();
-        e.handle(timeout + 1000.0, Event::TimerFired { timer: reconnect });
+            )
+        }) {
+            connected_at += 1.0;
+            assert!(connected_at < NOW + 400_000.0, "private reconnect");
+            actions = advance(&mut e, &mut timers, connected_at);
+        }
     }
 }
 #[test]
@@ -785,39 +792,28 @@ fn a_drop_before_the_baseline_snapshot_replays_no_history() {
 }
 #[test]
 fn fills_during_a_quiet_but_pinging_stretch_are_backfilled_once() {
-    let (mut e, socket) = ready();
+    let (mut e, socket, mut timers) = ready_tracked(options());
     e.handle(NOW, Event::WsOpened { socket });
-    let mut watchdog = e
-        .drain_actions()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == NOW + 10_000.0 => Some(timer),
-            _ => None,
-        })
-        .unwrap();
+    drain(&mut e, &mut timers);
     message(&mut e, socket, NOW + 500.0, BASELINE);
     e.take_frame(NOW + 500.0);
-    let mut reconnect_at = None;
+    let mut closed_at = None;
     for step in 1..=20 {
         let now = NOW + f64::from(step) * 10_000.0;
+        let mut actions = advance(&mut e, &mut timers, now - 1.0);
         message(&mut e, socket, now, r#"{"type":"pong"}"#);
-        e.handle(now, Event::TimerFired { timer: watchdog });
-        for action in e.drain_actions() {
-            match action {
-                Action::SetTimer { timer, at_ms } if at_ms == now + 10_000.0 => watchdog = timer,
-                Action::SetTimer { timer, at_ms } if at_ms == now + 1000.0 => {
-                    reconnect_at = Some((timer, at_ms))
-                }
-                _ => {}
-            }
-        }
-        if reconnect_at.is_some() {
+        actions.extend(advance(&mut e, &mut timers, now));
+        if actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+        {
+            closed_at = Some(now);
             break;
         }
     }
-    let (timer, at) = reconnect_at.expect("stale stream reconnects");
-    e.handle(at, Event::TimerFired { timer });
-    let next = e
-        .drain_actions()
+    let at = closed_at.expect("stale stream reconnects") + 1_000.0;
+    let next = advance(&mut e, &mut timers, at)
+        .into_iter()
         .find_map(|a| match a {
             Action::WsConnect { socket, .. } => Some(socket),
             _ => None,

@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
+use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_orderly::{Options, Orderly};
 pub type Driver = Engine<Orderly>;
 pub const MARKETS: &str = r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":20,"base_imr":0.01},{"symbol":"PERP_ETH_USDC","base_tick":0.001,"quote_tick":0.01,"base_min":0.001,"base_max":100,"base_imr":0.02}]}}"#;
@@ -49,7 +49,7 @@ pub fn ready() -> (Driver, SocketId) {
     ready_with(ORDER, "[]", POSITIONS)
 }
 pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketId) {
-    let (e, socket, _) = ready_with_logs(order, algos, positions);
+    let (e, socket, _, _) = ready_full(order, algos, positions);
     (e, socket)
 }
 /// Bootstraps like `ready_with` and returns the messages logged on the way.
@@ -58,10 +58,24 @@ pub fn ready_with_logs(
     algos: &str,
     positions: &str,
 ) -> (Driver, SocketId, Vec<String>) {
+    let (e, socket, _, logs) = ready_full(order, algos, positions);
+    (e, socket, logs)
+}
+/// Like `ready_with`, also returning the account poll tick timer.
+pub fn ready_ticking(order: &str, algos: &str, positions: &str) -> (Driver, SocketId, TimerId) {
+    let (e, socket, tick, _) = ready_full(order, algos, positions);
+    (e, socket, tick.unwrap())
+}
+fn ready_full(
+    order: &str,
+    algos: &str,
+    positions: &str,
+) -> (Driver, SocketId, Option<TimerId>, Vec<String>) {
     let mut e = Engine::new(Orderly::new(options()));
     e.start(1000.0);
     let mut private = None;
     let mut logs = vec![];
+    let mut tick = None;
     for _ in 0..10 {
         let out = actions(&mut e);
         if out.is_empty() {
@@ -96,6 +110,10 @@ pub fn ready_with_logs(
                     private = Some(socket)
                 }
                 Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
+                Action::SetTimer {
+                    timer,
+                    at_ms: 3000.0,
+                } => tick = Some(timer),
                 _ => {}
             }
         }
@@ -104,7 +122,7 @@ pub fn ready_with_logs(
     e.handle(1000.0, Event::WsOpened { socket });
     actions(&mut e);
     ws(&mut e, socket, r#"{"event":"auth","success":true}"#);
-    (e, socket, logs)
+    (e, socket, tick, logs)
 }
 pub fn fill_amounts(e: &mut Driver) -> Vec<f64> {
     let Some(bytes) = e.take_frame(2000.0) else {

@@ -77,6 +77,13 @@ impl Paradex {
 
 impl Venue for Paradex {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            client_order_lookup: true,
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public_start(cx);
     }
@@ -218,7 +225,13 @@ impl Paradex {
                 break;
             }
             for (pending, error) in failed {
-                self.dispatch_failed(cx, pending, &error);
+                match pending {
+                    Pending::Trade(request) => {
+                        self.trading
+                            .on_unsent(cx, &mut self.account, request, &error)
+                    }
+                    other => self.dispatch_failed(cx, other, &error),
+                }
             }
         }
     }

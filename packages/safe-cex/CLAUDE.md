@@ -79,7 +79,14 @@ interest from attached accounts; late book subscribers receive the native
 snapshot without waiting for a new venue event. Tick data, books
 and candles enter the receiving native engine by symbol and leave through its
 normal frames; never copy them into only the JS store. Providers send no private
-sections or account metadata. A running/loaded direct source is mandatory.
+sections or account metadata. A running/loaded direct source is mandatory. exchange-server's
+`externalPublicData: { type: 'in-process', source }` uses the same protocol over an
+in-memory port (`serveInProcessPublicData`). One hub per source keeps a single store
+subscription and broadcasts changed tickers every 250 ms. Like TS, it is lenient:
+private startup continues after 30 s without a loaded source, account markets the
+source has not listed are tolerated, and book/candle requests for them wait. A real
+field mismatch still fails. Testnet accounts ignore the venue-keyed source and run
+their own feed. Websocket gateways still reject.
 A source may forward frames: provider-owned book/candle listeners still run
 before the buffer is transferred, while ordinary worker callbacks stay silent.
 Matching shared ticker seeds wake startup even when identical REST data means
@@ -107,6 +114,33 @@ their configuration. The policy controls live feed ownership, not routing,
 credentials, supported venue products, or whether explicit public REST queries
 are allowed. `fetchBalance` reads current native reconciled state, as do the
 Rust adapter's other store-backed account reads.
+
+## Rust engine capabilities
+
+Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,
+read through `EngineHost.capabilities()`): account identity, client-order
+lookup, history axes, fills by order id, native cancel-all, leverage reads and
+maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
+order-book queries and options. `RustEngineExchange` routes from that record,
+never from venue names, and adopts it once the engine exists (`ensureHost` or
+`start`); `engineCapabilities` is undefined before then. Missing history axes
+take the branded base fallbacks, so `exchange.capabilities` reports them absent
+once the engine exists.
+
+## Rust main-thread trading
+
+The web builds a second `RustEngineExchange` on the main thread; the worker's
+instance owns the engine. An instance with a `callMethod` listener (the host's
+worker bridge) forwards the `WORKER_TRADING_METHODS` in `exchanges/base.ts` whole
+through `callMethodInWorker`, so preflight, placement scopes and nuke retries run
+against the worker's state and report there once. This holds even if a
+main-thread read (`fetchMarkets` during warm start) started a local engine; the
+worker never has that listener. Without a bridge, an instance runs locally.
+`updateOrder` crosses as `{ orderIds, clientOrderId }` because array properties
+do not survive a JSON bridge. Interrupted forwarded writes carry
+`outcome: 'unknown'` and the caller's client order IDs (`WORKER_WRITE_METHODS`,
+`workerCallClientOrderIds`); requests still buffered when a worker stops before
+startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
 
 ## Rust engine failure
 
@@ -521,8 +555,11 @@ See `apps/web/src/positionsHistory/helpers/CLAUDE.md`.
 
 `BaseExchange` deliberately supplies inert defaults for `start`, `placeOrder`,
 and `fetchHistoricalFills`. These functions carry a private
-runtime brand exposed through `isBaseCapabilityFallback`; derived class fields
-replace the branded function during construction. The deterministic capability
+runtime brand; derived class fields replace the branded function during
+construction. `exchange.capabilities` is the only reader: a capability is
+present when its method (`CAPABILITY_METHODS`) is neither the branded fallback
+nor an unconditional `return []`. Subclasses opt out of an axis with
+`markBaseCapabilityFallback`. The deterministic capability
 suite in `src/__tests__/audit-regressions/exchange-metadata-capabilities.test.ts`
 loads the real registry and enforces the following minimum contracts:
 
@@ -533,7 +570,7 @@ loads the real registry and enforces the following minimum contracts:
 - TP/SL trigger defaults must belong to the unique advertised trigger set.
 
 The fills-history runtime gate is deliberately not metadata. Ingestion checks
-the capability brand on `fetchHistoricalFills` and then applies
+`exchange.capabilities.fillHistory` and then applies
 `symbolScopedFills.ts` to decide whether the venue can be asked account-wide or
 must be walked by symbols discovered from the income ledger. A branded fallback,
 an unenumerable symbol-scoped venue, and an empty result are three different
@@ -854,8 +891,8 @@ existing connection only where the venue keeps them in the same account as its
 derivatives, so balance, margin and positions stay one view. A venue with a separate
 options account gets its own exchange name instead. Option markets carry
 `Market.option`; chains, expiries and account greeks come from `fetchOptionChain`,
-`fetchOptionExpiries` and `fetchAccountGreeks`, which are branded, so check them with
-`isInertCapability`. Chains are fetched on demand and never enter the store, so the
+`fetchOptionExpiries` and `fetchAccountGreeks`; check them with
+`exchange.capabilities` (`optionChain`, `optionExpiries`, `accountGreeks`). Chains are fetched on demand and never enter the store, so the
 perp ticker path is unchanged when options are on.
 
 ### Decision Flow

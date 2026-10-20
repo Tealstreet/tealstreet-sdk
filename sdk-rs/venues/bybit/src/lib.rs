@@ -13,9 +13,10 @@ pub use paths::{Category, Endpoints, Variant};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
-    Candle, DerivativeProduct, InstrumentClassification, Limits, Market, MinMax, Precision,
-    ProductKind, Ticker,
+    Candle, DerivativeProduct, InstrumentClassification, Interval, Limits, Market, MinMax,
+    Precision, ProductKind, Ticker,
 };
+use safe_cex_engine::time;
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
 };
@@ -243,9 +244,9 @@ pub struct BybitLinear {
     books: HashMap<String, BookState>,
     book_levels: BookLevels,
     /// Kline subscriptions by (symbol, interval), counted.
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     /// Live bar per subscription, extended by trades between native klines.
-    live_candles: HashMap<(String, String), Candle>,
+    live_candles: HashMap<(String, Interval), Candle>,
     trade_subscribers: HashMap<String, u32>,
     startup: Startup,
     /// Server clock minus ours, learned from a `recv_window` rejection.
@@ -256,73 +257,47 @@ pub struct BybitLinear {
 }
 
 /// Bybit kline interval codes.
-fn interval_code(interval: &str) -> Option<&'static str> {
+fn interval_code(interval: Interval) -> Option<&'static str> {
+    use Interval::*;
     Some(match interval {
-        "1m" => "1",
-        "3m" => "3",
-        "5m" => "5",
-        "15m" => "15",
-        "30m" => "30",
-        "1h" => "60",
-        "2h" => "120",
-        "4h" => "240",
-        "6h" => "360",
-        "12h" => "720",
-        "1d" => "D",
-        "1w" => "W",
-        "1M" => "M",
+        M1 => "1",
+        M3 => "3",
+        M5 => "5",
+        M15 => "15",
+        M30 => "30",
+        H1 => "60",
+        H2 => "120",
+        H4 => "240",
+        H6 => "360",
+        H12 => "720",
+        D1 => "D",
+        W1 => "W",
+        Mo1 => "M",
         _ => return None,
     })
 }
 
 /// Seconds intervals have no native kline; they are built from trades alone.
-fn seconds_interval(interval: &str) -> Option<f64> {
-    let seconds = interval.strip_suffix('s')?.parse::<f64>().ok()?;
-    (seconds > 0.0 && 60.0 % seconds == 0.0).then_some(seconds)
+fn seconds_interval(interval: Interval) -> Option<f64> {
+    use Interval::*;
+    matches!(interval, S1 | S5 | S15 | S30).then(|| interval.ms() / 1000.0)
 }
 
 /// The bar start (seconds) holding `time`: Monday weeks and UTC calendar months
 /// for `1w`/`1M`, matching the native `W`/`M` klines; epoch floors otherwise.
-fn candle_start(interval: &str, time: f64) -> Option<f64> {
+fn candle_start(interval: Interval, time: f64) -> f64 {
     const DAY: f64 = 86_400.0;
-    let step = match interval {
-        "1w" => return Some(((time - 4.0 * DAY) / (7.0 * DAY)).floor() * 7.0 * DAY + 4.0 * DAY),
-        "1M" => {
-            // Civil date from days since the epoch (Hinnant's algorithm).
-            let days = (time / DAY).floor() as i64 + 719_468;
-            let era = days.div_euclid(146_097);
-            let doe = days.rem_euclid(146_097);
-            let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-            let mp = (5 * doy + 2) / 153;
-            let month = if mp < 10 { mp + 3 } else { mp - 9 };
-            let year = yoe + era * 400 + i64::from(month <= 2);
-            // Days back to the first of that month.
-            let (y, m) = if month <= 2 {
-                (year - 1, month + 9)
-            } else {
-                (year, month - 3)
-            };
-            let era = y.div_euclid(400);
-            let yoe = y - era * 400;
-            let doy = (153 * m + 2) / 5;
-            let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-            return Some((era * 146_097 + doe - 719_468) as f64 * DAY);
+    match interval {
+        Interval::W1 => ((time - 4.0 * DAY) / (7.0 * DAY)).floor() * 7.0 * DAY + 4.0 * DAY,
+        Interval::Mo1 => {
+            let (year, month, _) = time::civil_from_days((time / DAY).floor() as i64);
+            time::days_from_civil(year, month, 1) as f64 * DAY
         }
-        _ => seconds_interval(interval).or_else(|| {
-            let (n, unit) = interval.split_at(interval.len().checked_sub(1)?);
-            let n = n.parse::<f64>().ok()?;
-            Some(
-                n * match unit {
-                    "m" => 60.0,
-                    "h" => 3_600.0,
-                    "d" => DAY,
-                    _ => return None,
-                },
-            )
-        })?,
-    };
-    Some((time / step).floor() * step)
+        _ => {
+            let step = interval.ms() / 1000.0;
+            (time / step).floor() * step
+        }
+    }
 }
 
 /// Definitive key rejections: invalid key, bad signature after the re-signed
@@ -728,7 +703,7 @@ impl BybitLinear {
         format!("orderbook.{depth}.{symbol}")
     }
 
-    fn kline_topic(symbol: &str, interval: &str) -> Option<String> {
+    fn kline_topic(symbol: &str, interval: Interval) -> Option<String> {
         Some(format!("kline.{}.{symbol}", interval_code(interval)?))
     }
 
@@ -1270,8 +1245,8 @@ impl BybitLinear {
         let Some(interval) = self
             .candles
             .keys()
-            .find(|(s, i)| s == symbol && interval_code(i) == Some(code))
-            .map(|(_, interval)| interval.clone())
+            .find(|(s, i)| s == symbol && interval_code(*i) == Some(code))
+            .map(|(_, interval)| *interval)
         else {
             return;
         };
@@ -1297,7 +1272,7 @@ impl BybitLinear {
                 _ => native,
             };
             self.live_candles.insert(key.clone(), candle);
-            cx.candle(symbol, &key.1, candle);
+            cx.candle(symbol, key.1, candle);
         }
     }
 
@@ -1316,21 +1291,19 @@ impl BybitLinear {
         }) {
             return;
         }
-        let intervals: Vec<String> = self
+        let intervals: Vec<Interval> = self
             .candles
             .keys()
             .filter(|(s, _)| s == symbol)
-            .map(|(_, interval)| interval.clone())
+            .map(|(_, interval)| *interval)
             .collect();
         for interval in intervals {
             let key = (symbol.to_owned(), interval);
-            let seconds = seconds_interval(&key.1).is_some();
+            let seconds = seconds_interval(key.1).is_some();
             let mut live = self.live_candles.get(&key).copied();
             let before = live;
             for &(time, price, size) in &trades {
-                let Some(start) = candle_start(&key.1, time) else {
-                    break;
-                };
+                let start = candle_start(key.1, time);
                 let bar = match live {
                     // Minute and longer bars start from a native kline.
                     None if !seconds => continue,
@@ -1363,7 +1336,7 @@ impl BybitLinear {
             }
             if let Some(candle) = live.filter(|c| Some(*c) != before) {
                 self.live_candles.insert(key.clone(), candle);
-                cx.candle(symbol, &key.1, candle);
+                cx.candle(symbol, key.1, candle);
             }
         }
     }
@@ -1412,7 +1385,7 @@ impl BybitLinear {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         add: bool,
     ) {
         if self.category_for(&symbol) == Category::Option
@@ -1422,13 +1395,10 @@ impl BybitLinear {
             return;
         }
         let trades = !self.variant.is_hyro();
-        let kline = Self::kline_topic(&symbol, &interval);
+        let kline = Self::kline_topic(&symbol, interval);
         // Hyro has no trade feed, so its seconds intervals stay unsupported.
-        if kline.is_none() && !(trades && seconds_interval(&interval).is_some()) {
-            cx.log(
-                LogLevel::Warning,
-                format!("Bybit has no {interval} candles"),
-            );
+        if kline.is_none() && !(trades && seconds_interval(interval).is_some()) {
+            cx.log(LogLevel::Error, interval.unsupported("Bybit"));
             return;
         }
         let key = (symbol.clone(), interval);
@@ -1469,7 +1439,7 @@ impl BybitLinear {
         cx: &mut Cx<'_, Pending>,
         command: CommandId,
         symbol: &str,
-        interval: &str,
+        interval: Interval,
         (limit, from_ms, to_ms): (Option<u32>, Option<f64>, Option<f64>),
     ) {
         if self.category_for(symbol) == Category::Option {
@@ -1481,7 +1451,7 @@ impl BybitLinear {
             return;
         }
         let Some(code) = interval_code(interval) else {
-            cx.done(command, Err(format!("Bybit has no {interval} candles")));
+            cx.done(command, Err(interval.unsupported("Bybit")));
             return;
         };
         let query = Query::new()
@@ -1911,8 +1881,11 @@ impl BybitLinear {
 impl Venue for BybitLinear {
     type Pending = Pending;
 
-    fn supports_options(&self) -> bool {
-        self.category_enabled(Category::Option)
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            options: self.category_enabled(Category::Option),
+            ..safe_cex_engine::Capabilities::BASE
+        }
     }
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1978,7 +1951,7 @@ impl Venue for BybitLinear {
                     self.candles
                         .keys()
                         .filter(|(symbol, _)| self.owns_symbol(symbol))
-                        .filter_map(|(symbol, interval)| Self::kline_topic(symbol, interval)),
+                        .filter_map(|(symbol, interval)| Self::kline_topic(symbol, *interval)),
                 );
                 topics.extend(
                     self.trade_subscribers
@@ -2168,7 +2141,7 @@ impl Venue for BybitLinear {
                 limit,
                 from_ms,
                 to_ms,
-            } => self.fetch_candles(cx, command, &symbol, &interval, (limit, from_ms, to_ms)),
+            } => self.fetch_candles(cx, command, &symbol, interval, (limit, from_ms, to_ms)),
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.on_trade_command(cx, trade),
         }
@@ -2348,18 +2321,24 @@ mod secondary_tests;
 #[cfg(test)]
 mod candle_start_tests {
     use super::candle_start;
+    use safe_cex_engine::model::Interval;
 
     #[test]
     fn calendar_bars_match_native_week_and_month_boundaries() {
         // 2026-10-20 12:34:56 UTC is a Tuesday.
         let t = 1_792_499_696.0;
-        assert_eq!(candle_start("1w", t), Some(1_792_368_000.0)); // Monday 2026-10-19
-        assert_eq!(candle_start("1M", t), Some(1_790_812_800.0)); // 2026-10-01
-        assert_eq!(candle_start("1M", 1_709_251_199.0), Some(1_706_745_600.0)); // 2024-02-29 -> 02-01
-        assert_eq!(candle_start("1M", 1_704_067_200.0), Some(1_704_067_200.0)); // 2024-01-01
-        assert_eq!(candle_start("1d", t), Some(1_792_454_400.0));
-        assert_eq!(candle_start("4h", t), Some(1_792_497_600.0));
-        assert_eq!(candle_start("15s", t), Some(1_792_499_685.0));
-        assert_eq!(candle_start("7s", t), None);
+        assert_eq!(candle_start(Interval::W1, t), 1_792_368_000.0); // Monday 2026-10-19
+        assert_eq!(candle_start(Interval::Mo1, t), 1_790_812_800.0); // 2026-10-01
+        assert_eq!(
+            candle_start(Interval::Mo1, 1_709_251_199.0),
+            1_706_745_600.0
+        ); // 2024-02-29 -> 02-01
+        assert_eq!(
+            candle_start(Interval::Mo1, 1_704_067_200.0),
+            1_704_067_200.0
+        ); // 2024-01-01
+        assert_eq!(candle_start(Interval::D1, t), 1_792_454_400.0);
+        assert_eq!(candle_start(Interval::H4, t), 1_792_497_600.0);
+        assert_eq!(candle_start(Interval::S15, t), 1_792_499_685.0);
     }
 }

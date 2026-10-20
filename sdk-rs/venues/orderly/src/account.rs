@@ -1,10 +1,13 @@
 use crate::{Connection, Orderly, Pending, Seed, sign, symbol, wire::*};
 use safe_cex_engine::coverage::SnapshotCoverage;
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Request {
     Info,
@@ -17,6 +20,7 @@ pub enum Request {
         rows: Vec<Position>,
         invalid: bool,
         revision: u64,
+        issued: u64,
         stamps: HashMap<String, (Option<u64>, u64)>,
         coverage: SnapshotCoverage<String>,
     },
@@ -152,6 +156,8 @@ pub struct Account {
     totals: HashMap<String, (f64, f64)>,
     terminal: HashSet<String>,
     terminal_order: VecDeque<String>,
+    positions_guard: StaleGuard,
+    positions_issued: u64,
 }
 impl Default for Account {
     fn default() -> Self {
@@ -181,6 +187,8 @@ impl Default for Account {
             totals: HashMap::new(),
             terminal: HashSet::new(),
             terminal_order: VecDeque::new(),
+            positions_guard: StaleGuard::default(),
+            positions_issued: 0,
         }
     }
 }
@@ -381,12 +389,14 @@ impl Orderly {
     pub(crate) fn account_poll(&mut self, cx: &mut Cx<'_, Pending>, orders: bool) {
         if !self.account.inflight[1] {
             self.account.inflight[1] = true;
+            self.account.positions_issued += 1;
             self.account_read(
                 cx,
                 Request::Positions {
                     rows: vec![],
                     invalid: false,
                     revision: self.account.positions_revision,
+                    issued: self.account.positions_issued,
                     stamps: HashMap::new(),
                     coverage: SnapshotCoverage::default(),
                 },
@@ -1011,11 +1021,20 @@ impl Orderly {
                 mut rows,
                 invalid,
                 revision,
+                issued,
                 stamps,
                 coverage,
             } => {
                 self.account.inflight[1] = false;
-                if invalid || revision != self.account.positions_revision {
+                if invalid {
+                    return;
+                }
+                let current = revision == self.account.positions_revision;
+                if !self
+                    .account
+                    .positions_guard
+                    .admit_issued(current, issued, STALE_SNAPSHOT_LIMIT)
+                {
                     return;
                 }
                 let Ok(meta) = serde_json::from_str::<PositionMeta>(data) else {
@@ -1025,6 +1044,21 @@ impl Orderly {
                 let upnl = safe_cex_engine::num::round_half_up(
                     rows.iter().map(|p| p.unrealized_pnl).sum::<f64>() * 100.0,
                 ) / 100.0;
+                let balance = Balance {
+                    total: meta.total_collateral_value - upnl,
+                    free: meta.free_collateral,
+                    used: meta.total_collateral_value - meta.free_collateral - upnl,
+                    upnl,
+                };
+                // Positions are pushed, so a stale read only commits the REST-only
+                // balance; stale rows could drop a position opened mid-read.
+                if !current {
+                    if coverage.rejected() == 0 {
+                        cx.store.set_balance(balance);
+                    }
+                    self.account_poll(cx, false);
+                    return;
+                }
                 if stamps
                     .iter()
                     .any(|(id, new)| snapshot_older(self.account.position_stamps.get(id), *new))
@@ -1054,12 +1088,7 @@ impl Orderly {
                 cx.store.set_positions(rows);
                 // The balance nets every row's PnL, so a partial snapshot keeps the last one.
                 if coverage.rejected() == 0 {
-                    cx.store.set_balance(Balance {
-                        total: meta.total_collateral_value - upnl,
-                        free: meta.free_collateral,
-                        used: meta.total_collateral_value - meta.free_collateral - upnl,
-                        upnl,
-                    });
+                    cx.store.set_balance(balance);
                 }
                 for s in cx
                     .store
