@@ -16,6 +16,7 @@ enum Step {
         payload: Create,
         order: Box<Order>,
         canceled: Option<String>,
+        reducer: Reducer,
     },
     Cancel {
         ids: Vec<String>,
@@ -410,6 +411,7 @@ impl Coinbase {
                 }),
             }),
             canceled,
+            reducer: reducer(opts.kind, opts.close == Some(true)),
         })
     }
 
@@ -601,7 +603,7 @@ impl Coinbase {
             }
             _ => unreachable!(),
         }
-        let mut planned = HashMap::<(String, OrderSide, bool), f64>::new();
+        let mut planned = HashMap::<(String, OrderSide, Reducer), f64>::new();
         let mut constrained = HashSet::new();
         let excluded: HashSet<_> = job
             .steps
@@ -619,8 +621,8 @@ impl Coinbase {
             .chain(self.trading.queue.iter().flat_map(|j| &j.steps))
             .chain(&job.steps)
         {
-            if let Step::Place { order, .. } = step {
-                let key = (order.symbol.clone(), order.side, protective(order.kind));
+            if let Step::Place { order, reducer, .. } = step {
+                let key = (order.symbol.clone(), order.side, *reducer);
                 if order.reduce_only {
                     constrained.insert(key.clone());
                 }
@@ -632,9 +634,9 @@ impl Coinbase {
                 *planned.entry(key).or_default() += amount;
             }
         }
-        for ((symbol, side, stop), amount) in planned {
-            if constrained.contains(&(symbol.clone(), side, stop))
-                && amount > self.reduction_capacity(cx, &symbol, side, stop, &excluded)?
+        for ((symbol, side, class), amount) in planned {
+            if constrained.contains(&(symbol.clone(), side, class))
+                && amount > self.reduction_capacity(cx, &symbol, side, class, &excluded)?
             {
                 return Err(
                     "Coinbase reduce-only orders exceed observed unreserved position size".into(),
@@ -649,7 +651,7 @@ impl Coinbase {
         cx: &Cx<'_, Pending>,
         symbol: &str,
         side: OrderSide,
-        stop: bool,
+        class: Reducer,
         excluded: &HashSet<String>,
     ) -> Result<f64, String> {
         if self
@@ -686,14 +688,14 @@ impl Coinbase {
         if positions.len() != 1 || !positions[0].contracts.is_finite() {
             return Err("Coinbase reduce-only needs exactly one opposite position".into());
         }
-        // A protective stop and a take-profit close the same position as
+        // Stops, resting take-profits and closes reduce the same position as
         // alternatives, so each class reserves its own remaining size. Executed
-        // and unidentified reductions below count against both classes.
+        // and unidentified reductions below count against every class.
         let mut reserved = 0.0;
         for order in cx.store.orders().iter().filter(|o| {
             o.symbol == symbol
                 && o.side == side
-                && protective(o.kind) == stop
+                && reducer(o.kind, o.close == Some(true)) == class
                 && live(o)
                 && !excluded.contains(&o.id)
         }) {
@@ -1106,6 +1108,7 @@ impl Coinbase {
                 order,
                 payload,
                 canceled,
+                reducer,
             } => {
                 if let Some(id) = canceled
                     && !cx
@@ -1143,7 +1146,7 @@ impl Coinbase {
                             cx,
                             &order.symbol,
                             order.side,
-                            protective(order.kind),
+                            *reducer,
                             &HashSet::new(),
                         )?
                 {
@@ -1541,8 +1544,20 @@ impl Coinbase {
     }
 }
 
-fn protective(kind: OrderType) -> bool {
-    kind == OrderType::StopLoss
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Reducer {
+    Stop,
+    TakeProfit,
+    Close,
+}
+/// A market or explicit close is never held back by resting take-profits.
+fn reducer(kind: OrderType, close: bool) -> Reducer {
+    match kind {
+        OrderType::StopLoss => Reducer::Stop,
+        OrderType::Market => Reducer::Close,
+        _ if close => Reducer::Close,
+        _ => Reducer::TakeProfit,
+    }
 }
 fn reason(code: Option<String>) -> Option<String> {
     code.filter(|c| !c.is_empty() && !c.starts_with("UNKNOWN_"))
