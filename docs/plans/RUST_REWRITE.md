@@ -41,6 +41,10 @@ Action  = WsConnect | WsSend | WsClose
   Hosts run the event loop: a thin layer per target, a few hundred lines each.
 - Time comes in as an event. Replaying recorded traffic is exact and needs no
   fake clock.
+- HTTP effects may carry optional `direct` / `publicCors` route hints. Hosts
+  consume them as routing metadata and never send them to the venue. Public
+  CORS endpoints come from host/provider policy; unconfigured native fallback
+  fails explicitly. Ordinary requests retain account routing.
 - Signing is a plain function call inside the core (`safe-cex-crypto`). The key
   stays wherever the engine runs. A host that delegates signing returns the
   signature as an event.
@@ -91,7 +95,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | --- | --- | --- |
 | 1 | `STRINGS` | `u32 n`, `u32 offsets[n + 1]`, UTF-8 bytes |
 | 2 | `MARKETS` (replace) | `u32 n`; `u32 strings[n][4]` (id, symbol, base, quote); `u32 flags[n]`; f64 columns: precisionAmount, precisionPrice, minAmount, maxAmount, minLeverage, maxLeverage, minPrice, contractSize, takerFee, makerFee |
-| 3 | `TICKERS` (replace) | `u32 n`; `u32 market[n]`; 11 f64 columns in ticker field order |
+| 3 | `TICKERS` (replace) | `u32 n`; `u32 market[n]`; 11 f64 columns in ticker field order; optional appended `u32 symbol[n]`, `u32 id[n]` string references |
 | 4 | `TICKER_DELTAS` | f64 `[ticker, mask, ...changed values]` repeated |
 | 5 | `BOOK` | `u32 market`, `u32 bids`, `u32 asks`, `u32 0`; f64 rows `[price, amount, total]` for bids then asks |
 | 6 | `CANDLES` | `u32 n`; `u32 market[n]`; `u32 interval[n]` (string); f64 rows `[time, open, high, low, close, volume]` |
@@ -101,6 +105,11 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
 | 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
 | 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]`; optional appended f64 `buyLeverage[n]`, `sellLeverage[n]` |
+
+`TICKERS` appends identity string references only when a ticker has no current
+market row. Those rows retain market index `0xFFFFFFFF`; consumers use the tail
+to preserve their native symbol and ID. The eleven numeric columns and packed
+delta row indexes retain their existing offsets. No market is synthesized.
 
 Venues with independent hedge leverage append f64 `buyLeverage[n]` and
 `sellLeverage[n]` columns to `SETTINGS`. Section length distinguishes this
@@ -314,8 +323,9 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | KuCoin, Phemex, Orderly family | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; plan: `RUST_PARADEX.md` |
+| AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
-| GRVT, AsterDEX, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
+| GRVT, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 
@@ -364,3 +374,12 @@ appended zero count explicitly clears them. Bitget inverse frames carry native
 order amount/filled and display remaining; their position notional is the native
 contract quantity. The worker adapter retains these native quantities in the
 existing TS `extra` fields alongside coin balances.
+
+After the optional coin columns, a `BALANCE` payload may append full per-currency
+balances: `u32 count`, `u32 currency[count]` string references, 8-byte padding,
+then f64 columns `used[count]`, `free[count]`, `total[count]`, `upnl[count]`.
+Currency-only frames first emit the empty coin extension. Absent currency tails
+leave that table unspecified; an appended zero count explicitly clears it.
+Legacy scalar and coin-only payloads retain their exact layout. The host exposes
+the full values as `currencies: Record<string, Balance>` alongside aggregate
+values and the existing optional `coins` table.

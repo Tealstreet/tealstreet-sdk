@@ -408,3 +408,18 @@ KuCoin integration; the complete 27-task repository test run passed before that
 merge and exact-head CI reruns the full suite. Earlier optional no-egress misses
 were not standard-gate failures; the invocation error is corrected explicitly
 rather than changing benchmark policy. Exact-head green CI remains required.
+
+### AsterDEX landing integration
+
+All 27 checks passed on `959925fa34`, but AsterDEX #1322 landed before merge.
+Its typed public-route/deadline metadata, account read routing and native wallet
+signing now coexist with Paradex's binary ingress, private JWT headers and recovery.
+The roster retains both completed implementations. Both-parent independent review
+passes; 279 harness, 54 host and 206 transport-routing tests pass. Workspace and
+WASM Clippy, bans, format, native host tests, typecheck and lint also pass.
+
+Paradex rejects the new caller STP option before any batch I/O rather than silently
+dropping it. Five newly introduced Aster-specific engine commands return explicit
+unsupported errors on Paradex instead of leaving callers waiting. Regression tests
+cover these boundaries. Fresh standard artifact/replay gates and exact-head CI are
+required after this integration; the latest results are posted on PR #1320.

@@ -664,6 +664,7 @@ impl Woo {
                 client_order_id: None,
                 close: None,
                 max_slippage_pct: None,
+                stp_mode: None,
                 bybit_bbo: None,
                 bybit_slippage_tolerance_ticks: None,
             };

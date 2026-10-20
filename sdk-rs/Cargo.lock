@@ -3609,6 +3609,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-asterdex"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "safe-cex-venue-binance",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-venue-backpack"
 version = "0.1.0"
 dependencies = [
@@ -3798,6 +3809,7 @@ version = "0.1.0"
 dependencies = [
  "js-sys",
  "safe-cex-engine",
+ "safe-cex-venue-asterdex",
  "safe-cex-venue-backpack",
  "safe-cex-venue-binance",
  "safe-cex-venue-bingx",

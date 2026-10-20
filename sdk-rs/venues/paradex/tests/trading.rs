@@ -753,3 +753,63 @@ fn unsupported_bybit_controls_reject_the_whole_batch_before_quotes_or_writes() {
         }
     }
 }
+
+#[test]
+fn unsupported_stp_controls_reject_the_whole_batch_before_quotes_or_writes() {
+    use safe_cex_engine::model::StpMode;
+    for mode in [
+        StpMode::ExpireTaker,
+        StpMode::ExpireMaker,
+        StpMode::ExpireBoth,
+    ] {
+        let mut h = private();
+        let mut unsupported = opts(OrderType::Market);
+        unsupported.client_order_id = Some("unsupported-stp".into());
+        unsupported.max_slippage_pct = Some(0.1);
+        unsupported.stp_mode = Some(mode);
+        place(&mut h, 190, vec![opts(OrderType::Limit), unsupported]);
+        assert!(
+            h.result(190)
+                .unwrap_err()
+                .contains("not supported by Paradex")
+        );
+        assert!(h.pending.is_empty());
+    }
+    for mode in ["", "UNKNOWN"] {
+        let json = format!(
+            r#"{{"symbol":"BTC-USD-PERP","type":"limit","side":"buy","amount":1,"stpMode":"{mode}"}}"#
+        );
+        assert!(serde_json::from_str::<PlaceOrderOpts>(&json).is_err());
+    }
+}
+
+#[test]
+fn unsupported_aster_commands_complete_with_an_error_instead_of_waiting_forever() {
+    use safe_cex_engine::model::StpMode;
+    for command in [
+        Command::FetchAccount { command: 191 },
+        Command::FetchStpMode { command: 191 },
+        Command::SetStpMode {
+            command: 191,
+            mode: StpMode::ExpireTaker,
+        },
+        Command::FetchOrderBook {
+            command: 191,
+            symbol: "BTC-USD-PERP".into(),
+            limit: None,
+        },
+        Command::CancelOrdersWithSymbols {
+            command: 191,
+            orders: vec![],
+        },
+    ] {
+        let mut h = private();
+        h.command(command);
+        assert!(
+            h.result(191)
+                .unwrap_err()
+                .contains("not supported by Paradex")
+        );
+        assert!(h.pending.is_empty());
+    }
+}

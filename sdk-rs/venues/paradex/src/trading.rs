@@ -255,6 +255,9 @@ fn place_operations(
     {
         return Err("Bybit BBO and TickSize controls are not supported by Paradex".into());
     }
+    if orders.iter().any(|o| o.stp_mode.is_some()) {
+        return Err("Caller STP controls are not supported by Paradex".into());
+    }
     validate_caller_ids(orders, cx)?;
     let signer = account
         .credentials()
@@ -391,6 +394,18 @@ impl Trading {
         command: Command,
         price_bands: &HashMap<String, f64>,
     ) -> bool {
+        if let Command::CancelOrdersWithSymbols { command, .. }
+        | Command::FetchStpMode { command }
+        | Command::SetStpMode { command, .. }
+        | Command::FetchAccount { command }
+        | Command::FetchOrderBook { command, .. } = &command
+        {
+            cx.done(
+                *command,
+                Err("This query or control is not supported by Paradex".into()),
+            );
+            return true;
+        }
         if let Command::PlaceOrders { command, orders } = &command
             && orders.iter().any(capped)
         {

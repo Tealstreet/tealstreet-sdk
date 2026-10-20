@@ -230,12 +230,15 @@ test('position IDs survive transfer and legacy frames never read the next sectio
   assert.equal(legacy.status().loaded, 31);
 });
 
-function balanceFrame(coins) {
-  const strings = coins?.map((c) => c.base) ?? [];
+function balanceFrame(coins, currencies) {
+  const currencyRows = Object.entries(currencies ?? {});
+  const strings = [...(coins?.map((c) => c.base) ?? []), ...currencyRows.map(([currency]) => currency)];
   const stringBuffer = stringFrame(strings).buffer;
-  const count = strings.length;
+  const count = coins?.length ?? 0;
   const at = (36 + count * 4 + 7) & ~7;
-  const length = coins ? at + count * 16 : 32;
+  const coinLength = coins || currencies ? at + count * 16 : 32;
+  const currencyAt = (coinLength + 4 + currencyRows.length * 4 + 7) & ~7;
+  const length = currencies ? currencyAt + currencyRows.length * 32 : coinLength;
   const result = new ArrayBuffer(16 + 8 + length + stringBuffer.byteLength - 16);
   const view = new DataView(result);
   new Uint8Array(result).set(new Uint8Array(stringBuffer, 0, 16));
@@ -243,12 +246,21 @@ function balanceFrame(coins) {
   view.setUint16(16, SECTION.BALANCE, true);
   view.setUint32(20, length, true);
   [1, 2, 3, 4].forEach((v, i) => view.setFloat64(24 + i * 8, v, true));
-  if (coins) {
+  if (coins || currencies) {
     view.setUint32(56, count, true);
-    coins.forEach((coin, i) => {
+    (coins ?? []).forEach((coin, i) => {
       view.setUint32(60 + i * 4, i, true);
       view.setFloat64(24 + at + i * 8, coin.amount, true);
       view.setFloat64(24 + at + count * 8 + i * 8, coin.notional, true);
+    });
+  }
+  if (currencies) {
+    view.setUint32(24 + coinLength, currencyRows.length, true);
+    currencyRows.forEach(([, values], i) => {
+      view.setUint32(24 + coinLength + 4 + i * 4, count + i, true);
+      ['used', 'free', 'total', 'upnl'].forEach((field, column) => {
+        view.setFloat64(24 + currencyAt + column * currencyRows.length * 8 + i * 8, values[field], true);
+      });
     });
   }
   new Uint8Array(result, 24 + length).set(new Uint8Array(stringBuffer, 16));
@@ -263,4 +275,77 @@ test('optional collateral columns survive buffer transfer and distinguish absent
   const transferred = structuredClone(buffer, { transfer: [buffer] });
   assert.equal(buffer.byteLength, 0);
   assert.deepEqual(new Frame(transferred).balance().coins, { BTC: coins[0], ETH: coins[1] });
+});
+
+test('optional currency balances preserve full values, coexist with coins, and clear explicitly', () => {
+  const currencies = {
+    USDT: { used: 1.25, free: 8.75, total: 10, upnl: -3 },
+    USDC: { used: 2, free: 4, total: 6, upnl: 0.5 },
+  };
+  assert.equal(new Frame(balanceFrame()).balance().currencies, undefined);
+  assert.equal(new Frame(balanceFrame([])).balance().currencies, undefined);
+  assert.deepEqual(new Frame(balanceFrame(undefined, {})).balance(), { used: 1, free: 2, total: 3, upnl: 4, coins: {}, currencies: {} });
+  const currencyOnly = new Frame(balanceFrame(undefined, currencies)).balance();
+  assert.deepEqual(currencyOnly.currencies, currencies);
+  assert.deepEqual(currencyOnly.coins, {});
+  const coins = [{ base: 'BTC', amount: 0.1, notional: 5000 }];
+  const buffer = balanceFrame(coins, currencies);
+  const transferred = structuredClone(buffer, { transfer: [buffer] });
+  assert.equal(buffer.byteLength, 0);
+  const balance = new Frame(transferred).balance();
+  assert.deepEqual(balance.coins, { BTC: coins[0] });
+  assert.deepEqual(balance.currencies, currencies);
+  const unusual = Object.fromEntries([['__proto__', currencies.USDT]]);
+  const decoded = new Frame(balanceFrame(undefined, unusual)).balance().currencies;
+  assert.deepEqual(Object.keys(decoded), ['__proto__']);
+  assert.deepEqual(decoded.__proto__, currencies.USDT);
+  assert.equal(Object.getPrototypeOf(decoded), Object.prototype);
+});
+
+function tickerFrame(identities) {
+  const count = 2;
+  const strings = ['LIVEUSDT', 'OLDUSDT', 'native-retired-id'];
+  const stringBuffer = stringFrame(strings).buffer;
+  const at = (4 + count * 4 + 7) & ~7;
+  const tail = at + count * TICKER_FIELDS.length * 8;
+  const length = tail + (identities ? count * 8 : 0);
+  const result = new ArrayBuffer(24 + length + stringBuffer.byteLength - 16);
+  const view = new DataView(result);
+  new Uint8Array(result).set(new Uint8Array(stringBuffer, 0, 16));
+  view.setUint16(6, 2, true);
+  view.setUint16(16, SECTION.TICKERS, true);
+  view.setUint32(20, length, true);
+  view.setUint32(24, count, true);
+  view.setUint32(28, 0, true);
+  view.setUint32(32, identities ? NONE : 1, true);
+  TICKER_FIELDS.forEach((_, column) => {
+    view.setFloat64(24 + at + column * count * 8, column + 1, true);
+    view.setFloat64(24 + at + column * count * 8 + 8, column + 100, true);
+  });
+  if (identities) {
+    [0, 1, 0, 2].forEach((reference, i) => view.setUint32(24 + tail + i * 4, reference, true));
+  }
+  new Uint8Array(result, 24 + length).set(new Uint8Array(stringBuffer, 16));
+  return result;
+}
+
+test('orphan ticker identities survive transfer and packed deltas without changing legacy tables', () => {
+  const legacy = new Frame(tickerFrame(false)).tickers();
+  assert.equal(legacy.identity, undefined);
+  assert.deepEqual([...legacy.last], [3, 102]);
+  const buffer = tickerFrame(true);
+  const frame = new Frame(structuredClone(buffer, { transfer: [buffer] }));
+  assert.equal(buffer.byteLength, 0);
+  const tickers = frame.tickers();
+  assert.deepEqual([...tickers.market], [0, NONE]);
+  assert.deepEqual(tickers.identity(0), { symbol: 'LIVEUSDT', id: 'LIVEUSDT' });
+  assert.deepEqual(tickers.identity(1), { symbol: 'OLDUSDT', id: 'native-retired-id' });
+  assert.deepEqual([...tickers.last], [3, 102]);
+  const state = new TickerState();
+  state.apply(frame);
+  state.apply({ tickers: () => undefined, tickerDeltas: () => Float64Array.of(1, 4, 500) });
+  assert.equal(state.columns.last[1], 500);
+  assert.deepEqual(state.identity(1), { symbol: 'OLDUSDT', id: 'native-retired-id' });
+  state.apply(new Frame(tickerFrame(false)));
+  assert.equal(state.identity, undefined, 'a later legacy replacement clears the old identity closure');
 });

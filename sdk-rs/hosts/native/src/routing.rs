@@ -97,6 +97,10 @@ pub struct RoutingPlan {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_http: Option<HttpRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_http: Option<HttpRoute>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_cors_http: Option<HttpRoute>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_header: Option<String>,
     pub ws: WsRoutes,
     pub ws_headers: BTreeMap<String, String>,
@@ -136,19 +140,32 @@ impl RoutingState {
         }
     }
 
-    pub fn http(&self, request: &HttpRequest) -> HttpRoute {
+    pub fn http(&self, request: &HttpRequest) -> Result<HttpRoute, String> {
+        match request.route {
+            Some(safe_cex_engine::RequestRoute::Direct) => return Ok(HttpRoute::default()),
+            Some(safe_cex_engine::RequestRoute::PublicCors) => {
+                return self
+                    .plan
+                    .public_cors_http
+                    .clone()
+                    .ok_or_else(|| "Public CORS request routing is not configured".into());
+            }
+            None => {}
+        }
         let public = self.plan.public_header.as_ref().is_some_and(|header| {
             !request
                 .headers
                 .iter()
                 .any(|(name, value)| name.eq_ignore_ascii_case(header) && !value.is_empty())
         });
-        if public {
+        Ok(if public {
             self.plan.public_http.as_ref().unwrap_or(&self.plan.http)
+        } else if request.method == safe_cex_engine::Method::Get {
+            self.plan.read_http.as_ref().unwrap_or(&self.plan.http)
         } else {
             &self.plan.http
         }
-        .clone()
+        .clone())
     }
 
     pub fn socket(
@@ -694,15 +711,107 @@ mod tests {
         let mut request = HttpRequest {
             id: RequestId(0),
             method: Method::Get,
+            route: None,
+            timeout_ms: None,
             url: "https://venue.invalid".into(),
             headers: vec![],
             body: None,
         };
-        assert_eq!(state.http(&request).prefix, "public");
+        assert_eq!(state.http(&request).unwrap().prefix, "public");
         request.headers.push(("x-mbx-apikey", String::new()));
-        assert_eq!(state.http(&request).prefix, "public");
+        assert_eq!(state.http(&request).unwrap().prefix, "public");
         request.headers[0].1 = "venue-key".into();
-        assert_eq!(state.http(&request).prefix, "private");
+        assert_eq!(state.http(&request).unwrap().prefix, "private");
+    }
+
+    #[test]
+    fn secondary_read_route_applies_only_to_signed_gets() {
+        let state = state(RoutingPlan {
+            http: HttpRoute {
+                prefix: "primary".into(),
+                ..HttpRoute::default()
+            },
+            read_http: Some(HttpRoute {
+                prefix: "secondary-cors".into(),
+                mode: HttpRouteMode::How,
+                tunnel_url: Some("wss://read-tunnel.example".into()),
+                ..HttpRoute::default()
+            }),
+            public_http: Some(HttpRoute {
+                prefix: "public".into(),
+                ..HttpRoute::default()
+            }),
+            public_header: Some("X-MBX-APIKEY".into()),
+            ..RoutingPlan::default()
+        });
+        let mut request = HttpRequest {
+            id: RequestId(0),
+            method: Method::Get,
+            route: None,
+            timeout_ms: None,
+            url: "https://fapi.asterdex.com/fapi/v3/account?signature=exact".into(),
+            headers: vec![("x-mbx-apikey", "read-wallet".into())],
+            body: None,
+        };
+        assert_eq!(state.http(&request).unwrap().prefix, "secondary-cors");
+        assert_eq!(state.http(&request).unwrap().mode, HttpRouteMode::How);
+        for method in [Method::Post, Method::Put, Method::Delete] {
+            request.method = method;
+            assert_eq!(state.http(&request).unwrap().prefix, "primary");
+        }
+        request.method = Method::Get;
+        request.headers.clear();
+        assert_eq!(state.http(&request).unwrap().prefix, "public");
+        request.headers.push(("X-MBX-APIKEY", String::new()));
+        assert_eq!(state.http(&request).unwrap().prefix, "public");
+    }
+
+    #[test]
+    fn public_request_hints_bypass_account_routing_and_fail_closed_when_unconfigured() {
+        let state = state(RoutingPlan {
+            http: HttpRoute {
+                prefix: "account-proxy".into(),
+                authorize: true,
+                ..HttpRoute::default()
+            },
+            public_cors_http: Some(HttpRoute {
+                prefix: "https://public-cors.test".into(),
+                ..HttpRoute::default()
+            }),
+            ..RoutingPlan::default()
+        });
+        let mut request = HttpRequest {
+            id: RequestId(0),
+            method: Method::Get,
+            route: Some(safe_cex_engine::RequestRoute::Direct),
+            timeout_ms: None,
+            url: "https://venue.test/time".into(),
+            headers: vec![],
+            body: None,
+        };
+        let direct = state.http(&request).unwrap();
+        assert!(direct.prefix.is_empty());
+        assert!(!direct.authorize);
+        assert!(direct.headers.is_empty());
+        assert_eq!(direct.mode, HttpRouteMode::Direct);
+        request.route = Some(safe_cex_engine::RequestRoute::PublicCors);
+        let cors = state.http(&request).unwrap();
+        assert_eq!(cors.prefix, "https://public-cors.test");
+        assert!(!cors.authorize);
+        assert!(cors.headers.is_empty());
+        assert_eq!(cors.mode, HttpRouteMode::Direct);
+        let absent = RoutingState::new(
+            RoutingPlan::default(),
+            Arc::new(|| Box::pin(async { Ok(String::new()) })),
+        );
+        assert!(
+            absent
+                .http(&request)
+                .unwrap_err()
+                .contains("not configured")
+        );
+        request.route = None;
+        assert_eq!(state.http(&request).unwrap().prefix, "account-proxy");
     }
 
     #[test]
@@ -860,6 +969,8 @@ mod tests {
                 let mut request = HttpRequest {
                     id: RequestId(1),
                     method: Method::Get,
+                    route: None,
+                    timeout_ms: None,
                     url: http.request.url,
                     headers: vec![("Content-Type", "application/json".into())],
                     body: None,
@@ -867,7 +978,7 @@ mod tests {
                 if let Some(key) = http.request.headers.get("x-mbx-apikey") {
                     request.headers.push(("x-mbx-apikey", key.clone()));
                 }
-                let actual = state.http(&request);
+                let actual = state.http(&request).unwrap();
                 let rewritten = if actual.prefix.is_empty() {
                     request.url.clone()
                 } else {
