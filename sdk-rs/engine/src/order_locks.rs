@@ -57,7 +57,12 @@ impl OrderLocks {
                     .extend(orders.iter().map(|o| o.symbol.clone()));
                 *command
             }
-            Command::AmendOrderWithSymbol { command, id, symbol, .. } => {
+            Command::AmendOrderWithSymbol {
+                command,
+                id,
+                symbol,
+                ..
+            } => {
                 scope.ids.push(id.clone());
                 scope.symbols.push(symbol.clone());
                 *command

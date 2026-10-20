@@ -1057,7 +1057,8 @@ impl<V: Venue> Engine<V> {
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
         #[cfg(feature = "order-locks")]
-        if let Event::Command(command) = &event
+        if self.venue.guard_order_mutations()
+            && let Event::Command(command) = &event
             && let Some(id) = command.completion_id()
             && !self.io.active_commands.insert(id)
         {
@@ -3166,7 +3167,13 @@ mod signing_tests {
         );
         assert!(engine.io.signatures.is_empty());
         // A duplicate signer outcome cannot consume the live HTTP request's provenance.
-        engine.handle(101., Event::PayloadSignFailed { request, error: "late duplicate signer failure" });
+        engine.handle(
+            101.,
+            Event::PayloadSignFailed {
+                request,
+                error: "late duplicate signer failure",
+            },
+        );
         assert_eq!(engine.io.order_read_tokens.get(&request), Some(&0));
         engine.handle(
             200.,
