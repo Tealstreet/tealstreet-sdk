@@ -361,20 +361,23 @@ impl Store {
 
     /// Mutate ticker values, keeping its symbol identity; changed fields go out as deltas.
     pub fn update_ticker(&mut self, symbol: &str, update: impl FnOnce(&mut Ticker)) {
-        // Before the seed, live data may recover a catalogue row; afterwards the
-        // seed decides which markets have tickers (as TS does), except for a
-        // funded asset a venue still needs to value.
-        let recover = !self.loaded.tickers
-            || self
-                .market(symbol)
-                .is_some_and(|market| self.wanted_ticker_bases.contains(&market.base));
-        let index = if recover {
-            self.ensure_ticker(symbol)
-        } else {
-            self.ticker_index(symbol)
-        };
-        let Some(index) = index else {
-            return;
+        // An existing row is the hot path: live feeds update every tick.
+        let index = match self.ticker_index(symbol) {
+            Some(index) => index,
+            None => {
+                // Before the seed, live data may recover a catalogue row;
+                // afterwards the seed decides which markets have tickers (as TS
+                // does), except for a funded asset a venue still needs to value.
+                let recover = !self.loaded.tickers
+                    || (!self.wanted_ticker_bases.is_empty()
+                        && self
+                            .market(symbol)
+                            .is_some_and(|market| self.wanted_ticker_bases.contains(&market.base)));
+                match recover.then(|| self.ensure_ticker(symbol)).flatten() {
+                    Some(index) => index,
+                    None => return,
+                }
+            }
         };
         self.update_ticker_at(index, update);
     }
