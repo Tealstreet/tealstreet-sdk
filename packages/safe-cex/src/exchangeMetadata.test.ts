@@ -379,6 +379,7 @@ describe('exchangeMetadata', () => {
 
       expect(mobileSupported).toEqual([
         'binance',
+        'binanceinverse',
         'binancepm',
         'binancespot',
         'bitget',
@@ -398,7 +399,6 @@ describe('exchangeMetadata', () => {
       });
 
       [
-        'binanceinverse',
         'bitgetinverse',
         'bitgetusdc',
         'hyrotrader',
@@ -424,8 +424,8 @@ describe('exchangeMetadata', () => {
       });
     });
 
-    it('keeps Binance inverse preview-only while COIN-M beta testing settles', () => {
-      expect(exchangeMetadata.binanceinverse.enabled).toBe(false);
+    it('keeps Binance inverse production-enabled after the COIN-M rollout', () => {
+      expect(exchangeMetadata.binanceinverse.enabled).toBe(true);
       expect(exchangeMetadata.binanceinverse.enabledInDev).toBe(true);
       expect(exchangeMetadata.binanceinverse.enableInPreview).toBe(true);
       expect(exchangeMetadata.binanceinverse.requiresCors).toBe(true);

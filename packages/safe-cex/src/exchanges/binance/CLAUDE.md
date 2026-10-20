@@ -8,8 +8,8 @@ This directory contains five Binance exchange variants for Tealstreet: **USD-M F
 | ------------------ | ------------------- | ----------------------------------- | ------------------------------ | ------------------------- |
 | Exchange class     | `BinanceExchange`   | `BinanceInverseExchange`            | `BinancePMExchange`            | `BinanceSpotExchange`     |
 | Pretty name        | Binance             | Binance Inverse                     | Binance Portfolio Margin       | Binance Spot              |
-| Production enabled | Yes                 | No (`enabledInDev: true`, preview off) | Yes                            | No (`enabledInDev: true`) |
-| Testnet support    | Yes                 | Yes                                 | Yes                            | Yes                       |
+| Production enabled | Yes                 | Yes                                 | Yes                            | No (`enabledInDev: true`) |
+| Testnet support    | Yes                 | No                                  | Yes                            | Yes                       |
 
 ## API Documentation
 
