@@ -91,6 +91,18 @@ describe('Rust bridge routes from the engine capability record', () => {
     });
   });
 
+  it('loads the record by creating the engine without starting it', async () => {
+    const { exchange, started } = fixture({ fillHistory: false, orderHistory: false, incomeHistory: false });
+    await expect(exchange.loadCapabilities()).resolves.toMatchObject({ fillHistory: false, orderHistory: false });
+    expect(started).not.toHaveBeenCalled();
+  });
+
+  it('answers a client order lookup from open orders before an engine exists', async () => {
+    const { exchange, commands } = fixture({ clientOrderLookup: true });
+    await expect(exchange.findOrderByClientOrderId('BTC', 'id-1')).resolves.toEqual({ found: false, definitive: false });
+    expect(commands).toEqual([]);
+  });
+
   it('keeps reported history axes as engine queries', async () => {
     const { exchange } = fixture({});
     await exchange.start();

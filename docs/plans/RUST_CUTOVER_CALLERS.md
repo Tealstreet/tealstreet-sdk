@@ -237,6 +237,14 @@ Rust venues report theirs once the engine exists, so read after `start()`.
 | `scripts/history-audit/lib/venue-survey.ts:107` | `!isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')` | `exchange.capabilities.closedPnl` |
 | `scripts/history-audit/lib/venue-survey.ts:165` | `isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')` | `!exchange.capabilities.fillHistory` |
 
+Main-thread mirrors (`createExchangeFromAccount` objects that apply worker
+frames and never create an engine) do not know a Rust venue's record yet, so
+their history answers stay at the base defaults until frames carry the record
+(next capabilities PR). `apps/web/src/order/lostSendResolver.ts:82` needs no
+change: without an engine, `findOrderByClientOrderId` answers from open orders,
+never definitively, as before. Callers that need the record on an unstarted
+exchange await `exchange.loadCapabilities()` first, as `exchange-mcp` does.
+
 `RUST_VENUES` is now a `ReadonlySet<ExchangeName>` (use `isRustVenue`), and the
 engine host no longer has `accountId()` (`getAccount()` answers for every venue
 that reports an account lookup). No tealstreet-next file outside the mirrored

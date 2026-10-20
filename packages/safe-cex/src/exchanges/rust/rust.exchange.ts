@@ -56,7 +56,7 @@ import {
   resolveAsterDEXApiVersion,
   resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
-import { BaseExchange, markBaseCapabilityFallback } from '../base';
+import { BaseExchange, type ExchangeCapabilities, markBaseCapabilityFallback } from '../base';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import {
   HYROTRADER_PROD_URL,
@@ -303,6 +303,11 @@ export class RustEngineExchange extends BaseExchange {
   onFrame?: (frame: ArrayBuffer) => void;
   private stopPollingConfig?: () => void;
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
+
+  override loadCapabilities = async (): Promise<ExchangeCapabilities> => {
+    await this.ensureHost();
+    return this.capabilities;
+  };
 
   /** What the venue answers, as its engine reports it; unknown until the engine exists. */
   get engineCapabilities(): EngineCapabilities | undefined {
@@ -637,7 +642,7 @@ export class RustEngineExchange extends BaseExchange {
         ...(this.name === 'weex' ? { privateWsHeaders: Boolean(transport.webSocketHeaders) } : {}),
       }),
     );
-    this.host = new EngineHost(
+    const host = new EngineHost(
       engine,
       ['backpack', 'coinbase', 'coinbasespot'].includes(this.name) || orderlyNames.has(this.name)
         ? { ...transport, now: virtualClock.getCurrentTimeMs }
@@ -655,7 +660,13 @@ export class RustEngineExchange extends BaseExchange {
       },
       { commandTimeoutMs: this.commandTimeoutMs },
     );
-    this.adoptCapabilities(this.host.capabilities());
+    try {
+      this.adoptCapabilities(host.capabilities());
+    } catch (error) {
+      host.dispose();
+      throw error;
+    }
+    this.host = host;
   };
 
   protected override workerCommandTimeoutMs = () => this.commandTimeoutMs + 1000;
@@ -1154,8 +1165,9 @@ export class RustEngineExchange extends BaseExchange {
     await this.command({ op: 'cancelSymbolOrders', symbol });
   };
 
+  // Without an engine (a main-thread mirror) the open-order lookup still answers, non-definitively.
   findOrderByClientOrderId = async (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> =>
-    this.requireCapabilities().clientOrderLookup
+    this.capabilityRecord?.clientOrderLookup
       ? this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId })
       : this.findOrderFromOpenOrders(symbol, clientOrderId);
 

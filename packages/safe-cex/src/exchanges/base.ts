@@ -158,6 +158,8 @@ export type BaseCapabilityMethod =
   | 'fetchIncomeHistoryRange'
   | 'fetchHistoricalOrders'
   | 'placeOrder'
+  | 'fetchOrders'
+  | 'fetchPositions'
   | 'start'
   | 'fetchOptionChain'
   | 'fetchOptionExpiries'
@@ -229,6 +231,8 @@ const isInertCapability = (value: unknown, method: BaseCapabilityMethod): boolea
 export const CAPABILITY_METHODS = {
   startup: 'start',
   trading: 'placeOrder',
+  openOrders: 'fetchOrders',
+  positions: 'fetchPositions',
   fillHistory: 'fetchHistoricalFills',
   orderHistory: 'fetchHistoricalOrders',
   incomeHistory: 'fetchIncomeHistory',
@@ -291,6 +295,8 @@ export interface Exchange {
   get isOnline(): boolean;
   /** What this venue can answer. Rust venues know theirs once the engine exists. */
   get capabilities(): ExchangeCapabilities;
+  /** `capabilities`, once the venue can know them (Rust creates its engine, without starting it). */
+  loadCapabilities: () => Promise<ExchangeCapabilities>;
   /**
    * Returns true if this exchange is running in public-data-only mode.
    */
@@ -608,6 +614,8 @@ export class BaseExchange implements Exchange {
   get isPublicDataOnly(): boolean {
     return this.options.publicDataOnly === true || !this.canSign;
   }
+
+  loadCapabilities = async (): Promise<ExchangeCapabilities> => this.capabilities;
 
   get capabilities(): ExchangeCapabilities {
     const answers = {} as ExchangeCapabilities;
