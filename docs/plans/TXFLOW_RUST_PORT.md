@@ -1,0 +1,215 @@
+# TxFlow Rust port
+
+Branch: `feat/rust-txflow`, based on `origin/feat/rust-rewrite` at
+`7da56dc8a552c595c6844c512ef1de54ff24225b`. Follow `VENUE_PORT_BRIEF.md`.
+Mainnet, preview and production availability remain disabled. Do not stash,
+rebase, force-push, or target master.
+
+## Initial audit and verification constraint
+
+Read the TxFlow `CLAUDE.md` before the implementation. The checked-in
+`txflow.exchange.ts` is a Phase 0 scaffold whose `start()` unconditionally
+rejects with `TXFLOW_PHASE_0_UNIMPLEMENTED_MESSAGE`. It has no public, private,
+trading or query implementation. This is a missing reference implementation,
+not evidence that the venue lacks these APIs.
+
+On 2026-10-20, fetched the official [complete API documentation](https://docs.txflow-testnet.xyz/llms-full.txt)
+and successfully read testnet `POST /info {"type":"perpMeta"}` with
+`x-api-version: 2026-08-16`. The response was HTTP 200 and
+`success: true, code: 0`; BTC and ETH have explicit indices 1 and 2. No writes,
+funding, agent approvals, or mainnet calls were made.
+
+The brief requires a live public recording, private documented-payload tape,
+identical TS/Rust replay output, and lower Rust CPU and memory. A functional
+Rust adapter cannot pass those comparisons against an adapter that refuses
+startup. Do not alias the Hyperliquid TS adapter as TxFlow, normalize away the
+missing reference state, benchmark startup rejection as public traffic, add a
+gate skip, or report these gates passing. Functional landing requires a real
+testnet reference adapter or an explicit change to the verification contract.
+
+An independent sub-agent reviewed this audit and the signing/reuse plan. It
+confirmed the oracle constraint and the protocol differences below. Scope
+clarification is pending; no functional capability is enabled by this plan.
+
+## Reuse audit
+
+Hyperliquid is the closest existing Rust venue, but TxFlow is not a safe
+configuration-only variant. Reuse the MessagePack named-map action hash
+preimage implementation from `venues/hyperliquid/src/sign.rs`, extracting a
+shared primitive only when both production callers exist. Reuse
+`safe-cex-crypto::{ethereum,eip712}`, engine `Book`, streamed array decoding,
+typed Store, socket identities/watchdogs, and paging infrastructure.
+
+Do not copy Hyperliquid account/trading/history state machines: the domains,
+signing schema, action fields, symbol identities, websocket topology, client
+IDs, acknowledgement semantics and pagination differ. Preserve all existing
+Hyperliquid vector and replay gates after any shared extraction. Audit crypto
+call sites before deleting anything; do not introduce unused signing helpers
+or retain first-port leftovers without callers.
+
+## Signing and authentication design
+
+Sources: [Signing](https://docs.txflow-testnet.xyz/api/signing.md),
+[WebSocket API](https://docs.txflow-testnet.xyz/api/websocket.md),
+[Exchange API](https://docs.txflow-testnet.xyz/api/exchange.md),
+[Rate limits](https://docs.txflow-testnet.xyz/api/rate-limits.md).
+
+- Account identity is the main wallet in `applicationId`; `secret` is a locally
+  held, already-approved agent private key. Never use the agent address as
+  `user`. Reads and subscriptions are unsigned. Validate the wallet/key before
+  private I/O and keep credentials out of logs and committed fixtures.
+- Domain: `TxFlow-Testnet`, version `1`, chain ID `2511`, zero verifying
+  contract. The documented domain separator is
+  `839dd579adc05b1545a37213db5dd3dc6928532ddf73dfa1b53f647421060a8f`.
+  No executable mainnet signing path while mainnet is offline.
+- Trading Agent type is
+  `Agent(string txflowNetwork,uint32 chainId,uint32 apiVersion,bytes32 connectionId)`.
+  The corresponding struct carries network `TxFlow-Testnet`, chain `2511`,
+  signing API version `1`. HTTP version `2026-08-16` is a separate concept.
+  Hyperliquid's `Exchange`/`1337` domain and `source` Agent schema cannot be used.
+- For ordinary agent actions, encode a typed MessagePack named map WITHOUT
+  action `type`. Preserve the exact documented declaration order, never sort
+  JSON keys or round-trip through an untyped tree. For `order`, outer fields
+  begin `grouping`, then `orders`; inner order fields are
+  `a,b,p,s,r,t,c,m,expiresAt`. Omit absent optional fields. Prices/sizes retain
+  their exact string spelling, asset IDs remain integers, and address-valued
+  MessagePack fields use binary bytes.
+- Append nonce as eight big-endian bytes, then a zero vault flag or one plus
+  twenty decoded address bytes; Keccak-256 gives `connectionId`.
+  `vaultTransfer` always uses the zero flag. `claimBuilderRewards` retains its
+  action type in its preimage. Neither is a substitute for an ordinary action.
+- EIP-712 uses the TxFlow domain and Agent struct above. Reuse crypto digest
+  signing and canonical low-S signatures, returning 32-byte `r`, `s`, and
+  JSON `v` 27 or 28. `signatureChainId` does not override agent signing.
+- Nonces are milliseconds and unique per signer. Allocate
+  `max(floor(now_ms), previous + 1)` with checked arithmetic and validity
+  bounds; reject non-finite time or exhaustion before writes. Lost responses
+  never trigger blind resubmission. HTTP 429 specifically means no execution;
+  respect `Retry-After` and use a fresh nonce if a bounded retry is implemented.
+- Every `/info` and `/exchange` request has `x-api-version: 2026-08-16` and JSON
+  content type. Public reads carry host routing hints; signing is local and
+  real venue URLs stay in venue code.
+- Direct account-key actions (`approveAgent`, fund transfers, withdrawals,
+  builder approval/revocation) use distinct primary types. An agent key cannot
+  sign them. The connector must not approve or fund accounts automatically.
+  Builder fees require independently confirmed account approval; do not inherit
+  Hyperliquid's builder identity or assume its fee approval is portable.
+- Verify before enabling I/O: official order vector (nonce `1700000000000`,
+  no vault) has connection ID
+  `6546d1c3acf430a28a0b2552c66e985f6543646660874734732ae9e9daf4d806`,
+  digest `eae1ae63709636fb9567accd33bc5dd2717bfac4d97e9a853f91c7fb391e1cc6`.
+  Check the published `r/s/v`, the direct `approveAgent` vector, named map bytes,
+  optional omission, field order, integer asset representation, exact decimal
+  strings, vault separation and monotonic nonce behavior. Use the official
+  explicitly disposable vector key only; never test against real credentials.
+
+## Phases and review checkpoints
+
+### 1. Public data
+
+Implement `sdk-rs/venues/txflow` with typed wire structures. Reject non-testnet
+startup before any I/O. Stream `perpMeta` from `data.universe`; map explicit
+`index`, accept USDC crypto perps, drop delisted markets, mark halted markets
+non-tradable, preserve `useNotionalMargin` metadata, and use `priceTick` and
+`szDecimals`. Resolve request `coin`/`asset` as numeric strings and native order
+asset fields as integers, independent of display names.
+
+Seed and stream tickers from documented native fields; funding percent must
+be converted to engine fractional units. Books retain full native depth and
+respect the documented snapshot/delta contracts, event time and reconnect
+fences. Do not borrow Hyperliquid sequence assumptions. Candles and history
+use the documented interval and timestamp conventions.
+
+Use one multiplexed node `/ws` feed and an independently identified business
+`/api-ws` feed, tagged with real roles and engine feed identities. Node
+subscriptions repeat channel type at the top level and inside subscription;
+API-service subscriptions omit the top-level type. Both require fixed
+10-second pings, even under continuous incoming traffic; recognize node
+`{"method":"PONG"}` and API-service `{"channel":"pong"}`. Reconnect invalidates
+books, restores active subscriptions and uses engine timers/watchdogs.
+
+Verify documented payload mapping, stale frames, filtering, header/routing,
+watchdog/reconnect behavior, full books and candles. Sub-agent review, fix,
+targeted tests, fmt/clippy and phase commit.
+
+### 2. Private data
+
+Implement the signing design above, unsigned account-address reads and
+private socket subscriptions. Stream typed clearinghouse state, native open
+orders and per-market settings. Commit authoritative empty state only after
+successful valid reads. Fence reads against intervening stream events, accepted
+writes, disconnect generations and disposal. Keep settings separate from open
+positions; never create zero-size positions for configuration.
+
+The API-service `userFills` subscription is a historical snapshot, not a live
+execution stream. Reconcile native REST executions by execution ID with a
+startup baseline and reconnect deduplication; never fabricate execution prices
+from cumulative order updates. Exactly one engine fill per native execution.
+Account refresh cadence must be defined from documented native behavior, since
+the scaffold has no TS tick to preserve.
+
+Verify official signing vectors and deterministic account race/reconnect/error
+tests. Sub-agent review, fixes, verification and phase commit.
+
+### 3. Trading
+
+Preflight complete batches before any write. Define native supported order
+shapes from verified docs and retain fail-closed controls for unmeasured
+reduce-only auto-cap, partial TP/SL and infinity-stop semantics. TxFlow cloids
+are at most 64 bytes and cannot begin `0x`; Hyperliquid's cloid generator is
+incompatible. Honor caller IDs verbatim only on exactly one native order;
+otherwise reject before writes. Mint distinct valid native IDs for generated
+orders and bracket children.
+
+Use serialized jobs and typed actions for order/cancel/cancelByCloid/modify2,
+leverage/margin and documented position mode. Batch limits are 50 orders and
+200 cancels. A single `statuses:["success"]` applies to the WHOLE action, not
+one row per order. Consensus acceptance does not establish execution or order
+IDs. Request `confirm:"executed"`, distinguish HTTP 202/pending, and resolve
+identity through authoritative order updates/reads keyed by cloid. Never
+manufacture success IDs or retry uncertain writes. `modify2` preserves native
+identity and cumulative filled; omitting `tpsl` clears existing children, so
+preserving a bracket requires explicitly preserving its pair.
+
+Verify all emitted signatures independently in the tape transport, including
+caller IDs, optional key omission, native fields, brackets, pending outcomes,
+semantic rejects, lost replies and read/write races. Sub-agent review, fixes,
+verification and phase commit.
+
+### 4. Queries
+
+Enumerate documented `/info` fills, historical orders, funding, ledger and public
+trade surfaces. Use offset/`hasMore` continuation and typed completeness checks;
+convert milliseconds to the existing rare-result JSON shapes at the boundary.
+Preserve native IDs, execution units, fee signs and currencies. Indexing lag
+cannot prove an order was never placed. Expose unsupported reported surfaces
+explicitly; never label a derived fill fold as venue-reported closed PnL.
+
+Verify payload and pagination behavior, malformed/failed pages, duplicate IDs,
+coverage and range boundaries. Sub-agent review, fixes, verification and commit.
+
+### 5. Integration and gates
+
+Only register functional Rust capability after its reference and core behavior
+exist. Add the Wasm feature/constructor, worker venue mapping, harness venue,
+private tape generator/root script, per-venue build and CI matrix/budget. Keep
+availability flags unchanged. Retain the TS oracle through the gate run; apply
+the spec's deletion rule only when the port actually ships and the harness has
+an explicit supported replacement reference strategy.
+
+Run all gates in the brief: bans, fmt, native clippy/tests, wasm32 clippy/build,
+signed private replay, a live 20-second two-book public capture and trimmed
+fixture, exact output and lower CPU/memory, Binance public/private regression,
+root typecheck/lint/tests and host integration checks. No placeholder performance
+numbers. Review the phase with a sub-agent, fix and commit evidence.
+
+Then push, open PR into `feat/rust-rewrite`, run fresh independent adversarial
+code-correctness reviews and post findings on the PR, fix/repeat, merge current
+landing structure, rerun affected gates, and merge only on green exact-head CI
+and all local gates passing. Cut a fresh branch from fetched landing afterward.
+
+## Progress
+
+- Initial source/API/reuse audit complete; independent review confirms plan.
+- Functional phases and all replay/performance gates pending: working TS oracle
+  is absent. No passing functional gate or production capability is claimed.
