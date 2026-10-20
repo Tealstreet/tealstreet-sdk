@@ -1,7 +1,7 @@
 //! Trading contracts against documented request/response wire shapes.
 mod support;
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
-use safe_cex_engine::{Command, Event, Method};
+use safe_cex_engine::{Command, Event, Method, OrderIdentityKind, OrderIdentityReceipt};
 use safe_cex_venue_paradex::Options;
 use serde::Deserialize;
 use support::*;
@@ -64,6 +64,11 @@ fn capped_buy_uses_a_fresh_public_book_then_a_signed_limit_ioc_with_exact_caller
     assert_eq!(h.pending.len(), 1);
     let quote = h.take("/orderbook/");
     assert_eq!(quote.method, Method::Get);
+    assert!(
+        !h.receipt_trace
+            .iter()
+            .any(|a| matches!(a, ReceiptTrace::Progress(1, _)))
+    );
     assert!(quote.url.ends_with("/orderbook/BTC-USD-PERP?depth=5"));
     assert!(!quote.headers.iter().any(|(n, _)| *n == "Authorization"));
     h.respond(quote, 200, r#"{"bids":[["102","1"]],"asks":[["103","2"]]}"#);
@@ -72,6 +77,16 @@ fn capped_buy_uses_a_fresh_public_book_then_a_signed_limit_ioc_with_exact_caller
     assert_eq!(payload.kind, "LIMIT");
     assert_eq!(payload.price.as_deref(), Some("103"));
     assert_eq!(payload.instruction.as_deref(), Some("IOC"));
+    assert_receipts(
+        &h,
+        &request,
+        1,
+        vec![OrderIdentityReceipt {
+            symbol: "BTC-USD-PERP".into(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity: "caller".into(),
+        }],
+    );
     assert_eq!(payload.client_id.as_deref(), Some("caller"));
     assert!(payload.signature.unwrap().starts_with("[\""));
     assert_eq!(payload.signature_timestamp, Some(h.now as u64));
@@ -173,6 +188,16 @@ fn brackets_have_individual_signatures_and_accept_child_responses_without_a_clie
     let main = h.take("/orders");
     let payload: Payload = serde_json::from_str(main.body.as_deref().unwrap()).unwrap();
     let client = payload.client_id.unwrap();
+    assert_receipts(
+        &h,
+        &main,
+        9,
+        vec![OrderIdentityReceipt {
+            symbol: "BTC-USD-PERP".into(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity: client.clone(),
+        }],
+    );
     h.respond(
         main,
         200,
@@ -184,10 +209,24 @@ fn brackets_have_individual_signatures_and_accept_child_responses_without_a_clie
     assert_eq!(payload.trigger_price.as_deref(), Some("110"));
     assert_eq!(payload.flags, Some(vec!["REDUCE_ONLY".into()]));
     assert!(payload.client_id.is_none());
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|a| matches!(a, ReceiptTrace::Progress(9, _)))
+            .count(),
+        1
+    );
     h.respond(tp, 200, r#"{"id":"tp","client_id":""}"#);
     let sl = h.take("/orders");
     let payload: Payload = serde_json::from_str(sl.body.as_deref().unwrap()).unwrap();
     assert_eq!(payload.kind, "STOP_LOSS_MARKET");
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|a| matches!(a, ReceiptTrace::Progress(9, _)))
+            .count(),
+        1
+    );
     h.respond(sl, 200, r#"{"id":"sl"}"#);
     assert_eq!(h.result(9), Ok("[\"entry\",\"tp\",\"sl\"]"));
 }
@@ -812,4 +851,49 @@ fn unsupported_aster_commands_complete_with_an_error_instead_of_waiting_forever(
         );
         assert!(h.pending.is_empty());
     }
+}
+
+fn assert_receipts(
+    h: &Harness,
+    request: &safe_cex_engine::HttpRequest,
+    command: u32,
+    expected: Vec<OrderIdentityReceipt>,
+) {
+    let index = h
+        .receipt_trace
+        .iter()
+        .position(|a| matches!(a, ReceiptTrace::Http(id) if *id == request.id))
+        .unwrap();
+    match &h.receipt_trace[index - 1] {
+        ReceiptTrace::Progress(owner, receipts) => {
+            assert_eq!(*owner, command);
+            assert_eq!(receipts, &expected);
+        }
+        _ => panic!("identities must precede the authenticated write"),
+    }
+}
+
+#[test]
+fn batch_receipts_bind_exact_native_generated_and_requested_ids_before_http() {
+    let mut h = private();
+    let first = opts(OrderType::Limit);
+    let mut second = first.clone();
+    second.client_order_id = None;
+    place(&mut h, 77, vec![first, second]);
+    let request = h.take("/orders");
+    let rows: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    let expected: Vec<_> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| OrderIdentityReceipt {
+            symbol: "BTC-USD-PERP".into(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity: row["client_id"].as_str().unwrap().into(),
+        })
+        .collect();
+    assert_eq!(expected.len(), 2);
+    assert_eq!(expected[0].identity, "caller");
+    assert_ne!(expected[1].identity, "caller");
+    assert_receipts(&h, &request, 77, expected);
 }

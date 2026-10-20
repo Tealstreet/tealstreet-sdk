@@ -9,12 +9,17 @@ pub const INSTRUMENTS: &str = r#"{"instruments":[{"symbol":"ETHUSD","priceIncrem
 pub const DETAILS: &str = r#"{"instrumentDetails":[{"account":"default:00002","symbol":"ETHUSD","tradingStatus":"FULL","minOrderSize":0.01,"maxOrderSize":{"value":724,"limitType":"LOTS"},"minOrderSizeIncrement":0.01,"marginRate":{"rateType":"FLAT","tiers":[{"endVolume":"Infinity","value":0.2}]}},{"account":"default:00002","symbol":"XBTUSD","tradingStatus":"FULL","minOrderSize":0.01,"maxOrderSize":{"value":724},"minOrderSizeIncrement":0.01,"marginRate":{"tiers":[{"value":0.2}]}}]}"#;
 pub const QUOTES: &str = r#"{"events":[{"symbol":"ETHUSD","type":"Quote","ask":3656.02,"bid":3656.01,"time":"2024-12-11T07:55:11Z"}]}"#;
 
+pub enum ReceiptTrace {
+    Progress(u32, Vec<safe_cex_engine::OrderIdentityReceipt>),
+    Http(safe_cex_engine::RequestId),
+}
 pub struct Rig {
     pub engine: Engine<BreakoutProp>,
     pub now: f64,
     pub requests: VecDeque<HttpRequest>,
     pub timers: HashMap<TimerId, f64>,
     pub notices: Vec<Notice>,
+    pub receipt_trace: Vec<ReceiptTrace>,
     pub dispatch_times: Vec<f64>,
 }
 impl Rig {
@@ -25,6 +30,7 @@ impl Rig {
             requests: VecDeque::new(),
             timers: HashMap::new(),
             notices: Vec::new(),
+            receipt_trace: Vec::new(),
             dispatch_times: Vec::new(),
         };
         rig.engine.start(0.0);
@@ -41,6 +47,13 @@ impl Rig {
     }
     pub fn collect(&mut self) {
         for action in self.engine.drain_actions() {
+            match &action {
+                Action::Http(r) => self.receipt_trace.push(ReceiptTrace::Http(r.id)),
+                Action::Notice(Notice::CommandProgress { command, receipts }) => self
+                    .receipt_trace
+                    .push(ReceiptTrace::Progress(*command, receipts.clone())),
+                _ => {}
+            }
             match action {
                 Action::Http(request) => {
                     self.dispatch_times.push(self.now);

@@ -4,7 +4,9 @@ use crate::{BreakoutProp, Operation, Pending, wire};
 use safe_cex_engine::model::{
     Market, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, StopTriggerType,
 };
-use safe_cex_engine::{Command, CommandId, Cx, Method, Store, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, Method, OrderIdentityKind, OrderIdentityReceipt, Store, num,
+};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -196,6 +198,21 @@ pub(crate) struct Request {
     pub path: String,
     pub body: Option<String>,
     step: Step,
+}
+
+impl Request {
+    pub(crate) fn report_progress(&self, cx: &mut Cx<'_, Pending>) {
+        if let Step::Place { order, code } = &self.step {
+            cx.command_progress(
+                self.command,
+                vec![OrderIdentityReceipt {
+                    symbol: order.instrument.clone(),
+                    kind: OrderIdentityKind::OrderCode,
+                    identity: code.clone(),
+                }],
+            );
+        }
+    }
 }
 
 #[derive(Default)]

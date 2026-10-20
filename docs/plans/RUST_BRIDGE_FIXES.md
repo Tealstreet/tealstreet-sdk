@@ -396,3 +396,34 @@ exercise supplied/absent IDs and compare final native fields in action order.
 Selected crate formatting passes. Combined-artifact verification for these hooks
 follows the remaining native slices; the existing 451-case run covers only the
 first-six checkpoint artifact.
+
+Group C implemented and independently reviewed PASS across all six production
+and seven test/support files. Four-crate native run passes 379 cases in 23
+nonempty suites; strict all-target Clippy and scoped fmt pass. Four focused
+post-review guard/quote cases pass after adding explicit no-receipt assertions
+for rejected replacements and metadata reads. Six new integration cases plus
+strengthened existing controls exercise final Bitrue split child IDs, Breakout
+order codes, Paradex JWT/delegated dispatch and WEEX batch tails. Review found
+no payload, signing, entropy or retry changes. Actual combined WASM and broad
+gates remain pending for these newly added hooks.
+
+### Phase 3c plan for command errors
+
+- Add explicit native command-log attribution at sites where the command is
+  known, including errors deferred until batch completion and Hyro waiters.
+  Ordinary background logs keep their existing behavior. Avoid message/time
+  matching, which could hide an unrelated identical failure.
+- Correlated command diagnostics remain visible as logs while pending. The
+  host retains only the first diagnostic per pending command, not a permanent
+  error ledger. A rejected result is reported once at the SDK command boundary;
+  a successful partial/best-effort result with a native error diagnostic still
+  emits one visible error. A deadline reports its unknown outcome; later native
+  diagnostics remain logs and do not create duplicate command toasts.
+- Consumer callback failures must not replace known command outcomes or make a
+  dispatched write look safely rejected. Preserve native partial-result fields,
+  identity receipts and existing worker/CLI errorReported propagation.
+- Cover same-frame and deferred native log+done, pure validation rejection,
+  partial success, identical independent failures, background errors, timeout
+  followed by late error, and throwing diagnostic listeners. Update native and
+  TS session protocol validation if an additive notice is used. Independent
+  review and scoped checks precede the command-error checkpoint.

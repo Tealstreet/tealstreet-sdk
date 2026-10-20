@@ -344,6 +344,11 @@ fn amendment_cancels_before_replacement_and_rejects_concurrent_same_order_mutati
     amend(&mut rig, 10);
     let cancel = rig.next_request();
     assert_eq!(cancel.method, Method::Delete);
+    assert!(
+        !rig.notices
+            .iter()
+            .any(|n| matches!(n, Notice::CommandProgress { command: 10, .. }))
+    );
     amend(&mut rig, 11);
     assert!(rig.result(11).is_err());
     assert!(rig.requests.is_empty());
@@ -364,6 +369,7 @@ fn amendment_cancels_before_replacement_and_rejects_concurrent_same_order_mutati
     rig.reply(&confirmation, 200, &cancellation_history(0.0).to_string());
     let replacement = rig.next_request();
     assert_eq!(replacement.method, Method::Post);
+    assert_order_code_receipt(&rig, &replacement, 10);
     assert_eq!(body(&replacement)["limitPrice"], 3660.0);
     rig.reply(&replacement, 200, r#"{"orderId":46073150}"#);
     assert_eq!(rig.result(10), &Ok("[\"46073150\"]".into()));
@@ -386,6 +392,11 @@ fn native_fill_after_last_portfolio_blocks_replacement_even_when_store_still_say
     let confirmation = rig.next_request();
     assert_eq!(confirmation.method, Method::Get);
     rig.reply(&confirmation, 200, &cancellation_history(0.25).to_string());
+    assert!(
+        !rig.notices
+            .iter()
+            .any(|n| matches!(n, Notice::CommandProgress { command: 10, .. }))
+    );
     assert!(rig.result(10).is_err());
     assert!(rig.requests.is_empty());
 }
@@ -931,4 +942,49 @@ fn empty_client_alias_cannot_authorize_history_for_a_different_native_order_code
     rig.reply(&confirmation, 200, &proof.to_string());
     assert!(rig.result(10).is_err());
     assert!(rig.requests.is_empty());
+}
+
+fn assert_order_code_receipt(rig: &Rig, request: &HttpRequest, command: u32) -> String {
+    let code = body(request)["orderCode"].as_str().unwrap().to_owned();
+    let index = rig
+        .receipt_trace
+        .iter()
+        .position(|a| matches!(a, ReceiptTrace::Http(id) if *id == request.id))
+        .unwrap();
+    match &rig.receipt_trace[index - 1] {
+        ReceiptTrace::Progress(owner, receipts) => {
+            assert_eq!(*owner, command);
+            assert_eq!(
+                receipts,
+                &vec![OrderIdentityReceipt {
+                    symbol: "ETHUSD".into(),
+                    kind: OrderIdentityKind::OrderCode,
+                    identity: code.clone()
+                }]
+            );
+        }
+        _ => panic!("orderCode receipt must precede actual write"),
+    }
+    code
+}
+
+#[test]
+fn actual_dispatch_reports_order_codes_sequentially_without_promoting_ack_ids() {
+    let mut rig = private();
+    place(&mut rig, 77, vec![limit(), limit()]);
+    let first = rig.next_request();
+    let first_code = assert_order_code_receipt(&rig, &first, 77);
+    assert_eq!(
+        rig.notices
+            .iter()
+            .filter(|n| matches!(n, Notice::CommandProgress { command: 77, .. }))
+            .count(),
+        1
+    );
+    rig.reply(&first, 200, r#"{"orderId":46073148}"#);
+    let next = rig.next_request();
+    let second_code = assert_order_code_receipt(&rig, &next, 77);
+    assert_ne!(first_code, second_code);
+    assert_ne!(first_code, "46073148");
+    assert_ne!(second_code, "46073148");
 }

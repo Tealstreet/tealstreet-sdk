@@ -406,6 +406,9 @@ impl Account {
         self.refresh(cx);
     }
     fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, mut request: Queued) {
+        if let Pending::Trade(trade) = &request.pending {
+            trade.report_progress(cx);
+        }
         let signing = if let Pending::Trade(trade) = &mut request.pending {
             trade.take_signing_hash().and_then(|signature| {
                 self.credentials

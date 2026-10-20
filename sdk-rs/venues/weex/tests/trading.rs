@@ -913,9 +913,18 @@ fn conditional_amount_replacement_preserves_trigger_and_execution() {
     );
     let r = writes(&actions).pop().unwrap();
     assert!(r.url.ends_with("algoOrder?orderId=1"));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandProgress { .. })))
+    );
     let actions = response(&mut e, &r, json!({"orderId":"1","success":true}));
     let r = writes(&actions).pop().unwrap();
     assert!(r.url.ends_with("algoOrder"));
+    assert_eq!(
+        receipt_rows(&actions, 1)[0].identity,
+        body(&r)["clientAlgoId"]
+    );
     assert_eq!(body(&r)["triggerPrice"], "68900");
     assert_eq!(body(&r)["price"], "68800");
     assert_eq!(body(&r)["quantity"], "0.3");
@@ -1138,6 +1147,11 @@ fn a_fill_while_canceling_blocks_stale_replacement_quantity() {
             }
         });
         let actions = response(&mut e, &cancel, json!([{"orderId":"1","success":true}]));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandProgress { .. })))
+        );
         assert!(writes(&actions).is_empty());
         assert!(
             done(&actions)
@@ -1354,4 +1368,110 @@ fn fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliat
         "a fresh complete snapshot permits an explicit caller retry"
     );
     assert_eq!(writes(&actions)[0].method, Method::Delete);
+}
+
+fn receipt_rows(actions: &[Action], command: u32) -> Vec<OrderIdentityReceipt> {
+    let (notice, rows) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(index, action)| match action {
+            Action::Notice(Notice::CommandProgress {
+                command: owner,
+                receipts,
+            }) if *owner == command => Some((index, receipts.clone())),
+            _ => None,
+        })
+        .expect("native receipts");
+    let write = actions
+        .iter()
+        .position(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+        .expect("write");
+    assert!(notice < write);
+    rows
+}
+
+#[test]
+fn receipt_batches_follow_exact_wire_ids_for_five_plus_tail_without_early_tail_ids() {
+    let mut e = engine();
+    let first = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 77,
+            orders: (0..6).map(|_| opts("")).collect(),
+        },
+    );
+    let request = writes(&first).pop().unwrap();
+    let expected: Vec<_> = body(&request)["batchOrders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| OrderIdentityReceipt {
+            symbol: "BTCUSDT".into(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity: row["newClientOrderId"].as_str().unwrap().into(),
+        })
+        .collect();
+    assert_eq!(expected.len(), 5);
+    assert_eq!(receipt_rows(&first, 77), expected);
+    let next = response(&mut e, &request, batch_ack(&request, 100));
+    let tail = writes(&next).pop().unwrap();
+    let id = body(&tail)["batchOrders"][0]["newClientOrderId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        receipt_rows(&next, 77),
+        vec![OrderIdentityReceipt {
+            symbol: "BTCUSDT".into(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity: id.clone()
+        }]
+    );
+    assert!(expected.iter().all(|row| row.identity != id));
+}
+
+#[test]
+fn receipts_match_algo_protection_and_attached_parent_ids_without_invented_children() {
+    for kind in [
+        OrderType::Conditional,
+        OrderType::TakeProfit,
+        OrderType::StopLoss,
+        OrderType::Limit,
+    ] {
+        let mut e = engine();
+        let mut order = opts("");
+        order.kind = kind;
+        if kind == OrderType::Conditional {
+            order.trigger_price = Some(70000.0);
+        }
+        if matches!(kind, OrderType::TakeProfit | OrderType::StopLoss) {
+            order.reduce_only = Some(true);
+        }
+        if kind == OrderType::Limit {
+            order.take_profit = Some(71000.0);
+            order.stop_loss = Some(68000.0);
+        }
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 78,
+                orders: vec![order],
+            },
+        );
+        let request = writes(&actions).pop().unwrap();
+        let payload = body(&request);
+        let id = payload
+            .get("newClientOrderId")
+            .unwrap_or(&payload["clientAlgoId"])
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            receipt_rows(&actions, 78),
+            vec![OrderIdentityReceipt {
+                symbol: "BTCUSDT".into(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: id.into()
+            }]
+        );
+    }
 }

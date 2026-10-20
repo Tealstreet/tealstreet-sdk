@@ -30,6 +30,7 @@ struct Step {
     path: String,
     body: Option<String>,
     effect: Effect,
+    receipts: Vec<OrderIdentityReceipt>,
 }
 enum Effect {
     Place { conditional: bool },
@@ -203,6 +204,7 @@ fn encode(value: &str) -> String {
 impl Target {
     fn lookup(&self, effect: Effect) -> Step {
         Step {
+            receipts: Vec::new(),
             method: Method::Get,
             path: format!(
                 "/fapi/v2/order?contractName={}&orderId={}&conditionOrder={}",
@@ -216,6 +218,7 @@ impl Target {
     }
     fn cancel(&self) -> Step {
         Step {
+            receipts: Vec::new(),
             method: Method::Post,
             path: "/fapi/v2/cancel".into(),
             body: Some(
@@ -279,8 +282,21 @@ impl Plan {
             self.refresh_result |= payload.condition_order.unwrap_or(false)
                 || !payload.trigger_order_create_params.is_empty();
             self.symbol(&order.symbol);
+            let mut receipts = vec![OrderIdentityReceipt {
+                symbol: order.symbol.clone(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: payload.client_order_id.clone(),
+            }];
+            receipts.extend(payload.trigger_order_create_params.iter().map(|child| {
+                OrderIdentityReceipt {
+                    symbol: order.symbol.clone(),
+                    kind: OrderIdentityKind::ClientOrderId,
+                    identity: child.client_order_id.clone(),
+                }
+            }));
             self.creating.push(order);
             self.steps.push_back(Step {
+                receipts,
                 method: Method::Post,
                 path: "/fapi/v2/order".into(),
                 body: Some(serde_json::to_string(&payload).expect("placement")),
@@ -692,6 +708,7 @@ impl Bitrue {
                 }
                 plan.symbol(&symbol);
                 plan.steps.push_back(Step {
+                    receipts: Vec::new(),
                     method: Method::Post,
                     path: "/fapi/v2/level_edit".into(),
                     body: Some(
@@ -800,6 +817,7 @@ impl Bitrue {
             );
             return;
         }
+        cx.command_progress(plan.command, step.receipts.clone());
         let path = step.path.clone();
         let body = step.body.clone();
         self.send(

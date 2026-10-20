@@ -6,7 +6,9 @@ use crate::{
 };
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response};
+use safe_cex_engine::{
+    Command, CommandId, Cx, LogLevel, Method, OrderIdentityKind, OrderIdentityReceipt, Response,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -31,6 +33,16 @@ struct Placement {
     #[serde(skip_serializing_if = "Option::is_none")]
     client_id: Option<String>,
 }
+fn placement_receipt(payload: &Placement) -> Option<OrderIdentityReceipt> {
+    payload
+        .client_id
+        .as_ref()
+        .map(|identity| OrderIdentityReceipt {
+            symbol: payload.market.clone(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity: identity.clone(),
+        })
+}
 #[derive(Clone)]
 enum Kind {
     Place {
@@ -52,6 +64,7 @@ enum Kind {
     },
 }
 struct Operation {
+    receipts: Vec<OrderIdentityReceipt>,
     hash: Option<String>,
     method: Method,
     path: String,
@@ -80,11 +93,17 @@ struct Quote {
     fair: Option<f64>,
 }
 pub struct Request {
+    progress: Option<(CommandId, Vec<OrderIdentityReceipt>)>,
     hash: Option<String>,
     job: u64,
     kind: Kind,
 }
 impl Request {
+    pub(crate) fn report_progress(&self, cx: &mut Cx<'_, Pending>) {
+        if let Some((command, receipts)) = &self.progress {
+            cx.command_progress(*command, receipts.clone());
+        }
+    }
     pub(crate) fn take_signing_hash(&mut self) -> Option<String> {
         self.hash.take()
     }
@@ -281,8 +300,10 @@ fn place_operations(
             return Ok(());
         }
         let expected = chunk.iter().map(|p| p.client_id.clone()).collect();
+        let receipts = chunk.iter().filter_map(placement_receipt).collect();
         let body = serde_json::to_string(&*chunk).map_err(|e| e.to_string())?;
         operations.push_back(Operation {
+            receipts,
             hash: delegated.then(|| chunk[0].signature.clone()),
             method: Method::Post,
             path: "/orders/batch".into(),
@@ -327,6 +348,7 @@ fn place_operations(
         let payload = prepare(o, signer, cx.now as u64, false, execution)?;
         let expected = vec![payload.client_id.clone()];
         operations.push_back(Operation {
+            receipts: placement_receipt(&payload).into_iter().collect(),
             hash: signer.is_delegated().then(|| payload.signature.clone()),
             method: Method::Post,
             path: "/orders".into(),
@@ -381,6 +403,7 @@ fn place_operations(
                     payload.signature_timestamp = signed.signature_timestamp;
                 }
                 operations.push_back(Operation {
+                    receipts: Vec::new(),
                     hash: signer.is_delegated().then(|| payload.signature.clone()),
                     method: Method::Post,
                     path: "/orders".into(),
@@ -473,6 +496,7 @@ impl Trading {
                     let mut operations = VecDeque::new();
                     for chunk in ids.chunks(2) {
                         operations.push_back(Operation {
+                            receipts: Vec::new(),
                             hash: None,
                             method: Method::Delete,
                             path: if chunk.len() == 2 {
@@ -503,6 +527,7 @@ impl Trading {
                     .ok_or_else(|| "Paradex cancel-all requires a known nonempty market".to_owned())
                     .map(|market| {
                         VecDeque::from([Operation {
+                            receipts: Vec::new(),
                             hash: None,
                             method: Method::Delete,
                             path: format!("/orders?market={}", encode(&market.id)),
@@ -516,6 +541,7 @@ impl Trading {
             Command::FetchLeverage { command, symbol } => (
                 command,
                 Ok(VecDeque::from([Operation {
+                    receipts: Vec::new(),
                     hash: None,
                     method: Method::Get,
                     path: "/account/margin".into(),
@@ -544,6 +570,7 @@ impl Trading {
                         margin_type: &'static str,
                     }
                     Ok(VecDeque::from([Operation {
+                        receipts: Vec::new(),
                         hash: None,
                         method: Method::Post,
                         path: format!("/account/margin/{}", encode(&symbol)),
@@ -638,6 +665,7 @@ impl Trading {
                     Vec::new(),
                     None,
                     Pending::Trade(Request {
+                        progress: None,
                         hash: None,
                         job,
                         kind: Kind::Quotes(symbol),
@@ -689,6 +717,8 @@ impl Trading {
                 operation.body,
                 None,
                 Pending::Trade(Request {
+                    progress: (!operation.receipts.is_empty())
+                        .then_some((state.command, operation.receipts)),
                     hash: operation.hash,
                     job,
                     kind: operation.kind,
@@ -1004,6 +1034,7 @@ impl Trading {
             signature_timestamp: u64,
         }
         Ok(VecDeque::from([Operation {
+            receipts: Vec::new(),
             hash: account
                 .credentials()
                 .filter(|c| c.is_delegated())
