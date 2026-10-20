@@ -4,6 +4,7 @@ pub mod command;
 pub mod credentials;
 pub mod engine;
 pub mod json;
+pub mod log;
 pub mod model;
 pub mod num;
 #[cfg(feature = "order-locks")]
@@ -20,6 +21,7 @@ pub use engine::{
     PayloadSignRequest, Query, RequestId, RequestRoute, Response, SignatureTarget, SocketChannel,
     SocketContext, SocketId, TimerId, Venue,
 };
+pub use log::{Health, Level, LogEvent, Redacted, Value};
 pub use store::Store;
 
 pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};

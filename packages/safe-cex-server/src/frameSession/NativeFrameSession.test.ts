@@ -362,6 +362,10 @@ describe('NativeFrameSession', () => {
     '{"type":"log","level":"warn","message":"bad"}',
     '{"type":"log","level":["info"],"message":"bad"}',
     '{"type":"log","level":"info","message":3}',
+    '{"type":"event","level":"warning","code":"ws.closed","message":"bad"}',
+    '{"type":"event","level":"warn","message":"no code"}',
+    '{"type":"event","level":"warn","code":"ws.closed","message":"bad","fields":{"nested":{}}}',
+    '{"type":"event","level":"warn","code":"ws.closed","message":"bad","extra":1}',
     '{"type":"deactivate","unexpected":"value"}',
   ])('rejects malformed native notices %#', async (notice) => {
     const { socket, promise, sink } = setup();
@@ -377,6 +381,9 @@ describe('NativeFrameSession', () => {
     '{"type":"error","command":3,"error":"invalid command"}',
     '{"type":"log","level":"warning","message":"retry"}',
     '{"type":"log","level":"error","message":"disconnected"}',
+    '{"type":"event","level":"debug","code":"ws.closed","message":"WebSocket closed","fields":{"socket":2,"code":1006}}',
+    '{"type":"event","level":"error","code":"auth.rejected","message":"rejected","fields":{"key":"[redacted]","retry":false,"at":null}}',
+    '{"type":"event","level":"warn","code":"ws.reconnect","message":"reconnecting"}',
     '{"type":"deactivate"}',
   ])('forwards valid native notices without treating venue errors as stream gaps %#', async (notice) => {
     const { session, socket, sink } = await connected();

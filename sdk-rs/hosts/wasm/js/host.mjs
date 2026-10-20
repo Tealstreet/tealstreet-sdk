@@ -81,6 +81,13 @@ export class EngineHost {
     return this.engine.accountId?.();
   }
 
+  /** Engine health counters; see `Health` in sdk-rs/engine/src/log.rs. */
+  health() {
+    if (this.disposed) throw new Error('engine disposed');
+    const json = this.engine.health?.();
+    return json ? JSON.parse(json) : undefined;
+  }
+
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
@@ -298,6 +305,12 @@ export class EngineHost {
       case 'log':
         this.handlers.onLog?.(action.level, action.message);
         break;
+      case 'event': {
+        const { level, code, message, fields = {} } = action;
+        if (this.handlers.onEvent) this.handlers.onEvent({ level, code, message, fields });
+        else if (level !== 'debug') this.handlers.onLog?.(level === 'warn' ? 'warning' : level, message);
+        break;
+      }
       case 'done': {
         const pending = this.commands.get(action.command);
         this.commands.delete(action.command);

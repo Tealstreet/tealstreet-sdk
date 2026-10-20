@@ -38,7 +38,8 @@ compile_error!(
 );
 
 use safe_cex_engine::{
-    Action, Engine, Event, LogLevel, Notice, RequestId, SocketId, TimerId, Venue,
+    Action, Engine, Event, Health, Level, LogLevel, Notice, RequestId, SocketId, TimerId, Value,
+    Venue,
 };
 #[cfg(feature = "apexomni")]
 use safe_cex_venue_apexomni::{ApexOmni, Options as ApexOmniOptions};
@@ -120,6 +121,10 @@ trait AnyEngine {
     fn drain(&mut self) -> Vec<Action>;
     fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]>;
     fn snapshot(&mut self, now: f64) -> &[u8];
+    fn set_log_level(&mut self, _level: Level) {}
+    fn health(&self) -> Health {
+        Health::default()
+    }
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
@@ -162,6 +167,14 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
     fn snapshot(&mut self, now: f64) -> &[u8] {
         self.snapshot_frame(now)
+    }
+
+    fn set_log_level(&mut self, level: Level) {
+        Engine::set_log_level(self, level);
+    }
+
+    fn health(&self) -> Health {
+        Engine::health(self).clone()
     }
 }
 
@@ -215,6 +228,9 @@ struct EngineOptions {
     private_only: bool,
     #[serde(default)]
     public_feed: Option<PublicFeedOptions>,
+    /// Minimum event level: `debug`, `info` (default), `warn` or `error`.
+    #[serde(default)]
+    log_level: Option<String>,
     #[serde(default)]
     read_credentials: Option<safe_cex_engine::ReadCredentials>,
     #[cfg(feature = "blofin")]
@@ -480,6 +496,13 @@ enum ActionOut<'a> {
         level: &'static str,
         message: &'a str,
     },
+    Event {
+        level: &'static str,
+        code: &'static str,
+        message: &'a str,
+        #[serde(skip_serializing_if = "Fields::is_empty")]
+        fields: Fields<'a>,
+    },
     Done {
         command: u32,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -487,6 +510,32 @@ enum ActionOut<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<&'a str>,
     },
+}
+
+struct Fields<'a>(&'a [(&'static str, Value)]);
+
+impl Fields<'_> {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl serde::Serialize for Fields<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (key, value) in self.0 {
+            match value {
+                Value::Str(text) => map.serialize_entry(key, text)?,
+                // JSON has no non-finite numbers.
+                Value::Num(number) if number.is_finite() => map.serialize_entry(key, number)?,
+                Value::Num(_) => map.serialize_entry(key, &())?,
+                Value::Bool(flag) => map.serialize_entry(key, flag)?,
+                Value::Redacted => map.serialize_entry(key, safe_cex_engine::log::REDACTED)?,
+            }
+        }
+        map.end()
+    }
 }
 
 fn socket_channel(channel: &safe_cex_engine::SocketChannel) -> &'static str {
@@ -579,6 +628,12 @@ fn encode(actions: &[Action]) -> String {
                 },
                 message,
             },
+            Action::Notice(Notice::Event(event)) => ActionOut::Event {
+                level: event.level.as_str(),
+                code: event.code,
+                message: &event.message,
+                fields: Fields(&event.fields),
+            },
             Action::Notice(Notice::CommandDone { command, result }) => ActionOut::Done {
                 command: *command,
                 result: result.as_ref().ok().map(String::as_str),
@@ -660,6 +715,11 @@ impl WasmEngine {
             safe_cex_venue_kraken::sign::Signer::new(secret)
                 .map_err(|error| JsError::new(&error))?;
         }
+        let log_level = match options.log_level.as_deref() {
+            None => Level::Info,
+            Some(text) => Level::parse(text)
+                .ok_or_else(|| JsError::new("logLevel must be debug, info, warn or error"))?,
+        };
         let policy = options
             .public_feed
             .as_ref()
@@ -1026,11 +1086,17 @@ impl WasmEngine {
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };
         inner.set_public_feed_policy(policy).map_err(JsError::new)?;
+        inner.set_log_level(log_level);
         Ok(Self { inner })
     }
 
     fn flush(&mut self) -> String {
         encode(&self.inner.drain())
+    }
+
+    /// Health counters as JSON (`safe_cex_engine::Health`, camelCase).
+    pub fn health(&self) -> String {
+        serde_json::to_string(&self.inner.health()).unwrap_or_default()
     }
 
     pub fn start(&mut self, now: f64) -> String {

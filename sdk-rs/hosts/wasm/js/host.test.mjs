@@ -510,6 +510,32 @@ test('credential deactivation is an explicit host event', () => {
   assert.equal(deactivated, 1);
 });
 
+test('structured events reach onEvent, or onLog as legacy levels without Debug', () => {
+  const actions = JSON.stringify([
+    { op: 'event', level: 'debug', code: 'ws.closed', message: 'WebSocket closed', fields: { socket: 1 } },
+    { op: 'event', level: 'warn', code: 'ws.reconnect', message: 'reconnecting' },
+    { op: 'event', level: 'error', code: 'auth.rejected', message: 'rejected', fields: { key: '[redacted]' } },
+  ]);
+  const events = [];
+  new EngineHost({ start: () => actions }, { now: () => 1 }, { onEvent: (event) => events.push(event), onLog: () => assert.fail('onEvent wins') }).start();
+  assert.deepEqual(events, [
+    { level: 'debug', code: 'ws.closed', message: 'WebSocket closed', fields: { socket: 1 } },
+    { level: 'warn', code: 'ws.reconnect', message: 'reconnecting', fields: {} },
+    { level: 'error', code: 'auth.rejected', message: 'rejected', fields: { key: '[redacted]' } },
+  ]);
+  const logs = [];
+  new EngineHost({ start: () => actions }, { now: () => 1 }, { onLog: (level, message) => logs.push([level, message]) }).start();
+  assert.deepEqual(logs, [['warning', 'reconnecting'], ['error', 'rejected']]);
+});
+
+test('health counters are parsed from the engine and unavailable after disposal', () => {
+  const host = new EngineHost({ health: () => '{"wsOpened":2,"httpFailures":1}' }, { now: () => 1 });
+  assert.deepEqual(host.health(), { wsOpened: 2, httpFailures: 1 });
+  assert.equal(new EngineHost({}, {}).health(), undefined);
+  host.dispose();
+  assert.throws(() => host.health(), /engine disposed/);
+});
+
 test('socket feed identity and protocol recovery reach the account transport', () => {
   let received;
   const host = new EngineHost({}, {

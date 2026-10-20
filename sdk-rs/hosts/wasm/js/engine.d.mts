@@ -5,6 +5,8 @@ export class WasmEngine implements WasmEngineLike {
   /** Available in builds with Coinbase portfolio selection. */
   accountId?(): string | undefined;
   constructor(venue: string, optionsJson: string);
+  /** JSON-encoded health counters. */
+  health(): string;
   start(now: number): string;
   command(json: string, now: number): string;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;

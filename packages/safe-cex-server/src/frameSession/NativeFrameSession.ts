@@ -64,6 +64,17 @@ function validateNotice(text: string): void {
     case 'log':
       if (keys(value, ['type', 'level', 'message']) && typeof value.level === 'string' && ['info', 'warning', 'error'].includes(value.level) && typeof value.message === 'string') return;
       break;
+    case 'event':
+      if (
+        keys(value, ['type', 'level', 'code', 'message', 'fields']) &&
+        typeof value.level === 'string' &&
+        ['debug', 'info', 'warn', 'error'].includes(value.level) &&
+        typeof value.code === 'string' &&
+        typeof value.message === 'string' &&
+        (!('fields' in value) || (record(value.fields) && Object.values(value.fields).every((field) => field === null || ['string', 'number', 'boolean'].includes(typeof field))))
+      )
+        return;
+      break;
     case 'deactivate':
       if (keys(value, ['type'])) return;
       break;

@@ -86,7 +86,9 @@ result, while `{"op":"fetchLeverage","command":7,"symbol":"BTCUSDT"}` produces
 unique among pending commands for this connection; the native server isolates
 them across clients. `setTickerSymbols`, `setTickInterval` and book/candle
 subscribe/unsubscribe have no completion. `setTickInterval` affects the whole
-account. Other notices are `error`, `log` and `deactivate`, relayed as JSON.
+account. Other notices are `error`, `log`, `event` and `deactivate`, relayed as JSON.
+`event` carries `level` (`debug`/`info`/`warn`/`error`), a stable dotted `code`,
+`message` and optional flat `fields`; match on `code`, not message text.
 Native typed decoding and venue capability checks remain authoritative.
 
 The adapter never retries or replays a sent command. On disconnect a sent

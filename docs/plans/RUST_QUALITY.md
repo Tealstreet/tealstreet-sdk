@@ -21,8 +21,9 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
   private frames (`bitrue/src/account.rs:700`), Bybit logs the signed request
   body (`bybit/src/lib.rs:550`); native transport errors include signed URLs
   (`hosts/native/src/transport.rs:390,404`).
-- Native and Durable Object hosts drop logs with no client attached; an
-  oversized native broadcast disconnects every peer (`server.rs:386`).
+- ~~Native and Durable Object hosts drop logs with no client attached; an
+  oversized native broadcast disconnects every peer (`server.rs:386`).~~
+  Fixed: Warn+ goes to stderr/console with no client; log notices are cut to fit.
 
 ## Error handling
 
@@ -83,8 +84,10 @@ closes, reconnects, auth failures, HTTP failures, rate limited, snapshots
 discarded, rows skipped, last private message) exposed via `getHealth()`.
 Hosts forward events and write Warn+ to stderr/console with no client.
 
-PRs: (1) facade, wire, `Health`, `cx.log` shim, host events on ws close and
-HTTP failure, no-client fallback; (2) redaction sweep with a test that fails on
+PRs: ~~(1) facade, wire, `Health`, `cx.log` shim, host events on ws close and
+HTTP failure, no-client fallback~~ (`engine/src/log.rs`: `Cx::event`, wasm
+`logLevel` option, `EngineHost.health()`/`onEvent`, native and DO `event`
+notices); (2) redaction sweep with a test that fails on
 secrets in any notice; (3) engine-level ws and auth counting; (4) venue batches
 assigning codes and fixing levels (keep message text stable); (5) health monitor
 and tealstreet-next on codes; (6) delete the shim.

@@ -3,7 +3,7 @@
 use crate::{Host, Transport};
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::command::HostInput;
-use safe_cex_engine::{Command, Event, LogLevel, Notice, Venue};
+use safe_cex_engine::{Command, Event, Level, LogLevel, Notice, Value, Venue};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -343,16 +343,79 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Deactivate)))
                 }
                 Notice::Log { level, message } => {
-                    self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Log {
-                        level: match level {
-                            LogLevel::Info => "info",
-                            LogLevel::Warning => "warning",
-                            LogLevel::Error => "error",
+                    let level = match level {
+                        LogLevel::Info => "info",
+                        LogLevel::Warning => "warning",
+                        LogLevel::Error => "error",
+                    };
+                    self.broadcast_log(
+                        level,
+                        level != "info",
+                        |message| encode_notice(ServerNotice::Log { level, message }),
+                        &message,
+                        None,
+                    );
+                }
+                Notice::Event(event) => {
+                    let level = event.level.as_str();
+                    self.broadcast_log(
+                        level,
+                        event.level >= Level::Warn,
+                        |message| {
+                            encode_notice(ServerNotice::Event {
+                                level,
+                                code: event.code,
+                                message,
+                                fields: NoticeFields(&event.fields),
+                            })
                         },
-                        message: &message,
-                    })))
+                        &event.message,
+                        Some(event.code),
+                    );
                 }
             }
+        }
+    }
+
+    /// Log notices never disconnect peers: an oversized one is cut to fit, and
+    /// with no client attached Warn+ goes to stderr instead of being dropped.
+    fn broadcast_log(
+        &mut self,
+        level: &str,
+        warn: bool,
+        encode: impl Fn(&str) -> Arc<str>,
+        message: &str,
+        code: Option<&str>,
+    ) {
+        if self.peers.is_empty() {
+            if warn {
+                eprintln!("safe-cex {level} {}: {message}", code.unwrap_or("log"));
+            }
+            return;
+        }
+        let limit = self.config.max_frame_bytes;
+        let mut text = encode(message);
+        if text.len() > limit {
+            // Escaping makes encoded length non-linear, so search the longest prefix that fits.
+            let (mut fits, mut over) = (0, message.len());
+            while over - fits > 1 {
+                let mut mid = (fits + over) / 2;
+                while !message.is_char_boundary(mid) {
+                    mid -= 1;
+                }
+                if mid <= fits {
+                    break;
+                }
+                if encode(&message[..mid]).len() <= limit {
+                    fits = mid;
+                } else {
+                    over = mid;
+                }
+            }
+            text = encode(&message[..fits]);
+        }
+        if text.len() <= limit {
+            self.broadcast(Outgoing::Text(text));
         }
     }
 
@@ -682,7 +745,39 @@ enum ServerNotice<'a> {
         level: &'a str,
         message: &'a str,
     },
+    Event {
+        level: &'a str,
+        code: &'a str,
+        message: &'a str,
+        #[serde(skip_serializing_if = "NoticeFields::is_empty")]
+        fields: NoticeFields<'a>,
+    },
     Deactivate,
+}
+
+struct NoticeFields<'a>(&'a [(&'static str, Value)]);
+
+impl NoticeFields<'_> {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl Serialize for NoticeFields<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (key, value) in self.0 {
+            match value {
+                Value::Str(text) => map.serialize_entry(key, text)?,
+                Value::Num(number) if number.is_finite() => map.serialize_entry(key, number)?,
+                Value::Num(_) => map.serialize_entry(key, &())?,
+                Value::Bool(flag) => map.serialize_entry(key, flag)?,
+                Value::Redacted => map.serialize_entry(key, safe_cex_engine::log::REDACTED)?,
+            }
+        }
+        map.end()
+    }
 }
 fn encode_notice(notice: ServerNotice<'_>) -> Arc<str> {
     serde_json::to_string(&notice)
@@ -937,6 +1032,46 @@ mod tests {
             commands.borrow().last(),
             Some(Command::UnsubscribeOrderBook { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn oversized_log_notice_is_truncated_instead_of_disconnecting_peers() {
+        let mut actor = Account::new(
+            Host::new(Engine::new(Stub(Rc::default())), NoTransport),
+            ServerConfig {
+                max_frame_bytes: 96,
+                ..ServerConfig::default()
+            },
+        );
+        let (outgoing, mut frames) = mpsc::channel(4);
+        let (cancel, canceled) = watch::channel(false);
+        actor.peers.insert(
+            1,
+            Peer {
+                outgoing,
+                cancel,
+                books: HashSet::new(),
+                candles: HashSet::new(),
+                tickers: None,
+            },
+        );
+        // Engine-originated notices bypass the venue cap, so the host must bound them.
+        actor
+            .host
+            .engine
+            .report_public_feed_error(&"\"é".repeat(200));
+        actor.execute();
+        assert!(!*canceled.borrow() && actor.peers.contains_key(&1));
+        let Some(Outgoing::Text(text)) = frames.recv().await else {
+            panic!("expected a log notice");
+        };
+        assert!(text.len() <= 96, "{} bytes", text.len());
+        let notice: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(notice["type"], "log");
+        assert!(
+            notice["message"].as_str().unwrap().starts_with("\"é"),
+            "{text}"
+        );
     }
 
     #[tokio::test]

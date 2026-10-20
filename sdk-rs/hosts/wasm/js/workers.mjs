@@ -7,6 +7,7 @@
 //   -> { op: 'command', id, command }       any EngineHost command
 //   <- binary messages: flush frames (a snapshot first), read with wire.mjs
 //   <- { op: 'done', id, result } | { op: 'done', id, error } | { op: 'log', level, message }
+//    | { op: 'event', level, code, message, fields }
 // Credentials arrive with 'start' and live only in the object's memory.
 import { EngineHost, socketMessages } from './host.mjs';
 
@@ -218,7 +219,8 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
           {
             onFrame: (frame) => this.broadcast(frame),
             onDeactivate: () => this.broadcast(JSON.stringify({ op: 'deactivate' })),
-            onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),
+            onLog: (level, text) => this.notify(level !== 'info', { op: 'log', level, message: text }),
+            onEvent: (event) => this.notify(event.level === 'warn' || event.level === 'error', { op: 'event', ...event }),
           },
         );
         this.host.start();
@@ -236,6 +238,12 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
 
     broadcast(message) {
       for (const client of this.clients) client.send(message);
+    }
+
+    /** With no client attached, Warn+ goes to the console instead of being dropped. */
+    notify(warn, notice) {
+      if (this.clients.size > 0) this.broadcast(JSON.stringify(notice));
+      else if (warn) console.warn(`safe-cex ${notice.level} ${notice.code ?? 'log'}: ${notice.message}`);
     }
 
     /** The last client leaving stops the engine and drops its credentials. */

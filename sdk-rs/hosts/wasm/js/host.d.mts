@@ -51,12 +51,38 @@ export interface EngineHandlers {
   onDeactivate?(): void;
   /** One frame per flush; transfer it, don't copy it. */
   onFrame?(buffer: ArrayBuffer): void;
+  /** Unstructured log; also receives Info+ events when `onEvent` is absent. */
   onLog?(level: 'info' | 'warning' | 'error', message: string): void;
+  /** Structured events at or above the engine's `logLevel` option. */
+  onEvent?(event: EngineEvent): void;
+}
+
+export interface EngineEvent {
+  level: 'debug' | 'info' | 'warn' | 'error';
+  /** Stable dotted identifier such as `ws.reconnect`; match on this, not the message. */
+  code: string;
+  message: string;
+  /** Redacted values arrive as `"[redacted]"`; non-finite numbers as `null`. */
+  fields: Record<string, string | number | boolean | null>;
+}
+
+/** Counters since engine construction. */
+export interface EngineHealth {
+  wsOpened: number;
+  wsClosed: number;
+  reconnects: number;
+  authFailures: number;
+  httpFailures: number;
+  rateLimited: number;
+  snapshotsDiscarded: number;
+  rowsSkipped: number;
 }
 
 /** The subset of the wasm-bindgen engine the host drives. */
 export interface WasmEngineLike {
   accountId?(): string | undefined;
+  /** JSON-encoded {@link EngineHealth}. */
+  health?(): string;
   start(now: number): string;
   command(json: string, now: number): string;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
@@ -88,6 +114,8 @@ export class EngineHost {
   /** With `marketOnly`, only books, candles and fills. */
   flush(marketOnly?: boolean): void;
   snapshot(): ArrayBuffer;
+  /** Undefined for an engine without `health()`. */
+  health(): EngineHealth | undefined;
   dispose(): void;
 }
 

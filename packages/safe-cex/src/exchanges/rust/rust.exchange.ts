@@ -1,4 +1,4 @@
-import type { EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { EngineHealth, EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
   Candle,
@@ -1061,6 +1061,9 @@ export class RustEngineExchange extends BaseExchange {
   cancelSymbolOrders = async (symbol: string) => {
     await this.command({ op: 'cancelSymbolOrders', symbol });
   };
+
+  /** Engine health counters; undefined before the engine starts or after disposal. */
+  getHealth = (): EngineHealth | undefined => (this.host && !this.isDisposed ? this.host.health() : undefined);
 
   getAccount = async (): Promise<ExchangeAccount> => {
     if (['coinbase', 'coinbasespot'].includes(this.name)) {

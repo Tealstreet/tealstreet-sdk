@@ -2,6 +2,7 @@
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
 use crate::json::{ArrayAt, ArraySplitter};
+use crate::log::{Health, Level, LogEvent, Value, code as log_code};
 use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts, PositionSide};
 use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 use crate::store::Store;
@@ -103,10 +104,12 @@ pub enum LogLevel {
 pub enum Notice {
     /// Definitive credential rejection; transient failures never deactivate.
     Deactivate,
+    /// Unstructured shim for [`Cx::log`]; venues migrate to [`Notice::Event`].
     Log {
         level: LogLevel,
         message: String,
     },
+    Event(LogEvent),
     /// `Ok` carries the command's JSON result.
     CommandDone {
         command: CommandId,
@@ -482,6 +485,8 @@ struct Io<P> {
     fills: Vec<Fill>,
     frame: Vec<u8>,
     snapshot: Vec<u8>,
+    min_level: Level,
+    health: Health,
 }
 
 impl<P> Default for Io<P> {
@@ -509,6 +514,8 @@ impl<P> Default for Io<P> {
             fills: Vec::new(),
             frame: Vec::new(),
             snapshot: Vec::new(),
+            min_level: Level::Info,
+            health: Health::default(),
         }
     }
 }
@@ -831,11 +838,52 @@ impl<P> Cx<'_, P> {
         }
     }
 
+    /// Unstructured shim kept until venues emit [`Cx::event`].
     pub fn log(&mut self, level: LogLevel, message: impl Into<String>) {
-        self.io.actions.push(Action::Notice(Notice::Log {
+        let enabled = match level {
+            LogLevel::Info => Level::Info,
+            LogLevel::Warning => Level::Warn,
+            LogLevel::Error => Level::Error,
+        };
+        if self.logs(enabled) {
+            self.io.actions.push(Action::Notice(Notice::Log {
+                level,
+                message: crate::log::cap(message.into()),
+            }));
+        }
+    }
+
+    /// Whether an event at `level` reaches the host; check before formatting
+    /// an expensive Debug message.
+    pub fn logs(&self, level: Level) -> bool {
+        level >= self.io.min_level
+    }
+
+    /// Counted in [`Health`] whatever the host's minimum level.
+    pub fn event(
+        &mut self,
+        level: Level,
+        code: &'static str,
+        message: impl Into<String>,
+        fields: impl IntoIterator<Item = (&'static str, Value)>,
+    ) {
+        self.io.health.count(code);
+        if !self.logs(level) {
+            return;
+        }
+        let fields = fields
+            .into_iter()
+            .map(|(key, value)| match value {
+                Value::Str(text) => (key, Value::Str(crate::log::cap(text))),
+                value => (key, value),
+            })
+            .collect();
+        self.io.actions.push(Action::Notice(Notice::Event(LogEvent {
             level,
-            message: message.into(),
-        }));
+            code,
+            message: crate::log::cap(message.into()),
+            fields,
+        })));
     }
 
     pub fn deactivate(&mut self) {
@@ -1143,6 +1191,15 @@ impl<V: Venue> Engine<V> {
         self.shared_ticker_revision = self.store.ticker_revision();
     }
 
+    /// Events below `level` are dropped before they are built; defaults to Info.
+    pub fn set_log_level(&mut self, level: Level) {
+        self.io.min_level = level;
+    }
+
+    pub fn health(&self) -> &Health {
+        &self.io.health
+    }
+
     /// Native hosts surface a rejected trusted-provider update as an ordinary notice.
     pub fn report_public_feed_error(&mut self, error: &str) {
         self.io.actions.push(Action::Notice(Notice::Log {
@@ -1288,10 +1345,21 @@ impl<V: Venue> Engine<V> {
             Event::TickIntervalChanged { interval_ms } => {
                 self.venue.on_tick_interval(&mut cx, interval_ms)
             }
-            Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
+            Event::WsOpened { socket } => {
+                cx.io.health.ws_opened = cx.io.health.ws_opened.saturating_add(1);
+                self.venue.on_open(&mut cx, socket)
+            }
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
             Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
-            Event::WsClosed { socket, code } => self.venue.on_close(&mut cx, socket, code),
+            Event::WsClosed { socket, code } => {
+                cx.event(
+                    Level::Debug,
+                    log_code::WS_CLOSED,
+                    "WebSocket closed",
+                    [("socket", socket.0.into()), ("code", code.into())],
+                );
+                self.venue.on_close(&mut cx, socket, code)
+            }
             Event::HttpResponse { request, response } => {
                 self.http_start(now, request, response.status, response.headers);
                 self.http_chunk(now, request, response.body.as_bytes());
@@ -1350,6 +1418,13 @@ impl<V: Venue> Engine<V> {
                 cx.io.streams.remove(&request);
                 cx.io.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
+                    // Transport errors can quote signed URLs, so only the fact is recorded.
+                    cx.event(
+                        Level::Debug,
+                        log_code::HTTP_FAILED,
+                        "HTTP request failed",
+                        [],
+                    );
                     self.venue.on_request_failed(&mut cx, pending, error);
                 }
             }
@@ -1512,6 +1587,22 @@ impl<V: Venue> Engine<V> {
             store: &mut self.store,
             io: &mut self.io,
         };
+        let status = incoming.status;
+        if status == 429 {
+            cx.event(
+                Level::Debug,
+                log_code::RATE_LIMITED,
+                "HTTP rate limited",
+                [],
+            );
+        } else if status >= 500 {
+            cx.event(
+                Level::Debug,
+                log_code::HTTP_FAILED,
+                "HTTP server error",
+                [("status", status.into())],
+            );
+        }
         // A 2xx without the expected array (an error envelope, a truncated
         // body) must never read as an authoritative empty list.
         if let Some(splitter) = &incoming.splitter {
