@@ -179,3 +179,22 @@ auth-path/array cases were added; full rerun is required for the final head.
   signing, preserving the local signer assumption; independent review passes.
 - Landing advanced to Coinbase `5c0e437faf`; merge it before final artifact
   builds. Coinbase capabilities and the roster-wide sweep remain outside scope.
+- Coinbase landing merged in `916fc8c498`, Polymarket landing `a0c11afd87`
+  merged in `5be8a2c727`. Independent merge reviews pass. Both retain this
+  lane's scoped registrations and the incoming venue APIs/transfer layouts.
+- Header-line ingress `77ebeed5e3` passes six standalone WASM tests, 37 JS host
+  tests after Coinbase integration, and two actual SDK signing tests. The latter
+  proves exact bridge bytes separately from normal HTTP header whitespace
+  normalization. The Coinbase-only `accountId` export is now feature gated in
+  `3d6144d555`; combined/Coinbase builds retain it.
+- The latest artifact is 1,262,278 bytes, 3,987 over budget after incoming
+  prediction metadata added common Store/frame work. Add an engine feature for
+  this optional metadata, enabled by Polymarket, to keep other standalone builds
+  lean while preserving its complete behavior and frame layout when enabled.
+- Independent Spot re-review found execution geometry needed validation before
+  emitting or consuming a trade ID. Bound by explicit native total/cumulative
+  quantities; preflight the known-fill floor on current/newer open rows while
+  retaining legitimate older/terminal executions. Regression/fix in progress.
+- Current complete root lint passes 28 tasks. The merged-source native and
+  harness pipelines are running; prior incomplete runs spanning landing merges
+  are not final gate evidence.
