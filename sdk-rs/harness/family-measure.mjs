@@ -78,7 +78,18 @@ const replay = (dir, label) => {
   if (result.status !== 0) throw new Error(`${label} replay failed: ${result.stderr}`);
   const output = JSON.parse(readFileSync(out, 'utf8'));
   const { metrics, ...state } = output;
-  return { metrics, state: JSON.stringify(state) };
+  return { metrics, state };
+};
+
+// Leaf paths where two outputs differ, for diagnosing a build difference.
+const differingPaths = (a, b, path = '', found = []) => {
+  if (found.length >= 20) return found;
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) differingPaths(a[key], b[key], `${path}/${key}`, found);
+  } else if (JSON.stringify(a) !== JSON.stringify(b)) {
+    found.push(`${path || '/'}: combined=${JSON.stringify(a)?.slice(0, 160)} family=${JSON.stringify(b)?.slice(0, 160)}`);
+  }
+  return found;
 };
 
 const samples = { combined: { cold: [], replay: [] }, family: { cold: [], replay: [] } };
@@ -92,7 +103,8 @@ for (let pair = 0; pair < pairs; pair++) {
     const { metrics, state } = replay(arms[arm], `${arm}-${pair}`);
     samples[arm].replay.push(metrics);
     reference ??= state;
-    if (state !== reference) differences.push(`${arm} pair ${pair + 1} output differs`);
+    const paths = differingPaths(reference, state);
+    if (paths.length) differences.push(`${arm} pair ${pair + 1} output differs:\n    ${paths.join('\n    ')}`);
   }
 }
 
