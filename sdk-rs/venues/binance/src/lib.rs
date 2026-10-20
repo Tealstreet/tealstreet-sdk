@@ -45,6 +45,7 @@ pub struct Options {
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+    pub recv_window: Option<f64>,
     /// A portfolio margin account (`papi`) rather than USD-M futures.
     pub portfolio_margin: bool,
 }
@@ -371,7 +372,7 @@ impl BinanceFutures {
         let Some(credentials) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
             return;
         };
-        let query = query.signed(credentials, cx.now);
+        let query = query.signed(credentials, cx.now, self.options.recv_window);
         let url = format!("{}{path}?{query}", self.urls.account_rest);
         let headers = vec![("X-MBX-APIKEY", credentials.key.clone())];
         match stream {

@@ -51,6 +51,13 @@ COIN-M partial placement failures reject with the proven accepted native IDs
 on `error.partialOrderIds`; subsequent placement steps stop. PM stop quantities
 honor explicit nonzero size even with `close:true`; zero means the full position.
 
+All four Rust profiles sign REST requests with `extra.recvWindow` (default
+20,000); the Spot private subscription retains its separate 5,000 window.
+Spot/COIN-M native historical fills/orders/income queries report unsupported;
+SDK methods expose the matching branded Base fallbacks so history ingestion
+can distinguish unsupported from a successful empty result. USD-M/PM histories
+remain implemented, including EXPIRED_IN_MATCH as canceled.
+
 TypeScript USD-M/PM cancel acknowledgements preserve rows already `Closed` or
 `Canceled`, including fills received while cancellation was in flight. Accepted
 nonterminal rows, including local Creating/Updating/Canceling states, become

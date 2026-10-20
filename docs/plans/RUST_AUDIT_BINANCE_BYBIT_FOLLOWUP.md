@@ -152,3 +152,15 @@ No new error architecture or unrelated engine helper migration belongs here.
   regressions failed before implementation. Independent review and all 26
   portfolio/variant trading tests pass. The additional actual SDK partial-error
   regression awaits the serialized Binance WASM build.
+- Queries/auth source checkpoint: history EXPIRED_IN_MATCH maps canceled.
+  Native Spot/COIN-M fills/orders/income reject unsupported reads before auth
+  or I/O; actual SDK constructors brand each matching Base fallback while
+  USD-M/PM methods remain supported. All four aliases forward recvWindow to
+  native ordinary/direct-primary signing, preserving 0/fractions/default 20,000
+  and secondary-read routing; Spot WS remains 5,000. Intended native query and
+  SDK branding regressions failed before implementation. An exact old-checkpoint
+  signer probe fails custom 4,321, and current source passes. Independent review
+  reran 18 native plus four actual-constructor tests successfully; author strict
+  Clippy/typecheck/ESLint passed. Eight actual selected-WASM HMAC scenarios are
+  prepared but await the root's serialized build. An earlier wrong-selected-
+  package 'unsupported venue' attempt is explicitly not regression evidence.
