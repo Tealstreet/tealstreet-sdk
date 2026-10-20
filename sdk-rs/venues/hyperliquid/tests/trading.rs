@@ -69,6 +69,40 @@ fn invalid_or_duplicate_caller_id_rejects_entire_batch_before_a_write() {
     }
 }
 #[test]
+fn bybit_controls_reject_the_whole_batch_before_any_write() {
+    for (field, value) in [
+        (
+            "bybitBbo",
+            serde_json::json!({"sideType":"Queue","level":1}),
+        ),
+        ("bybitSlippageToleranceTicks", serde_json::json!(2)),
+    ] {
+        let (mut e, _) = ready("disabled");
+        let good =
+            opts(r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":1}"#);
+        let mut unsupported: Value = serde_json::to_value(&good).unwrap();
+        unsupported[field] = value;
+        e.handle(
+            2000.0,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![good, serde_json::from_value(unsupported).unwrap()],
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "{field} emitted a write"
+        );
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
+                if error.contains("Bybit")
+        )));
+    }
+}
+
+#[test]
 fn full_position_stop_accepts_waiting_without_oid() {
     let (mut e, _) = ready("disabled");
     e.handle(2000.0,Event::Command(Command::PlaceOrders{command:1,orders:vec![opts(&format!(r#"{{"symbol":"BTC-PERP","type":"stop_market","side":"sell","price":80,"amount":2,"reduceOnly":true,"clientOrderId":"{CLOID}"}}"#))]}));

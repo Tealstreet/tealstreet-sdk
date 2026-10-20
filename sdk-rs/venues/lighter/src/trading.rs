@@ -295,6 +295,8 @@ impl Lighter {
                     client_order_id: None,
                     close: old.close,
                     max_slippage_pct: None,
+                    bybit_bbo: None,
+                    bybit_slippage_tolerance_ticks: None,
                 };
                 let mut steps = match self.prepare_orders(cx, vec![opts]) {
                     Ok(steps) => steps,
@@ -923,6 +925,12 @@ impl Lighter {
         cx: &Cx<'_, Pending>,
         orders: Vec<PlaceOrderOpts>,
     ) -> Result<VecDeque<Step>, String> {
+        if orders
+            .iter()
+            .any(|o| o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some())
+        {
+            return Err("Bybit BBO and TickSize controls are not supported by Lighter".into());
+        }
         let batch = orders.len() > 1
             && orders.iter().all(|o| {
                 o.symbol == orders[0].symbol

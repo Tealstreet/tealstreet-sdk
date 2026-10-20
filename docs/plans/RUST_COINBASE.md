@@ -285,3 +285,16 @@ correction keeps funding time zero for dated futures even when the shared API
 schema includes incidental perpetual metadata; INTX retains its original
 unknown-metadata sentinel. The strengthened CFM regression and all 86 venue tests
 pass; independent review and strict Clippy are clear. Both main spot tapes pass.
+
+### Landing integration checkpoint
+
+Merged landing commit922b5fdc89, preserving its Bybit/KuCoin aliases, allocator
+and optional native-order frame tail. Conflicts were reviewed in separate SDK,
+WASM and harness scopes; engine currency balances/account identity survive the
+automatic merge. Newly introduced Bybit-only native options reject for Coinbase.
+CFM native quantity metadata now survives both worker and main-thread frame
+application; the sixth real WASM case proves two contracts become0.02base and
+three native placement contracts become0.03base while retaining native extras.
+All six SDK/WASM cases, SDK typecheck/lint, 55 engine tests,86 venue tests and
+272 harness tests pass. The post-merge eight-private/public/control gates are
+running before PR publication.

@@ -4,6 +4,7 @@ import type { ExchangeName } from '../types';
 import { createPrivateKey, createPublicKey, verify } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createExchange } from '../index';
+import { BaseExchange } from '../exchanges/base';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
@@ -33,7 +34,7 @@ const jwtClaims = (token: string) => {
   expect(verify(null, Buffer.from(parts.slice(0, 2).join('.')), publicKey, Buffer.from(parts[2], 'base64url'))).toBe(true);
   return claims;
 };
-const transport = () => {
+const transport = (profile: 'spot' | 'cfm' = 'spot') => {
   const requests: Array<{ method: string; url: string; headers: Record<string, string>; body?: string }> = [];
   const subscriptions: Array<{ url: string; message: Record<string, any> }> = [];
   const response = (body: unknown, status = 200) => ({ status, body: new TextEncoder().encode(JSON.stringify(body)) });
@@ -58,12 +59,22 @@ const transport = () => {
         base_increment: '0.001', quote_increment: '0.01', min_quantity: '0.001', qty_24hr: '20', notional_24hr: '2200',
         quote: { best_bid_price: '109', best_ask_price: '111', trade_price: '110', mark_price: '110', index_price: '110' },
       }]);
-      if (path.endsWith('/cfm/balance_summary')) return response({ message: 'No CFM account' }, 403);
+      if (path.endsWith('/cfm/balance_summary')) return profile === 'cfm'
+        ? response({ balance_summary: { total_usd_balance: { value: '1000' }, available_margin: { value: '800' }, unrealized_pnl: { value: '0.2' } } })
+        : response({ message: 'No CFM account' }, 403);
+      if (path.endsWith('/cfm/positions')) return response({ positions: [{ product_id: 'BTC-CDE', side: 'LONG',
+        number_of_contracts: '2', avg_entry_price: '100', current_price: '110', unrealized_pnl: '0.2' }] });
       if (path.endsWith('/portfolios')) return response({ portfolios: [{ uuid: 'selected-spot-portfolio', type: 'DEFAULT' }] });
       if (path.endsWith('/portfolios/selected-spot-portfolio')) return response({ breakdown: {
         spot_positions: [{ asset: 'BTC', total_balance_crypto: 1.5, available_to_trade_crypto: 1, total_balance_fiat: 165 }],
       } });
-      if (path.endsWith('/products')) return response({ products: [product], num_products: 1, pagination: { has_next: false } });
+      if (path.endsWith('/products')) {
+        const row = profile === 'cfm' && parsed.searchParams.get('product_type') === 'FUTURE'
+          ? { ...product, product_id: 'BTC-CDE', product_type: 'FUTURE', base_increment: '1', base_min_size: '1',
+              future_product_details: { contract_expiry_type: 'EXPIRING', contract_root_unit: 'BTC', contract_size: '0.01' } }
+          : product;
+        return response({ products: [row], num_products: 1, pagination: { has_next: false } });
+      }
       if (path.endsWith('/orders/historical/batch')) return response({ orders: [], has_next: false, cursor: '' });
       throw new Error(`Unexpected Coinbase SDK request ${request.method} ${request.url}`);
     },
@@ -75,7 +86,8 @@ const transport = () => {
 
 describe('shipping Coinbase Rust family', () => {
   let exchange: RustEngineExchange | undefined;
-  afterEach(() => { exchange?.dispose(); exchange = undefined; });
+  let mirrored: BaseExchange | undefined;
+  afterEach(() => { exchange?.dispose(); exchange = undefined; mirrored?.dispose(); mirrored = undefined; });
 
   it.each(names)('%s selects private startup from downloaded JSON, returns native portfolio and preserves native commands', async (name) => {
     const tape = transport();
@@ -96,7 +108,7 @@ describe('shipping Coinbase Rust family', () => {
     await expect(exchange.fetchHistoricalOrders({ symbol: 'BTC-USD', from: Infinity })).rejects.toThrow(/numbers must be finite/);
     await expect(exchange.fetchOHLCV({ symbol: 'BTC-USD', interval: '1m', from: NaN })).rejects.toThrow(/numbers must be finite/);
     await expect(exchange.placeOrder({ symbol: 'BTC-USD', type: OrderType.Market, side: OrderSide.Buy,
-      amount: 1, stopLoss: NaN })).rejects.toThrow(/numbers must be finite/);
+      amount: 1, stopLoss: NaN })).rejects.toThrow(/must be finite/);
     expect(tape.requests).toHaveLength(beforeInvalid);
     await expect(exchange.placeOrder({ symbol: 'BTC-USD', type: OrderType.Limit, side: OrderSide.Buy,
       amount: 0.125, price: 99.25, timeInForce: OrderTimeInForce.PostOnly, clientOrderId: 'SDK-Exact-42' })).resolves.toEqual(['9007199254740995']);
@@ -125,6 +137,37 @@ describe('shipping Coinbase Rust family', () => {
     expect(new Set(privateMessages.map((s) => s.message.jwt)).size).toBe(2);
     for (const { message } of privateMessages) expect(jwtClaims(message.jwt).uri).toBeUndefined();
     if (name === 'coinbasespot') expect(tape.requests.every((r) => !/\/(cfm|intx)\//.test(r.url))).toBe(true);
+  }, 20000);
+
+  it('preserves CFM native placement units across the real WASM frame boundary', async () => {
+    const tape = transport('cfm');
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.native);
+    const store = new DefaultStore();
+    const mainStore = new DefaultStore();
+    mirrored = new BaseExchange('coinbase', { key: '', secret: '' }, mainStore);
+    exchange = await createExchange('coinbase', { key: downloaded, secret: '', tealstreetTunnel: false }, store) as RustEngineExchange;
+    exchange.onFrame = (frame) => mirrored!.applyWorkerFrame(frame.slice(0));
+    await exchange.start();
+    expect(store.marketsBySymbol['BTC-CDE'].contractSize).toBe(0.01);
+    expect(store.positions.find((p) => p.symbol === 'BTC-CDE')).toMatchObject({
+      contracts: 0.02, extra: { contractsNative: 2 },
+    });
+    expect(mainStore.positions.find((p) => p.symbol === 'BTC-CDE')).toMatchObject({
+      contracts: 0.02, extra: { contractsNative: 2 },
+    });
+    await expect(exchange.placeOrder({ symbol: 'BTC-CDE', type: OrderType.Limit, side: OrderSide.Buy,
+      amount: 3, price: 100, clientOrderId: 'CFM-native-three' })).resolves.toEqual(['9007199254740995']);
+    const placed = tape.requests.find((r) => r.method === 'POST' && new URL(r.url).pathname.endsWith('/orders'))!;
+    expect(JSON.parse(placed.body!).order_configuration.limit_limit_gtc.base_size).toBe('3');
+    await expect.poll(() => store.orders.find((o) => o.id === '9007199254740995')).toMatchObject({
+      symbol: 'BTC-CDE', amount: 0.03, filled: 0, remaining: 0.03,
+      extra: { remainingNative: 3, filledInPlacementUnits: 0 },
+    });
+    expect(mainStore.orders.find((o) => o.id === '9007199254740995')).toMatchObject({
+      symbol: 'BTC-CDE', amount: 0.03, filled: 0, remaining: 0.03,
+      extra: { remainingNative: 3, filledInPlacementUnits: 0 },
+    });
   }, 20000);
 
   it.each(names)('%s honors explicit public-only despite downloaded credentials', async (name) => {

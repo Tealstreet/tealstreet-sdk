@@ -3738,6 +3738,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-kucoin"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-venue-lighter"
 version = "0.1.0"
 dependencies = [
@@ -3818,6 +3828,7 @@ dependencies = [
  "safe-cex-venue-coinbase",
  "safe-cex-venue-cryptocom",
  "safe-cex-venue-hyperliquid",
+ "safe-cex-venue-kucoin",
  "safe-cex-venue-lighter",
  "safe-cex-venue-mexc",
  "safe-cex-venue-okx",

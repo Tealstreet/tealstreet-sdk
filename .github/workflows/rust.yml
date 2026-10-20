@@ -128,6 +128,9 @@ jobs:
           - venue: mexc
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-mexc
+          - venue: kucoin
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-kucoin
           - venue: bingx
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-bingx
@@ -219,6 +222,23 @@ jobs:
         run: |
           for venue in okx okxeu okxdemo okxeudemo; do
             yarn rust:private-tape-okx --venue "$venue"
+            yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
+          done
+
+      - name: Bybit inverse/spot/demo public data (correctness, CPU and memory)
+        if: matrix.venue == 'bybit'
+        run: |
+          yarn rust:gate --venue bybitinverse --tape sdk-rs/harness/fixtures/bybitinverse-public.jsonl.gz --books BTCUSD,ETHUSD
+          yarn rust:gate --venue bybitspot --tape sdk-rs/harness/fixtures/bybitspot-public.jsonl.gz --books BTCUSDT,ETHUSDT
+          yarn rust:gate --venue bybitdemo --tape sdk-rs/harness/fixtures/bybitdemo-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: Hyro documented public contract (live endpoints not configured)
+        if: matrix.venue == 'bybit'
+        run: yarn rust:gate --venue hyrotrader --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: Bybit variants account and trading (documented correctness)
+        if: matrix.venue == 'bybit'
+        run: |
+          for venue in bybitinverse bybitspot bybitdemo hyrotrader; do
+            yarn "rust:private-tape-$venue"
             yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
           done
       - name: Orderly broker and testnet variants (correctness)

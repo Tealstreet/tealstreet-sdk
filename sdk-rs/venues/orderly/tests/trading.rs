@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::model::PlaceOrderOpts;
+use safe_cex_engine::model::{BybitBbo, PlaceOrderOpts};
 use safe_cex_engine::{Action, Command, Event, Notice};
 use support::*;
 fn place(e: &mut Driver, command: u32, json: &str) {
@@ -63,6 +63,84 @@ fn full_batch_fails_before_any_write_for_invalid_later_id_and_bracket_source() {
         assert!(done(out, 10).is_err());
     }
 }
+fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
+    for busy in [false, true] {
+        let (mut e, _) = ready();
+        requests(&mut e);
+        let good: PlaceOrderOpts = serde_json::from_str(
+            r#"{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}"#,
+        )
+        .unwrap();
+        if busy {
+            e.handle(
+                2000.0,
+                Event::Command(Command::PlaceOrders {
+                    command: 1,
+                    orders: vec![good.clone()],
+                }),
+            );
+            assert_eq!(
+                requests(&mut e).len(),
+                1,
+                "valid order must reach native HTTP"
+            );
+        }
+        let before = e.snapshot_frame(2000.0).to_vec();
+        e.take_frame(2000.0);
+        e.handle(
+            2000.0,
+            Event::Command(Command::PlaceOrders {
+                command: 10,
+                orders: vec![good, bad.clone()],
+            }),
+        );
+        let out = actions(&mut e);
+        assert!(
+            out.iter().all(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 10, result: Err(error) })
+                    if error.contains("Bybit BBO and TickSize controls")
+            )),
+            "unexpected batch effects (busy={busy}): {out:?}"
+        );
+        assert_eq!(
+            out.len(),
+            1,
+            "batch must reject immediately and exactly once"
+        );
+        assert_eq!(e.snapshot_frame(2000.0), before);
+        assert!(
+            e.take_frame(2000.0).is_none(),
+            "rejection dirtied the store"
+        );
+    }
+}
+
+#[test]
+fn bybit_bbo_on_later_batch_item_rejects_before_any_read_write_or_mutation() {
+    let mut bad: PlaceOrderOpts = serde_json::from_str(
+        r#"{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}"#,
+    )
+    .unwrap();
+    bad.bybit_bbo = Some(BybitBbo {
+        side_type: "Queue".into(),
+        level: 1.0,
+    });
+    rejects_bybit_control_without_batch_effects(bad);
+}
+
+#[test]
+fn bybit_ticks_on_later_batch_item_reject_before_any_read_write_or_mutation() {
+    for ticks in [0.0, 1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut bad: PlaceOrderOpts = serde_json::from_str(
+            r#"{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}"#,
+        )
+        .unwrap();
+        bad.bybit_slippage_tolerance_ticks = Some(ticks);
+        rejects_bybit_control_without_batch_effects(bad);
+    }
+}
+
 #[test]
 fn split_quantities_preserve_exact_amount_and_report_partial_acceptance() {
     let (mut e, _) = ready();

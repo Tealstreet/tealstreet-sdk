@@ -170,6 +170,8 @@ fn opts(symbol: &str, kind: OrderType, side: OrderSide, amount: f64) -> PlaceOrd
         sl_trigger_type: None,
         client_order_id: None,
         close: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
     }
 }
 impl Session {
@@ -386,6 +388,15 @@ fn entire_batch_is_preflighted_before_any_write() {
     cases.push(bad);
     let mut bad = good.clone();
     bad.time_in_force = Some(TimeInForce::ImmediateOrCancel);
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.bybit_bbo = Some(BybitBbo {
+        side_type: "Counterparty".into(),
+        level: 1.0,
+    });
+    cases.push(bad);
+    let mut bad = good.clone();
+    bad.bybit_slippage_tolerance_ticks = Some(2.0);
     cases.push(bad);
     let mut bad = good.clone();
     bad.trigger_type = Some(StopTriggerType::MarkPrice);

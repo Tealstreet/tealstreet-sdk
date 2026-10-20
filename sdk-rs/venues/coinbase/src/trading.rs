@@ -232,6 +232,8 @@ impl Coinbase {
             || opts.tp_trigger_type.is_some()
             || opts.sl_trigger_type.is_some()
             || opts.max_slippage_pct.is_some()
+            || opts.bybit_bbo.is_some()
+            || opts.bybit_slippage_tolerance_ticks.is_some()
         {
             return Err("Coinbase does not support these bracket or slippage instructions".into());
         }
@@ -555,6 +557,8 @@ impl Coinbase {
                         sl_trigger_type: None,
                         client_order_id: None,
                         close: None,
+                        bybit_bbo: None,
+                        bybit_slippage_tolerance_ticks: None,
                     };
                     let replacement = self.prepare_create(cx, &opts, Some(id.clone()))?;
                     job.steps.push_back(Step::Cancel {
