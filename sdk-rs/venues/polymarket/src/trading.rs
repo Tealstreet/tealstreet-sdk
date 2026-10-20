@@ -667,6 +667,9 @@ impl Polymarket {
         if !self.trading.jobs.contains_key(&command) {
             return;
         }
+        // Set before a step whose failure happens before any request is sent.
+        let mut before_send = false;
+        let mut refused = false;
         let result = (|| {
             success(response)?;
             match request {
@@ -679,6 +682,7 @@ impl Polymarket {
                         || !ack.error_msg.is_empty()
                         || !["", "live", "matched", "delayed", "unmatched"].contains(&ack.status)
                     {
+                        refused = true;
                         return Err(format!("Polymarket placement rejected: {}", ack.error_msg));
                     }
                     if ack.status == "matched" {
@@ -775,6 +779,12 @@ impl Polymarket {
                                 .map_or(0.0, |o| o.filled),
                         );
                     self.account_terminal(cx, &replacement.old.id);
+                    self.trading
+                        .jobs
+                        .get_mut(&command)
+                        .expect("active job")
+                        .effective = true;
+                    before_send = true;
                     self.replace_read(cx, command, replacement)?;
                 }
                 Request::ReplaceRead {
@@ -809,6 +819,7 @@ impl Polymarket {
                                     .into(),
                             );
                         }
+                        before_send = true;
                         self.replace_read(cx, command, replacement)?;
                         return Ok(());
                     }
@@ -828,6 +839,7 @@ impl Polymarket {
                         return Ok(());
                     }
                     replacement.options.amount = remaining;
+                    before_send = true;
                     let placement = self.prepare(cx, replacement.options)?;
                     self.trading
                         .jobs
@@ -849,7 +861,9 @@ impl Polymarket {
             Err(error) => {
                 let error = if !(200..300).contains(&response.status) {
                     http_failure(response.status, error)
-                } else if error.starts_with("Polymarket placement rejected") {
+                } else if before_send {
+                    not_sent(error)
+                } else if refused {
                     // An explicit refusal; its messages are not a documented code table.
                     VenueError::new(error)
                 } else {

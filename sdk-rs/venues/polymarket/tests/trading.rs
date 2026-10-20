@@ -1147,21 +1147,36 @@ fn cancellation_with_symbol_uses_native_id_without_store_lookup() {
 #[test]
 fn write_failures_are_classified_without_changing_their_text() {
     use safe_cex_engine::{ErrorKind, Outcome};
-    for (status, body, kind, outcome) in [
-        (503, "unavailable", None, Some(Outcome::Unknown)),
+    let rejected = (Some(ErrorKind::Rejected), Some(Outcome::Rejected));
+    for (status, body, classified, text) in [
+        (503, "unavailable", (None, Some(Outcome::Unknown)), None),
+        (408, "timeout", (None, Some(Outcome::Unknown)), None),
         (
-            400,
-            r#"{"error":"invalid order"}"#,
-            Some(ErrorKind::Rejected),
-            Some(Outcome::Rejected),
+            401,
+            "{}",
+            (Some(ErrorKind::AuthInvalid), Some(Outcome::Rejected)),
+            None,
         ),
+        (
+            403,
+            "{}",
+            (Some(ErrorKind::AuthPermission), Some(Outcome::Rejected)),
+            None,
+        ),
+        (
+            429,
+            "{}",
+            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+            None,
+        ),
+        (400, r#"{"error":"invalid order"}"#, rejected, None),
         (
             200,
             r#"{"success":false,"orderID":"","errorMsg":"not enough balance","status":""}"#,
-            None,
-            None,
+            (None, None),
+            Some("Polymarket placement rejected: not enough balance"),
         ),
-        (200, "not json", None, Some(Outcome::Unknown)),
+        (200, "not json", (None, Some(Outcome::Unknown)), None),
     ] {
         let mut h = H::new();
         h.command(Command::PlaceOrders {
@@ -1175,10 +1190,14 @@ fn write_failures_are_classified_without_changing_their_text() {
         };
         assert_eq!(
             (error.kind, error.outcome),
-            (kind, outcome),
+            classified,
             "{status} {body}: {}",
             error.message
         );
+        let text = text.map_or_else(|| format!("Polymarket HTTP {status}: {body}"), Into::into);
+        if status != 200 || text.starts_with("Polymarket placement") {
+            assert_eq!(h.done, [(9, Err(text))], "{status} {body}");
+        }
     }
     let mut h = H::new();
     h.command(Command::PlaceOrders {
@@ -1194,4 +1213,38 @@ fn write_failures_are_classified_without_changing_their_text() {
         (h.failures[0].kind, h.failures[0].outcome),
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
+}
+
+#[test]
+fn failures_after_an_effective_step_are_never_rejected_or_not_sent() {
+    use safe_cex_engine::Outcome;
+    // A second placement refused after the first was accepted.
+    let mut h = H::new();
+    h.command(Command::PlaceOrders {
+        command: 9,
+        orders: vec![order(), order()],
+    });
+    h.response("/order", 200, &ack("first"));
+    let r = h.take("/order");
+    h.respond(r, 400, r#"{"error":"invalid order"}"#);
+    let [error] = h.failures.as_slice() else {
+        panic!("{:?}", h.failures);
+    };
+    assert_eq!(error.outcome, None);
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["first"]);
+
+    // The replacement cannot be prepared after the cancel was confirmed:
+    // nothing was sent, but the cancel took effect.
+    let mut h = H::new();
+    replace(&mut h, 2);
+    h.e.store_mut()
+        .update_markets(|market| market.active = false);
+    h.response("/data/order/o1", 200, &detail("o1", "CANCELED", 4.88));
+    assert_eq!(h.writes(), 0);
+    let [error] = h.failures.as_slice() else {
+        panic!("{:?}", h.failures);
+    };
+    assert_eq!(error.message, "Polymarket market is inactive");
+    assert_eq!(error.outcome, None);
+    assert_ne!(error.outcome, Some(Outcome::Unknown));
 }
