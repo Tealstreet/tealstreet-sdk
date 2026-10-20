@@ -1170,3 +1170,56 @@ fn no_id_execution_after_blind_rest_interval_does_not_reprice_the_gap() {
     assert!((fills[0] - 0.001).abs() < 1e-12);
     assert!((e.store().positions()[0].contracts - 0.011).abs() < 1e-12);
 }
+
+// Private reads start before the ticker seed. A stop read then cannot be
+// classified; when the seed lands mid-read, the stop is re-read at once
+// instead of staying invisible until the next poll.
+#[test]
+fn stop_read_before_the_ticker_seed_is_reread_as_soon_as_prices_exist() {
+    let mut e = Engine::new(Woo::new(Options {
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+        application_id: Some("app".into()),
+        ..Default::default()
+    }));
+    e.start(0.0);
+    let r = requests(&mut e).remove(0);
+    response(&mut e, &r, 10.0, MARKETS);
+    let mut early = requests(&mut e);
+    let ticker = take(&mut early, "/public/futures");
+    let regular = take(&mut early, "/v1/orders?");
+    let algo = take(&mut early, "/v3/algo/orders?");
+    response(&mut e, &regular, 15.0, &page(""));
+    let stop = r#"{"symbol":"PERP_BTC_USDT","algoOrderId":51,"algoType":"STOP","side":"SELL","quantity":0.01,"triggerPrice":60000.5,"triggerPriceType":"MARK_PRICE","totalExecutedQuantity":0,"reduceOnly":true}"#;
+    // The stop's rows stream in before the seed; the read completes after it.
+    let body = algos(stop);
+    e.handle(
+        16.0,
+        Event::HttpStart {
+            request: algo.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        16.0,
+        Event::HttpChunk {
+            request: algo.id,
+            data: body.as_bytes(),
+        },
+    );
+    assert!(e.store().order("51").is_none());
+    response(&mut e, &ticker, 20.0, TICKERS);
+    e.handle(25.0, Event::HttpEnd { request: algo.id });
+    let mut reads = requests(&mut e);
+    let reread = take(&mut reads, "/v3/algo/orders?");
+    response(&mut e, &take(&mut reads, "/v1/orders?"), 30.0, &page(""));
+    response(&mut e, &reread, 30.0, &algos(stop));
+    assert_eq!(
+        e.store()
+            .order("51")
+            .expect("stop visible after the re-read")
+            .kind,
+        safe_cex_engine::model::OrderType::StopLoss
+    );
+}
