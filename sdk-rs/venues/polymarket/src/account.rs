@@ -175,6 +175,8 @@ impl OrderRow<'_> {
 #[serde(rename_all = "camelCase")]
 struct Holding<'a> {
     asset: &'a str,
+    #[serde(default)]
+    slug: &'a str,
     size: Number,
     avg_price: Number,
     #[serde(default)]
@@ -595,7 +597,23 @@ impl Polymarket {
                     return;
                 }
                 let Some(market) = cx.store.market_by_id(row.asset) else {
-                    if self.account.unlisted.insert(row.asset.into()) {
+                    let outside_selection = !row.slug.is_empty()
+                        && self
+                            .options
+                            .polymarket
+                            .as_ref()
+                            .and_then(|options| options.market_slugs.as_ref())
+                            .is_some_and(|slugs| !slugs.iter().any(|slug| slug == row.slug));
+                    if outside_selection {
+                        return;
+                    }
+                    // Only a holding that may sit on a skipped catalogue row is ambiguous;
+                    // otherwise its market is unlisted (e.g. closed), as in TS.
+                    if self.catalogue_may_hold(row.slug) {
+                        snapshot.invalid = true;
+                        cx.log(LogLevel::Warning,
+                            "Polymarket owned holding has unavailable market metadata; preserving previous positions");
+                    } else if self.account.unlisted.insert(row.asset.into()) {
                         cx.log(
                             LogLevel::Warning,
                             format!(
@@ -607,17 +625,24 @@ impl Polymarket {
                     return;
                 };
                 let valid = |p: &f64| (0.0..=1.0).contains(p);
-                let price = row
-                    .cur_price
-                    .0
-                    .filter(valid)
-                    .or_else(|| {
-                        cx.store
-                            .ticker(&market.symbol)
-                            .map(|t| t.last)
-                            .filter(valid)
-                    })
-                    .unwrap_or(row.avg_price.0);
+                let price = row.cur_price.0.filter(valid).or_else(|| {
+                    // BBO/book presence does not prove a default last=0 was observed.
+                    cx.store
+                        .ticker(&market.symbol)
+                        .map(|ticker| ticker.last)
+                        .filter(|price| {
+                            valid(price)
+                                && (*price > 0.0 || self.trade_times.contains_key(&market.symbol))
+                        })
+                });
+                let Some(price) = price else {
+                    snapshot.invalid = true;
+                    cx.log(
+                        LogLevel::Warning,
+                        "Polymarket owned holding price unavailable; preserving previous positions",
+                    );
+                    return;
+                };
                 let index = cx
                     .store
                     .market_index_by_id(row.asset)

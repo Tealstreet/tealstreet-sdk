@@ -219,7 +219,10 @@ impl ApexOmni {
                 legacy,
                 retries,
                 at,
-            } if request.method == Method::Get && retries < 3 => {
+            } if request.method == Method::Get
+                && retries < 3
+                && !matches!(&*pending, Pending::Public(public::Request::Markets { .. })) =>
+            {
                 Self::reset_request(&mut pending);
                 if let Err((error, pending)) =
                     self.send_signed(cx, request, *pending, at, legacy, retries + 1)

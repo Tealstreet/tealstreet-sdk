@@ -91,9 +91,10 @@ struct BookState {
 struct Seed {
     daily: Option<Vec<Ticker>>,
     marks: MarkSeed,
-    live: bool,
-    retries: Vec<(TimerId, SeedRead)>,
-    attempts: [u32; 3],
+    /// Tickers are committed once; later mark reads update them in place.
+    seeded: bool,
+    backoff: safe_cex_engine::startup::Backoff<SeedRead>,
+    live: safe_cex_engine::startup::LiveTickers,
 }
 
 /// Startup waits for the first mark read; a failed one lets startup proceed
@@ -119,15 +120,24 @@ pub struct Backpack {
     books: HashMap<String, BookState>,
     candles: HashMap<(String, String), u32>,
     seed: Seed,
-    /// Perp markets whose catalogue row was skipped; drained as each is first reported.
-    skipped_markets: std::collections::HashSet<String>,
+    /// Perp markets whose catalogue row was skipped, and whether that was reported yet.
+    skipped_markets: HashMap<String, bool>,
     account: account::Account,
     trading: trading::Trading,
     generation: u64,
 }
 
 impl Backpack {
-    fn seed_read(&self, cx: &mut Cx<'_, Pending>, kind: SeedRead) {
+    fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.public.socket.is_none() {
+            self.public.socket =
+                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
+        }
+    }
+    fn seed_read(&mut self, cx: &mut Cx<'_, Pending>, kind: SeedRead) {
+        if !matches!(kind, SeedRead::Markets) && !self.seed.seeded {
+            self.seed.live.begin();
+        }
         let (path, pending) = match kind {
             SeedRead::Markets => (
                 "/api/v1/markets",
@@ -160,13 +170,7 @@ impl Backpack {
             self.seed.marks = MarkSeed::Unavailable;
             self.finish_seed(cx);
         }
-        if self.seed.retries.iter().any(|(_, k)| *k == kind) {
-            return;
-        }
-        let attempt = &mut self.seed.attempts[kind as usize];
-        let delay = (1000u32 << (*attempt).min(5)).min(30000);
-        *attempt = attempt.saturating_add(1);
-        self.seed.retries.push((cx.set_timer(delay as f64), kind));
+        self.seed.backoff.failed(cx, kind);
     }
     pub fn new(options: Options) -> Self {
         Self {
@@ -227,29 +231,29 @@ impl Backpack {
     }
 
     fn finish_seed(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.seed.live
+        if self.seed.seeded
             || self.seed.daily.is_none()
             || matches!(self.seed.marks, MarkSeed::Waiting)
         {
             return;
         }
-        self.seed.live = true;
-        cx.store.set_tickers(self.seed.daily.take().unwrap());
+        self.seed.seeded = true;
+        let mut tickers = self.seed.daily.take().unwrap();
+        self.seed.live.finish(cx.store, &mut tickers);
+        cx.store.set_tickers(tickers);
         if let MarkSeed::Loaded(marks) = std::mem::take(&mut self.seed.marks) {
             Self::apply_marks(cx, marks);
         }
-        self.public.socket = Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
-        self.account_start(cx);
-        if self.options.public_data_only || self.options.key.as_ref().is_none_or(String::is_empty) {
-            cx.store.set_orders(vec![]);
-            cx.store.set_positions(vec![]);
-            cx.store.set_balance(Default::default());
-        }
+        self.connect_public(cx);
     }
 
     /// Account rows on a market skipped at load are dropped; say so once per symbol.
-    pub(crate) fn report_skipped_market(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
-        if self.skipped_markets.remove(symbol) {
+    /// False means the market was never in the catalogue at all.
+    pub(crate) fn report_skipped_market(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) -> bool {
+        let Some(reported) = self.skipped_markets.get_mut(symbol) else {
+            return false;
+        };
+        if !std::mem::replace(reported, true) {
             cx.log(
                 LogLevel::Error,
                 format!(
@@ -257,6 +261,7 @@ impl Backpack {
                 ),
             );
         }
+        true
     }
 
     fn apply_marks(cx: &mut Cx<'_, Pending>, marks: Vec<(String, [f64; 4])>) {
@@ -410,6 +415,7 @@ impl Backpack {
             "depth" => self.depth(cx, serde_json::from_str(text).map_err(|e| e.to_string())?),
             "ticker" => {
                 let d: TickerEvent<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
+                let mut mask = (1 << 2) | (1 << 9) | (1 << 10);
                 cx.store.update_ticker(&d.s, |t| {
                     t.last = d.c;
                     if let Some(change) = d
@@ -418,14 +424,17 @@ impl Backpack {
                         .or_else(|| d.o.filter(|n| n.0 > 0.0).map(|n| (d.c - n.0) / n.0))
                     {
                         t.percentage = change * 100.0;
+                        mask |= 1 << 5;
                     }
                     t.volume = d.v;
                     t.quote_volume = d.q;
                 });
+                self.seed.live.record(cx.store, &d.s, mask);
             }
             "trade" => {
                 let d: TradeEvent<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
                 cx.store.update_ticker(&d.s, |t| t.last = d.p);
+                self.seed.live.record(cx.store, &d.s, 1 << 2);
             }
             "bookTicker" => {
                 let d: BookEvent<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
@@ -433,6 +442,7 @@ impl Backpack {
                     t.bid = d.b;
                     t.ask = d.a;
                 });
+                self.seed.live.record(cx.store, &d.s, 3);
             }
             "kline" => {
                 let d: KlineEvent<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
@@ -639,6 +649,7 @@ impl Venue for Backpack {
                     });
                 });
                 if r.is_err() {
+                    safe_cex_engine::startup::skipped_row(cx);
                     skipped.push(row_symbol(item));
                 }
                 return;
@@ -660,6 +671,7 @@ impl Venue for Backpack {
                     }
                 });
                 if r.is_err() {
+                    safe_cex_engine::startup::skipped_row(cx);
                     skipped.push(row_symbol(item));
                 }
                 return;
@@ -677,6 +689,7 @@ impl Venue for Backpack {
                     ))
                 });
                 if r.is_err() {
+                    safe_cex_engine::startup::skipped_row(cx);
                     skipped.push(row_symbol(item));
                 }
                 return;
@@ -738,12 +751,28 @@ impl Venue for Backpack {
         }
         match pending {
             Pending::Markets { rows, skipped } => {
-                self.seed.attempts[SeedRead::Markets as usize] = 0;
+                if rows.is_empty() {
+                    self.seed.backoff.failed(cx, SeedRead::Markets);
+                    return;
+                }
+                self.seed.backoff.succeeded(cx, &SeedRead::Markets);
                 self.skipped_markets = skipped
                     .into_iter()
                     .filter(|s| s.ends_with("_PERP"))
+                    .map(|s| (s, false))
                     .collect();
                 cx.store.set_markets(rows);
+                self.seed.live.begin();
+                self.connect_public(cx);
+                self.account_start(cx);
+                if self.options.public_data_only
+                    || self.options.key.as_ref().is_none_or(String::is_empty)
+                {
+                    cx.store.set_orders(vec![]);
+                    cx.store.set_positions(vec![]);
+                    cx.store.set_balance(Default::default());
+                }
+
                 self.get(
                     cx,
                     "/api/v1/tickers",
@@ -766,7 +795,15 @@ impl Venue for Backpack {
                 );
             }
             Pending::Daily { mut rows, skipped } => {
-                self.seed.attempts[SeedRead::Daily as usize] = 0;
+                if rows.is_empty() {
+                    self.retry_seed(
+                        cx,
+                        SeedRead::Daily,
+                        "Backpack ticker list has no usable rows",
+                    );
+                    return;
+                }
+                self.seed.backoff.succeeded(cx, &SeedRead::Daily);
                 // A malformed row keeps an empty ticker so socket updates can fill it.
                 for symbol in skipped {
                     if let Some(m) = cx.store.market(&symbol)
@@ -783,8 +820,15 @@ impl Venue for Backpack {
                 self.finish_seed(cx);
             }
             Pending::Marks { rows, .. } => {
-                self.seed.attempts[SeedRead::Marks as usize] = 0;
-                if self.seed.live {
+                if rows.is_empty()
+                    && !serde_json::from_str::<Vec<serde::de::IgnoredAny>>(response.body)
+                        .is_ok_and(|rows| rows.is_empty())
+                {
+                    self.retry_seed(cx, SeedRead::Marks, "Backpack mark list has no usable rows");
+                    return;
+                }
+                self.seed.backoff.succeeded(cx, &SeedRead::Marks);
+                if self.seed.seeded {
                     Self::apply_marks(cx, rows);
                 } else {
                     self.seed.marks = MarkSeed::Loaded(rows);
@@ -856,7 +900,12 @@ impl Venue for Backpack {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, error),
-            Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::Trade(request) => {
+                let error = safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::Network)
+                    .outcome(safe_cex_engine::Outcome::Unknown);
+                self.trade_failed(cx, request, error)
+            }
             Pending::History(request) => cx.done(request.command, Err(error.into())),
             Pending::Depth { symbol, generation }
                 if self
@@ -877,8 +926,7 @@ impl Venue for Backpack {
         if self.account_timer(cx, timer) {
             return;
         }
-        if let Some(index) = self.seed.retries.iter().position(|(t, _)| *t == timer) {
-            let (_, kind) = self.seed.retries.swap_remove(index);
+        if let Some(kind) = self.seed.backoff.on_timer(timer) {
             self.seed_read(cx, kind);
             return;
         }

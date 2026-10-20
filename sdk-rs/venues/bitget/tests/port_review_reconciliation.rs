@@ -114,43 +114,81 @@ fn uta_oneway_fill_retains_inferred_or_explicit_leg() {
 }
 
 #[test]
-fn unmappable_rest_position_and_order_rows_are_logged_without_discarding_valid_rows() {
-    let mut h = Harness::classic();
-    let positions: Value = serde_json::from_str(POSITION).unwrap();
-    let mut unknown = positions["data"][0].clone();
-    unknown["symbol"] = json!("UNKNOWNUSDT");
-    let mut invalid_known = positions["data"][0].clone();
-    invalid_known["total"] = json!("-1");
-    let mut valid = positions["data"][0].clone();
-    valid["total"] = json!("3");
-    h.respond(
-        "/all-position",
-        200,
-        &json!({"code":"00000","data":[unknown,invalid_known,valid]}).to_string(),
-    );
-    assert_eq!(h.engine.store().positions()[0].contracts, 3.0);
-    let orders: Value = serde_json::from_str(OPEN_ORDER).unwrap();
-    let mut unknown = orders["data"]["entrustedList"][0].clone();
-    unknown["symbol"] = json!("UNKNOWNUSDT");
-    let mut invalid_known = orders["data"]["entrustedList"][0].clone();
-    invalid_known["status"] = json!("future_unsupported_status");
-    let mut valid = orders["data"]["entrustedList"][0].clone();
-    valid["orderId"] = json!("valid-new");
-    h.orders(
-        &json!({"code":"00000","data":{"entrustedList":[unknown,invalid_known,valid]}}).to_string(),
-    );
-    assert!(h.engine.store().order("valid-new").is_some());
-    assert!(h.engine.store().order("1").is_none());
-    assert!(
-        h.logs
-            .iter()
-            .any(|log| log.contains("skipped Bitget position record"))
-    );
-    assert!(
-        h.logs
-            .iter()
-            .any(|log| log.contains("skipped Bitget order record"))
-    );
+fn mixed_unmapped_owned_rest_rows_preserve_the_whole_position_and_protection_scope() {
+    use safe_cex_engine::model::OrderType;
+
+    for unknown_first in [true, false] {
+        let mut h = Harness::classic();
+        let previous_positions = h.engine.store().positions().to_vec();
+        let mut previous_orders = h.engine.store().orders().to_vec();
+        for (id, kind, trigger) in [
+            ("prior-sl", OrderType::StopLoss, 80.0),
+            ("prior-tp", OrderType::TakeProfit, 120.0),
+        ] {
+            let mut protection = previous_orders[0].clone();
+            protection.id = id.into();
+            protection.kind = kind;
+            protection.reduce_only = true;
+            protection.price = trigger;
+            previous_orders.push(protection);
+        }
+        h.engine.store_mut().set_orders(previous_orders.clone());
+        let positions: Value = serde_json::from_str(POSITION).unwrap();
+        let mut unknown = positions["data"][0].clone();
+        unknown["symbol"] = json!("UNKNOWNUSDT");
+        unknown["total"] = json!("4");
+        let mut valid = positions["data"][0].clone();
+        valid["total"] = json!("3");
+        let rows = if unknown_first {
+            vec![unknown, valid]
+        } else {
+            vec![valid, unknown]
+        };
+        h.respond(
+            "/all-position",
+            200,
+            &json!({"code":"00000","data":rows}).to_string(),
+        );
+        assert_eq!(h.engine.store().positions(), previous_positions);
+        // A valid normal source cannot commit before the later protection
+        // source proves complete; a missing catalogue peer is not a flat leg.
+        let orders: Value = serde_json::from_str(OPEN_ORDER).unwrap();
+        let mut normal = orders["data"]["entrustedList"][0].clone();
+        normal["orderId"] = json!("valid-new");
+        h.respond(
+            "/orders-pending",
+            200,
+            &json!({"code":"00000","data":{"entrustedList":[normal]}}).to_string(),
+        );
+        let known = json!({"orderId":"valid-new-sl","symbol":"BTCUSDT","size":"1",
+            "triggerPrice":"80","holdSide":"long","planType":"loss_plan","status":"live"});
+        let mut unknown = known.clone();
+        unknown["orderId"] = json!("unknown-owned-sl");
+        unknown["symbol"] = json!("UNKNOWNUSDT");
+        let rows = if unknown_first {
+            vec![unknown, known]
+        } else {
+            vec![known, unknown]
+        };
+        h.respond(
+            "planType=profit_loss",
+            200,
+            &json!({"code":"00000","data":{"entrustedList":rows}}).to_string(),
+        );
+        assert_eq!(h.engine.store().orders(), previous_orders);
+        assert!(h.engine.store().order("valid-new").is_none());
+        assert!(h.engine.store().order("valid-new-sl").is_none());
+        assert!(
+            h.logs
+                .iter()
+                .any(|log| log.contains("skipped Bitget position record"))
+        );
+        assert!(
+            h.logs
+                .iter()
+                .any(|log| log.contains("skipped Bitget order record"))
+        );
+    }
 }
 
 #[test]
@@ -322,7 +360,7 @@ fn entirely_unmappable_snapshots_preserve_state_but_successful_empty_lists_clear
         200,
         r#"{"code":"00000","data":[{"symbol":"BTCUSDT","total":"-1"}]}"#,
     );
-    h.orders(r#"{"code":"00000","data":{"entrustedList":[{"orderId":"bad","symbol":"BTCUSDT","size":"2","price":"90","side":"buy","orderType":"new_unsupported_type","status":"live"}]}}"#);
+    h.respond("/orders-pending", 200, r#"{"code":"00000","data":{"entrustedList":[{"orderId":"bad","symbol":"BTCUSDT","size":"2","price":"90","side":"buy","orderType":"new_unsupported_type","status":"live"}]}}"#);
     assert_eq!(h.engine.store().positions().len(), 1);
     assert!(h.engine.store().order("1").is_some());
     h.private_message(r#"{"arg":{"channel":"positions"},"action":"snapshot","data":[{"symbol":"BTCUSDT","total":"-1"}]}"#);

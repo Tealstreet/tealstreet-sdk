@@ -869,6 +869,28 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Sends `client_id` (single and native batch), rule 1-64 characters, in place of the generated `ts_…` ID. Close orders (`close: true`) are not an honorable shape.
 
+
+## Rust public discovery resilience
+
+Rust catalogue/ticker reads retry through the shared engine capped exponential
+backoff. A malformed typed public row is skipped with a warning while valid
+neighbours remain usable. Private account initialization starts once the usable
+catalogue is available, without waiting for REST ticker seeds. Account snapshots,
+mutation acknowledgements and signing validation retain their stricter rules.
+See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.
+
+Summary ticker numbers accept null as zero as well as empty strings, matching
+TS's optional-field defaults. Mixed nullable bid/ask/funding fields retain valid
+last/mark prices on REST and JSON summaries. Instrument, book and signed/private
+required numbers do not inherit that null coercion.
+
+Rust JSON position snapshots and updates accept an empty string or null for optional
+`leverage` and `liquidation_price`, matching TS's `value || '0'` default. Zero
+leverage uses the existing cached setting or 10x fallback; liquidation defaults
+to zero. Nonempty malformed values and booleans remain invalid; position size/PnL
+still reject null and empty strings. Account margin and depth
+numbers retain strict validation. Binary position decoding is unchanged.
+
 ## Rust socket supervision
 
 Both Rust sockets use `engine::socket::Supervisor`: a 10-second connection deadline and capped exponential reconnect delay with jitter that survives short open/close flaps. Validated idle limits remain 60 seconds public and 90 seconds private; private authentication and subscription replies have 15-second deadlines. Native SBE heartbeat template40 and host RFC6455 control frames prove liveness. Rust sends no application JSON ping. Public per-book resynchronization and subscription retry timers remain independent.
