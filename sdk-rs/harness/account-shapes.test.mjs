@@ -17,6 +17,7 @@ test('lookup projection compares financial and native client identity across wir
   const ts = { ok: { found: true, order: { ...order, info: { clientOid: 'caller' }, lastUpdate: 1 } } };
   const rust = { ok: { found: true, order: { ...order, clientOrderId: 'caller', lastUpdate: 2 } } };
   assert.deepEqual(lookupResult(ts, command), lookupResult(rust, command));
+  assert.deepEqual(lookupResult({ ok: { found: true, order: { ...order, info: { c: 'caller' } } } }, command), lookupResult(rust, command));
   for (const [field, value] of Object.entries({ filled: 0.6, remaining: 1.4, amount: 3, price: 11,
     id: '2', side: 'sell', status: 'closed', clientOrderId: 'wrong' })) {
     assert.notDeepEqual(lookupResult(ts, command), lookupResult({ ok: { found: true, order: { ...rust.ok.order, [field]: value } } }, command));

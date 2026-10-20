@@ -154,7 +154,9 @@ const KNOWN_TS_FIXES = {
   // KuCoin Spot: emit each native execution once even across replay, preserve
   // newer private state across stale REST snapshots, and retain good orders
   // when active-symbol discovery fails or active-order rows have invalid
-  // financial geometry. Encode caller order IDs as URL components on cancel.
+  // financial geometry. Reject malformed WS order/execution quantities and
+  // missing/null required REST balances rather than committing coerced zeros.
+  // Encode caller order IDs as URL components on cancel.
   // Native regressions cover these cases;
   // standard replay compares both outputs without rewriting either result.
   kucoinspot() {},

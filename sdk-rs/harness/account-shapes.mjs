@@ -7,7 +7,9 @@ export const currencyBalances = (currencies = {}) => Object.fromEntries(
 export const lookupResult = (result, command) => {
   if (command?.op !== 'findOrderByClientOrderId' || result.ok?.found !== true) return result;
   const order = result.ok.order;
-  const identity = order.clientOrderId ?? order.info?.clientOid ?? order.info?.clientOrderId;
+  const aliases = ['clOrdId', 'clientOrderId', 'orderLinkId', 'clientOid', 'clOrdID', 'c', 'client_id', 'client_order_id', 'clientId'];
+  const nativeId = order.clientOrderId ?? aliases.map((field) => order.info?.[field]).find((id) => id !== undefined && id !== null);
+  const identity = nativeId === undefined ? undefined : String(nativeId);
   const fields = ['id', 'parentId', 'symbol', 'status', 'type', 'side', 'price', 'amount', 'filled', 'remaining',
     'timeInForce', 'triggerType', 'tpTriggerType', 'slTriggerType', 'takeProfit', 'stopLoss', 'extra'];
   return { ...result, ok: { ...result.ok, order: {
