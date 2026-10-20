@@ -536,6 +536,16 @@ test('health counters are parsed from the engine and unavailable after disposal'
   assert.throws(() => host.health(), /engine disposed/);
 });
 
+test('a terminal startup failure reaches the host with its structured detail', () => {
+  const failures = [];
+  const detail = { message: 'Bybit rejected the API key (10003): API key is invalid.', kind: 'authInvalid', venueCode: '10003' };
+  const host = new EngineHost({ start() { return JSON.stringify([{ op: 'startupFailed', detail }]); } }, { now: () => 1 }, {
+    onStartupFailed(value) { failures.push(value); },
+  });
+  host.start();
+  assert.deepEqual(failures, [detail]);
+});
+
 test('socket feed identity and protocol recovery reach the account transport', () => {
   let received;
   const host = new EngineHost({}, {

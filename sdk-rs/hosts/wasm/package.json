@@ -30,6 +30,14 @@
       "browser": "./js/engine.web.mjs",
       "node": "./js/engine.node.mjs",
       "default": "./js/engine.web.mjs"
+    },
+    "./engine/web": {
+      "types": "./js/loader.d.mts",
+      "default": "./js/engine.web.mjs"
+    },
+    "./venues": {
+      "types": "./js/venues.d.mts",
+      "default": "./js/venues.mjs"
     }
   },
   "scripts": {
