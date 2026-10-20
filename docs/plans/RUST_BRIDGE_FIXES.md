@@ -562,3 +562,32 @@ registrations survive pause, obsolete physical callbacks are fenced, floors
 remain distinct from fallback cadence, and consumed registrations are removed
 before callbacks. Venue timers, SDK policy propagation, classified auth feedback
 and actual account resync are still separate implementation work.
+
+## Phase 6a venue and SDK activation plan
+
+- SDK applies resolved `getTickInterval()` after host construction and before
+  native start. Send Infinity explicitly as null; do not serialize raw options
+  into Orderly's numeric constructor field. Subscribe every Rust venue to server
+  multiplier changes, forward Base auth-streak changes, and observe effective
+  option changes through the existing flush cadence. Send only changed policy,
+  clean listeners on disposal, and preserve errors/startup failure semantics.
+  This proves propagation; native classified credential evidence remains 6b.
+- Native slice A: Binance/Aster, Bybit, Bitget, BloFin, BingX, Backpack, Bitrue,
+  Orderly, Kucoin futures/spot, MEXC, Phemex and WEEX. Replace only recurring
+  account timer registration/rearm with the poll API. Preserve actual native
+  rate/backoff floors, degraded and multi-tick subcadences, listen-key renewal,
+  healing, socket supervision and read deadlines.
+- Native slice B: ApeX, Breakout, Coinbase, Crypto.com, GRVT, Hyperliquid,
+  Kraken futures/spot, Lighter, OKX, Paradex, Polymarket, Txflow and WOO. Preserve
+  urgent post-write repair separately (including Polymarket dirty refresh).
+  Hyperliquid's TS HIP-3 position-refresh interval is a real separate safety-net
+  floor, not permission to poll every dex at the short Base interval. Inspect TS
+  evidence before treating other old native defaults as minimums. OKX valuation
+  and GC keep running while periodic network polling is paused. Breakout retains
+  a logical registration when initially paused, including public-only accounts.
+- Each owner audits exact timer paths/floors before editing and tests actual
+  venue request timing with pause/resume, slower/faster policy and completion
+  after policy changes. Test high-risk rate/backoff/repair controls explicitly;
+  no blind replacement of all `set_timer` calls. Independent source/test review,
+  scoped tests/strict Clippy/fmt, then a combined rebuild and actual SDK controls
+  precede acceptance. No network-resync completion claim from these timers.
