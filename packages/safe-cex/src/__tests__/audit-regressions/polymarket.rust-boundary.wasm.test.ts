@@ -334,3 +334,35 @@ it('keeps more than one hundred levels in a default REST book query', async () =
   expect(book.bids[149]).toEqual({ price: 0.001, amount: 1, total: 150 });
   expect((await exchange.fetchOrderBook(SYMBOL, 10)).bids).toHaveLength(10);
 });
+
+it('requires execution coverage and final shares before replacing a partially filled order', async () => {
+  const old = { ...orderDetails('coverage-boundary', 'LIVE', 2), associate_trades: ['prior-fill'] };
+  let openOrders = [old];
+  let reads = 0;
+  let replacements = 0;
+  const { exchange, store, sockets } = await start({ key: KEY, secret: '', polymarket: API }, (request) => {
+    const path = new URL(request.url).pathname;
+    if (path === '/data/orders') return response({ data: openOrders, next_cursor: 'LTE=' });
+    if (request.method === 'DELETE' && path === '/order') {
+      openOrders = [];
+      return response({ canceled: [old.id], not_canceled: {} });
+    }
+    if (path === `/data/order/${old.id}`) {
+      reads += 1;
+      expect(replacements).toBe(0);
+      return response({ ...orderDetails(old.id, 'CANCELED', reads === 1 ? 2 : 3), associate_trades: reads === 1 ? ['prior-fill'] : ['prior-fill', 'new-fill'] });
+    }
+    if (request.method === 'POST' && path === '/order') {
+      replacements += 1;
+      expect(reads).toBe(2);
+      expect(JSON.parse(request.body!).order.takerAmount).toBe('7000000');
+      return response(placementAck('coverage-replacement'));
+    }
+  });
+  await until(() => sockets.some((socket) => socket.url.endsWith('/user') && socket.sent.length > 0));
+  sockets.find((socket) => socket.url.endsWith('/user'))!.message(JSON.stringify({ event_type: 'trade', id: 'new-fill', taker_order_id: old.id, asset_id: TOKEN, side: 'BUY', size: '1', price: '0.5', status: 'MATCHED', trader_side: 'TAKER', owner: API.apiKey }));
+  await until(() => store.orders.find((order) => order.id === old.id)?.filled === 3);
+  const order = store.orders.find((order) => order.id === old.id)!;
+  await expect(exchange.updateOrder({ order, update: { price: 0.6 } })).resolves.toEqual(['coverage-replacement']);
+  expect(replacements).toBe(1);
+});

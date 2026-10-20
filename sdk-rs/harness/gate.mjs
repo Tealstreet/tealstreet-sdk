@@ -161,6 +161,10 @@ const KNOWN_TS_FIXES = {
     // coherent final-fill cancel proofs with replacement leaves rounded down.
     // Share sizing uses financial half-up precision, correcting TS toFixed's
     // binary midpoint artifact; JavaScript formatting is never emulated.
+    // Unbounded history supplies the API max selector; upper-only and zero-wire
+    // start timestamps reject explicitly. Paired cumulative/execution evidence
+    // and association-covered final reads fence amend races and missing fields.
+    // Authoritative order removals cannot be reopened by delayed stream frames.
     // Unsupported history contracts fail explicitly instead of empty success.
   },
   // Paired production fixes, compared without rewriting either replay result:

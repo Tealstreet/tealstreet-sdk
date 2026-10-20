@@ -507,3 +507,20 @@ fn first_snapshot_normalizes_prior_trade_evidence_without_order_details() {
         (5.0, 5.0)
     );
 }
+
+#[test]
+fn authoritative_empty_orders_cannot_be_reopened_by_older_live_event() {
+    let mut h = H::new();
+    h.initial();
+    h.poll();
+    h.response("/data/orders", 200, r#"{"data":[],"next_cursor":"LTE="}"#);
+    assert!(h.e.store().orders().is_empty());
+    h.ws(&format!(
+        r#"{{"event_type":"order","timestamp":"1700000000000",{}}}"#,
+        &ORDER[1..ORDER.len() - 1]
+    ));
+    assert!(
+        h.e.store().orders().is_empty(),
+        "old LIVE notification reopened an order absent from authoritative snapshot"
+    );
+}

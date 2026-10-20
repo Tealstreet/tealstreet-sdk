@@ -521,12 +521,22 @@ impl Polymarket {
             {
                 return Err("Invalid Polymarket candle bounds");
             }
+            if from_ms.is_none() && to_ms.is_some() {
+                return Err("Polymarket upper-only candle bounds require from");
+            }
+            if from_ms.is_some_and(|from| from < 1000.0) {
+                return Err("Polymarket candle from must be at least 1000 milliseconds");
+            }
             let mut path = format!("{REST}/prices-history?market={}", encode(&market.id));
             if let Some(from) = from_ms {
                 path.push_str(&format!("&startTs={}", (from / 1000.0).floor()));
             }
             if let Some(to) = to_ms {
                 path.push_str(&format!("&endTs={}", (to / 1000.0).floor()));
+            }
+            // The API requires a time selector even when callers omit bounds.
+            if from_ms.is_none() && to_ms.is_none() {
+                path.push_str("&interval=max");
             }
             let fidelity = match interval.as_str() {
                 "1m" => 1,

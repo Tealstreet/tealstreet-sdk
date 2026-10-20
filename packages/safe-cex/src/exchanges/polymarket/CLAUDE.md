@@ -156,3 +156,17 @@ scopes discovery to1–100 distinct nonempty Gamma slugs. Queries use repeated
 `slug` parameters (bracketed arrays are ignored by Gamma). Omit the option for
 the complete keyset walk. A filter never changes token identity or truncates
 an outcome pair. Public performance fixtures disclose their selected slugs.
+
+
+Final amendment reads require explicit `size_matched`. When executions have
+been observed, `associate_trades` must cover their native trade IDs; absent
+coverage cannot authorize replacement. Each cumulative amount retains its own
+association set, including earlier observations that delayed executions may
+strengthen. These are overlapping observations, never quantities to add twice.
+Successful authoritative removal of a known order fences subsequent old events.
+
+Price history without bounds uses the API-defined `interval=max` horizon; the
+server's available horizon depends on fidelity and is not all-history coverage.
+An upper-only bound requires `from`, and `from` must be at least 1000ms because
+the endpoint treats `startTs=0` as absent. These unsupported requests reject
+before transport rather than silently omitting older requested data.

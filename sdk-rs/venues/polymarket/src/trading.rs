@@ -792,6 +792,9 @@ impl Polymarket {
                     if row.id != replacement.old.id {
                         return Err("Polymarket final order ID mismatch".into());
                     }
+                    if !row.has_fill_size() {
+                        return Err("Incomplete Polymarket final fill size".into());
+                    }
                     let order = row
                         .order(cx.store, cx.now)
                         .ok_or("Incomplete Polymarket final order details")?;
@@ -804,6 +807,7 @@ impl Polymarket {
                         .max(self.account_filled(&replacement.old.id));
                     if !matches!(order.status, OrderStatus::Canceled | OrderStatus::Closed)
                         || order.filled < known_filled
+                        || !self.account_fill_proof(&replacement.old.id, &row)
                     {
                         replacement.reads += 1;
                         if replacement.reads >= 3 {

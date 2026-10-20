@@ -807,11 +807,17 @@ export class PolymarketExchange extends BaseExchange {
         (opts.from !== undefined && opts.to !== undefined && opts.from > opts.to)) {
       throw new Error('Invalid Polymarket candle bounds or interval');
     }
+    if (opts.from === undefined && opts.to !== undefined) {
+      throw new Error('Polymarket upper-only candle bounds require from');
+    }
+    if (opts.from !== undefined && opts.from < 1000) {
+      throw new Error('Polymarket candle from must be at least 1000 milliseconds');
+    }
     const history = await this.api.getPriceHistory(
       tokenId,
       opts.from === undefined ? undefined : Math.floor(opts.from / 1000),
       opts.to === undefined ? undefined : Math.floor(opts.to / 1000),
-      undefined,
+      opts.from === undefined ? 'max' : undefined,
       fidelity,
     );
     const candles: Candle[] = history.map((h) => {

@@ -310,3 +310,37 @@ addressfindings, waitallCIgreenbeforemerge andfreshfollowupbranch.
 PR#1327 openedintofeat/rust-rewrite. Three freshadversarialreviews cover
 signing/trading, public/private/query state, andengine/SDK/harness integration.
 ReviewfindingswillbepostedonthePR; CI mustbegreenbeforemerge.
+
+
+### Adversarial PR review and repairs
+
+Three independent reviews were posted on PR #1327. Shared engine, frame, SDK
+and harness integration passed. The trading reviewer reproduced P1 replacement
+oversizing after a cumulative baseline plus a new execution, and P2 acceptance
+of missing final `size_matched`. The state reviewer reproduced invalid default
+candle filters and stale LIVE events restoring an authoritatively removed order.
+
+Repairs retain distinct cumulative amount/association pairs, count observed
+executions outside each pair, preserve prior lower bounds, and require explicit
+final size plus coverage of all known native execution IDs. Independent re-review
+found a further delayed-execution ordering: replacing a pair before receiving its
+execution lost evidence. Keeping all distinct observation constraints fixes it;
+the counterexample independently failed before and passed after the repair.
+Final trading re-review and integration re-review pass with no further blocking
+findings. New tests exercise both maker/taker paths, missing/null/wrong coverage,
+fractional units, delayed executions and valid catch-up proofs.
+
+Successful complete order snapshots now fence removed known IDs while preserving
+newer stream revisions. Candle defaults use the API-defined max horizon; an
+upper-only request requires `from`, which must be at least 1000ms because zero
+is treated as absent. Fidelity and exact millisecond filtering remain intact.
+The max horizon depends on fidelity and is not an all-history guarantee.
+
+Verification: 87 native venue tests, 16 actual-Wasm boundary tests, nine TS
+history tests (19 focused TS/frame tests), crate clippy, Wasm clippy, fmt, bans,
+root typecheck and lint pass. The repaired selected bundle is 836,933 bytes.
+A public rerun failed TS backing-buffer settling before comparison (22 samples,
+19 transitions, 1011ms). The one-second deadline is unchanged; rerunning with
+other checks finished. Initial CI had 30 successful checks and one false-positive
+secret finding: the documented fake `safe-fake-secret` fixture. Its exact
+historical fingerprint is recorded; local full-range secret scan passes.

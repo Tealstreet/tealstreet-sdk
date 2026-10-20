@@ -122,7 +122,22 @@ fn order() -> PlaceOrderOpts {
     .unwrap()
 }
 fn detail(id: &str, status: &str, filled: f64) -> String {
-    json!({"id":id,"asset_id":"1","side":"BUY","price":"0.5","original_size":"10","size_matched":filled.to_string(),"status":status,"order_type":"GTC","created_at":"1700000000"}).to_string()
+    let trades = if filled > 0.0 {
+        vec!["prior-fill"]
+    } else {
+        vec![]
+    };
+    detail_with_trades(id, status, filled, &trades)
+}
+fn detail_with_trades(id: &str, status: &str, filled: f64, trades: &[&str]) -> String {
+    json!({"id":id,"asset_id":"1","side":"BUY","price":"0.5","original_size":"10","size_matched":filled.to_string(),"associate_trades":trades,"status":status,"order_type":"GTC","created_at":"1700000000"}).to_string()
+}
+fn one_share_execution(h: &mut H, maker: bool) {
+    h.ws(if maker {
+        r#"{"event_type":"trade","id":"new-execution","taker_order_id":"foreign","asset_id":"1","side":"SELL","size":"1","price":"0.5","status":"MATCHED","trader_side":"MAKER","maker_orders":[{"order_id":"o1","owner":"api-test","asset_id":"1","side":"BUY","matched_amount":"1","price":"0.5"}]}"#
+    } else {
+        r#"{"event_type":"trade","id":"new-execution","taker_order_id":"o1","asset_id":"1","side":"BUY","size":"1","price":"0.5","status":"MATCHED","owner":"api-test","trader_side":"TAKER"}"#
+    });
 }
 fn replace(h: &mut H, command: u32) {
     h.command(Command::AmendOrder {
@@ -645,12 +660,16 @@ fn own_trade_execution_requires_coherent_terminal_rest_proof_before_any_replacem
     for catch_up in [false, true] {
         let mut h = H::new();
         replace(&mut h, 1);
-        // This is a uniquely identified execution, not a cumulative order update.
-        h.ws(r#"{"event_type":"trade","id":"late-execution","taker_order_id":"o1","asset_id":"1","side":"BUY","size":"5","price":"0.5","status":"MATCHED","owner":"api-test","trade_owner":"api-test","trader_side":"TAKER"}"#);
+        // Three new shares plus the two-share bootstrap baseline require a final five.
+        h.ws(r#"{"event_type":"trade","id":"late-execution","taker_order_id":"o1","asset_id":"1","side":"BUY","size":"3","price":"0.5","status":"MATCHED","owner":"api-test","trade_owner":"api-test","trader_side":"TAKER"}"#);
         h.response("/data/order/o1", 200, &detail("o1", "CANCELED", 2.0));
         assert_eq!(h.writes(), 0);
         if catch_up {
-            h.response("/data/order/o1", 200, &detail("o1", "CANCELED", 5.0));
+            h.response(
+                "/data/order/o1",
+                200,
+                &detail_with_trades("o1", "CANCELED", 5.0, &["prior-fill", "late-execution"]),
+            );
             let request = h.take("/order");
             let body: Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
             assert_eq!(body["order"]["takerAmount"], "5000000");
@@ -666,6 +685,229 @@ fn own_trade_execution_requires_coherent_terminal_rest_proof_before_any_replacem
                     .any(|request| request.url.ends_with("/data/order/o1"))
             );
         }
+    }
+}
+
+#[test]
+fn disjoint_execution_advances_bootstrap_fills_and_requires_terminal_catchup() {
+    for maker in [false, true] {
+        let mut h = H::new();
+        assert_eq!(h.e.store().order("o1").unwrap().filled, 2.0);
+        one_share_execution(&mut h, maker);
+        let live = h.e.store().order("o1").unwrap();
+        assert_eq!(live.filled, 3.0, "maker={maker}");
+        assert_eq!(live.remaining, 7.0, "maker={maker}");
+
+        replace(&mut h, 1);
+        h.response("/data/order/o1", 200, &detail("o1", "CANCELED", 2.0));
+        assert_eq!(h.writes(), 0, "maker={maker}: stale terminal quantity");
+        h.response(
+            "/data/order/o1",
+            200,
+            &detail_with_trades("o1", "CANCELED", 3.0, &["prior-fill", "new-execution"]),
+        );
+        let request = h.take("/order");
+        let body: Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+        assert_eq!(body["order"]["takerAmount"], "7000000", "maker={maker}");
+        assert_eq!(body["order"]["makerAmount"], "4200000", "maker={maker}");
+        h.respond(request, 200, &ack("replacement"));
+        assert_eq!(
+            h.done.last().unwrap(),
+            &(1, Ok(r#"["replacement"]"#.into()))
+        );
+    }
+}
+
+#[test]
+fn delayed_execution_does_not_erase_an_earlier_disjoint_cumulative_observation() {
+    for maker in [false, true] {
+        let mut h = H::new();
+        let row = detail_with_trades("o1", "LIVE", 2.0, &["prior-fill", "new-execution"]);
+        h.ws(&format!(
+            r#"{{"event_type":"order","type":"UPDATE",{}}}"#,
+            &row[1..row.len() - 1]
+        ));
+        one_share_execution(&mut h, maker);
+        assert_eq!(
+            h.e.store().order("o1").unwrap().filled,
+            3.0,
+            "maker={maker}"
+        );
+        replace(&mut h, 1);
+        h.response(
+            "/data/order/o1",
+            200,
+            &detail_with_trades("o1", "CANCELED", 2.0, &["prior-fill", "new-execution"]),
+        );
+        assert_eq!(
+            h.writes(),
+            0,
+            "maker={maker}: all IDs with a stale quantity"
+        );
+        h.response(
+            "/data/order/o1",
+            200,
+            &detail_with_trades("o1", "CANCELED", 3.0, &["prior-fill", "new-execution"]),
+        );
+        let request = h.take("/order");
+        let body: Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+        assert_eq!(body["order"]["takerAmount"], "7000000", "maker={maker}");
+    }
+}
+
+#[test]
+fn fractional_disjoint_execution_accepts_an_exact_six_decimal_terminal_total() {
+    let mut h = H::new();
+    let row = detail("o1", "LIVE", 2.1);
+    h.ws(&format!(
+        r#"{{"event_type":"order","type":"UPDATE",{}}}"#,
+        &row[1..row.len() - 1]
+    ));
+    h.ws(r#"{"event_type":"trade","id":"fractional-execution","taker_order_id":"o1","asset_id":"1","side":"BUY","size":"0.2","price":"0.5","status":"MATCHED","owner":"api-test","trader_side":"TAKER"}"#);
+    assert_eq!(h.e.store().order("o1").unwrap().filled, 2.3);
+    replace(&mut h, 1);
+    h.response(
+        "/data/order/o1",
+        200,
+        &detail_with_trades(
+            "o1",
+            "CANCELED",
+            2.3,
+            &["prior-fill", "fractional-execution"],
+        ),
+    );
+    let request = h.take("/order");
+    let body: Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["order"]["takerAmount"], "7700000");
+}
+
+#[test]
+fn terminal_numeric_catchup_requires_the_actual_execution_ids() {
+    for maker in [false, true] {
+        let mut h = H::new();
+        one_share_execution(&mut h, maker);
+        replace(&mut h, 1);
+        for _ in 0..3 {
+            h.response(
+                "/data/order/o1",
+                200,
+                &detail_with_trades(
+                    "o1",
+                    "CANCELED",
+                    3.0,
+                    &["prior-fill", "different-execution"],
+                ),
+            );
+            assert_eq!(h.writes(), 0, "maker={maker}: unrelated trade ID");
+        }
+        assert!(h.done.last().unwrap().1.is_err());
+        assert!(h.http.iter().all(|r| !r.url.ends_with("/data/order/o1")));
+    }
+}
+
+#[test]
+fn missing_or_null_terminal_associations_do_not_cover_known_executions() {
+    for maker in [false, true] {
+        for null in [false, true] {
+            let mut h = H::new();
+            one_share_execution(&mut h, maker);
+            replace(&mut h, 1);
+            let mut proof: Value = serde_json::from_str(&detail("o1", "CANCELED", 3.0)).unwrap();
+            if null {
+                proof["associate_trades"] = Value::Null;
+            } else {
+                proof.as_object_mut().unwrap().remove("associate_trades");
+            }
+            for _ in 0..3 {
+                h.response("/data/order/o1", 200, &proof.to_string());
+                assert_eq!(h.writes(), 0, "maker={maker} null={null}");
+            }
+            assert!(h.done.last().unwrap().1.is_err());
+        }
+    }
+}
+
+#[test]
+fn complete_terminal_coverage_accepts_additional_prebootstrap_trade_ids() {
+    for maker in [false, true] {
+        let mut h = H::new();
+        one_share_execution(&mut h, maker);
+        replace(&mut h, 1);
+        h.response(
+            "/data/order/o1",
+            200,
+            &detail_with_trades(
+                "o1",
+                "CANCELED",
+                4.0,
+                &["prior-fill", "new-execution", "previously-unseen"],
+            ),
+        );
+        let request = h.take("/order");
+        let body: Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+        assert_eq!(body["order"]["takerAmount"], "6000000", "maker={maker}");
+    }
+}
+
+#[test]
+fn cumulative_coverage_and_replayed_execution_do_not_add_the_same_fill_twice() {
+    for maker in [false, true] {
+        let mut h = H::new();
+        one_share_execution(&mut h, maker);
+        let row = detail_with_trades("o1", "LIVE", 3.0, &["prior-fill", "new-execution"]);
+        h.ws(&format!(
+            r#"{{"event_type":"order","type":"UPDATE",{}}}"#,
+            &row[1..row.len() - 1]
+        ));
+        one_share_execution(&mut h, maker);
+        assert_eq!(
+            h.e.store().order("o1").unwrap().filled,
+            3.0,
+            "maker={maker}"
+        );
+        replace(&mut h, 1);
+        h.response(
+            "/data/order/o1",
+            200,
+            &detail_with_trades("o1", "CANCELED", 3.0, &["prior-fill", "new-execution"]),
+        );
+        let request = h.take("/order");
+        let body: Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+        assert_eq!(body["order"]["takerAmount"], "7000000", "maker={maker}");
+    }
+}
+
+#[test]
+fn final_missing_or_null_matched_size_never_proves_zero_fills() {
+    for null in [false, true] {
+        let mut h = H::new();
+        h.command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![order()],
+        });
+        h.response("/order", 200, &ack("fresh-zero"));
+        h.command(Command::AmendOrder {
+            command: 2,
+            id: "fresh-zero".into(),
+            price: Some(0.6),
+            amount: None,
+        });
+        h.response(
+            "/order",
+            200,
+            r#"{"canceled":["fresh-zero"],"not_canceled":{}}"#,
+        );
+        let mut proof: Value =
+            serde_json::from_str(&detail("fresh-zero", "CANCELED", 0.0)).unwrap();
+        if null {
+            proof["size_matched"] = Value::Null;
+        } else {
+            proof.as_object_mut().unwrap().remove("size_matched");
+        }
+        h.response("/data/order/fresh-zero", 200, &proof.to_string());
+        assert_eq!(h.writes(), 0, "null={null}: no final matched size");
+        assert_eq!(h.done.last().unwrap().0, 2);
+        assert!(h.done.last().unwrap().1.is_err());
     }
 }
 

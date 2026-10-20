@@ -290,6 +290,96 @@ fn returned_candle_points_respect_subsecond_inclusive_bounds() {
 }
 
 #[test]
+fn price_history_requests_supply_a_valid_time_selector_and_reject_upper_only_bounds() {
+    // Official /prices-history rejects a missing time selector and endTs alone.
+    for (from, to, selector, expected) in [
+        (None, None, "&interval=max", vec![102000.0, 103000.0]),
+        (Some(1000.0), None, "&startTs=1", vec![102000.0, 103000.0]),
+        (
+            Some(100500.0),
+            None,
+            "&startTs=100",
+            vec![102000.0, 103000.0],
+        ),
+        (
+            Some(100500.0),
+            Some(102000.0),
+            "&startTs=100&endTs=102",
+            vec![101000.0, 102000.0],
+        ),
+    ] {
+        let mut h = H::new();
+        h.load();
+        h.event(Event::Command(Command::FetchCandles {
+            command: 7,
+            symbol: "election-Yes".into(),
+            interval: "5m".into(),
+            limit: Some(2),
+            from_ms: from,
+            to_ms: to,
+        }));
+        let url = &h.http[0].url;
+        let valid = url.contains("&startTs=")
+            || (url.contains("&interval=max") && !url.contains("&endTs="));
+        let expected_url = format!(
+            "https://clob.polymarket.com/prices-history?market={TOKEN}{selector}&fidelity=5"
+        );
+        let actual_url = url.clone();
+        h.response(
+            "/prices-history",
+            if valid { 200 } else { 400 },
+            if valid {
+                r#"{"history":[{"t":100,"p":0.1},{"t":101,"p":0.2},{"t":102,"p":0.3},{"t":103,"p":0.4}]}"#
+            } else {
+                r#"{"error":"invalid filters: the time component is mandatory"}"#
+            },
+        );
+        let candles: Vec<serde_json::Value> =
+            serde_json::from_str(h.done.last().unwrap().as_ref().unwrap()).unwrap();
+        assert_eq!(actual_url, expected_url);
+        assert_eq!(
+            candles
+                .iter()
+                .map(|c| c["timestamp"].as_f64().unwrap())
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+    let mut h = H::new();
+    h.load();
+    h.event(Event::Command(Command::FetchCandles {
+        command: 8,
+        symbol: "election-Yes".into(),
+        interval: "1m".into(),
+        limit: None,
+        from_ms: None,
+        to_ms: Some(102000.0),
+    }));
+    assert!(h.http.is_empty());
+    assert_eq!(
+        h.done.last().unwrap(),
+        &Err("Polymarket upper-only candle bounds require from".into())
+    );
+    for from in [0.0, 999.999] {
+        for to in [None, Some(102000.0)] {
+            h.event(Event::Command(Command::FetchCandles {
+                command: 9,
+                symbol: "election-Yes".into(),
+                interval: "1m".into(),
+                limit: None,
+                from_ms: Some(from),
+                to_ms: to,
+            }));
+            assert!(h.http.is_empty());
+            assert_eq!(
+                h.done.last().unwrap(),
+                &Err("Polymarket candle from must be at least 1000 milliseconds".into())
+            );
+        }
+    }
+}
+
+#[test]
 fn keyset_discovery_walks_opaque_cursors_atomically_and_rejects_cycles() {
     let mut h = H::new();
     let first = format!(r#"{{"markets":{MARKETS},"next_cursor":"a/b+=opaque"}}"#);
