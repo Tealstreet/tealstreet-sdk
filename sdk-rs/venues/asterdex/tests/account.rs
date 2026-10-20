@@ -18,6 +18,11 @@ struct H {
 }
 impl H {
     fn new() -> Self {
+        let mut h = Self::pending_mode();
+        h.reply("/positionSide/dual", r#"{"dualSidePosition":false}"#);
+        h
+    }
+    fn pending_mode() -> Self {
         let mut h = Self {
             engine: Engine::new(AsterDex::new(Options {
                 key: Some("documented-key".into()),
@@ -40,7 +45,6 @@ impl H {
         h.reply("/account", BALANCE);
         h.reply("/positionRisk", POSITION);
         h.reply("/openOrders", "[]");
-        h.reply("/positionSide/dual", r#"{"dualSidePosition":false}"#);
         h.reply("/listenKey", r#"{"listenKey":"private-contract"}"#);
         let socket = h.socket();
         h.event(Event::WsOpened { socket });
@@ -279,6 +283,119 @@ fn fills_are_per_execution_with_last_price_and_duplicate_suppression() {
     h.ws(order(10.0, "PARTIALLY_FILLED", "0.5", 1));
     h.ws(order(11.0, "PARTIALLY_FILLED", "1", 2));
     assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5), (102.0, 0.5)]);
+}
+
+#[test]
+fn unique_native_executions_survive_reordered_state_and_invalid_price_retries() {
+    for last_status in ["PARTIALLY_FILLED", "FILLED"] {
+        let mut h = H::new();
+        let _ = fill_rows(&mut h);
+        for (id, status) in [(901, "NEW"), (902, "CANCELED")] {
+            let mut non_execution = order(10.0, status, "0.5", 101);
+            non_execution["o"]["i"] = json!(id);
+            h.ws(non_execution);
+        }
+        assert!(fill_rows(&mut h).is_empty());
+        let latest = order(12.0, last_status, "1", 102);
+        let earlier = order(11.0, "PARTIALLY_FILLED", "0.5", 101);
+        h.ws(latest.clone());
+        let mut bad_price = earlier.clone();
+        bad_price["o"]["L"] = json!("0");
+        bad_price["o"]["ap"] = json!("0");
+        h.ws(bad_price);
+        h.ws(earlier.clone());
+        h.ws(latest);
+        h.ws(earlier);
+        assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5), (102.0, 0.5)]);
+        let final_order = h.engine.store().order("123").unwrap();
+        assert_eq!(final_order.filled, 1.0);
+        assert_eq!(final_order.last_update, 12.0);
+        assert_eq!(
+            final_order.status,
+            if last_status == "FILLED" {
+                OrderStatus::Closed
+            } else {
+                OrderStatus::Open
+            }
+        );
+    }
+}
+
+#[test]
+fn delayed_native_executions_survive_rest_or_cancel_ack_progress_without_reopening() {
+    for canceled in [false, true] {
+        let mut h = H::new();
+        let _ = fill_rows(&mut h);
+        h.ws(order(10.0, "NEW", "0", 0));
+        if canceled {
+            h.event(Event::Command(safe_cex_engine::Command::CancelOrders {
+                command: 10,
+                ids: vec!["123".into()],
+            }));
+            h.reply(
+                "/order",
+                r#"{"orderId":123,"status":"CANCELED","executedQty":"1"}"#,
+            );
+        } else {
+            h.fire_after(10_000.0);
+            h.reply("/openOrders", r#"[{"symbol":"BTCUSDT","orderId":123,"price":"100","origQty":"2","executedQty":"1","status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","time":20}]"#);
+        }
+        for event in [
+            order(11.0, "PARTIALLY_FILLED", "0.5", 101),
+            order(12.0, "PARTIALLY_FILLED", "1", 102),
+        ] {
+            h.ws(event.clone());
+            h.ws(event);
+        }
+        assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5), (102.0, 0.5)]);
+        let final_order = h.engine.store().order("123").unwrap();
+        assert_eq!(final_order.filled, 1.0);
+        assert_eq!(
+            final_order.status,
+            if canceled {
+                OrderStatus::Canceled
+            } else {
+                OrderStatus::Open
+            }
+        );
+    }
+}
+
+#[test]
+fn successful_mode_write_fences_startup_read_and_controls_subsequent_order_policy() {
+    for hedged in [true, false] {
+        let mut h = H::pending_mode();
+        let stale_mode = h.take("/positionSide/dual");
+        h.engine.store_mut().set_hedged(!hedged);
+        h.event(Event::Command(safe_cex_engine::Command::SetPositionMode {
+            command: 20,
+            hedged,
+        }));
+        h.reply("/positionSide/dual", "{}");
+        assert_eq!(h.engine.store().hedged(), hedged);
+        h.respond(
+            stale_mode,
+            if hedged {
+                r#"{"dualSidePosition":false}"#
+            } else {
+                r#"{"dualSidePosition":true}"#
+            },
+        );
+        assert_eq!(h.engine.store().hedged(), hedged);
+        h.event(Event::Command(safe_cex_engine::Command::PlaceOrders {
+            command: 21,
+            orders: vec![
+                serde_json::from_value(json!({
+                    "symbol":"BTCUSDT", "type":"market", "side":"buy", "amount":1,
+                    "reduceOnly":true
+                }))
+                .unwrap(),
+            ],
+        }));
+        let order = h.take("/order");
+        assert_eq!(order.url.contains("positionSide=SHORT"), hedged);
+        assert_eq!(order.url.contains("reduceOnly=true"), !hedged);
+    }
 }
 #[test]
 fn fill_without_execution_id_uses_cumulative_progress() {

@@ -30,6 +30,7 @@ pub struct AccountState {
     orders_in_flight: bool,
     balance_in_flight: bool,
     position_version: u64,
+    mode_version: u64,
     balance_version: u64,
     pub order_revision: u64,
     last_event: f64,
@@ -48,7 +49,9 @@ pub enum Request {
     },
     ListenKey,
     Keepalive,
-    Mode,
+    Mode {
+        version: u64,
+    },
     Balance {
         version: u64,
     },
@@ -286,7 +289,9 @@ impl AsterDex {
             Method::Get,
             &path,
             Query::new(),
-            Pending::Account(Request::Mode),
+            Pending::Account(Request::Mode {
+                version: self.account.mode_version,
+            }),
         );
         self.request_listen_key(cx);
         self.account.tick = Some(cx.set_timer(3_000.0));
@@ -308,6 +313,7 @@ impl AsterDex {
 
     pub(crate) fn on_mode_changed(&mut self, cx: &mut Cx<'_, Pending>, hedged: bool) {
         cx.store.set_hedged(hedged);
+        self.account.mode_version = self.account.mode_version.wrapping_add(1);
         self.account.position_version += 1;
         self.refresh_positions(cx);
     }
@@ -555,8 +561,9 @@ impl AsterDex {
                     self.close_private(cx);
                 }
             }
-            Request::Mode => {
+            Request::Mode { version } => {
                 if valid
+                    && version == self.account.mode_version
                     && let Ok(mode) = serde_json::from_str::<Mode>(body)
                     && let Some(value) = mode.dual_side_position.value()
                 {
@@ -809,6 +816,53 @@ impl AsterDex {
         };
         let id = o.i.to_string();
         #[derive(Deserialize)]
+        struct TradeHead {
+            o: TradeIdentity,
+        }
+        #[derive(Deserialize)]
+        struct TradeIdentity {
+            #[serde(default)]
+            t: Option<u64>,
+        }
+        let execution = serde_json::from_str::<TradeHead>(text)
+            .ok()
+            .and_then(|h| h.o.t)
+            .or_else(|| serde_json::from_str::<TradeIdentity>(text).ok()?.t);
+        let fill = matches!(o.status.as_ref(), "PARTIALLY_FILLED" | "FILLED")
+            .then(|| {
+                let qty = o.l.as_deref().and_then(finite).filter(|x| *x > 0.0)?;
+                let price = o
+                    .last_price
+                    .as_deref()
+                    .and_then(finite)
+                    .filter(|x| *x > 0.0)
+                    .or_else(|| o.ap.as_deref().and_then(finite).filter(|x| *x > 0.0))?;
+                Some((price, qty))
+            })
+            .flatten();
+        // Execution identity is independent of acceptance of its order-state update.
+        if let (Some(execution), Some((price, qty))) = (execution, fill) {
+            let key = (id.clone(), execution);
+            if self.account.executions.insert(key.clone()) {
+                self.account.execution_order.push_back(key);
+                while self.account.execution_order.len() > 10_000 {
+                    if let Some(old) = self.account.execution_order.pop_front() {
+                        self.account.executions.remove(&old);
+                    }
+                }
+                cx.fill(Fill {
+                    order_id: id.clone(),
+                    symbol: o.s.to_string(),
+                    side: order_side(&o.side),
+                    price,
+                    amount: qty,
+                });
+            }
+        }
+        if self.account.terminal.contains_key(&id) && status == OrderStatus::Open {
+            return;
+        }
+        #[derive(Deserialize)]
         struct EventTime {
             #[serde(rename = "E", default)]
             time: Option<f64>,
@@ -826,7 +880,6 @@ impl AsterDex {
         {
             return;
         }
-        self.account.native_order_times.insert(id.clone(), time);
         let previous_filled = cx.store.order(&id).map_or(0.0, |prev| prev.filled);
         if filled < previous_filled
             || cx.store.order(&id).is_some_and(|prev| {
@@ -835,6 +888,7 @@ impl AsterDex {
         {
             return;
         }
+        self.account.native_order_times.insert(id.clone(), time);
         self.account.order_revision += 1;
         let stop = o.sp.as_deref().and_then(finite).filter(|x| *x > 0.0);
         let order = Order {
@@ -864,52 +918,17 @@ impl AsterDex {
         if status != OrderStatus::Open {
             self.account.terminal.insert(id.clone(), (cx.now, order));
         }
-        #[derive(Deserialize)]
-        struct TradeHead {
-            o: TradeIdentity,
-        }
-        #[derive(Deserialize)]
-        struct TradeIdentity {
-            #[serde(default)]
-            t: Option<u64>,
-        }
-        let execution = serde_json::from_str::<TradeHead>(text)
-            .ok()
-            .and_then(|h| h.o.t);
-        if matches!(o.status.as_ref(), "PARTIALLY_FILLED" | "FILLED")
-            && let Some(qty) = o.l.as_deref().and_then(finite).filter(|x| *x > 0.0)
+        if execution.is_none()
+            && filled > previous_filled
+            && let Some((price, qty)) = fill
         {
-            let unique = execution.map_or_else(
-                || filled > previous_filled,
-                |execution| {
-                    let key = (id.clone(), execution);
-                    let fresh = self.account.executions.insert(key.clone());
-                    if fresh {
-                        self.account.execution_order.push_back(key);
-                    }
-                    while self.account.execution_order.len() > 10_000 {
-                        if let Some(old) = self.account.execution_order.pop_front() {
-                            self.account.executions.remove(&old);
-                        }
-                    }
-                    fresh
-                },
-            );
-            let px = o
-                .last_price
-                .as_deref()
-                .and_then(finite)
-                .filter(|x| *x > 0.0)
-                .or_else(|| o.ap.as_deref().and_then(finite));
-            if unique && let Some(price) = px {
-                cx.fill(Fill {
-                    order_id: id,
-                    symbol: o.s.to_string(),
-                    side: order_side(&o.side),
-                    price,
-                    amount: qty,
-                });
-            }
+            cx.fill(Fill {
+                order_id: id,
+                symbol: o.s.to_string(),
+                side: order_side(&o.side),
+                price,
+                amount: qty,
+            });
         }
         if let Some(t) = self.account.orders_timer.take() {
             cx.clear_timer(t);

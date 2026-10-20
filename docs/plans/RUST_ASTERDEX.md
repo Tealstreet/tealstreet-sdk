@@ -275,3 +275,22 @@ feat/rust-rewrite from passing checkpointedcf9cf5e9. Three fresh read-only
 code-correctness reviewers cover auth/private state, public/trading/history,
 and shared engine/hosts/wrapper/harness boundaries. Their findings will be posted
 on the PR, fixed and reviewed again; merge remains conditional on green CI.
+
+### PR code-correctness review round1
+
+Three independent review reports are posted on PR1322 (auth/private, public/
+trading/history, engine/host/wrapper/harness). Six actionable findings accepted:
+
+- P1: cancel after a placement ACK could silently skip the order before its
+  Store row arrived; preserve provided symbol identity and ACK provenance.
+- P1: unknown-order cancellation cannot authorize an amendment replacement.
+- P2: mode-write ACK must fence the older startup position-mode read.
+- P2: unique native executions must emit despite older order-state payloads.
+- P2: configured leverage lookup must not overwrite it with market maximum.
+- P2: standalone Workers must consume typed route/deadline metadata too.
+
+Account fixes are complete and independently re-reviewed clear: mode revision
+and native execution identity are independent of stale order-state rejection.
+Three new regressions cover both mode directions and subsequent order fields,
+reordered/delayed/duplicate fills and invalid-price retry. All89 Aster tests and
+strict clippy pass. Remaining fixes and their re-reviews are in progress.
