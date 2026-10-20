@@ -92,7 +92,7 @@ opt-level = "z"
 opt-level = "z"
 
 [profile.release.package.safe-cex-venue-bingx]
-opt-level = "z"
+opt-level = 3
 
 [profile.release.package.safe-cex-venue-weex]
 opt-level = "z"

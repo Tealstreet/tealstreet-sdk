@@ -434,3 +434,26 @@ Each bundle is below the fixed 1,258,291-byte budget. KuCoin private remains
 read-contract reviews pass. The pending merge is ready to commit; then integrate
 the latest roster-only landing update, push, post the final review evidence and
 require green CI at the new head before merging PR #1312 into feat/rust-rewrite.
+
+### Final CI performance repair
+
+Head 1dc54928a3 passed KuCoin and every other venue replay job except BingX.
+BingX preserved exact correctness but missed the strict steady CPU comparison
+on the CI runner (TS/Rust 30.0/33.1 ms). Change only its package release
+optimization from size (`z`) to throughput (`3`), matching the existing Bitget
+profile approach. The fixed byte budget and all gate assertions are unchanged.
+
+Controlled selective builds on the same Node 22.23.3 toolchain, three public
+runs each, measured Rust steady CPU 61.666 -> 46.303 ms (-24.9%), with the TS
+control 73.613 -> 74.056 ms (+0.6%). Rust total CPU was 120.726 -> 96.789 ms
+and retained memory 2,045,440 -> 2,045,480 bytes. The local baseline already
+passed; this comparison demonstrates improved margin rather than reproducing
+the cloud failure. Every candidate Rust steady run beat every baseline run.
+Both public gates and the candidate private gate passed their exact output,
+request, mutation and protocol checks. Wasm grows 768,786 -> 832,618 bytes,
+still 425,673 bytes below the fixed 1,258,291-byte limit.
+
+Independent final profile review passes with no P1/P2 findings. Fresh final-head
+CI is required before merging. Previous native, KuCoin, Binance and Hyperliquid
+validations remain applicable because this override affects only the BingX
+release artifact.
