@@ -14,9 +14,11 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
   (`utils/unknownSendOutcome.ts:3`) does not match the Rust "outcome unknown"
   texts (lighter, coinbase, txflow, orderly, bybit). **Risky** (enables lookups
   and chaser decisions).
-- A bad key can hang `start()`: Bybit retries startup forever
+- ~~A bad key can hang `start()`: Bybit retries startup forever
   (`bybit/src/lib.rs:734-745`) and `untilLoaded` has no failure path
-  (`rust.exchange.ts:795`). Needs a terminal startup failure.
+  (`rust.exchange.ts:795`). Needs a terminal startup failure.~~ Engine
+  `StartupFailed{error}` rejects `start()`; Bybit fails startup on definitive
+  key rejections (10003/10004 after resend/10010/33004) of its signed fee read.
 - Secrets in logs: 53 log sites interpolate raw bodies; Bitrue logs whole
   private frames (`bitrue/src/account.rs:700`), Bybit logs the signed request
   body (`bybit/src/lib.rs:550`); native transport errors include signed URLs
@@ -60,7 +62,8 @@ the unchanged `error` text, partial batches as fields; TS `ExchangeError`
 follows the bridge PR); (2) one
 shared parser per venue family, replacing `malformed` flags; (3) TS toast on
 rejection; (4) `outcome: Unknown` at unknown-outcome sites (**risky**); (5)
-`StartupFailed`, per-venue auth codes (**risky**: ends infinite retries); (6)
+`StartupFailed`, per-venue auth codes (**risky**: ends infinite retries;
+`StartupFailed`, BreakoutProp and Bybit landed); (6)
 app and chaser read `kind`/`outcome`; (7) wasm panic disposes the engine and
 surfaces `Internal`.
 
