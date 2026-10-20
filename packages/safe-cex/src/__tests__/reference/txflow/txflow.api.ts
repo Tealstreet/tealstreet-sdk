@@ -1,10 +1,10 @@
 import type { AxiosInstance } from 'axios';
-import type { ExchangeOptions } from '../../types';
-import type { BaseExchange } from '../base';
+import type { ExchangeOptions } from '../../../types';
+import type { BaseExchange } from '../../../exchanges/base';
 
-import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
-import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
-import { getTransport } from '../../transport/registry';
+import { markSkipRemoteSigning } from '../../../remoteSigningAdapter';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../../safeCexAxiosCreate';
+import { getTransport } from '../../../transport/registry';
 import { TXFLOW_API_VERSION, TXFLOW_TESTNET_REST_URL } from './txflow.types';
 
 export { TXFLOW_MAINNET_REST_URL, TXFLOW_TESTNET_REST_URL } from './txflow.types';

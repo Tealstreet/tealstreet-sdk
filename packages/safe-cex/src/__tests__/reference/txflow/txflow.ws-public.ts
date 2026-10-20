@@ -1,9 +1,9 @@
-import type { Candle, OHLCVOptions, OrderBook } from '../../types';
+import type { Candle, OHLCVOptions, OrderBook } from '../../../types';
 import type { TxFlowExchange } from './txflow.exchange';
 import type { TxFlowCandle, TxFlowContext, TxFlowTicker } from './txflow.types';
 
-import { calcOrderBookTotal, sortOrderBook } from '../../utils/orderbook';
-import { BaseWebSocket } from '../base.ws';
+import { calcOrderBookTotal, sortOrderBook } from '../../../utils/orderbook';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { mapTxFlowCandle, mapTxFlowContext, mapTxFlowTicker, txflowNumber } from './txflow.public';
 import { TXFLOW_TESTNET_REST_URL } from './txflow.types';
 

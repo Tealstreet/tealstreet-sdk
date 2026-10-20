@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { emptyTxFlowTicker, mapTxFlowCandle, mapTxFlowContext, mapTxFlowMarket, mapTxFlowTicker } from '../../exchanges/txflow/txflow.public';
-import type { TxFlowInstrument } from '../../exchanges/txflow/txflow.types';
+import { emptyTxFlowTicker, mapTxFlowCandle, mapTxFlowContext, mapTxFlowMarket, mapTxFlowTicker } from '../reference/txflow/txflow.public';
+import type { TxFlowInstrument } from '../reference/txflow/txflow.types';
 
 const instrument: TxFlowInstrument = { index: 1, name: 'BTC-USDC', baseCurrency: 'BTC', quoteCurrency: 'USDC', currencyType: 'usdc', basePrecision: '0.0001', priceTick: '0.1', maxLeverage: 50, haltTrading: false, delisted: false, onlyIsolated: false, useNotionalMargin: false };
 describe('TxFlow public native payload semantics', () => {

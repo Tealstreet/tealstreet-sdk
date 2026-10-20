@@ -1,5 +1,5 @@
-import type { Store } from '../../store/store.interface';
-import type { Balance, FetchedLeverage, Market, Order, OrderFillEvent, Position } from '../../types';
+import type { Store } from '../../../store/store.interface';
+import type { Balance, FetchedLeverage, Market, Order, OrderFillEvent, Position } from '../../../types';
 import {
   MarginType,
   OrderSide,
@@ -8,7 +8,7 @@ import {
   OrderType,
   PositionMode,
   PositionSide,
-} from '../../types';
+} from '../../../types';
 
 // TxFlow account reads are unsigned. The subject is applicationId (the main
 // wallet), never the locally held approved agent's address.

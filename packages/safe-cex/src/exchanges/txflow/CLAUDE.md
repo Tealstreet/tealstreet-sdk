@@ -6,6 +6,8 @@ Read `../CLAUDE.md` first for shared exchange-integration conventions.
 
 Exchange name: `txflow`, USDC crypto perpetuals on testnet only. Both the TS
 reference and Rust `sdk-rs/venues/txflow` reject non-testnet startup before I/O.
+Production registries load `RustEngineExchange`; the comparison adapter lives
+only in `src/__tests__/reference/txflow`.
 Mainnet is offline per the venue team. Keep `enabled: false`,
 `enableInPreview: false`, and the existing development availability. This port
 does not enable production, preview, Outcome, spot, TxRelay or fund transfers.

@@ -1,21 +1,13 @@
-import type { Order, PlaceOrderOpts, UpdateOrderOpts } from '../../types';
-import type { ClientOrderIdRule } from '../clientOrderId';
+import type { Order, PlaceOrderOpts, UpdateOrderOpts } from '../../../types';
 import type { TxFlowExchange } from './txflow.exchange';
 
-import { OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
-import { uuid } from '../../utils/uuid';
-import { virtualClock } from '../../utils/virtualClock';
+import { OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../../types';
+import { virtualClock } from '../../../utils/virtualClock';
 import { signAction } from './txflow.signing';
 
-export const validTxFlowCloid = (id: string): boolean =>
-  id.length > 0 && new TextEncoder().encode(id).length <= 64 && !id.startsWith('0x');
-
-export const txflowClientOrderIdRule: ClientOrderIdRule = {
-  label: 'TxFlow',
-  requirement: 'be nonempty, at most 64 UTF-8 bytes and not start with 0x',
-  isValid: validTxFlowCloid,
-  mint: () => `ts_${uuid()}`,
-};
+export { txflowClientOrderIdRule, validTxFlowCloid } from '../../../exchanges/txflow/txflow.client-id';
+import { validTxFlowCloid } from '../../../exchanges/txflow/txflow.client-id';
+import { uuid } from '../../../utils/uuid';
 
 type OrderWire = { a: number; b: boolean; p: string; s: string; r: boolean; t: { limit: { tif: string } }; c: string };
 type OrderAction = { grouping: 'na'; orders: OrderWire[] };
@@ -54,7 +46,7 @@ const numberWire = (value: number, step: number): string => {
   return text.replace(/\.?0+$/, '');
 };
 
-/** The public TS adapter remains the independent replay reference for this new port. */
+/** Test-only replay reference; production orders use the Rust venue. */
 export class TxFlowTrading {
   private tail: Promise<unknown> = Promise.resolve();
   private nonce = 0;

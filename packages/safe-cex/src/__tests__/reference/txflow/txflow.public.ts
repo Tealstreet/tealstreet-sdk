@@ -1,4 +1,4 @@
-import type { Candle, Market, Ticker } from '../../types';
+import type { Candle, Market, Ticker } from '../../../types';
 import type { TxFlowCandle, TxFlowContext, TxFlowInstrument, TxFlowTicker } from './txflow.types';
 
 export const txflowNumber = (value: unknown): number => {

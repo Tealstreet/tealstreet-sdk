@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ethers } from 'ethers';
-import { actionHash, agentDigest, signAction, TXFLOW_DOMAIN } from '../../exchanges/txflow/txflow.signing';
+import { actionHash, agentDigest, signAction, TXFLOW_DOMAIN } from '../reference/txflow/txflow.signing';
 
 // Published throwaway key and payload: https://docs.txflow-testnet.xyz/api/signing.md.
 const key = '0x' + 'ab'.repeat(32);

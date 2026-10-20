@@ -1,9 +1,9 @@
 import type { AxiosInstance } from 'axios';
-import type { Store } from '../../store/store.interface';
-import type { Candle, ExchangeName, ExchangeOptions, ExecutionsOptions, IncomeHistoryOptions, OHLCVOptions, Order, OrderBook, OrderHistoryOptions, PlaceOrderOpts, UpdateOrderOpts } from '../../types';
+import type { Store } from '../../../store/store.interface';
+import type { Candle, ExchangeName, ExchangeOptions, ExecutionsOptions, IncomeHistoryOptions, OHLCVOptions, Order, OrderBook, OrderHistoryOptions, PlaceOrderOpts, UpdateOrderOpts } from '../../../types';
 
 import { ethers } from 'ethers';
-import { BaseExchange } from '../base';
+import { BaseExchange } from '../../../exchanges/base';
 import { createAPI, createPublicAPI } from './txflow.api';
 import { TxflowAccount } from './txflow.account';
 import { TxFlowTrading, txflowClientOrderIdRule } from './txflow.trading';

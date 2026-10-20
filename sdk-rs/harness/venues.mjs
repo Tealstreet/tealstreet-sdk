@@ -586,7 +586,7 @@ export const VENUES = {
     options: { testnet: true },
     virtualPrivateClock: true,
     recordPublicCorsDirect: true,
-    ts: { module: `${root}/txflow/txflow.exchange.ts`, className: 'TxFlowExchange', name: 'txflow' },
+    ts: { module: `${root}/../__tests__/reference/txflow/txflow.exchange.ts`, className: 'TxFlowExchange', name: 'txflow' },
     requestKey: typedRequest,
     requestBodies: true,
     matchRequestBody: true,

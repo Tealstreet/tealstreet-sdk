@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { TxFlowExchange } from '../../exchanges/txflow/txflow.exchange';
+import { exchangeRegistry } from '../../exchanges/registry';
+import { TxFlowExchange } from '../reference/txflow/txflow.exchange';
 import { DefaultStore } from '../../store/store.base';
 import type { ExchangeOptions } from '../../types';
 
 const options: ExchangeOptions = { key: '', secret: '0x' + 'ab'.repeat(32), applicationId: '0x0000000000000000000000000000000000000001', testnet: true };
 describe('TxFlow account identity at the worker seam', () => {
+  it('loads Rust from the production registry', async () => {
+    expect(await exchangeRegistry.txflow()).toBe(RustEngineExchange);
+  });
   it.each([TxFlowExchange, RustEngineExchange])('keeps agent-only credentials private without an API key', (Ctor) => {
     const exchange = new Ctor('txflow', options, new DefaultStore());
     try { expect(exchange.isPublicDataOnly).toBe(false); } finally { exchange.dispose(); }

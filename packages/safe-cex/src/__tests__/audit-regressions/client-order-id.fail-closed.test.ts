@@ -23,7 +23,7 @@ import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
 import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
 import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
-import { TxFlowExchange } from '../../exchanges/txflow/txflow.exchange';
+import { TxFlowExchange } from '../reference/txflow/txflow.exchange';
 import { HyperliquidSpotExchange } from '../../exchanges/hyperliquid/hyperliquidspot.exchange';
 import { KrakenExchange } from '../../exchanges/kraken/kraken.exchange';
 import { KrakenSpotExchange } from '../../exchanges/kraken/krakenspot.exchange';

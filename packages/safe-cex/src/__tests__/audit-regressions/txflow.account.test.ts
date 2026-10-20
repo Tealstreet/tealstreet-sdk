@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TxflowAccount } from '../../exchanges/txflow/txflow.account';
+import { TxflowAccount } from '../reference/txflow/txflow.account';
 import { DefaultStore } from '../../store/store.base';
 import type { Market } from '../../types';
 

@@ -52,7 +52,7 @@ import {
 } from '../bybit/bybit.types';
 import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
-import { txflowClientOrderIdRule } from '../txflow/txflow.trading';
+import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 

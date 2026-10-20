@@ -347,3 +347,11 @@ point into the test reference. Keep availability/measurement flags disabled.
 Update the transport characterization to Rust's absence of Axios instances,
 add a registry cutover proof, and run an independent cutover review followed by
 root, Rust, host and replay checks on the merged result.
+
+Cutover review accepted: all nine modules preserve behavior, all 42 relocated
+imports resolve, production imports only the small shared client-ID rule, and
+both registries select Rust. Full safe-cex typecheck, 34 focused proofs and the
+updated TxFlow transport characterization pass. An actual Wasm startup proof
+through the production registry is being added separately. The Coinbase-merged
+release build and workspace checks continue; no Rust production edits followed
+the merge.

@@ -1,5 +1,5 @@
-import type { Execution, ExecutionsOptions, HistoricalOrder, IncomeHistoryOptions, IncomeRecord, OrderHistoryOptions } from '../../types';
-import { OrderSide, OrderStatus, OrderType } from '../../types';
+import type { Execution, ExecutionsOptions, HistoricalOrder, IncomeHistoryOptions, IncomeRecord, OrderHistoryOptions } from '../../../types';
+import { OrderSide, OrderStatus, OrderType } from '../../../types';
 import type { TxFlowExchange } from './txflow.exchange';
 
 type Page<T> = { data: T[]; hasMore: boolean };

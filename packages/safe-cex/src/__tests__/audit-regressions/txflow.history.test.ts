@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { TxFlowExchange } from '../../exchanges/txflow/txflow.exchange';
-import { fetchHistoricalFills, fetchHistoricalOrders, fetchIncomeHistory, fetchTrades } from '../../exchanges/txflow/txflow.history';
+import type { TxFlowExchange } from '../reference/txflow/txflow.exchange';
+import { fetchHistoricalFills, fetchHistoricalOrders, fetchIncomeHistory, fetchTrades } from '../reference/txflow/txflow.history';
 import { DefaultStore } from '../../store/store.base';
 import { OrderStatus, type Market } from '../../types';
 
