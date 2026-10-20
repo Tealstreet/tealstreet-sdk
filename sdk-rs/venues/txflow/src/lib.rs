@@ -666,7 +666,10 @@ impl Venue for TxFlow {
                 for (symbol, ladder) in &mut self.books {
                     ladder.book.clear();
                     ladder.time = None;
-                    cx.book_changed(symbol);
+                    // Only a published book needs clearing; others were never sent.
+                    if ladder.published {
+                        cx.book_changed(symbol);
+                    }
                 }
                 let books = self
                     .books
@@ -744,7 +747,9 @@ impl Venue for TxFlow {
             for (symbol, ladder) in &mut self.books {
                 ladder.book.clear();
                 ladder.time = None;
-                cx.book_changed(symbol);
+                if ladder.published {
+                    cx.book_changed(symbol);
+                }
             }
             self.account_disconnected(cx);
         }
