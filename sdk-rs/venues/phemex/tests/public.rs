@@ -75,7 +75,7 @@ fn candle_limit_selects_a_bounded_recent_window_even_with_an_old_from() {
             Event::Command(Command::FetchCandles {
                 command: 7,
                 symbol: "BTCUSDT".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
                 from_ms: Some(week_ago),
                 to_ms: Some(now),
                 limit: Some(limit),
@@ -112,7 +112,7 @@ fn candle_from_only_and_default_500_bar_windows_keep_their_existing_semantics() 
             Event::Command(Command::FetchCandles {
                 command: 7,
                 symbol: "BTCUSDT".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
                 from_ms,
                 to_ms: Some(now),
                 limit,
@@ -137,7 +137,7 @@ fn candle_reads_fail_without_http_during_the_shared_rate_limit_pause() {
         Event::Command(Command::FetchCandles {
             command,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             from_ms: None,
             to_ms: None,
             limit: Some(500),
@@ -411,4 +411,48 @@ mod socket_checks;
 fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
     let (e, socket) = started();
     socket_checks::flaps(e, socket, 100.);
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.set_public_feed_policy(safe_cex_engine::PublicFeedPolicy::Shared)
+        .unwrap();
+    e.start(0.);
+    let id = request(&mut e, "products");
+    respond(&mut e, id, PRODUCTS);
+    let id = request(&mut e, "24hr/all");
+    respond(&mut e, id, DAILY);
+    e.handle(
+        0.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let mut timers = Vec::new();
+    let mut fired = 0;
+    loop {
+        for action in e.drain_actions() {
+            match action {
+                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => timers.retain(|(t, _)| *t != timer),
+                Action::WsConnect { .. } | Action::WsClose { .. } => {
+                    panic!("suppressed public feed churned: {action:?}")
+                }
+                _ => {}
+            }
+        }
+        timers.sort_by(|a, b| b.1.total_cmp(&a.1));
+        match timers.pop() {
+            Some((timer, at)) if at <= 600_000. => {
+                fired += 1;
+                e.handle(at, Event::TimerFired { timer });
+            }
+            _ => break,
+        }
+    }
+    assert_eq!(fired, 0);
 }

@@ -1,6 +1,6 @@
 //! Payload examples follow api.prod.paradex.trade/v1 and the official Python SDK.
 mod support;
-use safe_cex_engine::{Action, Command, Event, Response, SocketChannel};
+use safe_cex_engine::{Action, Command, Event, PublicFeedPolicy, Response, SocketChannel};
 use safe_cex_venue_paradex::Options;
 use support::*;
 const BTC: &str = "BTC-USD-PERP";
@@ -261,7 +261,7 @@ fn documented_klines_and_fallback_preserve_time_units() {
     h.command(Command::FetchCandles {
         command: 1,
         symbol: BTC.into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
         limit: Some(2),
         from_ms: Some(120000.),
         to_ms: Some(240000.),
@@ -287,7 +287,7 @@ fn wide_intervals_use_legacy_route_and_malformed_parallel_arrays_fail() {
     h.command(Command::FetchCandles {
         command: 2,
         symbol: BTC.into(),
-        interval: "4h".into(),
+        interval: safe_cex_engine::model::Interval::H4,
         limit: None,
         from_ms: None,
         to_ms: None,
@@ -307,7 +307,7 @@ fn missing_kline_list_uses_legacy_fallback() {
     h.command(Command::FetchCandles {
         command: 3,
         symbol: BTC.into(),
-        interval: "5m".into(),
+        interval: safe_cex_engine::model::Interval::M5,
         limit: None,
         from_ms: None,
         to_ms: None,
@@ -320,11 +320,11 @@ fn polling_is_reference_counted_and_old_generation_cannot_restart_it() {
     let mut h = Harness::new();
     let subscribe = || Command::SubscribeCandles {
         symbol: BTC.into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     };
     let unsubscribe = || Command::UnsubscribeCandles {
         symbol: BTC.into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     };
     h.command(subscribe());
     h.command(subscribe());
@@ -357,7 +357,7 @@ fn candle_subscriptions_accept_all_declared_nonsecond_timeframes() {
         let mut h = Harness::new();
         h.command(Command::SubscribeCandles {
             symbol: BTC.into(),
-            interval: interval.into(),
+            interval: safe_cex_engine::model::Interval::parse(interval).unwrap(),
         });
         assert_eq!(h.pending.len(), 1, "{interval}");
     }
@@ -543,7 +543,7 @@ fn late_poll_cannot_overwrite_newer_trade_or_restart_removed_subscription() {
     let mut h = Harness::new();
     h.command(Command::SubscribeCandles {
         symbol: BTC.into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     });
     let r = h.take("klines");
     h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"trades.BTC-USD-PERP","data":{"price":"111","size":"2","created_at":1700000000000}}}"#);
@@ -802,15 +802,15 @@ fn preseed_subscriptions_keep_reference_counts_and_cancelled_interest_stays_canc
     });
     h.command(Command::SubscribeCandles {
         symbol: BTC.into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     });
     h.command(Command::SubscribeCandles {
         symbol: "ETH-USD-PERP".into(),
-        interval: "5m".into(),
+        interval: safe_cex_engine::model::Interval::M5,
     });
     h.command(Command::UnsubscribeCandles {
         symbol: "ETH-USD-PERP".into(),
-        interval: "5m".into(),
+        interval: safe_cex_engine::model::Interval::M5,
     });
     assert_eq!(h.pending.len(), 1);
     h.reply("/markets", MARKETS);
@@ -1053,7 +1053,7 @@ fn polls_cannot_rewind_a_bucket_or_quantity_known_before_the_request_started() {
     let bucket = (h.now / 60_000.).floor() * 60_000.;
     h.command(Command::SubscribeCandles {
         symbol: BTC.into(),
-        interval: "1m".into(),
+        interval: safe_cex_engine::model::Interval::M1,
     });
     h.reply("klines", r#"{"results":[]}"#);
     assert!(h.e.take_market_frame(h.now).is_none());
@@ -1152,4 +1152,47 @@ mod socket_checks;
 fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
     let h = Harness::new();
     socket_checks::flaps(h.e, h.public, h.now);
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut h = Harness::empty_with_policy(
+        Options {
+            public_data_only: true,
+            ..Options::default()
+        },
+        PublicFeedPolicy::Shared,
+    );
+    h.reply("/markets", MARKETS);
+    h.reply("summary", TICKERS);
+    assert_eq!(h.e.store().markets().len(), 2, "public startup completed");
+    let until = h.now + 600_000.;
+    let (mut timers, mut sockets, mut fired) = (Vec::new(), Vec::new(), 0);
+    loop {
+        for action in std::mem::take(&mut h.actions) {
+            match action {
+                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => timers.retain(|(t, _)| *t != timer),
+                Action::WsConnect { .. } | Action::WsClose { .. } => sockets.push(action),
+                _ => {}
+            }
+        }
+        let Some(&(timer, at)) = timers
+            .iter()
+            .filter(|(_, at)| *at <= until)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            break;
+        };
+        timers.retain(|(t, _)| *t != timer);
+        h.now = at;
+        h.e.handle(at, Event::TimerFired { timer });
+        h.collect();
+        fired += 1;
+    }
+    assert!(
+        sockets.is_empty(),
+        "no public connects or closes: {sockets:?}"
+    );
+    assert_eq!(fired, 0, "no supervision timers fire");
 }

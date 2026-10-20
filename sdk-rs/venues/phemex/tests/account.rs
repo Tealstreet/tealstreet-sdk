@@ -548,69 +548,65 @@ fn deadline_revokes_late_generation_and_starts_fresh_reads() {
 }
 #[test]
 fn dead_private_socket_reconnects_and_auth_uses_fresh_expiry() {
-    let (mut e, a, s) = started();
+    let (mut e, _, s) = started();
     e.handle(NOW, Event::WsOpened { socket: s });
-    let mut next = a
-        .windows(2)
-        .find_map(|pair| match (&pair[0], &pair[1]) {
-            (
-                Action::WsConnect {
-                    socket,
-                    channel: Some(safe_cex_engine::SocketChannel::Private),
-                    ..
-                },
-                Action::SetTimer { timer, at_ms },
-            ) if *socket == s && *at_ms == NOW + 5000.0 => Some(*timer),
-            _ => None,
-        })
-        .expect("private socket watchdog");
-    for delta in [5000., 10000., 15000.] {
+    let a: Vec<_> = e.drain_actions().collect();
+    let mut next = timer(&a, NOW + 5000.);
+    for delta in [5000., 10000.] {
         e.handle(NOW + delta, Event::TimerFired { timer: next });
         let a: Vec<_> = e.drain_actions().collect();
-        if delta < 15000. {
-            next = timer(&a, NOW + delta + 5000.);
-        } else {
-            assert!(
-                a.iter()
-                    .any(|a| matches!(a,Action::WsClose{socket}if *socket==s))
-            );
-            // Reconnect jitter shortens the 1 s delay by up to a quarter.
-            let reconnect = a
-                .iter()
-                .find_map(|a| match a {
-                    Action::SetTimer { timer, at_ms }
-                        if (NOW + 15750. ..=NOW + 16000.).contains(at_ms) =>
-                    {
-                        Some(*timer)
-                    }
-                    _ => None,
-                })
-                .unwrap();
-            e.handle(NOW + 16000., Event::TimerFired { timer: reconnect });
-            let a: Vec<_> = e.drain_actions().collect();
-            let fresh = a
-                .iter()
-                .find_map(|a| {
-                    if let Action::WsConnect {
-                        socket,
-                        channel: Some(safe_cex_engine::SocketChannel::Private),
-                        ..
-                    } = a
-                    {
-                        Some(*socket)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap();
-            assert_ne!(s, fresh);
-            e.handle(NOW + 16000., Event::WsOpened { socket: fresh });
-            assert!(
-                e.drain_actions()
-                    .any(|a| matches!(a,Action::WsSend{text,..}if text.contains("1700000076")))
-            );
-        }
+        assert!(
+            a.iter()
+                .any(|a| matches!(a,Action::WsSend{text,..}if text.contains("server.ping")))
+        );
+        next = timer(
+            &a,
+            NOW + if delta < 10000. {
+                delta + 5000.
+            } else {
+                12500.
+            },
+        );
     }
+    e.handle(NOW + 12500., Event::TimerFired { timer: next });
+    let a: Vec<_> = e.drain_actions().collect();
+    assert!(
+        a.iter()
+            .any(|a| matches!(a,Action::WsClose{socket}if *socket==s))
+    );
+    let (reconnect, at) = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (NOW + 13250. ..=NOW + 13500.).contains(at_ms) => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at, Event::TimerFired { timer: reconnect });
+    let a: Vec<_> = e.drain_actions().collect();
+    let fresh = a
+        .iter()
+        .find_map(|a| {
+            if let Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } = a
+            {
+                Some(*socket)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_ne!(s, fresh);
+    e.handle(at, Event::WsOpened { socket: fresh });
+    let expiry = (((at + 60_000.) / 1000.) + 0.5).floor().to_string();
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a,Action::WsSend{text,..}if text.contains(&expiry)))
+    );
 }
 
 #[test]

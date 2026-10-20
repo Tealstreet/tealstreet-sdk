@@ -7,6 +7,7 @@ pub mod credentials;
 pub mod de;
 pub mod engine;
 pub mod error;
+pub mod fence;
 pub mod json;
 pub mod model;
 pub mod num;
@@ -23,7 +24,9 @@ pub mod time;
 pub mod url;
 pub mod wire;
 
-pub use capabilities::{AccountLookup, CancelAll, Capabilities, LeverageQuery, MaxLeverage};
+pub use capabilities::{
+    AccountLookup, CancelAll, Capabilities, LeverageQuery, MaxLeverage, QuantityUnits,
+};
 pub use credentials::ReadCredentials;
 pub use engine::{
     Action, Command, CommandId, Cx, Engine, Event, Fill, HttpRequest, LogLevel, Method, Notice,

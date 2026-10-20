@@ -2,6 +2,7 @@ use crate::{Coinbase, Pending, ProductKind, account_wire as wire};
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId};
 use serde::Serialize;
@@ -90,12 +91,9 @@ pub(crate) struct Account {
     pub proofs: HashMap<String, Editable>,
     ready: bool,
     opened: bool,
-    received: f64,
-    payload: f64,
     sequence: Option<u64>,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    reconnect_failures: u8,
+    supervisor: Supervisor,
+    payload: f64,
     tick: Option<TimerId>,
     write_timer: Option<TimerId>,
     startup_retry: Option<(TimerId, Request)>,
@@ -130,6 +128,17 @@ pub(crate) struct Account {
     foreign: HashMap<String, String>,
 }
 impl Account {
+    pub(crate) fn new() -> Self {
+        Self {
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 30_000.0,
+                backoff_base_ms: 2_000.0,
+                backoff_cap_ms: 30_000.0,
+                ..Config::default()
+            }),
+            ..Self::default()
+        }
+    }
     pub(crate) fn revision(&self) -> u64 {
         self.revision
     }
@@ -958,7 +967,6 @@ impl Coinbase {
     }
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.opened = false;
-        self.account.received = cx.now;
         self.account.payload = cx.now;
         self.account.sequence = None;
         self.account.snapshot = None;
@@ -972,18 +980,18 @@ impl Coinbase {
         }
         self.account.has_snapshot = false;
         self.account.wire_snapshot_complete = false;
+        self.account.supervisor.connecting(cx);
         self.account.socket = Some(cx.connect_channel(
             "wss://advanced-trade-ws-user.coinbase.com",
             SocketChannel::Private,
         ));
-        self.account.watchdog = Some(cx.set_timer(5000.0));
     }
     pub(crate) fn private_on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
             return false;
         }
         self.account.opened = true;
-        self.account.received = cx.now;
+        self.account.supervisor.opened(cx);
         self.account.snapshot = Some(Snapshot {
             revision: self.account.revision,
             ..Default::default()
@@ -1031,9 +1039,6 @@ impl Coinbase {
         if let Some(s) = self.account.socket.take() {
             cx.close(s)
         }
-        if let Some(t) = self.account.watchdog.take() {
-            cx.clear_timer(t)
-        }
         self.account.opened = false;
         self.account.snapshot = None;
         self.account.deferred.clear();
@@ -1045,12 +1050,7 @@ impl Coinbase {
             }
         }
         self.account.sequence = None;
-        if self.account.reconnect.is_none() {
-            let delay = Backoff::new(2_000.0, 4, 30_000.0)
-                .jittered(u32::from(self.account.reconnect_failures), cx.now);
-            self.account.reconnect_failures = self.account.reconnect_failures.saturating_add(1);
-            self.account.reconnect = Some(cx.set_timer(delay))
-        }
+        self.account.supervisor.retry(cx);
         self.account_poll(cx, true);
     }
     fn account_poll(&mut self, cx: &mut Cx<'_, Pending>, orders: bool) {
@@ -1187,28 +1187,21 @@ impl Coinbase {
             self.account_read(cx, r);
             return true;
         }
-        if self.account.reconnect == Some(timer) {
-            self.account.reconnect = None;
-            self.private_connect(cx);
-            return true;
-        }
-        if self.account.watchdog == Some(timer) {
-            self.account.watchdog = None;
-            let limit = if self.account.opened {
-                30000.0
-            } else {
-                10000.0
-            };
-            if cx.now - self.account.received >= limit
-                || (self.account.snapshot.is_some() && cx.now - self.account.payload >= 30000.0)
-            {
-                cx.log(
-                    LogLevel::Warning,
-                    "Coinbase private stream watchdog expired",
-                );
-                self.private_disconnect(cx)
-            } else {
-                self.account.watchdog = Some(cx.set_timer(5000.0))
+        if self.account.supervisor.owns_timer(timer) {
+            match self.account.supervisor.on_timer(cx, timer) {
+                Tick::Reconnect => self.private_connect(cx),
+                // Snapshots may wait on paused REST lookups; only user-frame silence expires them.
+                Tick::Handled | Tick::Ping
+                    if self.account.snapshot.is_none()
+                        || cx.now - self.account.payload < 30_000.0 => {}
+                Tick::TimedOut(_) | Tick::Handled | Tick::Ping => {
+                    cx.log(
+                        LogLevel::Warning,
+                        "Coinbase private stream watchdog expired",
+                    );
+                    self.private_disconnect(cx)
+                }
+                Tick::Unhandled => {}
             }
             return true;
         }
@@ -2028,7 +2021,7 @@ impl Coinbase {
             return true;
         }
         self.account.sequence = Some(seq);
-        self.account.received = cx.now;
+        self.account.supervisor.received(cx.now);
         if frame.channel != "user" {
             return true;
         }
@@ -2151,7 +2144,6 @@ impl Coinbase {
             self.account_poll(cx, true);
             return;
         }
-        self.account.reconnect_failures = 0;
         self.account.has_snapshot = true;
         for o in s.rows.values() {
             if self

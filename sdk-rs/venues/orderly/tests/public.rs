@@ -1,8 +1,10 @@
+mod support;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketContext, SocketId,
     TimerId, Venue,
 };
 use safe_cex_venue_orderly::{Broker, Options, Orderly};
+use support::Clock;
 
 type Driver = Engine<Orderly>;
 fn actions(e: &mut Driver) -> Vec<Action> {
@@ -264,7 +266,7 @@ fn malformed_seed_and_candles_do_not_commit_partial_results() {
         1000.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTCUSDC".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     actions(&mut e);
@@ -303,7 +305,7 @@ fn startup_subscriptions_are_retained_and_can_be_removed_before_seed() {
                 1000.0,
                 Event::Command(Command::SubscribeCandles {
                     symbol: symbol.into(),
-                    interval: "1m".into(),
+                    interval: safe_cex_engine::model::Interval::M1,
                 }),
             );
         }
@@ -317,7 +319,7 @@ fn startup_subscriptions_are_retained_and_can_be_removed_before_seed() {
             1000.0,
             Event::Command(Command::UnsubscribeCandles {
                 symbol: "ETHUSDC".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             }),
         );
     });
@@ -458,7 +460,7 @@ fn candle_reads_reject_missing_timestamp_invalid_ohlc_and_failed_envelope() {
             Event::Command(Command::FetchCandles {
                 command: 42,
                 symbol: "BTCUSDC".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
                 limit: Some(5),
                 from_ms: None,
                 to_ms: None,
@@ -558,7 +560,7 @@ fn broker_listed_markets_keep_usdc_quote_unique_identity_and_native_requests() {
         Event::Command(Command::FetchCandles {
             command: 90,
             symbol: "XLMUSDC_mythos".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(10),
             from_ms: None,
             to_ms: None,
@@ -770,40 +772,34 @@ fn funding_watchdog_reconnects_only_its_shard_and_ignores_late_old_socket_frames
         &frame(&original_topics[0], native, 0.001),
     );
     assert_eq!(e.store().ticker(&internal).unwrap().funding_rate, 0.001);
-    let timers: Vec<_> = out
-        .iter()
-        .filter_map(|a| match a {
-            Action::SetTimer { timer, .. } => Some(*timer),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(timers.len(), 4);
-    e.handle(31000.0, Event::TimerFired { timer: timers[1] });
-    let out = actions(&mut e);
-    assert_eq!(
-        out.iter()
-            .filter(|a| matches!(a, Action::WsClose { .. }))
-            .count(),
-        1
-    );
-    assert!(
-        out.iter()
-            .any(|a| matches!(a, Action::WsClose { socket } if *socket == sockets[1]))
-    );
-    let retry = out
+    let mut clock = Clock::new(2000.0);
+    clock.track(&out);
+    let mut closes = vec![];
+    for now in (5_000..=22_000).step_by(1_000) {
+        closes.extend(
+            clock
+                .advance(&mut e, f64::from(now))
+                .into_iter()
+                .filter_map(|(at, a)| match a {
+                    Action::WsClose { socket } => Some((at, socket)),
+                    _ => None,
+                }),
+        );
+        for socket in [sockets[0], sockets[2], sockets[3]] {
+            clock.handle(
+                &mut e,
+                Event::WsMessage {
+                    socket,
+                    text: r#"{"event":"pong"}"#,
+                },
+            );
+        }
+    }
+    assert_eq!(closes, [(22_000.0, sockets[1])], "only the silent shard");
+    let fresh = clock
+        .advance(&mut e, 23_000.0)
         .into_iter()
-        .find_map(|a| match a {
-            // Reconnect jitter shortens the 1 s delay by up to a quarter.
-            Action::SetTimer { timer, at_ms } if (31750.0..=32000.0).contains(&at_ms) => {
-                Some(timer)
-            }
-            _ => None,
-        })
-        .unwrap();
-    e.handle(32000.0, Event::TimerFired { timer: retry });
-    let fresh = actions(&mut e)
-        .into_iter()
-        .find_map(|a| match a {
+        .find_map(|(_, a)| match a {
             Action::WsConnect { socket, .. } => Some(socket),
             _ => None,
         })
@@ -921,7 +917,7 @@ fn main_socket_caps_unique_topics_and_releases_capacity_on_unsubscribe() {
         2000.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "ASSET099USDC".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     assert!(subscription_topics(&actions(&mut e), sockets[0]).is_empty());
@@ -936,7 +932,7 @@ fn main_socket_caps_unique_topics_and_releases_capacity_on_unsubscribe() {
         2000.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "ASSET099USDC".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     assert_eq!(
@@ -1050,16 +1046,10 @@ fn assert_payload_silence_recovery(silent: usize) {
         .iter()
         .map(|(socket, _)| subscription_topics(&opened, *socket))
         .collect();
-    let mut timers: Vec<_> = opened
-        .iter()
-        .filter_map(|action| match action {
-            Action::SetTimer { timer, .. } => Some(*timer),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(timers.len(), connections.len());
-    let mut retry = None;
+    let mut clock = Clock::new(1000.0);
+    clock.track(&opened);
     for now in [11000.0, 21000.0, 31000.0] {
+        clock.advance(&mut e, now - 1.0);
         for (index, (socket, _)) in connections.iter().enumerate() {
             // Every feed remains responsive to heartbeats. Only the selected
             // feed withholds actual ticker/funding data.
@@ -1110,44 +1100,28 @@ fn assert_payload_silence_recovery(silent: usize) {
                 );
             }
         }
-        actions(&mut e);
-        for (index, (socket, _)) in connections.iter().enumerate() {
-            e.handle(
-                now,
-                Event::TimerFired {
-                    timer: timers[index],
-                },
+        clock.drain(&mut e);
+        let closed: Vec<_> = clock
+            .advance(&mut e, now)
+            .into_iter()
+            .filter_map(|(_, action)| match action {
+                Action::WsClose { socket } => Some(socket),
+                _ => None,
+            })
+            .collect();
+        if now == 31000.0 {
+            assert_eq!(closed, [connections[silent].0]);
+        } else {
+            assert!(
+                closed.is_empty(),
+                "a responsive payload feed stays connected"
             );
-            let out = actions(&mut e);
-            let closed: Vec<_> = out
-                .iter()
-                .filter_map(|action| match action {
-                    Action::WsClose { socket } => Some(*socket),
-                    _ => None,
-                })
-                .collect();
-            if now == 31000.0 && index == silent {
-                assert_eq!(closed, [*socket]);
-                retry = Some(only_timer(&out));
-            } else {
-                assert!(
-                    closed.is_empty(),
-                    "a responsive payload feed stays connected"
-                );
-                timers[index] = only_timer(&out);
-            }
         }
     }
-    e.handle(
-        32000.0,
-        Event::TimerFired {
-            timer: retry.unwrap(),
-        },
-    );
-    let out = actions(&mut e);
+    let out = clock.advance(&mut e, 32000.0);
     let fresh: Vec<_> = out
         .iter()
-        .filter_map(|action| match action {
+        .filter_map(|(_, action)| match action {
             Action::WsConnect {
                 socket,
                 channel,

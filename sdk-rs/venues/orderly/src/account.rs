@@ -1,10 +1,13 @@
 use crate::{Connection, Orderly, Pending, Seed, sign, symbol, wire::*};
-use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::Tick as SocketTick;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Request {
     Info,
@@ -17,6 +20,7 @@ pub enum Request {
         rows: Vec<Position>,
         invalid: bool,
         revision: u64,
+        issued: u64,
         stamps: HashMap<String, (Option<u64>, u64)>,
     },
     Orders {
@@ -130,12 +134,14 @@ pub struct Account {
     totals: HashMap<String, (f64, f64)>,
     terminal: HashSet<String>,
     terminal_order: VecDeque<String>,
+    positions_guard: StaleGuard,
+    positions_issued: u64,
 }
 impl Default for Account {
     fn default() -> Self {
         Self {
             credentials: None,
-            socket: Connection::default(),
+            socket: Connection::new(Some(10_000.0)),
             defaults: HashMap::new(),
             leverage: HashMap::new(),
             fallback_leverage: 1.0,
@@ -159,6 +165,8 @@ impl Default for Account {
             totals: HashMap::new(),
             terminal: HashSet::new(),
             terminal_order: VecDeque::new(),
+            positions_guard: StaleGuard::default(),
+            positions_issued: 0,
         }
     }
 }
@@ -359,12 +367,14 @@ impl Orderly {
     pub(crate) fn account_poll(&mut self, cx: &mut Cx<'_, Pending>, orders: bool) {
         if !self.account.inflight[1] {
             self.account.inflight[1] = true;
+            self.account.positions_issued += 1;
             self.account_read(
                 cx,
                 Request::Positions {
                     rows: vec![],
                     invalid: false,
                     revision: self.account.positions_revision,
+                    issued: self.account.positions_issued,
                     stamps: HashMap::new(),
                 },
             );
@@ -928,10 +938,19 @@ impl Orderly {
                 rows,
                 invalid,
                 revision,
+                issued,
                 stamps,
             } => {
                 self.account.inflight[1] = false;
-                if invalid || revision != self.account.positions_revision {
+                if invalid {
+                    return;
+                }
+                let current = revision == self.account.positions_revision;
+                if !self
+                    .account
+                    .positions_guard
+                    .admit_issued(current, issued, STALE_SNAPSHOT_LIMIT)
+                {
                     return;
                 }
                 let Ok(meta) = serde_json::from_str::<PositionMeta>(data) else {
@@ -941,6 +960,19 @@ impl Orderly {
                 let upnl = safe_cex_engine::num::round_half_up(
                     rows.iter().map(|p| p.unrealized_pnl).sum::<f64>() * 100.0,
                 ) / 100.0;
+                let balance = Balance {
+                    total: meta.total_collateral_value - upnl,
+                    free: meta.free_collateral,
+                    used: meta.total_collateral_value - meta.free_collateral - upnl,
+                    upnl,
+                };
+                // Positions are pushed, so a stale read only commits the REST-only
+                // balance; stale rows could drop a position opened mid-read.
+                if !current {
+                    cx.store.set_balance(balance);
+                    self.account_poll(cx, false);
+                    return;
+                }
                 if stamps
                     .iter()
                     .any(|(id, new)| snapshot_older(self.account.position_stamps.get(id), *new))
@@ -958,12 +990,7 @@ impl Orderly {
                     merge_stamp(&mut self.account.position_stamps, id, new);
                 }
                 cx.store.set_positions(rows);
-                cx.store.set_balance(Balance {
-                    total: meta.total_collateral_value - upnl,
-                    free: meta.free_collateral,
-                    used: meta.total_collateral_value - meta.free_collateral - upnl,
-                    upnl,
-                });
+                cx.store.set_balance(balance);
                 for s in cx
                     .store
                     .markets()
@@ -1096,25 +1123,17 @@ impl Orderly {
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.authenticated = false;
         self.account.socket.open = false;
-        self.account.socket.received = cx.now;
-        if let Some(timer) = self.account.socket.watchdog.take() {
-            cx.clear_timer(timer);
-        }
+        self.account.socket.supervisor.connecting(cx);
         self.account.socket.socket =
             Some(cx.connect_channel(self.private_url(), safe_cex_engine::SocketChannel::Private));
-        // Cover a transport that never produces either open or close.
-        self.account.socket.watchdog = Some(cx.set_timer(10000.0));
     }
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.socket.socket != Some(socket) || self.account.socket.open {
             return;
         }
-        if let Some(timer) = self.account.socket.watchdog.take() {
-            cx.clear_timer(timer);
-        }
         self.account.authenticated = false;
         self.account.socket.open = true;
-        self.account.socket.received = cx.now;
+        self.account.socket.supervisor.opened(cx);
         let timestamp = cx.now as u64;
         let credentials = self.account.credentials.as_ref().unwrap();
         #[derive(Serialize)]
@@ -1145,10 +1164,8 @@ impl Orderly {
                 cx.log(LogLevel::Error, e);
                 cx.close(socket);
                 self.private_close(cx, socket);
-                return;
             }
         }
-        self.account.socket.watchdog = Some(cx.set_timer(10000.0));
     }
     pub(crate) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.socket.socket != Some(socket) {
@@ -1157,16 +1174,7 @@ impl Orderly {
         self.account.authenticated = false;
         self.account.socket.socket = None;
         self.account.socket.open = false;
-        if let Some(t) = self.account.socket.watchdog.take() {
-            cx.clear_timer(t);
-        }
-        self.account.socket.attempts = self.account.socket.attempts.saturating_add(1);
-        self.account.socket.reconnect = Some(
-            cx.set_timer(
-                Backoff::new(1_000.0, 5, 30_000.0)
-                    .jittered(self.account.socket.attempts.saturating_sub(1), cx.now),
-            ),
-        );
+        self.account.socket.supervisor.retry(cx);
     }
     pub(crate) fn order_terminal(&self, id: &str) -> bool {
         self.account.terminal.contains(id)
@@ -1391,7 +1399,7 @@ impl Orderly {
     ) -> Result<(), String> {
         let env: Envelope<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
         let socket = self.account.socket.socket.unwrap();
-        self.account.socket.received = cx.now;
+        self.account.socket.supervisor.received(cx.now);
         if env.event == "auth" {
             if env.success != Some(true) {
                 cx.close(socket);
@@ -1403,7 +1411,7 @@ impl Orderly {
             }
             if !self.account.authenticated {
                 self.account.authenticated = true;
-                self.account.socket.attempts = 0;
+                self.account.socket.supervisor.authenticated(cx);
                 for topic in ["executionreport", "algoexecutionreportv2", "position"] {
                     #[derive(Serialize)]
                     struct Sub<'a> {
@@ -1497,27 +1505,23 @@ impl Orderly {
             self.account.tick = Some(cx.set_timer(self.poll_interval()));
             return true;
         }
-        if self.account.socket.reconnect == Some(timer) {
-            self.account.socket.reconnect = None;
-            self.private_connect(cx);
-            return true;
-        }
-        if self.account.socket.watchdog == Some(timer) {
-            self.account.socket.watchdog = None;
-            let socket = self.account.socket.socket.unwrap();
-            if !self.account.socket.open
-                || !self.account.authenticated
-                || cx.now - self.account.socket.received >= 20000.0
-            {
-                cx.close(socket);
-                self.private_close(cx, socket);
-            } else {
-                self.account.socket.ping_at = cx.now;
-                cx.send(socket, "{\"event\":\"ping\"}");
-                self.account.socket.watchdog = Some(cx.set_timer(10000.0));
+        match self.account.socket.supervisor.on_timer(cx, timer) {
+            SocketTick::Unhandled => return false,
+            SocketTick::Reconnect => self.private_connect(cx),
+            SocketTick::Ping => {
+                if let Some(socket) = self.account.socket.socket {
+                    self.account.socket.ping_at = cx.now;
+                    cx.send(socket, "{\"event\":\"ping\"}");
+                }
             }
-            return true;
+            SocketTick::TimedOut(_) => {
+                if let Some(socket) = self.account.socket.socket {
+                    cx.close(socket);
+                    self.private_close(cx, socket);
+                }
+            }
+            SocketTick::Handled => {}
         }
-        false
+        true
     }
 }
