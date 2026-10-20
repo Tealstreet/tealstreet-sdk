@@ -1579,7 +1579,13 @@ impl Bitrue {
         code: Option<i64>,
     ) {
         match request {
-            Request::Brackets { command, .. } => cx.done(command, Err(error.into())),
+            Request::Brackets { command, .. } => cx.done(
+                command,
+                Err(private_diagnostic(
+                    "Bitrue leverage bracket read failed",
+                    code,
+                )),
+            ),
             Request::Listen { generation } if generation == self.account.generation => {
                 self.listen_failed(cx, code, false)
             }

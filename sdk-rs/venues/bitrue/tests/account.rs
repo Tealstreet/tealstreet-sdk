@@ -731,6 +731,100 @@ fn failed_bracket_transport_reports_error_and_retains_market_bound() {
 }
 
 #[test]
+fn leverage_bracket_failures_never_echo_private_transport_or_response_diagnostics() {
+    for transport_failure in [true, false] {
+        let mut h = Harness::new();
+        h.seed();
+        let before =
+            h.e.store()
+                .market("E-BTC-USDT")
+                .unwrap()
+                .limits
+                .leverage
+                .max;
+        h.e.handle(
+            h.now,
+            Event::Command(Command::FetchMaxLeverage {
+                command: 62,
+                symbol: "E-BTC-USDT".into(),
+            }),
+        );
+        h.collect();
+        if transport_failure {
+            let error = format!("provider rejected {LOG_SECRET} at {SIGNED_STREAM_URL}");
+            // The safe GET retries three times before the terminal account error.
+            for _ in 0..4 {
+                let request = h.take("/leverageBracket?contractName=E-BTC-USDT");
+                h.e.handle(
+                    h.now,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: &error,
+                    },
+                );
+                h.collect();
+                assert_stream_notices_are_safe(&h);
+            }
+        } else {
+            let request = h.take("/leverageBracket?contractName=E-BTC-USDT");
+            let body = serde_json::json!({
+                "code": 401,
+                "msg": format!("{LOG_SECRET} {SIGNED_STREAM_URL}"),
+                "apiKey": LOG_SECRET,
+            })
+            .to_string();
+            h.e.handle(
+                h.now,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status: 403,
+                        headers: "",
+                        body: &body,
+                    },
+                },
+            );
+            h.collect();
+        }
+        assert_stream_notices_are_safe(&h);
+        let completions = h
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandDone {
+                    command: 62,
+                    result,
+                }) => Some(result),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(
+            completions[0].as_ref().unwrap_err(),
+            if transport_failure {
+                "Bitrue leverage bracket read failed"
+            } else {
+                "Bitrue leverage bracket read failed (code 401)"
+            }
+        );
+        assert!(
+            !h.pending
+                .iter()
+                .any(|request| request.url.contains("/leverageBracket"))
+        );
+        assert_eq!(
+            h.e.store()
+                .market("E-BTC-USDT")
+                .unwrap()
+                .limits
+                .leverage
+                .max,
+            before
+        );
+    }
+}
+
+#[test]
 fn private_open_flaps_back_off_without_reusing_listen_keys() {
     let mut h = Harness::new();
     h.e.handle(h.now, Event::WsOpened { socket: h.private });
