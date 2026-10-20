@@ -206,3 +206,21 @@ CPU 244.5 → 126.2 ms, steady 140.1 → 56.5 ms, retained 4.3 → 2.4 MB. Binan
 private passes 14 frames. WOO/combined/Binance builds all succeed. No performance
 normalizer or threshold was changed. Proceed to PR into feat/rust-rewrite,
 adversarial local reviews posted on the PR, fixes/rereviews and green CI.
+
+## Resumed PR adversarial fixes
+
+Fetched and merged origin/feat/rust-rewrite after quota restoration: already up
+to date. Checkpointed interrupted query work as eed72aef0f; no stash used.
+Posted ten concrete adversarial findings on PR #1316. Although the original
+PR head has green CI, landing waits for these fixes and renewed verification.
+
+Remaining phases:
+1. Private/trading: preserve reconciled execution quantities, camel aliases,
+   atomic pagination validation and independent cancel-family attempts.
+2. Queries: TS-compatible seconds and transaction symbol aliases, shell/native
+   regressions; keep the native millisecond contract.
+3. Oracle/harness: nested algo fills, terminal parents, atomic malformed-leaf
+   validation, persistent request-validator failures and private tape cases.
+4. Review each phase with sub-agents, rerun brief gates and root checks, commit
+   and push, post adversarial re-review findings, merge only green CI, then cut
+   a fresh branch from feat/rust-rewrite.
