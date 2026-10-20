@@ -514,9 +514,13 @@ fn native_stop_placeholder_child_does_not_hide_the_working_parent() {
     assert!(e.store().orders().iter().any(|o| o.id == "10"));
     let invalid = stop.replace("[{}]", "[{\"algo_order_id\":11,\"algo_type\":\"UNKNOWN_WORKING_ORDER\",\"symbol\":\"PERP_BTC_USDC\"}]");
     let (e, _) = ready_with(ORDER, &invalid, POSITIONS);
+    assert!(e.store().loaded().orders);
     assert!(
-        !e.store().loaded().orders,
-        "unknown working descendant must reject the snapshot"
+        !e.store()
+            .orders()
+            .iter()
+            .any(|o| o.id == "10" || o.id == "11"),
+        "unknown working descendant must skip its whole root"
     );
 }
 
@@ -631,23 +635,261 @@ fn private_native_mark_works_without_public_tickers_and_missing_marks_preserve_s
 }
 
 #[test]
-fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
-    let body = POSITIONS.replace("PERP_BTC_USDC", "PERP_MISSING_USDC");
-    let (e, _) = ready_with(ORDER, "[]", &body);
-    assert!(!e.store().loaded().positions);
+fn owned_position_outside_the_catalogue_is_skipped_and_values_the_balance_only_with_its_pnl() {
+    for marked in [true, false] {
+        let mut body = POSITIONS.replace("PERP_BTC_USDC", "PERP_MISSING_USDC");
+        if !marked {
+            body = body.replace(r#""mark_price":51000,"#, "");
+        }
+        let (e, _) = ready_with(ORDER, "[]", &body);
+        assert!(e.store().loaded().positions);
+        assert!(e.store().positions().is_empty());
+        assert_eq!(e.store().loaded().balance, marked);
+        if marked {
+            let balance = e.store().balance();
+            assert_eq!(
+                (balance.upnl, balance.total, balance.free),
+                (1500.0, 8500.0, 7000.0)
+            );
+        }
+    }
 }
 
 #[test]
-fn unknown_working_order_rejects_snapshot_but_terminal_and_spot_rows_remain_out_of_scope() {
-    for (symbol, status, loaded) in [
-        ("PERP_MISSING_USDC", "NEW", false),
-        ("PERP_MISSING_USDC", "FILLED", true),
-        ("SPOT_MISSING_USDC", "NEW", true),
+fn unknown_working_order_is_skipped_with_a_warning_and_terminal_and_spot_rows_silently() {
+    for (symbol, status, warned) in [
+        ("PERP_MISSING_USDC", "NEW", true),
+        ("PERP_MISSING_USDC", "FILLED", false),
+        ("SPOT_MISSING_USDC", "NEW", false),
     ] {
         let order = ORDER
             .replace("PERP_BTC_USDC", symbol)
             .replace("NEW", status);
-        let (e, _) = ready_with(&order, "[]", POSITIONS);
-        assert_eq!(e.store().loaded().orders, loaded, "{symbol} {status}");
+        let (e, _, logs) = ready_with_logs(&order, "[]", POSITIONS);
+        assert!(e.store().loaded().orders, "{symbol} {status}");
+        assert!(e.store().orders().is_empty(), "{symbol} {status}");
+        assert_eq!(
+            logs.iter()
+                .any(|m| m == "Orderly skipped order 9007199254740993 on an unknown market"),
+            warned,
+            "{symbol} {status}: {logs:?}"
+        );
     }
+}
+
+#[test]
+fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them() {
+    let (mut e, s) = ready();
+    let order = |id: u32, symbol: &str, price: &str| {
+        format!(
+            r#"{{"order_id":{id},"symbol":"{symbol}","type":"LIMIT","side":"BUY","status":"NEW","price":{price},"quantity":1,"total_executed_quantity":0,"executed":0,"visible_quantity":1,"reduce_only":false,"margin_mode":"CROSS"}}"#
+        )
+    };
+    let position = |symbol: &str, qty: &str| {
+        format!(
+            r#"{{"symbol":"{symbol}","position_qty":{qty},"average_open_price":50000,"mark_price":51000,"margin_mode":"CROSS","leverage":10}}"#
+        )
+    };
+    // Bootstrap leaves its polls pending; later rounds reconnect and re-authenticate to poll.
+    let mut socket = s;
+    let mut resync = |e: &mut Driver, orders: &[String], positions: &[String], collateral: u32| {
+        let mut pending = requests(e);
+        if pending.is_empty() {
+            e.handle(3000.0, Event::WsClosed { socket, code: 1006 });
+            let retry = actions(e)
+                .into_iter()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, .. } => Some(timer),
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(4000.0, Event::TimerFired { timer: retry });
+            socket = actions(e)
+                .into_iter()
+                .find_map(|a| match a {
+                    Action::WsConnect { socket, url, .. } if url.contains("private") => {
+                        Some(socket)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(4000.0, Event::WsOpened { socket });
+            actions(e);
+            e.handle(
+                4000.0,
+                Event::WsMessage {
+                    socket,
+                    text: r#"{"event":"auth","success":true}"#,
+                },
+            );
+            pending = requests(e);
+        }
+        let orders = format!(
+            r#"{{"success":true,"data":{{"rows":[{}],"meta":{{"total":{}}}}}}}"#,
+            orders.join(","),
+            orders.len()
+        );
+        let positions = format!(
+            r#"{{"success":true,"data":{{"rows":[{}],"total_collateral_value":{collateral},"free_collateral":7000}}}}"#,
+            positions.join(",")
+        );
+        for r in pending {
+            let body = if r.url.contains("/v1/positions") {
+                positions.as_str()
+            } else if r.url.contains("/v1/algo/orders") {
+                r#"{"success":true,"data":{"rows":[],"meta":{"total":0}}}"#
+            } else {
+                orders.as_str()
+            };
+            reply(e, &r, 200, body);
+        }
+        actions(e)
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let size = |e: &Driver, symbol: &str| {
+        e.store()
+            .positions()
+            .iter()
+            .find(|p| p.symbol == symbol)
+            .map(|p| p.contracts)
+    };
+    let price = |e: &Driver, id: &str| e.store().order(id).map(|o| o.price);
+    resync(
+        &mut e,
+        &[
+            order(1001, "PERP_BTC_USDC", "50000"),
+            order(1002, "PERP_BTC_USDC", "49000"),
+        ],
+        &[
+            position("PERP_BTC_USDC", "1"),
+            position("PERP_ETH_USDC", "2"),
+        ],
+        10000,
+    );
+    assert_eq!(price(&e, "1002"), Some(49000.0));
+    assert_eq!(size(&e, "ETHUSDC"), Some(2.0));
+    let balance = e.store().balance().clone();
+    let logs = resync(
+        &mut e,
+        &[
+            order(1001, "PERP_BTC_USDC", "50100"),
+            order(1002, "PERP_BTC_USDC", "\"bad\""),
+            order(1003, "PERP_NOPE_USDC", "1"),
+        ],
+        &[
+            position("PERP_BTC_USDC", "3"),
+            position("PERP_ETH_USDC", "\"bad\""),
+            position("PERP_NOPE_USDC_broker", "1"),
+            position("PERP_ZZZ_USDC", "0"),
+        ],
+        14000,
+    );
+    assert_eq!(price(&e, "1001"), Some(50100.0));
+    assert_eq!(price(&e, "1002"), Some(49000.0));
+    assert_eq!(price(&e, "1003"), None);
+    assert_eq!(size(&e, "BTCUSDC"), Some(3.0));
+    assert_eq!(size(&e, "ETHUSDC"), Some(2.0));
+    // BTC 3000 + retained ETH copy 2000 + unknown-market NOPE row 1000.
+    let partial = e.store().balance();
+    assert_eq!(
+        (partial.upnl, partial.total, partial.free, partial.used),
+        (6000.0, 8000.0, 7000.0, 1000.0)
+    );
+    for expected in [
+        "Orderly skipped unmappable order 1002",
+        "Orderly skipped order 1003 on an unknown market",
+        "Orderly skipped unmappable position ETHUSDC",
+        "Orderly skipped unmappable position NOPEUSDC_broker",
+    ] {
+        assert!(logs.iter().any(|m| m == expected), "{expected}: {logs:?}");
+    }
+    assert!(!logs.iter().any(|m| m.contains("bad") || m.contains("ZZZ")));
+    resync(
+        &mut e,
+        &[order(1001, "PERP_BTC_USDC", "50100")],
+        &[position("PERP_BTC_USDC", "3")],
+        12000,
+    );
+    assert_eq!(price(&e, "1002"), None);
+    assert_eq!(size(&e, "ETHUSDC"), None);
+    assert_eq!(e.store().positions().len(), 1);
+    assert_ne!(e.store().balance(), &balance);
+}
+
+#[test]
+fn skipped_position_rows_keep_the_balance_updating() {
+    let positions = |rows: &str| {
+        format!(
+            r#"{{"success":true,"data":{{"rows":[{rows}],"total_collateral_value":9000,"free_collateral":8000}}}}"#
+        )
+    };
+    // A flat row that fails mapping closes its symbol, whatever failed.
+    for flat in [
+        r#"{"symbol":"PERP_BTC_USDC","position_qty":0,"margin_mode":"WEIRD"}"#,
+        r#"{"symbol":"PERP_BTC_USDC","position_qty":0,"leverage":"bad"}"#,
+    ] {
+        let (mut e, _) = ready();
+        assert_eq!(e.store().positions().len(), 2);
+        let poll = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("/v1/positions"))
+            .unwrap();
+        reply(&mut e, &poll, 200, &positions(flat));
+        assert!(e.store().positions().is_empty(), "{flat}");
+        let balance = e.store().balance();
+        assert_eq!(
+            (balance.upnl, balance.total, balance.free),
+            (0.0, 9000.0, 8000.0),
+            "{flat}"
+        );
+    }
+    // A stale read still values collateral when the skipped row has a stored copy.
+    let (mut e, s, mut tick) = ready_ticking(ORDER, "[]", POSITIONS);
+    let mut poll = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/v1/positions"))
+        .unwrap();
+    // The guard admits a stale read after two discarded ones.
+    for seq in 0..3u64 {
+        ws(
+            &mut e,
+            s,
+            &format!(
+                r#"{{"topic":"position","ts":{},"data":{{"positions":[{{"symbol":"PERP_BTC_USDC","positionQty":2,"averageOpenPrice":50000,"markPrice":51000,"marginMode":"CROSS","leverage":10,"seq":{}}}]}}}}"#,
+                2000 + seq,
+                9007199254740993 + seq
+            ),
+        );
+        reply(
+            &mut e,
+            &poll,
+            200,
+            &positions(
+                r#"{"symbol":"PERP_BTC_USDC","position_qty":1,"average_open_price":50000,"mark_price":51000,"margin_mode":"WEIRD"}"#,
+            ),
+        );
+        if seq < 2 {
+            e.handle(3000.0, Event::TimerFired { timer: tick });
+            let mut next = None;
+            for a in actions(&mut e) {
+                match a {
+                    Action::Http(r) if r.url.ends_with("/v1/positions") => next = Some(r),
+                    Action::SetTimer { timer, .. } => tick = timer,
+                    _ => {}
+                }
+            }
+            poll = next.unwrap();
+        }
+    }
+    assert_eq!(e.store().position("BTCUSDC").unwrap().contracts, 2.0);
+    let balance = e.store().balance();
+    assert_eq!(
+        (balance.upnl, balance.total, balance.free),
+        (2500.0, 6500.0, 8000.0)
+    );
 }

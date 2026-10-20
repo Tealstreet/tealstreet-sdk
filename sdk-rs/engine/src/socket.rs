@@ -1,4 +1,5 @@
 //! Replayable socket liveness and retry policy; wire protocols remain venue-owned.
+use crate::backoff::{Backoff, jitter};
 use crate::{Cx, TimerId};
 
 #[derive(Clone, Copy, Debug)]
@@ -171,12 +172,11 @@ impl Supervisor {
             return;
         }
         self.cancel(cx);
-        let nominal = (self.config.backoff_base_ms * f64::from(1u32 << self.failures.min(31)))
-            .min(self.config.backoff_cap_ms);
+        let nominal = Backoff::new(self.config.backoff_base_ms, 31, self.config.backoff_cap_ms)
+            .delay(self.failures);
         self.failures = self.failures.saturating_add(1);
         let bits = self.mix(cx.now.to_bits() ^ u64::from(self.failures));
-        let unit = (bits >> 11) as f64 / ((1u64 << 53) as f64);
-        let delay = (nominal * (0.75 + unit * 0.25)).max(minimum_ms.max(0.0));
+        let delay = jitter(nominal, bits).max(minimum_ms.max(0.0));
         self.phase = Phase::Waiting;
         self.retry = Some(cx.set_timer(delay));
     }
