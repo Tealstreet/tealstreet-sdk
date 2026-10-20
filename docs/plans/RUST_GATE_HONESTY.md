@@ -360,3 +360,17 @@ never retry an unchanged failed performance measurement to obtain a pass.
   within the unchanged 12,582,912 ceiling. All 49 result rows match this collection.
   Landing advanced again (`5f84b3e21d`), producing a PR conflict; commit this
   evidence before the next authorized integration merge, without stashing.
+- Integrated landing `5f84b3e21d` (Binance/Bybit audit PR #1348). Gate remains
+  byte-identical; all thirteen incoming audit-comment lines are preserved in
+  the isolated oracle. Independent resolution review PASS. Frozen lifecycle
+  input compatibility review PASS: complete cancel ACK identity/quantities and
+  zero-size non-trade lifecycle events satisfy the new native guards. Keep its
+  bytes and six mandatory-success commands unchanged. Canonical Binance tape
+  now supplies two distinct trade IDs and complete cancellation economics, so
+  regenerate and classify its new hash against rebuilt native output.
+- Local post-merge verification: harness 767/767 PASS; typecheck 44/44 and lint
+  28/28 PASS. An overlapping repository run hit two import timeouts; both
+  controls pass in isolation (37/37). Full sequential repository run PASS:
+  27/27 tasks, safe-cex test-ci and test-unit each 7,791 tests. No timeout or
+  gate threshold changed. Rebuild Binance and run correctness-only private
+  controls before publishing; full CI still supplies quantitative measurements.
