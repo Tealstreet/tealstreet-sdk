@@ -312,3 +312,50 @@ fn subscriptions_before_markets_are_retained() {
             .any(|a| matches!(a,Action::WsSend{text,..}if text.contains("simple_depth_step0")))
     );
 }
+
+#[test]
+fn supervisor_backs_off_open_flaps_and_closes_a_stalled_handshake() {
+    let (mut e, mut socket) = boot();
+    let mut now = 10.0;
+    let mut previous = 0.0;
+    for nominal in [1000.0, 2000.0, 4000.0] {
+        e.handle(now, Event::WsClosed { socket, code: 1006 });
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        assert!((nominal * 0.75..=nominal).contains(&(at - now)));
+        assert!(at - now > previous);
+        previous = at - now;
+        now = at;
+        e.handle(now, Event::TimerFired { timer });
+        let actions: Vec<_> = e.drain_actions().collect();
+        socket = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, .. } => Some(*socket),
+                _ => None,
+            })
+            .unwrap();
+        if nominal < 4000.0 {
+            e.handle(now, Event::WsOpened { socket });
+            e.drain_actions().for_each(drop);
+        } else {
+            let timer = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, .. } => Some(*timer),
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(now + 10_000.0, Event::TimerFired { timer });
+            assert!(
+                e.drain_actions()
+                    .any(|a| matches!(a, Action::WsClose {socket:s} if s == socket))
+            );
+        }
+    }
+}

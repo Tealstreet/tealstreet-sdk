@@ -185,7 +185,7 @@ fn fills_are_deduplicated_by_execution_identity_across_reconnects() {
     assert_eq!(fills(&mut h), 1);
     h.e.handle(h.now, Event::WsClosed { socket, code: 1006 });
     h.collect();
-    h.timer(h.now + 1_000.);
+    h.reconnect();
     let newer = h
         .actions
         .iter()
@@ -831,4 +831,13 @@ fn amend_invalidation_keeps_fill_watermarks_and_exact_decimal_size_changes_remai
             .unwrap()
             .contains("\"price\":\"100\"")
     );
+}
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn private_supervisor_bounds_handshake_and_preserves_backoff_after_open() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    socket_checks::flaps(h.e, socket, h.now);
 }
