@@ -38,10 +38,34 @@ trade IDs are deduplicated in a bounded 16,384-execution window retained across
 private reconnects; missing IDs use cumulative progress, so complete identity
 coverage requires the venue's documented `t`. Execution delivery is independent
 of lifecycle terminal state: a genuine stop fill after `EXPIRED` still emits,
-while an old generation cannot close a new PM order within the same native
-family. Cross-family client-ID stream ownership remains a tracked follow-up.
+while an old generation cannot close a new PM order across regular and strategy
+families. PM records native ownership from observed stream/REST sources, so a
+triggered regular STOP_MARKET still cancels through the regular endpoint.
+Malformed handoff economics cannot retire the current owner; malformed REST
+joins retain the prior account state. Explicit PM `fs:"CM"` account events do
+not create USD-M positions. Trade-first fills emit immediately while ownership
+waits for a regular NEW or accepted snapshot.
 Accepted cancellations invalidate in-flight order snapshots. Generated-ID
 entropy failures return an error instead of sharing a broker-only ID.
+COIN-M partial placement failures reject with the proven accepted native IDs
+on `error.partialOrderIds`; subsequent placement steps stop. PM stop quantities
+honor explicit nonzero size even with `close:true`; zero means the full position.
+
+All four Rust profiles sign REST requests with `extra.recvWindow` (default
+20,000); the Spot private subscription retains its separate 5,000 window.
+Spot/COIN-M native historical fills/orders/income queries report unsupported;
+SDK methods expose the matching branded Base fallbacks so history ingestion
+can distinguish unsupported from a successful empty result. USD-M/PM histories
+remain implemented, including EXPIRED_IN_MATCH as canceled.
+
+Spot cancellation totals update sizing without consuming TRADE delivery. Its
+latest 16,384 native trade IDs dedupe across reconnects; terminal/reused client
+rows cannot suppress a genuine old execution or change a newer row. Only the
+first accepted REST observation seeds historical filled quantity; stream-first
+orders keep a zero floor, and later reads/ACKs never advance delivery. Idless
+packets use cumulative progress; evicted or mixed idless/identified packets have
+no lifetime exactly-once guarantee. Historical fills are not fabricated from
+ACKs or REST quantity.
 
 TypeScript USD-M/PM cancel acknowledgements preserve rows already `Closed` or
 `Canceled`, including fills received while cancellation was in flight. Accepted
