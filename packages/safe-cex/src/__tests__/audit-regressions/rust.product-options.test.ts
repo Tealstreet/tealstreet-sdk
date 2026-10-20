@@ -1,6 +1,8 @@
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions, PlaceOrderOpts } from '../../types';
 
+import { MessageChannel } from 'node:worker_threads';
+
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
@@ -75,7 +77,7 @@ it.each(['binance', 'okx', 'grvt', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hy
   },
 );
 
-it('keeps the TS shared-public eligibility restriction on combined inverse products', async () => {
+it('rejects legacy TS public providers before native product construction', async () => {
   const constructor = vi.fn();
   class Engine {
     constructor(venue: string, options: string) {
@@ -89,10 +91,40 @@ it('keeps the TS shared-public eligibility restriction on combined inverse produ
     enableOptionMarkets: true,
     externalPublicData: { type: 'websocket', url: 'wss://fixture.invalid', exchangeId: 'bybit' },
   });
-  await (exchange as unknown as { ensureHost(): Promise<void> }).ensureHost();
+  await expect((exchange as unknown as { ensureHost(): Promise<void> }).ensureHost()).rejects.toThrow(
+    'Rust externalPublicData is unsupported',
+  );
+  expect(constructor).not.toHaveBeenCalled();
+});
+
+it('keeps combined native products enabled with an explicit shared-feed policy', async () => {
+  const constructor = vi.fn();
+  class Engine {
+    constructor(venue: string, options: string) {
+      constructor(venue, JSON.parse(options));
+    }
+    free() {}
+  }
+  setWasmEngineLoader(async () => ({ WasmEngine: Engine }) as unknown as WasmEngineModule);
+  const channel = new MessageChannel();
+  const exchange = setup('bybit', {
+    enableInverseMarkets: true,
+    enableOptionMarkets: true,
+    publicFeed: { mode: 'shared', port: channel.port2 as unknown as MessagePort },
+  });
+  try {
+    await (exchange as unknown as { ensureHost(): Promise<void> }).ensureHost();
+  } finally {
+    channel.port1.close();
+    channel.port2.close();
+  }
   expect(constructor).toHaveBeenCalledExactlyOnceWith(
     'bybit',
-    expect.objectContaining({ enableInverseMarkets: false, enableOptionMarkets: true }),
+    expect.objectContaining({
+      enableInverseMarkets: true,
+      enableOptionMarkets: true,
+      publicFeed: { mode: 'shared' },
+    }),
   );
 });
 

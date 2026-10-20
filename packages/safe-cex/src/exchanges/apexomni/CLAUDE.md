@@ -504,6 +504,17 @@ Fee rates for signing: `Math.ceil(feeRate * 1e4)` -- converting to basis points 
 
 ### Balance Calculation
 
+The Rust venue's `Venue::on_public_feed` hook revalues loaded open positions
+from authoritative native ticker mark/last prices, using the same directional
+PnL formula as its direct instrument handler. The direct mapper folds index
+into mark only when the venue omits mark; an explicit zero mark falls back to
+last even when index is present. Shared snapshots
+retain the current mark across last-only patches. The hook does not establish
+private readiness or alter balance fields; balance remains owned by the
+existing authenticated account-balance reconciliation. Native engine tests
+compare direct/shared hedged valuation and provider price restoration after a
+delayed local quote seed.
+
 Unrealized PnL is calculated locally (`apexomni.exchange.ts:330-340`) from positions and ticker prices rather than using the API value, due to incompatibility with the USDC PnL approach:
 
 - `upnl = sum(direction * (ticker.last - entryPrice) * contracts)` for each position.

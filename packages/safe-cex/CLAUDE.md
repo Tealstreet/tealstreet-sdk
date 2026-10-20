@@ -45,6 +45,44 @@ binary lifecycle fixtures have separate evidence scopes. See phase 9 of
 `docs/plans/RUST_REWRITE.md` for deletion blockers; no TS venue may be removed
 merely because its name is registered in Rust.
 
+## Rust public-feed ownership
+
+Rust accounts use `publicFeed: { mode: 'direct' | 'disabled' }` or
+`publicFeed: { mode: 'shared', port }`. Without an explicit policy,
+`privateOnly: true` selects disabled; otherwise direct. The pre-start
+`disablePublicWebsockets()` hook also reaches native suppression. Policies are
+fixed before startup. Native suppression covers Public-role sockets and retries;
+Private/Business roles remain independent even on the same URL. Metadata REST
+and account reconciliation remain native to each account.
+
+Start a public-only `RustEngineExchange`, then construct `RustPublicFeedProvider`
+(exported by the SDK). Call `provider.attach(channel.port1)` once per account,
+and explicitly transfer `channel.port2` with its shared-policy options to that
+account's worker. One provider per source owns book/candle subscriptions and aggregates ticker
+interest from attached accounts; late book subscribers receive the native
+snapshot without waiting for a new venue event. Tick data, books
+and candles enter the receiving native engine by symbol and leave through its
+normal frames; never copy them into only the JS store. Providers send no private
+sections or account metadata. A running/loaded direct source is mandatory.
+A source may forward frames: provider-owned book/candle listeners still run
+before the buffer is transferred, while ordinary worker callbacks stay silent.
+Matching shared ticker seeds wake startup even when identical REST data means
+the native engine emits no changed frame.
+Venue/network/product identity and native instrument IDs/flags/contract sizes
+must match before account readiness; account-local metadata may be a subset.
+Catalog changes require restarting provider/accounts. Heartbeats release dead
+ports; provider loss or incompatible data disposes the receiving account without
+a direct-feed fallback. Cached provider fields stay authoritative across later
+account-local REST ticker polls; private state remains independent.
+
+The TS `externalPublicData` option remains for TS adapters. Rust rejects it with
+migration guidance to the explicit port policy. Existing gateway/application
+owners must adopt this API deliberately; a Rust registry entry does not migrate
+their configuration. The policy controls live feed ownership, not routing,
+credentials, supported venue products, or whether explicit public REST queries
+are allowed. `fetchBalance` reads current native reconciled state, as do the
+Rust adapter's other store-backed account reads.
+
 ## Client order ID contract
 
 `PlaceOrderOpts.clientOrderId` is a caller-supplied ID for the venue-native

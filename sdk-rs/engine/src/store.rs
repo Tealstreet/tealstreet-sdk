@@ -28,6 +28,7 @@ pub struct Store {
     market_by_symbol: HashMap<Box<str>, u32>,
     market_by_id: HashMap<Box<str>, u32>,
     tickers: Vec<Ticker>,
+    ticker_revision: u64,
     // Sorted row indexes borrow ticker identity instead of copying every symbol.
     ticker_by_symbol: Vec<u32>,
     orders: Vec<Order>,
@@ -278,6 +279,7 @@ impl Store {
     }
 
     pub fn set_tickers(&mut self, tickers: Vec<Ticker>) {
+        self.ticker_revision = self.ticker_revision.wrapping_add(1);
         self.tickers = tickers;
         self.ticker_by_symbol = (0..self.tickers.len() as u32).collect();
         self.ticker_by_symbol.sort_unstable_by(|&a, &b| {
@@ -292,6 +294,10 @@ impl Store {
         self.ticker_masks = vec![0; self.tickers.len()];
         self.dirty_tickers.clear();
         self.set_loaded(|loaded| loaded.tickers = true);
+    }
+
+    pub(crate) fn ticker_revision(&self) -> u64 {
+        self.ticker_revision
     }
 
     fn ticker_index(&self, symbol: &str) -> Option<u32> {
@@ -333,6 +339,7 @@ impl Store {
         if mask == 0 {
             return;
         }
+        self.ticker_revision = self.ticker_revision.wrapping_add(1);
         let slot = &mut self.ticker_masks[index as usize];
         if *slot == 0 {
             self.dirty_tickers.push(index);
@@ -554,7 +561,7 @@ impl Store {
         }
     }
 
-    fn set_loaded(&mut self, update: impl FnOnce(&mut Loaded)) {
+    pub(crate) fn set_loaded(&mut self, update: impl FnOnce(&mut Loaded)) {
         let before = self.loaded;
         update(&mut self.loaded);
         if self.loaded != before {

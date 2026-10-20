@@ -108,6 +108,12 @@ jobs:
       - name: Test
         run: yarn --cwd "$PACKAGE_DIR" test-ci
 
+      - name: Build the Rust engine included in the package
+        run: |
+          (cd sdk-rs && rustup show)
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+          corepack yarn -s rust:build-wasm
+
       # Also writes dist/THIRD_PARTY_LICENSES.md, and fails on a bundled
       # dependency whose licence is not allowed.
       - name: Build
@@ -137,6 +143,8 @@ jobs:
             'dist/THIRD_PARTY_LICENSES.md',
             'dist/index.js',
             'dist/wasm/poseidon_crypto.wasm',
+            'dist/wasm/rust/safe_cex_wasm.cjs',
+            'dist/wasm/rust/safe_cex_wasm_bg.wasm',
             'package.json',
           ];
           const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));

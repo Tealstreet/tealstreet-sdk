@@ -790,8 +790,12 @@ async fn connection(
                 message = frames.recv() => match message { Some(message) => message.message(), None => break },
                 incoming = socket.next() => match incoming {
                     Some(Ok(Message::Text(text))) => match safe_cex_engine::command::decode_host_input(&text) {
+                        Ok(HostInput::PublicFeedUpdate(_)) => Message::text(encode_notice(ServerNotice::Error {
+                            command: None, error: "public feed updates require a trusted host provider",
+                        }).to_string()),
                         Ok(input) => {
                             let control = match input {
+                                HostInput::PublicFeedUpdate(_) => unreachable!("provider controls are rejected before command dispatch"),
                                 HostInput::Command(command) => Control::Command { client, command },
                                 HostInput::TickIntervalChanged { interval_ms } => Control::TickIntervalChanged { client, interval_ms },
                             };
