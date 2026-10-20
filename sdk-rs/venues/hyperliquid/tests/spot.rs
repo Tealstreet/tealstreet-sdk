@@ -3,11 +3,15 @@
 mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, Query, SocketId, Venue,
+    Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, Query, SocketChannel,
+    SocketId, Venue,
 };
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 const META: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"PURR","index":1,"szDecimals":0},{"name":"HFUN","index":2,"szDecimals":2}],"universe":[{"name":"PURR/USDC","tokens":[1,0],"index":0},{"name":"@1","tokens":[2,0],"index":1}]},[{"coin":"@1","midPx":"0.00093722","markPx":"0.00094","prevDayPx":"0.0009","dayNtlVlm":"937.22"},{"coin":"PURR/USDC","midPx":"0.209265","markPx":"0.14","prevDayPx":"0.20432","dayNtlVlm":"8906.0"}]]"#;
 fn ready(private: bool) -> (Engine<Hyperliquid>, SocketId) {
+    ready_with_policy(private, PublicFeedPolicy::Direct)
+}
+fn ready_with_policy(private: bool, policy: PublicFeedPolicy) -> (Engine<Hyperliquid>, SocketId) {
     let mut e = Engine::new(Hyperliquid::new_spot(Options {
         public_data_only: !private,
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
@@ -15,6 +19,7 @@ fn ready(private: bool) -> (Engine<Hyperliquid>, SocketId) {
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Options::default()
     }));
+    e.set_public_feed_policy(policy).unwrap();
     e.start(1000.0);
     let r = take_http(&mut e);
     assert_eq!(support::kind(&r), "spotMetaAndAssetCtxs");
@@ -22,7 +27,19 @@ fn ready(private: bool) -> (Engine<Hyperliquid>, SocketId) {
     let mut socket = None;
     for a in e.drain_actions().collect::<Vec<_>>() {
         match a {
-            Action::WsConnect { socket: s, .. } => socket = Some(s),
+            Action::WsConnect {
+                socket: s, channel, ..
+            } => {
+                assert_eq!(
+                    channel,
+                    Some(if private {
+                        SocketChannel::Private
+                    } else {
+                        SocketChannel::Public
+                    })
+                );
+                socket = Some(s);
+            }
             Action::Http(r) => {
                 assert_eq!(support::kind(&r), "spotClearinghouseState");
                 support::reply(
@@ -1114,4 +1131,160 @@ fn spot_fill_frames_keep_native_order_identity_and_each_distinct_execution() {
     };
     assert_eq!(amount(0), 0.5);
     assert_eq!(amount(1), 0.25);
+}
+
+#[test]
+fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only() {
+    for policy in [PublicFeedPolicy::Disabled, PublicFeedPolicy::Shared] {
+        let (mut e, socket) = ready_with_policy(true, policy);
+        let actions: Vec<_> = e.drain_actions().collect();
+        let assert_topics = |actions: &[Action]| {
+            let mut topics: Vec<String> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::WsSend { text, .. } => serde_json::from_str::<serde_json::Value>(text)
+                        .ok()
+                        .and_then(|v| v["subscription"]["type"].as_str().map(str::to_owned)),
+                    _ => None,
+                })
+                .collect();
+            topics.sort();
+            assert_eq!(
+                topics,
+                [
+                    "notification",
+                    "spotState",
+                    "userFills",
+                    "userNonFundingLedgerUpdates"
+                ]
+            );
+        };
+        assert_topics(&actions);
+        let ping = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == 16000. => Some(*timer),
+                _ => None,
+            })
+            .unwrap();
+        for command in [
+            Command::SubscribeOrderBook {
+                symbol: "PURR/USDC".into(),
+            },
+            Command::SubscribeCandles {
+                symbol: "PURR/USDC".into(),
+                interval: "1m".into(),
+            },
+        ] {
+            e.handle(2000., Event::Command(command));
+        }
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::WsSend { .. } | Action::WsConnect { .. }))
+        );
+        let ticker = e.store().ticker("PURR/USDC").unwrap().clone();
+        support::message(
+            &mut e,
+            socket,
+            2100.,
+            r#"{"channel":"allMids","data":{"mids":{"PURR/USDC":"999"}}}"#,
+        );
+        assert_eq!(e.store().ticker("PURR/USDC").unwrap(), &ticker);
+        e.handle(16000., Event::TimerFired { timer: ping });
+        assert!(
+            e.drain_actions().any(
+                |a| matches!(a, Action::WsSend { text, .. } if text == r#"{"method":"ping"}"#)
+            )
+        );
+        e.handle(17000., Event::WsClosed { socket, code: 1006 });
+        let reconnect = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer {
+                    timer,
+                    at_ms: 18000.,
+                } => Some(timer),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(18000., Event::TimerFired { timer: reconnect });
+        let next = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect {
+                    socket,
+                    channel: Some(SocketChannel::Private),
+                    ..
+                } => Some(socket),
+                Action::WsConnect { .. } => panic!("spot reconnect opened a public feed"),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(18000., Event::WsOpened { socket: next });
+        assert_topics(&e.drain_actions().collect::<Vec<_>>());
+    }
+}
+
+#[test]
+fn shared_spot_prices_preserve_direct_private_valuation_cadence_and_raw_holdings() {
+    let state = r#"{"channel":"spotState","data":{"spotState":{"balances":[{"coin":"USDC","token":0,"hold":"3","total":"20"},{"coin":"UPURR","token":1,"hold":"1","total":"10"}]}}}"#;
+    for policy in [PublicFeedPolicy::Direct, PublicFeedPolicy::Shared] {
+        let (mut e, socket) = ready_with_policy(true, policy);
+        e.drain_actions().for_each(drop);
+        let balance = e.store().balance().clone();
+        let raw = e.store().currency_balances().unwrap().to_vec();
+        if policy == PublicFeedPolicy::Direct {
+            support::message(
+                &mut e,
+                socket,
+                2000.,
+                r#"{"channel":"allMids","data":{"mids":{"PURR/USDC":"0.3"}}}"#,
+            );
+        } else {
+            e.apply_public_feed(
+                2000.,
+                serde_json::from_str(
+                    r#"{"tickers":[{"symbol":"PURR/USDC","last":0.3,"mark":0.14}]}"#,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            e.store().balance(),
+            &balance,
+            "spot quotes do not run perpetual PnL math"
+        );
+        assert_eq!(e.store().currency_balances().unwrap(), raw);
+        support::message(&mut e, socket, 2100., state);
+        assert!((e.store().balance().total - 21.4).abs() < 1e-12);
+        assert_eq!(e.store().currency_balances().unwrap()[1].balance.total, 10.);
+        assert!((e.store().coin_balances().unwrap()[1].notional - 1.4).abs() < 1e-12);
+        if policy == PublicFeedPolicy::Shared {
+            e.apply_public_feed(
+                2200.,
+                serde_json::from_str(
+                    r#"{"tickers":[{"symbol":"PURR/USDC","last":0.3,"mark":0.3}]}"#,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            assert!((e.store().balance().total - 21.4).abs() < 1e-12);
+            // Model a late local metadata quote write and let the engine restore
+            // provider ownership at the next ordinary dispatch boundary.
+            e.store_mut().update_ticker("PURR/USDC", |t| {
+                t.mark = 999.;
+                t.last = 999.;
+            });
+            support::message(&mut e, socket, 2300., r#"{"channel":"pong","data":{}}"#);
+            assert_eq!(e.store().ticker("PURR/USDC").unwrap().mark, 0.3);
+            assert!((e.store().balance().total - 21.4).abs() < 1e-12);
+            support::message(&mut e, socket, 2400., state);
+            assert!((e.store().balance().total - 23.).abs() < 1e-12);
+            assert!((e.store().coin_balances().unwrap()[1].notional - 3.).abs() < 1e-12);
+            assert_eq!(e.store().currency_balances().unwrap()[1].currency, "UPURR");
+            assert_eq!(e.store().currency_balances().unwrap()[1].balance.total, 10.);
+            assert_eq!(e.store().balance().upnl, 0.);
+        }
+    }
 }

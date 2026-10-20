@@ -1,8 +1,9 @@
 //! The sans-I/O driver. Hosts feed [`Event`]s in and execute the [`Action`]s
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
-use crate::book::Book;
+use crate::book::{Book, BookSide};
 use crate::json::{ArrayAt, ArraySplitter};
 use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts};
+use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 use crate::store::Store;
 use crate::wire::{FrameWriter, section};
 use std::collections::HashMap;
@@ -459,6 +460,7 @@ struct Io<P> {
     #[cfg(feature = "order-locks")]
     order_response_token: Option<u64>,
     actions: Vec<Action>,
+    public_feed_policy: PublicFeedPolicy,
     pending: HashMap<RequestId, P>,
     signatures: Vec<(RequestId, PendingSignature)>,
     streams: HashMap<RequestId, ArrayAt>,
@@ -486,6 +488,7 @@ impl<P> Default for Io<P> {
             #[cfg(feature = "order-locks")]
             order_response_token: None,
             actions: Vec::new(),
+            public_feed_policy: PublicFeedPolicy::Direct,
             pending: HashMap::new(),
             signatures: Vec::new(),
             streams: HashMap::new(),
@@ -515,6 +518,10 @@ impl<P> Io<P> {
 }
 
 impl<P> Cx<'_, P> {
+    pub fn public_feed_policy(&self) -> PublicFeedPolicy {
+        self.io.public_feed_policy
+    }
+
     pub fn connect(&mut self, url: impl Into<String>) -> SocketId {
         self.connect_with_channel(url, None)
     }
@@ -566,6 +573,12 @@ impl<P> Cx<'_, P> {
         context: Option<SocketContext>,
         binary: bool,
     ) -> SocketId {
+        if channel == Some(SocketChannel::Public)
+            && self.io.public_feed_policy != PublicFeedPolicy::Direct
+        {
+            // Socket zero is reserved for suppressed feeds; it never reaches a host.
+            return SocketId(0);
+        }
         let socket = SocketId(self.io.next());
         self.io.actions.push(Action::WsConnect {
             binary,
@@ -600,6 +613,12 @@ impl<P> Cx<'_, P> {
         headers: Vec<(&'static str, String)>,
         channel: Option<SocketChannel>,
     ) -> SocketId {
+        if channel == Some(SocketChannel::Public)
+            && self.io.public_feed_policy != PublicFeedPolicy::Direct
+        {
+            // Socket zero is reserved for suppressed feeds; it never reaches a host.
+            return SocketId(0);
+        }
         let socket = SocketId(self.io.next());
         self.io.actions.push(Action::WsConnectWithHeaders {
             socket,
@@ -612,6 +631,9 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
+        if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
+            return;
+        }
         self.io.actions.push(Action::WsSend {
             socket,
             text: text.into(),
@@ -619,6 +641,9 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn close(&mut self, socket: SocketId) {
+        if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
+            return;
+        }
         self.io.actions.push(Action::WsClose { socket });
     }
 
@@ -937,6 +962,8 @@ pub trait Venue {
         error: &str,
     );
     fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, _interval_ms: f64) {}
+    /// Revalue account-derived state after host-owned public prices change.
+    fn on_public_feed(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
     /// Opt in only when amendments retain the caller's symbol routing context.
     fn supports_amend_order_with_symbol(&self) -> bool {
@@ -954,6 +981,9 @@ pub struct Engine<V: Venue> {
     store: Store,
     io: Io<V::Pending>,
     started: bool,
+    shared_books: HashMap<String, Book>,
+    shared_tickers: HashMap<String, crate::public_feed::PublicTicker>,
+    shared_ticker_revision: u64,
     #[cfg(feature = "command-tracking")]
     commands_received: bool,
     #[cfg(feature = "book-deltas")]
@@ -978,6 +1008,9 @@ impl<V: Venue> Engine<V> {
             store: Store::default(),
             io: Io::default(),
             started: false,
+            shared_books: HashMap::new(),
+            shared_tickers: HashMap::new(),
+            shared_ticker_revision: 0,
             #[cfg(feature = "command-tracking")]
             commands_received: false,
             #[cfg(feature = "book-deltas")]
@@ -986,6 +1019,139 @@ impl<V: Venue> Engine<V> {
             book_baselines: HashMap::new(),
             #[cfg(feature = "book-deltas")]
             book_market_rows: Vec::new(),
+        }
+    }
+
+    /// Feed ownership is fixed before startup; a disconnected provider never falls back.
+    pub fn set_public_feed_policy(&mut self, policy: PublicFeedPolicy) -> Result<(), &'static str> {
+        if self.started {
+            return Err("public feed policy must be configured before startup");
+        }
+        self.io.public_feed_policy = policy;
+        Ok(())
+    }
+
+    pub fn public_feed_policy(&self) -> PublicFeedPolicy {
+        self.io.public_feed_policy
+    }
+
+    /// Apply an explicitly shared public feed without admitting any account fields.
+    pub fn apply_public_feed(
+        &mut self,
+        now: f64,
+        update: PublicFeedUpdate,
+    ) -> Result<(), &'static str> {
+        if self.public_feed_policy() != PublicFeedPolicy::Shared {
+            return Err("publicFeedUpdate requires shared public feed policy");
+        }
+        // Validate the complete update before changing state.
+        update.validate()?;
+        let mut accepted_tickers = false;
+        for ticker in update.tickers {
+            if !ticker.has_values() || self.store.market(&ticker.symbol).is_none() {
+                continue;
+            }
+            accepted_tickers = true;
+            match self.shared_tickers.entry(ticker.symbol.clone()) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().merge(ticker)
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(ticker);
+                }
+            }
+        }
+        // Book/candle traffic must not replay quote-dependent account updates.
+        // Still restore independently changed native ticker revisions.
+        self.restore_shared_tickers(accepted_tickers, now);
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        for update in update.books {
+            if cx.store.market(&update.symbol).is_none() {
+                continue;
+            }
+            let book = self.shared_books.entry(update.symbol.clone()).or_default();
+            book.clear();
+            for (side, levels) in [(BookSide::Bids, update.bids), (BookSide::Asks, update.asks)] {
+                for (price, amount) in levels {
+                    book.apply(side, price, amount);
+                }
+            }
+            cx.book_changed(&update.symbol);
+        }
+        for update in update.candles {
+            if cx.store.market(&update.symbol).is_some() {
+                cx.candle(&update.symbol, &update.interval, update.candle());
+            }
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn restore_shared_tickers(&mut self, force: bool, now: f64) {
+        if self.public_feed_policy() != PublicFeedPolicy::Shared
+            || (!force && self.shared_ticker_revision == self.store.ticker_revision())
+        {
+            return;
+        }
+        self.apply_shared_tickers(now);
+    }
+
+    fn apply_shared_tickers(&mut self, now: f64) {
+        let mut missing = Vec::new();
+        for ticker in self.shared_tickers.values() {
+            if self.store.ticker(&ticker.symbol).is_none()
+                && let Some(market) = self.store.market(&ticker.symbol)
+            {
+                missing.push(crate::model::Ticker {
+                    id: market.id.clone(),
+                    symbol: market.symbol.clone(),
+                    ..Default::default()
+                });
+            }
+        }
+        if !missing.is_empty() {
+            let mut tickers = self.store.tickers().to_vec();
+            tickers.extend(missing);
+            self.store.set_tickers(tickers);
+        }
+        // Venue REST seeds may fill omitted fields, but cannot overwrite provider quotes.
+        for ticker in self.shared_tickers.values() {
+            if self.store.market(&ticker.symbol).is_some() {
+                self.store
+                    .update_ticker(&ticker.symbol, |target| ticker.apply(target));
+            }
+        }
+        // A venue may have revalued its account using REST prices before restoration.
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        self.venue.on_public_feed(&mut cx);
+        self.shared_ticker_revision = self.store.ticker_revision();
+    }
+
+    /// Native hosts surface a rejected trusted-provider update as an ordinary notice.
+    pub fn report_public_feed_error(&mut self, error: &str) {
+        self.io.actions.push(Action::Notice(Notice::Log {
+            level: LogLevel::Error,
+            message: error.to_owned(),
+        }));
+    }
+
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        if self.public_feed_policy() == PublicFeedPolicy::Shared {
+            Box::new(
+                self.shared_books
+                    .iter()
+                    .map(|(symbol, book)| (symbol.as_str(), book)),
+            )
+        } else {
+            self.venue.books()
         }
     }
 
@@ -1009,11 +1175,7 @@ impl<V: Venue> Engine<V> {
             self.book_deltas = enabled;
             self.book_baselines.clear();
             self.book_market_rows.clear();
-            let symbols: Vec<_> = self
-                .venue
-                .books()
-                .map(|(symbol, _)| symbol.to_owned())
-                .collect();
+            let symbols: Vec<_> = self.books().map(|(symbol, _)| symbol.to_owned()).collect();
             for symbol in symbols {
                 self.request_book_resync(&symbol);
             }
@@ -1053,9 +1215,16 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         self.venue.start(&mut cx);
+        self.restore_shared_tickers(false, now);
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        if self.public_feed_policy() != PublicFeedPolicy::Direct
+            && matches!(&event, Event::WsOpened { socket } | Event::WsBinary { socket, .. }
+            | Event::WsMessage { socket, .. } | Event::WsClosed { socket, .. } if socket.0 == 0)
+        {
+            return;
+        }
         #[cfg(feature = "order-locks")]
         if self.venue.guard_order_mutations()
             && let Event::Command(command) = &event
@@ -1086,6 +1255,22 @@ impl<V: Venue> Engine<V> {
             }
             _ => {}
         }
+        if self.public_feed_policy() != PublicFeedPolicy::Direct {
+            match &event {
+                Event::Command(Command::UnsubscribeOrderBook { symbol }) => {
+                    self.shared_books.remove(symbol);
+                    return;
+                }
+                Event::Command(
+                    Command::SetTickerSymbols { .. }
+                    | Command::SubscribeOrderBook { .. }
+                    | Command::SubscribeCandles { .. }
+                    | Command::UnsubscribeCandles { .. },
+                ) => return,
+                _ => {}
+            }
+        }
+
         let mut cx = Cx {
             now,
             store: &mut self.store,
@@ -1250,6 +1435,7 @@ impl<V: Venue> Engine<V> {
                 self.handle(now, Event::Command(command));
             }
         }
+        self.restore_shared_tickers(false, now);
     }
 
     fn http_start(&mut self, _now: f64, request: RequestId, status: u16, headers: &str) {
@@ -1381,7 +1567,11 @@ impl<V: Venue> Engine<V> {
 
     /// The venue's synchronized book for `symbol`, if any.
     pub fn book(&self, symbol: &str) -> Option<&Book> {
-        self.venue.book(symbol)
+        if self.public_feed_policy() == PublicFeedPolicy::Shared {
+            self.shared_books.get(symbol)
+        } else {
+            self.venue.book(symbol)
+        }
     }
 
     /// The whole current state as one frame, for a consumer that starts late
@@ -1394,10 +1584,10 @@ impl<V: Venue> Engine<V> {
         let mut w = FrameWriter::new(buffer, now);
         let everything = self.store.everything();
         self.store.write(&everything, &mut w);
-        for (symbol, book) in self.venue.books() {
+        for (symbol, book) in self.books() {
             if let Some(market) = self.store.market_index(symbol) {
                 // Recovering consumers may have missed the original invalidation frame.
-                if self.venue.book(symbol).is_some() {
+                if self.book(symbol).is_some() {
                     book.write(market, &mut w);
                 } else {
                     Book::default().write(market, &mut w);
@@ -1431,7 +1621,11 @@ impl<V: Venue> Engine<V> {
                     ));
             if self.book_deltas {
                 self.book_baselines.retain(|symbol, _| {
-                    self.venue.book(symbol).is_some() && self.store.market_index(symbol).is_some()
+                    (if self.io.public_feed_policy == PublicFeedPolicy::Shared {
+                        self.shared_books.contains_key(symbol)
+                    } else {
+                        self.venue.book(symbol).is_some()
+                    }) && self.store.market_index(symbol).is_some()
                 });
                 if store && !markets_match {
                     self.book_market_rows = self
@@ -1441,7 +1635,6 @@ impl<V: Venue> Engine<V> {
                         .map(|market| (market.symbol.clone(), market.id.clone()))
                         .collect();
                     let symbols: Vec<_> = self
-                        .venue
                         .books()
                         .filter_map(|(symbol, _)| {
                             let market = self.store.market_index(symbol)?;
@@ -1475,7 +1668,11 @@ impl<V: Venue> Engine<V> {
             let Some(market) = self.store.market_index(symbol) else {
                 continue;
             };
-            if let Some(book) = self.venue.book(symbol) {
+            if let Some(book) = if self.io.public_feed_policy == PublicFeedPolicy::Shared {
+                self.shared_books.get(symbol)
+            } else {
+                self.venue.book(symbol)
+            } {
                 #[cfg(feature = "book-deltas")]
                 if self.book_deltas {
                     let id = &self.store.markets()[market as usize].id;

@@ -9,6 +9,7 @@ pub mod num;
 #[cfg(feature = "order-locks")]
 mod order_locks;
 pub mod paging;
+pub mod public_feed;
 pub mod store;
 pub mod wire;
 
@@ -19,3 +20,5 @@ pub use engine::{
     SocketContext, SocketId, TimerId, Venue,
 };
 pub use store::Store;
+
+pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};

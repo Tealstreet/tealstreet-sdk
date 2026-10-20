@@ -620,6 +620,12 @@ impl Grvt {
 }
 impl Venue for Grvt {
     type Pending = Pending;
+    fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Public quotes cannot make an unseeded account appear loaded.
+        if cx.store.loaded().balance && cx.store.loaded().positions {
+            self.sync_balance_upnl(cx);
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.fetch_markets(cx);
     }
