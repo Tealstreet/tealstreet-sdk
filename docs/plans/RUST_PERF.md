@@ -646,3 +646,10 @@ parity and no repeated parsing with counterexample tests and independent review,
 then refresh identical helpers for both original/current runtimes. This removes
 fixture-routing work absent from production receive callbacks; it is not a
 claim of engine speedup. Retain all initial regressions and diagnostics.
+
+Recorded socket-key cache implemented and independently reviewed:185 harness
+tests pass,70 Tape tests pass, and focused parity/count tests prove100 known
+lookups invoke no URL parser, while unknown/live/object/invalid URLs preserve
+strict fallback behavior. Only fixture metadata lookup changed; signature,
+subscription, query/caller-ID and generation checks remain exact. No benchmark
+has yet been rerun after this source change.

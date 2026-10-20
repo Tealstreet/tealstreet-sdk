@@ -1269,3 +1269,80 @@ test('upgrade validation accepts void success and persists explicit false exactl
   assert.equal(tape.invalidSignatures, 1);
   assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
 });
+
+test('recorded socket cache preserves strict query, caller ID and typed JSON routing', async () => {
+  const ids = [{ type: 'command', orders: [{ clientOrderId: 'caller' }] }];
+  const routes = [
+    'wss://EXAMPLE.test:443/private?b=2&a=1&requestId=recorded',
+    'wss://example.test/private?newClientOrderId=caller',
+    'wss://example.test/private?newClientOrderId=generated',
+    'wss://example.test/private?c=1',
+    'wss://example.test/private?c=2',
+    ...[{ quantity: 1 }, { quantity: '1' }, { newClientOrderId: 'caller' }, { newClientOrderId: 'generated' }]
+      .map((value) => `wss://example.test/private?batchOrders=${encodeURIComponent(JSON.stringify([value]))}`),
+  ];
+  const tape = new Tape([...ids, ...routes.map((url) => ({ type: 'ws', url }))]);
+  const uncached = new Tape(ids);
+  for (const route of routes) {
+    const key = canonicalUrl(route, tape.callerIds);
+    const socket = { url: route, ordinal: 0, closed: false };
+    tape.open.set(key, new Set([socket]));
+    uncached.open.set(key, new Set([socket]));
+  }
+  const cache = tape.recordedSocketKeys;
+  for (const route of routes) assert.equal(await tape.socketFor(route), await uncached.socketFor(route));
+  assert.equal(tape.recordedSocketKeys, cache);
+  assert.equal(cache.size, routes.length);
+  assert.notEqual(await tape.socketFor(routes[1]), await tape.socketFor(routes[2]));
+  assert.notEqual(await tape.socketFor(routes[3]), await tape.socketFor(routes[4]));
+  assert.notEqual(await tape.socketFor(routes[5]), await tape.socketFor(routes[6]));
+});
+
+test('only unique valid recorded socket strings are cached and live fallbacks never grow it', async () => {
+  const OriginalURL = globalThis.URL;
+  const parsed = [];
+  globalThis.URL = class extends OriginalURL {
+    constructor(url, base) { parsed.push(url); super(url, base); }
+  };
+  try {
+    const first = 'wss://example.test/private?b=2&a=1&requestId=recorded';
+    const second = 'wss://example.test/other';
+    const invalid = 'not a valid URL';
+    const ignored = 'wss://example.test/not-a-socket';
+    const tape = new Tape([
+      { type: 'ws', url: first }, { type: 'ws', url: first },
+      { type: 'open', url: second }, { type: 'close', url: first },
+      { type: 'ws', url: invalid }, { type: 'close', url: invalid },
+      { type: 'config', url: ignored }, { type: 'command', url: ignored },
+      { type: 'ws', url: { toString: () => ignored } },
+    ]);
+    assert.deepEqual(parsed, [first, second, invalid]);
+    const cache = tape.recordedSocketKeys;
+    assert.equal(cache.size, 2);
+    const one = { closed: false };
+    const two = { closed: false };
+    tape.open.set(cache.get(first), new Set([one]));
+    tape.open.set(cache.get(second), new Set([two]));
+    parsed.length = 0;
+    for (let i = 0; i < 100; i++) assert.equal(await tape.socketFor(first), one);
+    assert.equal(await tape.socketFor(second), two);
+    assert.equal(parsed.length, 0, 'known delivery avoids URL parsing entirely');
+    const dynamic = 'wss://example.test/private?a=1&b=2&requestId=live';
+    for (let i = 0; i < 3; i++) assert.equal(await tape.socketFor(dynamic), one);
+    assert.deepEqual(parsed, [dynamic, dynamic, dynamic]);
+    let target = first;
+    const mutable = { toString: () => target };
+    assert.equal(await tape.socketFor(mutable), one);
+    target = second;
+    assert.equal(await tape.socketFor(mutable), two);
+    assert.equal(parsed.length, 5, 'non-string URL objects retain live coercion');
+    await assert.rejects(tape.socketFor(invalid), TypeError);
+    await assert.rejects(tape.socketFor(invalid), TypeError);
+    assert.deepEqual(parsed.slice(-2), [invalid, invalid]);
+    assert.equal(tape.recordedSocketKeys, cache);
+    assert.equal(cache.size, 2);
+    assert.equal(cache.has(dynamic), false);
+    assert.equal(cache.has(invalid), false);
+    assert.equal(cache.has(ignored), false);
+  } finally { globalThis.URL = OriginalURL; }
+});

@@ -165,6 +165,15 @@ export class Tape {
     this.cadence = 'recorded';
     this.options = options ?? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', ...venue.replayCredentials };
     this.callerIds = callerIdsOf(records);
+    // Recorded delivery URLs are fixed. Canonicalize them before the replay's
+    // memory/CPU baseline and retain the bounded cache across both samples.
+    this.recordedSocketKeys = new Map();
+    const socketUrls = new Set();
+    for (const record of records) if (['ws', 'open', 'close'].includes(record.type) && typeof record.url === 'string') socketUrls.add(record.url);
+    for (const url of socketUrls) {
+      try { this.recordedSocketKeys.set(url, strictUrl(url, this.callerIds)); }
+      catch { /* Invalid URLs must still fail at their original delivery call. */ }
+    }
     this.bookSymbols = books;
     this.bitget = venue.rust?.startsWith('bitget') ?? false;
     this.generated = new Set();
@@ -430,7 +439,7 @@ export class Tape {
 
   async socketFor(url, text, ordinal) {
     if (typeof text === 'number') { ordinal = text; text = undefined; }
-    const key = strictUrl(url, this.callerIds);
+    const key = this.recordedSocketKeys.get(url) ?? strictUrl(url, this.callerIds);
     const stream = text && this.venue.streamOf?.(text);
     const matches = (socket) => !socket.closed && (ordinal === undefined || socket.ordinal === ordinal)
       && (!stream || [...socket.subscriptions].some((topic) => stream === topic || stream.startsWith(`${topic}.`)));
