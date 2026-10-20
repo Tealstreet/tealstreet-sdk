@@ -74,4 +74,16 @@ connect. Real Rust fixture performs no exchange HTTP/sockets and checks actual
 snapshot/full BOOK/delta/delete/resync/fresh-reconnect frames through FrameApplier,
 byte-identical forwarding, independent clients using the same command ID and
 write counters proving no replay. Initial real loopback test **1/1 PASS**.
-Full server package **127/127 tests**, typecheck PASS; phase review in progress.
+Full server package **127/127 tests**, typecheck and lint PASS. Independent
+phase-3 code-correctness review PASS at `659fe566e6` (factory, documentation,
+fixture, harness and CI; excluded reviewer's authored transport). Reviewer
+independently ran **8/8** factory tests. No unresolved findings.
+
+## Landing integration and gates
+
+Committed phase-3 checkpoint `1f0aa3b392`, then merged landing `0063068241`
+without conflicts (`659fe566e6`). No stashes/rebases/force pushes. No PR yet.
+Initial Rust workspace run: **2,370/2,370 tests**, 190 groups, no failed/ignored;
+workspace all-target clippy, bans/fmt and workspace wasm32 clippy PASS. Re-running
+integration/package/root gates after the merge, then current-head WASM build,
+host/harness/frame-wire and Binance public/private acceptance before opening PR.
