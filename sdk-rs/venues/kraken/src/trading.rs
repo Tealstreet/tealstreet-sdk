@@ -230,7 +230,10 @@ impl Kraken {
         let mut steps = VecDeque::new();
         for opts in orders {
             steps.push_back(Step::Place(Box::new(self.prepare_order(cx, opts)?)));
-            if opts.stop_loss.is_some() || opts.take_profit.is_some() {
+            // A zero bracket price means "no leg", as on the other venues.
+            let leg = |price: Option<f64>| price.filter(|p| *p != 0.0);
+            let (stop_loss, take_profit) = (leg(opts.stop_loss), leg(opts.take_profit));
+            if stop_loss.is_some() || take_profit.is_some() {
                 if opts.kind != OrderType::Limit {
                     return Err(
                         "Kraken does not support take-profit/stop-loss legs on a market entry; use a limit entry or place TP/SL separately"
@@ -238,8 +241,8 @@ impl Kraken {
                     );
                 }
                 for (kind, price) in [
-                    (OrderType::StopLoss, opts.stop_loss),
-                    (OrderType::TakeProfit, opts.take_profit),
+                    (OrderType::StopLoss, stop_loss),
+                    (OrderType::TakeProfit, take_profit),
                 ] {
                     if let Some(price) = price {
                         let mut leg = opts.clone();
