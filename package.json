@@ -63,7 +63,9 @@
     "rust:private-tape-binancespot": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binancespot",
     "rust:private-tape-binanceinverse": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binanceinverse",
     "rust:private-tape-binancepm": "node sdk-rs/harness/private-tape-binance-variants.mjs --venue binancepm",
-    "rust:private-tape-apexomni": "node sdk-rs/harness/private-tape-apexomni.mjs"
+    "rust:private-tape-apexomni": "node sdk-rs/harness/private-tape-apexomni.mjs",
+    "rust:live-smoke": "node sdk-rs/harness/live-smoke.mjs",
+    "rust:test-live-smoke": "node --test sdk-rs/harness/live-smoke.integration.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
