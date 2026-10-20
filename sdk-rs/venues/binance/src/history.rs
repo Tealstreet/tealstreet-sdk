@@ -207,7 +207,7 @@ impl BinanceFutures {
                 let profile = if self.is_spot() { "Spot" } else { "COIN-M" };
                 cx.done(
                     command,
-                    Err(format!("Binance {profile} history is not supported")),
+                    Err(format!("Binance {profile} history is not supported").into()),
                 );
             }
             return;
