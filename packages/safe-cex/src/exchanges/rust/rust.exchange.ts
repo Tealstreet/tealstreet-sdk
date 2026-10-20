@@ -563,7 +563,21 @@ export class RustEngineExchange extends BaseExchange {
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
-        ...(['backpack', 'bitrue', 'breakoutprop', 'binance', 'binancepm', 'binancespot', 'binanceinverse', 'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader', 'mexc'].includes(this.name)
+        ...([
+          'backpack',
+          'bitrue',
+          'breakoutprop',
+          'binance',
+          'binancepm',
+          'binancespot',
+          'binanceinverse',
+          'bybit',
+          'bybitinverse',
+          'bybitspot',
+          'bybitdemo',
+          'hyrotrader',
+          'mexc',
+        ].includes(this.name)
           ? { recvWindow: this.options.extra?.recvWindow }
           : {}),
         applicationId,

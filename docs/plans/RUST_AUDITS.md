@@ -113,7 +113,8 @@ against current code before fixing. Lifecycle differences alone are not defects.
   **M1/M2:** deployment-owned per-account token checked before upgrade;
   conflicting starts rejected, one startup in flight, membership/generation
   rechecked after loading, malformed JSON handled. Options/start failures are
-  generic; actionable venue command failures remain visible.
+  generic; actionable venue command failures remain visible. Network clients
+  cannot inject trusted-provider public feed updates into account valuation.
 - ~~Native transport errors include signed URLs (`hosts/native/src/transport.rs:390,404`).~~
   **M3:** strip URLs on request/body errors. New delegated signer callback errors
   are generic instead of echoing arbitrary credential-bearing exception text.

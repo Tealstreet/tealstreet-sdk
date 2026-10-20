@@ -465,3 +465,38 @@ test('Workers retain actionable venue command errors for connected clients', asy
   assert.deepEqual(messages, [{ op: 'done', id: 22, error: 'Insufficient balance for this order' }]);
   object.leave(client);
 });
+
+test('Workers rejects provider controls from authenticated sockets while preserving ordinary commands', async () => {
+  const EngineObject = createEngineObject({ loadEngine, accountToken: () => 'account-a-token' });
+  const object = new EngineObject({ storage: { setAlarm() {} } });
+  const response = await object.fetch({ headers: new Map([
+    ['Upgrade', 'websocket'], ['Authorization', 'Bearer account-a-token'],
+  ]) });
+  assert.equal(response.status, 101);
+  const client = response.webSocket;
+  const messages = [];
+  const delivered = [];
+  const state = { bid: 50_000 };
+  object.host = {
+    async command(command) {
+      delivered.push(command);
+      if (command.op === 'publicFeedUpdate') state.bid = command.tickers[0].bid;
+      return { bid: state.bid };
+    },
+    dispose() {},
+  };
+  client.addEventListener('message', (event) => messages.push(JSON.parse(event.data)));
+  try {
+    client.send(JSON.stringify({ op: 'command', id: 31,
+      command: { op: 'publicFeedUpdate', tickers: [{ symbol: 'BTCUSDT', bid: 1 }] },
+    }));
+    await until(() => messages.some((message) => message.id === 31));
+    assert.deepEqual(messages[0], { op: 'done', id: 31, error: 'public feed updates require a trusted host provider' });
+    assert.deepEqual(delivered, []);
+    assert.equal(state.bid, 50_000);
+    client.send(JSON.stringify({ op: 'command', id: 32, command: { op: 'fetchAccount' } }));
+    await until(() => messages.some((message) => message.id === 32));
+    assert.deepEqual(messages[1], { op: 'done', id: 32, result: { bid: 50_000 } });
+    assert.deepEqual(delivered, [{ op: 'fetchAccount' }]);
+  } finally { client.close(); }
+});

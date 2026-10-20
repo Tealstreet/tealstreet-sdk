@@ -271,6 +271,10 @@ export const createEngineObject = ({ loadEngine, createTransport, accountToken, 
         return;
       }
       if (message.op === 'command' && this.host) {
+        if (message.command?.op === 'publicFeedUpdate') {
+          this.reply(client, { op: 'done', id: message.id, error: 'public feed updates require a trusted host provider' });
+          return;
+        }
         const host = this.host;
         try {
           const result = await host.command(message.command);

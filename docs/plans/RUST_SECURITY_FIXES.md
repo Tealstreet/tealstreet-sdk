@@ -209,3 +209,13 @@ live trading, weakened parity oracle, or performance threshold changes.
   commands could inject trusted-provider `publicFeedUpdate` quotes/books. Add
   rejection and a regression at that network boundary, preserving trusted
   in-process provider delivery and the incoming native server rejection.
+- Added the Workers network rejection. Its authenticated-socket regression
+  proves fabricated prices never reach the host and ordinary commands still
+  work. Intentional negative control (guard disabled) fails; restoring the guard
+  passes with `NODE_OPTIONS=--test-name-pattern=Workers.rejects.provider.controls`
+  and the existing workspace test script. Logs are
+  `/tmp/security-workers-provider-negative.log` and
+  `/tmp/security-workers-provider-restored.log`.
+  An earlier unfiltered JS run used temporary Backpack-only bindings: the new
+  assertion passed, while four unavailable Binance/Phemex binding cases failed.
+  The final complete suite must use rebuilt combined bindings.
