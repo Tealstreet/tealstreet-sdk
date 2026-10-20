@@ -43,6 +43,35 @@ test('read, gzip and JSON errors preserve their original failure', () => {
   assert.throws(() => acquireReplayFixture('fixture', { read: () => Buffer.from('{bad JSON') }), SyntaxError);
 });
 
+test('URL sharing preserves complete parsed values and every signed/query/encoding/case distinction', () => {
+  const urls = [
+    'https://exchange.example/ws?signature=A%2Fb&nonce=01&symbol=BTCUSD',
+    'https://exchange.example/ws?signature=A%2Fb&nonce=01&symbol=BTCUSD',
+    'https://exchange.example/ws?signature=A%2fb&nonce=01&symbol=BTCUSD',
+    'https://exchange.example/ws?nonce=01&signature=A%2Fb&symbol=BTCUSD',
+    'https://EXCHANGE.example/ws?signature=A%2Fb&nonce=01&symbol=BTCUSD',
+    'https://exchange.example/WS?signature=A%2Fb&nonce=01&symbol=BTCUSD',
+    'https://exchange.example/ws?signature=A/b&nonce=01&symbol=BTCUSD',
+    'https://example.test/雪😀\ud800?raw=%', 'https://example.test/雪😀\ud800?raw=%',
+    'not a URL', 'not a URL', '', '', null, false, 0,
+    { toString: 'must never coerce this object', url: 'nested URL' }, ['nested URL'],
+  ];
+  const original = urls.map((url, index) => ({
+    type: 'ws', url, text: ' { "url":"' + urls[0] + '" }\n', body: urls[0],
+    effectiveAt: index, ...(index === 0 ? { availableAfter: 0 } : {}),
+  }));
+  original.push({ type: 'ws', text: '\ud800\n雪', body: '', effectiveAt: null });
+  const serialized = '\n' + original.map((record) => JSON.stringify(record)).join('\n\n') + '\n';
+  const expected = original.map((record) => ({ ...record, availableAfter: record.availableAfter ?? record.effectiveAt }));
+  for (const gzip of [false, true]) {
+    const lease = acquireReplayFixture(gzip ? 'urls.gz' : 'urls.jsonl', {
+      read: () => gzip ? gzipSync(serialized) : Buffer.from(serialized),
+    });
+    try { assert.deepEqual(lease.records, expected); }
+    finally { lease.release(); }
+  }
+});
+
 test('real GC retains actual loader roots until release and keeps concurrent leases independent', () => {
   const moduleUrl = new URL('./replay-fixture.mjs', import.meta.url).href;
   const script = `

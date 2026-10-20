@@ -526,3 +526,36 @@ with one declared unscored diagnostic; raw heap dumps remain local and use a
 sanitized environment. Never clamp, permit invalid public negatives, or move
 implementation imports/initialization ahead of the memory baseline to hide it.
 Full performance goals and PR landing remain pending.
+
+## Exact heap owner and fixture representation correction
+
+One unscored, sanitized actual KuCoin Rust diagnostic preserves logical output
+and all 868 guarded inputs. Two local-only heap snapshots identify the precise
+owner: 16,154 still-reachable root `record.url` strings shrink in place from
+320 to 24 bytes, forwarding to three equal canonical strings. Their storage
+falls 4,781,584 bytes. Stable record/root edges remain; the snapshot/native-node
+accounting exactly matches the post-snapshot heap change. Independent offline
+review confirms every URL edge, count and accounting identity. Neither object
+loss, code flushing nor external migration explains that change. Snapshot GC
+also affects counters, so this diagnostic remains unscored and invalid memory
+is still rejected. Raw heap dumps never enter Git; redacted evidence is in
+`RUST_PERF_DELIVERY26_URL_OWNER.json.gz`.
+
+Share identical primitive root URL values while parsing the common fixture,
+before baseline sampling. Use a temporary per-acquisition Map, explicitly drop
+its binding before publishing the lease, and preserve exact strings including
+empty/invalid/signed/query/case/encoding distinctions. Do not parse/canonicalize
+URLs or touch body/text/nonstring fields. Both runtimes and both arms receive
+this helper. URL-sharing CPU/GC preparation moves outside the replay window;
+this is a disclosed shared-method correction, not an engine optimization.
+The earlier fixture lease remains an ownership contract and did not fix the
+actual representation change. Tests prove values, while heap graphs prove
+physical storage. Final source review passes, focused tests pass 33, and all
+657 source-frozen harness tests pass.
+
+Next: refresh only the two changed shared helper/test files while preserving
+all original source/binaries/proofs. Declare one fixed corrected-method KuCoin
+validity pair, retaining its result without retry; then freeze the 39/63 full
+collection if valid. No Rust/binary or host production code changed, so reuse
+verified releases and source checks with hashes rechecked. Full CPU/memory
+requirements, final gates and PR landing remain unfinished.
