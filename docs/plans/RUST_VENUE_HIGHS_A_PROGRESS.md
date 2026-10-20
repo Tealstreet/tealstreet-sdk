@@ -230,3 +230,18 @@ Final combined WASM SHA-256: `a6f1ac97d38ee6809753571a5925984a3a9b9b0ee1b2f5fad9
 Three fresh integration source reviews PASS with no new findings. All scoped phase findings are fixed and independently re-reviewed. The final source is the merge at `8110defe6a` (venue changes through `9dd1e171a3`); later changes are progress documentation only. Landing remains `c44f22bd8e` after fetch. PR correctness reviews and green CI are the remaining landing gates.
 
 Wind-down instruction received: finish this PR, write the local handoff, then stop without starting a follow-up assignment.
+
+### PR #1355 and final landing integration
+
+Opened https://github.com/Tealstreet/tealstreet-sdk/pull/1355 into
+`feat/rust-rewrite`. Three independent PR code-correctness reviews passed at
+`c431a0410c` and were posted as PR comments. MEXC/Bitrue/BloFin CI replay jobs
+passed, along with native clippy, fmt, WASM and secret scanning.
+
+While CI ran, landing advanced to `f895a98f26` (Paradex repairs and TS listener
+isolation, PR #1352). Merged cleanly as `3f7b8b0900`; our scoped source diff is
+unchanged, and the harness/audit auto-merges retain both lanes. Integration
+reviews, affected checks and final CI now run against this merged source.
+The preceding table is explicitly the complete wire-integrated checkpoint;
+final post-listener numbers and merge status are recorded in PR #1355. No
+follow-up assignment will start after this PR lands, per wind-down.
