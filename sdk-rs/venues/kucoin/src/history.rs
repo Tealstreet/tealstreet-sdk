@@ -2,6 +2,9 @@
 use crate::{Kucoin, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::paging::{self, WindowOrder};
+
+/// Requests per read, and windows per range, before a read is refused.
+const MAX_REQUESTS: u32 = 10_000;
 use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -317,17 +320,22 @@ impl Kucoin {
             7 * DAY - 1
         };
         // Millisecond integers below 2^53 tile exactly as f64.
-        let mut windows: VecDeque<(u64, u64)> = paging::windows(
+        // Millisecond integers below 2^53 tile exactly as f64. The window
+        // budget matches the request guard, so a huge range fails up front.
+        let Some(tiles) = paging::windows(
             start as f64,
             end as f64,
             width as f64,
             WindowOrder::NewestFirst,
-            usize::MAX,
-        )
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(a, b)| (a as u64, b as u64))
-        .collect();
+            MAX_REQUESTS as usize,
+        ) else {
+            cx.done(command, Err("KuCoin history range is too large".into()));
+            return;
+        };
+        let mut windows: VecDeque<(u64, u64)> = tiles
+            .into_iter()
+            .map(|(a, b)| (a as u64, b as u64))
+            .collect();
         let (first_start, first_end) = windows.pop_front().unwrap_or((start, end));
         let request = Request {
             command,
@@ -379,7 +387,7 @@ impl Kucoin {
         r.minimum_offset = None;
         r.invalid = false;
         r.requests += 1;
-        if r.requests > 10000 {
+        if r.requests > MAX_REQUESTS {
             cx.done(
                 r.command,
                 Err("KuCoin query exceeded page safety bound".into()),
@@ -881,6 +889,29 @@ mod tests {
             assert_eq!(rows.len(), 1, "nanosecond timestamp: {nanos}");
             assert_eq!(rows[0].id, "0");
         }
+    }
+    #[test]
+    fn a_range_beyond_the_request_budget_fails_before_allocating_windows() {
+        let mut e = engine();
+        e.handle(
+            2_000_000_000_000.0,
+            Event::Command(safe_cex_engine::Command::Query {
+                command: 77,
+                query: Query::Income {
+                    symbol: None,
+                    kind: None,
+                    from_ms: Some(0.0),
+                    to_ms: Some(9_007_199_254_740_991.0),
+                    limit: None,
+                },
+            }),
+        );
+        let actions: Vec<Action> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("too large")
+        )));
     }
     /// Pins the exact request sequence of a windowed, page-numbered read:
     /// 7-day windows newest first, the first walked over two pages. Paging

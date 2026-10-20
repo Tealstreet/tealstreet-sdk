@@ -186,6 +186,10 @@ pub fn windows(
                 }
                 let b = (a + width).min(to);
                 out.push_back((a, b));
+                // Past 2^53 the step can round away; refuse instead of looping.
+                if b + 1.0 <= a {
+                    return None;
+                }
                 a = b + 1.0;
             }
         }
@@ -197,6 +201,9 @@ pub fn windows(
                 }
                 let a = (b - width).max(from);
                 out.push_back((a, b));
+                if a - 1.0 >= b {
+                    return None;
+                }
                 b = a - 1.0;
             }
         }
@@ -509,6 +516,8 @@ mod tests {
         assert!(windows(0.0, 10.0, 9.0, WindowOrder::OldestFirst, 1).is_none());
         assert!(windows(2.0, 1.0, 9.0, WindowOrder::OldestFirst, 10).is_none());
         assert!(windows(0.0, f64::NAN, 9.0, WindowOrder::OldestFirst, 10).is_none());
+        // A step that rounds away fails instead of looping forever.
+        assert!(windows(0.0, 1e300, 9.0, WindowOrder::NewestFirst, usize::MAX).is_none());
     }
 
     #[test]
