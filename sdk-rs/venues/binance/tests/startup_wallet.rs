@@ -728,6 +728,21 @@ fn tradable_pair_with_a_late_quote_holds_previous_usd_then_values_on_the_quote()
         }
         seed_dust(&mut h, true, false);
         respond_dust_wallet(&mut h, true);
+        // Live streams open at once; supervised sockets drop unopened connections.
+        for socket in h
+            .sockets
+            .iter()
+            .map(|(socket, _)| *socket)
+            .collect::<Vec<_>>()
+        {
+            h.event(Event::WsOpened { socket });
+        }
+        let public = h
+            .sockets
+            .iter()
+            .find(|(_, url)| url.contains("9443/ws"))
+            .map(|(socket, _)| *socket)
+            .unwrap();
         assert_eq!(h.engine.store().loaded().balance, previous);
         assert_eq!(
             *h.engine.store().balance(),
@@ -739,10 +754,10 @@ fn tradable_pair_with_a_late_quote_holds_previous_usd_then_values_on_the_quote()
         );
         h.advance(10_000.);
         assert_eq!(h.engine.store().loaded().balance, previous);
-        h.message(
-            "9443/ws",
-            r#"{"e":"24hrTicker","s":"DUSTUSDT","c":"2","P":"0","v":"1","q":"2"}"#,
-        );
+        h.event(Event::WsMessage {
+            socket: public,
+            text: r#"{"e":"24hrTicker","s":"DUSTUSDT","c":"2","P":"0","v":"1","q":"2"}"#,
+        });
         assert!(h.engine.store().loaded().balance);
         assert_eq!(h.engine.store().balance().total, 110.);
     }
