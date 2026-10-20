@@ -280,3 +280,13 @@ generated ID and preserves both virtual siblings when editing one leg.
 - Replacement sizing observes events through the cancel acknowledgement and
   source timestamp watermarks. It does not claim atomic venue amendment or
   knowledge of unseen/later fills; observation storage is bounded.
+
+### KuCoin landing integration
+
+- Review fixes committed at `271bf7de80` after bounded cross-reviews passed.
+- Integrated `373cc09864` (KuCoin #1312). Disjoint owners resolved SDK host
+  lifecycle, WASM feature/options/dispatch, request normalization and build
+  selection conflicts. Three-way audits preserve all 17 default venues,
+  KuCoin hydration/broker contracts and every ApeX auth/identity/replay hook.
+- 151 targeted shared harness tests pass during merge review. Full acceptance
+  repeats from the merged state; private tape now includes review regressions.

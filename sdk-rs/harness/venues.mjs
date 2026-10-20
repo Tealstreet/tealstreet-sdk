@@ -4,6 +4,7 @@ import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:cryp
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { APEX_SEED, apexWireBody, createApexSocketAudit, prepareApexReplay, prepareApexTs, validateApexRequest } from './apexomni-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
+import { kucoin } from './kucoin.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
 
@@ -1058,6 +1059,10 @@ export const VENUES = {
     privateSocket: '/private/ws',
     volatileBodyFields: true,
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
+  },
+  kucoin: {
+    ...kucoin,
+    requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),
   },
   bybit: bybit('bybit', 'BybitExchange'),
   bybitinverse: bybit('bybitinverse', 'BybitInverseExchange'),
