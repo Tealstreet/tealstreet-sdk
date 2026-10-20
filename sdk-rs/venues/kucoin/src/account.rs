@@ -78,6 +78,7 @@ pub(crate) struct Account {
     order_versions: HashMap<String, u64>,
     order_fills: HashMap<String, f64>,
     order_books: HashMap<String, bool>,
+    initial_order_books: u8,
     terminal: HashSet<String>,
     order_absences: HashMap<String, u64>,
     incomplete_orders: HashSet<String>,
@@ -374,12 +375,21 @@ impl OrderRow<'_> {
         orders
     }
 }
+const WORKING_ORDER_MARKET_UNAVAILABLE: &str =
+    "KuCoin working order market unavailable; preserving previous orders";
 pub(crate) fn map_order(store: &Store, raw: &RawValue, now: f64) -> Result<Vec<Order>, String> {
     let row: OrderRow = serde_json::from_str(raw.get()).map_err(|e| e.to_string())?;
     if row.id.is_empty() && row.order_id.is_empty() {
         return Err("KuCoin order missing id".into());
     }
-    Ok(row.orders(store, now))
+    let orders = row.orders(store, now);
+    if orders
+        .iter()
+        .any(|order| order.status == OrderStatus::Open && store.market(&order.symbol).is_none())
+    {
+        return Err(WORKING_ORDER_MARKET_UNAVAILABLE.into());
+    }
+    Ok(orders)
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -655,7 +665,16 @@ impl Kucoin {
     ) {
         match request.read {
             Read::Positions => match serde_json::from_str::<PositionRow>(item) {
-                Ok(row) => request.positions.push(row.position(cx.store)),
+                Ok(row) => {
+                    if row.current_qty.get() != 0.0
+                        && cx.store.market(&symbol(cx.store, row.symbol)).is_none()
+                    {
+                        request.invalid = true;
+                        cx.log(LogLevel::Warning, "KuCoin owned position market unavailable; preserving previous snapshot");
+                    } else {
+                        request.positions.push(row.position(cx.store));
+                    }
+                }
                 Err(error) => match row_identity(item, "symbol") {
                     Some(symbol) => {
                         cx.log(
@@ -680,6 +699,11 @@ impl Kucoin {
                     } else {
                         request.invalid = true;
                     }
+                }
+                // An owned working order without catalogue sizing withholds the whole snapshot.
+                Err(error) if error == WORKING_ORDER_MARKET_UNAVAILABLE => {
+                    request.invalid = true;
+                    cx.log(LogLevel::Warning, error);
                 }
                 Err(error) => match row_identity(item, "id") {
                     // Still counted toward the page census so the snapshot can commit.
@@ -951,7 +975,24 @@ impl Kucoin {
                         orders.push(row);
                     }
                 }
-                cx.store.set_orders(orders);
+                self.account.initial_order_books |= if stop { 2 } else { 1 };
+                if cx.store.loaded().orders || self.account.initial_order_books == 3 {
+                    cx.store.set_orders(orders);
+                } else {
+                    // Publish the valid book without claiming the other book was read.
+                    let removed: Vec<_> = cx
+                        .store
+                        .orders()
+                        .iter()
+                        .filter(|old| !orders.iter().any(|order| order.id == old.id))
+                        .map(|old| old.id.clone())
+                        .collect();
+                    cx.store
+                        .remove_orders(&removed.iter().map(String::as_str).collect::<Vec<_>>());
+                    for order in orders {
+                        cx.store.upsert_order(order);
+                    }
+                }
             }
             Read::Balance => {
                 if let Some(row) = envelope
@@ -1059,6 +1100,13 @@ impl Kucoin {
             let Ok(row) = serde_json::from_str::<OrderRow>(data.get()) else {
                 return;
             };
+            if cx.store.market(&symbol(cx.store, row.symbol)).is_none() {
+                cx.log(
+                    LogLevel::Warning,
+                    "KuCoin working order market unavailable; preserving previous orders",
+                );
+                return;
+            }
             let orders = row.orders(cx.store, cx.now);
             if orders[0].id.is_empty() {
                 return;
@@ -1197,6 +1245,15 @@ impl Kucoin {
         if topic.starts_with("/contract/position")
             && let Ok(row) = serde_json::from_str::<PositionRow>(data.get())
         {
+            if row.current_qty.get() != 0.0
+                && cx.store.market(&symbol(cx.store, row.symbol)).is_none()
+            {
+                cx.log(
+                    LogLevel::Warning,
+                    "KuCoin owned position market unavailable; preserving previous snapshot",
+                );
+                return;
+            }
             if cx.store.hedged() && row.position_side.is_empty() {
                 if let Some(timer) = self.account.refresh.take() {
                     cx.clear_timer(timer);

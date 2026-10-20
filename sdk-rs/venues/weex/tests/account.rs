@@ -56,7 +56,7 @@ fn started(ws: bool) -> (Engine<WeexFutures>, Vec<Action>) {
     e.start(NOW);
     let actions: Vec<_> = e.drain_actions().collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let mut actions: Vec<_> = e.drain_actions().collect();
     response(
         &mut e,
         request(&actions, "24hr"),
@@ -69,7 +69,8 @@ fn started(ws: bool) -> (Engine<WeexFutures>, Vec<Action>) {
         200,
         r#"[{"symbol":"BTCUSDT","bidPrice":"89999","askPrice":"90001"}]"#,
     );
-    let actions = e.drain_actions().collect();
+    actions.extend(e.drain_actions());
+    actions.retain(|action| !matches!(action, Action::Http(r) if r.url.contains("24hr") || r.url.contains("bookTicker")));
     (e, actions)
 }
 fn complete(e: &mut Engine<WeexFutures>, actions: &[Action], normal: &str, algo: &str) {
@@ -274,13 +275,17 @@ fn private_watchdog_reconnect_regenerates_header_timestamp() {
     let (mut e, actions) = started(true);
     let socket = private_socket(&actions);
     let timer = actions
-        .iter()
-        .rev()
-        .find_map(|action| match action {
-            Action::SetTimer { timer, .. } => Some(*timer),
+        .windows(2)
+        .find_map(|pair| match (&pair[0], &pair[1]) {
+            (
+                Action::WsConnectWithHeaders {
+                    socket: private, ..
+                },
+                Action::SetTimer { timer, at_ms },
+            ) if *private == socket && *at_ms == NOW + 5000.0 => Some(*timer),
             _ => None,
         })
-        .unwrap();
+        .expect("private socket watchdog");
     e.handle(NOW + 31_000.0, Event::TimerFired { timer });
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(
@@ -1171,7 +1176,8 @@ fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
     e.start(NOW);
     let actions: Vec<_> = e.drain_actions().collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
-    let actions: Vec<_> = e.drain_actions().collect();
+    // Private startup begins at markets, so its failure may surface before tickers.
+    let mut actions: Vec<_> = e.drain_actions().collect();
     response(
         &mut e,
         request(&actions, "24hr"),
@@ -1184,7 +1190,7 @@ fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
         200,
         r#"[{"symbol":"BTCUSDT","bidPrice":"89999","askPrice":"90001"}]"#,
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    actions.extend(e.drain_actions());
     assert!(
         actions
             .iter()
@@ -1205,10 +1211,15 @@ fn ticker_seed_failure_does_not_block_private_start() {
     e.start(NOW);
     let actions: Vec<_> = e.drain_actions().collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
+    // Private reads start at markets, before the ticker seed resolves.
     let actions: Vec<_> = e.drain_actions().collect();
     response(&mut e, request(&actions, "24hr"), 503, "unavailable");
-    let actions: Vec<_> = e.drain_actions().collect();
-    assert_eq!(requests(&actions).len(), 6);
+    let private: Vec<_> = requests(&actions)
+        .into_iter()
+        .filter(|r| !r.url.contains("24hr") && !r.url.contains("bookTicker"))
+        .collect();
+    assert_eq!(private.len(), 6, "{private:?}");
+    e.drain_actions().for_each(drop);
     complete(&mut e, &actions, NORMAL, ALGO);
     assert!(e.store().loaded().orders && e.store().loaded().balance);
 }

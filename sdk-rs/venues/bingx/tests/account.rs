@@ -895,6 +895,39 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
     policy_poll_after_completion(engine, now);
 }
 #[test]
+fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
+    let mut h = Harness::new();
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    h.respond(
+        POSITIONS,
+        200,
+        &POSITION.replace("BTC-USDT", "MISSING-USDT"),
+    );
+    assert!(!h.engine.store().loaded().positions);
+    assert!(
+        h.logs
+            .iter()
+            .any(|log| log.contains("owned position market unavailable"))
+    );
+}
+
+#[test]
+fn unknown_working_order_rejects_snapshot_but_terminal_rows_do_not() {
+    for (status, loaded) in [("NEW", false), ("FILLED", true)] {
+        let mut h = Harness::new();
+        h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+        h.respond(
+            ORDERS,
+            200,
+            &OPEN
+                .replace("BTC-USDT", "MISSING-USDT")
+                .replace("NEW", status),
+        );
+        assert_eq!(h.engine.store().loaded().orders, loaded);
+    }
+}
+
+#[test]
 fn polling_ahead_of_stream_preserves_each_delayed_execution_once() {
     let mut h = Harness::ready();
     h.fire_at(3000.0);
@@ -1156,10 +1189,11 @@ fn a_persistent_unidentifiable_order_row_keeps_known_orders_and_escalates_to_err
 fn timed_out_key_acquisition_is_fenced_and_retried_after_backoff() {
     let mut h = Harness::new();
     let old = h.take(KEY);
+    // Private startup no longer waits for tickers, so the key deadline is the
+    // first 5s timer rather than the latest one.
     let (timer, _) = *h
         .timers
         .iter()
-        .rev()
         .find(|(_, at)| *at == h.now + 5000.0)
         .unwrap();
     h.now += 10_000.0;

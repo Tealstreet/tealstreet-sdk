@@ -32,7 +32,7 @@ import type { EngineSnapshot } from '../base';
 import bs58 from 'bs58';
 
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
-import { Frame, LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
+import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { isErrorReported, markErrorReported } from '../../commandOutcome';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
@@ -66,7 +66,7 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { paradexSigningTransport } from './paradex.signing';
-import { hasSharedTickerValues, RustPublicFeedClient, rustPublicFeedIdentity } from './publicFeed';
+import { RustPublicFeedClient, rustPublicFeedIdentity } from './publicFeed';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
@@ -264,6 +264,8 @@ export class RustEngineExchange extends BaseExchange {
   }
   private sharedPublicFeed?: RustPublicFeedClient;
   private requestSharedSnapshot = false;
+  private sharedNativeSymbols = new Set<string>();
+  private sharedValidatedMarkets?: Store['markets'];
   private sharedPublicReady = false;
   private nativeLoaded = 0;
   private readonly commandTimeoutMs: number;
@@ -788,7 +790,7 @@ export class RustEngineExchange extends BaseExchange {
           const wasReady = this.sharedPublicReady;
           if (
             this.requestSharedSnapshot &&
-            update.tickers?.some((ticker) => this.store.marketsBySymbol[ticker.symbol] && hasSharedTickerValues(ticker))
+            update.tickers?.some((ticker) => this.store.marketsBySymbol[ticker.symbol] && TICKER_FIELDS.some((field) => Number.isFinite(ticker[field])))
           )
             this.sharedPublicReady = true;
           this.host?.flush();
@@ -976,10 +978,21 @@ export class RustEngineExchange extends BaseExchange {
     }
     let sharedFailure: Error | undefined;
     let sendSharedSnapshot = false;
-    if (this.sharedPublicFeed && receivedLoaded & LOADED_FLAG.MARKETS && (catalogChanged || !this.requestSharedSnapshot)) {
+    if (
+      this.sharedPublicFeed &&
+      receivedLoaded & LOADED_FLAG.MARKETS &&
+      this.applier.hasMarketIdentity &&
+      (catalogChanged || !this.requestSharedSnapshot)
+    ) {
       try {
         this.sharedPublicFeed.validateMarkets(this.store.markets);
-        if (!this.requestSharedSnapshot) {
+        this.sharedValidatedMarkets = this.store.markets;
+        const symbols = new Set(this.store.markets.map((market) => market.symbol));
+        const gainedSymbols = [...symbols].some((symbol) => !this.sharedNativeSymbols.has(symbol));
+        // Install before dispatch: a synchronous provider reply or recovery can
+        // apply another frame with the same catalogue.
+        this.sharedNativeSymbols = symbols;
+        if (!this.requestSharedSnapshot || gainedSymbols) {
           this.requestSharedSnapshot = true;
           sendSharedSnapshot = true;
         }
@@ -1062,15 +1075,18 @@ export class RustEngineExchange extends BaseExchange {
     else this.log(message, level === 'warning' ? LogSeverity.Warning : LogSeverity.Info);
   };
 
-  /** Resolves once markets and tickers, and the account unless public-only, have loaded. */
+  /** Private accounts need markets and account state; public-only sessions also need tickers. */
   private untilLoaded = () =>
     new Promise<void>((resolve, reject) => {
       const ready = () => {
-        const required =
-          LOADED_FLAG.MARKETS |
-          LOADED_FLAG.TICKERS |
-          (this.isPublicDataOnly ? 0 : LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS);
-        return (this.nativeLoaded & required) === required && (!this.sharedPublicFeed || this.sharedPublicReady);
+        const loaded = (flags: number) => (this.nativeLoaded & flags) === flags;
+        const account =
+          this.isPublicDataOnly ||
+          (loaded(LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS) && this.applier.hasAccountState);
+        const publicReady = !this.isPublicDataOnly || (loaded(LOADED_FLAG.TICKERS) && this.applier.hasTickerState);
+        const sharedReady =
+          !this.sharedPublicFeed || (this.sharedPublicReady && this.sharedValidatedMarkets === this.store.markets);
+        return loaded(LOADED_FLAG.MARKETS) && this.applier.hasMarketIdentity && publicReady && account && sharedReady;
       };
       const wake = () => {
         if (!this.startupFailure && !this.isDisposed && !ready()) return;

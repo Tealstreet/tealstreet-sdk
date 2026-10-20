@@ -1410,7 +1410,7 @@ fn rest_fills_exclude_funding_settlement_and_invalid_rows() {
 }
 
 #[test]
-fn same_timestamp_hedge_funding_legs_both_survive_and_page_repeats_collapse() {
+fn income_ids_match_ts_and_hedge_legs_survive_while_page_repeats_collapse() {
     let mut h = ready();
     let leg = |id: &str, side: &str, size: &str, funding: &str| {
         format!(
@@ -1420,8 +1420,9 @@ fn same_timestamp_hedge_funding_legs_both_survive_and_page_repeats_collapse() {
     // Legacy rows reuse one id; sides and signed sizes tell the legs apart.
     let long = leg("592324_BTCUSDT_1", "Buy", "2", "-0.5");
     let short = leg("592324_BTCUSDT_1", "Sell", "-2", "-0.5");
+    let trade = r#"{"id":"t-row","symbol":"DOGEUSDT","side":"Buy","size":"100","funding":"0","fee":"0.0055","cashFlow":"-0.42","transactionTime":"1672127000000","type":"TRADE","currency":"USDT","tradeId":"trade-1","orderId":"order-1","category":"linear"}"#;
     let page1 = format!(
-        r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"c2","list":[{long},{short}]}}}}"#
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"c2","list":[{long},{short},{trade}]}}}}"#
     );
     let page2 = format!(
         r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"","list":[{short}]}}}}"#
@@ -1440,10 +1441,22 @@ fn same_timestamp_hedge_funding_legs_both_survive_and_page_repeats_collapse() {
         &[&page1, &page2],
     );
     let rows = serde_json::from_str::<Vec<serde_json::Value>>(&result).unwrap();
-    assert_eq!(rows.len(), 2, "{result}");
-    let total: f64 = rows.iter().map(|r| r["income"].as_f64().unwrap()).sum();
-    assert_eq!(total, -1.0);
-    assert_ne!(rows[0]["tranId"], rows[1]["tranId"]);
+    let ids: Vec<(&str, f64)> = rows
+        .iter()
+        .map(|r| (r["tranId"].as_str().unwrap(), r["income"].as_f64().unwrap()))
+        .collect();
+    // `mapBybitTransactionToIncomeRecords` emits these exact ids for the same rows:
+    // TS gives both hedge legs one id and keeps both.
+    assert_eq!(
+        ids,
+        [
+            ("BTCUSDT-SETTLEMENT-1672128000000:funding", -0.5),
+            ("BTCUSDT-SETTLEMENT-1672128000000:funding", -0.5),
+            ("trade-1-DOGEUSDT-TRADE-1672127000000:flow", -0.42),
+            ("trade-1-DOGEUSDT-TRADE-1672127000000:fee", -0.0055),
+        ],
+        "{result}"
+    );
 }
 
 #[test]

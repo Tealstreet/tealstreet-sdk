@@ -116,7 +116,7 @@ pub struct Bitrue {
     books: HashMap<String, DepthState>,
     candles: HashMap<(String, String), u32>,
     reads: HashMap<String, Vec<SocketRead>>,
-    startup_retry: Option<TimerId>,
+    startup_retry: safe_cex_engine::startup::Backoff<()>,
     deferred: Vec<Command>,
 }
 #[derive(Serialize)]
@@ -215,7 +215,7 @@ impl Bitrue {
             books: HashMap::new(),
             candles: HashMap::new(),
             reads: HashMap::new(),
-            startup_retry: None,
+            startup_retry: Default::default(),
             deferred: Vec::new(),
         }
     }
@@ -708,7 +708,7 @@ impl Venue for Bitrue {
             Job::Markets {
                 rows,
                 contracts,
-                failed,
+                failed: _,
             } => match serde_json::from_str::<Contract<'_>>(item) {
                 Ok(row) => {
                     let parts: Vec<_> = row.symbol.split('-').collect();
@@ -717,7 +717,7 @@ impl Venue for Bitrue {
                         || row.max_market_volume.0 <= 0.0
                         || row.price_precision > 18
                     {
-                        *failed = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                     contracts.insert(
@@ -759,7 +759,7 @@ impl Venue for Bitrue {
                         maker_fee: Some(0.001),
                     });
                 }
-                Err(_) => *failed = true,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
             Job::Account(r) => self.account_item(cx, r, item),
             Job::Trade(r) => self.trade_item(cx, r, item),
@@ -789,10 +789,11 @@ impl Venue for Bitrue {
                 failed,
             } => {
                 if failed || !(200..300).contains(&response.status) || rows.is_empty() {
-                    cx.log(LogLevel::Error, "Bitrue contracts read failed");
-                    self.startup_retry = Some(cx.set_timer(2000.0));
+                    cx.log(LogLevel::Warning, "Bitrue contracts read failed");
+                    self.startup_retry.failed(cx, ());
                     return;
                 }
+                self.startup_retry.succeeded(cx, &());
                 self.contracts = contracts;
                 let tickers = rows
                     .iter()
@@ -835,6 +836,7 @@ impl Venue for Bitrue {
                 && pending.request.path
                     == "https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey");
         if !rejection
+            && !matches!(pending.job, Job::Markets { .. })
             && safe
             && pending.attempts < 3
             && !error.starts_with("response did not contain")
@@ -848,8 +850,8 @@ impl Venue for Bitrue {
         }
         match pending.job {
             Job::Markets { .. } => {
-                cx.log(LogLevel::Error, format!("Bitrue contracts: {error}"));
-                self.startup_retry = Some(cx.set_timer(2000.0));
+                cx.log(LogLevel::Warning, format!("Bitrue contracts: {error}"));
+                self.startup_retry.failed(cx, ());
             }
             Job::Account(r) => self.account_failed(cx, r, error),
             Job::Trade(r) => self.trade_failed(cx, r, error),
@@ -860,8 +862,7 @@ impl Venue for Bitrue {
         if self.account_timer(cx, timer) {
             return;
         }
-        if self.startup_retry == Some(timer) {
-            self.startup_retry = None;
+        if self.startup_retry.on_timer(timer).is_some() {
             self.markets(cx);
             return;
         }

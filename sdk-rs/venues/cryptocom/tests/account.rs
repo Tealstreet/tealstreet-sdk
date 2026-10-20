@@ -448,6 +448,43 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     );
     assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
 }
+
+#[test]
+fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
+    let mut h = Harness::new();
+    h.reply("get-positions", r#"{"code":0,"result":{"data":[{"instrument_name":"MISSINGUSD-PERP","quantity":"1","cost":"100"}]}}"#);
+    assert!(!h.engine.store().loaded().positions);
+    assert!(h.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+}
+
+#[test]
+fn unknown_working_order_rejects_snapshot_but_terminal_and_spot_rows_remain_out_of_scope() {
+    for (symbol, status, loaded) in [
+        ("MISSINGUSD-PERP", "ACTIVE", false),
+        ("MISSINGUSD-PERP", "FILLED", true),
+        ("MISSING_USD", "ACTIVE", true),
+    ] {
+        let mut h = Harness::new();
+        h.reply("get-positions", EMPTY);
+        h.reply("user-balance", BALANCE);
+        let order = ORDER
+            .replace("BTCUSD-PERP", symbol)
+            .replace("ACTIVE", status);
+        h.reply(
+            "private/get-open-orders",
+            &format!(r#"{{"code":0,"result":{{"data":[{order}]}}}}"#),
+        );
+        if loaded {
+            h.reply("advanced/get-open-orders", EMPTY);
+        }
+        assert_eq!(
+            h.engine.store().loaded().orders,
+            loaded,
+            "{symbol} {status}"
+        );
+    }
+}
 fn warned(h: &Harness, needle: &str) -> bool {
     h.actions.iter().any(|a| {
         matches!(a, Action::Notice(Notice::Log { level: LogLevel::Warning, message })
