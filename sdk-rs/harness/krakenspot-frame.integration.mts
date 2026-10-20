@@ -43,3 +43,39 @@ test('compiled Kraken Spot reconnect fetches a new token before private subscrip
     assert(privateSockets[1].sent.some((frame) => frame.params?.token === 'replay-spot-token'));
   } finally { r.dispose(); }
 });
+test('compiled Kraken Spot emits each native execution once at last trade quantity and price', async () => {
+  const r = rig();
+  try {
+    await r.start();
+    const socket = r.sockets.find((socket) => socket.url.includes('ws-auth.'));
+    const trade = { channel: 'executions', type: 'update', data: [{ order_id: 'O-100', symbol: 'BTC/USD', side: 'buy', order_type: 'limit', exec_type: 'trade', exec_id: 'T-1', limit_price: 90, order_qty: 2, cum_qty: 0.25, last_qty: 0.25, last_price: 87.5, avg_price: 89.5, timestamp: new Date(KRAKEN_SPOT_EPOCH).toISOString() }] };
+    await r.send(socket, { ...trade, type: 'snapshot' });
+    assert.equal(r.frames.reduce((sum, frame) => sum + (frame.fills()?.count ?? 0), 0), 0);
+    await r.send(socket, trade);
+    await r.send(socket, trade);
+    const markets = r.frames.map((frame) => frame.markets()).filter(Boolean).at(-1);
+    const fills = r.frames.flatMap((frame) => {
+      const table = frame.fills();
+      return table ? Array.from({ length: table.count }, (_, i) => ({ id: table.orderId(i), symbol: markets.symbol(table.market[i]), price: table.rows[i * 2], amount: table.rows[i * 2 + 1] })) : [];
+    });
+    assert.deepEqual(fills, [{ id: 'O-100', symbol: 'XBT/USD', price: 87.5, amount: 0.25 }]);
+  } finally { r.dispose(); }
+});
+test('compiled Kraken Spot documented native triggers retain their protective price and safe amend identity', async () => {
+  const r = rig();
+  try {
+    await r.start();
+    const socket = r.sockets.find((socket) => socket.url.includes('ws-auth.'));
+    await r.send(socket, { channel: 'executions', type: 'update', data: [{ order_id: 'O-STOP', symbol: 'BTC/USD', side: 'sell', order_type: 'stop-loss', exec_type: 'new', order_qty: 2, cum_qty: 0,
+      triggers: { reference: 'last', price: 80, actual_price: 80, price_type: 'static', status: 'untriggered' }, timestamp: new Date(KRAKEN_SPOT_EPOCH).toISOString() }] });
+    const result = await r.command({ op: 'amendOrder', id: 'O-STOP', price: 81 });
+    assert.deepEqual(result, ['O-STOP']);
+    const body = new URLSearchParams(r.requests.findLast((request) => new URL(request.url).pathname.endsWith('/AmendOrder')).body);
+    body.delete('nonce');
+    assert.deepEqual(Object.fromEntries(body), { txid: 'O-STOP', trigger_price: '81' });
+    const orders = r.frames.map((frame) => frame.orders()).filter(Boolean).at(-1);
+    const row = Array.from({ length: orders.count }, (_, i) => i).find((i) => orders.id(i) === 'O-STOP');
+    assert.notEqual(row, undefined);
+    assert.equal(orders.price[row], 80);
+  } finally { r.dispose(); }
+});

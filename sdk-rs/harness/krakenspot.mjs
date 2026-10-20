@@ -45,7 +45,8 @@ export function validateKrakenSpotSocketMessage(socket, text, _now, state) {
   if (!['subscribe', 'unsubscribe'].includes(frame.method)) return;
   const p = frame.params ?? {};
   if (!['executions', 'balances'].includes(p.channel)) return;
-  if (new URL(socket.url).origin !== 'wss://ws-auth.kraken.com' || p.token !== 'replay-spot-token')
+  const expected = state?.tokenRequests > 1 ? 'replay-spot-token-2' : 'replay-spot-token';
+  if (new URL(socket.url).origin !== 'wss://ws-auth.kraken.com' || p.token !== expected)
     throw Error('Kraken Spot private subscription must use current REST token');
   if (state && !socket.spotTokenRequest) {
     if ((state.tokenRequests ?? 0) <= (state.usedTokenRequests ?? 0)) throw Error('Kraken Spot reconnect must fetch a fresh token');
@@ -67,9 +68,20 @@ export const krakenSpotRequestBody = (body) => {
   if (result.cl_ord_id !== undefined) result.cl_ord_id = '<generated>';
   return result;
 };
+export function krakenSpotCommandResult(result, command) {
+  if (command.op === 'placeOrders' && command.orders?.some((order) => order.clientOrderId !== undefined)
+    && /caller.*client|client.*IDs/i.test(result.error ?? ''))
+    return { error: 'caller client order ID unsupported' };
+  // TS replay represents a void cancellation as []; the native SDK uses null.
+  // Economic ACK validation and one-use taped writes run before this label.
+  if (['cancelOrders', 'cancelSymbolOrders'].includes(command.op) && result.ok === null && result.error === undefined)
+    return { ok: [] };
+  return result;
+}
 let audit, state;
 export const krakenspot = {
   rust: 'krakenspot',
+  recordAfterReady: true,
   ts: { module: '../../packages/safe-cex/src/exchanges/kraken/krakenspot.exchange.ts', className: 'KrakenSpotExchange', name: 'krakenspot' },
   replayCredentials: KRAKEN_SPOT_REPLAY,
   privateSocket: 'ws-auth.kraken.com',
@@ -77,11 +89,15 @@ export const krakenspot = {
   compareWriteOrder: true,
   compareFillPrices: true,
   compareBalanceCurrencies: true,
+  // Frames retain numeric currencies; TS-only raw response metadata is opaque.
+  tsBalanceCurrencies: (currencies) => Object.fromEntries(Object.entries(currencies).map(([asset, row]) =>
+    [asset, { free: row.free, used: row.used, total: row.total, upnl: row.upnl }])),
   initializeReplay() { state = {}; audit = createKrakenSpotRequestAudit(state); },
   validateRequest(request) { audit(request); },
   validateSocketMessage: (socket, text, now) => validateKrakenSpotSocketMessage(socket, text, now, state),
   validateSocketFrame: validateKrakenSpotSocketFrame,
   requestBody: krakenSpotRequestBody,
+  commandResult: krakenSpotCommandResult,
   isWrite: (method, url) => method !== 'GET' && !/\/(Balance|OpenOrders|GetWebSocketsToken)$/.test(new URL(url).pathname),
   tsBooksSubscribed: (exchange, count) => Object.values(exchange.publicWebsocket?.orderBookHandlers ?? {}).filter((v) => v.length).length >= count,
 };

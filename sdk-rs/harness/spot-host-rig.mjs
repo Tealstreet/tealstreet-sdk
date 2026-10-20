@@ -38,7 +38,22 @@ export function spotRig(venue, options, reply) {
       }
       now = target; host.flush();
     },
-    async command(command) { const result = await host.command(command); await spotSettle(); host.flush(); return result; },
+    async command(command) {
+      let done = false;
+      const pending = host.command(command);
+      pending.then(() => { done = true; }, () => { done = true; });
+      // Native write pacing is driven by engine timers, including queued cancels.
+      // Pump the same deterministic clock while awaiting a command ACK.
+      for (let step = 0; !done && step < 100; step++) {
+        await spotSettle();
+        if (done) break;
+        const timer = [...timers].sort((a,b) => a.at-b.at)[0];
+        assert(timer, `No timer can settle ${command.op}: ${logs.join('; ')}`);
+        timers.delete(timer); now = Math.max(now, timer.at); timer.fn();
+      }
+      assert(done, `Command ${command.op} exceeded deterministic timer budget`);
+      const result = await pending; host.flush(); return result;
+    },
     assertLoaded() {
       assert(frames.some((frame) => frame.markets()?.count > 0), logs.join('; '));
       assert(frames.some((frame) => (frame.status()?.loaded & 31) === 31), logs.join('; '));

@@ -77,7 +77,7 @@ documented positive relative distance; ambiguous edits fail before writes.
   through a bounded price path, keeping unpriced raw holdings. Duplicate-base
   identity/conversion tests and fresh public recapture are required. No live
   public gate is claimed yet.
-- Kraken frozen full crate: 120 tests (93 existing futures, 27 spot) pass;
+- Kraken frozen full crate: 122 tests (93 existing futures, 29 spot) pass;
   strict crate Clippy, formatting and diff checks pass. Public/private/trading/
   query review findings are resolved, with focused independent regressions.
 - Hyperliquid frozen full crate: 84 tests (26 spot) pass; strict crate Clippy,
@@ -87,6 +87,15 @@ documented positive relative distance; ambiguous edits fail before writes.
   4 compiled Kraken tests. Three compiled Hyperliquid tests also pass after
   fixing the deterministic rig's timer pumping. No account economics are
   rewritten in the replay gate.
+- Final DOGE/cancel-sentinel review passes: 2 native DOGE regressions,
+  12 TS parity regressions and 10 protocol tests independently pass. SDK subset
+  62 tests, package typecheck and lint pass. Crate and SDK fixes are committed
+  at `d7c1d415df`, `a2c7f7c666`, `b9f51b2bc8` and `3f0413cdb6`.
+- Kraken spot private gate passes: 19 frames, two markets/tickers; exact
+  requests, auth, fresh token rotation, account, trading and query results.
+  TS/Rust informational CPU 85.1/47.5 ms; retained memory 14.7/1.0 MB.
+  Successful cancel void normalization is operation-scoped; failures and
+  economics are unchanged. Recheck on the final rebuilt artifact.
 - First Kraken live capture includes 5,043 WS frames and two books, but exposed
   rejected XDG subscriptions. Pair TS/Rust XDG/XXDG-to-DOGE normalization,
   test inbound/outbound identity and balance valuation, then rebuild/recapture.

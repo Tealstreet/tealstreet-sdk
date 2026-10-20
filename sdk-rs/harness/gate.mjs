@@ -174,7 +174,8 @@ const KNOWN_TS_FIXES = {
     // return string IDs for both resting and filled placement ACKs. Native
     // tests additionally pin spot-only safety paths without rewriting economics.
     notes: [
-      'Join documented spotMetaAndAssetCtxs contexts by universe position when coin is omitted.',
+      'Join coinless spot contexts positionally only when the entire context array is coinless and exactly matches universe length.',
+      'Use the spot native websocket endpoint and supported book precision subscriptions (null and 2 through 5).',
       'Return the SDK string-array contract for resting and immediately filled orders.',
       'Use spot asset indices and 8-minus-size-decimals price precision with no perp builder or reduce-only flags.',
       'Keep accepted orders available for immediate cancel/amend despite the TS spot fetchOrders stub.',
@@ -190,6 +191,9 @@ const KNOWN_TS_FIXES = {
       'Translate AssetPairs XBT wsname to WS v2 BTC wire symbols while preserving canonical store symbols.',
       'Trim subscribed book depth after each update and clear reconnect book caches.',
       'Fan supported native OHLC updates out to every requested fallback timeframe.',
+      'Read current native triggers.actual_price/static triggers.price and map BTC/USD execution identity back to XBT/USD.',
+      'Keep documented iceberg orders as limit orders with native amend provenance.',
+      'Derive trailing quote distances from the raw chart input before precision rounding.',
       'Sign exact form bytes and enforce monotonic nonce, including retries and reconnect token reads.',
       'Refresh the authenticated WS token for each socket generation.',
       'Emit exact per-execution last_qty/last_price once per native execution identity.',

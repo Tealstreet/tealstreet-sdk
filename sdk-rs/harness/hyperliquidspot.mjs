@@ -40,6 +40,7 @@ export function validateHyperliquidSpotRequest({ method, url, body, now = Date.n
 }
 export const hyperliquidspot = {
   rust: 'hyperliquidspot',
+  recordAfterReady: true,
   ts: { module: '../../packages/safe-cex/src/exchanges/hyperliquid/hyperliquidspot.exchange.ts', className: 'HyperliquidSpotExchange', name: 'hyperliquidspot' },
   publicOptions: { key: '' },
   recordOptions: { publicDataOnly: true, key: '' },
@@ -61,7 +62,8 @@ export const hyperliquidspot = {
   },
   socketMatches(socket, text) {
     const channel = JSON.parse(text).channel;
-    return ['pong', 'subscriptionResponse'].includes(channel) || socket.hyperSpotChannels?.has(channel) === true;
+    return ['pong', 'subscriptionResponse'].includes(channel) || socket.hyperSpotChannels?.has(channel) === true
+      || (channel === 'spotState' && socket.hyperSpotChannels?.has('spotClearinghouseState') === true);
   },
   isWrite: (_method, url) => new URL(url).pathname === '/exchange',
   tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('l2Book.')).length >= count,

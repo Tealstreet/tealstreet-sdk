@@ -31,8 +31,10 @@ export function buildHyperliquidSpotTape() {
   command(1000, 'placeOrders', { orders: [{ symbol: 'PURR/USDC', type: 'market', side: 'buy', amount: 0.25, clientOrderId: caller }] });
   http('/exchange', { action: { type: 'order', orders: [{ a: 10001, b: true, p: '105', s: '0.25', r: false, t: { limit: { tif: 'Gtc' } }, c: caller }], grouping: 'na' }, nonce: SPOT_EPOCH, signature: { r: '0x00', s: '0x00', v: 27 } },
     { status: 'ok', response: { type: 'order', data: { statuses: [{ filled: { oid: 1001, totalSz: '0.25', avgPx: '100' } }] } } });
-  ws(1500, 'orderUpdates', [{ order: { coin: '@1', oid: 1001, side: 'B', limitPx: '105', sz: '0', origSz: '0.25', timestamp: SPOT_EPOCH + 1500, cloid: caller, reduceOnly: false, isTrigger: false, orderType: 'Limit', tif: 'Gtc' }, status: 'filled', statusTimestamp: SPOT_EPOCH + 1500 }]);
   for (const op of ['fetchFills', 'fetchOrderHistory', 'fetchIncome']) command(2000, op, { symbol: 'PURR/USDC' });
+  command(2400, 'fetchCandles', { symbol: 'PURR/USDC', interval: '1m', from: SPOT_EPOCH - 60000, to: SPOT_EPOCH });
+  http('/info', { type: 'candleSnapshot', req: { coin: '@1', interval: '1m', startTime: SPOT_EPOCH - 60000, endTime: SPOT_EPOCH } },
+    [{ t: SPOT_EPOCH - 60000, T: SPOT_EPOCH - 1, s: '@1', i: '1m', o: '99', h: '101', l: '98', c: '100', v: '12', n: 3 }]);
   ws(3000, 'spotState', { user: HYPERLIQUID_SPOT_REPLAY.applicationId, spotState: hyperliquidSpotBalance });
   return records;
 }
