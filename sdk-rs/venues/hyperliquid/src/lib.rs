@@ -261,6 +261,11 @@ impl Hyperliquid {
         }
         for market in &markets {
             self.excluded.remove(&market.id.to_ascii_lowercase());
+            // Account start seeded only the markets known then.
+            if self.account.started && cx.store.setting(&market.symbol).is_none() {
+                let seed = self.seed_setting(market);
+                cx.store.update_setting(&market.symbol, |s| *s = seed);
+            }
         }
         let mut all = cx.store.markets().to_vec();
         for market in markets {
@@ -362,6 +367,15 @@ impl Hyperliquid {
     }
     fn coin<'a>(&'a self, cx: &'a Cx<'_, Pending>, symbol: &str) -> Option<&'a str> {
         cx.store.market(symbol).map(|m| m.id.as_str())
+    }
+    /// Every catalogue read has succeeded, so an unknown coin is not a pending retry.
+    pub(crate) fn discovery_settled(&self) -> bool {
+        !self.core_discovery_incomplete
+            && self.startup.idle()
+            && self
+                .dex_names
+                .iter()
+                .all(|d| self.advanced_scopes.contains(d))
     }
     /// A coin TS hides by design (delisted or unquoted), as opposed to unknown.
     pub(crate) fn excluded_coin(&self, coin: &str) -> bool {

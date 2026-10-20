@@ -1,4 +1,5 @@
 use crate::{Connection, Orderly, Pending, Seed, sign, symbol, wire::*};
+use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
@@ -17,6 +18,7 @@ pub enum Request {
         invalid: bool,
         revision: u64,
         stamps: HashMap<String, (Option<u64>, u64)>,
+        coverage: SnapshotCoverage<String>,
     },
     Orders {
         algo: bool,
@@ -28,6 +30,7 @@ pub enum Request {
         seen: HashSet<String>,
         page_count: u32,
         stamps: HashMap<String, (Option<u64>, u64)>,
+        coverage: SnapshotCoverage<String>,
     },
 }
 #[derive(Clone)]
@@ -47,6 +50,26 @@ struct MappedOrder<'r, 'a> {
     timestamp: Option<u64>,
 }
 
+/// Stored positions carry the unified symbol, which keeps any broker suffix.
+fn position_key(native: &str) -> String {
+    symbol(native).unwrap_or_else(|| native.into())
+}
+/// The root id of an order row too malformed to parse.
+fn order_key(item: &str, algo: bool) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Identity {
+        #[serde(alias = "orderId", default)]
+        order_id: Id,
+        #[serde(alias = "algoOrderId", default)]
+        algo_order_id: Id,
+    }
+    let row: Identity = serde_json::from_str(item).ok()?;
+    Some(if algo {
+        row.algo_order_id.0
+    } else {
+        row.order_id.0
+    })
+}
 fn order_lineages<'r, 'a>(
     root: &'r OrderRow<'a>,
     algo: bool,
@@ -365,6 +388,7 @@ impl Orderly {
                     invalid: false,
                     revision: self.account.positions_revision,
                     stamps: HashMap::new(),
+                    coverage: SnapshotCoverage::default(),
                 },
             );
         }
@@ -385,6 +409,7 @@ impl Orderly {
                             seen: HashSet::new(),
                             page_count: 0,
                             stamps: HashMap::new(),
+                            coverage: SnapshotCoverage::default(),
                         },
                     );
                 }
@@ -503,11 +528,13 @@ impl Orderly {
             last_update: Some(cx.now),
         }))
     }
+    /// Maps a root and its algo children; working ids on unknown markets go to `unknown`.
     fn orders<'r, 'a>(
         &self,
         cx: &Cx<'_, Pending>,
         r: &'r OrderRow<'a>,
         algo: bool,
+        unknown: &mut Vec<String>,
     ) -> Result<Vec<MappedOrder<'r, 'a>>, String> {
         let mut out = vec![];
         let mut ids = HashSet::new();
@@ -538,10 +565,11 @@ impl Orderly {
                             })
                         });
                 if !final_status {
-                    return Err(
-                        "Orderly working order market unavailable; preserving previous orders"
-                            .into(),
-                    );
+                    unknown.push(if algo {
+                        row.algo_order_id.0.clone()
+                    } else {
+                        row.order_id.0.clone()
+                    });
                 }
                 continue;
             }
@@ -817,37 +845,96 @@ impl Orderly {
                         rows.push((s, margin(&r.default_margin_mode)?));
                     }
                 }
-                Request::Positions { rows, stamps, .. } => {
-                    let r: PositionRow<'_> =
-                        serde_json::from_str(item).map_err(|e| e.to_string())?;
-                    if let Some(p) = self.position(cx, &r)? {
-                        stamps.insert(p.id.clone(), (r.seq, r.timestamp.unwrap_or(0)));
-                        rows.push(p);
-                    }
+                Request::Positions {
+                    rows,
+                    stamps,
+                    coverage,
+                    ..
+                } => {
+                    let symbol = match serde_json::from_str::<PositionRow<'_>>(item) {
+                        Ok(r) => match self.position(cx, &r) {
+                            Ok(Some(p)) => {
+                                stamps.insert(p.id.clone(), (r.seq, r.timestamp.unwrap_or(0)));
+                                rows.push(p);
+                                return Ok(());
+                            }
+                            Ok(None) => return Ok(()),
+                            Err(_) => Some(position_key(&r.symbol)),
+                        },
+                        Err(_) => {
+                            #[derive(serde::Deserialize)]
+                            struct Identity<'a> {
+                                #[serde(borrow)]
+                                symbol: std::borrow::Cow<'a, str>,
+                            }
+                            serde_json::from_str::<Identity<'_>>(item)
+                                .ok()
+                                .map(|r| position_key(&r.symbol))
+                        }
+                    };
+                    cx.log(
+                        LogLevel::Warning,
+                        match &symbol {
+                            Some(symbol) => format!("Orderly skipped unmappable position {symbol}"),
+                            None => "Orderly skipped unmappable position without a symbol".into(),
+                        },
+                    );
+                    coverage.reject(symbol);
                 }
                 Request::Orders {
                     algo,
                     rows,
                     proofs,
+                    page,
                     seen,
                     page_count,
                     stamps,
+                    coverage,
                     ..
                 } => {
                     *page_count += 1;
-                    let r: OrderRow<'_> = serde_json::from_str(item).map_err(|e| e.to_string())?;
-                    let key = if *algo {
-                        &r.algo_order_id.0
-                    } else {
-                        &r.order_id.0
+                    let parsed = serde_json::from_str::<OrderRow<'_>>(item);
+                    let key = match &parsed {
+                        Ok(r) if *algo => r.algo_order_id.0.clone(),
+                        Ok(r) => r.order_id.0.clone(),
+                        Err(_) => order_key(item, *algo).unwrap_or_default(),
                     };
-                    if !key.is_empty() && !seen.insert(key.clone()) {
+                    let key = (!key.is_empty() && key != "0").then_some(key);
+                    if let Some(key) = &key
+                        && !seen.insert(key.clone())
+                    {
                         return Err("Orderly repeated order page".into());
+                    }
+                    let mut unknown = vec![];
+                    let mapped = parsed
+                        .as_ref()
+                        .ok()
+                        .and_then(|r| self.orders(cx, r, *algo, &mut unknown).ok());
+                    let Some(mapped) = mapped else {
+                        cx.log(
+                            LogLevel::Warning,
+                            match &key {
+                                Some(key) => format!("Orderly skipped unmappable order {key}"),
+                                None => "Orderly skipped unmappable order without an id".into(),
+                            },
+                        );
+                        if key.is_none() {
+                            // Numeric ids cannot collide with this page-position census key.
+                            seen.insert(format!("row:{page}:{page_count}"));
+                        }
+                        coverage.reject(key);
+                        return Ok(());
+                    };
+                    for id in unknown {
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("Orderly skipped order {id} on an unknown market"),
+                        );
+                        coverage.reject(Some(id));
                     }
                     if let Some((id, proof)) = self.proof(cx, item).filter(|_| !*algo) {
                         proofs.insert(id, proof);
                     }
-                    let mapped = self.orders(cx, &r, *algo)?;
                     for mapped in mapped {
                         let o = mapped.order;
                         if rows.iter().any(|prior| prior.id == o.id) {
@@ -864,9 +951,6 @@ impl Orderly {
             Ok(())
         })();
         if let Err(e) = result {
-            if e == "Orderly working order market unavailable; preserving previous orders" {
-                cx.log(LogLevel::Warning, &e);
-            }
             match request {
                 Request::Modes { invalid, .. }
                 | Request::Positions { invalid, .. }
@@ -924,10 +1008,11 @@ impl Orderly {
                 self.account_ready(cx);
             }
             Request::Positions {
-                rows,
+                mut rows,
                 invalid,
                 revision,
                 stamps,
+                coverage,
             } => {
                 self.account.inflight[1] = false;
                 if invalid || revision != self.account.positions_revision {
@@ -956,13 +1041,26 @@ impl Orderly {
                 for (id, new) in stamps {
                     merge_stamp(&mut self.account.position_stamps, id, new);
                 }
+                let kept = cx
+                    .store
+                    .positions()
+                    .iter()
+                    .filter(|p| {
+                        !coverage.allows_absence(&p.symbol) && !rows.iter().any(|q| q.id == p.id)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                rows.extend(kept);
                 cx.store.set_positions(rows);
-                cx.store.set_balance(Balance {
-                    total: meta.total_collateral_value - upnl,
-                    free: meta.free_collateral,
-                    used: meta.total_collateral_value - meta.free_collateral - upnl,
-                    upnl,
-                });
+                // The balance nets every row's PnL, so a partial snapshot keeps the last one.
+                if coverage.rejected() == 0 {
+                    cx.store.set_balance(Balance {
+                        total: meta.total_collateral_value - upnl,
+                        free: meta.free_collateral,
+                        used: meta.total_collateral_value - meta.free_collateral - upnl,
+                        upnl,
+                    });
+                }
                 for s in cx
                     .store
                     .markets()
@@ -983,6 +1081,7 @@ impl Orderly {
                 seen,
                 page_count,
                 stamps,
+                coverage,
             } => {
                 let i = algo as usize;
                 if invalid || revision != self.account.order_revisions[i] {
@@ -1024,6 +1123,7 @@ impl Orderly {
                             seen,
                             page_count: 0,
                             stamps,
+                            coverage,
                         },
                     );
                     return;
@@ -1047,7 +1147,19 @@ impl Orderly {
                     .store
                     .orders()
                     .iter()
-                    .filter(|o| o.parent_id.is_some() != algo || o.status == OrderStatus::Creating)
+                    .filter(|o| {
+                        o.parent_id.is_some() != algo
+                            || o.status == OrderStatus::Creating
+                            || ((!coverage.allows_absence(&o.id)
+                                || o.parent_id
+                                    .as_ref()
+                                    .is_some_and(|p| !coverage.allows_absence(p)))
+                                && !self.account.terminal.contains(&o.id)
+                                && !o.parent_id.as_ref().is_some_and(|p| {
+                                    self.account.terminal.contains(&format!("root:{p}"))
+                                })
+                                && !rows.iter().any(|row| row.id == o.id))
+                    })
                     .cloned()
                     .collect();
                 self.account
@@ -1340,7 +1452,13 @@ impl Orderly {
             }
             return Ok(());
         }
-        let orders = self.orders(cx, r, algo)?;
+        let mut unknown = vec![];
+        let orders = self.orders(cx, r, algo, &mut unknown)?;
+        if !unknown.is_empty() {
+            return Err(
+                "Orderly working order market unavailable; preserving previous orders".into(),
+            );
+        }
         for mapped in orders {
             let order = mapped.order;
             let row = mapped.row;

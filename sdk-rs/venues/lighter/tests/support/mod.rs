@@ -47,6 +47,9 @@ pub fn ready() -> (Engine<Lighter>, SocketId) {
     ready_with(options())
 }
 pub fn ready_with(options: Options) -> (Engine<Lighter>, SocketId) {
+    ready_with_meta(options, META)
+}
+pub fn ready_with_meta(options: Options, meta: &str) -> (Engine<Lighter>, SocketId) {
     let mut e = Engine::new(Lighter::new(options));
     e.start(NOW);
     let mut private = None;
@@ -61,7 +64,7 @@ pub fn ready_with(options: Options) -> (Engine<Lighter>, SocketId) {
                 Action::Http(r) => {
                     let body = if r.url.contains("orderBookDetails") || r.url.contains("orderBooks")
                     {
-                        META
+                        meta
                     } else if r.url.contains("exchangeStats") {
                         r#"{"code":200,"order_book_stats":[{"market_id":1,"last_trade_price":"100","mark_price":"100","index_price":"100"},{"market_id":2,"last_trade_price":"200","mark_price":"200","index_price":"200"}]}"#
                     } else if r.url.contains("accountActiveOrders") {

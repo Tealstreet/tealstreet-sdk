@@ -22,6 +22,11 @@ impl<K: PartialEq> Backoff<K> {
             .any(|read| &read.key == key && read.timer.is_some())
     }
 
+    /// No read has failed without a later success.
+    pub fn idle(&self) -> bool {
+        self.reads.is_empty()
+    }
+
     /// At most one retry per independent read; no write request enters this API.
     pub fn failed<P>(&mut self, cx: &mut Cx<'_, P>, key: K) {
         let index = match self.reads.iter().position(|read| read.key == key) {

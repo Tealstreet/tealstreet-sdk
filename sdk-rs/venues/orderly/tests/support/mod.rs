@@ -49,9 +49,19 @@ pub fn ready() -> (Driver, SocketId) {
     ready_with(ORDER, "[]", POSITIONS)
 }
 pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketId) {
+    let (e, socket, _) = ready_with_logs(order, algos, positions);
+    (e, socket)
+}
+/// Bootstraps like `ready_with` and returns the messages logged on the way.
+pub fn ready_with_logs(
+    order: &str,
+    algos: &str,
+    positions: &str,
+) -> (Driver, SocketId, Vec<String>) {
     let mut e = Engine::new(Orderly::new(options()));
     e.start(1000.0);
     let mut private = None;
+    let mut logs = vec![];
     for _ in 0..10 {
         let out = actions(&mut e);
         if out.is_empty() {
@@ -85,6 +95,7 @@ pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketI
                 Action::WsConnect { socket, url, .. } if url.contains("private") => {
                     private = Some(socket)
                 }
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
                 _ => {}
             }
         }
@@ -93,7 +104,7 @@ pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketI
     e.handle(1000.0, Event::WsOpened { socket });
     actions(&mut e);
     ws(&mut e, socket, r#"{"event":"auth","success":true}"#);
-    (e, socket)
+    (e, socket, logs)
 }
 pub fn fill_amounts(e: &mut Driver) -> Vec<f64> {
     let Some(bytes) = e.take_frame(2000.0) else {

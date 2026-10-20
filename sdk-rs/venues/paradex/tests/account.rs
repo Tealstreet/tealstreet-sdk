@@ -263,7 +263,7 @@ fn closed_positions_with_defaulted_optional_fields_remove_existing_exposure() {
 }
 
 #[test]
-fn malformed_required_size_in_mixed_snapshot_preserves_complete_positions() {
+fn malformed_required_size_in_mixed_snapshot_skips_only_that_row() {
     for (malformed_first, size) in [
         (false, "\"\""),
         (true, "\"\""),
@@ -282,7 +282,6 @@ fn malformed_required_size_in_mixed_snapshot_preserves_complete_positions() {
         );
         assert_eq!(h.e.store().positions().len(), 2);
         let positions = h.e.store().positions().to_vec();
-        let balance = h.e.store().balance().clone();
         let valid = POSITION.replace(r#""size":"2""#, r#""size":"9""#);
         let malformed = eth.replace(r#""size":"2""#, &format!(r#""size":{size}"#));
         let rows = if malformed_first {
@@ -292,8 +291,11 @@ fn malformed_required_size_in_mixed_snapshot_preserves_complete_positions() {
         };
         h.timer(h.now + 10_000.);
         h.reply("/positions", &format!(r#"{{"results":[{rows}]}}"#));
-        assert_eq!(h.e.store().positions(), positions);
-        assert_eq!(h.e.store().balance(), &balance);
+        assert_eq!(h.e.store().position("BTC-USD-PERP").unwrap().contracts, 9.);
+        assert_eq!(
+            h.e.store().position("ETH-USD-PERP"),
+            positions.iter().find(|p| p.symbol == "ETH-USD-PERP")
+        );
         assert!(h.e.store().loaded().positions);
     }
 }
@@ -329,7 +331,8 @@ fn malformed_and_failed_snapshots_preserve_last_known_good_state() {
     let account = h.take("/account");
     h.respond(account, 200, r#"{"data":{}}"#);
     let orders = h.take("/orders");
-    h.respond(orders, 200, r#"{"results":[{"id":"bad"}]}"#);
+    // A row with no recoverable id cannot prove any stored order's absence.
+    h.respond(orders, 200, r#"{"results":[{"id":7}]}"#);
     assert_eq!(h.e.store().positions().len(), 1);
     assert_eq!(*h.e.store().balance(), balance);
     assert_eq!(h.e.store().orders().len(), 1);
@@ -1024,7 +1027,7 @@ fn amend_invalidation_keeps_fill_watermarks_and_exact_decimal_size_changes_remai
 }
 
 #[test]
-fn unmapped_perpetual_private_snapshots_cannot_erase_confirmed_exposure() {
+fn unmapped_perpetual_rows_are_skipped_and_protect_only_their_own_identity() {
     let (mut h, socket) = loaded();
     authenticate(&mut h, socket);
     let old_orders = h.e.store().orders().to_vec();
@@ -1070,8 +1073,12 @@ fn unmapped_perpetual_private_snapshots_cannot_erase_confirmed_exposure() {
         "/account/margin",
         r#"{"configs":[{"market":"BTC-USD-PERP","leverage":20}]}"#,
     );
+    // The skipped order shares stored id 123 and keeps it; the skipped position
+    // names another market, so this snapshot's omission of BTC removes it.
     assert_eq!(h.e.store().orders(), old_orders);
-    assert_eq!(h.e.store().positions(), old_positions);
+    assert!(h.e.store().positions().is_empty());
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message == "Paradex skipped position UNKNOWN-USD-PERP on an unknown market")));
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message == "Paradex skipped order 123 on an unknown market")));
     // The next complete, genuinely empty scopes still remove closed exposure.
     h.timer(h.now + 10_000.);
     for path in ["/positions", "/orders"] {
@@ -1149,4 +1156,118 @@ fn private_supervisor_bounds_handshake_and_preserves_backoff_after_open() {
     let (mut h, socket) = loaded();
     authenticate(&mut h, socket);
     socket_checks::flaps(h.e, socket, h.now);
+}
+
+/// Runs one REST poll cycle; returns the warnings it logged.
+fn poll(h: &mut Harness, positions: &[String], orders: &[String]) -> Vec<String> {
+    let start = h.actions.len();
+    h.timer(h.now + 10_000.);
+    h.reply(
+        "/positions",
+        &format!(r#"{{"results":[{}]}}"#, positions.join(",")),
+    );
+    h.reply(
+        "/account",
+        r#"{"total_collateral":"1000","free_collateral":"800","initial_margin_requirement":"200"}"#,
+    );
+    h.reply(
+        "/orders",
+        &format!(r#"{{"results":[{}]}}"#, orders.join(",")),
+    );
+    h.reply(
+        "/account/margin",
+        r#"{"configs":[{"market":"BTC-USD-PERP","leverage":20}]}"#,
+    );
+    h.actions[start..]
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them() {
+    let (mut h, _) = loaded();
+    let position = |market: &str, size: &str| {
+        POSITION
+            .replace("BTC-USD-PERP", market)
+            .replace(r#""size":"2""#, &format!(r#""size":{size}"#))
+    };
+    let order = |id: &str, market: &str, price: &str| {
+        ORDER
+            .replace(r#""id":"123""#, &format!(r#""id":"{id}""#))
+            .replace("BTC-USD-PERP", market)
+            .replace(r#""price":"99""#, &format!(r#""price":{price}"#))
+    };
+    let size = |h: &Harness, market: &str| h.e.store().position(market).map(|p| p.contracts);
+    let price = |h: &Harness, id: &str| h.e.store().order(id).map(|o| o.price);
+    poll(
+        &mut h,
+        &[
+            position("BTC-USD-PERP", "\"2\""),
+            position("ETH-USD-PERP", "\"1\""),
+        ],
+        &[
+            order("123", "BTC-USD-PERP", "\"99\""),
+            order("124", "ETH-USD-PERP", "\"9\""),
+        ],
+    );
+    assert_eq!(size(&h, "ETH-USD-PERP"), Some(1.));
+    assert_eq!(price(&h, "124"), Some(9.));
+    let logs = poll(
+        &mut h,
+        &[
+            position("BTC-USD-PERP", "\"3\""),
+            position("ETH-USD-PERP", "\"bad\""),
+            position("NEW-USD-PERP", "\"4\""),
+            position("BTC-USD-250101-100000-C", "\"1\""),
+        ],
+        &[
+            order("123", "BTC-USD-PERP", "\"98\""),
+            order("124", "ETH-USD-PERP", "8"),
+            order("125", "NEW-USD-PERP", "\"7\""),
+            order("126", "BTC-USD-250101-100000-C", "\"4\""),
+        ],
+    );
+    assert_eq!(size(&h, "BTC-USD-PERP"), Some(3.));
+    assert_eq!(size(&h, "ETH-USD-PERP"), Some(1.));
+    assert_eq!(price(&h, "123"), Some(98.));
+    assert_eq!(price(&h, "124"), Some(9.));
+    assert_eq!(h.e.store().orders().len(), 2);
+    for expected in [
+        "Paradex skipped unmappable position ETH-USD-PERP",
+        "Paradex skipped position NEW-USD-PERP on an unknown market",
+        "Paradex skipped unmappable order 124",
+        "Paradex skipped order 125 on an unknown market",
+    ] {
+        assert!(logs.iter().any(|m| m == expected), "{expected}: {logs:?}");
+    }
+    assert!(
+        !logs
+            .iter()
+            .any(|m| m.contains("bad") || m.contains("-C") || m.contains("126"))
+    );
+    // A skipped row recorded no closure, so an unchanged venue timestamp still applies.
+    poll(
+        &mut h,
+        &[
+            position("BTC-USD-PERP", "\"3\""),
+            position("ETH-USD-PERP", "\"5\""),
+        ],
+        &[
+            order("123", "BTC-USD-PERP", "\"98\""),
+            order("124", "ETH-USD-PERP", "\"9\""),
+        ],
+    );
+    assert_eq!(size(&h, "ETH-USD-PERP"), Some(5.));
+    poll(
+        &mut h,
+        &[position("BTC-USD-PERP", "\"3\"")],
+        &[order("123", "BTC-USD-PERP", "\"98\"")],
+    );
+    assert_eq!(size(&h, "ETH-USD-PERP"), None);
+    assert_eq!(price(&h, "124"), None);
+    assert_eq!(h.e.store().orders().len(), 1);
 }

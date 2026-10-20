@@ -833,3 +833,117 @@ fn a_rejected_replacement_after_a_confirmed_cancel_is_not_reported_as_rejected()
     assert_eq!(error.message, "Margin is insufficient.");
     assert_eq!(error.outcome, None, "the cancel already took effect");
 }
+
+fn advance_to_position_read(h: &mut Harness, rows: &str) {
+    h.advance(75_000.0);
+    h.respond("/fapi/v3/positionRisk", 200, rows);
+    h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
+}
+
+#[test]
+fn an_unreadable_position_amount_keeps_that_leg_until_a_valid_snapshot_omits_it() {
+    let mut h = ready();
+    let row = |side: &str, amount: &str| {
+        format!(
+            r#"{{"symbol":"BTCUSDT","positionSide":"{side}","positionAmt":"{amount}","entryPrice":"95000.0","markPrice":"96000.0","unRealizedProfit":"1","liquidationPrice":"0","isolatedMargin":"0","notional":"960.0","updateTime":1720736417660}}"#
+        )
+    };
+    advance_to_position_read(
+        &mut h,
+        &format!("[{},{}]", row("LONG", "0.010"), row("SHORT", "-0.020")),
+    );
+    let short = h.engine.store().position("BTCUSDT:short").unwrap().clone();
+    assert_eq!(short.contracts, 0.02);
+
+    advance_to_position_read(
+        &mut h,
+        &format!(
+            "[{},{}]",
+            row("LONG", "0.030"),
+            row("SHORT", "garbled-amount")
+        ),
+    );
+    let store = h.engine.store();
+    assert_eq!(store.position("BTCUSDT:long").unwrap().contracts, 0.03);
+    assert_eq!(store.position("BTCUSDT:short"), Some(&short));
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m == "Binance positionRisk row BTCUSDT has an unreadable positionAmt")
+    );
+    assert!(!h.logs.iter().any(|m| m.contains("garbled-amount")));
+
+    advance_to_position_read(&mut h, &format!("[{}]", row("LONG", "0.030")));
+    assert!(h.engine.store().position("BTCUSDT:short").is_none());
+    assert_eq!(h.engine.store().positions().len(), 1);
+}
+
+#[test]
+fn an_open_order_of_unsupported_type_keeps_its_stored_copy_until_a_valid_snapshot_omits_it() {
+    let mut h = ready();
+    let order = |id: u64, kind: &str, price: &str| {
+        format!(
+            r#"{{"orderId":{id},"clientOrderId":"c{id}","executedQty":"0","origQty":"0.004","price":"{price}","reduceOnly":false,"side":"BUY","status":"NEW","stopPrice":"0","closePosition":false,"symbol":"BTCUSDT","timeInForce":"GTC","type":"{kind}","workingType":"CONTRACT_PRICE"}}"#
+        )
+    };
+    let algo = |id: u64, kind: &str, trigger: &str| {
+        format!(
+            r#"{{"algoId":{id},"orderType":"{kind}","symbol":"BTCUSDT","side":"SELL","quantity":"0.004","triggerPrice":"{trigger}","workingType":"MARK_PRICE","reduceOnly":true,"closePosition":false}}"#
+        )
+    };
+    let refresh = |h: &mut Harness, orders: &[String], algos: &[String]| {
+        let private = h.socket("/private/ws").unwrap();
+        h.event(Event::WsOpened { socket: private });
+        h.advance(10_000.0);
+        h.respond(
+            "/fapi/v1/openOrders",
+            200,
+            &format!("[{}]", orders.join(",")),
+        );
+        h.respond(
+            "/fapi/v1/openAlgoOrders",
+            200,
+            &format!("[{}]", algos.join(",")),
+        );
+    };
+    refresh(
+        &mut h,
+        &[order(1, "LIMIT", "90000"), order(2, "LIMIT", "89000")],
+        &[
+            algo(3, "STOP_MARKET", "85000"),
+            algo(4, "STOP_MARKET", "84000"),
+        ],
+    );
+    let stored = ["2", "4"].map(|id| h.engine.store().order(id).unwrap().clone());
+
+    refresh(
+        &mut h,
+        &[order(1, "LIMIT", "90500"), order(2, "FUTURE_KIND", "1")],
+        &[algo(3, "STOP_MARKET", "85500"), algo(4, "FUTURE_KIND", "1")],
+    );
+    let store = h.engine.store();
+    assert_eq!(store.order("1").unwrap().price, 90500.0);
+    assert_eq!(store.order("3").unwrap().price, 85500.0);
+    for row in &stored {
+        assert_eq!(store.order(&row.id), Some(row));
+    }
+    for id in ["2", "4"] {
+        let expected = format!("Binance open order {id} has an unsupported type");
+        assert!(h.logs.contains(&expected), "{expected}");
+    }
+    assert!(!h.logs.iter().any(|m| m.contains("FUTURE_KIND")));
+
+    refresh(
+        &mut h,
+        &[order(1, "LIMIT", "90500")],
+        &[algo(3, "STOP_MARKET", "85500")],
+    );
+    let ids: Vec<_> = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
+    assert_eq!(ids, ["1", "3"]);
+}

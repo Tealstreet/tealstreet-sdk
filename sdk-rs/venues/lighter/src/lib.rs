@@ -13,7 +13,7 @@ use safe_cex_engine::model::{
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wire::*;
 
 fn revalue_position(position: &mut Position, price: f64) {
@@ -134,6 +134,8 @@ pub struct Lighter {
     limits: limits::Limits,
     metadata: HashMap<String, MarketMeta>,
     symbols: HashMap<String, String>,
+    /// Native ids and symbols of spot markets, whose private rows belong to another product.
+    spot_markets: HashSet<String>,
     public: Connection,
     books: HashMap<String, DepthState>,
     candles: HashMap<(String, String), CandleState>,
@@ -169,6 +171,7 @@ impl Lighter {
             limits: limits::Limits::default(),
             metadata: HashMap::new(),
             symbols: HashMap::new(),
+            spot_markets: HashSet::new(),
             public: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -209,6 +212,9 @@ impl Lighter {
         } else {
             "USDC"
         }
+    }
+    fn spot_market(&self, id_or_symbol: &str) -> bool {
+        !id_or_symbol.is_empty() && self.spot_markets.contains(id_or_symbol)
     }
     fn symbol_for_id(&self, id: &str) -> Option<&str> {
         self.symbols.get(id).map(String::as_str)
@@ -843,7 +849,12 @@ impl Venue for Lighter {
             Pending::Markets { rows, metadata, .. } => {
                 match serde_json::from_str::<Instrument<'_>>(item) {
                     Ok(m) => {
-                        if m.status != "active" || m.market_type.eq_ignore_ascii_case("spot") {
+                        if m.market_type.eq_ignore_ascii_case("spot") {
+                            self.spot_markets.insert(format!("{:.0}", m.market_id));
+                            self.spot_markets.insert(m.symbol.to_string());
+                            return;
+                        }
+                        if m.status != "active" {
                             return;
                         }
                         let size = m
