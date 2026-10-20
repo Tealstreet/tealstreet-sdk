@@ -3,7 +3,7 @@ use crate::wire::{Number, Str, Text, check};
 use crate::{Bitrue, Job, Pending};
 use safe_cex_engine::model::*;
 use safe_cex_engine::url::encode;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response};
+use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -37,6 +37,10 @@ struct Plan {
     protections: Vec<String>,
     cancel_batch: bool,
     cancel_errors: Vec<CancelFailure>,
+    /// A cancellation leg's outcome is not known.
+    cancel_unknown: bool,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
 }
 #[derive(Serialize)]
 struct CancelFailure {
@@ -286,6 +290,8 @@ impl Plan {
             protections: vec![],
             cancel_batch: false,
             cancel_errors: vec![],
+            cancel_unknown: false,
+            effective: false,
         }
     }
     fn symbol(&mut self, symbol: &str) {
@@ -820,9 +826,10 @@ impl Bitrue {
             | Command::AmendOrder { command, .. }
             | Command::SetLeverage { command, .. } => *command,
             Command::SetMarginType { command, .. } => {
-                cx.done(
+                cx.fail(
                     *command,
-                    Err("Bitrue margin mode cannot be changed through the API".into()),
+                    not_sent("Bitrue margin mode cannot be changed through the API")
+                        .kind(ErrorKind::Unsupported),
                 );
                 return true;
             }
@@ -832,9 +839,10 @@ impl Bitrue {
                 symbol: _,
             } => {
                 if *hedged {
-                    cx.done(
+                    cx.fail(
                         *command,
-                        Err("Bitrue supports one-way positions only".into()),
+                        not_sent("Bitrue supports one-way positions only")
+                            .kind(ErrorKind::Unsupported),
                     );
                 } else {
                     cx.store.set_hedged(false);
@@ -845,7 +853,7 @@ impl Bitrue {
             _ => return false,
         };
         if let Err(error) = self.trade_plan(cx, command.clone()) {
-            cx.done(id, Err(error));
+            cx.fail(id, not_sent(error));
             return true;
         }
         self.trading.queue.push_back(command);
@@ -880,7 +888,7 @@ impl Bitrue {
                 self.trade_step(cx, plan);
             }
             Err(error) => {
-                cx.done(id, Err(error));
+                cx.fail(id, not_sent(error));
                 self.trade_next(cx);
             }
         }
@@ -931,7 +939,7 @@ impl Bitrue {
                     step,
                     protection: None,
                 },
-                "Bitrue replacement aborted after execution progress",
+                not_sent("Bitrue replacement aborted after execution progress"),
             );
             return;
         }
@@ -977,7 +985,7 @@ impl Bitrue {
             }),
         );
     }
-    fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, plan: Plan, error: Option<String>) {
+    fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, plan: Plan, error: Option<VenueError>) {
         let creating: Vec<_> = plan.creating.iter().map(|o| o.id.as_str()).collect();
         cx.store.remove_orders(&creating);
         for id in &plan.affected {
@@ -1006,7 +1014,14 @@ impl Bitrue {
         }
         self.trading.busy = false;
         let error = if plan.cancel_errors.is_empty() {
-            error
+            error.map(|mut error| {
+                if (plan.effective || !plan.ids.is_empty())
+                    && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                {
+                    error.outcome = None;
+                }
+                error
+            })
         } else {
             #[derive(Serialize)]
             #[serde(rename_all = "camelCase")]
@@ -1015,28 +1030,32 @@ impl Bitrue {
                 canceled_order_ids: &'a [String],
                 failed_orders: &'a [CancelFailure],
             }
-            Some(
+            let error = VenueError::new(
                 serde_json::to_string(&CancellationErrors {
                     message: "Bitrue cancellation failed for one or more orders",
                     canceled_order_ids: &plan.ids,
                     failed_orders: &plan.cancel_errors,
                 })
                 .expect("cancellation errors"),
-            )
+            );
+            // Legs may differ; only an unknown leg is worth stating.
+            Some(if plan.cancel_unknown {
+                error.outcome(Outcome::Unknown)
+            } else {
+                error
+            })
         };
-        cx.done(
-            plan.command,
-            error.map_or_else(
-                || {
-                    Ok(if plan.refresh_result || plan.cancel_batch {
-                        "[]".to_owned()
-                    } else {
-                        serde_json::to_string(&plan.ids).expect("order ids")
-                    })
-                },
-                Err,
+        match error {
+            Some(error) => cx.fail(plan.command, error),
+            None => cx.done(
+                plan.command,
+                Ok(if plan.refresh_result || plan.cancel_batch {
+                    "[]".to_owned()
+                } else {
+                    serde_json::to_string(&plan.ids).expect("order ids")
+                }),
             ),
-        );
+        }
         if !plan.symbols.is_empty() {
             self.refresh_orders(cx, plan.symbols);
             self.refresh_account(cx);
@@ -1077,7 +1096,7 @@ impl Bitrue {
             self.trade_finish(
                 cx,
                 plan,
-                Some("Bitrue protective placement outcome is uncertain; complete fresh order census is required".into()),
+                Some(VenueError::new("Bitrue protective placement outcome is uncertain; complete fresh order census is required").outcome(Outcome::Unknown)),
             );
             return false;
         }
@@ -1101,7 +1120,7 @@ impl Bitrue {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut request: Request,
-        error: &str,
+        error: VenueError,
     ) {
         if matches!(request.step.effect, Effect::Place { .. }) {
             self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
@@ -1109,9 +1128,10 @@ impl Bitrue {
         if request.plan.cancel_batch
             && let Effect::Cancel(target) = &request.step.effect
         {
+            request.plan.cancel_unknown |= error.outcome == Some(Outcome::Unknown);
             request.plan.cancel_errors.push(CancelFailure {
                 id: target.id.clone(),
-                error: error.into(),
+                error: error.message,
             });
             for id in &target.store_ids {
                 if cx
@@ -1124,8 +1144,20 @@ impl Bitrue {
             }
             self.trade_step(cx, *request.plan);
         } else {
-            self.trade_finish(cx, *request.plan, Some(error.into()));
+            self.trade_finish(cx, *request.plan, Some(error));
         }
+    }
+    /// A request that never answered. Reads precede a write that was never sent.
+    pub(crate) fn trade_lost(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        let read = matches!(request.step.effect, Effect::Inspect(_) | Effect::Verify(_));
+        let error = VenueError::new(error)
+            .kind(ErrorKind::Network)
+            .outcome(if read {
+                Outcome::NotSent
+            } else {
+                Outcome::Unknown
+            });
+        self.trade_failed(cx, request, error);
     }
     pub(crate) fn trade_response(
         &mut self,
@@ -1186,7 +1218,12 @@ impl Bitrue {
                     }
                 }
             }
-            self.trade_failed(cx, request, &error);
+            let read = matches!(request.step.effect, Effect::Inspect(_) | Effect::Verify(_));
+            let mut error = answer_failure(&response, error, rejected);
+            if read {
+                error.outcome = Some(Outcome::NotSent);
+            }
+            self.trade_failed(cx, request, error);
             return;
         }
         let result = match &request.step.effect {
@@ -1258,8 +1295,17 @@ impl Bitrue {
             }
         };
         if let Err(error) = result {
-            self.trade_failed(cx, request, &error);
+            // Reads precede a write that was never sent; other 2xx answers are unproven.
+            let outcome = if matches!(request.step.effect, Effect::Inspect(_) | Effect::Verify(_)) {
+                Outcome::NotSent
+            } else {
+                Outcome::Unknown
+            };
+            self.trade_failed(cx, request, VenueError::new(error).outcome(outcome));
         } else {
+            if !matches!(request.step.effect, Effect::Inspect(_) | Effect::Verify(_)) {
+                request.plan.effective = true;
+            }
             self.trade_step(cx, *request.plan);
         }
     }
@@ -1440,5 +1486,36 @@ impl Bitrue {
             _ => unreachable!(),
         }
         Ok(())
+    }
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+/// A refused write answer. Only Bitrue's documented pre-execution codes and
+/// auth/rate-limit statuses prove a refusal; 408/5xx do not prove anything.
+fn answer_failure(response: &Response<'_>, message: String, documented: bool) -> VenueError {
+    let error = VenueError::new(message);
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    let code = serde_json::from_str::<crate::wire::Envelope<'_>>(response.body)
+        .ok()
+        .map(|e| e.code.to_string())
+        .filter(|code| !code.is_empty());
+    let error = match &code {
+        Some(code) => error.venue_code(code.clone()),
+        None => error,
+    };
+    match response.status {
+        401 => rejected(error, ErrorKind::AuthInvalid),
+        403 => rejected(error, ErrorKind::AuthPermission),
+        429 => rejected(error, ErrorKind::RateLimited),
+        408 | 500.. => error.outcome(Outcome::Unknown),
+        _ if documented && code.as_deref() == Some("-1022") => {
+            rejected(error, ErrorKind::AuthInvalid)
+        }
+        _ if documented => rejected(error, ErrorKind::Rejected),
+        _ => error,
     }
 }

@@ -328,8 +328,8 @@ Fresh combined gates and exact-head CI are required before merging PR #1345.
 ## Architecture
 
 - Numeric decoders duplicated 40× across 19 venues, already divergent → `engine::de`.
-- Socket supervision copied per venue, no jitter, two without backoff →
-  `engine::socket::Supervisor`.
+- ~~Socket supervision copied per venue, no jitter, two without backoff →
+  `engine::socket::Supervisor`.~~ Fixed: every venue socket runs under the shared supervisor (#1385, #1406, #1423 and the final socket PR).
 - Venue registry lives only in the wasm host (`hosts/wasm/src/lib.rs:592`) →
   `safe-cex-venues` crate shared by both hosts.
 - Bybit fields and venue-named features in the engine (`model.rs:411`, `engine/Cargo.toml:10`).
@@ -343,34 +343,65 @@ Fresh combined gates and exact-head CI are required before merging PR #1345.
 
 ## Gate honesty
 
-No venue has live private evidence; private tapes are generated in CI from
-documented or synthetic payloads (14–24 frames for several venues).
+Gate implementation and measurements are tracked in
+[RUST_GATE_HONESTY.md](RUST_GATE_HONESTY.md). Strict replay failures remain FAIL;
+CI can accept only the exact venue, tape hash and diagnostic fields in the
+single [`known-gate-failures.json`](../../sdk-rs/harness/known-gate-failures.json)
+list. An accepted known failure is not a parity pass. Baseline/workload and
+candidate/fixer integrity failures cannot be exempted.
 
-- Binance/Bybit oracle copies Rust's `marginSize` into TS when TS is 0
-  (`harness/gate.mjs:646`). Circular.
-- "Identical output" is final-state only and partial (`harness/replay.mjs:803`):
-  no TP/SL, realizedPnl, fees, fill timestamps or execution ids; fill prices
-  skipped on binance, bybit, bitget, bingx, cryptocom, mexc, hyperliquid, weex,
-  breakoutprop; rows keyed by symbol collapse duplicates (`gate.mjs:87`).
-- Whole-section rewrites of the TS side (kraken, backpack, coinbase, orderly,
-  kucoin, phemex, cryptocom, bingx, lighter, weex, binance variants); some
-  normalizations apply to Rust too and can mask regressions.
-- ~20 TS venues were edited on this branch as paired fixes, so the oracle moved
-  with the port. Gate against master TS and declare deltas.
-- Perf: median of 3 with no margin, harness audit cost inside the window, wasm
-  compile outside it, process CPU ungated (Rust loses on grvt, hyperliquidspot,
-  bybit, woo, breakoutprop), failed perf jobs re-run to green, retained memory
-  mostly TS module graph and redefined ~10 times.
-- Size budget covers per-venue builds; the shipped combined build (≈10–11.7 MB)
-  has none. Paradex has 678 bytes of headroom.
-- Public fixtures are recorded by driving Rust, so TS-only subscriptions cannot
-  diverge; fixtures refreshed alongside behaviour fixes.
-- `bitgetusdc` has no CI replay gate; HyroTrader and BreakoutProp public data are synthetic.
+Implemented on the gate-honesty lane:
+
+- Binance/Bybit margin expectations come from taped native position/configuration
+  fields. Isolated TS fixers cannot receive candidate output; AST and mutation
+  controls reject circular fixes.
+- Compare TP/SL and each leg's trigger source, conditional execution price,
+  parent IDs, open/flat-position realized PnL and fill
+  price/fee/time/execution identity. Client IDs and fill prices default on; any
+  exclusion requires an explicit venue/field/reason. Duplicate public symbols
+  fail before filtering or map construction. Compare production receiver state
+  at startup, tape quarters, commands and terminal checkpoints, before fixers.
+  Validate each runner's boundaries against the tape plan independently, with
+  required account/book sections; matching omissions cannot establish coverage.
+- Per-venue leaf permissions and structural rules constrain every fixer;
+  overwritten-field counts are reported. No fixer rewrites candidate requests.
+- At least seven fresh interleaved performance pairs, alternating first runner;
+  require 10% improvement in main/steady/process CPU and retained memory.
+  Implementation loading and WASM compilation count in total CPU. Audit
+  callbacks, checkpoint reconstruction and baseline GC are outside performance
+  intervals. Retention subtracts the idle-loaded module baseline and counts
+  WASM growth once. Each performance run must reproduce its own audited final
+  output and transport receipt. No rerun-to-green performance selection.
+- Fixed combined shipping WASM budget: 13,631,488 bytes, checked on both browser
+  and Node artifacts before standalone overwrite. Standalone is 1,310,720 (#1421).
+- Bitget USDC has public/private CI cases with explicitly authored synthetic
+  provenance. A private query timeout remains incomplete evidence, not a pass.
+
+Remaining evidence limitations:
+
+- No venue has live private evidence; private tapes are documented/synthetic.
+  Several TS handlers emit execution identity or timestamps, now preserved by
+  the comparison. Rust live-fill frames lack those fields; other TS handlers
+  lack them too. Null/null equality cannot establish those capabilities. Missing wire fields
+  remain missing, never reconstructed into candidate output from the tape.
+- Some tape-derived TS corrections still rebuild sections. Their declared leaf
+  fields and overwrite counts are visible; raw checkpoints do not use them.
+- About 20 TS venues changed as paired fixes, so the oracle moved with the port.
+  Freeze outputs against master TS and declare deltas before removing references.
+- Existing public recordings were driven by Rust; TS-only subscriptions can
+  still be absent. Fixtures were refreshed alongside behavior changes.
+  HyroTrader, BreakoutProp and Bitget USDC public fixtures are synthetic.
+- The harness measures implementation loading/runtime plus replay routing and
+  minimal receipt recording. Common harness imports precede those intervals;
+  this is not a browser cold-start or pure venue-handler benchmark.
+- CI performance replays use the selected standalone venue build. The combined
+  shipping build has a separate size budget; these standalone measurements do
+  not establish combined-artifact cold-load or browser performance.
 
 Before cutover: live-smoke private captures on every venue (mainnet minimum size
 for coinbase, backpack, mexc with approval), a 3–7 day read-only production
 shadow diffing full store snapshots, public fixtures re-recorded with TS, and a
-per-venue canary holding the circular-evidence venues last.
+per-venue canary holding the formerly circular-evidence venues last.
 
 ## Port reviews (Opus, per venue vs TS)
 
@@ -632,8 +663,8 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`).
 - Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
   (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~; command
-  rejections don't emit the error toast (one-error rule); `privateOnly`/
-  `externalPublicData` ignored; `getAccount` missing for ~18 venues; dispose
+  rejections don't emit the error toast (one-error rule); ~~`privateOnly`/
+  `externalPublicData` ignored~~ (publicFeed policy; in-process source served, #1441); `getAccount` missing for ~18 venues; dispose
   mid-command reports a placed order as failed (`host.mjs:83`); base
   `cancelAllOrders`/`nuke` read the 250 ms-lagged TS store; fills lack
   realizedPnl/fee; `fetchOrders`/`fetchPositions`/`removeOrders` don't reach the
