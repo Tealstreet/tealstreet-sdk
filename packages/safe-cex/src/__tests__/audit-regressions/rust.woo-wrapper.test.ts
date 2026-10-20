@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { isRustVenue, RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { OrderSide, OrderType } from '../../types';
 
 describe('Rust WOO execution history boundary', () => {
   const exchanges: RustEngineExchange[] = [];
@@ -41,5 +42,42 @@ describe('Rust WOO execution history boundary', () => {
     const { exchange, command } = setup();
     await exchange.fetchHistoricalFills({ from: value, to: value });
     expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'fetchFills', from: undefined, to: undefined });
+  });
+
+  it('registers WOO beside Orderly brokers and preserves caller IDs and slippage through placement', async () => {
+    expect(isRustVenue('woo')).toBe(true);
+    expect(isRustVenue('woofi')).toBe(true);
+    expect(isRustVenue('kodiakfi')).toBe(true);
+    const { exchange, command } = setup();
+    const opts = { symbol: 'BTCUSDT', type: OrderType.Market, side: OrderSide.Buy, amount: 1,
+      maxSlippagePct: 0.25, clientOrderId: '9007199254740991' };
+    await expect(exchange.placeOrderWithClientOrderId(opts)).resolves.toEqual({
+      orderIds: [], clientOrderId: opts.clientOrderId,
+    });
+    expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'placeOrders', orders: [opts] });
+  });
+
+  it('rejects invalid caller IDs and non-finite slippage before any mixed batch command', async () => {
+    const { exchange, command } = setup();
+    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
+    const opts = { symbol: 'BTCUSDT', type: OrderType.Market, side: OrderSide.Buy, amount: 1 };
+    for (const clientOrderId of ['0', '01', '-1', '1.0', '9007199254740992']) {
+      await expect(exchange.placeOrders([opts, { ...opts, clientOrderId }])).rejects.toThrow('clientOrderId must');
+    }
+    for (const maxSlippagePct of [NaN, Infinity, -Infinity]) {
+      await expect(exchange.placeOrders([opts, { ...opts, maxSlippagePct }])).rejects.toThrow('must be finite');
+    }
+    for (const field of ['bybitBbo', 'bybitSlippageToleranceTicks']) {
+      await expect(exchange.placeOrders([opts, { ...opts, [field]: undefined }])).rejects.toThrow(
+        'does not support Bybit BBO or TickSize controls',
+      );
+    }
+    expect(command).not.toHaveBeenCalled();
+  });
+
+  it('sends account-wide cancellation to the native venue without a store-order scan', async () => {
+    const { exchange, command } = setup();
+    await exchange.cancelAllOrders();
+    expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'cancelSymbolOrders', symbol: '' });
   });
 });

@@ -150,6 +150,8 @@ fn opts() -> PlaceOrderOpts {
         sl_trigger_type: None,
         client_order_id: Some("9223372036854775807".into()),
         max_slippage_pct: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
         close: None,
     }
 }
@@ -335,6 +337,41 @@ fn entire_batch_preflight_prevents_partial_writes() {
         );
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(done(&actions, 3).unwrap().is_err());
+    }
+}
+#[test]
+fn bybit_specific_options_reject_the_entire_batch_before_any_write() {
+    for bbo in [true, false] {
+        let mut e = boot();
+        let mut invalid = opts();
+        invalid.client_order_id = Some("2".into());
+        if bbo {
+            invalid.bybit_bbo = Some(BybitBbo {
+                side_type: "Queue".into(),
+                level: 1.,
+            });
+        } else {
+            invalid.bybit_slippage_tolerance_ticks = Some(1.);
+        }
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 31,
+                orders: vec![opts(), invalid],
+            },
+        );
+        assert!(
+            done(&actions, 31)
+                .unwrap()
+                .as_ref()
+                .unwrap_err()
+                .contains("Bybit-specific")
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
     }
 }
 #[test]

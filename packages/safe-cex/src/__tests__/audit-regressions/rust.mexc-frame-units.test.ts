@@ -32,6 +32,21 @@ describe('native placement quantity bridge', () => {
     expect(store.orders[0].amount).toBe(0.006);
   });
 
+  it('preserves exact MEXC native leaves instead of reconstructing a fractional contract', () => {
+    const value = frame();
+    const order = value.orders()!;
+    value.orders = () => ({
+      ...order,
+      amount: Float64Array.of(4 * 0.0001),
+      filled: Float64Array.of(3 * 0.0001),
+      remaining: Float64Array.of(4 * 0.0001 - 3 * 0.0001),
+      remainingNative: Float64Array.of(1),
+    });
+    const store = new DefaultStore();
+    new FrameApplier(store, true).apply(value);
+    expect(store.orders[0].extra?.remainingNative).toBe(1);
+  });
+
   it('keeps base placement units for other venues', () => {
     const store = new DefaultStore();
     new FrameApplier(store).apply(frame());

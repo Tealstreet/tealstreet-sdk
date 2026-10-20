@@ -357,6 +357,9 @@ impl Grvt {
         execution: Option<(bool, f64)>,
         used: &mut HashSet<String>,
     ) -> Result<Step, String> {
+        if opts.bybit_bbo.is_some() || opts.bybit_slippage_tolerance_ticks.is_some() {
+            return Err("Bybit-specific order options are unsupported on GRVT".into());
+        }
         if !matches!(
             opts.kind,
             OrderType::Market | OrderType::Limit | OrderType::StopLoss | OrderType::TakeProfit
@@ -660,6 +663,8 @@ impl Grvt {
                                 client_order_id: None,
                                 max_slippage_pct: None,
                                 close: Some(false),
+                                bybit_bbo: None,
+                                bybit_slippage_tolerance_ticks: None,
                             };
                             plan.steps.push_back(self.placement(
                                 cx,
@@ -1092,6 +1097,8 @@ impl Grvt {
                         client_order_id: None,
                         max_slippage_pct: None,
                         close: source.close,
+                        bybit_bbo: None,
+                        bybit_slippage_tolerance_ticks: None,
                     };
                     let replacement = self.placement(
                         cx,

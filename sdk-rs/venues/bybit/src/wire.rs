@@ -7,6 +7,16 @@ use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
 type Opt<'a> = Option<Str<'a>>;
 
+// Cow nested inside Option/Vec does not inherit serde's direct-field borrowing.
+#[derive(Deserialize)]
+struct BorrowedStr<'a>(#[serde(borrow)] Cow<'a, str>);
+
+fn borrow_optional_str<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Opt<'de>, D::Error> {
+    Option::<BorrowedStr<'de>>::deserialize(deserializer).map(|value| value.map(|value| value.0))
+}
+
 /// A decimal string as JavaScript's `parseFloat` reads it: empty or malformed is NaN.
 pub fn float(text: &str) -> f64 {
     text.trim().parse::<f64>().unwrap_or(f64::NAN)
@@ -115,6 +125,8 @@ pub struct Instrument<'a> {
     #[serde(borrow, default)]
     pub status: Str<'a>,
     #[serde(borrow, default)]
+    pub contract_type: Str<'a>,
+    #[serde(borrow, default)]
     pub base_coin: Str<'a>,
     #[serde(borrow, default)]
     pub quote_coin: Str<'a>,
@@ -148,6 +160,12 @@ pub struct PriceFilter<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct LotSizeFilter<'a> {
     #[serde(borrow, default)]
+    pub base_precision: Opt<'a>,
+    #[serde(borrow, default)]
+    pub max_limit_order_qty: Opt<'a>,
+    #[serde(borrow, default)]
+    pub max_market_order_qty: Opt<'a>,
+    #[serde(borrow, default)]
     pub qty_step: Opt<'a>,
     #[serde(borrow, default)]
     pub min_order_qty: Opt<'a>,
@@ -172,28 +190,28 @@ pub struct FeeRate<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct TickerRow<'a> {
     #[serde(borrow, default)]
-    pub symbol: Str<'a>,
-    #[serde(borrow, default)]
+    pub symbol: Cow<'a, str>,
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub last_price: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub bid1_price: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub ask1_price: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub mark_price: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub index_price: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub price24h_pcnt: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub open_interest: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub funding_rate: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub next_funding_time: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub volume24h: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "borrow_optional_str")]
     pub turnover24h: Opt<'a>,
 }
 
@@ -203,24 +221,179 @@ pub struct TickerEvent<'a> {
     pub data: TickerRow<'a>,
 }
 
-#[derive(Deserialize)]
-pub struct BookEvent<'a> {
-    #[serde(rename = "type", borrow)]
-    pub kind: Str<'a>,
-    #[serde(borrow)]
-    pub data: BookData<'a>,
+#[derive(Default)]
+pub struct BookLevels {
+    pub bids: Vec<(f64, f64)>,
+    pub asks: Vec<(f64, f64)>,
+}
+
+pub struct BookMessage<'a> {
+    pub kind: Cow<'a, str>,
+    pub symbol: Cow<'a, str>,
+    pub update: u64,
+}
+
+impl BookLevels {
+    /// Refill numeric scratch space; no book state changes until the whole frame validates.
+    pub fn decode<'de>(&mut self, text: &'de str) -> serde_json::Result<BookMessage<'de>> {
+        self.bids.clear();
+        self.asks.clear();
+        let mut deserializer = serde_json::Deserializer::from_str(text);
+        let message = serde::de::DeserializeSeed::deserialize(BookSeed(self), &mut deserializer)?;
+        deserializer.end()?;
+        Ok(message)
+    }
+}
+
+struct BookSeed<'a>(&'a mut BookLevels);
+
+impl<'de> serde::de::DeserializeSeed<'de> for BookSeed<'_> {
+    type Value = BookMessage<'de>;
+    fn deserialize<D: serde::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_struct("BookMessage", &["type", "data"], self)
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for BookSeed<'_> {
+    type Value = BookMessage<'de>;
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a Bybit book frame")
+    }
+    fn visit_map<M: serde::de::MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+        use serde::de::Error;
+        let (mut kind, mut data) = (None, None);
+        while let Some(BorrowedStr(key)) = map.next_key()? {
+            match key.as_ref() {
+                "type" => {
+                    if kind.is_some() {
+                        return Err(M::Error::duplicate_field("type"));
+                    }
+                    kind = Some(map.next_value::<BorrowedStr<'de>>()?.0);
+                }
+                "data" => {
+                    if data.is_some() {
+                        return Err(M::Error::duplicate_field("data"));
+                    }
+                    data = Some(map.next_value_seed(BookDataSeed(self.0))?);
+                }
+                _ => {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
+            }
+        }
+        let (symbol, update) = data.ok_or_else(|| M::Error::missing_field("data"))?;
+        Ok(BookMessage {
+            kind: kind.ok_or_else(|| M::Error::missing_field("type"))?,
+            symbol,
+            update,
+        })
+    }
+}
+
+struct BookDataSeed<'a>(&'a mut BookLevels);
+
+impl<'de> serde::de::DeserializeSeed<'de> for BookDataSeed<'_> {
+    type Value = (Cow<'de, str>, u64);
+    fn deserialize<D: serde::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_struct("BookData", &["s", "b", "a", "u"], self)
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for BookDataSeed<'_> {
+    type Value = (Cow<'de, str>, u64);
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Bybit book data")
+    }
+    fn visit_map<M: serde::de::MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+        use serde::de::Error;
+        let (mut symbol, mut update) = (None, None);
+        let (mut bids, mut asks) = (false, false);
+        while let Some(BorrowedStr(key)) = map.next_key()? {
+            match key.as_ref() {
+                "s" => {
+                    if symbol.is_some() {
+                        return Err(M::Error::duplicate_field("s"));
+                    }
+                    symbol = Some(map.next_value::<BorrowedStr<'de>>()?.0);
+                }
+                "u" => {
+                    if update.is_some() {
+                        return Err(M::Error::duplicate_field("u"));
+                    }
+                    update = Some(map.next_value()?);
+                }
+                "b" => {
+                    if bids {
+                        return Err(M::Error::duplicate_field("b"));
+                    }
+                    bids = true;
+                    map.next_value_seed(LevelsSeed(&mut self.0.bids))?;
+                }
+                "a" => {
+                    if asks {
+                        return Err(M::Error::duplicate_field("a"));
+                    }
+                    asks = true;
+                    map.next_value_seed(LevelsSeed(&mut self.0.asks))?;
+                }
+                _ => {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
+            }
+        }
+        Ok((
+            symbol.ok_or_else(|| M::Error::missing_field("s"))?,
+            update.unwrap_or(0),
+        ))
+    }
 }
 
 #[derive(Deserialize)]
-pub struct BookData<'a> {
-    #[serde(borrow)]
-    pub s: Str<'a>,
-    #[serde(borrow, default)]
-    pub b: Vec<[Str<'a>; 2]>,
-    #[serde(borrow, default)]
-    pub a: Vec<[Str<'a>; 2]>,
-    #[serde(default)]
-    pub u: u64,
+struct BookLevel(
+    #[serde(deserialize_with = "decimal_string")] f64,
+    #[serde(deserialize_with = "decimal_string")] f64,
+);
+
+fn decimal_string<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f64, D::Error> {
+    struct Decimal;
+    impl serde::de::Visitor<'_> for Decimal {
+        type Value = f64;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a decimal string")
+        }
+        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<f64, E> {
+            Ok(float(value))
+        }
+    }
+    deserializer.deserialize_str(Decimal)
+}
+
+struct LevelsSeed<'a>(&'a mut Vec<(f64, f64)>);
+
+impl<'de> serde::de::DeserializeSeed<'de> for LevelsSeed<'_> {
+    type Value = ();
+    fn deserialize<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_seq(self)
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for LevelsSeed<'_> {
+    type Value = ();
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Bybit book price/quantity pairs")
+    }
+    fn visit_seq<S: serde::de::SeqAccess<'de>>(self, mut seq: S) -> Result<(), S::Error> {
+        while let Some(BookLevel(price, amount)) = seq.next_element()? {
+            self.0.push((price, amount));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Deserialize)]
@@ -253,6 +426,8 @@ pub struct KlineRow<'a>(#[serde(borrow)] pub Vec<Str<'a>>);
 /// A control frame: auth and subscribe acknowledgements, pongs.
 #[derive(Deserialize)]
 pub struct OpFrame<'a> {
+    #[serde(borrow, default)]
+    pub req_id: Opt<'a>,
     #[serde(borrow, default)]
     pub op: Opt<'a>,
     #[serde(default)]
@@ -300,6 +475,8 @@ pub struct OrderRow<'a> {
     #[serde(borrow, default)]
     pub cum_exec_qty: Opt<'a>,
     #[serde(borrow, default)]
+    pub cum_exec_value: Opt<'a>,
+    #[serde(borrow, default)]
     pub time_in_force: Opt<'a>,
     #[serde(borrow, default)]
     pub order_type: Opt<'a>,
@@ -307,6 +484,8 @@ pub struct OrderRow<'a> {
     pub stop_order_type: Opt<'a>,
     #[serde(borrow, default)]
     pub trigger_price: Opt<'a>,
+    #[serde(default, deserialize_with = "integer")]
+    pub trigger_direction: Option<i64>,
     #[serde(borrow, default)]
     pub take_profit: Opt<'a>,
     #[serde(borrow, default)]
@@ -347,6 +526,8 @@ pub struct PositionRow<'a> {
     pub position_idx: Option<i64>,
     #[serde(borrow, default)]
     pub avg_price: Opt<'a>,
+    #[serde(borrow, default)]
+    pub mark_price: Opt<'a>,
     #[serde(borrow, default)]
     pub entry_price: Opt<'a>,
     #[serde(borrow, default)]
@@ -404,6 +585,8 @@ pub struct ExecutionRow<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct WalletAccount<'a> {
     #[serde(borrow, default)]
+    pub account_type: Opt<'a>,
+    #[serde(borrow, default)]
     pub total_equity: Opt<'a>,
     #[serde(borrow, default)]
     pub total_wallet_balance: Opt<'a>,
@@ -422,6 +605,8 @@ pub struct WalletAccount<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WalletCoin<'a> {
+    #[serde(borrow, default)]
+    pub coin: Opt<'a>,
     #[serde(borrow, default)]
     pub equity: Opt<'a>,
     #[serde(borrow, default)]
@@ -575,4 +760,137 @@ pub fn topic(text: &str) -> Option<&str> {
     let start = text.find("\"topic\":\"")? + 9;
     let end = text[start..].find('"')? + start;
     Some(&text[start..end])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn book_decoder_reuses_numeric_buffers_across_frames() {
+        let text = r#"{"type":"delta","data":{"s":"BTCUSDT","b":[["54321","1"]],"a":[["54322","2"]],"u":2}}"#;
+        let mut levels = BookLevels::default();
+        levels.decode(text).unwrap();
+        let before = (
+            levels.bids.as_ptr(),
+            levels.asks.as_ptr(),
+            levels.bids.capacity(),
+            levels.asks.capacity(),
+        );
+        levels.decode(text).unwrap();
+        let after = (
+            levels.bids.as_ptr(),
+            levels.asks.as_ptr(),
+            levels.bids.capacity(),
+            levels.asks.capacity(),
+        );
+        assert_eq!(
+            before, after,
+            "book parsing allocated fresh numeric buffers"
+        );
+    }
+
+    #[test]
+    fn book_decoder_accepts_reordered_fields_and_rejects_incomplete_or_duplicate_frames() {
+        let mut levels = BookLevels::default();
+        let message = levels.decode(r#"{"d\u0061ta":{"a":[["2","3"]],"u":4,"s":"BTCUSDT","b":[["1","2"]]},"type":"delta","ignored":{"x":[1,2]}}"#).unwrap();
+        assert_eq!(
+            (
+                message.symbol.as_ref(),
+                message.kind.as_ref(),
+                message.update
+            ),
+            ("BTCUSDT", "delta", 4)
+        );
+        assert_eq!(levels.bids, [(1.0, 2.0)]);
+        for malformed in [
+            r#"{"type":"delta","data":{"s":"BTCUSDT","b":[["1","2"]],"a":[["2",3]]}}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT","b":[["1"]]}}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT","b":[["1","2","3"]]}}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT","b":null}}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT","b":[],"b":[]}}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT","a":[],"a":[]}}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT","u":1,"u":2}}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT","s":"ETHUSDT"}}"#,
+            r#"{"type":"delta","type":"snapshot","data":{"s":"BTCUSDT"}}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT"},"data":{"s":"ETHUSDT"}}"#,
+            r#"{"type":"delta","data":{}}"#,
+            r#"{"data":{"s":"BTCUSDT"}}"#,
+            r#"{"type":"delta"}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT"}} {}"#,
+        ] {
+            assert!(
+                levels.decode(malformed).is_err(),
+                "accepted malformed book: {malformed}"
+            );
+        }
+        let message = levels
+            .decode(r#"{"type":"snapshot","data":{"s":"BTCUSDT"}}"#)
+            .unwrap();
+        assert_eq!(message.update, 0);
+        assert!(
+            levels.bids.is_empty() && levels.asks.is_empty(),
+            "old scratch data leaked into omitted sides"
+        );
+    }
+
+    #[test]
+    fn public_book_strings_borrow_unescaped_json() {
+        let mut levels = BookLevels::default();
+        let event = levels.decode(
+            r#"{"type":"delta","data":{"s":"BTCUSDT","b":[["54321","1"]],"a":[["54322","2"]],"u":2}}"#,
+        ).unwrap();
+        assert_eq!(levels.bids, [(54321.0, 1.0)]);
+        assert_eq!(levels.asks, [(54322.0, 2.0)]);
+        assert!(
+            matches!(event.symbol, Cow::Borrowed(_)),
+            "book symbol allocated"
+        );
+        assert!(
+            matches!(event.kind, Cow::Borrowed(_)),
+            "book type allocated"
+        );
+    }
+
+    #[test]
+    fn public_ticker_strings_borrow_unescaped_json() {
+        let event: TickerEvent<'_> = serde_json::from_str(
+            r#"{"data":{"symbol":"BTCUSDT","lastPrice":"54321","volume24h":"1000","turnover24h":"54321000"}}"#,
+        ).unwrap();
+        assert!(
+            matches!(event.data.last_price, Some(Cow::Borrowed(_))),
+            "ticker price allocated"
+        );
+        assert!(
+            matches!(event.data.symbol, Cow::Borrowed(_)),
+            "ticker symbol allocated"
+        );
+    }
+
+    #[test]
+    fn public_book_escaped_strings_decode_into_owned_values() {
+        let mut levels = BookLevels::default();
+        let event = levels.decode(
+            r#"{"type":"del\u0074a","data":{"s":"BTC\u0055SDT","b":[["\u00354321","1"]],"a":[],"u":2}}"#,
+        ).unwrap();
+        assert_eq!(event.kind, "delta");
+        assert_eq!(event.symbol, "BTCUSDT");
+        assert_eq!(levels.bids[0].0, 54321.0);
+        assert!(matches!(event.kind, Cow::Owned(_)));
+        assert!(matches!(event.symbol, Cow::Owned(_)));
+        assert_eq!(levels.bids[0].1, 1.0);
+    }
+
+    #[test]
+    fn public_ticker_keeps_escape_null_missing_and_empty_field_semantics() {
+        let event: TickerEvent<'_> = serde_json::from_str(
+            r#"{"data":{"symbol":"BTCUSDT","lastPrice":"\u00354321","bid1Price":null,"volume24h":""}}"#,
+        ).unwrap();
+        assert_eq!(float_of(&event.data.last_price), 54321.0);
+        assert!(matches!(event.data.last_price, Some(Cow::Owned(_))));
+        assert!(event.data.bid1_price.is_none());
+        assert!(event.data.ask1_price.is_none());
+        assert!(matches!(event.data.volume24h, Some(Cow::Borrowed(""))));
+        assert!(float_of(&event.data.volume24h).is_nan());
+    }
 }

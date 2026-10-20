@@ -38,7 +38,12 @@
     "rust:private-tape:weex": "node sdk-rs/harness/private-tape-weex.mjs",
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
     "rust:gate": "node sdk-rs/harness/gate.mjs",
-    "rust:replay": "node --expose-gc --import tsx sdk-rs/harness/replay.mjs",
+    "rust:private-tape-bybitinverse": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue bybitinverse",
+    "rust:private-tape-bybitspot": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue bybitspot",
+    "rust:private-tape-bybitdemo": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue bybitdemo",
+    "rust:private-tape-hyrotrader": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue hyrotrader",
+    "rust:public-tape-hyrotrader": "node sdk-rs/harness/private-tape-bybit-variants.mjs --venue hyrotrader --public",
+    "rust:replay": "ESBUILD_WORKER_THREADS=0 node --expose-gc --import tsx sdk-rs/harness/replay.mjs",
     "rust:test-harness": "node --test sdk-rs/harness/*.test.mjs",
     "rust:private-tape-woo": "node sdk-rs/harness/private-tape-woo.mjs"
   },

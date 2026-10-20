@@ -52,7 +52,7 @@ export interface WasmEngineLike {
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
-  wsMessage(socket: number, text: string, now: number): string;
+  wsMessage(socket: number, text: string, now: number): string | undefined;
   wsClose(socket: number, code: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;
   httpChunk(request: number, data: Uint8Array, now: number): string;

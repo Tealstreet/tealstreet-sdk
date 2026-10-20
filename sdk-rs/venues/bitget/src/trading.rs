@@ -256,6 +256,9 @@ impl BitgetFutures {
         if let Command::PlaceOrders { orders, .. } = command {
             let mut ids = HashSet::new();
             for o in orders {
+                if o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some() {
+                    return Err("Bybit order controls are not supported by Bitget".into());
+                }
                 let market = cx
                     .store
                     .market(&o.symbol)
@@ -2037,8 +2040,10 @@ fn place_opts(order: &Order) -> PlaceOrderOpts {
         trigger_type: order.trigger_type,
         tp_trigger_type: order.trigger_type,
         sl_trigger_type: order.trigger_type,
-        max_slippage_pct: None,
         client_order_id: None,
         close: order.close,
+        max_slippage_pct: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
     }
 }
