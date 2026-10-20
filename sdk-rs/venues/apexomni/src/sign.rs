@@ -1,6 +1,7 @@
 //! ApeX API canonicalization and zkLink contract bytes; no provider or JS runtime.
 use crate::Options;
 use safe_cex_crypto::{Encoding, encode as crypto_encode, hex, hmac_sha256, sha256, zklink};
+pub use safe_cex_engine::url::encode;
 use safe_cex_engine::{Method, num};
 
 #[derive(Clone)]
@@ -58,19 +59,6 @@ pub struct Signed {
     pub path: String,
     pub headers: Vec<(&'static str, String)>,
     pub body: Option<String>,
-}
-
-pub fn encode(value: &str) -> String {
-    use std::fmt::Write;
-    let mut result = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-            result.push(char::from(byte));
-        } else {
-            write!(result, "%{byte:02X}").expect("writing a string");
-        }
-    }
-    result
 }
 
 /// Known ApeX fields are flat ASCII camelCase names; qs sorts these lexically.

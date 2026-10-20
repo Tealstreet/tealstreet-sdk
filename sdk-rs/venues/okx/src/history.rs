@@ -2,6 +2,7 @@
 use crate::{Okx, Pending};
 use safe_cex_engine::model::{Order, OrderExtra, OrderSide, OrderStatus, OrderType, TimeInForce};
 use safe_cex_engine::num::parse_decimal;
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, LogLevel, Method, Query, Response, TimerId, num};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -1060,17 +1061,4 @@ impl Okx {
         self.history_request(cx, request);
         true
     }
-}
-
-fn encode(value: &str) -> String {
-    let mut result = String::new();
-    for b in value.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-            result.push(char::from(b));
-        } else {
-            use std::fmt::Write;
-            let _ = write!(result, "%{b:02X}");
-        }
-    }
-    result
 }

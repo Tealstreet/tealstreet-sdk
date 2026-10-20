@@ -15,6 +15,7 @@ pub mod public_feed;
 pub mod socket;
 pub mod store;
 pub mod time;
+pub mod url;
 pub mod wire;
 
 pub use credentials::ReadCredentials;
