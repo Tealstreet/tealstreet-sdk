@@ -236,3 +236,30 @@ reject explicitly, and staged/timed reads and single-use writes keep their guard
 Independent review and all 393 pre-Breakout harness tests pass. The failed
 capture is checkpointed explicitly; the final fixture requires a new ordinary
 20-second recording, with protocol checks still enabled.
+
+
+## Binance integration and final signing edge
+
+Landing `e391337054` (Binance variants plus GRVT profiling) merged in
+`0d705cee38`. Incoming native-unit conversions, protocol auditing and registrations
+are preserved; both financial currency projections and all four SDK Spot names
+remain intact. New zero-position normalization stays scoped to Binance so other
+venues' unexpected rows remain visible.
+
+Independent merge review found Binance would leave the new Spot symbol-aware
+amendment command pending. `db87bfb00d` returns an explicit unsupported reply on
+all four Binance variants. The existing no-I/O/snapshot test proved the failure,
+then passed with the correction; independent re-review passes.
+
+The merged repository passes 2,404 native tests, fmt, workspace/all-target and
+wasm32 Clippy, bans, 443 harness tests, 44 typecheck tasks, 28 lint tasks and all
+27 repository test tasks (safe-cex 7,363 tests in each invocation). A later
+TS-only signing edge fix `fe1e69da4c` passes 274 focused tests plus typecheck/lint
+and independent review. It preserves protocol-relative URL behavior across
+browser HTTP, Node HTTP and HOW using the host's already-selected adapter mode;
+no routing table or resolver is duplicated.
+
+KuCoin final public/private gates and actual Spot SDK test pass. Exact commands,
+artifact/tape/harness hashes, counts and medians are committed in
+`venue-ports/KUCOIN_GATES.json`. Four other standard artifacts are being refreshed
+before the combined-host and actual SDK suite, PR reviews and CI.

@@ -112,7 +112,10 @@ request only after a signature event. Native hosts use
 answers cannot send unsigned orders. JWT generation follows TS's direct raw
 fetch path. `remoteSigner` remains the TS API-client adapter contract: by itself
 it cannot replace JWT's StarkNet signing; use a local key or `payloadSigner` for
-that step.
+that step. Signed protocol-relative URLs retain TS adapter semantics: browser
+HTTP inherits the page scheme, Node HTTP rejects them, and HOW concatenates the
+API base URL. The routing host exposes its cached `httpMode`; do not resolve
+routing a second time or treat all three adapters alike.
 
 The JS host validates signer header names and rejects CR/LF before encoding
 `name:value` lines for WASM. Values keep their exact bytes, including colons and
