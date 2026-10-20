@@ -330,7 +330,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
-| BreakoutProp legacy DXtrade | implemented and reviewed; documented public/private gates PASS; required live capture blocked by missing legacy credentials (`RUST_BREAKOUTPROP.md`) |
+| BreakoutProp legacy DXtrade | implemented and reviewed; documented public/private gates PASS (scripted public fixture accepted by Sam); live capture needs Sam's legacy DXtrade credentials (`RUST_BREAKOUTPROP.md`) |
 | GRVT, Coinbase, Polymarket, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge

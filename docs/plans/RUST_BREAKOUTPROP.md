@@ -193,12 +193,15 @@ verification.
 ## Final local gate ledger (2026-10-20)
 
 Implementation and independent phase/merge correctness reviews are complete.
-The task is **not landed or fully accepted**: required live public capture is
-blocked by missing legacy DXtrade credentials. The recorder exits 1 before
-creating `breakoutprop-smoke.jsonl`; `oneshot-secret ls` previously reported no
-store. The committed public fixture remains `source: documented-scripted`.
-Per the brief's Process step 3, push/PR/posted PR reviews/green-CI merge/fresh
-follow-up branch remain pending the missing live gate. No push or PR was made.
+Sam authorized the documented public fixture as the substitute for the live
+capture on 2026-10-20, so gate 5 is accepted for landing. The committed fixture
+`sdk-rs/harness/fixtures/breakoutprop-public.jsonl.gz` remains honestly labeled
+`source: documented-scripted` and CI runs its correctness/CPU/memory gate.
+Live connectivity still needs Sam's legacy DXtrade credentials. The recorder
+exits 1 before creating `breakoutprop-smoke.jsonl`; `oneshot-secret ls`
+previously reported no store. Record that remaining verification gap in the PR
+body and roster. Proceed with push/PR, posted correctness reviews, fixes and
+green-CI merge, then cut a fresh follow-up branch.
 
 | Brief gate | Result |
 | --- | --- |
@@ -206,7 +209,7 @@ follow-up branch remain pending the missing live gate. No push or PR was made.
 | 2. Rust format/clippy/tests | PASS, workspace fmt and all-target strict clippy; 1,976 workspace tests, including 100 Breakout tests |
 | 3. WASM clippy | PASS, default combined features and selected Breakout feature, strict wasm32 clippy |
 | 4. Default build + documented private replay | PASS; combined 22-venue WASM builds, generated 26-record private tape, 24 timeline records, 5 markets/tickers; exact output/requests |
-| 5. Public | Documented 20-second fixture PASS (three runs, numbers above); required live record/trim/replay BLOCKED by credentials |
+| 5. Public | PASS with Sam-authorized documented 20-second fixture (three runs, numbers above); live connectivity pending Sam's legacy DXtrade credentials |
 | 6. Binance regressions | PASS, public three-run and generated private one-run gates |
 
 Additional checks: 357 harness tests; 41 cross-venue wrapper tests; 77 compiled
