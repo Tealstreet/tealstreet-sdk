@@ -1,3 +1,4 @@
+import type { CommandProgress } from '@tealstreet/safe-cex-wasm/host';
 import type { PackedTickerDelta } from '../store/store.interface';
 import type { StoreData, Writable } from '../types';
 
@@ -69,6 +70,8 @@ export type StoreWorkerOutgoingOp =
   | 'callMethod:done'
   | 'twap:stateUpdate'
   | 'chaser:complete'
+  // Native order attribution, independent of RPC settlement and store frames.
+  | 'command-progress'
   // Lifecycle
   | 'deactivate-status'
   | 'start-status'
@@ -163,3 +166,9 @@ export interface PerfFixtureConfig {
   /** Restart from frame 0 at the end. Defaults to true. */
   loop?: boolean;
 }
+
+/** Receipt ownership is the original native host session and worker generation. */
+export type StoreWorkerCommandProgress = CommandProgress & {
+  account: string;
+  generation: number;
+};

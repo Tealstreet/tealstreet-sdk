@@ -1582,10 +1582,12 @@ impl Grvt {
                         });
                     }
                 } else {
-                    cx.log(
-                        LogLevel::Error,
-                        "Malformed GRVT leverage settings; retaining previous settings",
-                    );
+                    let message = "Malformed GRVT leverage settings; retaining previous settings";
+                    if let Some((command, _)) = &command {
+                        cx.command_error(*command, message);
+                    } else {
+                        cx.log(LogLevel::Error, message);
+                    }
                 }
                 if let Some((command, _)) = command {
                     #[derive(Serialize)]
@@ -1774,7 +1776,12 @@ impl Grvt {
             }
             Request::Leverage { command, .. } => {
                 if let Some((command, _)) = command {
+                    cx.command_error(
+                        command,
+                        "GRVT private request failed; retaining previous account state",
+                    );
                     cx.done(command, Err("GRVT leverage request failed".into()));
+                    return;
                 } else {
                     self.account.leverage_pending = false;
                 }

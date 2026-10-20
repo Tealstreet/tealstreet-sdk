@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const exchanges: RustEngineExchange[] = [];
 const setup = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'lighter') => {
@@ -20,7 +21,9 @@ const setup = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'lig
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: '[]' }]);
     },
-    takeFrame: () => undefined,
+    takeFrame: () => new Uint8Array(consumerFrame({
+      loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+    })),
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noop,
     wsMessage: noop,

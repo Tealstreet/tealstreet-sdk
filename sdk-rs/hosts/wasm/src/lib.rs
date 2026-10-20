@@ -494,6 +494,10 @@ enum ActionOut<'a> {
         level: &'static str,
         message: &'a str,
     },
+    CommandError {
+        command: u32,
+        message: &'a str,
+    },
     Done {
         command: u32,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -503,6 +507,10 @@ enum ActionOut<'a> {
         error: Option<std::borrow::Cow<'a, str>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         detail: Option<&'a safe_cex_engine::VenueError>,
+    },
+    CommandProgress {
+        command: u32,
+        receipts: &'a [safe_cex_engine::OrderIdentityReceipt],
     },
 }
 
@@ -588,6 +596,10 @@ fn encode(actions: &[Action]) -> String {
             },
             Action::ClearTimer { timer } => ActionOut::ClearTimer { timer: timer.0 },
             Action::Notice(Notice::Deactivate) => ActionOut::Deactivate,
+            Action::Notice(Notice::CommandError { command, message }) => ActionOut::CommandError {
+                command: *command,
+                message,
+            },
             Action::Notice(Notice::StartupFailed { error }) => {
                 ActionOut::StartupFailed { detail: error }
             }
@@ -611,6 +623,12 @@ fn encode(actions: &[Action]) -> String {
                 error: Some(error.legacy_text().into()),
                 detail: Some(error),
             },
+            Action::Notice(Notice::CommandProgress { command, receipts }) => {
+                ActionOut::CommandProgress {
+                    command: *command,
+                    receipts,
+                }
+            }
         })
         .collect();
     serde_json::to_string(&out).unwrap_or_default()
@@ -1311,6 +1329,56 @@ fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn command_progress_serializes_native_identity_namespaces_in_action_order() {
+        use safe_cex_engine::{Action, Notice, OrderIdentityKind, OrderIdentityReceipt};
+        let receipts = [
+            (OrderIdentityKind::ClientOrderId, "client"),
+            (OrderIdentityKind::ClientOrderIndex, "9007199254740993"),
+            (OrderIdentityKind::OrderCode, "code"),
+        ]
+        .into_iter()
+        .map(|(kind, identity)| OrderIdentityReceipt {
+            symbol: "BTC-USD".into(),
+            kind,
+            identity: identity.into(),
+        })
+        .collect::<Vec<_>>();
+        let encoded = super::encode(&[
+            Action::Notice(Notice::CommandProgress {
+                command: 19,
+                receipts,
+            }),
+            Action::Notice(Notice::CommandDone {
+                command: 19,
+                result: Ok("[]".into()),
+            }),
+        ]);
+        assert_eq!(
+            encoded,
+            r#"[{"op":"commandProgress","command":19,"receipts":[{"symbol":"BTC-USD","kind":"clientOrderId","identity":"client"},{"symbol":"BTC-USD","kind":"clientOrderIndex","identity":"9007199254740993"},{"symbol":"BTC-USD","kind":"orderCode","identity":"code"}]},{"op":"done","command":19,"result":"[]"}]"#
+        );
+    }
+
+    #[test]
+    fn attributed_command_errors_preserve_command_and_precede_result() {
+        use safe_cex_engine::{Action, Notice};
+        let encoded = super::encode(&[
+            Action::Notice(Notice::CommandError {
+                command: 19,
+                message: "placement rejected".into(),
+            }),
+            Action::Notice(Notice::CommandDone {
+                command: 19,
+                result: Err("placement rejected".into()),
+            }),
+        ]);
+        assert_eq!(
+            encoded,
+            r#"[{"op":"commandError","command":19,"message":"placement rejected"},{"op":"done","command":19,"error":"placement rejected"}]"#
+        );
+    }
+
     #[test]
     fn host_commands_dispatch_once_and_flush_once_with_original_clock() {
         use safe_cex_engine::command::HostInput;
