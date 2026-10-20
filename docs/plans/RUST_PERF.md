@@ -555,3 +555,15 @@ rounding rule; other nine prior caps remain fixed. Hyperliquid1012824 receives
 actual EngineHost WEEX command regression proves caught validation still fails
 the final audit.175 harness tests and independent review pass. All gate source
 is frozen for final helper copy, private gates and controlled public comparison.
+
+Final eleven-family correctness checkpoint: all14 private gates pass, including
+Hyperliquid26 frames, Bitget12, all four OKX variants29 each, Binance14,
+Bybit18, Crypto21, WEEX20, BingX38, MEXC25, BloFin29 and Backpack21. Release
+builds and fixed budgets pass for web/Node11 each, isolated clippy11, host69,
+SDK WASM29, selector3 and harness175 tests.44 repository typecheck,28 lint and
+27 full repository test tasks pass (12m20s; safe-cex6622 tests/458 files in
+both CI and unit tasks). Workspace fmt/bans/all-target native clippy pass;
+strict Rust tests and final wasm workspace clippy remain in progress. Final
+exact landing control4420816 bytes/global opt3 retains its original unbatched
+runtime; both copies'11-helper closure matches30b5d05a07. Public and optional
+diagnostic samples wait until every local compile/test/private replay is quiet.
