@@ -171,3 +171,16 @@ per-venue canary holding the circular-evidence venues last.
   staying open, X-Perp history SWAP hardcode, market-order amend placing a new
   order, duplicate algo cancels. Shared by both: reduce-only conditional sent
   without `reduceOnly` and un-inverted `posSide` in hedge mode.
+
+### Hyperliquid
+Signing hash, order payload and price/size rounding match TS; no new highs.
+- Medium: HIP-3 leverage change sends cross where TS sends isolated
+  (`hyperliquid/src/trading.rs:758`); read `onlyIsolated`/`marginMode`. HIP-3
+  margin-type change with no position fails (default leverage 20 > market max,
+  `trading.rs:759`). Spot open orders never reconciled and can go stale
+  (`account.rs:426,1604`). Edit aborts when the source order already filled
+  (TS places a second order) — confirm fail-closed is intended.
+- Low/confirm: spot testnet signing and spot size rounding (TS bugs Rust fixed);
+  spot vault signs as vault (TS as master) — confirm; more terminal statuses;
+  `stopLoss: 0` rejects whole order; signed fees; unified balance spot slices
+  not populated; fills lack execution id, realized PnL and fee (engine `Fill`).
