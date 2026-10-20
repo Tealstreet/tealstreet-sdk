@@ -38,3 +38,16 @@ Landing was red on two public CPU objectives: Hyro steady CPU (runs
 3. Adversarial review, PR into `feat/rust-rewrite`, merge on green CI.
 4. Review PR #1344 (batched delivery, isolated venue WASM packages): land clear
    wins with evidence, close the rest with a written reason.
+
+## Small windows get more pairs (follow-up, after #1456)
+
+After #1456 recovered the Hyperliquid Spot cost #1356 added, its steady
+objective (TS 10-18 ms, 50 book frames) still swung 0.73-1.08 Rust/TS over
+five CI runs and failed on fast runners (e.g. run 39485779122: 12.2 vs 11.3
+ms). Three pairs cannot resolve a ~10% margin at that scale. When any public
+CPU objective's TS median is under 20 ms after the requested pairs, the gate
+now runs interleaved pairs up to nine in total, alternating which side runs
+first, and judges the medians with the unchanged rule. Only tiny tapes are
+affected (today Hyperliquid Spot, Hyro, BreakoutProp, TxFlow and Polymarket);
+private tapes never get extra pairs. More samples narrow the noise in both
+directions and loosen nothing; `--no-small-window-pairs` keeps exact pairs.

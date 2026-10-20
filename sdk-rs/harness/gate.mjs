@@ -24,7 +24,7 @@ import { fixCoinbase, COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { fixBitrue, BITRUE_TS_FIXES } from './known-ts-fixes-bitrue.mjs';
 import { memoryMetricErrors } from './memory.mjs';
-import { cpuObjectiveMet } from './cpu-objective.mjs';
+import { cpuObjectiveMet, pairsFor, SMALL_WINDOW_MS } from './cpu-objective.mjs';
 import { fixBinanceSpotFills, fixBinanceFilledStatus } from './binance-protocol.mjs';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
@@ -37,6 +37,8 @@ const { values } = parseArgs({
     tape: { type: 'string' },
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     runs: { type: 'string', default: '3' },
+    // Keep exactly --runs pairs even for objectives under SMALL_WINDOW_MS.
+    'no-small-window-pairs': { type: 'boolean', default: false },
     'no-egress': { type: 'boolean', default: false },
   },
 });
@@ -100,11 +102,14 @@ const compare = (label, a, b) => {
   }
 };
 
-const runs = Number(values.runs);
+let runs = Number(values.runs);
 const results = { ts: [], rust: [] };
-for (let run = 0; run < runs; run++) {
-  for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
-}
+const pair = (run) => {
+  // Odd extra pairs run Rust first so order drift falls on both sides.
+  const order = run >= Number(values.runs) && run % 2 ? ['rust', 'ts'] : ['ts', 'rust'];
+  for (const impl of order) results[impl].push(replay(impl, run));
+};
+for (let run = 0; run < runs; run++) pair(run);
 const [ts, rust] = [results.ts[0], results.rust[0]];
 
 const venue = venueOf(values.venue);
@@ -116,6 +121,13 @@ const isPrivate =
       ? venue.isPrivateRecord(record)
       : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
   );
+// Private tapes are paced in real time and gate correctness only.
+if (!isPrivate && !values['no-small-window-pairs']) {
+  const tsMedian = (metric) => median(results.ts.map((r) => r.metrics[metric]));
+  const total = pairsFor(runs, [tsMedian('cpuMs'), tsMedian('steadyCpuMs')]);
+  for (let run = runs; run < total; run++) pair(run);
+  runs = total;
+}
 const records = tapeRecords;
 const instrumentRows = tapeRecords
   .filter((r) => r.type === 'http' && new URL(r.url).pathname === '/v5/market/instruments-info')
@@ -1161,6 +1173,7 @@ row('steady cpu', t.steadyCpuMs, r.steadyCpuMs);
 row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
+if (runs > Number(values.runs)) console.log(`(${runs} interleaved pairs: a TS objective is under ${SMALL_WINDOW_MS} ms)`);
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
 if (venue.family === 'orderly')
   console.log(

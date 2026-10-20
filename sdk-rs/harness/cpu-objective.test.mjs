@@ -21,3 +21,12 @@ test('missing or invalid measurements never pass', () => {
   for (const [rust, ts] of [[NaN, 5], [5, NaN], [undefined, 5], [Infinity, 5], [1, Infinity]])
     assert.equal(cpuObjectiveMet(rust, ts), false);
 });
+
+test('small TS windows get more pairs; larger ones keep the requested count', async () => {
+  const { pairsFor, SMALL_WINDOW_PAIRS } = await import('./cpu-objective.mjs');
+  assert.equal(pairsFor(3, [65, 18.6]), SMALL_WINDOW_PAIRS);
+  assert.equal(pairsFor(3, [12, 50]), SMALL_WINDOW_PAIRS);
+  assert.equal(pairsFor(3, [65, 20]), 3);
+  assert.equal(pairsFor(11, [5, 5]), 11);
+  assert.equal(pairsFor(1, [NaN, NaN]), 1);
+});
