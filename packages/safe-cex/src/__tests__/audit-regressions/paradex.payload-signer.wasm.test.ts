@@ -72,6 +72,7 @@ it.each([false, true])(
     };
     setWasmEngineLoader(async () => {
       const module = await loadNodeEngine();
+      expect(typeof module.WasmEngine.prototype.payloadSigned).toBe('function');
       return {
         ...module,
         WasmEngine: class extends module.WasmEngine {
@@ -89,7 +90,7 @@ it.each([false, true])(
           }
           payloadSigned(request: number, signature: string, headers: string, now: number) {
             signingHeaders.push(headers);
-            return super.payloadSigned(request, signature, headers, now);
+            return super.payloadSigned!(request, signature, headers, now);
           }
         },
       };
