@@ -641,3 +641,34 @@ fn explicit_amend_quantity_remains_verbatim_after_an_additional_fill() {
     response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "2.5");
 }
+
+#[test]
+fn unsupported_stp_rejects_single_and_mixed_batches_before_io_and_keeps_queue_usable() {
+    for mode in ["EXPIRE_TAKER", "EXPIRE_MAKER", "EXPIRE_BOTH"] {
+        for mixed in [false, true] {
+            let mut engine = ready();
+            let before_balance = engine.store().balance().clone();
+            let mut orders = Vec::new();
+            if mixed {
+                orders.push(order(serde_json::json!({})));
+            }
+            orders.push(order(serde_json::json!({"stpMode": mode})));
+            let actions = place(&mut engine, orders);
+            assert!(
+                actions
+                    .iter()
+                    .all(|action| matches!(action, Action::Notice(_)))
+            );
+            assert!(actions.iter().any(|action| matches!(action,
+                Action::Notice(Notice::CommandDone { command: 42, result: Err(error) })
+                if error.contains("self-trade prevention"))));
+            assert!(engine.store().orders().is_empty());
+            assert!(engine.store().positions().is_empty());
+            assert_eq!(engine.store().balance(), &before_balance);
+            assert_eq!(
+                http(place(&mut engine, vec![order(serde_json::json!({}))])).len(),
+                1
+            );
+        }
+    }
+}

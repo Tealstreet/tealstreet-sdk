@@ -319,3 +319,17 @@ generated ID and preserves both virtual siblings when editing one leg.
 - Landing advanced again to `d9aa597fd3` (AsterDEX #1322). Commit this
   stable gate checkpoint, integrate its shared account/read/route contracts,
   adapt the new STP field, then repeat affected checks before final PR push.
+
+### AsterDEX landing integration
+
+- Integrated `d9aa597fd3` (AsterDEX #1322), preserving its request routing,
+  timeouts, currency-balance frames, shared account/book/STP commands, auth
+  and all 18 venue features. Kept one shared `FetchAccount` variant and both
+  account wire aliases. ApeX keeps API-only host initialization and signing.
+- Three-way SDK/WASM/harness audits pass; 149 targeted shared harness tests
+  pass. Lockfile/manifest union validates with locked cargo metadata. CI matrix
+  includes both venues without raising size caps; roster removes both from
+  the future-port list. Build selection supports both and existing aliases.
+- ApeX explicitly rejects the newly modeled unsupported STP control before
+  any batch I/O; replacement defaults it absent. Added all-mode single/mixed
+  batch and account wire-alias regressions. Full post-merge gates follow.
