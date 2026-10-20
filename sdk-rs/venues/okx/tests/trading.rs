@@ -1167,7 +1167,7 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
                 },
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = actions(&mut e);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             actions.iter().any(|a| matches!(
@@ -1476,4 +1476,87 @@ fn leverage_read_survives_unrelated_private_pushes() {
     );
     assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 12, result: Ok(s) }) if s.contains("30.0"))));
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
+}
+
+#[test]
+fn trading_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let limit = r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":38000}"#;
+    for (body, kind, outcome, code) in [
+        (
+            r#"{"code":"1","msg":"","data":[{"ordId":"","sCode":"51008","sMsg":"Insufficient margin"}]}"#,
+            Some(ErrorKind::Rejected),
+            Some(Outcome::Rejected),
+            Some("51008"),
+        ),
+        (
+            r#"{"code":"50011","msg":"Too Many Requests","data":[]}"#,
+            Some(ErrorKind::RateLimited),
+            Some(Outcome::Rejected),
+            Some("50011"),
+        ),
+        (
+            r#"{"code":"0","msg":"","data":[{"ordId":"","sCode":"50004","sMsg":"timeout"}]}"#,
+            None,
+            Some(Outcome::Unknown),
+            None,
+        ),
+        (
+            r#"{"code":"1","msg":"","data":[{"ordId":"","sCode":"50026","sMsg":"System error"}]}"#,
+            Some(ErrorKind::Rejected),
+            None,
+            Some("50026"),
+        ),
+        (
+            r#"{"code":"50013","msg":"Systems are busy","data":[]}"#,
+            Some(ErrorKind::Rejected),
+            Some(Outcome::Unknown),
+            Some("50013"),
+        ),
+    ] {
+        let mut e = trading_engine();
+        let out = place(&mut e, vec![order(limit)]);
+        let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
+        reply(&mut e, request, body, 6.0);
+        let failure = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{body}"));
+        assert_eq!(
+            (failure.kind, failure.outcome, failure.venue_code.as_deref()),
+            (kind, outcome, code),
+            "{body}: {}",
+            failure.message
+        );
+    }
+}
+
+#[test]
+fn a_partially_accepted_batch_is_not_reported_as_rejected() {
+    let mut e = trading_engine();
+    let out = place(
+        &mut e,
+        vec![
+            order(r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":2,"price":38000}"#),
+            order(r#"{"symbol":"BTCUSDT","type":"limit","side":"sell","amount":2,"price":42000}"#),
+        ],
+    );
+    let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
+    reply(
+        &mut e,
+        request,
+        r#"{"code":"2","data":[{"ordId":"accepted","sCode":"0"},{"sCode":"51008","sMsg":"Insufficient margin"}]}"#,
+        6.0,
+    );
+    let failure = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("failed command");
+    assert_eq!(failure.outcome, None, "one order is live: {failure:?}");
 }

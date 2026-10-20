@@ -94,7 +94,8 @@ pub enum Pending {
     Klines {
         command: CommandId,
         rows: Vec<Candle>,
-        malformed: bool,
+        /// The first row that did not decode.
+        invalid: Option<String>,
     },
 }
 
@@ -856,15 +857,20 @@ impl Venue for AsterDex {
             Pending::Klines {
                 command,
                 rows,
-                malformed,
+                invalid,
             } => {
-                let result = if response.status == 200 && !malformed {
-                    serde_json::to_string(&rows).map_err(|error| error.to_string())
-                } else {
-                    Err(format!(
+                let result = match invalid {
+                    None if response.status == 200 => {
+                        serde_json::to_string(&rows).map_err(|error| error.to_string())
+                    }
+                    None => Err(format!(
                         "Aster klines HTTP {} or malformed payload",
                         response.status
-                    ))
+                    )),
+                    Some(detail) => Err(format!(
+                        "Aster klines HTTP {} or malformed payload: {detail}",
+                        response.status
+                    )),
                 };
                 cx.done(command, result);
             }
@@ -941,11 +947,12 @@ impl Venue for AsterDex {
                 }
             },
             Pending::OpenInterest { rows, .. } => collect_interest(item, rows),
-            Pending::Klines {
-                rows, malformed, ..
-            } => match serde_json::from_str::<KlineRow>(item) {
+            Pending::Klines { rows, invalid, .. } => match serde_json::from_str::<KlineRow>(item) {
                 Ok(row) => rows.push(candle(row.0, &row.1, &row.2, &row.3, &row.4, &row.5)),
-                Err(_) => *malformed = true,
+                Err(error) => {
+                    let row = rows.len();
+                    invalid.get_or_insert_with(|| format!("row {row}: {error}"));
+                }
             },
         }
     }
@@ -1114,7 +1121,7 @@ impl Venue for AsterDex {
                     Pending::Klines {
                         command,
                         rows: Vec::new(),
-                        malformed: false,
+                        invalid: None,
                     },
                 );
             }
@@ -1227,11 +1234,9 @@ fn reset_pending(pending: &mut Pending) {
             rows.clear();
             skipped.clear();
         }
-        Pending::Klines {
-            rows, malformed, ..
-        } => {
+        Pending::Klines { rows, invalid, .. } => {
             rows.clear();
-            *malformed = false;
+            *invalid = None;
         }
         Pending::OpenInterest { rows, .. } => rows.clear(),
         _ => {}

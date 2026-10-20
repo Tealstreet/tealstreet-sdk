@@ -127,6 +127,12 @@ impl Kucoin {
         }
     }
 
+    /// The read budget's reset timer, for scripted tests that settle pacing.
+    #[cfg(test)]
+    pub(crate) fn budget_timer(&self) -> Option<TimerId> {
+        self.http_budget.timer
+    }
+
     pub(crate) fn http_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         if self.http_budget.timer != Some(timer) {
             return false;

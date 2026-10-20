@@ -1,12 +1,15 @@
 //! Classic futures queries: numbered pages for fills/orders, exact ledger offsets.
 use crate::{Kucoin, Pending};
 use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::paging::{self, WindowOrder};
 use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const DAY: u64 = 86_400_000;
+/// Requests per read, and windows per range, before a read is refused.
+const MAX_REQUESTS: u32 = 10_000;
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Fills,
@@ -29,6 +32,10 @@ pub struct Request {
     from: u64,
     to: u64,
     chunk_end: u64,
+    /// Windows still to read after the current one, newest first.
+    windows: VecDeque<(u64, u64)>,
+    /// The range reaches past the newest windows the request budget allows.
+    clipped: bool,
     page: u32,
     offset: Option<u64>,
     limit: usize,
@@ -308,24 +315,48 @@ impl Kucoin {
             return;
         }
         let explicit_range = from.is_some() && to.is_some();
+        let width = if kind == Kind::Income {
+            DAY - 1
+        } else {
+            7 * DAY - 1
+        };
+        // Only the newest windows the request budget could ever reach are
+        // built; a read that walks past them without reaching its limit fails,
+        // as the request guard did when windows were generated lazily.
+        let reachable = end.saturating_sub(u64::from(MAX_REQUESTS) * (width + 1) - 1);
+        let clipped = start < reachable;
+        // Millisecond integers below 2^53 tile exactly as f64.
+        let Some(tiles) = paging::windows(
+            start.max(reachable) as f64,
+            end as f64,
+            width as f64,
+            WindowOrder::NewestFirst,
+            MAX_REQUESTS as usize,
+        ) else {
+            cx.done(command, Err("Invalid KuCoin query time range".into()));
+            return;
+        };
+        let mut windows: VecDeque<(u64, u64)> = tiles
+            .into_iter()
+            .map(|(a, b)| (a as u64, b as u64))
+            .collect();
+        let (first_start, first_end) = windows.pop_front().unwrap_or((start, end));
         let request = Request {
             command,
             kind,
             symbol,
             order,
             filter,
-            start: start.max(end.saturating_sub(if kind == Kind::Income {
-                DAY - 1
-            } else {
-                7 * DAY - 1
-            })),
+            start: first_start,
             from: start,
             to: end,
-            chunk_end: end,
+            chunk_end: first_end,
+            windows,
             page: 1,
             offset: None,
             limit: limit.unwrap_or(if kind == Kind::Trades { 100 } else { 1000 }) as usize,
             explicit_range,
+            clipped,
             rows: Vec::new(),
             page_rows: Vec::new(),
             seen: HashSet::new(),
@@ -361,7 +392,7 @@ impl Kucoin {
         r.minimum_offset = None;
         r.invalid = false;
         r.requests += 1;
-        if r.requests > 10000 {
+        if r.requests > MAX_REQUESTS {
             cx.done(
                 r.command,
                 Err("KuCoin query exceeded page safety bound".into()),
@@ -651,20 +682,18 @@ impl Kucoin {
             self.history_schedule(cx, r);
             return;
         }
-        if !capped && r.start > r.from {
-            r.chunk_end = r.start - 1;
-            r.start = r
-                .from
-                .max(r.chunk_end.saturating_sub(if r.kind == Kind::Income {
-                    DAY - 1
-                } else {
-                    7 * DAY - 1
-                }));
+        if !capped && let Some((start, end)) = r.windows.pop_front() {
+            r.start = start;
+            r.chunk_end = end;
             r.page = 1;
             r.window_count = 0;
             r.offset = None;
             r.retries = 0;
             self.history_schedule(cx, r);
+            return;
+        }
+        if !capped && r.clipped {
+            cx.done(r.command, Err("KuCoin history range is too large".into()));
             return;
         }
         r.rows.sort_by(|a, b| {
@@ -869,6 +898,125 @@ mod tests {
             assert_eq!(rows.len(), 1, "nanosecond timestamp: {nanos}");
             assert_eq!(rows[0].id, "0");
         }
+    }
+    #[test]
+    fn a_huge_range_builds_only_reachable_windows_and_a_limited_read_still_succeeds() {
+        // to = MAX_SAFE_INTEGER must not tile ~10^8 windows before the first request.
+        let mut e = engine();
+        let r = query(
+            &mut e,
+            Query::Income {
+                symbol: None,
+                kind: None,
+                from_ms: Some(0.0),
+                to_ms: Some(9_007_199_254_740_991.0),
+                limit: Some(1),
+            },
+        );
+        assert!(r.url.contains("endAt=9007199254740991"), "{}", r.url);
+        // An old start with no end reaches its limit in the newest window.
+        let mut e = engine();
+        let r = query(
+            &mut e,
+            Query::Income {
+                symbol: None,
+                kind: None,
+                from_ms: Some(0.0),
+                to_ms: None,
+                limit: Some(1),
+            },
+        );
+        let body = r#"{"code":"200000","data":{"hasMore":false,"dataList":[{"time":1999999999000,"type":"RealisedPNL","amount":1,"fee":0,"accountEquity":1,"status":"Completed","remark":"XBTUSDTM","offset":5,"currency":"USDT"}]}}"#;
+        let actions = reply(&mut e, r, body);
+        assert!(done(&actions).contains("1999999999"), "{actions:?}");
+    }
+    /// Pins the exact request sequence of a windowed, page-numbered read:
+    /// 7-day windows newest first, the first walked over two pages. Paging
+    /// refactors keep it.
+    #[test]
+    fn windowed_fill_request_sequence_is_pinned() {
+        const END: u64 = 1_740_640_088_002;
+        let mut e = engine();
+        let mut r = query(
+            &mut e,
+            Query::Fills {
+                symbol: Some("BTCUSDT".into()),
+                order_id: None,
+                from_ms: Some((END - 15 * DAY) as f64),
+                to_ms: Some(END as f64),
+                limit: Some(1000),
+            },
+        );
+        let fill = |id: &str, created: u64| {
+            format!(
+                r#"{{"symbol":"XBTUSDTM","tradeId":"{id}","orderId":"order","side":"buy","liquidity":"maker","price":"100","size":1,"fee":"0","feeCurrency":"USDT","createdAt":{created},"tradeTime":{}}}"#,
+                u128::from(created) * 1_000_000
+            )
+        };
+        let pages = [
+            (1, 2, 2, fill("a", END - 1)),
+            (2, 2, 2, fill("b", END - 2)),
+            (1, 1, 0, String::new()),
+            (1, 1, 0, String::new()),
+        ];
+        let mut sent = Vec::new();
+        for (index, (page, total_pages, total, items)) in pages.iter().enumerate() {
+            sent.push(r.url.split_once("/api/").unwrap().1.to_owned());
+            let body = format!(
+                r#"{{"code":"200000","data":{{"currentPage":{page},"totalPage":{total_pages},"totalNum":{total},"items":[{items}]}}}}"#
+            );
+            let actions = reply(&mut e, r, &body);
+            if index + 1 == pages.len() {
+                assert!(!done(&actions).is_empty());
+                break;
+            }
+            // Page pacing and the shared read budget both set timers; fire
+            // them in deadline order until the next page is dispatched.
+            let mut timers: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                    _ => None,
+                })
+                .collect();
+            let ready = actions.iter().find_map(|a| match a {
+                Action::Http(r) => Some(r.clone()),
+                _ => None,
+            });
+            r = ready.unwrap_or_else(|| {
+                loop {
+                    timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+                    // A page queued behind the read budget waits for its reset.
+                    let (timer, at) = if timers.is_empty() {
+                        let budget = e.venue().budget_timer().expect("queued page timer");
+                        (budget, 0.0)
+                    } else {
+                        timers.remove(0)
+                    };
+                    e.handle(at.max(2_000_000_000_000.0), Event::TimerFired { timer });
+                    let mut next = None;
+                    for action in e.drain_actions() {
+                        match action {
+                            Action::Http(r) => next = Some(r),
+                            Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                            _ => {}
+                        }
+                    }
+                    if let Some(r) = next {
+                        break r;
+                    }
+                }
+            });
+        }
+        assert_eq!(
+            sent,
+            [
+                "v1/fills?symbol=XBTUSDTM&startAt=1740035288003&endAt=1740640088002&currentPage=1&pageSize=50",
+                "v1/fills?symbol=XBTUSDTM&startAt=1740035288003&endAt=1740640088002&currentPage=2&pageSize=50",
+                "v1/fills?symbol=XBTUSDTM&startAt=1739430488003&endAt=1740035288002&currentPage=1&pageSize=50",
+                "v1/fills?symbol=XBTUSDTM&startAt=1739344088002&endAt=1739430488002&currentPage=1&pageSize=50",
+            ]
+        );
     }
     #[test]
     fn fill_native_time_survives_millisecond_window_boundaries() {
