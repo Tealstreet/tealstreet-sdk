@@ -415,6 +415,19 @@ describe('PromptFormatter', () => {
         expect(result.positionSize).toBe(2);
       });
 
+      it('shows an OKX DOGE position in base units with the asset', () => {
+        const exchange = {
+          store: {
+            positions: [{ symbol: 'DOGEUSDT', side: PositionSide.Long, contracts: 240, entryPrice: 0.1 }],
+            markets: [
+              { symbol: 'DOGEUSDT', base: 'DOGE', precision: { price: 0.00001, amount: 0.01 }, contractSize: 1000 },
+            ],
+          },
+        } as unknown as ExchangeLike;
+        const result = formatPrompt({ symbol: 'DOGEUSDT', exchange, config: { format: '{side}{size}> ' } });
+        expect(result.prompt).toContain('240 DOGE');
+      });
+
       it('should return open order count', () => {
         const exchange = createMockExchange({
           price: 50000,

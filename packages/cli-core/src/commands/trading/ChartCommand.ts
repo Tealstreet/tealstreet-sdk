@@ -1,8 +1,9 @@
 import { formatPrice } from '@tealstreet/utils/src/formatting/formatPrice';
-import { Candle, Order, OrderType, Position, PositionSide, Timeframe } from '@tealstreet/safe-cex/src/types';
+import { Candle, Order, OrderType, Position, PositionSide, Timeframe, type Market } from '@tealstreet/safe-cex/src/types';
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { GREEN, RED, RESET, DIM, CYAN } from './colors';
+import { formatBaseSize } from '../../utils/formatBaseSize';
 
 /**
  * Chart line for position or order overlay
@@ -17,13 +18,11 @@ export interface ChartLine {
 /**
  * Format position for chart display
  */
-export function formatPositionLine(position: Position, _pricePrecision?: number): ChartLine | null {
+export function formatPositionLine(position: Position, market?: Market): ChartLine | null {
   if (position.contracts === 0) return null;
 
   const side = position.side === PositionSide.Long ? 'long' : 'short';
-  const sizeStr = Math.abs(position.contracts)
-    .toFixed(4)
-    .replace(/\.?0+$/, '');
+  const sizeStr = formatBaseSize(position.contracts, market);
   const pnlStr =
     position.unrealizedPnl >= 0
       ? `+$${position.unrealizedPnl.toFixed(2)}`
@@ -395,15 +394,13 @@ export function formatChartHeader(
  * Format a position summary line for display above the chart
  * Shows position info even if entry price is outside the visible chart range
  */
-export function formatPositionSummary(position: Position | null | undefined, pricePrecision?: number): string | null {
+export function formatPositionSummary(position: Position | null | undefined, market?: Market): string | null {
   if (!position || position.contracts === 0) return null;
 
   const side = position.side === PositionSide.Long ? 'Long' : 'Short';
   const sideColor = position.side === PositionSide.Long ? GREEN : RED;
-  const sizeStr = Math.abs(position.contracts)
-    .toFixed(4)
-    .replace(/\.?0+$/, '');
-  const entryStr = formatPrice(position.entryPrice, pricePrecision);
+  const sizeStr = formatBaseSize(position.contracts, market);
+  const entryStr = formatPrice(position.entryPrice, market?.precision?.price ?? 2);
   const pnlColor = position.unrealizedPnl >= 0 ? GREEN : RED;
   const pnlStr =
     position.unrealizedPnl >= 0
@@ -541,7 +538,7 @@ export class ChartCommand extends TradingBaseCommand {
 
       // Build chart lines from position and orders
       const chartLines: ChartLine[] = [];
-      const positionLine = position ? formatPositionLine(position, pricePrecision) : null;
+      const positionLine = position ? formatPositionLine(position, market) : null;
       if (positionLine) {
         chartLines.push(positionLine);
       }
@@ -565,7 +562,7 @@ export class ChartCommand extends TradingBaseCommand {
       );
 
       // Position summary line (shows even if outside chart range)
-      const positionSummary = formatPositionSummary(position, pricePrecision);
+      const positionSummary = formatPositionSummary(position, market);
 
       // Calculate countdown for chart
       let countdown: string | undefined;

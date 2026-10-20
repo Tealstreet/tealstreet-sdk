@@ -1,7 +1,8 @@
 import { BaseCommand } from '../BaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
-import { formatPriceCompact, formatSizeCompact } from '@tealstreet/utils/src/formatting';
+import { formatPriceCompact } from '@tealstreet/utils/src/formatting';
+import { formatBaseSize } from '../../utils/formatBaseSize';
 
 /**
  * Position command - shows current position for a symbol.
@@ -61,7 +62,6 @@ export class PositionCommand extends BaseCommand {
     const ticker = tickers.find((t) => t.symbol === targetSymbol);
     const market = markets.find((m) => m.symbol === targetSymbol);
     const pricePrecision = market?.precision?.price;
-    const amountPrecision = market?.precision?.amount;
     const markPrice = ticker?.mark ?? ticker?.last ?? 0;
 
     const sideStr = position.side === PositionSide.Long ? 'LONG' : 'SHORT';
@@ -79,7 +79,7 @@ export class PositionCommand extends BaseCommand {
     lines.push('─'.repeat(40));
     lines.push(`${targetSymbol}  ${sideStr}`);
     lines.push('─'.repeat(40));
-    lines.push(`Size:   ${formatSizeCompact(Math.abs(position.contracts), amountPrecision)} (${formatPriceCompact(Math.abs(position.notional))})`);
+    lines.push(`Size:   ${formatBaseSize(position.contracts, market)} (${formatPriceCompact(Math.abs(position.notional))})`);
     lines.push(`Entry:  ${formatPriceCompact(position.entryPrice, pricePrecision)} → ${formatPriceCompact(markPrice, pricePrecision)}`);
     lines.push(`uPnL:   ${pnlSign}${formatPriceCompact(position.unrealizedPnl)} (${pnlSign}${pnlPercent}%)`);
     lines.push(`Liq:    ${position.liquidationPrice > 0 ? formatPriceCompact(position.liquidationPrice, pricePrecision) : 'N/A'}`);
