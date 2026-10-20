@@ -162,8 +162,9 @@ fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
         assert!(
             out.iter().all(|action| matches!(
                 action,
-                Action::Notice(Notice::CommandDone { command: 10, result: Err(error) })
-                    if error.contains("Bybit BBO and TickSize controls")
+                Action::Notice(Notice::CommandFailed { command: 10, error })
+                    if error.message.contains("Bybit BBO and TickSize controls")
+                        && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
             )),
             "unexpected batch effects (busy={busy}): {out:?}"
         );
@@ -1782,5 +1783,11 @@ fn lost_and_server_failed_writes_are_unknown_but_rejections_are_not() {
         400,
         r#"{"success":false,"code":-1012,"message":"rpc rejected"}"#,
     );
-    assert_eq!(outcome(actions(&mut e), 4), Some(Some(Outcome::Unknown)));
+    let out = actions(&mut e);
+    assert_eq!(outcome(out.clone(), 4), Some(Some(Outcome::Unknown)));
+    // Reconciled like a lost write: account state is re-read.
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get))
+    );
 }

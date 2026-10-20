@@ -13,6 +13,12 @@ pub struct Request {
     pub command: CommandId,
     step: Step,
 }
+impl Request {
+    /// A read (FetchLeverage) has no write outcome to classify.
+    pub(crate) fn is_read(&self) -> bool {
+        self.step.method == Method::Get
+    }
+}
 struct Step {
     method: Method,
     path: String,
@@ -992,9 +998,10 @@ impl Orderly {
                 .iter()
                 .any(|o| o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some())
         {
-            cx.done(
+            cx.fail(
                 id,
-                Err("Bybit BBO and TickSize controls are not supported by Orderly".into()),
+                not_sent("Bybit BBO and TickSize controls are not supported by Orderly")
+                    .kind(ErrorKind::Unsupported),
             );
             return;
         }
@@ -1051,7 +1058,8 @@ impl Orderly {
                 let waiting = if affected && !job.keep_going {
                     job.superseded = true;
                     job.steps.clear();
-                    job.error = Some(not_sent(
+                    // The current step may already be in flight, so nothing is proven.
+                    job.error = Some(VenueError::new(
                         "Orderly remaining writes were superseded by bulk cancellation",
                     ));
                     job.waiting.take()
@@ -1496,11 +1504,16 @@ impl Orderly {
                 self.trade_lost(cx, request, VenueError::new(e).outcome(Outcome::Unknown));
             } else {
                 let mut error = answer_failure(response, e);
-                // A read precedes a write that was never sent.
                 if !write {
-                    error.outcome = Some(Outcome::NotSent);
+                    // A read has no write outcome to classify.
+                    error.outcome = None;
+                    self.trade_failed(cx, request, error);
+                } else if error.outcome == Some(Outcome::Unknown) {
+                    // Server-side codes may follow execution: reconcile like a lost write.
+                    self.trade_lost(cx, request, error);
+                } else {
+                    self.trade_failed(cx, request, error);
                 }
-                self.trade_failed(cx, request, error);
             }
             return;
         }
@@ -1764,8 +1777,8 @@ fn answer_failure(response: Response<'_>, message: String) -> VenueError {
     match (response.status, code) {
         (_, Some(-1000 | -1011 | -1012)) => error.outcome(Outcome::Unknown),
         (_, Some(-1007)) => error,
-        (401, _) | (_, Some(-1001)) => rejected(error, ErrorKind::AuthInvalid),
-        (403, _) | (_, Some(-1002)) => rejected(error, ErrorKind::AuthPermission),
+        (401, _) | (_, Some(-1001 | -1002)) => rejected(error, ErrorKind::AuthInvalid),
+        (403, _) => rejected(error, ErrorKind::AuthPermission),
         (429, _) | (_, Some(-1003)) => rejected(error, ErrorKind::RateLimited),
         (400..=499, _) | (_, Some(-1004 | -1005 | -1006 | -1008 | -1103..=-1101)) => {
             rejected(error, ErrorKind::Rejected)
