@@ -272,3 +272,21 @@ live trading, weakened parity oracle, or performance threshold changes.
   combined bindings afterward and runs host, wrapper, consumer, frame/session,
   product, startup/polling, scripted live-smoke and harness checks. Final replay
   gate numbers and hosted CI/PR review receipts remain outstanding.
+
+### Replay scheduling checkpoint
+
+- Final-source Paradex builds successfully: 1222994 bytes against the fixed
+  1258291-byte budget. No public replay has started in this final-source matrix
+  yet; there is no new failed acceptance attempt to rerun.
+- After a read-only scheduling review, external orchestration checks actual CPU
+  idle and paging as well as the lagging load average. Admission requires load
+  at most twice the logical CPU count, at least 20% idle CPU, and no sustained
+  paging pressure over two consecutive 30-second windows. These are scheduling
+  conditions only; the sampler, five-second settling deadline, three-run
+  medians, fixture bytes and CPU/memory acceptance rules remain unchanged.
+- Recent host samples again have zero idle CPU and load above 30 on 10 CPUs,
+  so orchestration is waiting before timing. Progress and machine observations
+  are in `/tmp/security-v2-all-gates-progress.log`; receipts accumulate in
+  `/tmp/security-v2-all-gates.json`. The final-source code is `5a9314df83`;
+  later commits only record documentation. All quality and scanner receipts
+  above remain valid. PR creation/review/CI/merge remain outstanding.
