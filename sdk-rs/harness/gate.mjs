@@ -320,7 +320,10 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
   if (values.venue === 'bitunix') {
     // Bitunix fixes: failed reconciliation preserves state; live cumulative fills
     // emit once; history dedupes by tradeId rather than collapsing equal fills;
-    // split orders use distinct generated client IDs; cancel replies
+    // Split sizes conserve the adjusted amount in native integer steps, and
+    // reordered order events cannot regress cumulative fills or filled terminals.
+    // Native regressions pin both TS defects without output waivers here.
+    // Split orders use distinct generated client IDs; cancel replies
     // require per-order success; replacements reconcile final remaining quantity.
     // Full-position TP/SL batches coalesce sibling edits. Setting ACKs fence
     // stale reads; cancel ACKs preserve newer terminal events.

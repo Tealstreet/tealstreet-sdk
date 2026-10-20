@@ -419,7 +419,7 @@ pub struct OrderRow<'a> {
     #[serde(default)]
     pub trade_qty: Num,
     #[serde(default)]
-    pub deal_amount: Num,
+    pub deal_amount: Option<Num>,
     #[serde(default, alias = "avgPrice")]
     pub average_price: Num,
     #[serde(borrow, default, deserialize_with = "text")]

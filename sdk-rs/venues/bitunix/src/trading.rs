@@ -170,6 +170,62 @@ fn positive(v: f64, name: &str) -> Result<f64, String> {
     }
 }
 
+fn split_quantities(
+    amount: f64,
+    step: f64,
+    minimum: f64,
+    maximum: f64,
+) -> Result<Vec<f64>, String> {
+    // Engine quantities are f64; native-unit counts must round-trip exactly.
+    const MAX_TICKS: f64 = 9_007_199_254_740_991.0;
+    let step = positive(step, "quantity step")?;
+    let maximum = positive(maximum, "maximum quantity")?;
+    let ticks = (amount / step).round();
+    if !minimum.is_finite()
+        || minimum < 0.0
+        || !ticks.is_finite()
+        || !(1.0..=MAX_TICKS).contains(&ticks)
+    {
+        return Err("Bitunix quantity cannot be represented in native units".into());
+    }
+    let ticks = ticks as u64;
+    let mut max_ticks = (maximum / step).floor().min(MAX_TICKS) as u64;
+    // A decimal limit such as 0.3 / 0.1 may divide just below an integer.
+    // Admit the next tick only when its serialized decimal stays within max.
+    let candidate = (maximum / step).ceil().min(MAX_TICKS) as u64;
+    if num::adjust(candidate as f64 * step, step) <= maximum {
+        max_ticks = candidate;
+    }
+    if max_ticks == 0 {
+        return Err("Bitunix maximum quantity is smaller than one native unit".into());
+    }
+    let count = ticks.div_ceil(max_ticks);
+    if count > 10_000 {
+        return Err("Bitunix order exceeds split limit".into());
+    }
+    let quantity = |units: u64| -> Result<f64, String> {
+        let value = num::adjust(units as f64 * step, step);
+        if !value.is_finite()
+            || value < minimum
+            || value <= 0.0
+            || value > maximum
+            || (value / step).round() != units as f64
+        {
+            return Err("Bitunix split quantity is outside native lot limits".into());
+        }
+        Ok(value)
+    };
+    let mut sizes = Vec::with_capacity(count as usize);
+    for _ in 0..ticks / max_ticks {
+        sizes.push(quantity(max_ticks)?);
+    }
+    let remainder = ticks % max_ticks;
+    if remainder != 0 {
+        sizes.push(quantity(remainder)?);
+    }
+    Ok(sizes)
+}
+
 impl BitunixFutures {
     fn reject(&self, cx: &mut Cx<'_, Pending>, command: u32, error: String) {
         cx.log(LogLevel::Error, &error);
@@ -545,28 +601,12 @@ impl BitunixFutures {
             p.sl_stop_type = Some(stop(o.sl_trigger_type));
             p.sl_order_type = Some("MARKET".into());
         }
-        let max = m.limits.amount.max;
-        if max <= 0.0 || !max.is_finite() {
-            return Err("Bitunix market has no valid maximum quantity".into());
-        }
-        let lots = if amount > max {
-            (amount / max).ceil() as usize
-        } else {
-            1
-        };
-        if lots > 10_000 {
-            return Err("Bitunix order exceeds split limit".into());
-        }
-        let remainder = if amount > max {
-            num::adjust(amount % max, m.precision.amount)
-        } else {
-            0.0
-        };
-        let lot = num::adjust((amount - remainder) / lots as f64, m.precision.amount);
-        let mut sizes = vec![lot; lots];
-        if remainder > 0.0 {
-            sizes.push(remainder);
-        }
+        let sizes = split_quantities(
+            amount,
+            m.precision.amount,
+            m.limits.amount.min,
+            m.limits.amount.max,
+        )?;
         if o.client_order_id.is_some() && sizes.len() != 1 {
             return Err("Bitunix clientOrderId cannot be split".into());
         }
@@ -1629,4 +1669,34 @@ fn append_protection(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::split_quantities;
+
+    #[test]
+    fn native_ticks_handle_awkward_limits_minimums_and_exact_split_count() {
+        assert_eq!(
+            split_quantities(2.0, 0.1, 0.1, 0.95).unwrap(),
+            [0.9, 0.9, 0.2]
+        );
+        assert_eq!(
+            split_quantities(1.0, 0.1, 0.1, 0.3).unwrap(),
+            [0.3, 0.3, 0.3, 0.1]
+        );
+        assert!(split_quantities(1.25, 0.25, 0.5, 1.0).is_err());
+        assert_eq!(
+            split_quantities(9_999.5, 0.1, 0.1, 1.0).unwrap().len(),
+            10_000
+        );
+        assert_eq!(
+            split_quantities(10_000.0, 0.1, 0.1, 1.0).unwrap().len(),
+            10_000
+        );
+        assert!(split_quantities(10_000.1, 0.1, 0.1, 1.0).is_err());
+        assert!(split_quantities(1e16, 1.0, 1.0, 1e16).is_err());
+        assert!(split_quantities(1.0, 0.0, 0.0, 1.0).is_err());
+        assert!(split_quantities(1.0, 0.25, 0.0, 0.1).is_err());
+    }
 }

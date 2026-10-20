@@ -615,7 +615,11 @@ impl BitunixFutures {
             &o.order_type
         });
         let amount = o.qty.0;
-        let filled = if ws { o.deal_amount.0 } else { o.trade_qty.0 };
+        let filled = if ws {
+            o.deal_amount.unwrap_or_default().0
+        } else {
+            o.trade_qty.0
+        };
         let native = NativeOrder {
             raw_id: raw.clone(),
             position_id: o.position_id.to_string(),
@@ -786,34 +790,85 @@ impl BitunixFutures {
                         cx.log(LogLevel::Warning, "Bitunix order event missing identity");
                         return;
                     }
-                    if self.account.terminal.contains_key(raw) && o.event != "CLOSE" {
+                    let (filled, updated, closed) = cx
+                        .store
+                        .orders()
+                        .iter()
+                        .filter(|row| {
+                            row.id == raw
+                                || self
+                                    .account
+                                    .native
+                                    .get(&row.id)
+                                    .is_some_and(|meta| meta.raw_id == raw)
+                        })
+                        .fold(
+                            (
+                                self.account.filled.get(raw).map_or(0.0, |v| v.0),
+                                0.0_f64,
+                                false,
+                            ),
+                            |(filled, updated, closed), row| {
+                                (
+                                    filled.max(row.filled),
+                                    updated.max(row.last_update),
+                                    closed || row.status == OrderStatus::Closed,
+                                )
+                            },
+                        );
+                    let timestamp = time_ms(&o.mtime);
+                    let stale_timestamp = timestamp > 0.0 && timestamp < updated;
+                    let cumulative = o.deal_amount.map(|value| value.0);
+                    let advancing_execution = !tpsl
+                        && matches!(o.event.as_ref(), "CLOSE" | "UPDATE")
+                        && cumulative.is_some_and(|value| value > filled);
+                    // Fence stale events before touching raw protection metadata too.
+                    // A late terminal execution can still advance a canceled order.
+                    if (!tpsl
+                        && cumulative
+                            .or_else(|| (o.event == "CREATE").then_some(0.0))
+                            .is_some_and(|value| value < filled))
+                        || (stale_timestamp && !advancing_execution)
+                        || (closed && o.event == "CLOSE" && o.order_status != "FILLED")
+                    {
                         self.debounce(cx, Axis::Orders);
                         return;
                     }
-                    for n in self.account.native.values_mut().filter(|n| n.raw_id == raw) {
-                        if let Some(p) = o.tp_price {
-                            n.tp = Some(p.0);
-                        }
-                        if let Some(p) = o.sl_price {
-                            n.sl = Some(p.0);
-                        }
-                        if !o.tp_stop_type.is_empty() {
-                            n.tp_stop = Some(trigger(&o.tp_stop_type));
-                        }
-                        if !o.sl_stop_type.is_empty() {
-                            n.sl_stop = Some(trigger(&o.sl_stop_type));
-                        }
-                        if !o.tp_order_type.is_empty() {
-                            n.tp_execution = o.tp_order_type.to_ascii_uppercase();
-                        }
-                        if !o.sl_order_type.is_empty() {
-                            n.sl_execution = o.sl_order_type.to_ascii_uppercase();
-                        }
-                        if o.tp_order_price.0 != 0.0 {
-                            n.tp_limit = o.tp_order_price.0;
-                        }
-                        if o.sl_order_price.0 != 0.0 {
-                            n.sl_limit = o.sl_order_price.0;
+                    if self.account.terminal.contains_key(raw)
+                        && o.event != "CLOSE"
+                        && !(o.event == "UPDATE"
+                            && !tpsl
+                            && cumulative.is_some_and(|value| value > filled))
+                    {
+                        self.debounce(cx, Axis::Orders);
+                        return;
+                    }
+                    if !stale_timestamp {
+                        for n in self.account.native.values_mut().filter(|n| n.raw_id == raw) {
+                            if let Some(p) = o.tp_price {
+                                n.tp = Some(p.0);
+                            }
+                            if let Some(p) = o.sl_price {
+                                n.sl = Some(p.0);
+                            }
+                            if !o.tp_stop_type.is_empty() {
+                                n.tp_stop = Some(trigger(&o.tp_stop_type));
+                            }
+                            if !o.sl_stop_type.is_empty() {
+                                n.sl_stop = Some(trigger(&o.sl_stop_type));
+                            }
+                            if !o.tp_order_type.is_empty() {
+                                n.tp_execution = o.tp_order_type.to_ascii_uppercase();
+                            }
+                            if !o.sl_order_type.is_empty() {
+                                n.sl_execution = o.sl_order_type.to_ascii_uppercase();
+                            }
+                            if o.tp_order_price.0 != 0.0 {
+                                n.tp_limit = o.tp_order_price.0;
+                            }
+                            if o.sl_order_price.0 != 0.0 {
+                                n.sl_limit = o.sl_order_price.0;
+                            }
                         }
                     }
                     if o.event == "CREATE" && !self.account.terminal.contains_key(raw) {
@@ -849,15 +904,15 @@ impl BitunixFutures {
                         for id in ids {
                             cx.store.update_order(&id, |r| {
                                 let timestamp = time_ms(&o.mtime);
-                                if timestamp > 0.0 {
+                                if timestamp > r.last_update {
                                     r.last_update = timestamp;
                                 }
                                 if o.event == "CLOSE" {
-                                    r.status = if o.order_status == "FILLED" {
-                                        OrderStatus::Closed
-                                    } else {
-                                        OrderStatus::Canceled
-                                    };
+                                    if o.order_status == "FILLED" {
+                                        r.status = OrderStatus::Closed;
+                                    } else if r.status != OrderStatus::Closed {
+                                        r.status = OrderStatus::Canceled;
+                                    }
                                     if !tpsl {
                                         r.remaining = 0.0;
                                     }
@@ -888,16 +943,21 @@ impl BitunixFutures {
                                         r.price = p.0;
                                     }
                                 } else {
-                                    if o.price.0 != 0.0 {
+                                    if !stale_timestamp && o.price.0 != 0.0 {
                                         r.price = o.price.0;
                                     }
-                                    if o.qty.0 != 0.0 {
+                                    if !stale_timestamp && o.qty.0 != 0.0 {
                                         r.amount = o.qty.0;
                                     }
-                                    if o.deal_amount.0 != 0.0 {
-                                        r.filled = o.deal_amount.0;
+                                    if let Some(cumulative) = cumulative {
+                                        r.filled = r.filled.max(cumulative);
                                     }
-                                    if o.event != "CLOSE" {
+                                    if o.event != "CLOSE"
+                                        && !matches!(
+                                            r.status,
+                                            OrderStatus::Closed | OrderStatus::Canceled
+                                        )
+                                    {
                                         r.remaining = r.amount - r.filled;
                                     }
                                 }
@@ -910,10 +970,11 @@ impl BitunixFutures {
                             .filled
                             .entry(o.order_id.to_string())
                             .or_insert((0.0, 0.0));
-                        let delta = o.deal_amount.0 - previous.0;
+                        let cumulative = cumulative.unwrap_or(previous.0);
+                        let delta = cumulative - previous.0;
                         if delta > 0.0 {
                             let cost = if o.average_price.0 > 0.0 {
-                                o.average_price.0 * o.deal_amount.0
+                                o.average_price.0 * cumulative
                             } else {
                                 previous.1 + delta * o.price.0
                             };
@@ -924,7 +985,7 @@ impl BitunixFutures {
                                 price: (cost - previous.1) / delta,
                                 amount: delta,
                             });
-                            *previous = (o.deal_amount.0, cost);
+                            *previous = (cumulative, cost);
                         }
                     }
                 }

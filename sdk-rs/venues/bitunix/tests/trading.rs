@@ -3,6 +3,95 @@ mod support;
 use safe_cex_engine::model::{OrderStatus, PlaceOrderOpts};
 use safe_cex_engine::{Action, Command, Event, Notice};
 use support::*;
+
+#[test]
+fn nonmultiple_splits_conserve_native_quantity_and_honor_maximum() {
+    for (amount, maximum, step, expected) in [
+        (250.0, 100.0, 0.001, vec![100.0, 100.0, 50.0]),
+        (250.0, 100.0, 1.0, vec![100.0, 100.0, 50.0]),
+        (1.0, 0.3, 0.1, vec![0.3, 0.3, 0.3, 0.1]),
+        (0.75, 0.5, 0.25, vec![0.5, 0.25]),
+    ] {
+        let (mut e, _) = startup();
+        let mut markets = e.store().markets().to_vec();
+        markets[0].precision.amount = step;
+        markets[0].limits.amount.max = maximum;
+        markets[0].limits.amount.min = step;
+        e.store_mut().set_markets(markets);
+        let mut opts = order("");
+        opts.amount = amount;
+        e.handle(
+            1.0,
+            Event::Command(Command::PlaceOrders {
+                command: 901,
+                orders: vec![opts],
+            }),
+        );
+        let writes = requests(&mut e);
+        assert_eq!(writes.len(), 1);
+        let body: serde_json::Value =
+            serde_json::from_str(writes[0].body.as_deref().unwrap()).unwrap();
+        let rows = body["orderList"].as_array().unwrap();
+        let quantities: Vec<f64> = rows
+            .iter()
+            .map(|row| row["qty"].as_str().unwrap().parse().unwrap())
+            .collect();
+        assert_eq!(quantities, expected);
+        assert!(quantities.iter().all(|qty| *qty <= maximum));
+        assert_eq!(
+            quantities
+                .iter()
+                .map(|qty| (qty / step).round() as u64)
+                .sum::<u64>(),
+            (amount / step).round() as u64
+        );
+    }
+}
+
+#[test]
+fn invalid_later_split_prevents_every_earlier_plain_or_protection_write() {
+    for protection in [false, true] {
+        let (mut e, _) = startup();
+        let mut markets = e.store().markets().to_vec();
+        markets[0].precision.amount = 0.25;
+        markets[0].limits.amount.min = 0.5;
+        markets[0].limits.amount.max = 1.0;
+        e.store_mut().set_markets(markets);
+        let mut first = order("");
+        first.amount = 0.5;
+        if protection {
+            first.kind = safe_cex_engine::model::OrderType::StopLoss;
+        }
+        let mut last = order("");
+        last.amount = 1.25;
+        e.handle(
+            1.0,
+            Event::Command(Command::PlaceOrders {
+                command: 903,
+                orders: vec![first, last],
+            }),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone {
+                command: 903,
+                result: Err(_)
+            })
+        )));
+        assert!(
+            !e.store()
+                .orders()
+                .iter()
+                .any(|row| row.status == OrderStatus::Creating)
+        );
+    }
+}
 fn order(extra: &str) -> PlaceOrderOpts {
     serde_json::from_str(&format!(r#"{{"symbol":"BTCUSDT","type":"limit","side":"buy","price":90500.04,"amount":0.0021{extra}}}"#)).unwrap()
 }

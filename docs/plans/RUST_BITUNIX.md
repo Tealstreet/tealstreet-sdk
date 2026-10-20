@@ -1727,3 +1727,18 @@ All eight Coinbase private profiles + public PASS on reviewed sampler. Batch
 launcher alone paused after final replay completed to finish native fixes;
 no replay process/timer or gate policy paused/changed. Continue remaining
 venues only after native correction and independent audit.
+
+Final native fixes frozen/reviewed PASS:68Bitunix tests (8added) plus strict
+all-target clippy, crate/global fmt, bans and strict WASM clippy PASS. Logs
+/tmp/bitunix-final-fixes-{before,tests,clippy,fmt,bans,globalfmt,wasm-clippy}.log.
+Three original account race regressions and split conservation fail before.
+Presence-aware Option<Num> differentiates explicit0 from omitted dealAmount;
+monotonic execution facts advance once on late UPDATE/CLOSE while timestamp,
+price, sibling TP/SL metadata and Closed/Canceled terminal state remain fenced.
+Tests include duplicate late fills, no-mtime sparse edits and virtual siblings.
+Splits use exact integer ticks/max-sized lots/remainder, validate all resulting
+min/max sizes, total≤10k and the whole batch before HTTP. Decimal0.3/0.1 and
+quarter-step conservation, invalid later batch and count boundaries covered.
+TS defects documented in KNOWN_TS_FIXES Bitunix branch; net realizedPNL
+unchanged verbatim. Exact final independent reviewer approved latest source.
+Resume paused outer batch after checkpoint; rebuild Bitunix only when reached.

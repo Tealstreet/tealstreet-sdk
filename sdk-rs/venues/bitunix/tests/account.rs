@@ -3,6 +3,219 @@ mod support;
 use safe_cex_engine::model::{MarginType, OrderSide, OrderStatus};
 use safe_cex_engine::{Action, Event, Notice};
 use support::*;
+
+#[test]
+fn reordered_updates_cannot_regress_fills_prices_or_native_protection() {
+    let (mut e, s) = startup();
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","qty":"3","dealAmount":"2","price":"105","tpPrice":"81","mtime":"2025-04-05T16:05:40Z"}}"#,
+    );
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","qty":"3","dealAmount":"1","price":"90","tpPrice":"70","mtime":"2025-04-05T16:05:39Z"}}"#,
+    );
+    let row = e.store().order("one").unwrap();
+    assert_eq!((row.filled, row.remaining, row.price), (2.0, 1.0, 105.0));
+    e.handle(
+        100.0,
+        Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 900,
+            id: "one".into(),
+            price: Some(106.0),
+            amount: None,
+        }),
+    );
+    let writes = requests(&mut e);
+    let body = writes.last().unwrap().body.as_deref().unwrap();
+    assert!(body.contains(r#""tpPrice":"81""#), "{body}");
+}
+
+#[test]
+fn stale_terminal_cancel_cannot_downgrade_a_full_fill() {
+    let (mut e, s) = startup();
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"one","orderStatus":"FILLED","dealAmount":"3","mtime":"2025-04-05T16:05:42Z"}}"#,
+    );
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"one","orderStatus":"CANCELED","dealAmount":"1","mtime":"2025-04-05T16:05:41Z"}}"#,
+    );
+    let row = e.store().order("one").unwrap();
+    assert_eq!(
+        (row.status, row.filled, row.remaining),
+        (OrderStatus::Closed, 3.0, 0.0)
+    );
+}
+
+#[test]
+fn advancing_late_terminal_fill_survives_cancel_without_rewinding_time() {
+    let (mut e, s) = startup();
+    e.take_frame(0.0);
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"one","orderStatus":"CANCELED","dealAmount":"2","price":"105","tpPrice":"81","mtime":"2025-04-05T16:05:42Z"}}"#,
+    );
+    let time = e.store().order("one").unwrap().last_update;
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"2.5","price":"95","tpPrice":"75","mtime":"2025-04-05T16:05:41Z"}}"#,
+    );
+    let row = e.store().order("one").unwrap();
+    assert_eq!(
+        (row.status, row.filled, row.remaining, row.price),
+        (OrderStatus::Canceled, 2.5, 0.0, 105.0)
+    );
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"2.5","price":"95","mtime":"2025-04-05T16:05:41Z"}}"#,
+    );
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"one","orderStatus":"FILLED","dealAmount":"3","qty":"4","price":"90","tpPrice":"70","mtime":"2025-04-05T16:05:41Z"}}"#,
+    );
+    let row = e.store().order("one").unwrap();
+    assert_eq!(
+        (row.status, row.filled, row.remaining),
+        (OrderStatus::Closed, 3.0, 0.0)
+    );
+    assert_eq!(row.last_update, time);
+    assert_eq!((row.amount, row.price), (3.0, 105.0));
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"3.25","price":"95","mtime":"2025-04-05T16:05:41Z"}}"#,
+    );
+    let row = e.store().order("one").unwrap();
+    assert_eq!(
+        (
+            row.status,
+            row.filled,
+            row.remaining,
+            row.price,
+            row.last_update
+        ),
+        (OrderStatus::Closed, 3.25, 0.0, 105.0, time)
+    );
+    let frame = e.take_market_frame(100.0).unwrap();
+    let fills: Vec<_> = safe_cex_engine::wire::sections(frame)
+        .filter(|(kind, _)| *kind == 11)
+        .collect();
+    assert_eq!(fills.len(), 1);
+    // REST baseline 1 -> canceled 2 -> late update 2.5 -> late close 3 -> 3.25.
+    // Replaying the intermediate update must not emit a fifth execution.
+    assert_eq!(u32::from_le_bytes(fills[0].1[..4].try_into().unwrap()), 4);
+}
+
+#[test]
+fn missing_timestamps_keep_cumulative_fills_and_terminal_state_monotonic() {
+    let (mut e, s) = startup();
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"2","price":"105","tpPrice":"81","slPrice":"111"}}"#,
+    );
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"1","price":"90","tpPrice":"70","slPrice":"120"}}"#,
+    );
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"0","qty":"4","price":"90","tpPrice":"70","slPrice":"120"}}"#,
+    );
+    assert_eq!(e.store().order("one").unwrap().filled, 2.0);
+    assert_eq!(
+        (
+            e.store().order("one").unwrap().amount,
+            e.store().order("one").unwrap().price
+        ),
+        (3.0, 105.0)
+    );
+    // Omission is a legitimate sparse amend, unlike an explicit zero cumulative.
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","price":"106","tpPrice":"82"}}"#,
+    );
+    e.handle(
+        100.0,
+        Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 902,
+            id: "one".into(),
+            price: Some(106.0),
+            amount: None,
+        }),
+    );
+    let writes = requests(&mut e);
+    let body = writes.last().unwrap().body.as_deref().unwrap();
+    assert!(
+        body.contains(r#""tpPrice":"82""#) && body.contains(r#""slPrice":"111""#),
+        "{body}"
+    );
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"one","orderStatus":"CANCELED","dealAmount":"2"}}"#,
+    );
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"2.5"}}"#,
+    );
+    let row = e.store().order("one").unwrap();
+    assert_eq!(
+        (row.status, row.filled, row.remaining),
+        (OrderStatus::Canceled, 2.5, 0.0)
+    );
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"one","orderStatus":"FILLED","dealAmount":"3"}}"#,
+    );
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"one","orderStatus":"CANCELED","dealAmount":"3"}}"#,
+    );
+    let row = e.store().order("one").unwrap();
+    assert_eq!(
+        (row.status, row.filled, row.remaining),
+        (OrderStatus::Closed, 3.0, 0.0)
+    );
+}
+
+#[test]
+fn stale_terminal_tpsl_close_preserves_both_virtual_siblings() {
+    let (mut e, s) = startup();
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"tpsl","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"protect","orderStatus":"FILLED","tpPrice":"91000","slPrice":"101000"}}"#,
+    );
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"tpsl","data":{"event":"CLOSE","symbol":"BTCUSDT","orderId":"protect","orderStatus":"CANCELED","tpPrice":"70","slPrice":"120"}}"#,
+    );
+    for (id, price) in [
+        ("protect__position-1__tp", 91000.0),
+        ("protect__position-1__sl", 101000.0),
+    ] {
+        let row = e.store().order(id).unwrap();
+        assert_eq!((row.status, row.price), (OrderStatus::Closed, price));
+    }
+}
 #[test]
 fn startup_keeps_reported_net_pnl_and_handles_null_tpsl_and_account_arrays() {
     let (e, _) = startup();
