@@ -22,7 +22,7 @@ export const stable = (value) => Array.isArray(value) ? value.map(stable) : valu
   ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])])) : value;
 export const sameCommandResults = (a, b) => JSON.stringify(stable(a)) === JSON.stringify(stable(b));
 export const deliverSocketFrame = (socket, text, audit, validate) => {
-  audit?.received(socket.url, text); validate?.(socket, text); socket.onMessage(text);
+  audit?.received(socket.url, text, socket); validate?.(socket, text); socket.onMessage(text);
 };
 export const replayStoreReady = (loaded, isPrivate) => {
   const publicMask = LOADED_FLAG.MARKETS | LOADED_FLAG.TICKERS;
@@ -167,7 +167,8 @@ export class Tape {
     this.expectedWrites = records.filter((record) => record.type === 'http' && (venue.isWrite?.(record.method, record.url) ?? isWriteRequest(record.method, record.url)))
       .map((record) => this.keyFor(record.method, record.url, record.requestBody));
     this.publicTickers = this.venue.publicTickers?.(this.records) ?? [];
-    this.audit = this.venue.createSocketAudit?.(impl, { isPrivate: this.isPrivate, books: this.bookSymbols, tickers: this.publicTickers });
+    this.requestAudit = this.venue.createRequestAudit?.(impl, { isPrivate: this.isPrivate });
+    this.audit = this.venue.createSocketAudit?.(impl, { isPrivate: this.isPrivate, books: this.bookSymbols, tickers: this.publicTickers, requestAudit: this.requestAudit });
     this.responses = new Responses(this.records, this.keyFor, this.venue.checkRequest, (method, url) => this.venue.isWrite?.(method, url) ?? isWriteRequest(method, url));
     this.frames = this.records.filter((r) => r.type === 'ws' || r.type === 'command' || r.type === 'close' || r.type === 'open');
     this.open = new Map();
@@ -255,6 +256,7 @@ export class Tape {
   respond(method, url, body, headers) {
     try {
       this.venue.validateRequest?.({ method, url, body, headers });
+      this.requestAudit?.validate({ method, url, body, headers });
     } catch (error) {
       this.invalidSignatures++;
       throw error;
@@ -275,6 +277,12 @@ export class Tape {
       ? this.responses.respond(method, url, body, this.commandIndex, (record) => this.validateBitgetMatch(record, method, url, body), elapsed)
       : this.responses.respond(method, url, body, this.commandIndex, elapsed);
     if (this.responses.isWrite(method, url) && response.status !== 599) this.expectedWrites.shift();
+    try {
+      this.requestAudit?.response({ method, url, body, headers, response });
+    } catch (error) {
+      this.invalidSignatures++;
+      throw error;
+    }
     return response;
   }
 
@@ -289,6 +297,7 @@ export class Tape {
       // Bybit adds a generated requestId to each connection URL.
       if (!this.open.has(key)) this.open.set(key, new Set());
       this.open.get(key).add(socket);
+      this.audit?.opened?.(socket);
       onOpen();
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
@@ -308,7 +317,7 @@ export class Tape {
     }
     for (const waiter of this.waiters) waiter();
     this.sent(socket.url, text);
-    this.audit?.sent(socket.url, text);
+    this.audit?.sent(socket.url, text, socket);
     const compared = this.venue.marketFilter && Array.isArray(message?.params)
       ? { ...message, params: message.params.filter((topic) => topic.startsWith('account.') || this.venue.marketFilter({ symbol: topic.split('.').at(-1) })) } : text;
     for (const key of subscriptionKeys(socket.url, compared, this.callerIds, this.venue)) {
@@ -396,6 +405,7 @@ export class Tape {
   close(socket, code = 1000) {
     if (socket.closed) return;
     socket.closed = true;
+    this.audit?.closed?.(socket);
     socket.onClose?.(code);
   }
 

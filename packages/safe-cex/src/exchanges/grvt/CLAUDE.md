@@ -85,13 +85,14 @@ When a TDG request fails with error code `1000` (session expired):
 3. Calls `exchange.authenticate()` to get new session
 4. Retries the failed request with new credentials
 5. Uses `_retry` flag on config to prevent infinite loops
+6. Replaces both cookie and proxy-session headers and reconnects an authenticated private socket with the new session
 
 ### EIP-712 Order Signing (`grvt.exchange.ts:1050-1126`)
 
 Every order must be cryptographically signed:
 
 1. **Wallet Initialization** (`grvt.exchange.ts:92-124`): `ethers.Wallet` created from `opts.secret` (private key). Address validated against `opts.grvtSignerAddress` if provided.
-2. **Domain Configuration**: `{ name: "Grvt", version: "0", chainId }` where chainId is 326 (testnet) or 325 (production)
+2. **Domain Configuration**: `{ name: "GRVT Exchange", version: "0", chainId }` where chainId is 326 (testnet) or 325 (production)
 3. **EIP-712 Message Structure** (`grvt.exchange.ts:1083-1106`):
    - `subAccountID`: Integer trading account ID
    - `isMarket`: Boolean
@@ -438,7 +439,7 @@ and TP/SL metadata. `post_only: true` is represented as safe-cex
 safe-cex TIF values.
 
 For standalone TP/SL, the store price is `trigger_price`, and replacement
-passes it explicitly as `triggerPrice` together with `trigger_by` and
+passes it explicitly as `triggerPrice`, preserves the native market/limit execution choice and separate limit price, together with `trigger_by` and
 `close_position`. Do not default a missing/unsupported TIF, trigger price,
 trigger type, or close flag: fail before cancellation so an existing order is
 never silently replaced with weaker semantics.
@@ -524,8 +525,8 @@ From lite format instrument data:
 
 For EIP-712 signature, values are converted to contract-level integers:
 
-- **Contract Size**: `Math.floor(size * 10^baseDecimals)` where `baseDecimals` comes from instrument (`bd` field, default 9)
-- **Limit Price**: `Math.floor(price * 1_000_000_000)` (PRICE_MULTIPLIER = 1e9, always)
+- **Contract Size**: exact decimal string scaled by instrument `bd`, using checked BigInt arithmetic; missing metadata fails preflight
+- **Limit Price**: exact decimal string scaled by 1e9 using checked BigInt arithmetic
 - **Asset ID**: `instrument_hash` passed as hex string (e.g., `"0x030501"`)
 
 ### API Payload vs EIP-712
@@ -536,8 +537,8 @@ The API payload uses **human-readable decimal strings** (e.g., `size: "0.1"`, `l
 
 GRVT uses nanosecond timestamps throughout:
 
-- `expiration`: `(Date.now() + 3600*1000) * 1e6` -- kept as string (exceeds MAX_SAFE_INTEGER)
-- `create_time`: `Date.now() * 1_000_000`
+- `expiration`: `(BigInt(Date.now()) + 3600000n) * 1000000n` as a decimal string
+- `create_time`: `BigInt(Date.now()) * 1000000n` as a decimal string
 - Kline timestamps: Divided by `1_000_000_000` to convert to seconds
 - Position update timestamps: Divided by `1_000_000` to convert to milliseconds
 

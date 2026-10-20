@@ -10,7 +10,7 @@ if [[ $# -gt 0 ]]; then
   fi
   case "$2" in
     binance|bybit|hyperliquid|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|woo|grvt) build_args+=(--no-default-features --features "$2") ;;
-    *) echo "Unsupported venue: $2 (expected binance, bybit, hyperliquid, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue or grvt)" >&2; exit 2 ;;
+    *) echo "Unsupported venue: $2 (expected binance, bybit, hyperliquid, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, woo or grvt)" >&2; exit 2 ;;
   esac
 fi
 cd "$(dirname "$0")/.."

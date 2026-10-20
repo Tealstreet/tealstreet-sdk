@@ -37,6 +37,17 @@ async function signed() {
   } };
 }
 const validate = (body, supplied = headers) => venue.validateRequest({ method: 'POST', url: REST + '/lite/v1/create_order', body: JSON.stringify(body), headers: supplied });
+const LOGIN = 'https://edge.grvt.io/auth/api_key/login';
+const loginHeaders = { 'X-Grvt-Remember-Me': 'true' };
+const loginBody = '{"api_key":"grvt-replay-key"}';
+const loginRecord = (index = 1, afterCommand = 0) => ({
+  type: 'http', method: 'POST', url: LOGIN, status: 200, body: '{"status":"success"}',
+  requestBody: { api_key: 'grvt-replay-key' }, afterCommand,
+  headers: `Set-Cookie: gravity=fixture-session-${index}; Path=/\nX-Ts-Grvt-Session: fixture-session-${index}\nX-Grvt-Account-Id: fixture-account`,
+});
+const login = (tape) => tape.respond('POST', LOGIN, loginBody, loginHeaders);
+const sessionHeaders = (index) => ({ ...headers, 'X-Ts-Grvt-Session': `fixture-session-${index}`, Cookie: `gravity=fixture-session-${index}` });
+
 test('GRVT independently recovers a valid EIP-712 builder order and refuses economic mutations', async () => {
   const body = await signed();
   assert.doesNotThrow(() => validate(body));
@@ -82,7 +93,8 @@ test('GRVT matching removes only verified signature entropy and clocks, retainin
 test('GRVT Tape persists rejected signatures after valid retries and consumes write acknowledgements once', async () => {
   const body = await signed();
   const records = [{ type: 'http', method: 'POST', url: REST + '/lite/v1/create_order', status: 200, body: '{"r":{"oi":"0x300"}}', requestBody: body }];
-  const tape = new Tape(records, venue, true, 30000, 'rust');
+  const tape = new Tape([loginRecord(), ...records], venue, true, 30000, 'rust');
+  assert.equal(login(tape).status, 200);
   const changed = structuredClone(body); changed.o.l[0].s = '0.005';
   assert.throws(() => tape.respond('POST', records[0].url, JSON.stringify(changed), headers));
   assert.equal(tape.respond('POST', records[0].url, JSON.stringify(body), headers).status, 200);
@@ -112,5 +124,92 @@ test('GRVT public market requests reject leaked private credentials', () => {
   assert.doesNotThrow(() => venue.validateRequest(request));
   for (const header of ['Cookie', 'X-Ts-Grvt-Session', 'X-Grvt-Account-Id', 'X-API-KEY']) {
     assert.throws(() => venue.validateRequest({ ...request, headers: { [header]: 'private' } }), /private credentials/);
+  }
+});
+
+
+test('GRVT Tape rotates credentials only from actual login responses and invalidates rejected sessions persistently', () => {
+  const url = REST + '/lite/v1/positions', body = '{"sa":"777"}';
+  const records = [loginRecord(), loginRecord(2, 1),
+    { type: 'http', method: 'POST', url, requestBody: { sa: '777' }, status: 200, body: '{"r":[]}' },
+    { type: 'http', method: 'POST', url, requestBody: { sa: '777' }, status: 401, body: '{"c":1000,"m":"expired"}', afterCommand: 1 },
+    { type: 'http', method: 'POST', url, requestBody: { sa: '777' }, status: 200, body: '{"r":[]}', afterCommand: 2 },
+  ];
+  const tape = new Tape(records, venue, true, 30000, 'rust');
+  assert.equal(login(tape).status, 200);
+  assert.equal(tape.respond('POST', url, body, sessionHeaders(1)).status, 200);
+  tape.commandIndex = 1;
+  assert.equal(tape.respond('POST', url, body, sessionHeaders(1)).status, 401);
+  assert.throws(() => tape.respond('POST', url, body, sessionHeaders(1)), /current authenticated session/);
+  assert.throws(() => tape.respond('POST', url, body, sessionHeaders(2)), /current authenticated session/);
+  assert.equal(login(tape).status, 200);
+  assert.throws(() => tape.respond('POST', url, body, sessionHeaders(1)), /current authenticated session/);
+  tape.commandIndex = 2;
+  assert.equal(tape.respond('POST', url, body, sessionHeaders(2)).status, 200);
+  assert.equal(tape.invalidSignatures, 3);
+  assert.throws(() => tape.assertWritesConsumed(), /3 invalid replay signature/);
+});
+
+test('GRVT private REST cannot authenticate itself before successful login, and Tape instances keep separate sessions', () => {
+  const record = { type: 'http', method: 'POST', url: REST + '/lite/v1/positions', requestBody: { sa: '777' }, status: 200, body: '{"r":[]}' };
+  const authenticated = new Tape([loginRecord(), record], venue, true, 30000, 'rust');
+  assert.equal(login(authenticated).status, 200);
+  const separate = new Tape([loginRecord(), record], venue, true, 30000, 'rust');
+  assert.throws(() => separate.respond('POST', record.url, '{"sa":"777"}', headers), /current authenticated session/);
+  assert.equal(separate.invalidSignatures, 1);
+  assert.equal(authenticated.respond('POST', record.url, '{"sa":"777"}', headers).status, 200);
+});
+
+test('GRVT Tape requires first-frame auth per real socket generation and rejects same-socket reauthentication permanently', async () => {
+  const tape = new Tape([loginRecord(), loginRecord(2, 1)], venue, true, 30000, 'rust');
+  assert.equal(login(tape).status, 200);
+  const connect = async () => {
+    const socket = tape.connect(PRIVATE, () => {}, () => {}, () => {});
+    await new Promise(setImmediate);
+    return socket;
+  };
+  const auth = (socket, index) => tape.send(socket, JSON.stringify({ type: 'auth',
+    session_cookie: `rm=true; gravity=fixture-session-${index}`, account_id: 'fixture-account', testnet: false }));
+  const acknowledge = (socket) => {
+    tape.deliver(socket, '{"type":"auth_success"}');
+    for (const stream of ['v1.order', 'v1.position', 'v1.fill']) tape.send(socket,
+      JSON.stringify({ method: 'subscribe', stream, feed: ['777'], is_full: false }));
+  };
+  const first = await connect();
+  auth(first, 1); acknowledge(first);
+  assert.deepEqual(tape.audit.errors(), []);
+  tape.commandIndex = 1;
+  assert.equal(login(tape).status, 200);
+  auth(first, 2);
+  assert.ok(tape.audit.errors().some((error) => /first-frame auth for socket generation/.test(error)));
+  tape.close(first);
+  const second = await connect();
+  assert.equal(second.generation, first.generation + 1);
+  auth(second, 2); acknowledge(second);
+  // Correct authentication on a new connection cannot erase the earlier fault.
+  assert.deepEqual(tape.audit.errors(), ['invalid GRVT first-frame auth for socket generation']);
+});
+
+test('GRVT socket generation must authenticate with the current REST session and cannot send heartbeat first', async () => {
+  for (const firstFrame of ['ping', JSON.stringify({ type: 'auth', session_cookie: 'rm=true; gravity=fixture-session-2', account_id: 'fixture-account', testnet: false })]) {
+    const tape = new Tape([loginRecord()], venue, true, 30000, 'rust');
+    assert.equal(login(tape).status, 200);
+    const socket = tape.connect(PRIVATE, () => {}, () => {}, () => {});
+    await new Promise(setImmediate);
+    tape.send(socket, firstFrame);
+    assert.ok(tape.audit.errors().some((error) => /first.frame/.test(error)));
+  }
+});
+
+
+test('GRVT session rejection invalidates HTTP-200 lite and full error aliases', () => {
+  for (const error of [{ c: 1000 }, { code: '1000' }, { e: { c: '1000' } }, { e: { code: 1000 } }, { error: { c: 1000 } }, { error: { code: '1000' } }]) {
+    const url = REST + '/lite/v1/positions';
+    const tape = new Tape([loginRecord(), { type: 'http', method: 'POST', url,
+      requestBody: { sa: '777' }, status: 200, body: JSON.stringify(error) }], venue, true, 30000, 'rust');
+    assert.equal(login(tape).status, 200);
+    assert.equal(tape.respond('POST', url, '{"sa":"777"}', headers).status, 200);
+    assert.throws(() => tape.respond('POST', url, '{"sa":"777"}', headers), /current authenticated session/);
+    assert.equal(tape.invalidSignatures, 1);
   }
 });

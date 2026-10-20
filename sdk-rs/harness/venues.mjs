@@ -277,31 +277,83 @@ export const VENUES = {
         if (previous && previous.body !== serialized) throw new Error('GRVT auth resend changed the signed order');
         attempts.set(o.m.co, { body: serialized });
       },
-      createSocketAudit: (_impl, { isPrivate, books }) => {
+      createRequestAudit() {
+        // Credentials become valid only after the transport actually returns
+        // a successful login. Requests alone cannot create or rotate a session.
+        let current;
+        const fields = (headers) => Object.fromEntries((Array.isArray(headers) ? headers : Object.entries(headers ?? {}))
+          .map(([key, value]) => [key.toLowerCase(), String(value)]));
+        return {
+          current: () => current && { ...current },
+          validate({ url, headers }) {
+            if (new URL(url).hostname !== 'trades.grvt.io') return;
+            const h = fields(headers);
+            if (!current || h['x-ts-grvt-session'] !== current.cookie || h['x-grvt-account-id'] !== current.account
+              || (h.cookie !== undefined && !h.cookie.split(';').map((v) => v.trim()).includes(`gravity=${current.cookie}`)))
+              throw new Error('GRVT request did not use the current authenticated session');
+          },
+          response({ url, response }) {
+            const parsed = new URL(url);
+            if (!['edge.grvt.io', 'trades.grvt.io'].includes(parsed.hostname)) return;
+            let body;
+            try { body = parseRequestJson(response.body); } catch { return; }
+            const code = body?.c ?? body?.code ?? body?.e?.c ?? body?.e?.code ?? body?.error?.c ?? body?.error?.code;
+            if (parsed.hostname === 'trades.grvt.io') {
+              if (String(code) === '1000') current = undefined;
+              return;
+            }
+            if (parsed.pathname !== '/auth/api_key/login' || response.status < 200 || response.status >= 300
+              || (code !== undefined && String(code) !== '0')) return;
+            const pairs = String(response.headers ?? '').split('\n').filter(Boolean).map((line) => {
+              const colon = line.indexOf(':');
+              return [line.slice(0, colon).trim(), line.slice(colon + 1).trim()];
+            });
+            const h = fields(pairs);
+            const cookieHeader = pairs.filter(([key]) => key.toLowerCase() === 'set-cookie')
+              .map(([, value]) => value).find((value) => /(?:^|[,;]\s*)gravity=/.test(value));
+            const cookie = h['x-ts-grvt-session'] ?? cookieHeader?.match(/(?:^|[,;]\s*)gravity=([^;,\s]+)/)?.[1];
+            if (!cookie || !h['x-grvt-account-id']) {
+              current = undefined;
+              throw new Error('GRVT login response omitted authenticated session credentials');
+            }
+            current = { cookie, account: h['x-grvt-account-id'] };
+          },
+        };
+      },
+      createSocketAudit: (_impl, { isPrivate, books, requestAudit }) => {
         const states = new Map(), failures = [];
-        const state = (url) => {
-          if (!states.has(url)) states.set(url, { authSent: false, ack: false, streams: new Set(), pings: 0, messages: 0, auths: 0 });
-          return states.get(url);
+        const state = (url, socket) => {
+          const key = `${url}#${socket?.generation ?? 1}`;
+          if (!states.has(key)) states.set(key, { url, closed: false, authSent: false, ack: false, streams: new Set(), pings: 0, messages: 0 });
+          return states.get(key);
         };
         const fail = (message) => failures.push(message);
         return {
-          sent(url, text) {
-            const current = state(url), privateSocket = new URL(url).hostname === 'trades.grvt.io';
+          opened(socket) { state(socket.url, socket); },
+          closed(socket) { state(socket.url, socket).closed = true; },
+          sent(url, text, socket) {
+            const current = state(url, socket), privateSocket = new URL(url).hostname === 'trades.grvt.io';
+            const first = current.messages++ === 0;
+            if (current.closed) fail('GRVT sent a frame on a closed socket generation');
             if (text === 'pong') {
+              if (privateSocket && !current.authSent) fail('GRVT private first frame was not authentication');
               if (current.pings <= 0) fail('unexpected GRVT pong'); else current.pings--;
               return;
             }
-            if (text === 'ping') return;
+            if (text === 'ping') {
+              if (privateSocket && !current.authSent) fail('GRVT private first frame was not authentication');
+              return;
+            }
             const frame = JSON.parse(text);
             if (privateSocket && frame.type === 'auth') {
-              const expected = current.auths === 0 ? 'fixture-session-1' : 'fixture-session-2';
-              if ((current.auths === 0 ? current.messages !== 0 : !current.ack || current.auths !== 1)
-                || frame.session_cookie !== `rm=true; gravity=${expected}`
-                || frame.account_id !== account || frame.testnet !== false) fail('invalid GRVT first-frame auth');
-              current.authSent = true;
-              current.auths++;
-              current.ack = false;
-              current.streams.clear();
+              const credentials = requestAudit?.current();
+              const validCookie = credentials
+                ? frame.session_cookie === `rm=true; gravity=${credentials.cookie}`
+                : !requestAudit && ['rm=true; gravity=fixture-session-1', 'rm=true; gravity=fixture-session-2'].includes(frame.session_cookie);
+              if (!first || current.authSent || !validCookie
+                || frame.account_id !== (credentials?.account ?? account) || frame.testnet !== false)
+                fail('invalid GRVT first-frame auth for socket generation');
+              else current.authSent = true;
             } else if (privateSocket) {
               if (!current.ack || frame.method !== 'subscribe' || !['v1.order', 'v1.position', 'v1.fill'].includes(frame.stream)
                 || JSON.stringify(frame.feed) !== '["777"]' || frame.is_full !== false)
@@ -312,16 +364,16 @@ export const VENUES = {
             } else if (frame.method === 'unsubscribe') {
               for (const selector of frame.params?.selectors ?? []) current.streams.delete(`${frame.params.stream}:${selector}`);
             }
-            current.messages++;
           },
-          received(url, text) {
-            const current = state(url);
+          received(url, text, socket) {
+            const current = state(url, socket);
+            if (current.closed) fail('GRVT received a frame on a closed socket generation');
             if (text === 'ping') { current.pings++; return; }
             if (text === 'pong') return;
             const frame = JSON.parse(text), stream = frame.s ?? frame.stream;
             if (frame.type === 'auth_success') {
-              if (!current.authSent) fail('GRVT auth ACK preceded credentials');
-              current.ack = true;
+              if (!current.authSent || current.ack) fail('GRVT auth ACK preceded credentials or repeated on the same socket generation');
+              else current.ack = true;
             }
             if (new URL(url).hostname === 'trades.grvt.io' && stream && (frame.f ?? frame.feed)) {
               if (!current.ack || !current.streams.has(stream)) fail('unsubscribed GRVT private data: ' + stream);
@@ -335,13 +387,14 @@ export const VENUES = {
                 fail('unsubscribed GRVT public data: ' + stream + ':' + instrument);
             }
           },
-          ready() { return !isPrivate || [...states.values()].some((s) => s.authSent); },
+          ready() { return !isPrivate || [...states.values()].some((s) => !s.closed && s.authSent); },
           errors() {
-            for (const [url, current] of states) {
+            for (const current of states.values()) {
+              const { url } = current;
               if (current.pings) fail('missing GRVT pong');
-              if (new URL(url).hostname === 'trades.grvt.io' && isPrivate)
+              if (new URL(url).hostname === 'trades.grvt.io' && isPrivate && !current.closed)
                 for (const stream of ['v1.order', 'v1.position', 'v1.fill']) if (!current.streams.has(stream)) fail('missing GRVT private stream: ' + stream);
-              if (new URL(url).hostname === 'market-data.grvt.io') for (const symbol of books) {
+              if (new URL(url).hostname === 'market-data.grvt.io' && !current.closed) for (const symbol of books) {
                 const native = symbol.replace(/_PERP$/, '_Perp');
                 if (!current.streams.has(`v1.book.s:${native}@500-50`)) fail('missing GRVT book subscription: ' + symbol);
               }
