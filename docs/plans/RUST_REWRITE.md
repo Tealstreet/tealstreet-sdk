@@ -337,7 +337,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | WOO | done ([#1316](https://github.com/Tealstreet/tealstreet-sdk/pull/1316)) |
 | ApeX Omni perpetuals | Implemented; [PR #1324](https://github.com/Tealstreet/tealstreet-sdk/pull/1324), native zkLink/API-key signing; all local gates and independent code-correctness re-reviews pass |
 | KuCoin, Phemex, Orderly family | wave 2 lanes running |
-| Engine performance: batched message delivery, per-venue wasm builds | lane running |
+| Engine performance: batched message delivery, per-venue wasm builds | lane running; [GRVT fixture profiling](GRVT_RUST_PERF.md) hands off measured replay audit overhead |
 | GRVT perpetuals | implemented; [PR #1321](https://github.com/Tealstreet/tealstreet-sdk/pull/1321), all local gates passing |
 | Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; plan: `RUST_PARADEX.md` |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
