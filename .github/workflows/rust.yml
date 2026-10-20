@@ -170,6 +170,12 @@ jobs:
           - venue: phemex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape:phemex
+          - venue: krakenspot
+            books: XBT/USD,ETH/USD
+            private_script: rust:private-tape-krakenspot
+          - venue: hyperliquidspot
+            books: PURR/USDC,HYPE/USDC
+            private_script: rust:private-tape-hyperliquidspot
           - venue: kraken
             books: PF_XBTUSD,PF_ETHUSD
             private_script: rust:private-tape-kraken
@@ -275,6 +281,12 @@ jobs:
             yarn "rust:private-tape-$venue"
             yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
           done
+      - name: Hyperliquid Spot compiled native account and trading contracts
+        if: matrix.venue == 'hyperliquidspot'
+        run: yarn rust:test-hyperliquidspot-parity
+      - name: Kraken Spot compiled auth and atomic amendment contracts
+        if: matrix.venue == 'krakenspot'
+        run: yarn rust:test-krakenspot-parity
       - name: Breakout compiled account, startup and polling controls
         if: matrix.venue == 'breakoutprop'
         run: yarn rust:test-breakoutprop-parity

@@ -529,3 +529,18 @@ to their unchanged scopes. Detailed evidence:
 Local implementation and evidence reviews pass. Final-head PR correctness
 review and all-green CI are still required before merging; earlier failed
 checks remain documented on the PR.
+
+## Landing spot-products integration
+
+The target advanced to `f4ea9e06ab` (Hyperliquid/Kraken Spot, PR #1339) before
+landing. Resolved seven conflicts by preserving both sets of registrations,
+Spot contracts, exact synthetic-fixture fingerprints, fail-closed live-smoke
+lists, TS-fix notes and standalone compiler overrides. The nearby registry
+census is now 48 Rust names, nine defaults, 39 opt-in and one unregistered.
+Two independent merge reviews pass, including automatic WASM/SDK/harness merges;
+no delegated signing, command decoder, request ordinal or financial projection
+behavior was lost. Formatting and all 578 harness tests pass.
+
+Because shared WASM and venue-descriptor inputs changed, all prior exact-source
+proofs above are historical checkpoints. Refresh all 22 replay gates, full native
+and combined/TS verification on this committed merge before final PR review/CI.

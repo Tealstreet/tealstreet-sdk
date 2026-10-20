@@ -19,6 +19,8 @@ import {
 import { createRequire } from 'node:module';
 import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
+import { hyperliquidspot } from './hyperliquidspot.mjs';
+import { krakenspot } from './krakenspot.mjs';
 import { kucoin } from './kucoin.mjs';
 import { kucoinspot } from './kucoinspot.mjs';
 import { breakoutprop } from './breakoutprop-requests.mjs';
@@ -1363,6 +1365,8 @@ export const VENUES = {
     isWrite: (method) => method !== 'GET',
   },
 
+  hyperliquidspot,
+  krakenspot,
   hyperliquid: {
     rust: 'hyperliquid',
     ts: {

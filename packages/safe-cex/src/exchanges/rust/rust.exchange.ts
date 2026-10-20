@@ -96,9 +96,11 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   kucoinspot: 'kucoinspot',
   polymarket: 'polymarket',
   hyperliquid: 'hyperliquid',
+  hyperliquidspot: 'hyperliquidspot',
   paradex: 'paradex',
   txflow: 'txflow',
   kraken: 'kraken',
+  krakenspot: 'krakenspot',
   lighter: 'lighter',
   'lighter-robinhood': 'lighter-robinhood',
   okx: 'okx',
@@ -151,6 +153,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     isValid: (id) => /^[1-9]\d{0,9}$/.test(id) && Number(id) <= 0xffff_ffff,
   },
   hyperliquid: hyperliquidClientOrderIdRule,
+  hyperliquidspot: hyperliquidClientOrderIdRule,
   paradex: patternClientOrderIdRule('Paradex', /^.{1,64}$/, {
     mint: () => `ts_${uuid()}`,
     isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
@@ -251,7 +254,7 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
-    this.isSpot = ['bybitspot', 'binancespot', 'coinbasespot', 'kucoinspot'].includes(exchangeName);
+    this.isSpot = ['bybitspot', 'binancespot', 'kucoinspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot'].includes(exchangeName);
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     if (exchangeName === 'polymarket') {
@@ -311,6 +314,12 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
+    }
+    if (this.name === 'hyperliquidspot' || this.name === 'krakenspot') {
+      this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
+      this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
+      this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
+      this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
     if (['woo', 'grvt', 'kucoinspot'].includes(this.name)) {
       this.cancelAllOrders = async () => {
@@ -655,6 +664,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     return new Promise((resolve) => {
       let settled = false;
+      let started = false;
       const finish = (result: ValidateAccountResult) => {
         if (settled) return;
         settled = true;
@@ -666,13 +676,15 @@ export class RustEngineExchange extends BaseExchange {
       const onError = (message: unknown) =>
         finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
       const loaded = () => {
-        if (this.store.loaded.balance || (this.name === 'breakoutprop' && this.isPublicDataOnly && this.store.loaded.markets && this.store.loaded.tickers)) finish({ error: '', balance: this.store.balance });
+        if (this.startupFailure) return finish({ error: this.startupFailure.message });
+        if (this.isDisposed) return finish({ error: 'Exchange disposed during account validation' });
+        if (started && (this.store.loaded.balance || (this.name === 'breakoutprop' && this.isPublicDataOnly && this.store.loaded.markets && this.store.loaded.tickers))) finish({ error: '', balance: this.store.balance });
       };
       this.emitter.on('error', onError);
       const unsubscribe = this.store.subscribe(loaded);
       const timeout = setTimeout(() => finish({ error: 'Timed out validating the account' }), 15_000);
       loaded();
-      if (!this.host || !this.startup) this.start().catch((error) => onError(String(error?.message ?? error)));
+      if (!settled) this.start().then(() => { started = true; loaded(); }, (error) => onError(String(error?.message ?? error)));
     });
   };
 

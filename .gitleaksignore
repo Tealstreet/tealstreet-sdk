@@ -41,3 +41,10 @@ d2db97a4af1ad06a0b92f3bb4b8db4915ee01821:packages/safe-cex/src/__tests__/audit-r
 # replay-key and a placeholder signature; never a supplied credential. Replaced
 # with placeholder. Exact historical occurrence only; future changes stay scanned.
 c58afe1514d38ddbd90e45261f078721a9db03c6:sdk-rs/harness/kucoinspot.test.mjs:generic-api-key:6
+
+# Spot replay oracles only: Hyperliquid uses the public synthetic 0x012345...0123
+# Ethereum test vector; Kraken is base64 of the literal "replay-secret", paired
+# with "replay-key". Neither is an account credential. Exact historical
+# fingerprints only; future changes and production credentials remain scanned.
+3972cc5f54587301f5da05a3fbd6c406ba1691c6:sdk-rs/harness/hyperliquidspot.mjs:generic-api-key:5
+3972cc5f54587301f5da05a3fbd6c406ba1691c6:sdk-rs/harness/krakenspot.mjs:generic-api-key:3

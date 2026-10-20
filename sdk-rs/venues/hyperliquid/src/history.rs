@@ -166,6 +166,21 @@ impl Hyperliquid {
                 return;
             }
         }
+        if self.spot {
+            cx.done(
+                command,
+                match query {
+                    Query::OrderByClientId { .. } => {
+                        Ok("{\"found\":false,\"definitive\":false}".into())
+                    }
+                    Query::PublicTrades { .. } => {
+                        Err("Hyperliquid spot public trades query is not supported".into())
+                    }
+                    _ => Ok("[]".into()),
+                },
+            );
+            return;
+        }
         let (kind, from, to) = match &query {
             Query::OrderByClientId { .. } => (Kind::Lookup, None, None),
             Query::Fills { from_ms, to_ms, .. } => (Kind::Fills, *from_ms, *to_ms),
