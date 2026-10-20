@@ -474,7 +474,6 @@ impl History {
         } else {
             credentials
         };
-        let (url, headers, _) = params.into_request(Method::Get, path, auth, cx.now);
         let request = Pending::History(Request {
             command,
             window: (from.unwrap_or(0.0), to.unwrap_or(0.0)),
@@ -486,7 +485,7 @@ impl History {
         } else {
             ArrayAt::EnvelopeField("data")
         };
-        cx.request_streamed(Method::Get, url, headers, at, request);
+        crate::issue(cx, auth, Method::Get, path, params, Some(at), request);
     }
 
     pub fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
