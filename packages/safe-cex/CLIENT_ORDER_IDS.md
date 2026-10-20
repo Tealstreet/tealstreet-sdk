@@ -11,6 +11,12 @@ generated format, so broker attribution carried by the ID survives. It returns
 but plain Limit/Market; Paradex also refuses `close`), an order above the
 market's max size, or an unknown market.
 
+The Rust wrapper applies the same caller-ID preflight as each TS adapter.
+Binance, Binance PM and Phemex preserve the rules and broker-attributed mint
+formats below; caller IDs reach the engine unchanged. An invalid order anywhere
+in a batch prevents the entire batch from reaching the engine. Lighter rejects
+caller IDs before any engine command.
+
 | Venue                        | Caller rule              | Minted              | Attribution          | Where the ID lands on a mapped `Order`                    |
 | ---------------------------- | ------------------------ | ------------------- | -------------------- | --------------------------------------------------------- |
 | Binance                      | `[.A-Z:/a-z0-9_-]{1,36}` | `x-s3vFFRQp…`       | in the ID            | `info.clientOrderId` (REST), `info.c` (WS)                |

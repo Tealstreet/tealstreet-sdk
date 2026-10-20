@@ -1186,6 +1186,85 @@ test('Backpack cancellation client IDs stay exact while only valid creation IDs 
   assert.equal(tape.respond('DELETE', cancel, '{"clientId":42}').status, 200);
 });
 
+test('replay readiness waits for the first recorded socket before deriving subscriptions', async () => {
+  const url = 'wss://stream.crypto.com/exchange/v1/market';
+  const tape = new Tape([{ type: 'ws', t: 0, url, socket: 0, text: 'ticker' }], {}, false, 200);
+  const seen = [];
+  let marketsReady = false;
+  const played = tape.play(undefined, async () => seen.push(`ready:${marketsReady}`));
+  await new Promise(setImmediate);
+  assert.deepEqual(seen, []);
+  // The production venue commits its seed before opening this socket.
+  marketsReady = true;
+  tape.connect(url, () => seen.push('opened'), () => seen.push('frame'));
+  assert.equal(await played, 1);
+  assert.deepEqual(seen, ['opened', 'ready:true', 'frame']);
+});
+
+for (const delayedAuth of [false, true]) test(`first-socket startup fence preserves authenticated Phemex bootstrap before readiness (${delayedAuth ? 'delayed auth' : 'immediate auth'})`, async () => {
+  const url = 'wss://ws.phemex.com';
+  const authAck = JSON.stringify({ id: 999, error: null, result: { status: 'success' } });
+  const snapshot = JSON.stringify({ type: 'snapshot', orders_p: [] });
+  const ticker = JSON.stringify({ method: 'perp_market24h_pack_p.update', data: [] });
+  const tape = new Tape([
+    { type: 'ws', t: 0, url, bootstrap: true, text: authAck },
+    { type: 'ws', t: 0, url, bootstrap: true, text: snapshot },
+    { type: 'ws', t: 0, url, text: ticker },
+  ], venueOf('phemex'), true, 200, 'rust');
+  const seen = [];
+  const publicSocket = tape.connect(url,
+    () => tape.send(publicSocket, JSON.stringify({ method: 'perp_market24h_pack_p.subscribe', params: [] })),
+    () => seen.push('public-ticker'),
+  );
+  const privateSocket = tape.connect(url, () => {
+    const authenticate = () => {
+      const expiry = Math.floor(Date.now() / 1000 + 60);
+      const signature = createHmac('sha256', 'replay-secret').update('replay-key' + expiry).digest('hex');
+      tape.send(privateSocket, JSON.stringify({ id: 999, method: 'user.auth', params: ['API', 'replay-key', signature, expiry] }));
+    };
+    // Opening notification occurs first; bootstrap must wake when auth later
+    // identifies the private socket, even without stream-routing venue flags.
+    if (delayedAuth) setTimeout(authenticate, 10);
+    else authenticate();
+  }, (text) => {
+    if (JSON.parse(text).id === 999) {
+      seen.push('private-auth-ack');
+      tape.send(privateSocket, JSON.stringify({ method: 'aop_p.subscribe', params: [] }));
+    } else seen.push('private-snapshot');
+  });
+  assert.equal(await tape.play(undefined, async () => {
+    assert.deepEqual(seen, ['private-auth-ack', 'private-snapshot']);
+    assert.equal(tape.audit.ready(), true);
+    seen.push('ready');
+  }), 1);
+  assert.deepEqual(seen, ['private-auth-ack', 'private-snapshot', 'ready', 'public-ticker']);
+  assert.deepEqual(tape.audit.errors(), []);
+});
+
+test('shared public/private routing rejects ambiguous closes and keeps physical socket ordinals', async () => {
+  const url = 'wss://example.test/shared';
+  const seen = [];
+  const tape = new Tape([], {
+    socketMatches: (socket, text) => Boolean(socket.private) === JSON.parse(text).private,
+    onSocketSend: (socket, text) => { socket.private = JSON.parse(text).private; },
+  }, true, 200);
+  const publicSocket = tape.connect(url, () => {}, () => seen.push('public'), (code) => seen.push(`closed-public:${code}`));
+  const privateSocket = tape.connect(url, () => {}, () => seen.push('private'));
+  tape.send(privateSocket, '{"private":true}');
+  await new Promise(setImmediate);
+  await tape.deliverFrame({ type: 'ws', url, text: '{"private":false}' });
+  await tape.deliverFrame({ type: 'ws', url, text: '{"private":true}' });
+  await assert.rejects(tape.deliverFrame({ type: 'close', url }), /Ambiguous close/);
+  assert.equal(publicSocket.closed, false);
+  assert.equal(privateSocket.closed, false);
+  await tape.deliverFrame({ type: 'close', url, socket: 0, code: 1006 });
+  const replacement = tape.connect(url, () => {}, () => seen.push('replacement'));
+  await new Promise(setImmediate);
+  assert.deepEqual([publicSocket.ordinal, privateSocket.ordinal, replacement.ordinal], [0, 1, 2]);
+  await tape.deliverFrame({ type: 'ws', url, socket: 1, text: '{"private":true}' });
+  await tape.deliverFrame({ type: 'ws', url, socket: 2, text: '{"private":false}' });
+  assert.deepEqual(seen, ['public', 'private', 'closed-public:1006', 'private', 'replacement']);
+});
 test('venue socket keys preserve bullet tokens while normalizing generated connection IDs', async () => {
   const venue = { volatileQueryFields: ['connectId'] };
   const urlKey = (value) => canonicalUrl(value, new Set(), venue);

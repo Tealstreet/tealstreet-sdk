@@ -1,0 +1,1245 @@
+//! Sequenced g-API writes. The complete command is validated before dispatch;
+//! ambiguous transport failures never cause a mutation to be retried.
+use crate::{Pending, PhemexPerpetuals};
+use safe_cex_engine::model::{
+    MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionMode,
+    PositionSide, StopTriggerType, TimeInForce,
+};
+use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
+use serde::Deserialize;
+use serde_json::value::RawValue;
+use std::collections::{HashMap, HashSet, VecDeque};
+
+#[derive(Default)]
+pub(crate) struct State {
+    jobs: HashMap<CommandId, Job>,
+    sides: HashMap<String, String>,
+    brackets: HashMap<String, Brackets>,
+}
+#[derive(Clone, Copy)]
+struct Brackets {
+    tp: Option<StopTriggerType>,
+    sl: Option<StopTriggerType>,
+}
+struct Job {
+    steps: VecDeque<Step>,
+    ids: Vec<String>,
+    settings: bool,
+    mode: Option<bool>,
+}
+pub struct Request {
+    command: CommandId,
+    call: Call,
+    revision: u64,
+}
+struct Step {
+    method: Method,
+    path: &'static str,
+    query: String,
+    call: Call,
+    replacement: Option<Guard>,
+}
+struct Guard {
+    id: String,
+    amount: f64,
+    filled: f64,
+}
+enum Call {
+    Place {
+        order: Box<Order>,
+        pos_side: String,
+        brackets: Brackets,
+    },
+    Cancel {
+        before: Vec<Order>,
+        ids: Vec<String>,
+    },
+    Settings {
+        symbol: String,
+        leverage: Option<f64>,
+        margin: Option<MarginType>,
+        mode: Option<PositionMode>,
+    },
+}
+#[derive(Deserialize)]
+struct Envelope {
+    code: i64,
+    #[serde(default)]
+    msg: String,
+    #[serde(default)]
+    data: Option<Box<RawValue>>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Identity {
+    #[serde(rename = "orderID")]
+    order_id: String,
+    #[serde(default, rename = "clOrdID")]
+    client_id: Option<String>,
+    #[serde(default)]
+    ord_status: String,
+    #[serde(default)]
+    exec_status: String,
+    #[serde(default)]
+    biz_error: i64,
+    #[serde(default, deserialize_with = "crate::wire::optional_number")]
+    cum_qty_rq: Option<f64>,
+    #[serde(default, deserialize_with = "crate::wire::optional_number")]
+    cum_qty: Option<f64>,
+    #[serde(default, deserialize_with = "crate::wire::optional_number")]
+    exec_qty: Option<f64>,
+    #[serde(default)]
+    code: i64,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum CancelResult {
+    Rows(Vec<Identity>),
+    Row(Identity),
+}
+
+fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: String) {
+    cx.log(LogLevel::Error, &error);
+    cx.done(command, Err(error));
+}
+fn encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+            out.push(b as char);
+        } else {
+            use std::fmt::Write;
+            let _ = write!(out, "%{b:02X}");
+        }
+    }
+    out
+}
+fn query(pairs: Vec<(&str, String)>) -> String {
+    pairs
+        .into_iter()
+        .map(|(k, v)| format!("{k}={}", encode(&v)))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+fn positive(v: f64, step: f64) -> Result<f64, String> {
+    let n = num::adjust(v, step);
+    if v.is_finite() && v > 0.0 && n.is_finite() && n > 0.0 {
+        Ok(n)
+    } else {
+        Err("Phemex quantity/price must be finite and positive after rounding".into())
+    }
+}
+fn trigger(t: StopTriggerType) -> Result<&'static str, String> {
+    match t {
+        StopTriggerType::MarkPrice => Ok("ByMarkPrice"),
+        StopTriggerType::LastPrice => Ok("ByLastPrice"),
+        _ => Err("Phemex index-price triggers are unsupported".into()),
+    }
+}
+fn plain(o: &PlaceOrderOpts) -> bool {
+    matches!(o.kind, OrderType::Limit | OrderType::Market)
+        && o.stop_loss.is_none()
+        && o.take_profit.is_none()
+        && o.trigger_price.is_none()
+}
+fn valid_client(id: &str) -> bool {
+    let len: usize = id
+        .chars()
+        .map(|c| if c as u32 > 0xffff { 2 } else { 1 })
+        .sum();
+    (1..=40).contains(&len)
+        && !id
+            .chars()
+            .any(|c| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
+}
+fn native(id: &str) -> Result<&str, String> {
+    let base = id
+        .strip_suffix("__stop_loss")
+        .or_else(|| id.strip_suffix("__take_profit"))
+        .unwrap_or(id);
+    if base.is_empty()
+        || base.contains("__")
+        || base.len() > 128
+        || !base
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+    {
+        Err("Phemex requires an actual venue order ID".into())
+    } else {
+        Ok(base)
+    }
+}
+fn active(o: &Order) -> bool {
+    matches!(
+        o.status,
+        OrderStatus::Open | OrderStatus::Creating | OrderStatus::Updating | OrderStatus::Canceling
+    )
+}
+
+impl PhemexPerpetuals {
+    fn place_plan(
+        &self,
+        cx: &Cx<'_, Pending>,
+        orders: Vec<PlaceOrderOpts>,
+    ) -> Result<VecDeque<Step>, String> {
+        if orders.len() > 1000 {
+            return Err("Phemex command exceeds 1000 orders".into());
+        }
+        let mut seen = HashSet::new();
+        for o in &orders {
+            if o.stp_mode.is_some() {
+                return Err("Phemex self-trade prevention is unsupported".into());
+            }
+            if o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some() {
+                return Err("Phemex does not support Bybit execution controls".into());
+            }
+            if let Some(id) = &o.client_order_id {
+                if !plain(o) || !valid_client(id) {
+                    return Err(
+                        "Phemex caller clientOrderId requires a plain order and 1..40 characters"
+                            .into(),
+                    );
+                }
+                if !seen.insert(id.clone()) {
+                    return Err("Phemex duplicate clientOrderId in command".into());
+                }
+            }
+        }
+        let mut steps = VecDeque::new();
+        for o in orders {
+            let m = cx
+                .store
+                .market(&o.symbol)
+                .ok_or_else(|| format!("Market {} not found", o.symbol))?;
+            if !m.precision.amount.is_finite() || m.precision.amount <= 0.0 {
+                return Err("Phemex quantity precision is unknown".into());
+            }
+            if !m.active || m.is_read_only == Some(true) {
+                return Err("Phemex market is not writable".into());
+            }
+            if o.kind == OrderType::Conditional {
+                return Err("Phemex opening trigger orders are disabled until stopPxRp and triggerType are verified".into());
+            }
+            if o.trigger_price.is_some() {
+                return Err("Phemex triggerPrice is unsupported for this order type".into());
+            }
+            if o.client_order_id.is_some() && o.amount > m.limits.amount.max {
+                return Err("Phemex caller clientOrderId cannot span split orders".into());
+            }
+            let mode = self
+                .account
+                .mode(&o.symbol)
+                .ok_or("Phemex position mode is unknown; await account reconciliation")?;
+            let protective = matches!(
+                o.kind,
+                OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+            );
+            let reduce = o.reduce_only == Some(true) || protective;
+            let pos_side = self
+                .account
+                .pos_side(&o.symbol, o.side, reduce)
+                .ok_or("Phemex position side is unknown")?;
+            let p = o
+                .price
+                .map(|p| positive(p, m.precision.price))
+                .transpose()?;
+            if o.kind != OrderType::Market && p.is_none() {
+                return Err("Phemex limit/stop/trailing price is required".into());
+            }
+            let tp = o
+                .take_profit
+                .map(|p| positive(p, m.precision.price))
+                .transpose()?;
+            let sl = o
+                .stop_loss
+                .map(|p| positive(p, m.precision.price))
+                .transpose()?;
+            let brackets = Brackets {
+                tp: tp.map(|_| o.tp_trigger_type.unwrap_or(StopTriggerType::LastPrice)),
+                sl: sl.map(|_| o.sl_trigger_type.unwrap_or(StopTriggerType::MarkPrice)),
+            };
+            if let Some(t) = brackets.tp {
+                trigger(t)?;
+            }
+            if let Some(t) = brackets.sl {
+                trigger(t)?;
+            }
+            let kind = match o.kind {
+                OrderType::Market => "Market",
+                OrderType::Limit => "Limit",
+                OrderType::TakeProfit => "MarketIfTouched",
+                _ => "Stop",
+            };
+            let full_close =
+                o.amount == 0.0 && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit);
+            let mut amount = if full_close || o.kind == OrderType::TrailingStopLoss {
+                0.0
+            } else {
+                positive(o.amount, m.precision.amount)?
+            };
+            let mut offset = None;
+            if o.kind == OrderType::TrailingStopLoss {
+                let side = if o.side == OrderSide::Buy {
+                    PositionSide::Short
+                } else {
+                    PositionSide::Long
+                };
+                let position = cx
+                    .store
+                    .positions()
+                    .iter()
+                    .find(|p| p.symbol == o.symbol && p.side == side && p.contracts > 0.0)
+                    .ok_or("Phemex trailing stop requires a matching open position")?;
+                let last = cx
+                    .store
+                    .ticker(&o.symbol)
+                    .map(|t| t.last)
+                    .filter(|p| p.is_finite() && *p > 0.0)
+                    .ok_or("Phemex trailing stop requires a current ticker")?;
+                let distance = positive((last - p.unwrap()).abs(), m.precision.price)?;
+                offset = Some(if o.side == OrderSide::Sell {
+                    -distance
+                } else {
+                    distance
+                });
+                amount = positive(position.contracts, m.precision.amount)?;
+            }
+            if !full_close && amount < m.limits.amount.min {
+                return Err("Phemex quantity below market minimum".into());
+            }
+            let max = m.limits.amount.max;
+            if !max.is_finite() || max <= 0.0 {
+                return Err("Phemex market maximum quantity is unknown".into());
+            }
+            if o.client_order_id.is_some() && amount > max {
+                return Err("Phemex caller clientOrderId cannot span split orders".into());
+            }
+            if offset.is_some() && amount > max {
+                return Err("Phemex trailing full-position quantity exceeds maximum".into());
+            }
+            // Use integral precision units so splitting never over-orders through rounding.
+            let units = if full_close {
+                1.0
+            } else {
+                (amount / m.precision.amount).round()
+            };
+            let nearest_max = num::adjust(max, m.precision.amount);
+            let max_units = (nearest_max / m.precision.amount).round()
+                - if nearest_max > max { 1.0 } else { 0.0 };
+            if o.client_order_id.is_some() && units > max_units {
+                return Err("Phemex caller clientOrderId cannot span split orders".into());
+            }
+            if !units.is_finite()
+                || units > 9_007_199_254_740_991.0
+                || max_units < 1.0
+                || (units / max_units).ceil() > 1000.0
+            {
+                return Err("Phemex order cannot be safely split".into());
+            }
+            if !max_units.is_finite() || max_units > 9_007_199_254_740_991.0 {
+                return Err("Phemex market maximum cannot be represented safely".into());
+            }
+            let mut left = units;
+            while left > 0.0 {
+                let qty = if full_close {
+                    0.0
+                } else {
+                    num::adjust(left.min(max_units) * m.precision.amount, m.precision.amount)
+                };
+                left -= left.min(max_units);
+                if qty > max {
+                    return Err("Phemex split lot exceeds market maximum".into());
+                }
+                if !full_close && qty < m.limits.amount.min {
+                    return Err("Phemex split remainder below minimum quantity".into());
+                }
+                let id = match &o.client_order_id {
+                    Some(id) => id.clone(),
+                    None => format!("Tealstreet_{}", safe_cex_crypto::uuid::uuid()?),
+                };
+                if o.client_order_id.is_none() && !seen.insert(id.clone()) {
+                    return Err("Phemex duplicate generated clientOrderId".into());
+                }
+                let mut params = vec![
+                    ("clOrdID", id.clone()),
+                    ("symbol", self.native_symbol(&m.symbol).to_owned()),
+                    ("posSide", pos_side.into()),
+                    (
+                        "side",
+                        if o.side == OrderSide::Buy {
+                            "Buy"
+                        } else {
+                            "Sell"
+                        }
+                        .into(),
+                    ),
+                    ("ordType", kind.into()),
+                ];
+                if !full_close {
+                    params.push(("orderQtyRq", num::format(qty)));
+                }
+                if offset.is_none() {
+                    if matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                        params.push(("stopPxRp", num::format(p.unwrap())));
+                    }
+                    if o.kind != OrderType::Market {
+                        params.push(("priceRp", num::format(p.unwrap())));
+                    }
+                    if o.kind == OrderType::Limit {
+                        params.push((
+                            "timeInForce",
+                            match o.time_in_force.unwrap_or(TimeInForce::GoodTillCancel) {
+                                TimeInForce::GoodTillCancel => "GoodTillCancel",
+                                TimeInForce::ImmediateOrCancel => "ImmediateOrCancel",
+                                TimeInForce::FillOrKill => "FillOrKill",
+                                TimeInForce::PostOnly => "PostOnly",
+                            }
+                            .into(),
+                        ));
+                    }
+                    if protective {
+                        params.push(("closeOnTrigger", "true".into()));
+                    }
+                    if mode == PositionMode::Oneway && o.reduce_only == Some(true) && !protective {
+                        params.push(("reduceOnly", "true".into()));
+                    }
+                    if let Some(sl) = sl {
+                        params.push(("stopLossRp", num::format(sl)));
+                    }
+                    if let Some(tp) = tp {
+                        params.push(("takeProfitRp", num::format(tp)));
+                    }
+                    if let Some(t) = brackets.tp {
+                        params.push(("tpTrigger", trigger(t)?.into()));
+                    }
+                    if let Some(t) = brackets.sl {
+                        params.push(("slTrigger", trigger(t)?.into()));
+                    }
+                    if matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                        let t = if o.kind == OrderType::TakeProfit {
+                            o.tp_trigger_type.unwrap_or(StopTriggerType::LastPrice)
+                        } else {
+                            o.sl_trigger_type.unwrap_or(StopTriggerType::MarkPrice)
+                        };
+                        params.push(("triggerType", trigger(t)?.into()));
+                    }
+                } else if let Some(offset) = offset {
+                    params.push(("pegOffsetValueRp", num::format(offset)));
+                    params.push(("pegPriceType", "TrailingStopPeg".into()));
+                }
+                let row = Order {
+                    id: format!("__phemex_creating_{id}"),
+                    parent_id: None,
+                    status: OrderStatus::Creating,
+                    symbol: o.symbol.clone(),
+                    kind: o.kind,
+                    side: o.side,
+                    price: p.unwrap_or(0.0),
+                    amount: qty,
+                    filled: 0.0,
+                    remaining: qty,
+                    reduce_only: reduce,
+                    close: o.close,
+                    client_order_id: Some(id),
+                    time_in_force: o.time_in_force,
+                    last_update: cx.now,
+                    trigger_type: if o.kind == OrderType::TakeProfit {
+                        Some(o.tp_trigger_type.unwrap_or(StopTriggerType::LastPrice))
+                    } else if o.kind == OrderType::StopLoss {
+                        Some(o.sl_trigger_type.unwrap_or(StopTriggerType::MarkPrice))
+                    } else {
+                        None
+                    },
+                    take_profit: tp,
+                    stop_loss: sl,
+                    extra: None,
+                };
+                steps.push_back(Step {
+                    method: Method::Put,
+                    path: "/g-orders/create",
+                    query: query(params),
+                    call: Call::Place {
+                        order: Box::new(row),
+                        pos_side: pos_side.into(),
+                        brackets,
+                    },
+                    replacement: None,
+                });
+                if steps.len() > 1000 {
+                    return Err("Phemex command exceeds 1000 native orders".into());
+                }
+            }
+        }
+        Ok(steps)
+    }
+
+    fn cancel_plan(
+        &self,
+        cx: &Cx<'_, Pending>,
+        ids: Vec<String>,
+    ) -> Result<VecDeque<Step>, String> {
+        let mut groups: Vec<(String, String, Vec<String>)> = Vec::new();
+        let mut seen = HashSet::new();
+        for id in ids {
+            let base = native(&id)?.to_owned();
+            if !seen.insert(base.clone()) {
+                continue;
+            }
+            let o = cx
+                .store
+                .order(&base)
+                .or_else(|| cx.store.order(&id))
+                .ok_or(
+                    "Phemex cancel requires a cached order to resolve symbol and position side",
+                )?;
+            if !active(o) {
+                return Err("Phemex cannot cancel a terminal order".into());
+            }
+            let m = cx
+                .store
+                .market(&o.symbol)
+                .ok_or("Phemex cancel market not found")?;
+            let pos = if let Some(p) = self.trading.sides.get(&base) {
+                p.clone()
+            } else if let Some(p) = self.account.order_pos_side(&base) {
+                p.to_owned()
+            } else {
+                let mode = self
+                    .account
+                    .mode(&o.symbol)
+                    .ok_or("Phemex cancel position mode is unknown")?;
+                if mode == PositionMode::Oneway {
+                    "Merged".into()
+                } else if (o.side == OrderSide::Buy) != o.reduce_only {
+                    "Long".into()
+                } else {
+                    "Short".into()
+                }
+            };
+            if !matches!(pos.as_str(), "Merged" | "Long" | "Short") {
+                return Err("Phemex cancel position side is invalid".into());
+            }
+            if let Some(g) = groups
+                .iter_mut()
+                .find(|g| g.0 == self.native_symbol(&m.symbol) && g.1 == pos)
+            {
+                g.2.push(base);
+            } else {
+                groups.push((self.native_symbol(&m.symbol).to_owned(), pos, vec![base]));
+            }
+        }
+        let mut steps = VecDeque::new();
+        for (symbol, pos, ids) in groups {
+            let single = ids.len() == 1;
+            for chunk in ids.chunks(10) {
+                let before = cx
+                    .store
+                    .orders()
+                    .iter()
+                    .filter(|o| {
+                        native(&o.id)
+                            .ok()
+                            .is_some_and(|id| chunk.iter().any(|x| x == id))
+                            && active(o)
+                    })
+                    .cloned()
+                    .collect();
+                steps.push_back(Step {
+                    method: Method::Delete,
+                    path: if single {
+                        "/g-orders/cancel"
+                    } else {
+                        "/g-orders"
+                    },
+                    query: query(vec![
+                        ("symbol", symbol.clone()),
+                        ("posSide", pos.clone()),
+                        ("orderID", chunk.join(",")),
+                    ]),
+                    call: Call::Cancel {
+                        before,
+                        ids: chunk.to_vec(),
+                    },
+                    replacement: None,
+                });
+            }
+        }
+        Ok(steps)
+    }
+
+    fn amend_plan(
+        &self,
+        cx: &Cx<'_, Pending>,
+        id: String,
+        price: Option<f64>,
+        amount: Option<f64>,
+    ) -> Result<VecDeque<Step>, String> {
+        if price.is_none() && amount.is_none() {
+            return Err("Phemex amendment requires price or amount".into());
+        }
+        if self.account.has_unreconciled_fills() {
+            return Err(
+                "Phemex fills are awaiting order reconciliation; wait before amending".into(),
+            );
+        }
+        let base = native(&id)?.to_owned();
+        let parent = cx
+            .store
+            .order(&base)
+            .ok_or("Phemex replacement parent order not found")?;
+        if parent.status != OrderStatus::Open {
+            return Err("Phemex replacement requires an open parent order".into());
+        }
+        if matches!(parent.kind, OrderType::StopLoss | OrderType::TakeProfit)
+            && parent
+                .extra
+                .as_ref()
+                .is_some_and(|extra| extra.conditional_order_price.is_some())
+        {
+            return Err(
+                "Phemex imported limit-trigger orders cannot be safely canceled and replaced"
+                    .into(),
+            );
+        }
+        if parent.kind == OrderType::TrailingStopLoss {
+            return Err(
+                "Phemex trailing cancel-replace cannot preserve its original offset".into(),
+            );
+        }
+        let child = cx
+            .store
+            .order(&id)
+            .ok_or("Phemex amendment order not found")?;
+        let mut tp = parent.take_profit;
+        let mut sl = parent.stop_loss;
+        let mut types = self
+            .trading
+            .brackets
+            .get(&base)
+            .copied()
+            .unwrap_or(Brackets { tp: None, sl: None });
+        for c in cx.store.orders().iter().filter(|o| {
+            o.parent_id.as_deref() == Some(base.as_str()) || o.id.starts_with(&format!("{base}__"))
+        }) {
+            if c.kind == OrderType::TakeProfit {
+                tp = Some(c.price);
+                types.tp = c.trigger_type.or(types.tp);
+            }
+            if c.kind == OrderType::StopLoss {
+                sl = Some(c.price);
+                types.sl = c.trigger_type.or(types.sl);
+            }
+        }
+        if tp.is_some() && types.tp.is_none() || sl.is_some() && types.sl.is_none() {
+            return Err("Phemex cannot preserve imported bracket trigger type".into());
+        }
+        let child_amend = id != base;
+        if child_amend && amount.is_some() {
+            return Err("Phemex virtual bracket quantity amendment is unsupported".into());
+        }
+        if child_amend {
+            match child.kind {
+                OrderType::TakeProfit => tp = price,
+                OrderType::StopLoss => sl = price,
+                _ => return Err("Phemex invalid virtual bracket".into()),
+            }
+        }
+        let opts = PlaceOrderOpts {
+            symbol: parent.symbol.clone(),
+            kind: parent.kind,
+            side: parent.side,
+            amount: amount.unwrap_or(parent.remaining),
+            price: Some(if child_amend {
+                parent.price
+            } else {
+                price.unwrap_or(parent.price)
+            }),
+            trigger_price: None,
+            max_slippage_pct: None,
+            stop_loss: sl,
+            take_profit: tp,
+            reduce_only: Some(parent.reduce_only),
+            time_in_force: parent.time_in_force,
+            trigger_type: parent.trigger_type,
+            tp_trigger_type: if parent.kind == OrderType::TakeProfit {
+                Some(
+                    parent
+                        .trigger_type
+                        .ok_or("Phemex cannot preserve standalone take-profit trigger type")?,
+                )
+            } else {
+                types.tp
+            },
+            sl_trigger_type: if parent.kind == OrderType::StopLoss {
+                Some(
+                    parent
+                        .trigger_type
+                        .ok_or("Phemex cannot preserve standalone stop-loss trigger type")?,
+                )
+            } else {
+                types.sl
+            },
+            client_order_id: None,
+            close: parent.close,
+            stp_mode: None,
+            bybit_bbo: None,
+            bybit_slippage_tolerance_ticks: None,
+        };
+        let mut replacement = self.place_plan(cx, vec![opts])?;
+        if let Some(step) = replacement.front_mut() {
+            step.replacement = Some(Guard {
+                id: base.clone(),
+                amount: parent.amount,
+                filled: parent.filled,
+            });
+        }
+        let mut cancel = self.cancel_plan(cx, vec![base])?;
+        cancel.extend(replacement);
+        Ok(cancel)
+    }
+
+    fn settings_plan(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: String,
+        leverage: Option<f64>,
+        margin: Option<MarginType>,
+    ) -> Result<VecDeque<Step>, String> {
+        let m = cx
+            .store
+            .market(&symbol)
+            .ok_or("Phemex settings market not found")?;
+        let context = self
+            .account
+            .context(&symbol)
+            .ok_or("Phemex current leverage/margin context is unknown")?;
+        let margin = margin.unwrap_or(context.margin_type);
+        if !m.limits.leverage.min.is_finite()
+            || !m.limits.leverage.max.is_finite()
+            || m.limits.leverage.min <= 0.0
+            || m.limits.leverage.min > m.limits.leverage.max
+        {
+            return Err("Phemex market leverage limits are invalid".into());
+        }
+        let changing_leverage = leverage.is_some();
+        let long = leverage.unwrap_or(context.long_leverage);
+        let short = if context.mode == PositionMode::Hedged && !changing_leverage {
+            context.short_leverage
+        } else {
+            long
+        };
+        if !long.is_finite() || long <= 0.0 || !short.is_finite() || short <= 0.0 {
+            return Err("Phemex current side leverage is unknown or invalid".into());
+        }
+        let long = if changing_leverage {
+            long.clamp(m.limits.leverage.min, m.limits.leverage.max)
+        } else {
+            long
+        };
+        let short = if changing_leverage {
+            short.clamp(m.limits.leverage.min, m.limits.leverage.max)
+        } else {
+            short
+        };
+        let signed = |value: f64| {
+            if margin == MarginType::Cross {
+                -value
+            } else {
+                value
+            }
+        };
+        let mut params = vec![("symbol", self.native_symbol(&m.symbol).to_owned())];
+        if context.mode == PositionMode::Hedged {
+            params.push(("longLeverageRr", num::format(signed(long))));
+            params.push(("shortLeverageRr", num::format(signed(short))));
+        } else {
+            params.push(("leverageRr", num::format(signed(long))));
+        }
+        Ok(VecDeque::from([Step {
+            method: Method::Put,
+            path: "/g-positions/leverage",
+            query: query(params),
+            call: Call::Settings {
+                symbol,
+                leverage: changing_leverage.then_some(long),
+                margin: Some(margin),
+                mode: None,
+            },
+            replacement: None,
+        }]))
+    }
+
+    pub(crate) fn trade_command(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: Command,
+    ) -> Option<Command> {
+        self.trading
+            .sides
+            .retain(|id, _| cx.store.order(id).is_some_and(active));
+        self.trading
+            .brackets
+            .retain(|id, _| cx.store.order(id).is_some_and(active));
+        let is_settings = matches!(
+            command,
+            Command::SetLeverage { .. }
+                | Command::SetMarginType { .. }
+                | Command::SetPositionMode { .. }
+        );
+        let depends_settings = matches!(
+            command,
+            Command::PlaceOrders { .. } | Command::AmendOrder { .. }
+        );
+        let mut mode = None;
+        let (id, planned) = match command {
+            Command::CancelOrdersWithSymbols { command, .. }
+            | Command::FetchStpMode { command }
+            | Command::SetStpMode { command, .. }
+            | Command::FetchAccount { command }
+            | Command::FetchOrderBook { command, .. }
+            | Command::FetchLeverage { command, .. } => {
+                (command, Err("Phemex command is unsupported".into()))
+            }
+            Command::PlaceOrders { command, orders } => (command, self.place_plan(cx, orders)),
+            Command::CancelOrders { command, ids } => (command, self.cancel_plan(cx, ids)),
+            Command::CancelSymbolOrders { command, symbol } => {
+                let ids = cx
+                    .store
+                    .orders()
+                    .iter()
+                    .filter(|o| o.symbol == symbol && active(o))
+                    .map(|o| o.id.clone())
+                    .collect();
+                (
+                    command,
+                    if cx.store.market(&symbol).is_some() {
+                        if !self.account.orders_ready() {
+                            Err("Phemex order snapshot is not loaded; cannot cancel every symbol order".into())
+                        } else {
+                            self.cancel_plan(cx, ids)
+                        }
+                    } else {
+                        Err("Phemex market not found".into())
+                    },
+                )
+            }
+            Command::AmendOrder {
+                command,
+                id,
+                price,
+                amount,
+            } => (command, self.amend_plan(cx, id, price, amount)),
+            Command::SetLeverage {
+                command,
+                symbol,
+                leverage,
+            } => (
+                command,
+                self.settings_plan(cx, symbol, Some(leverage), None),
+            ),
+            Command::SetMarginType {
+                command,
+                symbol,
+                isolated,
+            } => (
+                command,
+                self.settings_plan(
+                    cx,
+                    symbol,
+                    None,
+                    Some(if isolated {
+                        MarginType::Isolated
+                    } else {
+                        MarginType::Cross
+                    }),
+                ),
+            ),
+            Command::SetPositionMode { command, hedged } => {
+                mode = Some(hedged);
+                let result = (|| {
+                    let mut steps = VecDeque::new();
+                    for m in cx
+                        .store
+                        .markets()
+                        .iter()
+                        .filter(|m| m.active && m.is_read_only != Some(true))
+                    {
+                        self.account.context(&m.symbol).ok_or(
+                            "Phemex global mode change requires confirmed context for every market",
+                        )?;
+                        steps.push_back(Step {
+                            method: Method::Put,
+                            path: "/g-positions/switch-pos-mode-sync",
+                            query: query(vec![
+                                ("symbol", self.native_symbol(&m.symbol).to_owned()),
+                                (
+                                    "targetPosMode",
+                                    if hedged { "Hedged" } else { "OneWay" }.into(),
+                                ),
+                            ]),
+                            call: Call::Settings {
+                                symbol: m.symbol.clone(),
+                                leverage: None,
+                                margin: None,
+                                mode: Some(if hedged {
+                                    PositionMode::Hedged
+                                } else {
+                                    PositionMode::Oneway
+                                }),
+                            },
+                            replacement: None,
+                        });
+                    }
+                    if steps.is_empty() {
+                        return Err("Phemex no markets available for mode change".into());
+                    }
+                    Ok(steps)
+                })();
+                (command, result)
+            }
+            other => return Some(other),
+        };
+        if self.trading.jobs.contains_key(&id) {
+            cx.log(LogLevel::Error, "Phemex command ID is already in flight");
+            return None;
+        }
+        if self.trading.jobs.len() >= 32 {
+            reject(cx, id, "Phemex too many active trading commands".into());
+            return None;
+        }
+        if self.options.public_data_only || self.credentials.is_none() {
+            reject(cx, id, "Phemex private credentials are required".into());
+            return None;
+        }
+        if (is_settings || depends_settings) && self.trading.jobs.values().any(|j| j.settings) {
+            reject(
+                cx,
+                id,
+                "Phemex account settings update is already in flight".into(),
+            );
+            return None;
+        }
+        match planned {
+            Err(error) => reject(cx, id, error),
+            Ok(steps) => {
+                self.trading.jobs.insert(
+                    id,
+                    Job {
+                        steps,
+                        ids: Vec::new(),
+                        settings: is_settings,
+                        mode,
+                    },
+                );
+                self.trade_next(cx, id);
+            }
+        }
+        None
+    }
+
+    fn trade_next(&mut self, cx: &mut Cx<'_, Pending>, id: CommandId) {
+        let Some(job) = self.trading.jobs.get_mut(&id) else {
+            return;
+        };
+        let Some(step) = job.steps.pop_front() else {
+            let job = self.trading.jobs.remove(&id).unwrap();
+            if let Some(hedged) = job.mode {
+                cx.store.set_hedged(hedged);
+            }
+            cx.done(id, Ok(serde_json::to_string(&job.ids).unwrap()));
+            return;
+        };
+        if cx.now < self.paused_until {
+            self.trading.jobs.remove(&id);
+            reject(
+                cx,
+                id,
+                "Phemex requests are rate limited; mutation was not sent".into(),
+            );
+            return;
+        }
+        if let Some(g) = &step.replacement
+            && (!cx.store.order(&g.id).is_some_and(|o| {
+                o.status == OrderStatus::Canceled && o.amount == g.amount && o.filled == g.filled
+            }) || self.account.has_unreconciled_fills())
+        {
+            self.trading.jobs.remove(&id);
+            reject(
+                cx,
+                id,
+                "Phemex order changed while canceling; replacement was not sent".into(),
+            );
+            return;
+        }
+        match &step.call {
+            Call::Place { order, .. } => cx.store.upsert_order((**order).clone()),
+            Call::Cancel { before, .. } => {
+                for o in before {
+                    cx.store.set_order_status(&o.id, OrderStatus::Canceling);
+                }
+            }
+            _ => {}
+        }
+        self.account_write(cx);
+        let revision = self.account.order_revision();
+        self.request(
+            cx,
+            step.method,
+            step.path,
+            &step.query,
+            None,
+            Pending::Trade(Request {
+                command: id,
+                call: step.call,
+                revision,
+            }),
+            None,
+        );
+    }
+
+    pub(crate) fn trade_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Response<'_>,
+    ) {
+        let result = (|| {
+            if !(200..300).contains(&response.status) {
+                return Err(format!("Phemex HTTP {}", response.status));
+            }
+            let env: Envelope = serde_json::from_str(response.body)
+                .map_err(|_| "Phemex malformed write acknowledgement")?;
+            if env.code != 0 {
+                return Err(if env.msg.is_empty() {
+                    format!("Phemex error {}", env.code)
+                } else {
+                    env.msg
+                });
+            }
+            match &request.call {
+                Call::Place {
+                    order,
+                    pos_side,
+                    brackets,
+                } => {
+                    let raw = env.data.ok_or("Phemex missing create result")?;
+                    let identity: Identity = serde_json::from_str(raw.get())
+                        .map_err(|_| "Phemex missing create order identity")?;
+                    native(&identity.order_id)?;
+                    if identity
+                        .client_id
+                        .as_ref()
+                        .is_some_and(|id| Some(id) != order.client_order_id.as_ref())
+                        || identity.biz_error != 0
+                        || identity.code != 0
+                    {
+                        return Err(
+                            "Phemex create acknowledgement identity/rejection mismatch".into()
+                        );
+                    }
+                    if identity.ord_status == "Suspended"
+                        && identity.exec_status == "PendingAllocate"
+                    {
+                        return Err("Phemex order suspended; likely insufficient margin".into());
+                    }
+                    let row: crate::account_wire::OrderRow = serde_json::from_str(raw.get())
+                        .map_err(|_| "Phemex malformed create order")?;
+                    if row.symbol.to_ascii_uppercase() != order.symbol
+                        || crate::account_wire::order_side(&row.side) != Some(order.side)
+                        || row.order_qty.or(row.order_qty_rq).is_none() && order.amount > 0.0
+                        || row
+                            .order_qty
+                            .or(row.order_qty_rq)
+                            .is_some_and(|q| order.amount > 0.0 && q != order.amount)
+                        || !row.pos_side.is_empty() && row.pos_side != pos_side.as_str()
+                        || !matches!(
+                            row.kind.as_ref(),
+                            "Market" | "Limit" | "Stop" | "MarketIfTouched"
+                        )
+                        || row.status.eq_ignore_ascii_case("Rejected")
+                    {
+                        return Err("Phemex create response does not match submitted order".into());
+                    }
+                    let pending = identity.ord_status == "Init";
+                    if !pending {
+                        row.orders(cx.now)
+                            .ok_or("Phemex unrecognized create order response")?;
+                    }
+                    cx.store.remove_orders(&[order.id.as_str()]);
+                    if !pending && self.account.order_revision() == request.revision {
+                        self.accept_write_order(cx, &row);
+                    }
+                    self.trading
+                        .sides
+                        .insert(identity.order_id.clone(), pos_side.clone());
+                    self.trading
+                        .brackets
+                        .insert(identity.order_id.clone(), *brackets);
+                    self.trading
+                        .jobs
+                        .get_mut(&request.command)
+                        .ok_or("Phemex missing write job")?
+                        .ids
+                        .push(identity.order_id);
+                }
+                Call::Cancel { before, ids } => {
+                    if self.account.order_revision() != request.revision {
+                        return Err("Phemex order changed during cancel acknowledgement; await reconciliation".into());
+                    }
+                    let raw = env
+                        .data
+                        .filter(|raw| raw.get() != "null")
+                        .ok_or("Phemex missing cancel acknowledgement")?;
+                    let result: CancelResult = serde_json::from_str(raw.get())
+                        .map_err(|_| "Phemex malformed cancel acknowledgement")?;
+                    let (rows, array) = match result {
+                        CancelResult::Rows(rows) => (rows, true),
+                        CancelResult::Row(row) => (vec![row], false),
+                    };
+                    let mut seen = HashSet::new();
+                    let mut accepted = HashSet::new();
+                    let mut finalized = HashMap::new();
+                    let mut problem = None;
+                    for row in rows {
+                        if !ids.contains(&row.order_id) || !seen.insert(row.order_id.clone()) {
+                            accepted.remove(&row.order_id);
+                            finalized.remove(&row.order_id);
+                            problem = Some("Phemex cancel identity mismatch".to_string());
+                            continue;
+                        }
+                        if row.code != 0
+                            || row.biz_error != 0
+                            || row.exec_status.eq_ignore_ascii_case("Rejected")
+                        {
+                            problem = Some(format!(
+                                "Phemex cancel row rejected: {} {}",
+                                row.code, row.biz_error
+                            ));
+                            continue;
+                        }
+                        let filled = row.cum_qty_rq.or(row.cum_qty).or(row.exec_qty);
+                        if filled.is_some_and(|v| !v.is_finite() || v < 0.0) {
+                            problem = Some("Phemex invalid cancel cumulative fill".into());
+                            continue;
+                        }
+                        let status = match row.ord_status.to_ascii_lowercase().as_str() {
+                            "init" => None,
+                            "canceled" | "cancelled" => Some(OrderStatus::Canceled),
+                            "filled" => Some(OrderStatus::Closed),
+                            _ => {
+                                problem = Some(
+                                    "Phemex cancel acknowledgement has no confirmed outcome".into(),
+                                );
+                                continue;
+                            }
+                        };
+                        if let Some(filled) = filled
+                            && cx
+                                .store
+                                .order(&row.order_id)
+                                .is_some_and(|o| filled > o.filled)
+                        {
+                            cx.store.update_order(&row.order_id, |o| {
+                                o.filled = filled;
+                                o.remaining = (o.amount - filled).max(0.0);
+                            });
+                        }
+                        accepted.insert(row.order_id.clone());
+                        if let Some(status) = status {
+                            finalized.insert(row.order_id, status);
+                        }
+                    }
+                    if seen.is_empty() || array && seen.len() != ids.len() {
+                        problem = Some("Phemex missing cancel acknowledgement rows".into());
+                    }
+                    // A documented bulk object acknowledges the request, but its
+                    // representative order row proves finality only for that ID.
+                    if !array && problem.is_none() {
+                        accepted.extend(ids.iter().cloned());
+                    }
+                    for o in before {
+                        let base = native(&o.id).ok();
+                        let status = base.and_then(|id| finalized.get(id)).copied();
+                        let accepted = base.is_some_and(|id| accepted.contains(id));
+                        if cx.store.order(&o.id).is_some_and(|current| {
+                            current.status == OrderStatus::Canceling
+                                && current.amount == o.amount
+                                && current.filled >= o.filled
+                        }) {
+                            if let Some(status) = status {
+                                cx.store.set_order_status(&o.id, status);
+                            } else if !accepted
+                                && cx
+                                    .store
+                                    .order(&o.id)
+                                    .is_some_and(|current| current.filled == o.filled)
+                            {
+                                cx.store.set_order_status(&o.id, o.status);
+                            }
+                        }
+                    }
+                    for id in finalized.keys() {
+                        self.account.terminal(id, cx.now);
+                    }
+                    if !accepted.is_empty() {
+                        self.account_write(cx);
+                    }
+                    if let Some(error) = problem {
+                        return Err(error);
+                    }
+                }
+                Call::Settings {
+                    symbol,
+                    leverage,
+                    margin,
+                    mode,
+                } => {
+                    if let Some(l) = leverage {
+                        cx.store.update_setting(symbol, |s| s.leverage = *l);
+                    }
+                    if let Some(m) = margin {
+                        cx.store
+                            .update_setting(symbol, |s| s.margin_type = Some(*m));
+                    }
+                    self.account
+                        .apply_settings(symbol, *leverage, *margin, *mode);
+                }
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.account_write(cx);
+                self.account_refresh(cx);
+                self.trade_next(cx, request.command);
+            }
+            Err(error) => self.trade_failed(cx, request, error),
+        }
+    }
+
+    pub(crate) fn trade_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: impl Into<String>,
+    ) {
+        match &request.call {
+            Call::Place { order, .. } => cx.store.remove_orders(&[order.id.as_str()]),
+            Call::Cancel { before, .. } if self.account.order_revision() == request.revision => {
+                for o in before {
+                    if cx.store.order(&o.id).is_some_and(|current| {
+                        current.status == OrderStatus::Canceling
+                            && current.amount == o.amount
+                            && current.filled == o.filled
+                    }) {
+                        cx.store.set_order_status(&o.id, o.status);
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.trading.jobs.remove(&request.command);
+        self.account_refresh(cx);
+        reject(cx, request.command, error.into());
+    }
+}

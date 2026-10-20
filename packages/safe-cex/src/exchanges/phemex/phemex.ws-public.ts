@@ -64,7 +64,7 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
         JSON.stringify({
           method: method,
           // kline requires second arg to be a number
-          params: method === 'kline_p.subscribe' ? [params[0], +params[1]] : params,
+          params: method === 'kline_p.subscribe' ? [params[0], +params[1]] : method === 'orderbook_p.subscribe' ? [params[0], false, 0] : params,
           id: id++,
         }),
       );
@@ -149,7 +149,7 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
       }
 
       if (json?.orderbook_p && typeof jsonSymbol === 'string') {
-        this.dispatchTopic(`orderbook_p.${jsonSymbol}`, json.orderbook_p);
+        this.dispatchTopic(`orderbook_p.${jsonSymbol}`, { ...json.orderbook_p, sequence: json.sequence, type: json.type, depth: json.depth });
         return;
       }
 
@@ -456,7 +456,7 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
         this.topics[topic] = (this.topics[topic] || 0) + 1;
         this.updateSubscriptionLimitWarning();
 
-        const payload = { method: 'orderbook_p.subscribe', params: [symbol], id: 3 };
+        const payload = { method: 'orderbook_p.subscribe', params: [symbol, false, 0], id: 3 };
         this.send(JSON.stringify(payload));
       } else {
         timeoutId = setTimeout(() => waitForConnectedAndSubscribe(), 100);
@@ -492,6 +492,10 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
   };
 
   private processOrderBookUpdate = (orderBook: OrderBook, update: Record<string, any>) => {
+    if (update.type === 'snapshot' && update.depth === 0) {
+      orderBook.bids = [];
+      orderBook.asks = [];
+    }
     const bids = update.bids || [];
     for (let i = 0; i < bids.length; i++) {
       const [price, amount] = bids[i];

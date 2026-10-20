@@ -119,7 +119,7 @@ describe('Phemex public WebSocket dispatch', () => {
     } as MessageEvent);
 
     expect(btc).toHaveBeenCalledOnce();
-    expect(btc).toHaveBeenCalledWith(orderbook);
+    expect(btc).toHaveBeenCalledWith({ ...orderbook, sequence: 456, type: 'incremental', depth: undefined });
     expect(eth).not.toHaveBeenCalled();
     expect(recordStats).toHaveBeenCalledOnce();
     expect(recordStats).toHaveBeenCalledWith('orderbook_p.BTCUSDT');

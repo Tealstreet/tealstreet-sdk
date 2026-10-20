@@ -10,7 +10,7 @@ import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { parseRequestJson } from './request-json.mjs';
-import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands, fixKrakenOutput } from './known-ts-fixes.mjs';
+import { fixBlofinAccount, fixWeexConditionals, fixPhemexAccount, fixLighterFills, fixLighterCommands, fixKrakenOutput } from './known-ts-fixes.mjs';
 import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
@@ -156,6 +156,16 @@ const KNOWN_TS_FIXES = {
   // uncertain write acknowledgements and revalidate queued amendments. Compare
   // both outputs directly; no TxFlow-specific normalization is permitted.
   txflow: [],
+  phemex(ts) {
+    // Independent execution/cumulative-size/flat-settings oracle from taped venue rows.
+    if (ts.account) fixPhemexAccount(ts.account, tapeRecords);
+    // Phemex zero-open ticker changes remain finite.
+    for (const ticker of ts.tickers) if (ticker.percentage === null) ticker.percentage = 0;
+    // TS recovery reads missing/unknown affected sides and preserves nonzero
+    // full-snapshot rows while recovering the other hedged leg.
+    // Native tests also guard exact row versions/absence fences, confirmed
+    // cancellation finality, preserved trigger sources and exact split lots.
+  },
   // Paired production fixes, compared without rewriting either replay result:
   // preserve full-depth incremental books; verify subscription acknowledgements;
   // fence polled candles against newer trades and reject older trade buckets;

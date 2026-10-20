@@ -292,3 +292,11 @@ buy/sell leverage, but its profile selected scalar comparison. Enabling the
 existing independent-leverage comparison preserves and compares both rails;
 neither implementation nor its output is rewritten. Merge Phemex next, retain
 the reviewed union, then rerun combined TxFlow/Binance and host gates.
+
+Merged Phemex landing `45d7a3fb98` after the pre-merge checks completed. The
+independent integration review compared the resolved index against both parents
+and accepted the complete union, including all Wasm option guards, shared host
+byte APIs, bootstrap routing, deterministic private clock and caller-ID checks.
+Locked isolated TxFlow/Phemex constructor checks and workspace formatting pass.
+Pre-merge workspace tests passed 1,835 tests; root tests passed all 27 tasks.
+Final combined release/replay and merged-state checks are in progress.

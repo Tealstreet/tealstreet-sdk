@@ -65,3 +65,22 @@ Every mutation consumes a recorded response; only reads may reuse their last
 snapshot. Public replay advances timers by tape timestamps; private replay is
 paced from the epoch after startup. Trimming keeps every HTTP anchor inside the
 selected time window so later depth resynchronizations remain reproducible.
+
+## Phemex perpetuals
+
+`phemex` supports PerpetualV2 USDT/USDC contracts through the real-value g-API.
+Legacy contract families stay filtered as in TypeScript. `Triggered` displays
+as Closed but remains nonterminal; a later native New update can reopen it.
+Public books request full depth and replace periodic snapshots.
+
+Fills and order history use bounded symbol-scoped reads (up to 200 rows), public
+trades up to 1000; they do not claim exhaustive range history. Generic income
+returns an explicit unsupported error pending verified ledger scope and amount
+semantics. Rust remains opt-in; live private-account validation and subsequent
+TypeScript retirement are separate adoption work.
+
+`rust:private-tape:phemex` generates the account/trading tape. Its explicit
+`bootstrap: true` auth/snapshot records are delivered before startup readiness.
+Older tapes classify public/private sockets sharing a URL from authentication;
+explicit connection ordinals take precedence. Request matching preserves caller
+IDs and JSON wire types; only generated IDs and documented volatile fields vary.

@@ -265,10 +265,10 @@ export class Tape {
     for (const record of records.filter((r) => r.type === 'ws-send')) {
       const request = venue.socketRequest?.(JSON.parse(record.text));
       if (!request) continue;
-      const key = `${canonicalUrl(record.url)} ${record.socket ?? 0} ${request.id}`;
+      const key = `${canonicalUrl(record.url, this.callerIds, this.venue)} ${record.socket ?? 0} ${request.id}`;
       if (this.recordedSocketRequests.has(key)) throw new Error(`duplicate taped websocket request ${key}`);
       this.recordedSocketRequests.set(key, request.key);
-      const queueKey = `${canonicalUrl(record.url)} ${record.socket ?? 0} ${request.key}`;
+      const queueKey = `${canonicalUrl(record.url, this.callerIds, this.venue)} ${record.socket ?? 0} ${request.key}`;
       if (!this.recordedSocketQueues.has(queueKey)) this.recordedSocketQueues.set(queueKey, []);
       this.recordedSocketQueues.get(queueKey).push(request.id);
     }
@@ -456,7 +456,7 @@ export class Tape {
       if (request) {
         if (socket.requestIds.has(request.id)) throw new Error(`duplicate websocket request ${request.key}`);
         if (this.recordedSocketRequests.size || this.venue.requireSocketRequestRecords) {
-          const queueKey = `${canonicalUrl(socket.url)} ${socket.ordinal} ${request.key}`;
+          const queueKey = `${canonicalUrl(socket.url, this.callerIds, this.venue)} ${socket.ordinal} ${request.key}`;
           const count = socket.requestCounts.get(request.key) ?? 0;
           const recordedId = this.recordedSocketQueues.get(queueKey)?.[count];
           if (recordedId === undefined) throw new Error(`unrecorded websocket request ${request.key}`);
@@ -484,7 +484,9 @@ export class Tape {
       if (message.method === 'subscribe') socket.subscriptions.add(message.params.channel);
       if (message.method === 'unsubscribe') socket.subscriptions.delete(message.params.channel);
     }
-    for (const waiter of this.waiters) waiter();
+    this.venue.onSocketSend?.(socket, text);
+    // Authentication may classify a shared-URL socket after its open callback.
+    this.waiters = this.waiters.filter((waiter) => !waiter());
     this.sent(socket.url, text);
     this.audit?.sent(socket.url, text, socket.generation);
     for (const reply of this.venue.socketReplies?.(socket.url, message) ?? []) {
@@ -498,6 +500,10 @@ export class Tape {
         this.startupSubscriptions.set(key, true);
         this.pendingStartupSubscriptions--;
       }
+    }
+    if (this.venue.pingReply) {
+      const reply = this.venue.pingReply(text);
+      if (reply) setImmediate(() => { if (!socket.closed) this.deliver(socket, reply); });
     }
     if (this.venue.respondToPing && text === 'ping') {
       setImmediate(() => {
@@ -604,6 +610,11 @@ export class Tape {
     socket.onClose?.(code);
   }
 
+  sockets(url, ordinal) {
+    return [...(this.open.get(canonicalUrl(url, this.callerIds, this.venue)) ?? [])].filter((socket) =>
+      !socket.closed && (ordinal === undefined || socket.ordinal === ordinal));
+  }
+
   correlateSocketResponse(socket, text) {
     if (!this.venue.socketResponse) return text;
     let message;
@@ -615,7 +626,7 @@ export class Tape {
     const response = this.venue.socketResponse(message);
     if (!response) return text;
     if (socket.responseIds.has(response.id)) throw new Error('duplicate websocket response');
-    const scope = `${canonicalUrl(socket.url)} ${socket.ordinal}`;
+    const scope = `${canonicalUrl(socket.url, this.callerIds, this.venue)} ${socket.ordinal}`;
     const recordedKey = `${scope} ${response.id}`;
     const recorded = this.recordedSocketRequests.get(recordedKey);
     if ((this.recordedSocketRequests.size || this.venue.requireSocketRequestRecords) && recorded === undefined)
@@ -634,18 +645,21 @@ export class Tape {
     return JSON.stringify({ ...message, id });
   }
 
-  async socketFor(url, text, ordinal) {
+  async socketFor(url, text, ordinal, openingOnly = false) {
     if (typeof text === 'number') { ordinal = text; text = undefined; }
     const key = canonicalUrl(url, this.callerIds, this.venue);
-    const stream = text && this.venue.streamOf?.(text);
+    const stream = !openingOnly && text && this.venue.streamOf?.(text);
     const lifecycleKey = ordinal === undefined ? undefined : `${key} ${ordinal}`;
-    const streams = this.venue.subscriptionRouting && lifecycleKey ? this.lifecycleStreams.get(lifecycleKey) : undefined;
-    const bound = lifecycleKey && this.lifecycleSockets.get(lifecycleKey);
+    const streams = !openingOnly && this.venue.subscriptionRouting && lifecycleKey
+      ? this.lifecycleStreams.get(lifecycleKey) : undefined;
+    const bound = !openingOnly && lifecycleKey && this.lifecycleSockets.get(lifecycleKey);
     if (this.venue.subscriptionRouting && !stream && bound && !bound.closed) return bound;
-    if ((stream || streams?.size) && this.venue.subscriptionRouting) ordinal = undefined;
+    if (!openingOnly && (stream || streams?.size) && this.venue.subscriptionRouting) ordinal = undefined;
     const subscribed = (socket, target) => [...socket.subscriptions].some((topic) => target === topic || target.startsWith(`${topic}.`));
-    const active = () => [...(this.open.get(key) ?? [])].filter((socket) => !socket.closed && (ordinal === undefined || socket.ordinal === ordinal)
-      && (stream ? subscribed(socket, stream) : !streams?.size || [...streams].some((target) => subscribed(socket, target))));
+    const active = () => this.sockets(url, ordinal).filter((socket) =>
+      (stream ? subscribed(socket, stream) : !streams?.size || [...streams].some((target) => subscribed(socket, target)))
+      && (openingOnly || ordinal !== undefined || text === undefined || !this.venue.socketMatches
+        || this.venue.socketMatches(socket, text)));
     if (!active().length) {
       let waiter;
       const pending = new Promise((resolve) => {
@@ -661,9 +675,9 @@ export class Tape {
         this.waiters = this.waiters.filter((entry) => entry !== waiter);
       }
     }
-    if (stream || ordinal !== undefined || this.venue.rust !== 'hyperliquid') {
+    if (openingOnly || stream || ordinal !== undefined || this.venue.socketMatches || this.venue.rust !== 'hyperliquid') {
       const socket = active().at(-1);
-      if (this.venue.subscriptionRouting && lifecycleKey) this.lifecycleSockets.set(lifecycleKey, socket);
+      if (!openingOnly && this.venue.subscriptionRouting && lifecycleKey) this.lifecycleSockets.set(lifecycleKey, socket);
       return socket;
     }
     // Legacy tapes without a stream discriminator deliver to every listener,
@@ -696,10 +710,32 @@ export class Tape {
   }
 
   async deliverFrame(frame) {
-    const latest = await this.socketFor(frame.url, frame.text, frame.socket);
+    if (frame.type === 'close' && frame.socket === undefined && this.venue.socketMatches && this.sockets(frame.url).length > 1) {
+      throw new Error('Ambiguous close on a shared public/private endpoint');
+    }
+    let text = frame.binary === undefined ? frame.text : Uint8Array.from(Buffer.from(frame.binary, 'base64'));
+    const latest = await this.socketFor(frame.url, text, frame.socket);
+    if (this.venue.bootstrapPrivateFromTape && frame.type === 'ws') {
+      const message = JSON.parse(text);
+      if (message.req_id === '@latest') {
+        const deadline = performance.now() + this.timeoutMs;
+        while (!latest.requests.has(message.op)) {
+          if (performance.now() >= deadline)
+            throw new ReplayTimeout(`replay timeout: ${message.op} request for acknowledgement`);
+          await new Promise((resolve) => realTimeout(resolve, 5));
+        }
+        text = JSON.stringify({ ...message, req_id: latest.requests.get(message.op) });
+      }
+    }
     const sockets = this.bitget && frame.socket === undefined
       ? [...(this.open.get(canonicalUrl(frame.url, this.callerIds, this.venue)) ?? [])].filter((socket) => !socket.closed) : [latest];
-    if (frame.type === 'close') { for (const socket of sockets) this.close(socket, frame.code ?? 1006); return; }
+    if (frame.type === 'close') {
+      for (const socket of sockets) {
+        if (socket.url) this.close(socket, frame.code ?? 1006);
+        else socket.onClose(frame.code ?? 1006);
+      }
+      return;
+    }
     if (frame.type === 'open') return;
     let arg;
     try {
@@ -710,7 +746,10 @@ export class Tape {
     const key = this.bitget && arg && this.topicKey(arg);
     const matching = key ? sockets.filter((socket) => socket.topics.has(key)) : sockets;
     if (key && !matching.length) throw new Error(`frame has no subscribed socket: ${frame.url} ${key}`);
-    for (const socket of matching) this.deliver(socket, frame.text);
+    for (const socket of matching) {
+      if (socket.url) this.deliver(socket, text);
+      else socket.onMessage(text);
+    }
   }
 
   /**
@@ -719,30 +758,33 @@ export class Tape {
    * waits until its time after the account is ready.
    */
   async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
-    const urls = [...new Set(this.frames.filter((f) => f.url && f.type !== 'wait').map((f) => f.url))];
+    const first = this.frames.find((frame) => frame.url && frame.type !== 'wait');
     const startupDeadline = performance.now() + this.timeoutMs;
-    await within(
-      (async () => {
-        if (urls.length) await this.socketFor(urls[0]);
-        await ready(!this.venue.bootstrapPrivateFromTape);
-        // Native and TS outboxes batch sends independently of handler registration.
-        // Begin the tape only after every seed-derived startup topic reached send.
-        while (this.pendingStartupSubscriptions || (this.audit?.ready && !this.audit.ready())) {
-          if (performance.now() >= startupDeadline) throw new ReplayTimeout('replay timeout: startup subscriptions');
-          await new Promise((resolve) => setTimeout(resolve, 1));
-        }
-      })(),
-      this.timeoutMs,
-      'Replay startup',
-    );
+    await within((async () => {
+      // Fence only the first physical socket; a later command may create the
+      // first frame's subscription. Bootstrap auth then selects its own socket.
+      if (first) await this.socketFor(first.url, first.text, first.socket, true);
+      for (const frame of this.frames.filter((frame) => this.venue.bootstrapFrame?.(frame))) {
+        await this.deliverFrame(frame);
+        await new Promise(setImmediate);
+      }
+      await ready(!this.venue.bootstrapPrivateFromTape);
+      // Native and TS outboxes batch sends independently of handler registration.
+      // Begin the tape only after every seed-derived startup topic reached send.
+      while (this.pendingStartupSubscriptions || (this.audit?.ready && !this.audit.ready())) {
+        if (performance.now() >= startupDeadline) throw new ReplayTimeout('replay timeout: startup subscriptions');
+        await new Promise((resolve) => realTimeout(resolve, 1));
+      }
+    })(), this.timeoutMs, 'Replay startup');
     begin();
     this.playing = true;
     clock?.start();
     this.replayClock = clock;
     const start = performance.now();
     let delivered = 0;
-    const warm = Math.floor(this.frames.length / 4);
+    const warm = Math.floor(this.frames.reduce((count, frame) => count + (this.venue.bootstrapFrame?.(frame) ? 0 : 1), 0) / 4);
     for (const frame of this.frames) {
+      if (this.venue.bootstrapFrame?.(frame)) continue;
       if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
       if (this.isPrivate && !clock) {
         const wait = frame.t - (performance.now() - start);
@@ -772,30 +814,8 @@ export class Tape {
         // Observe timers at this explicit horizon without inventing socket traffic.
       } else if (this.startupDelivered.has(frame)) {
         // Still advance tape time, frame count and tick callbacks below.
-      } else if (this.bitget) {
-        await this.deliverFrame(frame);
       } else {
-        let data = frame.binary === undefined ? frame.text : Uint8Array.from(Buffer.from(frame.binary, 'base64'));
-        const socket = await this.socketFor(frame.url, data, frame.socket);
-        if (frame.type === 'close') {
-          if (socket.url) this.close(socket, frame.code ?? 1006);
-          else socket.onClose(frame.code ?? 1006);
-        } else if (frame.type === 'ws') {
-          if (this.venue.bootstrapPrivateFromTape) {
-            const message = JSON.parse(data);
-            if (message.req_id === '@latest') {
-              const deadline = performance.now() + this.timeoutMs;
-              while (!socket.requests.has(message.op)) {
-                if (performance.now() >= deadline)
-                  throw new ReplayTimeout(`replay timeout: ${message.op} request for acknowledgement`);
-                await new Promise((resolve) => realTimeout(resolve, 5));
-              }
-              data = JSON.stringify({ ...message, req_id: socket.requests.get(message.op) });
-            }
-          }
-          if (socket.url) this.deliver(socket, data);
-          else socket.onMessage(data);
-        }
+        await this.deliverFrame(frame);
       }
       delivered++;
       onTick?.(frame.t);
