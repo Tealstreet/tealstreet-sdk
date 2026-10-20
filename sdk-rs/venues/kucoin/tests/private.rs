@@ -844,3 +844,41 @@ fn account_reconciliation_starts_without_the_private_socket() {
     assert!(h.engine.store().loaded().positions);
     assert!(h.engine.store().loaded().orders);
 }
+
+#[test]
+fn unmappable_order_row_does_not_freeze_the_order_snapshot() {
+    let mut h = Harness::new();
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{POSITION}]}}"#),
+    );
+    h.reply("/account-overview",r#"{"code":"200000","data":{"availableBalance":"950","orderMargin":"50","accountEquity":"1010","unrealisedPNL":"10"}}"#);
+    h.reply(
+        "/getPositionMode",
+        r#"{"code":"200000","data":{"positionMode":0}}"#,
+    );
+    let site = ORDER
+        .replace("5cdfc138b21023a909e5ad55", "site-twap")
+        .replace("\"size\":10", "\"size\":\"lots\"");
+    h.reply(
+        "/orders?",
+        &format!(
+            r#"{{"code":"200000","data":{{"currentPage":1,"totalPage":1,"totalNum":2,"items":[{ORDER},{site}]}}}}"#
+        ),
+    );
+    h.reply("/stopOrders?", EMPTY);
+    assert!(h.engine.store().loaded().orders);
+    assert!(h.engine.store().order("5cdfc138b21023a909e5ad55").is_some());
+    assert!(h.engine.store().order("site-twap").is_none());
+}
+
+#[test]
+fn unmappable_position_row_does_not_block_the_position_snapshot() {
+    let mut h = Harness::new();
+    let bad = POSITION.replace("\"currentQty\":10", "\"currentQty\":\"lots\"");
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{bad}]}}"#),
+    );
+    assert!(h.engine.store().loaded().positions);
+}

@@ -558,7 +558,8 @@ TxFlow loses nothing (master TS was a placeholder).
   (reconciliation starts at launch).
 - Medium: ~~one unknown id rejects the whole cancel batch (`trading.rs:505,1034`)~~
   (uncached IDs sent directly; later cancellations continue and failures surface);
-  one malformed REST row freezes reconciliation (`account.rs:652`, rows lane);
+  ~~one malformed REST row freezes reconciliation (`account.rs:652`)~~ (skipped
+  with the store's copy kept; still counted in the page census);
   ~~caller client id on attached TP/SL rejected (`trading.rs:120`)~~ (no change:
   the client-ID contract honours caller IDs only on plain Limit/Market).
 - Low: leverage sent as `10.0`; fill without `matchPrice` dropped; spot polls
