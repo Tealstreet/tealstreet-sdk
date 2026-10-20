@@ -34,6 +34,41 @@ pub struct Job {
     current: WriteKind,
     returns_ids: bool,
 }
+// Keep entropy failure fallible so batch preflight cannot dispatch a partial write.
+fn client_oid(
+    supplied: Option<&str>,
+    mint: impl FnOnce() -> Result<String, String>,
+) -> Result<String, String> {
+    match supplied {
+        Some(id)
+            if !id.is_empty()
+                && id.len() <= 40
+                && id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') =>
+        {
+            Ok(id.to_owned())
+        }
+        Some(_) => Err("KuCoin Spot clientOrderId must be 1-40 letters, digits, '_' or '-'".into()),
+        None => mint(),
+    }
+}
+fn placements(
+    orders: Vec<PlaceOrderOpts>,
+    mut prepare: impl FnMut(&PlaceOrderOpts) -> Result<Write, String>,
+) -> Result<VecDeque<Write>, String> {
+    let mut seen = HashSet::new();
+    let mut requests = VecDeque::new();
+    for order in orders {
+        if let Some(id) = &order.client_order_id
+            && !seen.insert(id.clone())
+        {
+            return Err("duplicate KuCoin Spot caller clientOrderId".into());
+        }
+        requests.push_back(prepare(&order)?);
+    }
+    Ok(requests)
+}
 impl KucoinSpot {
     fn placement(&mut self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<Write, String> {
         if !matches!(o.kind, OrderType::Limit | OrderType::Market)
@@ -63,26 +98,7 @@ impl KucoinSpot {
         if amount <= 0.0 || amount > m.limits.amount.max {
             return Err("KuCoin Spot order exceeds native size limits".into());
         }
-        let client_oid = match &o.client_order_id {
-            Some(id)
-                if !id.is_empty()
-                    && id.len() <= 40
-                    && id
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') =>
-            {
-                id.clone()
-            }
-            Some(_) => {
-                return Err(
-                    "KuCoin Spot clientOrderId must be 1-40 letters, digits, '_' or '-'".into(),
-                );
-            }
-            None => {
-                self.next_id += 1;
-                format!("rust-{}-{}", cx.now as u64, self.next_id)
-            }
-        };
+        let client_oid = client_oid(o.client_order_id.as_deref(), safe_cex_crypto::uuid::uuid)?;
         let price = if o.kind == OrderType::Limit {
             Some(format(adjust(
                 o.price.ok_or("KuCoin Spot limit order needs a price")?,
@@ -204,27 +220,10 @@ impl KucoinSpot {
             other => other,
         };
         let (id, build): (CommandId, Result<(VecDeque<Write>, bool), String>) = match command {
-            Command::PlaceOrders { command, orders } => {
-                let mut seen = HashSet::new();
-                let mut requests = VecDeque::new();
-                let mut error = None;
-                for o in orders {
-                    if let Some(id) = &o.client_order_id
-                        && !seen.insert(id.clone())
-                    {
-                        error = Some("duplicate KuCoin Spot caller clientOrderId".into());
-                        break;
-                    }
-                    match self.placement(cx, &o) {
-                        Ok(w) => requests.push_back(w),
-                        Err(e) => {
-                            error = Some(e);
-                            break;
-                        }
-                    }
-                }
-                (command, error.map_or_else(|| Ok((requests, true)), Err))
-            }
+            Command::PlaceOrders { command, orders } => (
+                command,
+                placements(orders, |o| self.placement(cx, o)).map(|requests| (requests, true)),
+            ),
             Command::CancelOrders { command, ids } => {
                 let out = ids
                     .into_iter()
@@ -397,5 +396,42 @@ impl KucoinSpot {
             ),
             Err(e) => cx.done(id, Err(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn caller_id_bypasses_entropy_and_entropy_failure_discards_staged_batch() {
+        let caller = "caller-exact_1";
+        assert_eq!(
+            client_oid(Some(caller), || panic!("caller ID must not use entropy")).unwrap(),
+            caller
+        );
+        let order: PlaceOrderOpts = serde_json::from_str(
+            r#"{"symbol":"BTC-USDT","type":"limit","side":"buy","amount":1,"price":100}"#,
+        )
+        .unwrap();
+        let mut calls = 0;
+        let result = placements(vec![order.clone(), order], |order| {
+            calls += 1;
+            let id = client_oid(order.client_order_id.as_deref(), || {
+                if calls == 1 {
+                    Ok("generated-first".into())
+                } else {
+                    Err("entropy unavailable".into())
+                }
+            })?;
+            Ok(Write {
+                method: Method::Post,
+                path: "/api/v1/hf/orders".into(),
+                body: Some(id),
+                kind: WriteKind::Place,
+            })
+        });
+        assert_eq!(calls, 2);
+        assert_eq!(result.err().as_deref(), Some("entropy unavailable"));
     }
 }

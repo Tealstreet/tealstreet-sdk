@@ -24,7 +24,7 @@ pub struct Credentials {
     address_felt: Felt,
     address: String,
     subkey: String,
-    chain_id: String,
+    chain_id: Felt,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,7 +92,7 @@ fn secret(input: &str) -> Result<Felt, String> {
     Ok(Felt::from_bytes_be(&value.to_be_bytes()))
 }
 
-fn chain_id(input: &str) -> Result<String, String> {
+fn chain_id(input: &str) -> Result<Felt, String> {
     let value = if input.starts_with("0x")
         || input.starts_with("0X")
         || input.bytes().all(|b| b.is_ascii_digit())
@@ -104,7 +104,7 @@ fn chain_id(input: &str) -> Result<String, String> {
     if value == Felt::ZERO {
         return Err("Invalid Paradex chain ID".into());
     }
-    Ok(format!("{value:#x}"))
+    Ok(value)
 }
 
 impl Credentials {
@@ -183,7 +183,7 @@ impl Credentials {
         let domain = hash_elements(&[
             selector("StarkNetDomain(name:felt,chainId:felt,version:felt)").expect("ASCII type"),
             short_string("Paradex").expect("short string"),
-            felt(&self.chain_id)?,
+            self.chain_id,
             Felt::ONE,
         ]);
         let hash = hash_elements(&[
@@ -285,16 +285,17 @@ impl Credentials {
         } else {
             quantum(price.expect("price is present"))?
         };
-        let mut values = vec![
+        let mut values = [
             Felt::from(now_ms),
             word(market)?,
             side,
             word(order_type)?,
             felt(&size)?,
             felt(&price)?,
+            Felt::ZERO,
         ];
         if let Some(id) = id {
-            values.push(word(id)?);
+            values[6] = word(id)?;
         }
         let signature = self.signature(
             if id.is_some() {
@@ -302,7 +303,7 @@ impl Credentials {
             } else {
                 "Order(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt)"
             },
-            &values,
+            &values[..if id.is_some() { 7 } else { 6 }],
         )?;
         Ok(OrderSignature {
             signature,

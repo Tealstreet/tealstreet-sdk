@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { kucoinspot } from './kucoinspot.mjs';
 const endpoint='wss://spot.example.test/endpoint';
 const records=['public','private'].map((role)=>({type:'http',url:`https://api.kucoin.com/api/v1/bullet-${role}`,body:JSON.stringify({code:'200000',data:{token:role+'-token',instanceServers:[{endpoint,pingInterval:18000,pingTimeout:10000}]}})}));
-const headers={ 'KC-API-KEY':'replay-key','KC-API-KEY-VERSION':'2','KC-API-PASSPHRASE':'MAjIjMzjcttoIgqsyea+6hjH5yiYCiBexxFt4UdBpIY=','KC-API-TIMESTAMP':'1700000000123','KC-API-SIGN':'placeholder' };
+const headers={ 'KC-API-KEY':'replay-key','KC-API-KEY-VERSION':'2','KC-API-PASSPHRASE':'placeholder','KC-API-TIMESTAMP':'1700000000123','KC-API-SIGN':'placeholder' };
 test('spot request matching preserves caller identity, HF endpoint and raw numeric strings',()=>{
  const ids=new Set(['caller-1']);
  const key=kucoinspot.requestKey('POST','https://api.kucoin.com/api/v1/hf/orders',JSON.stringify({symbol:'BTC-USDT',clientOid:'caller-1',size:'1',price:'90'}),ids);

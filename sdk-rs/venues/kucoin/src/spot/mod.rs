@@ -682,6 +682,10 @@ impl Venue for KucoinSpot {
             }
             "pong" => {
                 let c = &mut self.sockets[channel];
+                // A pong acknowledges a sent ping, never the welcome watchdog.
+                if !c.ready || c.pong.is_none() {
+                    return;
+                }
                 if let Some(t) = c.pong.take() {
                     cx.clear_timer(t);
                 }

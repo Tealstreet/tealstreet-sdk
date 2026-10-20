@@ -361,3 +361,33 @@ asynchronous GC and includes reconstruction cost in measurement. Consequently,
 the frozen `41e28f774a` proofs above remain historical until all six artifact
 replays are refreshed. Full checks, combined host/SDK checks, PR correctness
 reviews and exact-head CI are required on the merged source before landing.
+
+## PR correctness review round 1
+
+Three independent reviews of actual PR head `8487855f5a` were posted as PR
+comments. Paradex/signing and Bitrue/shared-protocol reviews pass. The Spot
+review found two P2 bugs: same-time native instances could mint identical client
+IDs, and a pong before welcome could cancel the welcome watchdog permanently.
+Missing IDs now use the existing fallible UUID helper; caller IDs bypass entropy,
+and whole-batch staging rejects entropy failure before any write. Pongs require
+both readiness and an outstanding heartbeat. Four new regressions failed before
+the fix, then all 143 KuCoin tests (42 Spot plus the new staging unit test) and
+Clippy pass. Independent re-review closes both findings.
+
+The merged baseline passes 2,510 native tests, workspace/all-target and wasm32
+Clippy, bans, 562 harness tests, native-frame and server-adapter integrations,
+44 typecheck tasks, 28 lint tasks and 27 repository test tasks (safe-cex 7,467
+tests in each invocation). These counts precede the five added Spot regressions.
+
+CI found Linux Paradex at 1,258,344 bytes, 53 bytes over the fixed budget despite
+the local build passing. Keeping the validated chain ID as a Felt and signing
+from a fixed field array removes formatting/parsing and allocation work. All
+115 Paradex tests, Clippy, formatting and independent review pass. The standard
+local artifact saves another 240 bytes, reaching 1,257,815; Linux must verify it.
+
+CI's scan flagged one old synthetic invalid-auth header in a rejected-request
+test. Its author confirmed the fixture was authored without supplied credentials;
+its exact derivation is not asserted. The current value is now `placeholder`,
+and only the exact historical fingerprint is excluded, following existing scan
+policy. All 47 PR commits scan clean locally; independent narrow-exclusion
+review and 562 harness tests pass. No scanner rule or broad allowlist changed.

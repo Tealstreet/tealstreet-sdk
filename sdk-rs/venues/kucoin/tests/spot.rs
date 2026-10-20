@@ -397,8 +397,11 @@ fn whole_batch_preflight_rejects_duplicate_ids_and_unsupported_shapes() {
     for invalid in ["duplicate", "bracket", "type", "id"] {
         let mut h = H::new(true);
         h.actions.clear();
-        let a = place(None);
+        let mut a = place(None);
         let mut b = a.clone();
+        if invalid != "duplicate" {
+            a.client_order_id = None;
+        }
         match invalid {
             "bracket" => b.stop_loss = Some(80.0),
             "type" => b.kind = safe_cex_engine::model::OrderType::Conditional,
@@ -411,6 +414,135 @@ fn whole_batch_preflight_rejects_duplicate_ids_and_unsupported_shapes() {
         });
         assert!(h.done(1).is_err());
         assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
+    }
+}
+#[test]
+fn generated_client_ids_are_unique_across_identically_started_engines() {
+    let mut left = H::new(true);
+    let mut right = H::new(true);
+    assert_eq!(left.now, right.now);
+    let mut order = place(None);
+    order.client_order_id = None;
+    let mut ids = Vec::new();
+    for h in [&mut left, &mut right] {
+        h.command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![order.clone()],
+        });
+        let request = h.http("/hf/orders");
+        let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        let id = payload["clientOid"].as_str().unwrap().to_owned();
+        assert!(!id.is_empty() && id.len() <= 40);
+        ids.push(id);
+    }
+    assert_ne!(ids[0], ids[1]);
+    assert!(
+        ids.iter()
+            .all(|id| id.bytes().all(|b| b.is_ascii_alphanumeric()))
+    );
+}
+fn assert_prewelcome_pong_preserves_recovery(private: bool) {
+    let mut h = H::new(private);
+    let socket = if private { h.private } else { h.public };
+    h.event(Event::WsClosed { socket, code: 1006 });
+    h.timer(1000.0);
+    h.reply(if private { "/bullet-private" } else { "/bullet-public" }, r#"{"code":"200000","data":{"token":"replacement","instanceServers":[{"endpoint":"wss://spot.example.test/replacement","pingInterval":18000,"pingTimeout":10000}]}}"#);
+    let socket = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.actions.clear();
+    h.event(Event::WsOpened { socket });
+    let timer = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 10000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    h.event(Event::WsMessage {
+        socket,
+        text: r#"{"type":"pong"}"#,
+    });
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer: t } if *t == timer))
+    );
+    assert!(!h.actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+    h.timer(10000.0);
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+    );
+    h.timer(1000.0);
+    assert_eq!(
+        h.http(if private {
+            "/bullet-private"
+        } else {
+            "/bullet-public"
+        })
+        .method,
+        Method::Post
+    );
+}
+#[test]
+fn public_prewelcome_pong_cannot_cancel_welcome_watchdog() {
+    assert_prewelcome_pong_preserves_recovery(false);
+}
+#[test]
+fn private_prewelcome_pong_cannot_cancel_welcome_watchdog() {
+    assert_prewelcome_pong_preserves_recovery(true);
+}
+#[test]
+fn valid_pong_schedules_one_ping_and_unsolicited_pong_cannot_postpone_it() {
+    for private in [false, true] {
+        let mut h = H::new(private);
+        let socket = if private { h.private } else { h.public };
+        h.actions.clear();
+        h.event(Event::WsMessage {
+            socket,
+            text: r#"{"type":"pong"}"#,
+        });
+        let timer = h
+            .actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == h.now + 18000.0 => Some(*timer),
+                _ => None,
+            })
+            .unwrap();
+        h.actions.clear();
+        h.now += 1000.0;
+        h.event(Event::WsMessage {
+            socket,
+            text: r#"{"type":"pong"}"#,
+        });
+        assert!(
+            !h.actions
+                .iter()
+                .any(|a| matches!(a, Action::ClearTimer { timer: t } if *t == timer))
+        );
+        assert!(
+            !h.actions
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { .. }))
+        );
+        h.now += 17000.0;
+        h.event(Event::TimerFired { timer });
+        assert!(h.actions.iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text.contains("\"type\":\"ping\""))));
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 10000.0))
+        );
     }
 }
 #[test]
