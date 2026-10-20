@@ -224,7 +224,9 @@ it('preserves KuCoin HF caller context, base quantities, lookup certainty and br
         commissionAsset: 'USDT',
       },
     ]);
-    for (const request of requests.filter((r) => r.headers['KC-API-KEY'])) {
+    const signedRequests = requests.filter((r) => r.headers['KC-API-KEY']);
+    expect(signedRequests.length).toBeGreaterThanOrEqual(9);
+    for (const request of signedRequests) {
       const timestamp = request.headers['KC-API-TIMESTAMP'];
       const url = new URL(request.url);
       const rawPath =

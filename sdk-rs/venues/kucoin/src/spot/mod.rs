@@ -239,6 +239,10 @@ impl KucoinSpot {
         }
     }
     fn reconnect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+        if channel == 1 {
+            self.revision += 1;
+            self.balance_revision += 1;
+        }
         let c = &mut self.sockets[channel];
         c.ready = false;
         for t in [c.ping.take(), c.pong.take(), c.reconnect.take()]
@@ -333,6 +337,10 @@ impl KucoinSpot {
         let mut currencies = vec![];
         let mut coins = vec![];
         for r in rows {
+            if r.currency.is_empty() || r.available.0 < 0.0 || r.holds.0 < 0.0 || r.balance.0 < 0.0
+            {
+                return Err("invalid KuCoin Spot trade-account balance".into());
+            }
             let p = if matches!(r.currency, "USD" | "USDT" | "USDC") {
                 1.0
             } else {
@@ -384,12 +392,25 @@ impl KucoinSpot {
         if row.id().is_empty() {
             return;
         }
-        let Some(mut order) = row.order(cx.now, cx.store.order(row.id()), true) else {
+        let previous = cx.store.order(row.id());
+        if !matches!(row.side, "" | "buy" | "sell")
+            || previous.is_some_and(|o| !row.symbol.is_empty() && row.symbol != o.symbol)
+            || (row.event == "match" && row.side.is_empty() && previous.is_none())
+        {
+            return;
+        }
+        let Some(mut order) = row.order(cx.now, previous, true) else {
             return;
         };
+        if !valid_order(&order) {
+            return;
+        }
         if row.event == "match" {
             let amount = row.match_size.or(row.filled_size).map_or(0.0, |n| n.0);
             let price = row.match_price.or(row.price).map_or(0.0, |n| n.0);
+            if amount <= 0.0 || price <= 0.0 {
+                return;
+            }
             let key = if let Some(id) = row.trade_id {
                 format!("{}:{id}", row.id())
             } else {
@@ -423,6 +444,9 @@ impl KucoinSpot {
             return;
         }
         if let Some(old) = old {
+            if order.status == OrderStatus::Open && order.amount < old.filled {
+                return;
+            }
             order.filled = order.filled.max(old.filled);
             order.remaining = order.remaining.min((order.amount - order.filled).max(0.0));
         }
@@ -503,6 +527,15 @@ impl KucoinSpot {
             }
         }
     }
+}
+fn valid_order(o: &Order) -> bool {
+    o.amount >= 0.0
+        && o.filled >= 0.0
+        && o.filled <= o.amount
+        && o.remaining >= 0.0
+        && o.remaining <= o.amount
+        && o.price >= 0.0
+        && o.filled + o.remaining <= o.amount + (o.amount * 1e-12).max(1e-12)
 }
 fn lookup_output(symbol: &str, id: &str, rows: &[Order]) -> String {
     #[derive(Serialize)]
@@ -792,12 +825,7 @@ impl Venue for KucoinSpot {
                     }
                     if let Some(mut o) = row.order(cx.now, None, false) {
                         if o.id.is_empty()
-                            || o.amount < 0.0
-                            || o.filled < 0.0
-                            || o.filled > o.amount
-                            || o.remaining < 0.0
-                            || o.remaining > o.amount
-                            || o.price < 0.0
+                            || !valid_order(&o)
                             || (o.kind == OrderType::Limit && row.price.is_none())
                             || o.symbol != r.symbol
                             || r.rows.len() >= 20_000

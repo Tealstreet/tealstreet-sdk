@@ -40,6 +40,15 @@ TS does not implement spot order history, income/PnL/funding history, or public
 trades. Order/income capabilities retain the branded base fallback; public
 trades rejects as TS does. No invented native endpoints fill those gaps.
 
+The Rust path deliberately fixes malformed-data safety bugs in TS: duplicate
+execution replay is deduplicated; older reconciliation cannot roll back fills;
+failed active-symbol discovery and malformed order pages preserve good state.
+The shared order geometry check covers partial private rows as well as REST;
+execution price and size must be positive. Required REST account amounts reject
+missing, null, empty or negative values instead of silently becoming zero.
+Balance socket notifications are partial by design and trigger a fresh REST
+trade-account read. Zero-size terminal order notifications remain valid.
+
 The engine names real `https://api.kucoin.com` and bullet-supplied WebSocket
 URLs. The existing TS-resolved Tealstreet host transport applies account routing.
 Signing reuses the futures API-key-v2 signer and optional broker headers.

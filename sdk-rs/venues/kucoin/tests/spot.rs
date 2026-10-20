@@ -712,3 +712,83 @@ fn recovery_cannot_merge_a_native_size_smaller_than_the_known_fill_floor() {
         (2.0, 91.0, 0.7, 1.3)
     );
 }
+#[test]
+fn malformed_private_financial_rows_never_emit_invalid_fills_or_replace_good_orders() {
+    for field in [
+        json!({"matchPrice":"-10"}),
+        json!({"matchPrice":"0"}),
+        json!({"size":"-1"}),
+        json!({"filledSize":"3"}),
+        json!({"remainSize":"1.5"}),
+        json!({"matchSize":"-1"}),
+        json!({"side":"invalid"}),
+        json!({"symbol":"ETH-USDT"}),
+    ] {
+        let mut event = json!({"orderId":"order-1","symbol":"BTC-USDT","side":"buy","type":"match","status":"match","orderType":"limit","price":"90","size":"2","filledSize":"0.7","remainSize":"1.3","matchSize":"0.2","matchPrice":"89.5","tradeId":"execution","ts":1700000000001000000u64});
+        for (k, v) in field.as_object().unwrap() {
+            event[k] = v.clone();
+        }
+        let mut h = H::new(true);
+        h.ws(true, "/spotMarket/tradeOrdersV2", event);
+        assert!(h.fill_rows().is_empty());
+        let o = &h.e.store().orders()[0];
+        assert_eq!(
+            (o.amount, o.price, o.filled, o.remaining),
+            (2.0, 90.0, 0.5, 1.5)
+        );
+    }
+}
+#[test]
+fn private_partial_fields_preserve_known_amount_and_zero_size_terminal_is_valid() {
+    let mut h = H::new(true);
+    h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","type":"update","status":"open","remainSize":"1.4","ts":1700000000001000000u64}));
+    let o = &h.e.store().orders()[0];
+    assert_eq!((o.amount, o.filled, o.remaining), (2.0, 0.5, 1.4));
+    h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","type":"canceled","status":"done","size":"0","filledSize":"0","remainSize":"0","ts":1700000000002000000u64}));
+    assert!(h.e.store().orders().is_empty());
+}
+#[test]
+fn missing_null_empty_or_negative_trade_account_numbers_preserve_good_balance() {
+    for row in [
+        json!({"currency":"USDT","holds":"100","balance":"1000"}),
+        json!({"currency":"USDT","available":null,"holds":"100","balance":"1000"}),
+        json!({"currency":"USDT","available":"","holds":"100","balance":"1000"}),
+        json!({"currency":"USDT","available":"-1","holds":"100","balance":"1000"}),
+    ] {
+        let mut h = H::new(true);
+        h.timer(5000.0);
+        h.reply(
+            "/accounts?type=trade",
+            &json!({"code":"200000","data":[row]}).to_string(),
+        );
+        let b = h.e.store().balance();
+        assert_eq!((b.free, b.used, b.total), (1100.0, 200.0, 1300.0));
+        assert_eq!(h.e.store().coin_balances().unwrap().len(), 2);
+    }
+}
+#[test]
+fn newer_private_rows_cannot_shrink_below_the_existing_execution_floor() {
+    let mut h = H::new(true);
+    h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","side":"buy","type":"match","status":"match","orderType":"limit","price":"91","size":"2","filledSize":"0.7","remainSize":"1.3","matchSize":"0.2","matchPrice":"89.5","tradeId":"new-fill","ts":1700000000001000000u64}));
+    h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","type":"update","status":"open","price":"92","size":"0.5","filledSize":"0.2","remainSize":"0.3","ts":1700000000002000000u64}));
+    let o = &h.e.store().orders()[0];
+    assert_eq!(
+        (o.amount, o.price, o.filled, o.remaining),
+        (2.0, 91.0, 0.7, 1.3)
+    );
+}
+#[test]
+fn private_disconnect_fences_account_reads_started_before_the_socket_gap() {
+    let mut h = H::new(true);
+    h.timer(5000.0);
+    let orders = h.http("/active/symbols");
+    let balance = h.http("/accounts?type=trade");
+    h.event(Event::WsClosed {
+        socket: h.private,
+        code: 1006,
+    });
+    h.respond(&orders, 200, r#"{"code":"200000","data":{"symbols":[]}}"#);
+    h.respond(&balance, 200, r#"{"code":"200000","data":[]}"#);
+    assert_eq!(h.e.store().orders().len(), 1);
+    assert_eq!(h.e.store().balance().total, 1300.0);
+}

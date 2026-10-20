@@ -218,8 +218,9 @@ impl OrderRow<'_> {
             .or(self.origin_size)
             .or(self.order_size)
             .map(|n| n.0)
+            .or_else(|| old.map(|o| o.amount))
             .or_else(|| self.remain_size.map(|n| n.0 + filled))
-            .unwrap_or_else(|| old.map_or(0.0, |o| o.amount));
+            .unwrap_or(0.0);
         let status = match if ws && matches!(self.event, "canceled" | "cancelled" | "filled") {
             self.event
         } else {
@@ -288,11 +289,11 @@ impl OrderRow<'_> {
 #[derive(Deserialize)]
 pub struct Account<'a> {
     pub currency: &'a str,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_number")]
     pub available: Number,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_number")]
     pub holds: Number,
-    #[serde(default)]
+    #[serde(deserialize_with = "required_number")]
     pub balance: Number,
 }
 #[derive(Deserialize)]
@@ -321,4 +322,12 @@ pub struct FillRow<'a> {
     #[serde(default)]
     pub fee_currency: &'a str,
     pub created_at: Number,
+}
+
+fn required_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
+    let raw = <&RawValue>::deserialize(d)?;
+    if matches!(raw.get(), "null" | "\"\"") {
+        return Err(serde::de::Error::custom("missing financial number"));
+    }
+    serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)
 }
