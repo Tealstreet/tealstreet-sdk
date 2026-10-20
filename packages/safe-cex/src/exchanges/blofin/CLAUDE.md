@@ -776,6 +776,29 @@ malformed successful mode reads do not silently initialize cross/one-way mode,
 and an empty position push clears used margin and unrealized PnL. Per-market
 settings retain leverage and margin when positions close. Cumulative fills keep
 quantity and traded-value watermarks for 500 orders, including terminal rows.
+Startup execution reporting waits for the first complete pending-order census;
+up to 500 early cumulative socket observations wait for that execution baseline.
+A complete REST prefix can prove a buffered suffix even when newer socket state
+prevents that REST snapshot from replacing the order store. Each proven suffix
+uses the difference in cumulative traded value, preserving its execution price.
+A native `createTime` at or after private startup proves that a newly filled
+order has no pre-session prefix and may report immediately. For older or unknown
+orders, an unprovable startup prefix is a quiet baseline; missing historical
+quote value also waits for a known value before reporting further suffixes.
+Reporting starts after this baseline, so later REST polls cannot consume live
+socket executions. An existing order absent from the census has no proven
+prefix even if its first socket update arrives after readiness: it seeds a
+baseline instead of replaying historical executions. An unprovable prefix
+updated after reporting readiness, or any suffix with missing cumulative quote
+value, emits an order-specific error so an unresolved live execution gap is
+visible. These boundaries deliberately avoid inventing quantities or prices from
+cumulative rows; they do not promise recovery of executions whose prefix is
+unknown. Once a new cumulative quote baseline is known, later proven suffixes
+continue normally without replaying the unresolved gap. Invalid live cumulative
+quotes retain the last proven prefix, including in startup buffering and bounded
+queue eviction, so a later valid quote can recover the complete proven interval.
+An invalid pre-session quote instead advances a quiet historical quantity floor
+with unknown quote basis, preventing later rows from replaying that history.
 
 Rust commands preflight an entire batch before I/O. Cancel responses must cover
 exactly the requested native identities even when the top-level code is zero;

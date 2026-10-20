@@ -123,8 +123,23 @@ pub struct AccountState {
     tick: Option<TimerId>,
     retry: Option<TimerId>,
 }
+impl AccountState {
+    pub(crate) fn order_final(&self, id: &str) -> bool {
+        self.order_versions
+            .get(id)
+            .is_some_and(|(_, _, final_state)| *final_state)
+    }
+}
 
 impl Okx {
+    pub(crate) fn account_after_uncertain_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.join = None;
+        self.account.orders_generation += 1;
+        self.account.orders_in_flight = false;
+        self.account.revision += 1;
+        self.account_refresh(cx);
+    }
+
     pub(crate) fn account_after_settings(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.join = None;
         self.account.generation += 1;
@@ -685,6 +700,10 @@ impl Okx {
                     }
                 }
                 cx.store.set_orders(rows);
+                cx.orders_reconciled(None);
+                self.trading
+                    .acknowledged
+                    .retain(|_, order| order.version > version);
                 self.account.ready = cx.store.loaded().positions && cx.store.loaded().balance;
                 let ids: HashSet<_> = cx.store.orders().iter().map(|o| o.id.as_str()).collect();
                 self.account
@@ -1093,12 +1112,13 @@ impl Okx {
                         row.state,
                         "filled" | "canceled" | "mmp_canceled" | "order_failed"
                     );
-                    let triggered = matches!(row.state, "effective" | "partially_effective");
+                    let triggered = row.state == "effective";
                     let native_id = if row.algo_id.is_empty() {
                         row.ord_id
                     } else {
                         row.algo_id
                     };
+                    self.trading.acknowledged.remove(native_id);
                     if !terminal
                         && !triggered
                         && self
@@ -1133,7 +1153,10 @@ impl Okx {
                             );
                         } else if triggered {
                             cx.store.remove_orders(&[&order.id]);
-                        } else if matches!(row.state, "live" | "partially_filled" | "pause") {
+                        } else if matches!(
+                            row.state,
+                            "live" | "partially_filled" | "partially_effective" | "pause"
+                        ) {
                             self.account.order_leverage.insert(
                                 order.id.clone(),
                                 (

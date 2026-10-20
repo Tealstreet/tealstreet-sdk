@@ -707,6 +707,7 @@ impl WasmEngine {
                     public_data_only: options.public_data_only,
                     spot_only: venue == "coinbasespot" || options.spot_only,
                     testnet: options.testnet,
+                    read_credentials: options.read_credentials.clone(),
                 })
                 .map_err(|error| JsError::new(&error))?,
             )),

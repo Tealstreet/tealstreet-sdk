@@ -87,27 +87,23 @@ High:
   (`binance/src/account.rs:1169`).~~ Fixed: TRADE-only execution-ID dedupe, including PM/COIN-M.
 
 Medium:
-- Phemex cancel-all fails while any place is in flight (`phemex/src/trading.rs:806`).
-- Cancel-all misses just-placed orders: okx, asterdex, breakoutprop, bitget, blofin, bitrue.
-- Backpack amend replaces full size after partial fill (`backpack/src/trading.rs:411`).
-- No per-order lock between amend and cancel in most venues.
+- ~~Phemex cancel-all fails while any place is in flight (`phemex/src/trading.rs:806`).~~ Pending placements are fenced before resolving native cancellation targets. See [verification](RUST_ORDER_RACES.md).
+- ~~Cancel-all misses just-placed orders: okx, asterdex, breakoutprop, bitget, blofin, bitrue.~~ Retained acknowledgement routes, pending-placement fences and SDK attempted-symbol scopes cover the gap; Aster/Breakout acknowledgement caches already existed and were retained. See [verification](RUST_ORDER_RACES.md).
+- ~~Backpack amend replaces full size after partial fill (`backpack/src/trading.rs:411`).~~ Replacement subtracts prior and cancel-racing executions and requires definitive cancellation. See [verification](RUST_ORDER_RACES.md).
+- ~~No per-order lock between amend and cancel in most venues.~~ Shared scoped admission covers concurrent/preplanned cancel-replace adapters; existing serial-intent or explicit-lock paths remain. Binance/Bybit findings belong to their lane. See [verification](RUST_ORDER_RACES.md).
 - ~~Stale snapshot reopens canceled orders: Binance USD-M/PM (`trading.rs:1463`),
-  Bybit Demo/Hyro (`account.rs:1824`).~~ Fixed: write/event revision fences plus native terminal retention
-  cover in-flight reads and replica-stale reads issued after acknowledgement.
-- REST snapshot swallows stream fills: bitrue `account.rs:1291`, bingx `account.rs:726`.
+  Bybit Demo/Hyro (`account.rs:1824`).~~ Fixed: write/event revision fences plus native terminal retention cover in-flight and replica-stale reads.
+- ~~REST snapshot swallows stream fills: bitrue `account.rs:1291`, bingx `account.rs:726`.~~ Independent execution axes also cover Aster/WOO fallback; startup baselines do not let later REST consume stream fills. See [verification](RUST_ORDER_RACES.md).
 - Binance Spot quantified cancel acknowledgement can advance the execution
   cursor before its matching TRADE, losing the execution notification. Reverified
   on `bd94abb524`; tracked for the Binance follow-up after the derivative fixes.
 - Binance PM strategy/regular client-ID reuse on one symbol can let an old
   strategy terminal replay cancel the newer regular row. Reproduced in PR #1348;
   inherited from the base, tracked for native-owner fencing in the follow-up.
-- BloFin replays pre-session fills (`blofin/src/account.rs:1231`).
-- Stale books stay visible during resync (`engine.rs:1147`); woo ignores `prevTs`,
-  kraken spot ignores checksum, asterdex/lighter keep books while waiting.
-- ~~Bybit inverse amend writes `remaining` in contracts (`bybit/src/trading.rs:1934`).~~
-  Dropped after reverification: the cited local-ack branch only runs for Demo/Hyro, which cannot enable inverse.
-  A regression verifies authoritative inverse amend updates preserve coin `remaining` and native `remainingNative`.
-- Write timeout discards optimistic state instead of refreshing: orderly, okx.
+- ~~BloFin replays pre-session fills (`blofin/src/account.rs:1231`).~~ Session cutoff and one-time complete REST baseline preserve live continuation without historical replay. See [verification](RUST_ORDER_RACES.md).
+- ~~Stale books stay visible during resync (`engine.rs:1147`); woo ignores `prevTs`, kraken spot ignores checksum, asterdex/lighter keep books while waiting.~~ Explicit invalidation and recovery snapshot clears, WOO continuity and Kraken Spot CRC. Binance/Bybit iterator-contract follow-up was sent to their lane. See [verification](RUST_ORDER_RACES.md).
+- ~~Bybit inverse amend writes `remaining` in contracts (`bybit/src/trading.rs:1934`).~~ Dropped after reverification: cited local-ACK branch runs only for Demo/Hyro, which cannot enable inverse. Regression preserves coin `remaining` and native `remainingNative`.
+- ~~Write timeout discards optimistic state instead of refreshing: orderly, okx.~~ Unknown order outcomes preserve pending state and force fresh reads; includes HTTP408/5xx and OKX50004. Config-specific confirmation is not claimed. See [verification](RUST_ORDER_RACES.md).
 
 Low: ~~no reconnect backoff (asterdex, bitrue, bingx, kucoin, cryptocom, phemex,
 coinbase public, grvt, paradex, polymarket)~~ — fixed for the requested feeds
@@ -115,13 +111,16 @@ by the shared supervisor, including fresh KuCoin token POSTs. Reverification
 dropped the literal public no-backoff claim for AsterDEX, Bitrue, BingX and
 Paradex: they already had exponential delays, but reset at open; their fixed
 private recovery, missing jitter and repeated-flap reset are now covered.
-KuCoin client-id collisions;
-~~`uuid().unwrap_or_default()` in Binance~~ (fixed: propagate entropy failure instead of producing a broker-only ID); Backpack empty positions on any 404;
-OKX `partially_effective` final; Lighter late-fill drop; ~~Bybit unused `exec_id`~~ (fixed: bounded native execution-ID dedupe retained across reconnects).
+~~KuCoin client-id collisions~~;
+~~`uuid().unwrap_or_default()` in Binance~~ (entropy failure now propagates); ~~Backpack empty positions on any 404~~;
+~~OKX `partially_effective` final~~; ~~Lighter late-fill drop~~; ~~Bybit unused `exec_id`~~ (bounded execution-ID dedupe survives reconnects).
 
-Scenario tests, independent phase reviews and acceptance evidence for these Binance/Bybit
+
+
+Scenario tests, independent phase reviews and acceptance evidence for Binance/Bybit
 closures: [`RUST_AUDIT_BINANCE_BYBIT.md`](RUST_AUDIT_BINANCE_BYBIT.md).
 Execution and Bybit terminal retention are bounded; private verification remains scripted.
+
 
 Engine root causes: `Fill` has no execution id and the store replaces lists with
 no freshness fence, so every venue reinvents dedupe and terminal fencing.
@@ -525,13 +524,17 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
 
 ### Kraken
 Futures matches TS on nearly every input; no high regression.
-- Medium: isolated positions flip to cross when a WS row omits
+- ~~Medium: isolated positions flip to cross when a WS row omits
   `maxFixedLeverage` (`kraken/src/account.rs:1056,1132`; confirm live);
   `more_candles: true` fails the whole candle fetch, empty chart (`lib.rs:727`);
   spot `EGeneral:Permission denied` on an order deactivates the account
-  (`spot/account.rs:513`).
-- Decided: market entry with attached TP/SL is rejected (Rust behaviour);
-  the error must say the TP/SL legs are unsupported on market entry.
+  (`spot/account.rs:513`).~~ Fixed: a stream row without the field keeps the
+  REST-proven margin mode and leverage (as TS's cached preference does); a capped
+  candle page (Kraken serves 2000 bars from `from`) pages forward to `to`, bounded; permission denied on a spot write fails only that
+  command, while on a read it still deactivates.
+- ~~Decided: market entry with attached TP/SL is rejected (Rust behaviour);
+  the error must say the TP/SL legs are unsupported on market entry.~~ Done: the
+  rejection names the unsupported take-profit/stop-loss legs before any write.
 - Low: income over 500 rows errors (TS partial); one bad row rejects
   catalogue/tickers/open orders and blocks private start (startup lane);
   missing funding field set to 0; raw error text; spot 3m candles.
@@ -541,13 +544,8 @@ Futures matches TS on nearly every input; no high regression.
 
 ### Orderly and TxFlow (already default to Rust)
 TxFlow loses nothing (master TS was a placeholder).
-- High (Orderly, all six brokers): standalone SL/TP rejected because the app
-  always sends `triggerPrice: price` (`orderly/src/trading.rs:362`); master TS
-  ignored `triggerPrice`. Chart-drag stops, stop form and hotkeys all fail.
-- Medium: cancel-all only loops symbols in the store instead of the unscoped
-  DELETE (`rust.exchange.ts` has no Orderly override; engine supports
-  `symbol: ''`); SL/TP blocked when a trailing stop or quantity TP_SL exists on
-  that side (`trading.rs:254`).
+- ~~High (Orderly, all six brokers): standalone SL/TP rejected because the app always sends `triggerPrice: price` (`orderly/src/trading.rs:362`); master TS ignored `triggerPrice`. Chart-drag stops, stop form and hotkeys all fail.~~ Matching protective prices are accepted and covered by app-shaped regressions.
+- ~~Medium: cancel-all only loops symbols in the store instead of the unscoped DELETE (`rust.exchange.ts` has no Orderly override; engine supports `symbol: ''`); SL/TP blocked when a trailing stop or quantity TP_SL exists on that side (`trading.rs:254`).~~ All broker aliases cancel globally; independent trailing/quantity protections are preserved, and mixed-parent contradictions fail before cancellation. See [verification](RUST_ORDER_RACES.md).
 - Low: one bad market row or unknown order row fails closed (startup lane);
   trailing-stop display price; cancels skipped for unknown/finished ids;
   candle `from`/`to` filtering a latest-N fetch.
@@ -579,11 +577,14 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
 - High: ~~`SetPositionMode` has no symbol (`engine/src/command.rs:95`), so Phemex
   loops PUTs over every market and can half-switch (`phemex/src/trading.rs:858`).~~
   Phemex now requires one market and sends one PUT; WEEX preserves optional scope;
-  one unknown order status/type drops the whole private frame incl. positions
-  and balances (`account_wire.rs:298`, `account.rs:601`).
+  ~~one unknown order status/type drops the whole private frame incl. positions
+  and balances (`account_wire.rs:298`, `account.rs:601`)~~ (that row is skipped,
+  its executions still emit, the store keeps its copy).
 - Medium: one bad public row stops startup; one bad position row freezes a
   currency slice (`account.rs:286`); no fallback read when a symbol's mode or
-  leverage context is uncached (`trading.rs:229,713`).
+  leverage context is uncached (`trading.rs:229,713`) — re-verified as low
+  impact: `accountPositions` (size-0 rows included) reconciles every 2 s, so the
+  gap is the first cycle; TS also refuses a symbol that read omits.
 - Low: cancel batch refused on one uncached id; index triggers refused; daily
   candle `to`; no 1 s REST resync after terminal events.
 - Confirm (TS bugs Rust fixed): filled from cumQty with exec dedupe; WS-closed
@@ -643,19 +644,23 @@ Normal inputs send the same requests as TS; the risk is resilience.
   `id` dropped; income row without asset fails the page; fetchLeverage returns max.
 
 ### Coinbase (already defaults to Rust)
-- High: one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
+- High: ~~one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
   site) rejects every snapshot and blocks all trading incl. cancel
   (`coinbase/src/account.rs:336,1577,1842`, `trading.rs:1028`); a failed
   placement leaves a reservation that breaks cancel-symbol for the session
   (`trading.rs:1109,1283,1164`); CLI market orders with GTC rejected
-  (`trading.rs:264`, `cli-core/.../BaseBuySellCommand.ts:368`); browser-side
+  (`trading.rs:264`, `cli-core/.../BaseBuySellCommand.ts:368`)~~ (rows skip with
+  store copies and stay cancellable; 4xx releases, ambiguous outcomes release
+  after 30 s plus later order/position reads; GTC market sends IOC); browser-side
   `signWsAuth`/HTTP signing lost (decision 2).
-- Medium: reduce-only capacity counts protective stops against TPs and spot
+- Medium: ~~reduce-only capacity counts protective stops against TPs and spot
   reduce-only always rejected (`trading.rs:654,676`); portfolio probe stalls on
   404/other non-2xx (`account.rs:1322,1687`); one bad CFM position row rejects
-  the snapshot (`account.rs:1246`).
+  the snapshot (`account.rs:1246`)~~ (stops and other closes reserve separately;
+  spot reduce-only is plain; probe advances unless 408/429/5xx; bad position
+  rows skip keeping the store copy, flat side-less rows clear).
 - Low: CFM `upnl` and spot `total` sources differ (equity double-count risk);
-  OHLCV honours `from`; placement errors lose Coinbase's message.
+  OHLCV honours `from`; ~~placement errors lose Coinbase's message~~.
 
 ### Lighter
 
@@ -665,8 +670,8 @@ Signing, integer scaling, tx encoding and nonces match TS.
   (`lighter/src/account.rs:424,877`), so leverage reads as the market max and a
   margin-mode change signs max leverage (`trading.rs:567`).~~ Position-only
   ratio/percentage/tick normalization now has REST/WS and 5x signing regressions.
-- Medium: windowed fill history pages the whole account history then fails
-  (`history.rs:404,744`); one bad market/account row stalls startup or sync;
+- Medium: ~~windowed fill history pages the whole account history then fails
+  (`history.rs:404,744`)~~ (newest-first paging stops past `from`); one bad market/account row stalls startup or sync;
   account tier not exposed and `changeAccountTier` missing.
 - Low: thinner error mapping (rate-limit guidance, 21613 refresh); reduce-only
   re-check races a fixed 2 s timer. ~~Shared with TS: amend re-places the full
@@ -796,9 +801,10 @@ CLOB V2 signing and amounts match the official client.
 Alias→product mapping, credentials, testnet, routing and broker/builder
 attribution are correct for all 48 names (~~BloFin `brokerId` aside~~; repaired
 with its production/proxy gate).
-- Medium: Coinbase accounts with a saved read-only key fail to start — no
+- Medium: ~~Coinbase accounts with a saved read-only key fail to start — no
   `secondaryReadHeaders` entry or `read_credentials` (`transport/engine.ts:76,116`,
-  `hosts/wasm/src/lib.rs:656`); Coinbase is Rust-only.
+  `hosts/wasm/src/lib.rs:656`); Coinbase is Rust-only.~~ Read keys sign REST
+  reads after a same-portfolio `key_permissions` check.
 - Low/medium: polling controls ignored — `extra.tickInterval` (incl. `Infinity`
   to stop polling), the server slowdown multiplier and credential-rejection
   backoff reach only BreakoutProp (and raw tickInterval to Orderly, where
@@ -816,6 +822,7 @@ Signing, order payloads (incl. app stop shapes), amend, cancel and positions mat
 
 ### BreakoutProp (disabled in production)
 App stop payloads accepted; amend stricter than TS.
-- High if re-enabled: one unexpected portfolio row (XBTUSD lot, terminal-placed
+- High if re-enabled: ~~one unexpected portfolio row (XBTUSD lot, terminal-placed
   order type, multi-leg order) rejects the whole snapshot
-  (`breakoutprop/src/account.rs:159,226,261`, `lib.rs:920`).
+  (`breakoutprop/src/account.rs:159,226,261`, `lib.rs:920`)~~ (such rows are
+  skipped and logged; off-catalogue position margin still counts).
