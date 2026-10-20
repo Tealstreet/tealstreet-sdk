@@ -44,6 +44,9 @@ import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, nativeTransport } from '@tealst
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { isErrorReported, markErrorReported } from '../../commandOutcome';
 import { exchangeMetadata } from '../../exchangeMetadata';
+import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
+import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
+import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
@@ -469,6 +472,18 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (this.name === 'binance') {
       // As TS: USD-M has no reported closed axis; round trips fold from per-symbol fills.
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: true });
+    }
+    // Journal paths as the TS venues declare them; bybitinverse declares none and keeps the base refusal.
+    if (['bybit', 'bybitdemo', 'hyrotrader'].includes(this.name)) {
+      this.fetchHistoricalPositions = this.bybitJournal;
+    }
+    if (okxNames.has(this.name)) this.fetchHistoricalPositions = this.okxJournal;
+    if (this.name === 'blofin') this.fetchHistoricalPositions = this.blofinJournal;
+    if (['bitget', 'bitgetusdc', 'bitgetinverse'].includes(this.name)) {
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
+    }
+    if (['hyperliquid', 'paradex'].includes(this.name)) {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: true });
     }
     if (this.name === 'woo') {
@@ -1658,13 +1673,71 @@ export class RustEngineExchange extends BaseExchange {
     this.command<IncomeRecord[]>({ op: 'fetchIncome', incomeType, from: startTime, to: endTime });
 
   /** The venue's raw closed-position rows, for the same TS mappers the TS venue uses. */
-  private fetchClosedPositionRows = (opts: { symbol?: string; from?: number; to?: number }) =>
-    this.command<Array<Record<string, any>>>({
-      op: 'fetchClosedPositions',
-      symbol: opts.symbol,
-      from: opts.from,
-      to: opts.to,
+  private fetchClosedPositionRows = (opts: { symbol?: string; from?: number; to?: number }, report = true) =>
+    this.command<Array<Record<string, any>>>(
+      { op: 'fetchClosedPositions', symbol: opts.symbol, from: opts.from, to: opts.to },
+      { report },
+    );
+
+  /**
+   * Journal paths read the reported closed axis and THROW on a failed read, as TS does: an
+   * under-counted history presented as complete is the failure the journal refuses.
+   */
+  private bybitJournal = async (opts: { account: string; from?: number; to?: number }) => {
+    const to = opts.to ?? virtualClock.getCurrentTimeMs();
+    const from = opts.from ?? to - 7 * 24 * 60 * 60 * 1000;
+    if (this.isPublicDataOnly) return [];
+    const rows = await this.fetchClosedPositionRows({ from, to }, false);
+    // Closed-PnL rows carry no hedge leg; the order axis does (see bybit.exchange.ts).
+    const legs = new Map<string, PositionSide | 'both'>();
+    try {
+      for (const order of await this.fetchHistoricalOrders({ from, to })) {
+        if (order?.id && order.positionSide) legs.set(String(order.id), order.positionSide);
+      }
+    } catch {
+      throw new Error('bybit: could not read the order axis to resolve hedge legs');
+    }
+    return aggregateBybitClosedPnl(rows, {
+      account: opts.account,
+      resolveSettleCurrency: (symbol: string) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
+      resolveLeg: legs.size ? (orderId: string) => legs.get(orderId) : undefined,
     });
+  };
+
+  private okxJournal = async (opts: { account: string; from?: number; to?: number }) => {
+    if (this.isPublicDataOnly) return [];
+    const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to }, false);
+    const records = [];
+    for (const row of rows) {
+      const market = this.store.marketsById[String(row.instId ?? '')];
+      // As TS: inverse rows need a reference price the adapter lacks, so they are skipped.
+      if (!market || market.isInverse) continue;
+      const record = mapOkxPositionHistory(row, {
+        account: opts.account,
+        toBase: (contracts: number, instId: string) =>
+          this.okxContractsToBase(contracts, this.store.marketsById[instId] ?? market),
+        resolveSymbol: (instId: string) => this.store.marketsById[instId]?.symbol,
+        resolveSettleCurrency: (instId: string) => this.store.marketsById[instId]?.quote,
+      });
+      if (record) records.push(record);
+    }
+    return records;
+  };
+
+  private blofinJournal = async (opts: { account: string; from?: number; to?: number }) => {
+    if (this.isPublicDataOnly) return [];
+    const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to }, false);
+    const records = [];
+    for (const row of rows) {
+      const record = mapBlofinPositionHistory(row, {
+        account: opts.account,
+        resolveSymbol: (instId: string) => this.store.marketsById[instId]?.symbol,
+        resolveSettleCurrency: (instId: string) => this.store.marketsById[instId]?.quote,
+      });
+      if (record) records.push(record);
+    }
+    return records;
+  };
 
   /** As the TS venues: reported rows only, newest close first; a failed read reports and yields []. */
   private fetchReportedClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {

@@ -48,7 +48,10 @@ describe('Rust closed PnL reads the engine rows through the TS mappers', () => {
   it('bybit pages through the engine and maps like the TS venue, newest close first', async () => {
     const { exchange, command } = make('bybit', BYBIT_ROWS);
     const entries = await exchange.fetchClosedPnl({ symbol: 'ETHUSDT', from: 1, to: 2, accountName: 'acct' });
-    expect(command).toHaveBeenCalledWith({ op: 'fetchClosedPositions', symbol: 'ETHUSDT', from: 1, to: 2 });
+    expect(command).toHaveBeenCalledWith(
+      { op: 'fetchClosedPositions', symbol: 'ETHUSDT', from: 1, to: 2 },
+      { report: true },
+    );
     expect(entries).toEqual([
       mapBybitClosedPnl(BYBIT_ROWS[1], 'acct', true),
       mapBybitClosedPnl(BYBIT_ROWS[0], 'acct', false),
@@ -96,7 +99,10 @@ describe('Rust closed PnL reads the engine rows through the TS mappers', () => {
     for (const name of ['okx', 'blofin'] as const) {
       const { exchange, command } = make(name, []);
       await exchange.fetchClosedPnl({ symbol: '', accountName: 'a' });
-      expect(command).toHaveBeenCalledWith({ op: 'fetchClosedPositions', symbol: undefined, from: undefined, to: undefined });
+      expect(command).toHaveBeenCalledWith(
+        { op: 'fetchClosedPositions', symbol: undefined, from: undefined, to: undefined },
+        { report: true },
+      );
     }
   });
 
