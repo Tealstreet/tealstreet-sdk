@@ -941,3 +941,10 @@ reentrant work contributes inclusive time once. Engine counter scans remain
 outside the drain interval but inside whole replay CPU, so the signed residual
 must not be presented as all host overhead or exact packing. Production source
 and default replay behavior are unchanged; no new timing sample was collected.
+
+Post-merge17 broad checks pass: strict all-target workspace Clippy, full strict
+workspace tests, wasm32 workspace Clippy,44 typecheck/28 lint/27 repository test
+tasks. The initial failed compile/typecheck logs remain retained alongside
+final passes. Kraken landed during these checks; hold the unrun17-family
+release and baseline builds and integrate18 before freezing measurement inputs.
+No new CPU gate or comparison pair has run.
