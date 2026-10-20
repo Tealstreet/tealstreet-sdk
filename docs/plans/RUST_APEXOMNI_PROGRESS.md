@@ -290,3 +290,15 @@ generated ID and preserves both virtual siblings when editing one leg.
   KuCoin hydration/broker contracts and every ApeX auth/identity/replay hook.
 - 151 targeted shared harness tests pass during merge review. Full acceptance
   repeats from the merged state; private tape now includes review regressions.
+
+### Post-KuCoin verification checkpoint
+
+- All ApeX TS tests pass 113/113 across eight files. Two older bracket tests
+  needed complete valid-order fixtures (`status`, `filled`, `remaining`);
+  assertions are unchanged. Root typecheck 44 tasks and lint 28 tasks pass.
+- Merged harness passes 264 tests. Combined 17-venue WASM rebuild passes.
+  Expanded TS private replay passes 23 commands / 16 writes with all strict
+  error counters zero; the partial order replaces 0.004 after 0.006 filled.
+- Workspace native, paired private, combined WASM/host and final root tests
+  are completing. Public performance/size and Binance regressions repeat
+  after the current shared artifact is released.
