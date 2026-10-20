@@ -1155,7 +1155,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             429,
             "",
-            rejected(ErrorKind::RateLimited),
+            (Some(ErrorKind::RateLimited), None),
             "Paradex HTTP 429",
         ),
         (
@@ -1202,12 +1202,21 @@ fn write_failures_are_classified_without_changing_their_text() {
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
     // Unsupported controls were never sent.
-    let mut h = private();
-    h.command(Command::FetchStpMode { command: 9 });
-    assert_eq!(
-        (h.failures[0].kind, h.failures[0].outcome),
-        (Some(ErrorKind::Unsupported), Some(Outcome::NotSent))
-    );
+    for command in [
+        Command::FetchStpMode { command: 9 },
+        Command::SetPositionMode {
+            command: 9,
+            hedged: true,
+            symbol: None,
+        },
+    ] {
+        let mut h = private();
+        h.command(command);
+        assert_eq!(
+            (h.failures[0].kind, h.failures[0].outcome),
+            (Some(ErrorKind::Unsupported), Some(Outcome::NotSent))
+        );
+    }
 }
 
 #[test]

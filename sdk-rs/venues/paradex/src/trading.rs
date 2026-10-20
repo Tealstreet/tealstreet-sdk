@@ -638,14 +638,15 @@ impl Trading {
             Command::SetMarginType {
                 command, isolated, ..
             } => {
-                cx.done(
-                    command,
-                    if isolated {
-                        Err("Paradex isolated account routing is unsupported".into())
-                    } else {
-                        Ok("[]".into())
-                    },
-                );
+                if isolated {
+                    cx.fail(
+                        command,
+                        not_sent("Paradex isolated account routing is unsupported")
+                            .kind(ErrorKind::Unsupported),
+                    );
+                } else {
+                    cx.done(command, Ok("[]".into()));
+                }
                 return true;
             }
             Command::SetPositionMode {
@@ -653,14 +654,14 @@ impl Trading {
                 hedged,
                 symbol: _,
             } => {
-                cx.done(
-                    command,
-                    if hedged {
-                        Err("Paradex supports one-way mode only".into())
-                    } else {
-                        Ok("[]".into())
-                    },
-                );
+                if hedged {
+                    cx.fail(
+                        command,
+                        not_sent("Paradex supports one-way mode only").kind(ErrorKind::Unsupported),
+                    );
+                } else {
+                    cx.done(command, Ok("[]".into()));
+                }
                 return true;
             }
             Command::AmendOrder {
@@ -756,20 +757,9 @@ impl Trading {
         if let Some(operation) = state.operations.pop_front() {
             if let Kind::Amend { id, target } = &operation.kind {
                 if let Err(error) = account.begin_amend(id, (**target).clone()) {
+                    // An amend job has a single operation, so nothing took effect yet.
                     let state = self.jobs.remove(&job).expect("pending amendment");
-                    let effective = state.effective || !state.results.is_empty();
-                    let error = not_sent(error);
-                    cx.fail(
-                        state.command,
-                        if effective {
-                            VenueError {
-                                outcome: None,
-                                ..error
-                            }
-                        } else {
-                            error
-                        },
-                    );
+                    cx.fail(state.command, not_sent(error));
                     return;
                 }
                 self.amend_locks.insert(id.clone());
@@ -827,7 +817,13 @@ impl Trading {
                     self.advance(cx, account, request.job);
                 }
                 // A read before any write: nothing was sent.
-                Err(error) => self.complete(cx, account, request, Err(not_sent(error)), false),
+                Err(error) => {
+                    let error = VenueError {
+                        outcome: Some(Outcome::NotSent),
+                        ..answer_failure(response.status, error)
+                    };
+                    self.complete(cx, account, request, Err(error), false)
+                }
             }
             return;
         }
@@ -900,9 +896,19 @@ impl Trading {
             }
             _ => Ok(Vec::new()),
         });
-        let result = result.map_err(|error| match crate::success(response) {
-            Err(_) => answer_failure(response.status, error),
-            Ok(()) => unproven(error),
+        let result = result.map_err(|error| {
+            let error = match crate::success(response) {
+                Err(_) => answer_failure(response.status, error),
+                Ok(()) => unproven(error),
+            };
+            match request.kind {
+                // A read: no write outcome to classify.
+                Kind::Rails(_) => VenueError {
+                    outcome: None,
+                    ..error
+                },
+                _ => error,
+            }
         });
         if result.is_ok() && matches!(request.kind, Kind::Amend { .. }) {
             account.amend_ack(cx, response.body);
@@ -1443,7 +1449,8 @@ fn answer_failure(status: u16, message: String) -> VenueError {
         200..=299 => error,
         401 => rejected(error, ErrorKind::AuthInvalid),
         403 => rejected(error, ErrorKind::AuthPermission),
-        429 => rejected(error, ErrorKind::RateLimited),
+        // The amend fence treats a 429 as possibly applied; match it.
+        429 => error.kind(ErrorKind::RateLimited),
         408 => error.outcome(Outcome::Unknown),
         400..=499 => rejected(error, ErrorKind::Rejected),
         _ => error.outcome(Outcome::Unknown),
