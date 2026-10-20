@@ -112,9 +112,11 @@ Low risk, do first:
    `encodeURIComponent` and axios dialects; 5 `Query` types. Signing vectors
    settle it.~~ Done: `engine::url` dialects and `Query`; Kraken's form
    spelling and AsterDEX's raw-value query stay venue-specific.
-3. `engine::backoff::Backoff`: ~40 inline exponential formulas, no jitter.
-   Migrate with constants unchanged, then jitter, then one startup-retry policy
-   (fixes startup fail-closed on OKX, BloFin, Bitget).
+3. `engine::backoff::Backoff`: ~~~40 inline exponential formulas, no jitter.
+   Migrate with constants unchanged, then jitter~~ (done: one schedule shared
+   with `engine::socket::Supervisor`, reconnects jittered); then one
+   startup-retry policy (fixes startup fail-closed on OKX, BloFin, Bitget),
+   landing with the public-startup PR.
 4. ~~`engine::time`: ISO/civil-date math in 9 venues.~~ Done: civil math,
    month arithmetic and ISO formatting shared; venue text grammars stay local.
 

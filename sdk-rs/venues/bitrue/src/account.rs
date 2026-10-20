@@ -1,6 +1,7 @@
 //! Futures account snapshots and the listen-key stream.
 use crate::wire::{Number, Text};
 use crate::{Bitrue, Job, Pending};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
@@ -22,14 +23,9 @@ const REFRESH_MS: f64 = 30.0 * 60_000.0;
 const HISTORY_LIMIT: usize = 500;
 /// Consecutive event-fenced snapshots discarded before one commits anyway.
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
-const ORDER_RETRY_INITIAL_MS: f64 = 500.0;
-const ORDER_RETRY_CAP_MS: f64 = 30_000.0;
 
 /// Delay before re-reading a symbol whose open-order read failed `failures` times in a row.
-fn order_retry_ms(failures: u32) -> f64 {
-    let steps = failures.saturating_sub(1).min(16) as i32;
-    (ORDER_RETRY_INITIAL_MS * 2f64.powi(steps)).min(ORDER_RETRY_CAP_MS)
-}
+const ORDER_RETRY: Backoff = Backoff::new(500.0, 16, 30_000.0);
 
 enum OrderRead {
     Reconciled,
@@ -613,7 +609,8 @@ impl Bitrue {
                 if let Some(timer) = backoff.retry.take() {
                     cx.clear_timer(timer);
                 }
-                backoff.retry = Some(cx.set_timer(order_retry_ms(backoff.failures)));
+                backoff.retry =
+                    Some(cx.set_timer(ORDER_RETRY.delay(backoff.failures.saturating_sub(1))));
             }
         }
         if self.account.initial_orders.is_empty() {

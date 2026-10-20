@@ -4,6 +4,7 @@ mod history;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
@@ -299,8 +300,7 @@ impl MexcFutures {
         if let Some(timer) = state.retry.take() {
             cx.clear_timer(timer);
         }
-        state.retry =
-            Some(cx.set_timer((250.0 * 2f64.powi(state.failures.min(7) as i32)).min(30_000.0)));
+        state.retry = Some(cx.set_timer(Backoff::new(250.0, 7, 30_000.0).delay(state.failures)));
     }
     fn apply_depth(book: &mut Book, depth: &Depth, size: f64) {
         for (side, rows) in [(BookSide::Bids, &depth.bids), (BookSide::Asks, &depth.asks)] {
