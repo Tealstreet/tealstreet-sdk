@@ -695,6 +695,7 @@ impl AsterDex {
                             self.account.orders_seeded = true;
                         }
                         cx.store.set_orders(rows);
+                        cx.orders_reconciled(None);
                     }
                 }
             }

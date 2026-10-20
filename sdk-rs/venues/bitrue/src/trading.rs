@@ -4,10 +4,11 @@ use crate::{Bitrue, Job, Pending};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Command, CommandId, Cx, Method, Response};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Default)]
 pub(crate) struct Trading {
+    acknowledged: HashMap<String, Target>,
     queue: VecDeque<Command>,
     busy: bool,
 }
@@ -32,7 +33,7 @@ struct Step {
     effect: Effect,
 }
 enum Effect {
-    Place { conditional: bool },
+    Place { conditional: bool, target: Target },
     Cancel(Target),
     Inspect(Box<Amend>),
     Verify(Target),
@@ -279,6 +280,14 @@ impl Plan {
             self.refresh_result |= payload.condition_order.unwrap_or(false)
                 || !payload.trigger_order_create_params.is_empty();
             self.symbol(&order.symbol);
+            let target = Target {
+                id: String::new(),
+                contract: payload.contract_name.clone(),
+                conditional: payload.condition_order.unwrap_or(false),
+                filled: 0.0,
+                amount: order.amount,
+                store_ids: vec![],
+            };
             self.creating.push(order);
             self.steps.push_back(Step {
                 method: Method::Post,
@@ -286,6 +295,7 @@ impl Plan {
                 body: Some(serde_json::to_string(&payload).expect("placement")),
                 effect: Effect::Place {
                     conditional: payload.condition_order.unwrap_or(false),
+                    target,
                 },
             });
         }
@@ -585,6 +595,12 @@ impl Bitrue {
         let mut plan = Plan::new(id);
         match command {
             Command::PlaceOrders { orders, .. } => {
+                if self.trading.acknowledged.len() >= 4096 {
+                    return Err(
+                        "Bitrue unobserved placement capacity exceeded; reconcile before placing"
+                            .into(),
+                    );
+                }
                 let mut seen = HashSet::new();
                 let mut rows = Vec::new();
                 for opts in orders {
@@ -628,6 +644,11 @@ impl Bitrue {
                 let mut seen = HashSet::new();
                 for id in &ids {
                     let Some(order) = cx.store.order(id) else {
+                        if let Some(target) = self.trading.acknowledged.get(id)
+                            && seen.insert(id.clone())
+                        {
+                            plan.steps.push_back(target.cancel());
+                        }
                         continue;
                     };
                     if terminal(order.status) || !seen.insert(id.clone()) {
@@ -662,6 +683,19 @@ impl Bitrue {
                         continue;
                     }
                     targets.push(self.cancel_target(cx, order)?);
+                }
+                if let Some(market) = cx.store.market(&symbol) {
+                    targets.extend(
+                        self.trading
+                            .acknowledged
+                            .values()
+                            .filter(|t| {
+                                t.contract == market.id
+                                    && !targets.iter().any(|other| other.id == t.id)
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                    );
                 }
                 plan.symbol(&symbol);
                 for target in targets {
@@ -709,6 +743,12 @@ impl Bitrue {
         Ok(plan)
     }
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) -> bool {
+        self.trading.acknowledged.retain(|id, _| {
+            !cx.store
+                .orders()
+                .iter()
+                .any(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
+        });
         let id = match &command {
             Command::PlaceOrders { command, .. }
             | Command::CancelOrders { command, .. }
@@ -854,6 +894,9 @@ impl Bitrue {
     ) {
     }
     pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        if matches!(request.step.effect, Effect::Place { .. }) {
+            self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
+        }
         self.trade_finish(cx, *request.plan, Some(error.into()));
     }
     pub(crate) fn trade_response(
@@ -867,11 +910,20 @@ impl Bitrue {
             return;
         }
         let result = match &request.step.effect {
-            Effect::Place { conditional } => {
+            Effect::Place {
+                conditional,
+                target,
+            } => {
                 let reply = serde_json::from_str::<Reply<Identity<'_>>>(response.body)
                     .map_err(|e| format!("Malformed Bitrue placement: {e}"));
                 match reply {
                     Ok(reply) if !reply.data.order_id.is_empty() => {
+                        let id = reply.data.order_id.to_string();
+                        if cx.store.order(&id).is_none() {
+                            let mut target = target.clone();
+                            target.id = id.clone();
+                            self.trading.acknowledged.insert(id, target);
+                        }
                         if !conditional {
                             request.plan.ids.push(reply.data.order_id.to_string());
                         }
@@ -884,6 +936,7 @@ impl Bitrue {
             Effect::Cancel(target) => {
                 let reply = serde_json::from_str::<Reply<Identity<'_>>>(response.body);
                 if reply.is_ok_and(|r| r.data.order_id.to_string() == target.id) {
+                    self.trading.acknowledged.remove(&target.id);
                     self.account.orders_revision += 1;
                     for id in &target.store_ids {
                         self.remember_terminal(id);

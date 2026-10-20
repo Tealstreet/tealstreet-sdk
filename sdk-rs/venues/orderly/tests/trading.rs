@@ -170,7 +170,11 @@ fn split_quantities_preserve_exact_amount_and_report_partial_acceptance() {
     let error = done(actions(&mut e), 1).unwrap_err();
     assert!(error.contains("partialOrderIds"));
     assert!(error.contains("41"));
-    assert!(requests(&mut e).is_empty());
+    assert!(
+        requests(&mut e)
+            .iter()
+            .all(|r| r.method == safe_cex_engine::Method::Get)
+    );
 }
 #[test]
 fn brackets_follow_entry_and_accept_documented_root_id_shape() {
@@ -1095,5 +1099,96 @@ fn omitted_stream_fields_do_not_erase_prior_type_or_margin_contradictions() {
             !out.iter().any(|a| matches!(a, Action::Http(_))),
             "missing fields erased contradictory native evidence"
         );
+    }
+}
+
+#[test]
+fn lost_place_cancel_and_amend_preserve_optimistic_state_and_reconcile_without_replay() {
+    use safe_cex_engine::model::OrderStatus;
+    for kind in [0, 1, 2] {
+        let (mut e, _) = ready();
+        requests(&mut e);
+        if kind == 0 {
+            place(
+                &mut e,
+                71,
+                r#"[{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}]"#,
+            );
+        } else {
+            e.handle(
+                2000.0,
+                Event::Command(if kind == 1 {
+                    Command::CancelOrders {
+                        command: 71,
+                        ids: vec!["9007199254740993".into()],
+                    }
+                } else {
+                    Command::AmendOrder {
+                        command: 71,
+                        id: "9007199254740993".into(),
+                        price: Some(50001.0),
+                        amount: None,
+                    }
+                }),
+            );
+        }
+        let request = requests(&mut e).pop().unwrap();
+        let before = e.store().orders().to_vec();
+        e.handle(
+            2001.0,
+            Event::HttpFailed {
+                request: request.id,
+                error: "timeout after acceptance",
+            },
+        );
+        let out = actions(&mut e);
+        assert_eq!(e.store().orders().len(), before.len());
+        let expected = [
+            OrderStatus::Creating,
+            OrderStatus::Canceling,
+            OrderStatus::Updating,
+        ][kind];
+        assert!(e.store().orders().iter().any(|o| o.status == expected));
+        assert!(out.iter().any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get && r.url.contains("orders?status=INCOMPLETE"))));
+        assert!(
+            !out.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+        );
+        assert!(done(out, 71).is_err());
+    }
+}
+
+#[test]
+fn uncertain_placement_is_retired_only_by_a_successful_fresh_order_snapshot() {
+    for status in [200, 503] {
+        let (mut e, _) = ready();
+        requests(&mut e);
+        place(
+            &mut e,
+            81,
+            r#"[{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}]"#,
+        );
+        let write = requests(&mut e).pop().unwrap();
+        e.handle(
+            2001.0,
+            Event::HttpFailed {
+                request: write.id,
+                error: "lost response",
+            },
+        );
+        let fresh = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("/v1/orders?"))
+            .unwrap();
+        assert!(e.store().order("pending:81").is_some());
+        let body = format!(
+            r#"{{"success":true,"data":{{"rows":[{}],"meta":{{"total":1}}}}}}"#,
+            ORDER.replace("9007199254740993", "9007199254740994")
+        );
+        reply(&mut e, &fresh, status, &body);
+        assert_eq!(e.store().order("pending:81").is_some(), status != 200);
+        if status == 200 {
+            assert!(e.store().order("9007199254740994").is_some());
+        }
     }
 }

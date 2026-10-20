@@ -383,3 +383,66 @@ fn pre_session_order_replay_seeds_execution_baseline_without_emitting_history() 
     );
     assert_eq!(h.e.store().order("123").unwrap().filled, 0.006);
 }
+
+#[test]
+fn startup_rest_partial_seeds_history_but_later_rest_cannot_consume_stream_fills() {
+    const START: f64 = 1_700_000_000_000.0;
+    let mut h = Harness::new_at(START);
+    h.modes();
+    h.reply("account/positions", r#"{"code":"0","data":[]}"#);
+    h.reply(
+        "balances",
+        r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"0"}]}"#,
+    );
+    let snapshot = |qty, average| {
+        format!(
+            r#"{{"code":"0","data":[{{"instId":"BTC-USDT","orderCategory":"normal","orderId":"123","orderType":"limit","side":"buy","size":"10","price":"100","filledSize":"{qty}","averagePrice":"{average}","state":"partially_filled"}}]}}"#
+        )
+    };
+    h.reply("orders-pending", &snapshot(4, 100));
+    h.reply("orders-pending", r#"{"code":"0","data":[]}"#);
+    h.reply("orders-tpsl-pending", r#"{"code":"0","data":[]}"#);
+    h.reply("orders-algo-pending", r#"{"code":"0","data":[]}"#);
+    assert!(executions(h.e.take_frame(START).unwrap()).is_empty());
+    let event = |qty, average, updated| {
+        format!(
+            r#"{{"arg":{{"channel":"orders"}},"data":[{{"instId":"BTC-USDT","orderCategory":"normal","orderId":"123","orderType":"limit","side":"buy","size":"10","price":"100","filledSize":"{qty}","averagePrice":"{average}","state":"partially_filled","updateTime":"{updated}"}}]}}"#
+        )
+    };
+    let first = event(6, 120, START + 1.0);
+    h.e.handle(
+        START + 2.0,
+        Event::WsMessage {
+            socket: h.private,
+            text: &first,
+        },
+    );
+    h.collect();
+    assert_eq!(
+        executions(h.e.take_frame(START + 2.0).unwrap()),
+        [(160.0, 0.002)]
+    );
+
+    h.e.handle(START + 10_000.0, Event::TimerFired { timer: h.tick });
+    h.collect();
+    h.reply("orders-pending", &snapshot(8, 130));
+    h.reply("orders-pending", r#"{"code":"0","data":[]}"#);
+    h.reply("orders-tpsl-pending", r#"{"code":"0","data":[]}"#);
+    h.reply("orders-algo-pending", r#"{"code":"0","data":[]}"#);
+    assert_eq!(h.e.store().order("123").unwrap().filled, 0.008);
+    let late = event(8, 130, START + 11_000.0);
+    for _ in 0..2 {
+        h.e.handle(
+            START + 12_000.0,
+            Event::WsMessage {
+                socket: h.private,
+                text: &late,
+            },
+        );
+        h.collect();
+    }
+    assert_eq!(
+        executions(h.e.take_frame(START + 12_000.0).unwrap()),
+        [(160.0, 0.002)]
+    );
+}

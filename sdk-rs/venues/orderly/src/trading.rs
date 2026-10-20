@@ -1444,9 +1444,25 @@ impl Orderly {
         }
     }
     pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        self.finish_failed_trade(cx, request, error, false);
+    }
+    pub(crate) fn trade_lost(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        self.finish_failed_trade(cx, request, error, true);
+        self.account_after_uncertain_write(cx);
+    }
+    fn finish_failed_trade(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+        uncertain: bool,
+    ) {
         match request.step.effect {
-            Effect::Place(order) => cx.store.remove_orders(&[&order.id]),
-            Effect::Cancel { orders, .. } => {
+            Effect::Place(order) if !uncertain => cx.store.remove_orders(&[&order.id]),
+            Effect::Place(order) => {
+                self.account.uncertain_placements.insert(order.id);
+            }
+            Effect::Cancel { orders, .. } if !uncertain => {
                 for original in orders {
                     cx.store.update_order(&original.id, |o| {
                         if o.status == OrderStatus::Canceling {
@@ -1481,7 +1497,7 @@ impl Orderly {
                     self.account_poll(cx, true);
                 }
             }
-            Effect::Amend { id } => {
+            Effect::Amend { id } if !uncertain => {
                 cx.store.update_order(&id, |o| {
                     if o.status == OrderStatus::Updating {
                         o.status = OrderStatus::Open;
@@ -1502,7 +1518,7 @@ impl Orderly {
         if job.error.is_none() {
             job.error = Some(error.into());
         }
-        if !job.keep_going {
+        if uncertain || !job.keep_going {
             job.steps.clear();
         }
         self.trade_next(cx);

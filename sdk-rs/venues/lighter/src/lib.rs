@@ -616,6 +616,10 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.markets(cx, false);
@@ -787,10 +791,12 @@ impl Venue for Lighter {
         if let Some(t) = self.public.watchdog.take() {
             cx.clear_timer(t);
         }
-        for state in self.books.values_mut() {
+        for (symbol, state) in &mut self.books {
             state.waiting = true;
             state.revision += 1;
             state.nonce = None;
+            state.book.clear();
+            cx.book_changed(symbol);
         }
         self.public.attempts = self.public.attempts.saturating_add(1);
         self.public.reconnect = Some(cx.set_timer(
@@ -1202,6 +1208,12 @@ impl Venue for Lighter {
                     }
                     if cx.now - s.last_received > 90_000.0 {
                         s.waiting = true;
+                        if !s.book.is_empty() {
+                            s.book.clear();
+                            s.nonce = None;
+                            s.revision += 1;
+                            cx.book_changed(symbol);
+                        }
                     }
                     if s.waiting {
                         Some(symbol.clone())

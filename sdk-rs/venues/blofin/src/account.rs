@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Clone, Default)]
 pub struct Source {
+    execution_baseline: (f64, Option<f64>),
     pub inst_id: String,
     pub margin_mode: String,
     pub position_side: String,
@@ -34,9 +35,10 @@ pub(crate) struct Account {
     orders_busy: bool,
     startup_started: bool,
     session_started: f64,
+    orders_seeded: bool,
     account_busy: bool,
     pub sources: HashMap<String, Source>,
-    fills: HashMap<String, (f64, f64)>,
+    fills: HashMap<String, (f64, Option<f64>)>,
     fill_order: VecDeque<String>,
     terminal: HashSet<String>,
     terminal_order: VecDeque<String>,
@@ -46,6 +48,16 @@ pub(crate) struct Account {
     auth_failures: u32,
 }
 impl Account {
+    fn execution_progress(&mut self, id: &str, qty: f64, value: Option<f64>) {
+        self.fills.insert(id.to_owned(), (qty, value));
+        self.fill_order.retain(|key| key != id);
+        self.fill_order.push_back(id.to_owned());
+        while self.fill_order.len() > 500 {
+            if let Some(id) = self.fill_order.pop_front() {
+                self.fills.remove(&id);
+            }
+        }
+    }
     fn remember_terminal(&mut self, id: &str) {
         if self.terminal.insert(id.to_owned()) {
             self.terminal_order.push_back(id.to_owned());
@@ -489,6 +501,11 @@ impl Blofin {
                 )
             });
         Source {
+            execution_baseline: (
+                o.filled_size.0,
+                (o.average_price.0 > 0.0 || o.filled_size.0 == 0.0)
+                    .then_some(o.filled_size.0 * o.average_price.0),
+            ),
             inst_id: o.inst_id.to_string(),
             margin_mode: o.margin_mode.to_string(),
             position_side: o.position_side.to_string(),
@@ -1058,8 +1075,27 @@ impl Blofin {
                             }
                         }
                         rows.extend(extra);
+                        // Seed historical executions once, after every startup page succeeds.
+                        // Periodic REST progress must not consume delayed stream executions.
+                        if !self.account.orders_seeded {
+                            for order in &rows {
+                                if matches!(order.kind, OrderType::Limit | OrderType::Market)
+                                    && let Some(source) = sources.get(&order.id)
+                                    && !self.account.fills.contains_key(&order.id)
+                                {
+                                    let (qty, value) = source.execution_baseline;
+                                    if qty > 0.0 {
+                                        self.account.execution_progress(&order.id, qty, value);
+                                    }
+                                }
+                            }
+                            self.account.orders_seeded = true;
+                        }
                         self.account.sources = sources;
                         cx.store.set_orders(rows);
+                        cx.orders_reconciled(None);
+                    } else if self.account.retry.is_none() {
+                        self.account.retry = Some((cx.set_timer(1_000.0), 1));
                     }
                 }
             }
@@ -1251,20 +1287,18 @@ impl Blofin {
             .fills
             .get(id.as_ref())
             .copied()
-            .unwrap_or((0.0, 0.0));
+            .unwrap_or((0.0, Some(0.0)));
         if qty <= previous.0 {
+            if qty == previous.0 && previous.1.is_none() {
+                self.account.execution_progress(id, qty, Some(value));
+            }
             return;
         }
         let delta = decimal_difference(qty, previous.0);
-        let delta_value = decimal_difference(value, previous.1);
-        self.account.fills.insert(id.to_string(), (qty, value));
-        self.account.fill_order.retain(|key| key != id);
-        self.account.fill_order.push_back(id.to_string());
-        while self.account.fill_order.len() > 500 {
-            if let Some(id) = self.account.fill_order.pop_front() {
-                self.account.fills.remove(&id);
-            }
-        }
+        let delta_value = previous
+            .1
+            .map(|previous| decimal_difference(value, previous));
+        self.account.execution_progress(id, qty, Some(value));
         if updated > 0.0 && updated < self.account.session_started {
             return;
         }
@@ -1277,11 +1311,9 @@ impl Blofin {
             order_id: id.to_string(),
             symbol: order.symbol.clone(),
             side: order.side,
-            price: if delta_value > 0.0 {
-                clean(delta_value / delta)
-            } else {
-                row.average_price.0
-            },
+            price: delta_value
+                .filter(|value| *value > 0.0)
+                .map_or(row.average_price.0, |value| clean(value / delta)),
             amount: clean(delta * contract),
         });
     }

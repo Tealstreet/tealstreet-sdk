@@ -693,6 +693,10 @@ fn spot_rows(
 }
 
 impl Venue for Hyperliquid {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.spot && !self.options.public_data_only {

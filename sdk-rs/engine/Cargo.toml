@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [features]
+order-locks = []
 command-tracking = []
 book-deltas = []
 command-asterdex = []

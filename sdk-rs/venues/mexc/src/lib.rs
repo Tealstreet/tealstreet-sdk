@@ -383,6 +383,10 @@ impl MexcFutures {
 }
 
 impl Venue for MexcFutures {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials

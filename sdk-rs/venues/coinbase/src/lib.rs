@@ -68,6 +68,10 @@ impl Coinbase {
     }
 }
 impl Venue for Coinbase {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn account_id(&self) -> Option<&str> {
         self.account.portfolio_id.as_deref()

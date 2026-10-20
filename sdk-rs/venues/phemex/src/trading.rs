@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Default)]
 pub(crate) struct State {
+    acknowledged: HashMap<String, Order>,
     jobs: HashMap<CommandId, Job>,
     sides: HashMap<String, String>,
     brackets: HashMap<String, Brackets>,
@@ -489,6 +490,7 @@ impl PhemexPerpetuals {
                 .store
                 .order(&base)
                 .or_else(|| cx.store.order(&id))
+                .or_else(|| self.trading.acknowledged.get(&base))
                 .ok_or(
                     "Phemex cancel requires a cached order to resolve symbol and position side",
                 )?;
@@ -775,12 +777,18 @@ impl PhemexPerpetuals {
         cx: &mut Cx<'_, Pending>,
         command: Command,
     ) -> Option<Command> {
-        self.trading
-            .sides
-            .retain(|id, _| cx.store.order(id).is_some_and(active));
-        self.trading
-            .brackets
-            .retain(|id, _| cx.store.order(id).is_some_and(active));
+        self.trading.acknowledged.retain(|id, _| {
+            !cx.store
+                .orders()
+                .iter()
+                .any(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
+        });
+        self.trading.sides.retain(|id, _| {
+            cx.store.order(id).is_some_and(active) || self.trading.acknowledged.contains_key(id)
+        });
+        self.trading.brackets.retain(|id, _| {
+            cx.store.order(id).is_some_and(active) || self.trading.acknowledged.contains_key(id)
+        });
         let is_settings = matches!(
             command,
             Command::SetLeverage { .. }
@@ -801,7 +809,16 @@ impl PhemexPerpetuals {
             | Command::FetchLeverage { command, .. } => {
                 (command, Err("Phemex command is unsupported".into()))
             }
-            Command::PlaceOrders { command, orders } => (command, self.place_plan(cx, orders)),
+            Command::PlaceOrders { command, orders } => {
+                (
+                    command,
+                    if self.trading.acknowledged.len() >= 4096 {
+                        Err("Phemex unobserved placement capacity exceeded; reconcile before placing".into())
+                    } else {
+                        self.place_plan(cx, orders)
+                    },
+                )
+            }
             Command::CancelOrders { command, ids } => (command, self.cancel_plan(cx, ids)),
             Command::CancelSymbolOrders { command, symbol } => {
                 let ids = cx
@@ -810,6 +827,13 @@ impl PhemexPerpetuals {
                     .iter()
                     .filter(|o| o.symbol == symbol && active(o))
                     .map(|o| o.id.clone())
+                    .chain(
+                        self.trading
+                            .acknowledged
+                            .iter()
+                            .filter(|(_, o)| o.symbol == symbol)
+                            .map(|(id, _)| id.clone()),
+                    )
                     .collect();
                 (
                     command,
@@ -1070,6 +1094,14 @@ impl PhemexPerpetuals {
                     if !pending && self.account.order_revision() == request.revision {
                         self.accept_write_order(cx, &row);
                     }
+                    if cx.store.order(&identity.order_id).is_none() {
+                        let mut route = (**order).clone();
+                        route.id = identity.order_id.clone();
+                        route.status = OrderStatus::Open;
+                        self.trading
+                            .acknowledged
+                            .insert(identity.order_id.clone(), route);
+                    }
                     self.trading
                         .sides
                         .insert(identity.order_id.clone(), pos_side.clone());
@@ -1178,6 +1210,9 @@ impl PhemexPerpetuals {
                                 cx.store.set_order_status(&o.id, o.status);
                             }
                         }
+                    }
+                    for id in &accepted {
+                        self.trading.acknowledged.remove(id);
                     }
                     for id in finalized.keys() {
                         self.account.terminal(id, cx.now);

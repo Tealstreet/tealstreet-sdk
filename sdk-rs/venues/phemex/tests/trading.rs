@@ -1332,3 +1332,65 @@ fn unknown_context_and_public_only_fail_closed() {
     assert!(done(&a).is_err());
     assert!(writes(&a).is_empty());
 }
+
+#[test]
+fn cancel_all_waits_for_creating_order_and_cancels_native_ack_even_when_init() {
+    for status in ["New", "Init"] {
+        let (mut e, socket) = authenticated("OneWay");
+        e.handle(
+            1000.,
+            Event::WsMessage {
+                socket,
+                text: r#"{"type":"snapshot","orders_p":[]}"#,
+            },
+        );
+        e.drain_actions().for_each(drop);
+        let a = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 41,
+                orders: vec![opts("pending-caller")],
+            },
+        );
+        let create = writes(&a)[0].clone();
+        assert!(
+            e.store()
+                .orders()
+                .iter()
+                .any(|o| o.status == OrderStatus::Creating)
+        );
+        let a = command(
+            &mut e,
+            Command::CancelSymbolOrders {
+                command: 42,
+                symbol: "BTCUSDT".into(),
+            },
+        );
+        assert!(writes(&a).is_empty());
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 42, .. })))
+        );
+        let mut reply = ack(&create, "native-accepted");
+        reply["data"]["ordStatus"] = json!(status);
+        let a = respond(&mut e, &create, reply);
+        let cancel = writes(&a)
+            .into_iter()
+            .find(|r| r.method == Method::Delete)
+            .expect("deferred cancel dispatched");
+        assert_eq!(p(&cancel, "orderID").as_deref(), Some("native-accepted"));
+        assert_eq!(p(&cancel, "posSide").as_deref(), Some("Merged"));
+        let a = respond(
+            &mut e,
+            &cancel,
+            json!({"code":0,"data":{"orderID":"native-accepted","ordStatus":"Canceled"}}),
+        );
+        assert!(a.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 42,
+                result: Ok(_)
+            })
+        )));
+    }
+}

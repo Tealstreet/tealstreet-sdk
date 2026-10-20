@@ -8,6 +8,7 @@ use std::collections::{HashSet, VecDeque};
 
 #[derive(Default)]
 pub struct Trading {
+    acknowledged: std::collections::HashMap<String, (String, Planned)>,
     queue: VecDeque<Command>,
     active: Option<Job>,
     metadata_at: std::collections::HashMap<String, f64>,
@@ -39,12 +40,14 @@ pub struct Request {
     read_retries: u8,
 }
 
+#[derive(Clone)]
 struct Planned {
     path: &'static str,
     payload: Payload,
     effect: Effect,
 }
 
+#[derive(Clone)]
 enum Effect {
     Metadata(String),
     ResolveAmend {
@@ -234,6 +237,22 @@ struct Reply<'a> {
 
 impl BitgetFutures {
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let observed: Vec<_> = self
+            .trading
+            .acknowledged
+            .keys()
+            .filter(|id| {
+                cx.store
+                    .orders()
+                    .iter()
+                    .any(|o| o.id == **id || o.parent_id.as_ref() == Some(*id))
+                    || self.order_terminal(id)
+            })
+            .cloned()
+            .collect();
+        for id in observed {
+            self.trading.acknowledged.remove(&id);
+        }
         let Some(id) = command_id(&command) else {
             return;
         };
@@ -506,7 +525,15 @@ impl BitgetFutures {
 
     fn plan_job(&self, cx: &Cx<'_, Pending>, job: &mut Job) -> Result<(), String> {
         match &job.intent {
-            Command::PlaceOrders { orders, .. } => job.calls = self.place_calls(cx, orders)?.into(),
+            Command::PlaceOrders { orders, .. } => {
+                if self.trading.acknowledged.len() >= 4096 {
+                    return Err(
+                        "Bitget unobserved placement capacity exceeded; reconcile before placing"
+                            .into(),
+                    );
+                }
+                job.calls = self.place_calls(cx, orders)?.into();
+            }
             Command::CancelOrders { ids, .. } => {
                 let native: HashSet<_> = ids
                     .iter()
@@ -520,6 +547,18 @@ impl BitgetFutures {
                     .cloned()
                     .collect();
                 job.calls = self.cancel_calls(cx, &orders, true)?.into();
+                for (_, call) in ids
+                    .iter()
+                    .filter_map(|id| self.trading.acknowledged.get(id))
+                {
+                    if call.path.is_empty() {
+                        return Err(
+                            "Bitget cancellation needs the acknowledged order's native identity"
+                                .into(),
+                        );
+                    }
+                    job.calls.push_back(call.clone());
+                }
             }
             Command::CancelSymbolOrders { symbol, .. } => {
                 let orders: Vec<_> = cx
@@ -530,6 +569,20 @@ impl BitgetFutures {
                     .cloned()
                     .collect();
                 job.calls = self.cancel_calls(cx, &orders, true)?.into();
+                for (_, call) in self
+                    .trading
+                    .acknowledged
+                    .values()
+                    .filter(|(s, _)| s == symbol)
+                {
+                    if call.path.is_empty() {
+                        return Err(
+                            "Bitget cancellation needs the acknowledged order's native identity"
+                                .into(),
+                        );
+                    }
+                    job.calls.push_back(call.clone());
+                }
             }
             Command::AmendOrder {
                 id, price, amount, ..
@@ -1509,14 +1562,30 @@ impl BitgetFutures {
             && let Effect::Cancel { orders, .. } = &request.call.effect
         {
             let data = parsed.as_ref().ok().and_then(|(_, r)| r.data.as_ref());
-            let accepted: HashSet<_> = data.map_or_else(HashSet::new, |d| {
+            let retained = orders
+                .iter()
+                .any(|o| self.trading.acknowledged.contains_key(&native_id(o)));
+            let mut accepted: HashSet<_> = data.map_or_else(HashSet::new, |d| {
                 d.success_list
                     .iter()
                     .map(|i| i.order_id.text().into_owned())
                     .collect()
             });
+            if let Some(data) = data {
+                let native = data.order_id.text();
+                let client = data.client_oid.text();
+                for order in orders {
+                    if !native.is_empty() && native == native_id(order)
+                        || !client.is_empty()
+                            && request.call.payload.client_oid.as_deref() == Some(client.as_ref())
+                    {
+                        accepted.insert(native_id(order));
+                    }
+                }
+            }
             for order in orders {
                 if accepted.contains(&native_id(order)) {
+                    self.trading.acknowledged.remove(&native_id(order));
                     self.mark_canceled(cx, &order.id);
                     if !write_noted {
                         self.note_write(cx);
@@ -1534,7 +1603,7 @@ impl BitgetFutures {
                         .collect::<Vec<_>>()
                         .join("; ")
                 ));
-            } else if request.call.path == paths::BATCH_CANCEL
+            } else if (request.call.path == paths::BATCH_CANCEL || retained)
                 && orders.iter().any(|o| !accepted.contains(&native_id(o)))
             {
                 error = Some("Bitget batch cancel did not acknowledge every order".into());
@@ -1578,6 +1647,122 @@ impl BitgetFutures {
                     ));
                 }
                 if !ids.is_empty() {
+                    let p = &request.call.payload;
+                    let symbol = p.symbol.clone().unwrap_or_default();
+                    for id in &ids {
+                        if cx
+                            .store
+                            .orders()
+                            .iter()
+                            .any(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
+                            || self.order_terminal(id)
+                        {
+                            continue;
+                        }
+                        let strategy = matches!(
+                            request.call.path,
+                            paths::PLACE_TPSL | paths::PLACE_TRAILING | paths::UTA_STRATEGY
+                        );
+                        let mut payload = if self.account.uta {
+                            Payload {
+                                category: (!strategy).then(|| self.product().to_uppercase()),
+                                order_id: Some(id.clone()),
+                                ..Payload::default()
+                            }
+                        } else {
+                            let mut payload = Payload {
+                                symbol: Some(symbol.clone()),
+                                product_type: p.product_type.clone(),
+                                margin_coin: p.margin_coin.clone(),
+                                ..Payload::default()
+                            };
+                            if strategy {
+                                payload.plan_type = p.plan_type.clone();
+                                if request.call.path == paths::PLACE_TRAILING {
+                                    payload.order_id_list = Some(vec![CancelId {
+                                        order_id: id.clone(),
+                                    }]);
+                                } else {
+                                    payload.order_id = Some(id.clone());
+                                }
+                            } else {
+                                payload.order_id_list = Some(vec![CancelId {
+                                    order_id: id.clone(),
+                                }]);
+                            }
+                            payload
+                        };
+                        if p.client_oid.as_deref() == Some(id)
+                            && data.is_some_and(|d| d.order_id.text().is_empty())
+                        {
+                            // Native identity was not returned: only UTA accepts a client-id cancel here.
+                            if self.account.uta {
+                                payload.order_id = None;
+                                payload.client_oid = Some(id.clone());
+                            }
+                        }
+                        let kind = if strategy {
+                            if request.call.path == paths::PLACE_TRAILING {
+                                OrderType::TrailingStopLoss
+                            } else if p.plan_type.as_deref().is_some_and(|t| t.contains("profit")) {
+                                OrderType::TakeProfit
+                            } else {
+                                OrderType::StopLoss
+                            }
+                        } else {
+                            OrderType::Limit
+                        };
+                        let order = Order {
+                            id: id.clone(),
+                            symbol: symbol.clone(),
+                            kind,
+                            parent_id: None,
+                            status: OrderStatus::Open,
+                            side: OrderSide::Buy,
+                            price: 0.0,
+                            amount: 0.0,
+                            filled: 0.0,
+                            remaining: 0.0,
+                            reduce_only: false,
+                            close: None,
+                            client_order_id: None,
+                            time_in_force: None,
+                            last_update: cx.now,
+                            trigger_type: None,
+                            take_profit: None,
+                            stop_loss: None,
+                            extra: None,
+                        };
+                        let unresolved = !self.account.uta
+                            && p.client_oid.as_deref() == Some(id)
+                            && data.is_some_and(|d| d.order_id.text().is_empty());
+                        self.trading.acknowledged.insert(
+                            id.clone(),
+                            (
+                                symbol.clone(),
+                                Planned {
+                                    path: if unresolved {
+                                        ""
+                                    } else if self.account.uta {
+                                        if strategy {
+                                            paths::UTA_CANCEL_STRATEGY
+                                        } else {
+                                            paths::UTA_CANCEL
+                                        }
+                                    } else if strategy {
+                                        paths::CANCEL_PLAN
+                                    } else {
+                                        paths::BATCH_CANCEL
+                                    },
+                                    payload,
+                                    effect: Effect::Cancel {
+                                        orders: vec![order],
+                                        idempotent_missing: true,
+                                    },
+                                },
+                            ),
+                        );
+                    }
                     self.note_write(cx);
                     write_noted = true;
                 }
@@ -1612,6 +1797,9 @@ impl BitgetFutures {
             }
         }
         if let Some(error) = error {
+            if matches!(request.call.effect, Effect::Place { .. }) {
+                self.account.orders_version = self.account.orders_version.wrapping_add(1);
+            }
             if let Effect::Cancel { orders, .. } = &request.call.effect {
                 for order in orders {
                     cx.store.update_order(&order.id, |current| {

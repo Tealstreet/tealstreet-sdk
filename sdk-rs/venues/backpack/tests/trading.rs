@@ -185,7 +185,12 @@ fn amend_validates_before_cancel_and_never_reuses_the_original_caller_id() {
     );
     let cancel = requests(&mut e).pop().unwrap();
     assert_eq!(cancel.method, Method::Delete);
-    reply(&mut e, &cancel, 200, "{}");
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+    );
     let replace = requests(&mut e).pop().unwrap();
     assert!(!replace.body.as_deref().unwrap().contains("clientId"));
     reply(&mut e, &replace, 200, r#"{"id":"replacement"}"#);
@@ -351,7 +356,12 @@ fn missing_trigger_by_is_repaired_and_does_not_reopen_a_replacement_filled_befor
     reply(&mut e, &r, 200, &format!("[{old}]"));
     let cancel = requests(&mut e).pop().unwrap();
     assert_eq!(cancel.method, Method::Delete);
-    reply(&mut e, &cancel, 200, "{}");
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+    );
     let new = requests(&mut e).pop().unwrap();
     assert!(
         new.body
@@ -440,7 +450,12 @@ fn amend_trigger_limit_preserves_execution_price_and_trigger_source() {
     );
     let cancel = requests(&mut e).pop().unwrap();
     assert_eq!(cancel.method, Method::Delete);
-    reply(&mut e, &cancel, 200, "{}");
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"id":"trigger-limit","status":"Cancelled","executedQuantity":"0"}"#,
+    );
     let replace = requests(&mut e).pop().unwrap();
     let body = replace.body.as_deref().unwrap();
     assert!(body.contains("\"price\":\"145.00\""), "{body}");
@@ -486,7 +501,12 @@ fn rest_and_stream_post_only_orders_remain_post_only_when_amended() {
             }),
         );
         let cancel = requests(&mut e).pop().unwrap();
-        reply(&mut e, &cancel, 200, "{}");
+        reply(
+            &mut e,
+            &cancel,
+            200,
+            r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+        );
         let replacement = requests(&mut e).pop().unwrap();
         assert!(
             replacement
@@ -499,15 +519,9 @@ fn rest_and_stream_post_only_orders_remain_post_only_when_amended() {
 }
 
 #[test]
-fn concurrent_cancel_failures_cannot_undo_another_success() {
-    for (a, b) in [(503, 200), (200, 503), (503, 503)] {
-        let (mut e, socket) = ready();
-        ws(
-            &mut e,
-            socket,
-            "account.orderUpdate",
-            r#"{"e":"orderAccepted","i":"123","E":2000000,"X":"New","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"0","f":"GTC"}"#,
-        );
+fn concurrent_cancel_is_rejected_until_the_first_command_completes() {
+    for status in [200, 503] {
+        let (mut e, _) = ready_orders(&format!("[{ORDER}]"));
         e.drain_actions().for_each(drop);
         e.handle(
             2000.0,
@@ -524,18 +538,19 @@ fn concurrent_cancel_failures_cannot_undo_another_success() {
                 ids: vec!["123".into()],
             }),
         );
-        let two = requests(&mut e).pop().unwrap();
-        reply(&mut e, &one, a, "{}");
-        if a == 503 {
-            assert_eq!(
-                e.store().order("123").unwrap().status,
-                OrderStatus::Canceling
-            );
-        }
-        reply(&mut e, &two, b, "{}");
+        let out: Vec<_> = e.drain_actions().collect();
+        assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(out.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 2,
+                result: Err(_)
+            })
+        )));
+        reply(&mut e, &one, status, "{}");
         assert_eq!(
             e.store().order("123").unwrap().status,
-            if a == 200 || b == 200 {
+            if status == 200 {
                 OrderStatus::Canceled
             } else {
                 OrderStatus::Open
@@ -557,7 +572,12 @@ fn trigger_limit_repairs_preserve_post_only_time_in_force_and_reduce_only() {
             .replace("\"timeInForce\":\"GTC\"", &format!("\"timeInForce\":\"{tif}\",\"postOnly\":{post_only}"));
         reply(&mut e, &read, 200, &format!("[{old}]"));
         let cancel = requests(&mut e).pop().unwrap();
-        reply(&mut e, &cancel, 200, "{}");
+        reply(
+            &mut e,
+            &cancel,
+            200,
+            r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+        );
         let replacement = requests(&mut e).pop().unwrap();
         let body = replacement.body.as_deref().unwrap();
         assert!(
@@ -604,10 +624,112 @@ fn reconciliation_created_at_cannot_invalidate_pending_cancel_acknowledgements()
             .unwrap();
         reply(&mut e, &read, 200, &format!("[{ORDER}]"));
         assert_eq!(e.store().order("123").unwrap().last_update, 1000.0);
-        reply(&mut e, &cancel, 200, "{}");
+        reply(
+            &mut e,
+            &cancel,
+            200,
+            r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+        );
         assert_eq!(
             e.store().order("123").unwrap().status,
             OrderStatus::Canceled
         );
+    }
+}
+
+#[test]
+fn amend_replaces_only_the_unfilled_total_including_fills_during_cancel() {
+    for (initial, later, requested, expected) in [
+        ("2", "2", None, Some("3.00")),
+        ("2", "3", None, Some("2")),
+        ("2", "3", Some(4.0), Some("1")),
+        ("2", "5", None, None),
+    ] {
+        let (mut e, socket) = ready_orders(&format!(
+            "[{}]",
+            ORDER.replace(
+                "\"executedQuantity\":\"0\"",
+                &format!("\"executedQuantity\":\"{initial}\"")
+            )
+        ));
+        e.drain_actions().for_each(drop);
+        e.handle(
+            2000.0,
+            Event::Command(Command::AmendOrder {
+                command: 1,
+                id: "123".into(),
+                price: Some(142.0),
+                amount: requested,
+            }),
+        );
+        let cancel = requests(&mut e).pop().unwrap();
+        // A stream update can beat the definitive HTTP cancellation reply.
+        ws(
+            &mut e,
+            socket,
+            "account.orderUpdate",
+            &format!(
+                r#"{{"e":"orderFill","i":"123","E":3000000,"X":"PartiallyFilled","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"{later}","l":"1","L":"140","t":999,"f":"GTC"}}"#
+            ),
+        );
+        requests(&mut e);
+        reply(
+            &mut e,
+            &cancel,
+            200,
+            &format!(r#"{{"id":"123","status":"Cancelled","executedQuantity":"{later}"}}"#),
+        );
+        let out: Vec<_> = e.drain_actions().collect();
+        let writes: Vec<_> = out
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) if r.method == Method::Post => Some(r),
+                _ => None,
+            })
+            .collect();
+        if let Some(expected) = expected {
+            assert_eq!(writes.len(), 1);
+            let value: serde_json::Value =
+                serde_json::from_str(writes[0].body.as_deref().unwrap()).unwrap();
+            assert_eq!(value["quantity"], expected);
+        } else {
+            assert!(
+                writes.is_empty(),
+                "a fully executed order must not be replaced"
+            );
+            assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(value), .. }) if value == "[]")));
+        }
+    }
+}
+
+#[test]
+fn amend_does_not_replace_after_an_ambiguous_cancel_ack() {
+    for ack in [
+        "{}",
+        r#"{"id":"other","status":"Cancelled","executedQuantity":"0"}"#,
+        r#"{"id":"123","status":"New","executedQuantity":"0"}"#,
+    ] {
+        let (mut e, _) = ready_orders(&format!("[{ORDER}]"));
+        e.drain_actions().for_each(drop);
+        e.handle(
+            2000.0,
+            Event::Command(Command::AmendOrder {
+                command: 1,
+                id: "123".into(),
+                price: Some(142.0),
+                amount: None,
+            }),
+        );
+        let cancel = requests(&mut e).pop().unwrap();
+        reply(&mut e, &cancel, 200, ack);
+        let out: Vec<_> = e.drain_actions().collect();
+        assert!(
+            !out.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+        );
+        assert!(out.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+        )));
     }
 }

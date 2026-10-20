@@ -556,6 +556,10 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Err(error) = self.options.validate() {

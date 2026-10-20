@@ -879,3 +879,23 @@ fn explicit_active_flag_overrides_a_contradictory_canceled_status() {
     let body = h.take("/api/v1/orders").body.unwrap();
     assert!(body.contains(r#""size":"6""#), "{body}");
 }
+
+#[test]
+fn generated_client_ids_do_not_collide_across_instances_at_the_same_timestamp() {
+    let mut ids = std::collections::HashSet::new();
+    for _ in 0..16 {
+        let mut h = Harness::new();
+        let mut o = order();
+        o.client_order_id = None;
+        place(&mut h, vec![o]);
+        h.metadata(false, "CROSS");
+        let r = h.take("/api/v1/orders");
+        let body: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+        let id = body["clientOid"].as_str().unwrap();
+        assert!(!id.is_empty() && id.len() <= 40);
+        assert!(
+            ids.insert(id.to_owned()),
+            "new sessions must not reuse an exchange idempotency key"
+        );
+    }
+}

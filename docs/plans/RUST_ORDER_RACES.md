@@ -21,3 +21,15 @@ Scope is the requested trading medium/low items in `RUST_AUDITS.md`. Binance and
 ### Private reconciliation checkpoint
 
 Reverified and repaired REST/stream execution baseline races for Bitrue, BingX, Aster and WOO fallback; BloFin pre-session executions now seed baselines without emission; Lighter processes late delivered executions once. Seven deterministic interleaving regressions added. Focused six-venue account suites passed (136 before the extra WOO gap regression). Independent review found and repaired WOO blind-gap pricing/quantity inference; reciprocal public review also passed. Full crate quality and final-source gates remain outstanding. No TS venue was deleted.
+
+### Trading/public checkpoint before landing refresh
+
+Implemented and peer-reviewed: shared feature-gated mutation admission across concurrent/preplanned cancel+replace adapters; serial-intent adapters retain FIFO behavior; seven affected adapters also track pending placements and ambiguous outcomes. Retained native acknowledgement routing closes pre-stream cancellation, including regular/conditional/TPSL/UTA families. SDK cancelAll now retains attempted placement scopes so it reaches native cancellation with an empty store. Explicit partial-business rejections remain cancelable; missing acknowledgement remains uncertain. Complete fresh REST snapshots use causal read epochs and venue snapshot-generation fences; Phemex has no causal REST orders census, so ambiguous sent placement conservatively prevents symbol/global cancellation until recreation (known-native individual cancels remain available).
+
+Backpack remaining-size/cancel-racing execution and 404 preservation, KuCoin collision-resistant fallible IDs, OKX partial-effective/nonfinal status, OKX/Orderly ambiguous-write refreshes implemented and independently reviewed. Private followup seeds BloFin startup cumulative/quote baselines once without letting periodic REST consume stream executions (17 account tests and strict Clippy pass). Wrapper regressions 105 tests plus typecheck/lint pass.
+
+Public fixes peer-reviewed: empty invalidation frames, dropped-clear snapshot recovery, WOO prevTs, Kraken Spot exact-decimal CRC32, Aster/Lighter recovery clearing and stale-REST fences. Engine focused tests 90+ pass, 74 public cases pass. Intentional TS corrections include WOO continuity, Kraken Spot CRC, Backpack 404 preservation, documented in gate comments; replay comparisons are not weakened.
+
+Exploratory selected Paradex build measured 1,258,877 bytes, exceeding fixed 1,258,291 by 586. This is a real gate failure, not accepted evidence. Replace global snapshot subscription bookkeeping with the existing venue book iterator contract, then rerun final-source budgets.
+
+Next: checkpoint all verified work, merge current origin landing (includes other lane PR1338), reconcile shared feature/command changes, lean snapshot repair, strike verified audit items, freeze source and run final gates. Existing focused logs are developmental evidence, not final frozen-source results.

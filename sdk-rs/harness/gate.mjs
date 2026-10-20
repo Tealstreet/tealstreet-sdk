@@ -178,6 +178,10 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // Binance/OKX also bypass cached client-ID hits with secondary credentials:
 // that cache may contain another account's orders. TS and Rust both query
 // the primary account; native tests retain PM's canonical client-ID identity.
+// Audit corrections are exercised by native interleaving regressions, never
+// rewritten into the replay result: Kraken Spot verifies raw-decimal CRC32;
+// WOO validates prevTs and clears invalid books during recovery; Backpack
+// preserves positions after an unqualified 404 rather than committing [].
 const KNOWN_TS_FIXES = {
   hyperliquidspot: {
     // Paired reference fixes retain native spot IDs for coinless contexts and
@@ -336,6 +340,7 @@ const KNOWN_TS_FIXES = {
     output: fixKrakenOutput,
     fixes: [
       'Retain full depth, reject sequence gaps/stale snapshots, unsubscribe unused books.',
+      'Validate Kraken Spot top-ten CRC32 using original decimal tokens; TS ignores checksum.',
       'Full native ticker statistics stay live; omitted relative funding resets zero instead of retaining a stale rate.',
       'Negative instrument quantity precision is a positive power-of-ten step; TS clamps it to 0.1.',
       'Deduplicate native execution IDs; suppress historical fills snapshots.',
@@ -414,7 +419,9 @@ const KNOWN_TS_FIXES = {
   // clear synthetic flat marginSize when an authoritative holding reopens;
   // paced, complete V1 income with signed fees and account aggregate scope.
   // Rust additionally walks V3 fill time windows (TS still reads one page).
-  woo: [],
+  woo: [
+    'Validate prevTs continuity and clear resync books; TS accepts unbridged depth deltas.',
+  ],
   // Paired TS fixes: contract-sized public volumes; private cumulative z/native
   // units, execution L prices, monotonic terminal state and ping timestamp echo.
   // Cancel native identities and protective defaults now match metadata. Rust

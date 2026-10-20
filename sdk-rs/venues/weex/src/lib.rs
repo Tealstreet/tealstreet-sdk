@@ -487,6 +487,10 @@ fn interval(i: &str, stream: bool) -> bool {
     ) || (stream && matches!(i, "2h" | "6h"))
 }
 impl Venue for WeexFutures {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.read_credentials

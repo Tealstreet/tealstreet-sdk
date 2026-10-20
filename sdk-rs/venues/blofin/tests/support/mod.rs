@@ -30,19 +30,9 @@ impl Harness {
         };
         h.collect();
         let instruments = h.take("instruments");
-        h.e.handle(
-            now,
-            Event::HttpResponse {
-                request: instruments.id,
-                response: Response {
-                    status: 200,
-                    headers: "",
-                    body: INSTRUMENT,
-                },
-            },
-        );
-        h.collect();
-        h.reply("tickers",r#"{"code":"0","data":[{"instId":"BTC-USDT","last":"60000","open24h":"59000","bidPrice":"59999","askPrice":"60001","volCurrency24h":"1","vol24h":"60000"}]}"#);
+        h.respond_at(instruments, INSTRUMENT, now);
+        let tickers = h.take("tickers");
+        h.respond_at(tickers,r#"{"code":"0","data":[{"instId":"BTC-USDT","last":"60000","open24h":"59000","bidPrice":"59999","askPrice":"60001","volCurrency24h":"1","vol24h":"60000"}]}"#,now);
         h.private = h
             .actions
             .iter()
@@ -83,8 +73,11 @@ impl Harness {
         self.respond(r, body);
     }
     pub fn respond(&mut self, r: HttpRequest, body: &str) {
+        self.respond_at(r, body, 0.0);
+    }
+    fn respond_at(&mut self, r: HttpRequest, body: &str, now: f64) {
         self.e.handle(
-            0.0,
+            now,
             Event::HttpResponse {
                 request: r.id,
                 response: Response {

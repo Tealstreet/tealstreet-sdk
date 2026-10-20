@@ -436,3 +436,32 @@ fn unknown_metadata_and_invalid_caller_null_fail_before_writes() {
     assert_eq!(h.writes(), 0);
     assert!(serde_json::from_str::<PlaceOrderOpts>(r#"{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000,"clientOrderId":null}"#).is_err());
 }
+
+#[test]
+fn cancel_symbol_includes_ack_before_rest_or_private_new() {
+    let mut h = Harness::new();
+    h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000,"clientOrderId":"pending"}]"#);
+    let create = h.take(Method::Post, "/fapi/v2/order");
+    h.reply(
+        create,
+        r#"{"code":"0","data":{"orderId":2334151155877155281}}"#,
+    );
+    assert!(h.e.store().orders().is_empty());
+    h.command(Command::CancelSymbolOrders {
+        command: 8,
+        symbol: "E-BTC-USDT".into(),
+    });
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    assert_eq!(body(&cancel)["orderId"], "2334151155877155281");
+    h.reply(
+        cancel,
+        r#"{"code":"0","data":{"orderId":2334151155877155281}}"#,
+    );
+    assert!(h.notices.iter().any(|n| matches!(
+        n,
+        Notice::CommandDone {
+            command: 8,
+            result: Ok(_)
+        }
+    )));
+}

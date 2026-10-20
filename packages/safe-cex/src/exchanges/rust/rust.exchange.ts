@@ -221,6 +221,11 @@ export const setRustEngineTransport = (factory: () => Transport) => {
   engineTransport = factory;
 };
 
+const placementScopedCancelAllNames = new Set<ExchangeName>([
+  'phemex', 'okx', 'okxeu', 'okxdemo', 'okxeudemo', 'asterdex',
+  'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue',
+]);
+
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
 
@@ -236,6 +241,7 @@ export class RustEngineExchange extends BaseExchange {
   private hostInitialization?: Promise<void>;
   private startup?: Promise<void>;
   private startupFailure?: Error;
+  private readonly attemptedPlacementSymbols = new Set<string>();
   private readonly startupWaiters = new Set<() => void>();
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
@@ -257,6 +263,16 @@ export class RustEngineExchange extends BaseExchange {
     this.isSpot = ['bybitspot', 'binancespot', 'coinbasespot', 'hyperliquidspot', 'krakenspot'].includes(exchangeName);
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
+    if (placementScopedCancelAllNames.has(exchangeName)) {
+      this.cancelAllOrders = async () => {
+        // Frames can lag placement ACKs. Keep attempted scopes for this account's
+        // lifetime, including uncertain/rejected outcomes and races with later places.
+        const symbols = new Set([...this.store.orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols]);
+        for (const symbol of symbols) {
+          if (!this.isDisposed) await this.cancelSymbolOrders(symbol);
+        }
+      };
+    }
     if (exchangeName === 'polymarket') {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
@@ -759,6 +775,9 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     if (this.name === 'asterdex') for (const order of orders) this.validateAsterStp(order.stpMode);
+    if (this.host && placementScopedCancelAllNames.has(this.name)) {
+      for (const order of orders) this.attemptedPlacementSymbols.add(order.symbol);
+    }
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 

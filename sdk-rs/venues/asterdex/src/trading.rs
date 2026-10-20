@@ -552,6 +552,9 @@ impl AsterDex {
             (Call::StpWrite, Ok(_)) => Ok(()),
             (_, Err(error)) => Err(error),
         };
+        if was_place && outcome.is_err() {
+            self.account.order_revision = self.account.order_revision.wrapping_add(1);
+        }
         if let Some(job) = self.trading.jobs.get_mut(&command) {
             if was_place {
                 job.reserved_places = job.reserved_places.saturating_sub(1);

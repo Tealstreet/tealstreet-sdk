@@ -1352,6 +1352,7 @@ impl Bitrue {
                     for order in retained {
                         cx.store.upsert_order(order);
                     }
+                    cx.orders_reconciled(Some(&symbol));
                 } else {
                     cx.log(
                         LogLevel::Warning,

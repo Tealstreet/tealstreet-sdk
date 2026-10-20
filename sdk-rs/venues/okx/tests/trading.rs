@@ -126,9 +126,10 @@ fn lost_write_response_never_retries() {
         },
     );
     let out = actions(&mut e);
+    assert!(out.iter().any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get && r.url.contains("orders-pending"))));
     assert!(
         !out.iter()
-            .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
     );
     assert!(out.iter().any(|a| matches!(
         a,
@@ -646,4 +647,160 @@ fn bybit_execution_controls_reject_the_whole_batch_before_writes() {
             Action::Notice(Notice::CommandDone { result: Err(message), .. })
                 if message.contains("only on Bybit"))));
     }
+}
+
+#[test]
+fn lost_cancel_and_amend_responses_keep_pending_state_until_a_fresh_read() {
+    use safe_cex_engine::model::{OrderStatus, OrderType};
+    for amend in [false, true] {
+        let mut e = trading_engine();
+        e.store_mut()
+            .upsert_order(stored("uncertain", OrderType::Limit));
+        e.handle(
+            5.0,
+            Event::Command(if amend {
+                Command::AmendOrder {
+                    command: 11,
+                    id: "uncertain".into(),
+                    price: Some(37000.0),
+                    amount: None,
+                }
+            } else {
+                Command::CancelOrders {
+                    command: 11,
+                    ids: vec!["uncertain".into()],
+                }
+            }),
+        );
+        let request = actions(&mut e)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(
+            6.0,
+            Event::HttpFailed {
+                request: request.id,
+                error: "timeout after exchange acceptance",
+            },
+        );
+        let out = actions(&mut e);
+        assert_eq!(
+            e.store().order("uncertain").unwrap().status,
+            if amend {
+                OrderStatus::Updating
+            } else {
+                OrderStatus::Canceling
+            }
+        );
+        assert!(out.iter().any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get && r.url.contains("orders-pending"))));
+        assert!(
+            !out.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+        );
+        assert!(out.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 11,
+                result: Err(_)
+            })
+        )));
+    }
+}
+
+#[test]
+fn cancel_all_includes_acknowledged_entries_and_brackets_before_any_stream_rows() {
+    let mut e = trading_engine();
+    let mut out = place(
+        &mut e,
+        vec![order(
+            r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":2,"price":38000,"stopLoss":36000,"takeProfit":42000}"#,
+        )],
+    );
+    for (id, algo) in [("entry", false), ("stop", true), ("profit", true)] {
+        let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
+        let ack = if algo {
+            format!(r#"{{"algoId":"{id}","sCode":"0"}}"#)
+        } else {
+            format!(r#"{{"ordId":"{id}","sCode":"0"}}"#)
+        };
+        reply(&mut e, request, &envelope(&ack), 6.0);
+        out = actions(&mut e);
+    }
+    assert!(
+        e.store().orders().is_empty(),
+        "the private stream has not populated any rows"
+    );
+    e.handle(
+        7.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 2,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let out = actions(&mut e);
+    let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
+    assert!(
+        matches!(request, Action::Http(r) if r.url.ends_with("/cancel-batch-orders") && r.body.as_ref().unwrap().contains("entry"))
+    );
+    reply(
+        &mut e,
+        request,
+        &envelope(r#"{"ordId":"entry","sCode":"0"}"#),
+        8.0,
+    );
+    let out = actions(&mut e);
+    let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
+    assert!(
+        matches!(request, Action::Http(r) if r.url.ends_with("/cancel-algos") && r.body.as_ref().unwrap().contains("stop") && r.body.as_ref().unwrap().contains("profit"))
+    );
+    reply(
+        &mut e,
+        request,
+        r#"{"code":"0","data":[{"algoId":"stop","sCode":"0"},{"algoId":"profit","sCode":"0"}]}"#,
+        9.0,
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 2,
+            result: Ok(_)
+        })
+    )));
+}
+
+#[test]
+fn partial_batch_accepted_order_remains_cancelable_before_the_stream() {
+    let mut e = trading_engine();
+    let out = place(
+        &mut e,
+        vec![
+            order(r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":2,"price":38000}"#),
+            order(r#"{"symbol":"BTCUSDT","type":"limit","side":"sell","amount":2,"price":42000}"#),
+        ],
+    );
+    let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
+    reply(
+        &mut e,
+        request,
+        r#"{"code":"2","data":[{"ordId":"accepted","sCode":"0"},{"sCode":"51008","sMsg":"Insufficient margin"}]}"#,
+        6.0,
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 1,
+            result: Err(_)
+        })
+    )));
+    e.handle(
+        7.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 2,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/cancel-batch-orders") && r.body.as_ref().unwrap().contains("accepted"))));
 }
