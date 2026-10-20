@@ -296,6 +296,7 @@ fn unrelated_order_update_does_not_skip_the_second_hedge_rail() {
 fn startup_mode_and_metadata_reads_respect_the_rate_limit_pause() {
     let mut e = safe_cex_engine::Engine::new(safe_cex_venue_mexc::MexcFutures::new(
         safe_cex_venue_mexc::Options {
+            recv_window: None,
             read_credentials: None,
             key: Some("key".into()),
             secret: Some("secret".into()),
@@ -898,6 +899,7 @@ fn mode_read(body: &str, status: u16) -> (support::TestEngine, Vec<Action>) {
     let mut e = Engine::new(MexcFutures::new(Options {
         read_credentials: None,
         public_data_only: false,
+        recv_window: None,
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
     }));

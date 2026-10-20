@@ -136,12 +136,13 @@ it.each([false, true])(
         key: 'public-subkey-only',
         scheme: 'stark',
         encoding: 'felt-pair',
-        payload: vector.auth.hash,
+        payload: vector.shortAuth.hash,
       });
       const auth = requests.find((request) => new URL(request.url).pathname.includes('/auth/'))!;
       expect(auth.url).toBe(`https://api.prod.paradex.trade/v1/auth/${vector.subkey}`);
       expect(auth.headers['PARADEX-STARKNET-SIGNATURE']).toBe('opaque signer answer 1');
       expect(auth.headers['PARADEX-STARKNET-ACCOUNT']).toBe(vector.address);
+      expect(Number(auth.headers['PARADEX-SIGNATURE-EXPIRATION']) - Number(auth.headers['PARADEX-TIMESTAMP'])).toBe(300);
       expect(auth.headers['X-Signer-Proof']).toBe('proof-1');
       // The ABI preserves bytes; the routing transport then applies standard Headers OWS normalization.
       expect(signingHeaders[0]).toContain('X-Exact:  proof:with:colons  \nX-Empty:');

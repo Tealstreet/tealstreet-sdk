@@ -413,7 +413,7 @@ test('synchronous transport errors release their request controller', async () =
   });
   host.execute({ op: 'http', request: 1, method: 'POST', url: 'https://example.test/order', headers: [] });
   await new Promise(setImmediate);
-  assert.deepEqual(failures, ['transport unavailable']);
+  assert.deepEqual(failures, ['HTTP transport request failed']);
   assert.equal(host.requests.size, 0);
   host.dispose();
 });
@@ -575,6 +575,47 @@ test('the raw host rejects unconfigured CORS routing before touching the network
   await assert.rejects(nativeTransport().request({method:'GET',route:'publicCors',url:'https://venue.test/time',headers:{}}),/not configured/);
 });
 
+test('EngineHost starts only once even when start is called repeatedly', () => {
+  let starts = 0;
+  const host = new EngineHost({ start() { starts++; return ''; } }, { now: () => 0 });
+  host.start();
+  host.start();
+  host.dispose();
+  host.start();
+  assert.equal(starts, 1);
+});
+
+test('native JS requests forbid redirects with credential headers', async (t) => {
+  let options;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    options = init;
+    return { status: 302, headers: new Map(), body: null };
+  });
+  await nativeTransport().request({ method: 'GET', url: 'https://venue.test/private', headers: { 'X-Api-Key': 'sensitive' } });
+  assert.equal(options.redirect, 'error');
+});
+
+test('native JS transport never forwards private headers to a redirect target', async () => {
+  let leaked = 0;
+  const target = createServer((socket) => { leaked++; socket.end('HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n'); });
+  target.listen(0, '127.0.0.1');
+  await once(target, 'listening');
+  const source = createServer((socket) => socket.once('data', (request) => {
+    assert.match(request.toString(), /sensitive-private-key/);
+    socket.end(`HTTP/1.1 307 Temporary Redirect\r\nlocation: http://127.0.0.1:${target.address().port}/stolen\r\ncontent-length: 0\r\nconnection: close\r\n\r\n`);
+  }));
+  source.listen(0, '127.0.0.1');
+  await once(source, 'listening');
+  try {
+    await assert.rejects(nativeTransport().request({ method: 'POST', url: `http://127.0.0.1:${source.address().port}/private`, headers: { 'X-Api-Key': 'sensitive-private-key' } }));
+    assert.equal(leaked, 0);
+  } finally {
+    source.close();
+    target.close();
+    await Promise.all([once(source, 'close'), once(target, 'close')]);
+  }
+});
+
 test('delegated signing crosses back as an event before HTTP and forwards the opaque answer', async () => {
   const calls = [];
   const engine = {
@@ -660,7 +701,7 @@ test('missing, rejected and malformed delegated signers fail without making HTTP
     host.execute({ op: 'signPayload', request: 10, payload: {}, timeoutMs: 1000 });
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(failures.length, 1);
-    assert.match(failures[0][1], /not configured|denied|Invalid payload signer (result|header)/);
+    assert.match(failures[0][1], /not configured|Payload signing failed|Invalid payload signer (result|header)/);
     assert.equal(host.signings.size, 0);
     host.dispose();
   }
@@ -708,6 +749,218 @@ test('delegated header names and CR/LF fail before encoding or making HTTP reque
     assert.equal(host.signings.size, 0);
     host.dispose();
   }
+});
+
+
+test('external signer exceptions never forward credentials or signed URLs to the engine', async () => {
+  for (const asynchronous of [false, true]) {
+    const failures = [];
+    const host = new EngineHost({ payloadSignFailed: (_id, error) => { failures.push(error); return ''; } }, {
+      now: () => 0, setTimeout, clearTimeout,
+      signPayload: () => {
+        const error = new Error('https://venue.test/private?signature=private-signature Authorization: private-token');
+        if (asynchronous) return Promise.reject(error);
+        throw error;
+      },
+      request() { assert.fail('signing failure must not issue HTTP'); },
+    });
+    host.execute({ op: 'signPayload', request: 13, payload: {}, timeoutMs: 1000 });
+    await new Promise(setImmediate);
+    assert.deepEqual(failures, ['Payload signing failed']);
+    assert.equal(host.signings.size, 0);
+    host.dispose();
+  }
+});
+
+for (const failure of ['synchronous request', 'asynchronous request', 'response body']) {
+  test(`unstructured ${failure} errors cannot leak credentials through command errors or logs`, async () => {
+    const secret = 'https://venue.test/private?signature=private-signature Authorization: private-token';
+    const delivered = [];
+    const logs = [];
+    let command;
+    const engine = {
+      command(json) {
+        command = JSON.parse(json).command;
+        return JSON.stringify([{ op: 'http', request: 17, method: 'POST', url: 'https://venue.test/order', headers: [] }]);
+      },
+      httpStart: () => '', httpChunk: () => '', httpEnd: assert.fail,
+      httpFailed(_id, error) {
+        delivered.push(error);
+        return JSON.stringify([{ op: 'log', level: 'error', message: error }, { op: 'done', command, error }]);
+      },
+    };
+    const host = new EngineHost(engine, {
+      now: () => 0,
+      request() {
+        if (failure === 'synchronous request') throw new Error(secret);
+        if (failure === 'asynchronous request') return Promise.reject(new Error(secret));
+        return Promise.resolve({ status: 200, body: (async function* () {
+          yield Uint8Array.of(1);
+          await Promise.resolve();
+          throw new Error(secret);
+        })() });
+      },
+    }, { onLog: (_level, text) => logs.push(text) });
+    const expected = failure === 'response body' ? 'HTTP response body failed' : 'HTTP transport request failed';
+    await assert.rejects(host.command({ op: 'placeOrders', orders: [] }), (error) => error.message === expected);
+    assert.deepEqual(delivered, [expected]);
+    assert.deepEqual(logs, [expected]);
+    assert.equal(host.requests.size, 0);
+    host.dispose();
+  });
+}
+
+test('structured venue response errors stay actionable after transport failures are sanitized', async () => {
+  let command;
+  let response = '';
+  const message = 'Insufficient balance for this order';
+  const host = new EngineHost({
+    command(json) {
+      command = JSON.parse(json).command;
+      return JSON.stringify([{ op: 'http', request: 18, method: 'POST', url: 'https://venue.test/order', headers: [] }]);
+    },
+    httpStart: () => '',
+    httpChunk(_id, bytes) { response += new TextDecoder().decode(bytes); return ''; },
+    httpEnd() { return JSON.stringify([{ op: 'done', command, error: JSON.parse(response).msg }]); },
+    httpFailed: assert.fail,
+  }, {
+    now: () => 0,
+    request: async () => ({ status: 400, body: new TextEncoder().encode(JSON.stringify({ code: -2019, msg: message })) }),
+  });
+  await assert.rejects(host.command({ op: 'placeOrders', orders: [] }), (error) => error.message === message);
+  host.dispose();
+});
+
+for (const failure of ['connect', 'send']) {
+  test(`WebSocket ${failure} exceptions close the engine socket without exposing credentials`, async () => {
+    const secret = 'https://venue.test/private?signature=private-signature Authorization: private-token';
+    const logs = [];
+    const closed = [];
+    let command;
+    let handlers;
+    let physicalCloses = 0;
+    const timers = [];
+    const host = new EngineHost({
+      command(json) {
+        command = JSON.parse(json).command;
+        return JSON.stringify([{ op: 'wsConnect', socket: 19, url: 'wss://venue.test/private' },
+          ...(failure === 'send' ? [{ op: 'wsSend', socket: 19, text: secret }] : [])]);
+      },
+      wsClose(id, code) {
+        closed.push([id, code]);
+        return JSON.stringify([{ op: 'done', command, error: 'Socket closed before venue acknowledgement' }]);
+      },
+      wsOpen: assert.fail, wsMessage: assert.fail, wsBinary: assert.fail,
+    }, {
+      now: () => 0,
+      setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      clearTimeout() {},
+      connect(_url, callbacks) {
+        handlers = callbacks;
+        if (failure === 'connect') throw new Error(secret);
+        return {
+          send() { throw new Error(secret); },
+          close() { physicalCloses++; callbacks.onClose(1000); throw new Error(secret); },
+        };
+      },
+    }, { onLog: (_level, text) => logs.push(text) });
+    const pending = assert.rejects(host.command({ op: 'placeOrders', orders: [] }),
+      (error) => error.message === 'Socket closed before venue acknowledgement');
+    assert.deepEqual(closed, []);
+    // The command deadline shares the transport timer; only the reconnect delay is under test.
+    const failureTimers = timers.filter((timer) => timer.ms === 1_000);
+    assert.equal(failureTimers.length, 1);
+    failureTimers[0].fn();
+    await pending;
+    assert.deepEqual(closed, [[19, 1006]]);
+    assert.deepEqual(logs, [`WebSocket transport ${failure === 'connect' ? 'connection' : 'send'} failed`]);
+    assert.equal(host.sockets.size, 0);
+    assert.equal(physicalCloses, Number(failure === 'send'));
+    handlers.onOpen();
+    handlers.onMessage('late private message');
+    handlers.onBinary(Uint8Array.of(1));
+    handlers.onClose(1000);
+    assert.equal(closed.length, 1);
+    host.dispose();
+  });
+}
+
+test('synchronous provider failures queue bounded reconnects and disposal revokes queued callbacks', () => {
+  const timers = [];
+  const canceled = [];
+  let attempts = 0;
+  let closed = 0;
+  const host = new EngineHost({
+    wsClose() {
+      closed++;
+      return closed < 3 ? JSON.stringify([{ op: 'wsConnect', socket: 20, url: 'wss://venue.test/private' }]) : '';
+    },
+  }, {
+    now: () => 0,
+    connect() { attempts++; throw new Error('private-auth-token'); },
+    setTimeout(fn, ms) { const timer = { fn, ms }; timers.push(timer); return timer; },
+    clearTimeout: (timer) => canceled.push(timer),
+  });
+  host.execute({ op: 'wsConnect', socket: 20, url: 'wss://venue.test/private' });
+  assert.equal(attempts, 1);
+  assert.equal(closed, 0);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].ms, 1_000);
+  assert.equal(typeof [...host.timers.keys()][0], 'symbol');
+  timers[0].fn();
+  assert.equal(attempts, 2);
+  assert.equal(closed, 1);
+  assert.equal(timers.length, 2);
+  host.dispose();
+  assert.deepEqual(canceled, [timers[1]]);
+  assert.equal(host.socketFailures.size, 0);
+  assert.equal(host.timers.size, 0);
+  timers[1].fn();
+  assert.equal(attempts, 2);
+  assert.equal(closed, 1);
+});
+
+test('a revoked provider failure cannot close a replacement socket reusing its id', () => {
+  const timers = [];
+  const canceled = [];
+  let attempts = 0;
+  let replacementCloses = 0;
+  let oldHandlers;
+  const host = new EngineHost({ wsOpen: assert.fail, wsMessage: assert.fail, wsBinary: assert.fail, wsClose: assert.fail }, {
+    now: () => 0,
+    connect(_url, callbacks) {
+      if (++attempts === 1) { oldHandlers = callbacks; throw new Error('private-auth-token'); }
+      return { send() {}, close() { replacementCloses++; } };
+    },
+    setTimeout(fn) { timers.push(fn); return fn; },
+    clearTimeout(timer) { canceled.push(timer); throw new Error('private-cancellation-token'); },
+  });
+  host.execute({ op: 'wsConnect', socket: 21, url: 'wss://venue.test/private' });
+  host.execute({ op: 'wsConnect', socket: 21, url: 'wss://venue.test/replacement' });
+  assert.deepEqual(canceled, [timers[0]]);
+  timers[0]();
+  oldHandlers.onOpen();
+  oldHandlers.onMessage('late credential-bearing response');
+  oldHandlers.onBinary(Uint8Array.of(1));
+  oldHandlers.onClose(1000);
+  assert.equal(host.sockets.size, 1);
+  assert.equal(replacementCloses, 0);
+  assert.equal(host.socketFailures.size, 0);
+  host.dispose();
+  assert.equal(replacementCloses, 1);
+});
+
+test('provider failure timer errors cannot expose credential-bearing scheduler exceptions', async () => {
+  const logs = [];
+  const host = new EngineHost({ command: () => JSON.stringify([{ op: 'wsConnect', socket: 22, url: 'wss://venue.test/private' }]) }, {
+    now: () => 0,
+    connect() { throw new Error('private-connection-token'); },
+    setTimeout() { throw new Error('private-scheduler-token'); },
+  }, { onLog: (_level, message) => logs.push(message) });
+  await assert.rejects(host.command({ op: 'fetchAccount' }), (error) => error.message === 'WebSocket failure reporting failed');
+  assert.deepEqual(logs, ['WebSocket transport connection failed']);
+  assert.equal(host.socketFailures.size, 0);
+  host.dispose();
 });
 
 test('a classified failure settles as an ExchangeError with its detail and the legacy message', async () => {

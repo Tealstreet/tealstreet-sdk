@@ -9,7 +9,9 @@ use safe_cex_engine::model::{
     MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
-use safe_cex_engine::{Command, CommandId, Cx, Response, SocketId, TimerId, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, Outcome, Response, SocketId, TimerId, VenueError, num,
+};
 use std::collections::{HashMap, VecDeque};
 
 /// Orders per `create-batch` request (Bybit's non-VIP limit).
@@ -98,6 +100,8 @@ struct Job {
     continue_on_error: bool,
     ids: Vec<String>,
     error: Option<String>,
+    /// A write may have taken effect without a definitive answer.
+    unknown: bool,
     delay: Option<TimerId>,
 }
 
@@ -192,6 +196,14 @@ fn tp_trigger_by(opts: &PlaceOrderOpts) -> &'static str {
     }
 }
 
+const CANCEL_ALL_NOT_SUCCESSFUL: &str = "Bybit cancel-all was not successful";
+
+/// No definitive answer: transport failure (0), HTTP 408/5xx without a Bybit
+/// envelope, or retCode 10000 (server timeout) / 10016 (internal error).
+fn outcome_unknown(code: i64) -> bool {
+    matches!(code, 0 | 408 | 500..=599 | 10000 | 10016)
+}
+
 /// Bybit's message, with the Trading Terms refusal made actionable.
 fn describe((code, message): (i64, String)) -> String {
     if !AGREEMENT_CODES.contains(&code) {
@@ -284,7 +296,7 @@ fn cancel_all_affected(body: &str) -> Result<Vec<String>, &'static str> {
         |_| "Bybit cancel-all outcome is unknown: missing or malformed affected-order list",
     )?;
     if reply.result.success.is_some_and(|success| success != "1") {
-        return Err("Bybit cancel-all was not successful");
+        return Err(CANCEL_ALL_NOT_SUCCESSFUL);
     }
     let mut ids = Vec::with_capacity(reply.result.list.len());
     for row in reply.result.list {
@@ -758,11 +770,21 @@ impl BybitLinear {
             None => {
                 let job = self.trading.jobs.remove(&command).expect("present");
                 // A batch reports its failures as logs; it fails only when nothing went through.
-                let result = match job.error {
-                    Some(error) if job.ids.is_empty() || !job.continue_on_error => Err(error),
-                    _ => Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
-                };
-                cx.done(command, result);
+                match job.error {
+                    // Unclassified failures keep the plain path until Bybit migrates to `fail`.
+                    Some(error)
+                        if job.unknown && (job.ids.is_empty() || !job.continue_on_error) =>
+                    {
+                        cx.fail(command, VenueError::new(error).outcome(Outcome::Unknown))
+                    }
+                    Some(error) if job.ids.is_empty() || !job.continue_on_error => {
+                        cx.done(command, Err(error))
+                    }
+                    _ => cx.done(
+                        command,
+                        Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
+                    ),
+                }
             }
         }
     }
@@ -860,6 +882,10 @@ impl BybitLinear {
                     .and_then(|s| s.ret_code)
                     .is_some_and(|code| code == 10001)
         });
+        // A gateway failure is unproven whatever body it carries.
+        let http_unknown = response
+            .as_ref()
+            .is_ok_and(|r| r.status == 408 || r.status >= 500);
         let outcome = match &response {
             Ok(response) => match venue_error(response) {
                 None => Ok(response.body),
@@ -869,12 +895,21 @@ impl BybitLinear {
         };
         let mut ids = Vec::new();
         let mut errors = Vec::new();
+        let mut unknown = false;
         let mut fallback_steps = Vec::new();
         match (call, outcome) {
             (Call::PlaceOne, Ok(body)) => {
-                match serde_json::from_str::<Placed>(body).ok().and_then(|p| p.result).and_then(|r| r.order_id).filter(|id| !id.is_empty()) {
+                match serde_json::from_str::<Placed>(body)
+                    .ok()
+                    .and_then(|p| p.result)
+                    .and_then(|r| r.order_id)
+                    .filter(|id| !id.is_empty())
+                {
                     Some(id) => ids.push(id.into_owned()),
-                    None => errors.push("Bybit order outcome is unknown: create acknowledgement has no order ID; reconcile before replacing".into()),
+                    None => {
+                        unknown = true;
+                        errors.push("Bybit order outcome is unknown: create acknowledgement has no order ID; reconcile before replacing".into());
+                    }
                 }
             }
             (Call::Amend, Ok(body)) => {
@@ -1013,10 +1048,14 @@ impl BybitLinear {
                             mark_canceled(cx, &terminal, true);
                         }
                         if omitted != 0 {
+                            unknown = true;
                             errors.push(format!("Bybit cancel-all left {omitted} live order(s) unconfirmed; reconcile before retrying"));
                         }
                     }
-                    Err(message) => errors.push(message.into()),
+                    Err(message) => {
+                        unknown |= message != CANCEL_ALL_NOT_SUCCESSFUL;
+                        errors.push(message.into());
+                    }
                 }
             }
             (Call::Leverage { symbol, leverage }, outcome)
@@ -1063,7 +1102,10 @@ impl BybitLinear {
                     (outcome, _) if !reasons.is_empty() || outcome.is_ok() => {
                         errors.push(reasons.join(", "));
                     }
-                    (Err(error), _) => errors.push(describe(error)),
+                    (Err(error), _) => {
+                        unknown |= outcome_unknown(error.0);
+                        errors.push(describe(error));
+                    }
                     (Ok(_), _) => {}
                 }
             }
@@ -1076,9 +1118,13 @@ impl BybitLinear {
                 self.trading.mode_version += 1;
                 self.refresh_after_mode_change(cx);
             }
-            (_, Err(error)) => errors.push(describe(error)),
+            (_, Err(error)) => {
+                unknown |= outcome_unknown(error.0);
+                errors.push(describe(error));
+            }
             (_, Ok(_)) => {}
         }
+        unknown |= http_unknown && !errors.is_empty();
         for message in &errors {
             cx.command_error(command, message.clone());
         }
@@ -1088,6 +1134,7 @@ impl BybitLinear {
         if let Some(first) = errors.into_iter().next() {
             job.error.get_or_insert(first);
         }
+        job.unknown |= unknown;
         job.ids.extend(ids);
         if !fallback_steps.is_empty() {
             let steps = fallback_steps
