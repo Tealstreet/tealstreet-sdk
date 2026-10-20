@@ -136,7 +136,9 @@ const canonicalUrl = (url) => {
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
-const requestKey = (method, url, body) => (['blofin', 'mexc', 'bingx', 'bitrue', 'lighter', 'kucoin', 'asterdex', 'kraken', 'apexomni', 'paradex', 'phemex', 'coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop', 'txflow'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'bybit' || venue.family === 'binance')
+const requestKey = (method, url, body) => ['hyperliquidspot','krakenspot'].includes(values.venue)
+  ? venue.requestKey(method, url, body, callerIds)
+  : (['blofin', 'mexc', 'bingx', 'bitrue', 'lighter', 'kucoin', 'asterdex', 'kraken', 'apexomni', 'paradex', 'phemex', 'coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop', 'txflow', 'hyperliquidspot', 'krakenspot'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'bybit' || venue.family === 'binance')
   ? keyOf(method, url, body, callerIds, venue)
   : `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
 
@@ -147,7 +149,7 @@ class Tape extends SharedTape {
   constructor(impl) {
     super(records, { ...venue, deferResponseAudit: true, impl, books: bookSymbols, timeoutMs: 15000, isPrivate, canonicalize: values.venue === 'backpack' ? (url) => sharedUrl(url, callerIds, venue) : canonicalUrl,
       explicitOpens: values.venue === 'bitunix', legacyLatest: false,
-      responses: values.venue === 'backpack' || values.venue === 'hyperliquid' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'bybit' || venue.family === 'binance' || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop', 'txflow'].includes(values.venue) || values.venue.startsWith('bitget') ? undefined : new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
+      responses: values.venue === 'backpack' || values.venue === 'hyperliquid' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'bybit' || venue.family === 'binance' || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop', 'txflow', 'hyperliquidspot', 'krakenspot'].includes(values.venue) || values.venue.startsWith('bitget') ? undefined : new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
         venue.matchRequestBody ? undefined : (method, url, body) => isWriteRequest(method, url) && !['', '{}'].includes(canonicalBody(body)) ? undefined : requestKey(method, url)),
       prepareFrame: (r) => {
         if (r.type !== 'ws' || typeof r.text !== 'string') return r;
@@ -179,7 +181,7 @@ class Tape extends SharedTape {
 
   send(socket, text) {
     const { url, connection } = socket;
-    if (values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'bitrue' || values.venue === 'woo' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'binance' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop', 'txflow'].includes(values.venue) || values.venue.startsWith('bitget')) return super.send(socket, text);
+    if (values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'bitrue' || values.venue === 'woo' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'binance' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['coinbase', 'coinbasespot', 'polymarket', 'grvt', 'breakoutprop', 'txflow', 'hyperliquidspot', 'krakenspot'].includes(values.venue) || values.venue.startsWith('bitget')) return super.send(socket, text);
     venue.validateSocketMessage?.(socket, text);
     for (const key of subscriptionKeys(socket.rawUrl, text)) {
       if (this.startupSubscriptions.get(key) === false) {
@@ -543,7 +545,7 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'binance' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['polymarket', 'grvt', 'txflow'].includes(values.venue)) ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return { frames, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'binance' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['polymarket', 'grvt', 'txflow', 'hyperliquidspot', 'krakenspot'].includes(values.venue)) ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
   }, () => measure(heapBefore, wasmMemoryBytes(), tape.peakBytes, usage), { check: () => assertReplayIntegrity(tape) });
   host.dispose();
   clock?.restore();
@@ -560,6 +562,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   for (let i = 0; i < (orders?.count ?? 0); i++) {
     const row = { id: orders.id(i), clientOrderId: orders.clientOrderId(i), parentId: orders.parentId(i), symbol: symbol(orders.market[i]), ...orderEnums(orders.enums[i]) };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
+    if (venue.coinNativeAmounts) row.extra = { remainingNative: row.remaining };
     if (venue.inverseNativeAmounts) row.extra = { remainingNative: Math.round(Math.max(0, row.amount - row.filled) * 1e12) / 1e12 };
     orderRows.push(row);
   }
@@ -567,6 +570,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   for (let i = 0; i < (positions?.count ?? 0); i++) {
     const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
     for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
+    if (venue.coinNativeAmounts) row.extra = { contractsNative: row.notional / markets.contractSize[positions.market[i]], unrealizedPnlNative: row.unrealizedPnl };
     if (venue.inverseNativeAmounts) row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
     positionRows.push(row);
   }
@@ -841,7 +845,7 @@ async function runTs() {
       }
     : undefined;
   const protocolErrors = tape.audit?.errors() ?? [];
-  return { frames, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'binance' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['polymarket', 'grvt', 'txflow'].includes(values.venue)) ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return { frames, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || ['lighter', 'lighter-robinhood'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'binance' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue === 'paradex' || values.venue === 'phemex' || ['polymarket', 'grvt', 'txflow', 'hyperliquidspot', 'krakenspot'].includes(values.venue)) ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
   }, () => measure(heapBefore, 0, tape.peakBytes, usage), { check: () => assertReplayIntegrity(tape) });
   exchange.dispose();
   clock?.restore();

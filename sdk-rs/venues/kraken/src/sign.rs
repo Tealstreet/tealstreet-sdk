@@ -74,6 +74,17 @@ impl Signer {
         mac.update(&hash);
         STANDARD.encode(mac.finalize().into_bytes())
     }
+    pub fn spot_signature(&self, body: &str, nonce: &str, path: &str) -> Result<String, String> {
+        if !path.starts_with("/0/private/") || path.contains('?') {
+            return Err("Kraken Spot unsupported signing path".into());
+        }
+        let hash = Sha256::digest(format!("{nonce}{body}").as_bytes());
+        let mut mac =
+            Hmac::<Sha512>::new_from_slice(&self.secret).expect("HMAC accepts any key length");
+        mac.update(path.as_bytes());
+        mac.update(&hash);
+        Ok(STANDARD.encode(mac.finalize().into_bytes()))
+    }
     pub fn challenge(&self, challenge: &str) -> String {
         self.digest(challenge.as_bytes())
     }

@@ -71,6 +71,7 @@ pub struct Account {
     reads: VecDeque<QueuedRead>,
     pub refresh_timer: Option<TimerId>,
     spot_at: f64,
+    spot_forced_at: Option<f64>,
     spot_inflight: bool,
     spot_revision: u64,
     spot_authoritative_ws: bool,
@@ -94,6 +95,10 @@ pub struct Account {
     pub suppressed: HashMap<String, f64>,
     seen_fills: HashSet<u64>,
     fill_queue: VecDeque<u64>,
+    spot_filled: HashMap<String, (String, f64)>,
+    spot_fill_orders: VecDeque<String>,
+    spot_fill_tids: HashSet<u64>,
+    spot_fill_queue: VecDeque<u64>,
     notify_fills: HashSet<u64>,
     notify_queue: VecDeque<u64>,
     realized: HashMap<(String, PositionSide), f64>,
@@ -115,6 +120,42 @@ pub struct Placement {
     pub at: f64,
 }
 impl Hyperliquid {
+    pub(crate) fn apply_spot_ack_fills(&self, order: &mut Order) {
+        if let Some((symbol, filled)) = self.account.spot_filled.get(&order.id)
+            && *symbol == order.symbol
+        {
+            order.filled = order.amount.min(*filled);
+            order.remaining = (order.amount - order.filled).max(0.0);
+        }
+    }
+    fn record_spot_fill(&mut self, fill: &FillRow<'_>, symbol: &str) {
+        if !self.account.spot_fill_tids.insert(fill.tid) {
+            return;
+        }
+        self.account.spot_fill_queue.push_back(fill.tid);
+        if self.account.spot_fill_queue.len() > 20_000
+            && let Some(tid) = self.account.spot_fill_queue.pop_front()
+        {
+            self.account.spot_fill_tids.remove(&tid);
+        }
+        let id = fill.oid.to_string();
+        if !self.account.spot_filled.contains_key(&id) {
+            self.account.spot_fill_orders.push_back(id.clone());
+        }
+        let entry = self
+            .account
+            .spot_filled
+            .entry(id)
+            .or_insert_with(|| (symbol.to_owned(), 0.0));
+        if entry.0 == symbol {
+            entry.1 += fill.sz;
+        }
+        if self.account.spot_fill_orders.len() > 1024
+            && let Some(id) = self.account.spot_fill_orders.pop_front()
+        {
+            self.account.spot_filled.remove(&id);
+        }
+    }
     pub(crate) fn user(&self) -> Option<&str> {
         self.options
             .vault
@@ -260,7 +301,7 @@ impl Hyperliquid {
                 (
                     i as u32,
                     MarketSetting {
-                        leverage: 20.0,
+                        leverage: if self.spot { 1.0 } else { 20.0 },
                         buy_leverage: None,
                         sell_leverage: None,
                         margin_type: Some(MarginType::Cross),
@@ -269,6 +310,15 @@ impl Hyperliquid {
             })
             .collect::<Vec<_>>();
         cx.store.set_settings(settings);
+        if self.spot {
+            self.account.mode_resolved = true;
+            self.account.builder_approved = Some(false);
+            if !self.options.public_data_only && self.user().is_some() {
+                self.refresh_spot(cx, true);
+                self.account.sync_timer = Some(cx.set_timer(10_000.0));
+            }
+            return;
+        }
         self.account_read(cx, "userFees", None, Request::Fees, false);
         if self.options.public_data_only {
             return;
@@ -345,6 +395,10 @@ impl Hyperliquid {
         builder
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.spot {
+            self.refresh_spot(cx, true);
+            return;
+        }
         let mut dexes = vec![String::new()];
         dexes.extend(self.dex_names.iter().cloned());
         for dex in dexes {
@@ -370,6 +424,10 @@ impl Hyperliquid {
         );
     }
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.spot {
+            self.refresh_spot(cx, true);
+            return;
+        }
         let mut dexes = vec![String::new()];
         dexes.extend(self.dex_names.iter().cloned());
         for dex in dexes {
@@ -396,6 +454,10 @@ impl Hyperliquid {
         );
     }
     pub(crate) fn schedule_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.spot {
+            self.refresh_spot(cx, true);
+            return;
+        }
         if self.account.refresh_timer.is_none() && self.user().is_some() {
             self.account.refresh_timer = Some(
                 cx.set_timer(500.0f64.max(1000.0 - (cx.now - self.account.last_order_refresh))),
@@ -403,8 +465,19 @@ impl Hyperliquid {
         }
     }
     fn refresh_spot(&mut self, cx: &mut Cx<'_, Pending>, force: bool) {
-        if self.account.spot_inflight || (!force && cx.now - self.account.spot_at < 10_000.0) {
+        if self.account.spot_inflight
+            || (!force && cx.now - self.account.spot_at < 10_000.0)
+            || (self.spot
+                && force
+                && self
+                    .account
+                    .spot_forced_at
+                    .is_some_and(|at| cx.now - at < 1500.0))
+        {
             return;
+        }
+        if force {
+            self.account.spot_forced_at = Some(cx.now);
         }
         self.account.spot_inflight = true;
         self.account.spot_at = cx.now;
@@ -469,6 +542,17 @@ impl Hyperliquid {
                 .unwrap(),
             )
         };
+        if self.spot {
+            for kind in [
+                "notification",
+                "spotState",
+                "userFills",
+                "userNonFundingLedgerUpdates",
+            ] {
+                send(cx, kind, None, None, None);
+            }
+            return;
+        }
         for kind in [
             "notification",
             "orderUpdates",
@@ -800,6 +884,11 @@ impl Hyperliquid {
             self.account.last_order_refresh = cx.now;
             self.refresh_orders(cx);
         }
+        if self.account.sync_timer == Some(timer) && self.spot {
+            self.refresh_spot(cx, false);
+            self.account.sync_timer = Some(cx.set_timer(10_000.0));
+            return;
+        }
         if self.account.sync_timer == Some(timer) {
             for dex in self.dex_names.clone() {
                 self.refresh_state(cx, &dex);
@@ -1036,7 +1125,7 @@ impl Hyperliquid {
         self.live_balance(cx);
     }
     pub(crate) fn live_balance(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.user().is_none() || self.options.public_data_only {
+        if self.spot || self.user().is_none() || self.options.public_data_only {
             return;
         }
         let upnl = cx
@@ -1083,7 +1172,87 @@ impl Hyperliquid {
         };
         cx.store.set_balance(balance);
     }
+    fn spot_price(&self, cx: &Cx<'_, Pending>, coin: &str, path: &mut Vec<String>) -> f64 {
+        if ["USDC", "USDT", "USD", "USDH"]
+            .iter()
+            .any(|c| coin.eq_ignore_ascii_case(c))
+        {
+            return 1.0;
+        }
+        if path.len() >= 3
+            || path
+                .iter()
+                .any(|visited| visited.eq_ignore_ascii_case(coin))
+        {
+            return 0.0;
+        }
+        path.push(coin.to_owned());
+        let price =
+            (|| {
+                for usdc in [true, false] {
+                    for market in cx.store.markets().iter().filter(|m| {
+                        m.base.eq_ignore_ascii_case(coin) && (m.quote == "USDC") == usdc
+                    }) {
+                        let Some(ticker) = cx.store.ticker(&market.symbol) else {
+                            continue;
+                        };
+                        let mark = if ticker.mark > 0.0 {
+                            ticker.mark
+                        } else {
+                            ticker.last
+                        };
+                        if mark.is_finite() && mark > 0.0 {
+                            let quote = self.spot_price(cx, &market.quote, path);
+                            let notional = mark * quote;
+                            if notional.is_finite() && notional > 0.0 {
+                                return notional;
+                            }
+                        }
+                    }
+                }
+                0.0
+            })();
+        path.pop();
+        price
+    }
     fn apply_spot(&mut self, cx: &mut Cx<'_, Pending>, state: &SpotState<'_>, ws: bool) {
+        if self.spot {
+            let mut balance = Balance::default();
+            let mut currencies = Vec::new();
+            let mut coins = Vec::new();
+            let mut valuation_path = Vec::with_capacity(3);
+            for b in &state.balances {
+                let coin = b
+                    .token
+                    .and_then(|token| self.spot_tokens.get(&token))
+                    .and_then(|symbol| cx.store.market(symbol))
+                    .map_or(b.coin.as_ref(), |m| m.base.as_str());
+                let price = self.spot_price(cx, coin, &mut valuation_path);
+                let free = (b.total - b.hold).max(0.0);
+                balance.total += b.total * price;
+                balance.used += b.hold * price;
+                balance.free += free * price;
+                currencies.push(CurrencyBalance {
+                    currency: b.coin.to_string(),
+                    balance: Balance {
+                        total: b.total,
+                        used: b.hold,
+                        free,
+                        upnl: 0.0,
+                    },
+                });
+                coins.push(CoinBalance {
+                    base: b.coin.to_string(),
+                    amount: b.total,
+                    notional: b.total * price,
+                });
+            }
+            cx.store.set_balance(balance);
+            cx.store.set_currency_balances(currencies);
+            cx.store.set_coin_balances(coins);
+            self.account.spot_revision += 1;
+            return;
+        }
         let available = state
             .token_to_available_after_maintenance
             .iter()
@@ -1154,7 +1323,7 @@ impl Hyperliquid {
         };
         let raw = frame.data.get();
         match frame.channel.as_ref() {
-            "clearinghouseState" => {
+            "clearinghouseState" if !self.spot => {
                 if let Ok(env) = serde_json::from_str::<ClearingEnvelope>(raw)
                     && let Some(mut state) = env.clearinghouse_state
                 {
@@ -1171,7 +1340,7 @@ impl Hyperliquid {
                     self.apply_spot(cx, &state, true);
                 }
             }
-            "activeAssetData" => {
+            "activeAssetData" if !self.spot => {
                 if let Ok(row) = serde_json::from_str::<ActiveAsset>(raw)
                     && let Some(symbol) = self.symbol(&row.coin).map(str::to_owned)
                 {
@@ -1197,7 +1366,7 @@ impl Hyperliquid {
                     self.apply_asset_setting(cx, &symbol, &row);
                 }
             }
-            "orderUpdates" => {
+            "orderUpdates" if !self.spot => {
                 let _ = json::each::<OrderUpdate>(raw, |u| self.order_event(cx, u));
             }
             "userFills" => {
@@ -1205,7 +1374,7 @@ impl Hyperliquid {
                     self.fills(cx, fills);
                 }
             }
-            "user" | "userEvents" => {
+            "user" | "userEvents" if !self.spot => {
                 if raw.starts_with('[') {
                     if let Ok(rows) = serde_json::from_str::<Vec<FillRow>>(raw) {
                         self.fills(
@@ -1233,7 +1402,7 @@ impl Hyperliquid {
                     }
                 }
             }
-            "userNonFundingLedgerUpdates" if self.account.mode != Mode::Standard => {
+            "userNonFundingLedgerUpdates" if self.spot || self.account.mode != Mode::Standard => {
                 self.refresh_spot(cx, false)
             }
             _ => {}
@@ -1415,7 +1584,7 @@ impl Hyperliquid {
                     }
                 }
             }
-            if fills.is_snapshot {
+            if fills.is_snapshot || (self.spot && self.account.spot_fill_tids.contains(&fill.tid)) {
                 continue;
             }
             if self.account.notify_fills.insert(fill.tid) {
@@ -1432,7 +1601,25 @@ impl Hyperliquid {
                     price: fill.px,
                     amount: fill.sz,
                 });
-                self.optimistic_fill(cx, &symbol, &fill);
+                if self.spot {
+                    self.record_spot_fill(&fill, &symbol);
+                    let id = fill.oid.to_string();
+                    self.amend_source_filled(&id);
+                    if let Some(order) = cx.store.order(&id) {
+                        let remaining = (order.remaining - fill.sz).max(0.0);
+                        if remaining == 0.0 {
+                            cx.store.remove_orders(&[&id]);
+                        } else {
+                            cx.store.update_order(&id, |o| {
+                                o.remaining = remaining;
+                                o.filled = (o.amount - remaining).max(0.0);
+                            });
+                        }
+                    }
+                    self.refresh_spot(cx, true);
+                } else {
+                    self.optimistic_fill(cx, &symbol, &fill);
+                }
             }
         }
         self.live_balance(cx);

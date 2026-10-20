@@ -840,3 +840,113 @@ test('production TxFlow typed writes retain economics, caller IDs and unknown fi
   assert.throws(()=>tape.respond('POST',url,signed,[...Object.entries(headers),['X-API-VERSION','wrong']]));
   assert.equal(tape.missingWrites,1);assert.equal(tape.respond('POST',url,signed,headers).status,200);
 });
+
+test('production Binance COIN-M account metadata derives only from native rows and their own multiplier', () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('function rustAccount('), end = source.indexOf('\nasync function runTs()', start);
+  const orderColumns = ['amount','filled','remaining'], positionColumns = ['notional','unrealizedPnl'];
+  const derive = new Function('venue','ORDER_COLUMNS','POSITION_COLUMNS','orderEnums','positionEnums', `${source.slice(start,end)};return rustAccount;`)(
+    {coinNativeAmounts:true},orderColumns,positionColumns,()=>({}),()=>({}));
+  const input = () => ({markets:{symbol:()=> 'BTCUSD_PERP',contractSize:[100]},
+    orders:{count:1,id:()=> 'order',clientOrderId:()=>undefined,parentId:()=>undefined,market:[0],enums:[0],amount:[10],filled:[3],remaining:[7]},
+    positions:{count:1,market:[0],enums:[0],notional:[700],unrealizedPnl:[2]},balance:{},fills:[]});
+  const projection = (row) => {const account=derive(row);return [account.orders[0].extra.remainingNative,account.positions[0].extra.contractsNative];};
+  assert.deepEqual(projection(input()),[7,7]);
+  for (const mutate of [(row)=>row.orders.remaining[0]=6,(row)=>row.positions.notional[0]=600,(row)=>row.markets.contractSize[0]=200]) {
+    const row=input();mutate(row);assert.notDeepEqual(projection(row),[7,7]);
+  }
+});
+
+test('production Kraken Spot preserves authenticated typed economics and scopes generated IDs to placement', async () => {
+  const { krakenSpotSignature } = await import('./krakenspot.mjs');
+  const url='https://api.kraken.com/0/private/AddOrder',id='a'.repeat(32);
+  const expected={pair:'XXBTZUSD',type:'buy',ordertype:'limit',volume:'1',price:'90',cl_ord_id:id,nonce:'0'};
+  const record={type:'http',method:'POST',url,requestBody:new URLSearchParams(expected).toString(),status:200,body:'{}'};
+  const signed=(body)=>({'API-Key':'replay-key','API-Sign':krakenSpotSignature('/0/private/AddOrder',body)});
+  let nonce=BigInt(Date.now())*1000n;
+  const request=(patch={})=>new URLSearchParams({...expected,...patch,nonce:String(++nonce)}).toString();
+  for (const patch of [{volume:'2'},{cl_ord_id:id+'\n'},{cl_ord_id:''},{requestId:'unknown'},{signature:'unknown'},{clientOrderId:'unknown'}]) {
+    const tape=productionTapeFor('krakenspot',[record]),body=request(patch);
+    try {assert.equal(tape.respond('POST',url,body,signed(body)).status,599);} catch(error) {assert.match(error.message,/client ID/);}
+    assert.equal(tape.unusedWrites(),1);
+    const valid=request({cl_ord_id:'b'.repeat(32)});
+    assert.equal(tape.respond('POST',url,valid,signed(valid)).status,200);
+    assert.equal(tape.unusedWrites(),0);
+  }
+  const tape=productionTapeFor('krakenspot',[record]),body=request();
+  assert.throws(()=>tape.respond('POST',url,body,{'API-Key':'replay-key','API-Sign':'invalid'}),/signature/);
+  assert.equal(tape.respond('POST',url,body,signed(body)).status,200,'invalid HMAC must not commit nonce');
+});
+
+test('production Kraken Spot token activates only after delivery and socket topics cannot cross generations', async () => {
+  const { krakenSpotSignature } = await import('./krakenspot.mjs');
+  const url='https://api.kraken.com/0/private/GetWebSocketsToken';
+  const tape=productionTapeFor('krakenspot',[{type:'http',method:'POST',url,requestBody:'nonce=0',status:200,body:JSON.stringify({error:[],result:{token:'delivered-token'}})}]);
+  const socket=tape.connect('wss://ws-auth.kraken.com/v2',()=>{},()=>{});
+  const subscribe=(channel)=>JSON.stringify({method:'subscribe',params:{channel,token:'delivered-token'}});
+  const body='nonce='+String(BigInt(Date.now())*1000n);
+  const response=tape.respond('POST',url,body,{'API-Key':'replay-key','API-Sign':krakenSpotSignature('/0/private/GetWebSocketsToken',body)});
+  assert.throws(()=>tape.send(socket,subscribe('executions')),/delivered token/);
+  await tape.waitForResponse(response);
+  tape.send(socket,subscribe('executions'));tape.send(socket,subscribe('balances'));
+  assert.equal(tape.audit.ready(),true);
+  const sibling=tape.connect(socket.rawUrl,()=>{},()=>{});
+  assert.throws(()=>tape.send(sibling,subscribe('executions')),/fresh token/);
+  sibling.onMessage(JSON.stringify({channel:'executions',type:'update',data:[]}));
+  assert(tape.audit.errors().some((error)=>/own subscription/.test(error)));
+  tape.close(socket,1000,true);assert.equal(tape.audit.ready(),false);
+});
+
+test('production spot public sends populate own full topic identities and isolate siblings and unsubscribe', async () => {
+  for (const name of ['hyperliquidspot','krakenspot']) {
+    const tape=productionTapeFor(name,[]);
+    const url=name==='hyperliquidspot'?'wss://api.hyperliquid.xyz/ws':'wss://ws.kraken.com/v2';
+    const socket=tape.connect(url,()=>{},()=>{}),sibling=tape.connect(url,()=>{},()=>{});
+    const send=(method)=>JSON.stringify(name==='hyperliquidspot'?{method,subscription:{type:'l2Book',coin:'@1'}}:{method,params:{channel:'book',symbol:['BTC/USD']}});
+    const frame=JSON.stringify(name==='hyperliquidspot'?{channel:'l2Book',data:{coin:'@1',levels:[[],[]]}}:{channel:'book',data:[{symbol:'BTC/USD'}]});
+    tape.send(socket,send('subscribe'));assert(tape.fullSubscriptions.size>0);
+    socket.onMessage(frame);assert.deepEqual(tape.audit.errors(),[]);
+    sibling.onMessage(frame);assert(tape.audit.errors().length>0);
+    tape.send(socket,send('unsubscribe'));const before=tape.audit.errors().length;socket.onMessage(frame);
+    assert(tape.audit.errors().length>=before);
+  }
+});
+
+test('production Hyperliquid Spot authenticates raw bytes before retaining caller IDs and typed extra fields', async () => {
+  const { createRequire } = await import('node:module');
+  const require=createRequire(new URL('../../packages/safe-cex/package.json',import.meta.url));
+  const {ethers}=require('ethers'),{encode}=require('@msgpack/msgpack');
+  const {HYPERLIQUID_SPOT_REPLAY}=await import('./hyperliquidspot.mjs');
+  const wallet=new ethers.Wallet(HYPERLIQUID_SPOT_REPLAY.secret),url='https://api.hyperliquid.xyz/exchange';
+  const caller='0x'+'01'.repeat(16);
+  const action={type:'order',orders:[{a:10001,b:true,p:'90',s:'1',r:false,t:{limit:{tif:'Gtc'}},c:caller}],grouping:'na'};
+  const sign=async(value,extra={})=>{
+    const nonce=Date.now(),suffix=Buffer.alloc(9);suffix.writeBigUInt64BE(BigInt(nonce));
+    const signature=ethers.Signature.from(await wallet.signTypedData({name:'Exchange',version:'1',chainId:1337,verifyingContract:ethers.ZeroAddress},
+      {Agent:[{name:'source',type:'string'},{name:'connectionId',type:'bytes32'}]},
+      {source:'a',connectionId:ethers.keccak256(Buffer.concat([encode(value),suffix]))})).toJSON();
+    return JSON.stringify({action:value,nonce,signature,...extra});
+  };
+  const records=[{type:'command',op:'placeOrders',orders:[{clientOrderId:caller}]},
+    {type:'http',method:'POST',url,requestBody:JSON.stringify({action,nonce:0,signature:{}}),status:200,body:'{}'}];
+  for (const [change,extra] of [[{...action,orders:[{...action.orders[0],c:'0x'+'02'.repeat(16)}]},{}],
+    [{...action,orders:[{...action.orders[0],s:1}]},{}],[action,{requestId:'unknown'}],[action,{clientOrderId:'unknown'}],[action,{timestamp:1}]]) {
+    const tape=productionTapeFor('hyperliquidspot',records),raw=await sign(change,extra);
+    assert.equal(tape.respond('POST',url,raw).status,599);assert.equal(tape.unusedWrites(),1);
+    assert.equal(tape.respond('POST',url,await sign(action)).status,200);assert.equal(tape.unusedWrites(),0);
+  }
+  const tape=productionTapeFor('hyperliquidspot',records),raw=await sign(action);
+  assert.throws(()=>tape.respond('POST',url+'?signature=unknown',raw),/URL fields/);
+  assert.throws(()=>tape.respond('POST',url,raw,[['Content-Type','application/json'],['content-type','application/json']]),/Duplicate/);
+  assert.equal(tape.unusedWrites(),1);assert.equal(tape.respond('POST',url,raw).status,200);
+});
+
+test('production Hyperliquid Spot accepts only documented book acknowledgement defaults on its own socket', () => {
+  const url='wss://api.hyperliquid.xyz/ws',topic={type:'l2Book',coin:'@1'};
+  for (const [change,valid] of [[{},true],[{mantissa:7},false],[{fast:true},false],[{fast:'false'},false],[{nSigFigs:3},false],[{unknown:1},false],[{coin:'@107'},false]]) {
+    const tape=productionTapeFor('hyperliquidspot',[]),socket=tape.connect(url,()=>{},()=>{});
+    tape.send(socket,JSON.stringify({method:'subscribe',subscription:topic}));
+    socket.onMessage(JSON.stringify({channel:'subscriptionResponse',data:{method:'subscribe',subscription:{...topic,mantissa:null,fast:false,nSigFigs:null,...change}}}));
+    assert.equal(tape.audit.errors().length===0,valid,JSON.stringify(change));
+  }
+});

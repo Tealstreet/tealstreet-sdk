@@ -1998,3 +1998,35 @@ auth/subscription/closed proof on new profiles. Bounded negative controls
 must reject forged/duplicate/unknown fields without consuming ACKs. Independent
 review each scope; full root/native/compiled union checks, new spot+parent
 gates and rebuilt Bitunix/Binance controls before push/exact40-check CI.
+
+f4 phase implementation/reviews PASS: native2646/212groups/zeroignored,
+strict native/WASM Clippy, locked check, bans/globalfmt PASS. Engine/crypto/
+Bitunix/native host production remain unchanged. SDK164focused/250source
+cutover cases, package types/lint and independent review PASS; all48aliases
+and27features retained. Root44typecheck/28lint/27test tasks PASS; SDK7519
+tests/519files twice. Fresh combined build PASS28.16s.
+
+Harness795helpers and6production-path tests PASS, independent final audit
+PASS. Both spots2public+2private TS probes clean: HL67public/10privateframes,
+Kraken6166public/19private; all protocol/socket/unserved/unusedWrites0.
+Hyperliquid actual server ACKs add l2Book defaults mantissa:null/fast:false;
+identity permits ONLY these exact defaults plus absent==nSigFigs:null. One
+positive/six negative controls preserve wrong types/unknown fields/precision/
+coin distinctions. No output repair or fixture changes. Kraken nonce state
+commits after valid HMAC; token state activates at successful delivery;
+new profiles use typed SharedTape requests/sends/subscriptions and actual
+socket ownership. Original newline-ID validation already rejects that input;
+do NOT claim it as a new bug fix. Route-scoped generated-ID projection and
+caller/unknown identity preservation are independently proved.
+
+Binanceinverse native/TS functional both6frames clean; native-only metadata
+remaining[5,0],contracts7 from700/100. Mutation controls detect any incorrect
+native remaining/notional/multiplier, retaining existing economic comparisons.
+Final compiled run426PASS/1FAIL of427: stale realVenue KrakenSpot global
+initializeReplay call after per-Tape audit migration. One-line helper repair
+keeps futures Kraken hook and lets spot own its audit; types/lint/250source
+controls PASS, independent review PASS. Affected actual48-product compiled
+startup/late-frame matrix rerun PASS48/48 on unchanged artifact (32.95s);
+other379 compiled cases already passed. All owned jobs finished. Merge this
+reviewed phase, then fresh feature-isolated new spot/parent gates, Bitunix/
+Binance four-mode controls and unfinished GRVT/Lighter/Coinbase controls.

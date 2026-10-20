@@ -12,6 +12,8 @@ import { createKrakenRequestAudit, validateKrakenSocketMessage, validateKrakenSo
 let krakenRequestAudit;
 import { paradexProtocol } from './paradex-protocol.mjs';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
+import { hyperliquidspot } from './hyperliquidspot.mjs';
+import { krakenspot } from './krakenspot.mjs';
 import { kucoin } from './kucoin.mjs';
 import { createRequire } from 'node:module';
 import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
@@ -1298,6 +1300,8 @@ export const VENUES = {
     isWrite: (method) => method !== 'GET',
   },
 
+  hyperliquidspot,
+  krakenspot,
   hyperliquid: {
     rust: 'hyperliquid',
     matchRequestBody: true,

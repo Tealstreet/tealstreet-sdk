@@ -176,8 +176,16 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
         for (const key of ['markets', 'tickers', 'orders', 'positions', 'balance'])
           expect(payload).not.toHaveProperty(key);
       }
-      if (name === 'bybitspot' || name === 'coinbasespot' || name === 'binancespot')
+      if (['bybitspot', 'coinbasespot', 'binancespot', 'hyperliquidspot', 'krakenspot'].includes(name))
         expect(lateStore.markets.every((row) => row.isSpot)).toBe(true);
+      if (name === 'hyperliquidspot' || name === 'krakenspot') {
+        expect(input.spotMarkets.length).toBeGreaterThan(0);
+        for (const store of [worker.store, lateStore]) {
+          expect(store.markets.map(({ id, symbol, base, quote }) => ({ id, symbol, base, quote }))).toEqual(input.spotMarkets);
+          expect(store.markets.every((row) => !row.isInverse && !row.isPerpetual && row.limits.leverage.max === 1)).toBe(true);
+          expect(store.positions.every((row) => row.contracts === 0)).toBe(true);
+        }
+      }
       if (name === 'bitgetinverse' || name === 'bybitinverse' || name === 'binanceinverse')
         expect(lateStore.markets.every((row) => row.isInverse)).toBe(true);
       if (name === 'bitgetusdc') expect(lateStore.markets.every((row) => row.quote === 'USDC')).toBe(true);

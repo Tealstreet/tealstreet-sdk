@@ -77,6 +77,7 @@ test('KuCoin queued recovery drains under the deterministic replay clock', async
   const clock = new ReplayClock(1700000000000);
   clock.install();
   try {
+    clock.beginStartup();
     const exchange = { xhr: { get: () => new Promise((resolve) => setTimeout(resolve, 20)) }, cancelSymbolOrders: async () => {} };
     kucoin.configureTs(exchange);
     const read = exchange.xhr.get('/api/v1/level2/snapshot');
