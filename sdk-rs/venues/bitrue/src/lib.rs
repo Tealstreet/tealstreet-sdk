@@ -6,7 +6,7 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
@@ -87,7 +87,7 @@ struct DepthState {
 enum Channel {
     Ticker(u32),
     Book(String),
-    Candle(String, String),
+    Candle(String, Interval),
 }
 enum SocketReadKind {
     Candles {
@@ -113,7 +113,7 @@ pub struct Bitrue {
     public: Connection,
     channels: HashMap<String, Channel>,
     books: HashMap<String, DepthState>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     reads: HashMap<String, Vec<SocketRead>>,
     startup_retry: Option<TimerId>,
     deferred: Vec<Command>,
@@ -144,15 +144,16 @@ fn ws_symbol(symbol: &str) -> String {
             .to_ascii_lowercase()
     )
 }
-fn interval(s: &str) -> Option<&'static str> {
-    Some(match s {
-        "1m" => "1min",
-        "5m" => "5min",
-        "15m" => "15min",
-        "30m" => "30min",
-        "1h" => "60min",
-        "1d" => "1day",
-        "1w" => "1week",
+fn interval(i: Interval) -> Option<&'static str> {
+    use Interval::*;
+    Some(match i {
+        M1 => "1min",
+        M5 => "5min",
+        M15 => "15min",
+        M30 => "30min",
+        H1 => "60min",
+        D1 => "1day",
+        W1 => "1week",
         _ => return None,
     })
 }
@@ -593,9 +594,12 @@ impl Venue for Bitrue {
             self.subscribe_book(cx, &symbol);
         }
         for (symbol, i) in self.candles.keys() {
-            let channel = topic(symbol, &format!("kline_{}", interval(i).unwrap()));
+            let Some(mapped) = interval(*i) else {
+                continue;
+            };
+            let channel = topic(symbol, &format!("kline_{mapped}"));
             self.channels
-                .insert(channel.clone(), Channel::Candle(symbol.clone(), i.clone()));
+                .insert(channel.clone(), Channel::Candle(symbol.clone(), *i));
             self.subscription(cx, "sub", &channel, None, None, None);
         }
     }
@@ -688,7 +692,7 @@ impl Venue for Bitrue {
                 if let Some(row) = data.into_candle() {
                     let multiplier = cx.store.market(symbol).map_or(1.0, |m| m.precision.amount);
                     if let Some(c) = candle(&row, multiplier) {
-                        cx.candle(symbol, i, c);
+                        cx.candle(symbol, *i, c);
                     }
                 }
             }
@@ -978,10 +982,14 @@ impl Venue for Bitrue {
                 symbol,
                 interval: i,
             } => {
+                if interval(i).is_none() {
+                    cx.log(LogLevel::Error, i.unsupported("Bitrue"));
+                    return;
+                }
                 if let (Some(symbol), Some(mapped)) =
-                    (self.resolve_symbol(cx, &symbol), interval(&i))
+                    (self.resolve_symbol(cx, &symbol), interval(i))
                 {
-                    let count = self.candles.entry((symbol.clone(), i.clone())).or_default();
+                    let count = self.candles.entry((symbol.clone(), i)).or_default();
                     *count += 1;
                     if *count == 1 {
                         let channel = topic(&symbol, &format!("kline_{mapped}"));
@@ -996,14 +1004,14 @@ impl Venue for Bitrue {
                 interval: i,
             } => {
                 if let Some(symbol) = self.resolve_symbol(cx, &symbol) {
-                    if let Some(count) = self.candles.get_mut(&(symbol.clone(), i.clone())) {
+                    if let Some(count) = self.candles.get_mut(&(symbol.clone(), i)) {
                         *count = count.saturating_sub(1);
                         if *count > 0 {
                             return;
                         }
                     }
-                    self.candles.remove(&(symbol.clone(), i.clone()));
-                    if let Some(mapped) = interval(&i) {
+                    self.candles.remove(&(symbol.clone(), i));
+                    if let Some(mapped) = interval(i) {
                         let channel = topic(&symbol, &format!("kline_{mapped}"));
                         self.channels.remove(&channel);
                         self.subscription(cx, "unsub", &channel, None, None, None);
@@ -1018,12 +1026,12 @@ impl Venue for Bitrue {
                 from_ms,
                 to_ms,
             } => {
-                let (Some(symbol), Some(mapped)) = (self.resolve_symbol(cx, &symbol), interval(&i))
-                else {
-                    cx.done(
-                        command,
-                        Err("Unknown Bitrue market or candle interval".into()),
-                    );
+                let Some(mapped) = interval(i) else {
+                    cx.done(command, Err(i.unsupported("Bitrue")));
+                    return;
+                };
+                let Some(symbol) = self.resolve_symbol(cx, &symbol) else {
+                    cx.done(command, Err("Unknown Bitrue market".into()));
                     return;
                 };
                 if !self.public.open {

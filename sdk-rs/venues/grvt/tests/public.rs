@@ -1,3 +1,4 @@
+use safe_cex_engine::model::Interval;
 use safe_cex_engine::{Action, Command, Engine, Event, Response, SocketChannel, SocketId, Venue};
 use safe_cex_venue_grvt::{Grvt, Options};
 const CATALOG: &str = r#"{"r":[{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6},{"i":"ETH_USDT_Perp","ih":"0x030502","b":"ETH","q":"USDT","k":"PERPETUAL","ts":"0.01","ms":"0.01","bd":9,"qd":6}]}"#;
@@ -331,12 +332,12 @@ fn ticker_empty_string_clears_only_that_field() {
 fn simultaneous_candle_intervals_use_independent_feed_sockets_and_dispose() {
     let (mut e, _) = boot();
     let mut sockets = vec![];
-    for interval in ["1m", "5m"] {
+    for interval in [Interval::M1, Interval::M5] {
         e.handle(
             1700000000010.,
             Event::Command(Command::SubscribeCandles {
                 symbol: "BTC_USDT_PERP".into(),
-                interval: interval.into(),
+                interval,
             }),
         );
         let socket = e
@@ -363,12 +364,12 @@ fn simultaneous_candle_intervals_use_independent_feed_sockets_and_dispose() {
         sockets.push(socket);
     }
     assert_ne!(sockets[0], sockets[1]);
-    for (index, interval) in ["1m", "5m"].iter().enumerate() {
+    for (index, interval) in [Interval::M1, Interval::M5].iter().enumerate() {
         e.handle(
             1700000000012.,
             Event::Command(Command::UnsubscribeCandles {
                 symbol: "BTC_USDT_PERP".into(),
-                interval: (*interval).into(),
+                interval: *interval,
             }),
         );
         assert!(

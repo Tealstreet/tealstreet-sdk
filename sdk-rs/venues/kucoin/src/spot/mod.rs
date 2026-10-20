@@ -94,7 +94,7 @@ pub struct KucoinSpot {
     credentials: Option<sign::Credentials>,
     sockets: [Socket; 2],
     books: BTreeMap<String, SpotBook>,
-    candles: BTreeMap<(String, String), u32>,
+    candles: BTreeMap<(String, Interval), u32>,
     revision: u64,
     balance_revision: u64,
     orders_loading: bool,
@@ -271,7 +271,7 @@ impl KucoinSpot {
                 .chain(
                     self.candles
                         .keys()
-                        .map(|(s, i)| format!("/market/candles:{s}_{}", interval(i).unwrap().1)),
+                        .map(|(s, i)| format!("/market/candles:{s}_{}", interval(*i).unwrap().1)),
                 )
                 .collect::<Vec<_>>();
             for t in topics {
@@ -584,7 +584,7 @@ impl KucoinSpot {
             let Some(i) = self
                 .candles
                 .keys()
-                .find(|(s, i)| s == symbol && interval(i).is_ok_and(|(_, v)| v == native))
+                .find(|(s, i)| s == symbol && interval(*i).is_ok_and(|(_, v)| v == native))
                 .map(|(_, i)| i.clone())
             else {
                 return;
@@ -597,7 +597,7 @@ impl KucoinSpot {
             if let Ok(u) = serde_json::from_str::<Update>(data.get())
                 && let Ok(c) = candle(u.candles.get())
             {
-                cx.candle(symbol, &i, c);
+                cx.candle(symbol, i, c);
             }
         }
     }
@@ -1201,17 +1201,17 @@ impl Venue for KucoinSpot {
                 symbol,
                 interval: i,
             } => {
-                if interval(&i).is_err() {
-                    cx.log(LogLevel::Error, "unsupported KuCoin Spot candle interval");
+                if interval(i).is_err() {
+                    cx.log(LogLevel::Error, i.unsupported("KuCoin Spot"));
                     return;
                 }
-                let n = self.candles.entry((symbol.clone(), i.clone())).or_default();
+                let n = self.candles.entry((symbol.clone(), i)).or_default();
                 *n += 1;
                 if *n == 1 {
                     self.topic(
                         cx,
                         0,
-                        &format!("/market/candles:{symbol}_{}", interval(&i).unwrap().1),
+                        &format!("/market/candles:{symbol}_{}", interval(i).unwrap().1),
                         true,
                     );
                 }
@@ -1220,14 +1220,14 @@ impl Venue for KucoinSpot {
                 symbol,
                 interval: i,
             } => {
-                if let Some(n) = self.candles.get_mut(&(symbol.clone(), i.clone())) {
+                if let Some(n) = self.candles.get_mut(&(symbol.clone(), i)) {
                     *n = n.saturating_sub(1);
                     if *n == 0 {
-                        self.candles.remove(&(symbol.clone(), i.clone()));
+                        self.candles.remove(&(symbol.clone(), i));
                         self.topic(
                             cx,
                             0,
-                            &format!("/market/candles:{symbol}_{}", interval(&i).unwrap().1),
+                            &format!("/market/candles:{symbol}_{}", interval(i).unwrap().1),
                             false,
                         );
                     }
@@ -1242,10 +1242,10 @@ impl Venue for KucoinSpot {
                 from_ms,
                 to_ms,
             } => {
-                let Ok((minutes, native)) = interval(&i) else {
+                let Ok((minutes, native)) = interval(i) else {
                     cx.done(
                         command,
-                        Err("unsupported KuCoin Spot candle interval".into()),
+                        Err(i.unsupported("KuCoin Spot")),
                     );
                     return;
                 };

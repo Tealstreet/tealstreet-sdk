@@ -7,7 +7,7 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
@@ -92,7 +92,7 @@ pub enum Pending {
 
 pub struct CandleRead {
     instrument: String,
-    interval: String,
+    interval: Interval,
     limit: u32,
     before: f64,
     after: f64,
@@ -110,7 +110,7 @@ pub struct Okx {
     books: HashMap<String, BookState>,
     marks: HashSet<String>,
     indexes: HashSet<String>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     products: HashMap<String, Product>,
     underlying_products: HashMap<String, Vec<String>>,
     price_tickers: HashMap<String, Option<u32>>,
@@ -458,9 +458,11 @@ impl Okx {
                 return;
             }
             for (symbol, interval) in self.candles.keys() {
-                if let Some(m) = cx.store.market(symbol) {
+                if let Some(m) = cx.store.market(symbol)
+                    && let Some(bar) = bar(*interval)
+                {
                     let id = m.id.clone();
-                    let name = format!("candle{}", bar(interval));
+                    let name = format!("candle{bar}");
                     self.topics(cx, BUSINESS, "subscribe", &[Topic::instrument(&name, &id)]);
                 }
             }
@@ -539,18 +541,20 @@ impl Okx {
             return;
         }
         if let Some(interval) = channel.strip_prefix("candle") {
-            let interval = interval_for_bar(interval);
+            let Some(interval) = interval_for_bar(interval) else {
+                return;
+            };
             if let Some(m) = cx.store.market_by_id(message.arg.inst_id) {
                 let symbol = m.symbol.clone();
                 if !self
                     .candles
-                    .contains_key(&(symbol.clone(), interval.clone()))
+                    .contains_key(&(symbol.clone(), interval))
                 {
                     return;
                 }
                 let _ = json::each::<Vec<&str>>(data.get(), |row| {
                     if let Some(c) = wire::candle(&row) {
-                        cx.candle(&symbol, &interval, c);
+                        cx.candle(&symbol, interval, c);
                     }
                 });
             }
@@ -1136,30 +1140,36 @@ impl Venue for Okx {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
+                let Some(bar) = bar(interval) else {
+                    cx.log(LogLevel::Error, interval.unsupported("OKX"));
+                    return;
+                };
                 let count = self
                     .candles
-                    .entry((symbol.clone(), interval.clone()))
+                    .entry((symbol.clone(), interval))
                     .or_default();
                 *count += 1;
                 if *count == 1
                     && let Some(m) = cx.store.market(&symbol)
                 {
                     let id = m.id.clone();
-                    let name = format!("candle{}", bar(&interval));
+                    let name = format!("candle{bar}");
                     self.topics(cx, BUSINESS, "subscribe", &[Topic::instrument(&name, &id)]);
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                if let Some(count) = self.candles.get_mut(&(symbol.clone(), interval.clone())) {
+                if let Some(count) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     *count = count.saturating_sub(1);
                     if *count > 0 {
                         return;
                     }
                 }
-                self.candles.remove(&(symbol.clone(), interval.clone()));
-                if let Some(m) = cx.store.market(&symbol) {
+                self.candles.remove(&(symbol.clone(), interval));
+                if let Some(m) = cx.store.market(&symbol)
+                    && let Some(bar) = bar(interval)
+                {
                     let id = m.id.clone();
-                    let name = format!("candle{}", bar(&interval));
+                    let name = format!("candle{bar}");
                     self.topics(
                         cx,
                         BUSINESS,
@@ -1191,10 +1201,10 @@ impl Venue for Okx {
                 let explicit_limit = limit.filter(|n| *n > 0);
                 let limit = explicit_limit.unwrap_or(300).min(300);
                 let end = to_ms.unwrap_or(cx.now);
-                let Some(default_start) = subtract_bars(end, &interval, limit) else {
+                let Some(default_start) = subtract_bars(end, interval, limit) else {
                     cx.done(
                         command,
-                        Err(format!("unsupported candle interval {interval}")),
+                        Err(interval.unsupported("OKX")),
                     );
                     return;
                 };
@@ -1209,13 +1219,13 @@ impl Venue for Okx {
                 }
                 let read = CandleRead {
                     instrument: m.id.clone(),
-                    interval: interval.clone(),
+                    interval,
                     limit,
                     before,
                     after: end,
                     historical: false,
                     force_history: to_ms.is_some_and(|to| {
-                        subtract_bars(cx.now, &interval, 1440).is_some_and(|oldest| to < oldest)
+                        subtract_bars(cx.now, interval, 1440).is_some_and(|oldest| to < oldest)
                     }),
                 };
                 let path = read.path();
@@ -1290,25 +1300,26 @@ struct Subscription<'a> {
     args: &'a [Topic<'a>],
 }
 
-fn bar(interval: &str) -> &str {
-    match interval {
-        "1h" => "1H",
-        "2h" => "2H",
-        "4h" => "4H",
-        "6h" => "6H",
-        "12h" => "12H",
-        "1d" => "1D",
-        "1w" => "1W",
-        "1M" => "1Mutc",
-        other => other,
-    }
+const BARS: [(Interval, &str); 13] = [
+    (Interval::M1, "1m"),
+    (Interval::M3, "3m"),
+    (Interval::M5, "5m"),
+    (Interval::M15, "15m"),
+    (Interval::M30, "30m"),
+    (Interval::H1, "1H"),
+    (Interval::H2, "2H"),
+    (Interval::H4, "4H"),
+    (Interval::H6, "6H"),
+    (Interval::H12, "12H"),
+    (Interval::D1, "1D"),
+    (Interval::W1, "1W"),
+    (Interval::Mo1, "1Mutc"),
+];
+fn bar(interval: Interval) -> Option<&'static str> {
+    BARS.iter().find(|(i, _)| *i == interval).map(|(_, bar)| *bar)
 }
-fn interval_for_bar(value: &str) -> String {
-    if value == "1Mutc" {
-        "1M".into()
-    } else {
-        value.to_lowercase()
-    }
+fn interval_for_bar(value: &str) -> Option<Interval> {
+    BARS.iter().find(|(_, bar)| *bar == value).map(|(i, _)| *i)
 }
 fn percentage(last: &str, open: &str) -> f64 {
     let open = num::parse(open);
@@ -1336,7 +1347,7 @@ impl CandleRead {
         format!(
             "/api/v5/market/{endpoint}?instId={}&bar={}&limit={}&before={}&after={}",
             self.instrument,
-            bar(&self.interval),
+            bar(self.interval).unwrap_or_default(),
             if self.historical {
                 self.limit.min(100)
             } else {
@@ -1348,21 +1359,10 @@ impl CandleRead {
     }
 }
 
-fn subtract_bars(end: f64, interval: &str, count: u32) -> Option<f64> {
+fn subtract_bars(end: f64, interval: Interval, count: u32) -> Option<f64> {
+    bar(interval)?;
     let duration = match interval {
-        "1m" => 60_000.0,
-        "3m" => 180_000.0,
-        "5m" => 300_000.0,
-        "15m" => 900_000.0,
-        "30m" => 1_800_000.0,
-        "1h" => 3_600_000.0,
-        "2h" => 7_200_000.0,
-        "4h" => 14_400_000.0,
-        "6h" => 21_600_000.0,
-        "12h" => 43_200_000.0,
-        "1d" => 86_400_000.0,
-        "1w" => 604_800_000.0,
-        "1M" => {
+        Interval::Mo1 => {
             let ms = end.floor() as i64;
             let (year, month, day) = sign::civil_date(ms.div_euclid(86_400_000));
             let months = year * 12 + month - 1 - i64::from(count);
@@ -1387,7 +1387,7 @@ fn subtract_bars(end: f64, interval: &str, count: u32) -> Option<f64> {
             let day = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
             return Some((day * 86_400_000 + ms.rem_euclid(86_400_000)) as f64);
         }
-        _ => return None,
+        _ => interval.ms(),
     };
     Some(end - duration * f64::from(count))
 }

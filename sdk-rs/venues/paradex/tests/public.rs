@@ -358,7 +358,7 @@ fn candle_subscriptions_accept_all_declared_nonsecond_timeframes() {
         let mut h = Harness::new();
         h.command(Command::SubscribeCandles {
             symbol: BTC.into(),
-            interval: interval.into(),
+            interval: safe_cex_engine::model::Interval::parse(interval).unwrap(),
         });
         assert_eq!(h.pending.len(), 1, "{interval}");
     }

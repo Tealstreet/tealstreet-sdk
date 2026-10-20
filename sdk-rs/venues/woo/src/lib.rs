@@ -108,28 +108,6 @@ pub(crate) fn compact(native: &str) -> String {
 pub(crate) fn native(m: &Market) -> String {
     format!("PERP_{}_{}", m.base, m.quote)
 }
-pub(crate) fn interval_ms(interval: &str) -> Option<f64> {
-    if interval == "1M" {
-        return Some(2_592_000_000.0);
-    }
-    if !interval.is_ascii() {
-        return None;
-    }
-    let (value, unit) = interval.split_at(interval.len().checked_sub(1)?);
-    let multiplier = match unit {
-        "s" => 1000.0,
-        "m" => 60_000.0,
-        "h" => 3_600_000.0,
-        "d" => 86_400_000.0,
-        "w" => 604_800_000.0,
-        _ => return None,
-    };
-    value
-        .parse::<f64>()
-        .ok()
-        .filter(|v| v.is_finite() && *v > 0.0)
-        .map(|v| v * multiplier)
-}
 fn candle(raw: Kline) -> Option<Candle> {
     if raw.start_timestamp < 0.0
         || raw.low <= 0.0
@@ -447,13 +425,13 @@ impl Woo {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: &str,
-        interval: &str,
+        interval: Interval,
         raw: Kline,
     ) {
         let Some(mut next) = candle(raw) else {
             return;
         };
-        let Some(state) = self.candles.get_mut(&(symbol.into(), interval.into())) else {
+        let Some(state) = self.candles.get_mut(&(symbol.into(), interval)) else {
             return;
         };
         if let Some(old) = &state.last {
@@ -488,11 +466,9 @@ impl Woo {
             if s != symbol {
                 continue;
             }
-            let Some(ms) = interval_ms(interval) else {
-                continue;
-            };
+            let ms = interval.ms();
             let start = (time / ms).floor() * ms / 1000.0;
-            if interval.ends_with('s') && state.last.as_ref().is_none_or(|c| c.timestamp != start) {
+            if interval.as_str().ends_with('s') && state.last.as_ref().is_none_or(|c| c.timestamp != start) {
                 if state.last.as_ref().is_some_and(|c| c.timestamp > start) {
                     continue;
                 }
@@ -525,7 +501,7 @@ impl Woo {
             c.low = c.low.min(t.p);
             c.close = t.p;
             c.volume += t.a;
-            cx.candle(s, interval, *c);
+            cx.candle(s, *interval, *c);
         }
     }
     fn fetch_candles(&self, cx: &mut Cx<'_, Pending>, cmd: Command) {
@@ -540,13 +516,12 @@ impl Woo {
         else {
             unreachable!()
         };
-        let (symbol, interval) = (symbol.as_str(), interval.as_str());
+        let symbol = symbol.as_str();
         let Some(m) = cx.store.market(symbol) else {
             cx.done(command, Err("Market not found".into()));
             return;
         };
-        if interval_ms(interval).is_none()
-            || from.is_some_and(|v| !v.is_finite())
+        if from.is_some_and(|v| !v.is_finite())
             || to.is_some_and(|v| !v.is_finite())
             || from.zip(to).is_some_and(|(a, b)| a > b)
         {
@@ -554,7 +529,7 @@ impl Woo {
             return;
         }
         let size = limit.unwrap_or(500).clamp(1, 1000);
-        let ms = interval_ms(interval).unwrap();
+        let ms = interval.ms();
         let recent = (((cx.now / ms).floor() * ms - to.unwrap_or(0.0)).abs() / ms) < 100.0;
         let (mut url, at) = if recent {
             (
@@ -696,7 +671,7 @@ impl Venue for Woo {
                 let symbol = compact(symbol);
                 if kind == "orderbookupdate" {
                     self.depth_message(cx, &symbol, msg.ts, data.get());
-                } else if let Some(interval) = kind.strip_prefix("kline_") {
+                } else if let Some(interval) = kind.strip_prefix("kline_").and_then(Interval::parse) {
                     if let Ok(raw) = serde_json::from_str(data.get()) {
                         self.stream_candle(cx, &symbol, interval, raw);
                     }
@@ -1116,16 +1091,13 @@ impl Venue for Woo {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                if interval_ms(&interval).is_none() {
-                    return;
-                }
                 let Some(m) = cx.store.market(&symbol).map(native) else {
                     return;
                 };
                 let trade = self.candles.keys().any(|(s, _)| s == &symbol);
                 let state = self
                     .candles
-                    .entry((symbol.clone(), interval.clone()))
+                    .entry((symbol.clone(), interval))
                     .or_default();
                 state.count += 1;
                 if state.count > 1 {
@@ -1137,7 +1109,7 @@ impl Venue for Woo {
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                let key = (symbol.clone(), interval.clone());
+                let key = (symbol.clone(), interval);
                 let Some(s) = self.candles.get_mut(&key) else {
                     return;
                 };

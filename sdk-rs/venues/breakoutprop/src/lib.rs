@@ -60,7 +60,7 @@ pub struct BreakoutProp {
     trading: trading::TradingState,
     terminal_orders: HashMap<String, f64>,
     books: HashMap<String, (usize, Book)>,
-    candles: HashMap<(String, String), usize>,
+    candles: HashMap<(String, Interval), usize>,
 }
 
 pub struct Pending {
@@ -97,7 +97,7 @@ pub(crate) enum Operation {
     Candles {
         command: u32,
         symbol: String,
-        interval: String,
+        interval: Interval,
         from_ms: Option<f64>,
         to_ms: Option<f64>,
         rows: Vec<Candle>,
@@ -437,7 +437,7 @@ impl BreakoutProp {
                 to_ms,
                 ..
             } => {
-                let (kind, _) = wire::interval(interval)
+                let (kind, _) = wire::interval(*interval)
                     .ok_or_else(|| "Unsupported DXtrade candle interval".to_owned())?;
                 (
                     Method::Post,
@@ -631,10 +631,10 @@ impl BreakoutProp {
                 .filter(|((symbol, _), _)| symbol == &ticker.symbol)
             {
                 let seconds =
-                    wire::synthetic_interval_seconds(interval).expect("validated candle interval");
+                    wire::synthetic_interval_seconds(*interval).expect("validated candle interval");
                 cx.candle(
                     symbol,
-                    interval,
+                    *interval,
                     Candle {
                         timestamp: (cx.now / 1_000.0 / seconds).floor() * seconds,
                         open: ticker.last,
@@ -997,7 +997,7 @@ impl Venue for BreakoutProp {
                 Ok(row)
                     if row.kind == "Candle"
                         && row.symbol == symbol.as_str()
-                        && wire::interval(interval)
+                        && wire::interval(*interval)
                             .is_some_and(|(kind, _)| row.candle_type == kind)
                         && [row.open, row.high, row.low, row.close]
                             .iter()
@@ -1105,10 +1105,10 @@ impl Venue for BreakoutProp {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                if wire::synthetic_interval_seconds(&interval).is_some() {
+                if wire::synthetic_interval_seconds(interval).is_some() {
                     *self.candles.entry((symbol, interval)).or_default() += 1;
                 } else {
-                    cx.log(LogLevel::Error, "Unsupported DXtrade candle interval");
+                    cx.log(LogLevel::Error, interval.unsupported("DXtrade"));
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
@@ -1128,8 +1128,9 @@ impl Venue for BreakoutProp {
                 to_ms,
                 ..
             } => {
-                if wire::interval(&interval).is_none()
-                    || from_ms.is_some_and(|value| wire::iso_time(value).is_err())
+                if wire::interval(interval).is_none() {
+                    cx.done(command, Err(interval.unsupported("DXtrade")));
+                } else if from_ms.is_some_and(|value| wire::iso_time(value).is_err())
                     || to_ms.is_some_and(|value| wire::iso_time(value).is_err())
                 {
                     cx.done(command, Err("Invalid DXtrade candle request".into()));

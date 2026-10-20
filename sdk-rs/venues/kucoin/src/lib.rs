@@ -10,7 +10,7 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Balance, Candle, Market, Ticker};
+use safe_cex_engine::model::{Balance, Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, Store, TimerId,
@@ -131,7 +131,7 @@ pub struct Kucoin {
     funding: funding::Funding,
     connections: Vec<Connection>,
     books: HashMap<String, BookState>,
-    candles: BTreeMap<(String, String), u32>,
+    candles: BTreeMap<(String, Interval), u32>,
     message_id: u64,
     book_generation: u64,
 }
@@ -172,21 +172,23 @@ fn encoded_path(path: &str) -> String {
         .join("&");
     format!("{base}?{query}")
 }
-pub(crate) fn interval(value: &str) -> Result<(u32, &'static str), String> {
+/// KuCoin candle minutes and native type name.
+pub(crate) fn interval(value: Interval) -> Result<(u32, &'static str), String> {
+    use Interval::*;
     match value {
-        "1m" => Ok((1, "1min")),
-        "3m" => Ok((3, "3min")),
-        "5m" => Ok((5, "5min")),
-        "15m" => Ok((15, "15min")),
-        "30m" => Ok((30, "30min")),
-        "1h" => Ok((60, "1hour")),
-        "2h" => Ok((120, "2hour")),
-        "4h" => Ok((240, "4hour")),
-        "6h" => Ok((360, "6hour")),
-        "12h" => Ok((720, "12hour")),
-        "1d" => Ok((1440, "1day")),
-        "1w" => Ok((10080, "1week")),
-        _ => Err(format!("unsupported KuCoin candle interval: {value}")),
+        M1 => Ok((1, "1min")),
+        M3 => Ok((3, "3min")),
+        M5 => Ok((5, "5min")),
+        M15 => Ok((15, "15min")),
+        M30 => Ok((30, "30min")),
+        H1 => Ok((60, "1hour")),
+        H2 => Ok((120, "2hour")),
+        H4 => Ok((240, "4hour")),
+        H6 => Ok((360, "6hour")),
+        H12 => Ok((720, "12hour")),
+        D1 => Ok((1440, "1day")),
+        W1 => Ok((10080, "1week")),
+        _ => Err(value.unsupported("KuCoin")),
     }
 }
 fn success(status: u16, body: &str) -> Result<Envelope<'_>, String> {
@@ -467,7 +469,7 @@ impl Kucoin {
                     self.fetch_depth(cx, &symbol);
                 }
                 for (symbol, timeframe) in self.candles.keys().cloned().collect::<Vec<_>>() {
-                    if let Ok((_, ws)) = interval(&timeframe) {
+                    if let Ok((_, ws)) = interval(timeframe) {
                         let api = api_symbol(cx.store, &symbol);
                         self.subscription(
                             cx,
@@ -848,8 +850,8 @@ impl Venue for Kucoin {
             let timeframe = self
                 .candles
                 .keys()
-                .find(|(s, i)| s == &symbol && interval(i).is_ok_and(|(_, v)| v == ws))
-                .map(|(_, i)| i.clone());
+                .find(|(s, i)| s == &symbol && interval(*i).is_ok_and(|(_, v)| v == ws))
+                .map(|(_, i)| *i);
             #[derive(Deserialize)]
             struct Row {
                 candles: Vec<Number>,
@@ -857,7 +859,7 @@ impl Venue for Kucoin {
             if let (Some(timeframe), Ok(row)) = (timeframe, serde_json::from_str::<Row>(data.get()))
                 && let Some(candle) = wire::candle(&row.candles, false)
             {
-                cx.candle(&symbol, &timeframe, candle);
+                cx.candle(&symbol, timeframe, candle);
             }
         } else {
             self.ticker_message(cx, message.topic, data);
@@ -1156,7 +1158,7 @@ impl Venue for Kucoin {
             Command::SubscribeCandles {
                 symbol,
                 interval: timeframe,
-            } => match interval(&timeframe) {
+            } => match interval(timeframe) {
                 Ok((_, ws)) => {
                     let n = self.candles.entry((symbol.clone(), timeframe)).or_default();
                     *n += 1;
@@ -1176,12 +1178,12 @@ impl Venue for Kucoin {
                 symbol,
                 interval: timeframe,
             } => {
-                let key = (symbol.clone(), timeframe.clone());
+                let key = (symbol.clone(), timeframe);
                 if let Some(n) = self.candles.get_mut(&key) {
                     *n = n.saturating_sub(1);
                     if *n == 0 {
                         self.candles.remove(&key);
-                        if let Ok((_, ws)) = interval(&timeframe)
+                        if let Ok((_, ws)) = interval(timeframe)
                             && !self.connections.is_empty()
                         {
                             let api = api_symbol(cx.store, &symbol);
@@ -1203,7 +1205,7 @@ impl Venue for Kucoin {
                 from_ms,
                 to_ms,
             } => {
-                match interval(&timeframe) {
+                match interval(timeframe) {
                     Ok((minutes, _)) => {
                         let end = to_ms.unwrap_or(cx.now);
                         let start = if let Some(limit) = limit {

@@ -1,5 +1,5 @@
 //! PerpetualV2 public wire records use real prices and quantities.
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
@@ -249,26 +249,11 @@ pub struct Envelope<'a> {
     #[serde(default, borrow)]
     pub msg: Str<'a>,
 }
-pub fn resolution(i: &str) -> Option<u32> {
-    Some(match i {
-        "1m" => 60,
-        "3m" => 180,
-        "5m" => 300,
-        "15m" => 900,
-        "30m" => 1800,
-        "1h" => 3600,
-        "2h" => 7200,
-        "3h" => 10800,
-        "4h" => 14400,
-        "6h" => 21600,
-        "12h" => 43200,
-        "1d" => 86400,
-        "1w" => 604800,
-        "1M" => 2592000,
-        "3M" => 7776000,
-        "1Y" => 31104000,
-        _ => return None,
-    })
+/// Phemex kline resolution in seconds.
+pub fn resolution(i: Interval) -> Option<u32> {
+    use Interval::*;
+    matches!(i, M1 | M3 | M5 | M15 | M30 | H1 | H2 | H3 | H4 | H6 | H12 | D1 | W1 | Mo1)
+        .then(|| (i.ms() / 1000.0) as u32)
 }
 
 /// Encode venue-native symbols without letting a command add query parameters.

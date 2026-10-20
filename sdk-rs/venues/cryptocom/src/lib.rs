@@ -7,7 +7,7 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
-use safe_cex_engine::model::{Balance, Candle, Market, Ticker};
+use safe_cex_engine::model::{Balance, Candle, Interval, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
@@ -87,15 +87,24 @@ pub struct Cryptocom {
     history: history::History,
 }
 
-pub(crate) fn interval(value: &str) -> Result<&str, String> {
-    match value {
-        "1m" | "5m" | "15m" | "30m" | "1h" | "2h" | "4h" | "12h" => Ok(value),
-        "1d" => Ok("1D"),
-        "1w" => Ok("7D"),
-        _ => Err(format!(
-            "Unsupported Crypto.com candlestick interval: {value}"
-        )),
-    }
+const TIMEFRAMES: [(Interval, &str); 10] = [
+    (Interval::M1, "1m"),
+    (Interval::M5, "5m"),
+    (Interval::M15, "15m"),
+    (Interval::M30, "30m"),
+    (Interval::H1, "1h"),
+    (Interval::H2, "2h"),
+    (Interval::H4, "4h"),
+    (Interval::H12, "12h"),
+    (Interval::D1, "1D"),
+    (Interval::W1, "7D"),
+];
+pub(crate) fn interval(value: Interval) -> Result<&'static str, String> {
+    TIMEFRAMES
+        .iter()
+        .find(|(i, _)| *i == value)
+        .map(|(_, native)| *native)
+        .ok_or_else(|| value.unsupported("Crypto.com"))
 }
 
 fn quoted(s: &str) -> String {
@@ -333,10 +342,12 @@ impl Cryptocom {
                     .strip_prefix("candlestick.")
                     .and_then(|s| s.split('.').next())
                     .unwrap_or("");
-                let timeframe = match timeframe {
-                    "1D" => "1d",
-                    "7D" => "1w",
-                    other => other,
+                let Some(timeframe) = TIMEFRAMES
+                    .iter()
+                    .find(|(_, native)| *native == timeframe)
+                    .map(|(i, _)| *i)
+                else {
+                    return Ok(());
                 };
                 if !self.subscriptions.contains_key(message.subscription) {
                     return Ok(());
@@ -677,7 +688,7 @@ impl Venue for Cryptocom {
             Command::SubscribeCandles {
                 symbol,
                 interval: timeframe,
-            } => match interval(&timeframe) {
+            } => match interval(timeframe) {
                 Ok(timeframe) => self.add_channel(cx, format!("candlestick.{timeframe}.{symbol}")),
                 Err(error) => cx.log(LogLevel::Error, error),
             },
@@ -685,7 +696,7 @@ impl Venue for Cryptocom {
                 symbol,
                 interval: timeframe,
             } => {
-                if let Ok(timeframe) = interval(&timeframe) {
+                if let Ok(timeframe) = interval(timeframe) {
                     self.remove_channel(cx, format!("candlestick.{timeframe}.{symbol}"));
                 }
             }
@@ -696,7 +707,7 @@ impl Venue for Cryptocom {
                 from_ms,
                 to_ms,
                 ..
-            } => match interval(&timeframe) {
+            } => match interval(timeframe) {
                 Ok(timeframe) => {
                     let mut path = format!(
                         "/public/get-candlestick?instrument_name={}&timeframe={timeframe}",

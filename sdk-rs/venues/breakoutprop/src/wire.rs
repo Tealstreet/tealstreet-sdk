@@ -1,4 +1,5 @@
 //! Borrowed DXtrade response contracts; timestamps on the engine boundary are milliseconds.
+use safe_cex_engine::model::Interval;
 use serde::Deserialize;
 use std::borrow::Cow;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
@@ -149,28 +150,28 @@ pub(crate) fn iso_time(value: f64) -> Result<String, String> {
     Ok(format!("{seconds}.{fraction:0<3}Z"))
 }
 
-pub(crate) fn interval(value: &str) -> Option<(&'static str, f64)> {
-    Some(match value {
-        "1m" => ("m", 60.0),
-        "5m" => ("5m", 300.0),
-        "15m" => ("15m", 900.0),
-        "30m" => ("30m", 1_800.0),
-        "1h" => ("h", 3_600.0),
-        "2h" => ("2h", 7_200.0),
-        "4h" => ("4h", 14_400.0),
-        "1d" => ("d", 86_400.0),
-        "1w" => ("w", 604_800.0),
+/// DXtrade's native candle type and the interval in seconds.
+pub(crate) fn interval(value: Interval) -> Option<(&'static str, f64)> {
+    use Interval::*;
+    let kind = match value {
+        M1 => "m",
+        M5 => "5m",
+        M15 => "15m",
+        M30 => "30m",
+        H1 => "h",
+        H2 => "2h",
+        H4 => "4h",
+        D1 => "d",
+        W1 => "w",
         _ => return None,
-    })
+    };
+    Some((kind, value.ms() / 1000.0))
 }
-
-pub(crate) fn synthetic_interval_seconds(value: &str) -> Option<f64> {
-    match value {
-        "3m" => Some(180.0),
-        "6h" => Some(21_600.0),
-        "12h" => Some(43_200.0),
-        _ => interval(value).map(|(_, seconds)| seconds),
-    }
+/// Live candles are built from ticks, so a few intervals with no REST type
+/// are still served.
+pub(crate) fn synthetic_interval_seconds(value: Interval) -> Option<f64> {
+    use Interval::*;
+    (matches!(value, M3 | H6 | H12) || interval(value).is_some()).then(|| value.ms() / 1000.0)
 }
 
 pub(crate) fn path_segment(value: &str) -> String {

@@ -2,6 +2,7 @@
 //! embedding application; clients can neither create accounts nor set credentials.
 use crate::{Host, Transport};
 use futures_util::{SinkExt, StreamExt};
+use safe_cex_engine::model::Interval;
 use safe_cex_engine::command::HostInput;
 use safe_cex_engine::{Command, Event, LogLevel, Notice, Venue};
 use serde::Serialize;
@@ -238,7 +239,7 @@ struct Peer {
     outgoing: mpsc::Sender<Outgoing>,
     cancel: watch::Sender<bool>,
     books: HashSet<String>,
-    candles: HashSet<(String, String)>,
+    candles: HashSet<(String, Interval)>,
     tickers: Option<HashSet<String>>,
 }
 struct Pending {
@@ -250,7 +251,7 @@ struct Account<V: Venue, T: Transport> {
     config: ServerConfig,
     peers: HashMap<u64, Peer>,
     books: HashMap<String, usize>,
-    candles: HashMap<(String, String), usize>,
+    candles: HashMap<(String, Interval), usize>,
     pending: HashMap<u32, Pending>,
     next_command: u32,
 }
@@ -421,7 +422,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             }
         }
         for (symbol, interval) in peer.candles {
-            if release(&mut self.candles, &(symbol.clone(), interval.clone())) {
+            if release(&mut self.candles, &(symbol.clone(), interval)) {
                 self.handle(Command::UnsubscribeCandles { symbol, interval });
             }
         }
@@ -472,7 +473,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 return;
             }
             Command::SubscribeCandles { symbol, interval } => {
-                let key = (symbol.clone(), interval.clone());
+                let key = (symbol.clone(), *interval);
                 if peer.candles.insert(key.clone()) {
                     let count = self.candles.entry(key).or_default();
                     *count += 1;
@@ -483,7 +484,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 return;
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                let key = (symbol.clone(), interval.clone());
+                let key = (symbol.clone(), *interval);
                 if peer.candles.remove(&key) && release(&mut self.candles, &key) {
                     self.handle(command);
                 }
@@ -583,10 +584,10 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 per_account += usize::from(!self.books.contains_key(symbol));
             }
             Command::SubscribeCandles { symbol, interval } => {
-                if !valid_symbol(symbol) || interval.is_empty() || interval.len() > 64 {
+                if !valid_symbol(symbol) {
                     return false;
                 }
-                let key = (symbol.clone(), interval.clone());
+                let key = (symbol.clone(), *interval);
                 per_client += usize::from(!peer.candles.contains(&key));
                 per_account += usize::from(!self.candles.contains_key(&key));
             }
