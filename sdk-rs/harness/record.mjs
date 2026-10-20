@@ -99,7 +99,12 @@ const recording = {
     };
   },
   async request(request) {
-    const response = await live.request(request);
+    // A native recorder may explicitly declare direct egress for public CORS
+    // reads. Browser/account hosts still require their configured route.
+    const outgoing = request.route === 'publicCors' && venue.recordPublicCorsDirect
+      ? { ...request, route: 'direct' }
+      : request;
+    const response = await live.request(outgoing);
     const recorded = (body) => {
       write({
         type: 'http',

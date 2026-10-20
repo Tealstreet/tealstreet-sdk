@@ -112,7 +112,7 @@ SDK.
   OKX (+EU/demo), Bybit linear/inverse/spot (+demo), Bitget (+inverse/USDC),
   KuCoin futures/spot, Phemex, BloFin, BingX, WEEX, Bitunix, Bitrue, Backpack,
   Coinbase (+spot), Crypto.com, WOO, Orderly family, Paradex, GRVT, ApeX Omni,
-  Hyperliquid (+spot). **Hyperliquid honors every shape**, stops and brackets
+  Hyperliquid (+spot), TxFlow (testnet plain Limit/Market). **Hyperliquid honors every shape**, stops and brackets
   included (`isHonorableShape`): a stop is one native order, and on a bracket
   the caller's ID goes on the entry while each TP/SL leg gets its own minted
   cloid. It also mints a cloid for every order it places, caller ID or not.

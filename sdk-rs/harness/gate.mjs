@@ -169,6 +169,17 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  // TxFlow previously rejected start as a scaffold. Its new TS reference and
+  // Rust implementation both fence stale reads, deduplicate executions, reject
+  // uncertain write acknowledgements and revalidate queued amendments.
+  // Preserve sparse-context volumes, authoritative hedge settings/mode fences,
+  // and delisted history identities in both implementations as well.
+  // Compare both outputs directly; no TxFlow-specific normalization is permitted.
+  // The production wrapper also rejects order-history ID/status filters that
+  // the native query cannot represent, instead of silently discarding them.
+  // Both implementations pace subscription bursts and recover dropped gateway
+  // subscriptions; the live fixture confirms every ticker acknowledgement.
+  txflow: [],
   breakoutprop: {
     // Public polling, duplicate quote levels and the cancellation precondition
     // are fixed in the TS reference. Native tests pin safety corrections; no
@@ -226,6 +237,8 @@ const KNOWN_TS_FIXES = {
   coinbase: (ts) => fixCoinbase(ts, tapeRecords),
   coinbasespot: (ts) => fixCoinbase(ts, tapeRecords),
   phemex(ts) {
+    // Paired TS authority fences now protect REST reads across private pushes,
+    // socket generations and other REST commits; compare balances unchanged.
     // Independent execution/cumulative-size/flat-settings oracle from taped venue rows.
     if (ts.account) fixPhemexAccount(ts.account, tapeRecords);
     // Phemex zero-open ticker changes remain finite.
