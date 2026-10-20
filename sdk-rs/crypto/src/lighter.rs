@@ -69,6 +69,33 @@ impl SchnorrNonce {
         Ok(Self(reduced))
     }
 }
+/// Hedge fresh host entropy with the scalar secret and the actual signed message.
+/// Even repeated / biased entropy cannot reuse a nonce across distinct messages.
+/// An entropy-source failure must still fail closed in the host.
+pub fn hedged_nonce(input: &[u8], key: &[u8], entropy: &[u8; 32]) -> Result<SchnorrNonce, String> {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha512;
+    use zeroize::Zeroizing;
+    let key = Zeroizing::new(scalar(key)?);
+    let message = poseidon2_hash_fp5(input)?;
+    for counter in 0u32..64 {
+        let mut mac =
+            Hmac::<Sha512>::new_from_slice(key.as_ref()).expect("HMAC accepts any key length");
+        mac.update(b"safe-cex/lighter/schnorr-nonce/v1\0");
+        mac.update(entropy);
+        mac.update(&message);
+        mac.update(&counter.to_be_bytes());
+        let mut digest = mac.finalize().into_bytes();
+        let mut candidate = Zeroizing::new([0u8; 40]);
+        candidate.copy_from_slice(&digest[..40]);
+        digest[..].zeroize();
+        candidate[39] &= 0x7f;
+        if let Ok(nonce) = SchnorrNonce::from_bytes(candidate.as_ref()) {
+            return Ok(nonce);
+        }
+    }
+    Err("Lighter hedged nonce derivation failed".into())
+}
 /// Sign raw word-aligned bytes with a validated nonce, consumed exactly once.
 /// Hosts own fresh, unpredictable nonce generation; re-constructing a reused nonce reveals the key.
 pub fn schnorr_sign(input: &[u8], key: &[u8], nonce: SchnorrNonce) -> Result<Vec<u8>, String> {
@@ -109,6 +136,23 @@ mod tests {
     }
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+    #[test]
+    fn repeated_entropy_does_not_reuse_nonce_across_messages_or_keys() {
+        let key = [3; 40];
+        let entropy = [0; 32]; // Broken RNG returns the same bytes for every signature.
+        let a = hedged_nonce(&[1; 8], &key, &entropy).unwrap();
+        let b = hedged_nonce(&[2; 8], &key, &entropy).unwrap();
+        let c = hedged_nonce(&[1; 8], &[4; 40], &entropy).unwrap();
+        let d = hedged_nonce(&[1; 8], &key, &[1; 32]).unwrap();
+        assert_ne!(a.0, b.0);
+        assert_ne!(a.0, c.0);
+        assert_ne!(a.0, d.0);
+        assert_eq!(a.0, hedged_nonce(&[1; 8], &key, &entropy).unwrap().0);
+        for (input, nonce) in [([1; 8], a), ([2; 8], b)] {
+            let signature = schnorr_sign(&input, &key, nonce).unwrap();
+            assert!(schnorr_verify(&input, &public_key(&key).unwrap(), &signature).unwrap());
+        }
     }
     #[test]
     fn zero_nonce_key_recovery_signature_is_refused_like_go() {

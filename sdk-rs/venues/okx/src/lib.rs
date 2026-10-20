@@ -1,5 +1,6 @@
 //! OKX swaps and EEA X-Perps on the sans-I/O engine.
 mod account;
+mod closed;
 mod history;
 mod sign;
 mod trading;
@@ -19,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 const PUBLIC: usize = 0;
 const BUSINESS: usize = 2;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub eea: bool,
@@ -28,6 +29,17 @@ pub struct Options {
     pub secret: Option<String>,
     pub passphrase: Option<String>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -87,6 +99,7 @@ struct BookState {
 pub enum Pending {
     Account(account::Request),
     History(history::Request),
+    Closed(closed::Request),
     Trade(trading::Request),
     Markets {
         kind: InstrumentType,
@@ -122,11 +135,12 @@ pub struct CandleRead {
 }
 
 pub struct Okx {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<Credentials>,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
+    closed: closed::ClosedState,
     connections: [Connection; 3],
     books: HashMap<String, BookState>,
     marks: HashSet<String>,
@@ -145,6 +159,7 @@ pub struct Okx {
 
 impl Okx {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = if options.public_data_only {
             None
         } else {
@@ -167,6 +182,7 @@ impl Okx {
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
+            closed: closed::ClosedState::default(),
             connections: std::array::from_fn(|channel| Connection::new(channel != PUBLIC && login)),
             books: HashMap::new(),
             marks: HashSet::new(),
@@ -708,6 +724,7 @@ impl Venue for Okx {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             client_order_lookup: true,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            closed_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -800,6 +817,7 @@ impl Venue for Okx {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
+            Pending::Closed(request) => Self::closed_item(request, item),
             Pending::Markets {
                 kind,
                 rows,
@@ -1068,6 +1086,7 @@ impl Venue for Okx {
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, request, response),
+            Pending::Closed(request) => self.closed_response(cx, request),
             Pending::Markets {
                 kind,
                 rows,
@@ -1218,6 +1237,8 @@ impl Venue for Okx {
             self.trade_lost(cx, request, error);
         } else if let Pending::History(request) = pending {
             self.history_failed(cx, request, error);
+        } else if let Pending::Closed(request) = pending {
+            Self::closed_failed(cx, request, error);
         } else if let Pending::Candles { command, .. } = pending {
             cx.command_error(command, error);
             cx.done(command, Ok("[]".into()));
@@ -1240,7 +1261,7 @@ impl Venue for Okx {
             }
             return;
         }
-        if self.history_timer(cx, timer) {
+        if self.history_timer(cx, timer) || self.closed_timer(cx, timer) {
             return;
         }
         if self.account_timer(cx, timer) {
@@ -1266,6 +1287,22 @@ impl Venue for Okx {
                 None => c.supervisor.retry(cx),
             },
             Tick::Handled | Tick::Unhandled => {}
+        }
+    }
+
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
 

@@ -311,8 +311,9 @@ const gate = (venue, isPrivate = false, defect) => {
     assert.deepEqual([...spawned].sort(), ['rust', 'ts']);
     if (!isPrivate) {
       assert.deepEqual(calls.slice(0, 2), [['correctness', 'ts'], ['correctness', 'rust']]);
-      assert.equal(calls.length, 16);
-      for (let run = 0; run < 7; run++)
+      // Stub CPU is a few ms, so the small-window policy extends seven pairs to nine.
+      assert.equal(calls.length, 20);
+      for (let run = 0; run < 9; run++)
         assert.deepEqual(calls.slice(2 + run * 2, 4 + run * 2), (run % 2 ? ['rust', 'ts'] : ['ts', 'rust']).map((impl) => ['performance', impl]));
     } else assert.equal(calls.length, 4);
   `;
