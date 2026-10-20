@@ -364,9 +364,12 @@ control-flow and response knowledge.
 
 The `'error'` event's options carry `classified: { kind, outcome, venueCode }`
 for typed engine errors (`classifiedError`), and
-`ExchangeHealthMonitor.processMessage(message, isError, classified)` uses that
-kind's category before any text pattern. Pass it through; text matching stays
-the fallback for unclassified errors.
+`ExchangeHealthMonitor.processMessage(message, isError, classified)` lets
+specific kinds (auth, rate limit, venue unavailable, network/timeout) win over
+text; catch-all kinds (`rejected`, `invalidInput`, `internal`, `unsupported`)
+only replace the `unknown` fallback, because text patterns know venue auth codes
+the engine leaves generic. Hosts must pass `opts.classified` from their `'error'`
+listener into `processMessage` for this to apply.
 
 `src/health/errorPatterns.ts` is not just toast labeling. The web controller
 uses its `auth_invalid`, `auth_expired`, and `auth_permissions` categories to

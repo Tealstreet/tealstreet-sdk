@@ -25,6 +25,17 @@ import {
 
 export type HealthStatus = 'healthy' | 'degraded' | 'error';
 
+/** Kinds precise enough to override text classification. */
+const SPECIFIC_KINDS: ReadonlySet<string> = new Set([
+  'authInvalid',
+  'authExpired',
+  'authPermission',
+  'rateLimited',
+  'venueUnavailable',
+  'network',
+  'timeout',
+]);
+
 export interface ErrorEntry {
   category: ErrorCategory;
   message: string;
@@ -89,12 +100,11 @@ export class ExchangeHealthMonitor {
       return null;
     }
 
+    // Specific kinds win; catch-all kinds (rejected, invalidInput, internal, unsupported)
+    // defer to text patterns, which know venue auth/permission codes the engine leaves generic.
     const typed = exchangeErrorCategory(classified);
-    if (typed) {
-      const severity = this.patterns.find((pattern) => pattern.category === typed)?.severity ?? 'warning';
-      this.recordError(typed, message, severity);
-      return typed;
-    }
+    const specific = typed && classified?.kind && SPECIFIC_KINDS.has(classified.kind);
+    if (typed && specific) return this.recordTyped(typed, message);
 
     const lowerMessage = message.toLowerCase();
 
@@ -111,6 +121,8 @@ export class ExchangeHealthMonitor {
       }
     }
 
+    if (typed) return this.recordTyped(typed, message);
+
     // If it's explicitly an error but no pattern matched, record as unknown
     if (isError) {
       this.recordError('unknown', message, 'warning');
@@ -118,6 +130,12 @@ export class ExchangeHealthMonitor {
     }
 
     return null;
+  }
+
+  private recordTyped(category: ErrorCategory, message: string): ErrorCategory {
+    const severity = this.patterns.find((pattern) => pattern.category === category)?.severity ?? 'warning';
+    this.recordError(category, message, severity);
+    return category;
   }
 
   /**
