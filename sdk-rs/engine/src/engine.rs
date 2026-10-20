@@ -967,6 +967,11 @@ pub trait Venue {
     fn guard_order_mutations(&self) -> bool {
         false
     }
+    /// Refuse cancel-all while a placement outcome is unknown. A venue that opts
+    /// out must itself cancel any late-landing order once its fresh read proves it.
+    fn fence_uncertain_cancel_all(&self) -> bool {
+        true
+    }
 
     /// Opt in to typed option queries and IV-priced orders at the command boundary.
     fn supports_options(&self) -> bool {
@@ -1461,11 +1466,16 @@ impl<V: Venue> Engine<V> {
                     }
                     if (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements())
-                        && let Err(id) = cx.io.order_locks.acquire(&command, cx.store)
+                        && let Err(id) = cx.io.order_locks.acquire(
+                            &command,
+                            cx.store,
+                            self.venue.fence_uncertain_cancel_all(),
+                        )
                     {
                         let error = match &command {
                             Command::CancelSymbolOrders { symbol, .. }
-                                if cx.io.order_locks.uncertain(symbol) =>
+                                if self.venue.fence_uncertain_cancel_all()
+                                    && cx.io.order_locks.uncertain(symbol) =>
                             {
                                 "Placement outcome is uncertain; reconcile before cancel-all"
                             }
@@ -1502,7 +1512,7 @@ impl<V: Venue> Engine<V> {
         }
         #[cfg(feature = "order-locks")]
         for (command, failed) in self.io.order_locks.ready() {
-            if failed {
+            if failed && self.venue.fence_uncertain_cancel_all() {
                 let Command::CancelSymbolOrders { command, .. } = command else {
                     unreachable!()
                 };
@@ -1926,6 +1936,7 @@ mod streaming_tests {
         empty_book: Book,
         book_subscribers: u32,
         symbol_amend: bool,
+        fence_uncertain: bool,
         commands: Vec<Command>,
     }
 
@@ -1935,6 +1946,9 @@ mod streaming_tests {
         }
         fn guard_order_mutations(&self) -> bool {
             true
+        }
+        fn fence_uncertain_cancel_all(&self) -> bool {
+            self.fence_uncertain
         }
         type Pending = Vec<String>;
         fn start(&mut self, cx: &mut Cx<'_, Self::Pending>) {
@@ -2297,6 +2311,49 @@ mod streaming_tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn opted_out_venue_receives_queued_and_later_cancel_all_after_uncertain_place() {
+        let mut engine = frame_engine();
+        engine.venue.fence_uncertain = false;
+        engine.handle(0., Event::Command(held_place(1, "A")));
+        engine.io.order_locks.note_write();
+        engine.handle(
+            0.,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 2,
+                symbol: "A".into(),
+            }),
+        );
+        assert_eq!(
+            engine.venue.commands.len(),
+            1,
+            "cancel-all still waits for the placement"
+        );
+        complete_held(&mut engine, 1, true);
+        assert!(engine.io.order_locks.uncertain("A"));
+        assert_eq!(
+            engine.venue.commands.len(),
+            2,
+            "queued cancel-all is dispatched"
+        );
+        complete_held(&mut engine, 2, false);
+        engine.handle(
+            0.,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 3,
+                symbol: "A".into(),
+            }),
+        );
+        assert_eq!(
+            engine.venue.commands.len(),
+            3,
+            "later cancel-all is dispatched"
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("uncertain"))));
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn complete_known_partial_outcome_does_not_poison_or_clear_older_uncertainty() {
         let mut engine = frame_engine();
         engine.handle(0., Event::Command(held_place(1, "A")));
@@ -2528,6 +2585,7 @@ mod streaming_tests {
             empty_book: Book::default(),
             book_subscribers: 0,
             symbol_amend: false,
+            fence_uncertain: true,
             commands: Vec::new(),
         });
         engine.start(0.0);
@@ -2563,6 +2621,7 @@ mod streaming_tests {
             empty_book: Book::default(),
             book_subscribers: 0,
             symbol_amend: false,
+            fence_uncertain: true,
             commands: Vec::new(),
         })
     }

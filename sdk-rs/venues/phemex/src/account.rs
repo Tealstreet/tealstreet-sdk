@@ -32,7 +32,7 @@ pub struct Request {
     invalid: bool,
 }
 /// A per-symbol open-order read issued after a placement outcome went unknown.
-/// Only an HTTP read started after the failure can lift the engine's cancel-all fence.
+/// Only an HTTP read started after the failure can prove which of its orders exist.
 pub struct OrdersRead {
     symbol: String,
     generation: u64,
@@ -45,6 +45,10 @@ struct Reconcile {
     failures: u32,
     incomplete: u32,
     abandoned: bool,
+    /// clOrdIDs of unknown-outcome placements, tagged with the generation that owes their read.
+    lost: Vec<(String, u64)>,
+    /// Lost placements a later cancel-all must still cancel if the read reveals them.
+    cancel: Vec<(String, u64)>,
 }
 /// Reads with rows this engine cannot map before giving up on a symbol.
 const INCOMPLETE_READS: u32 = 3;
@@ -976,21 +980,113 @@ impl PhemexPerpetuals {
         true
     }
     /// Placements on `symbols` ended with an unknown outcome; read their open
-    /// orders no earlier than `not_before`.
+    /// orders no earlier than `not_before`. `lost` is the unanswered order, if any.
     pub(crate) fn orders_uncertain(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbols: Vec<String>,
+        lost: Option<&Order>,
         not_before: f64,
     ) {
         for symbol in symbols {
-            let entry = self.account.reconcile.entry(symbol).or_default();
+            let entry = self.account.reconcile.entry(symbol.clone()).or_default();
             entry.generation += 1;
             entry.not_before = entry.not_before.max(not_before);
             entry.incomplete = 0;
             entry.abandoned = false;
+            if let Some(id) = lost
+                .filter(|order| order.symbol == symbol)
+                .and_then(|order| order.client_order_id.clone())
+            {
+                entry.lost.push((id, entry.generation));
+            }
         }
         self.orders_reconcile(cx);
+    }
+    /// A cancel-all on `symbol` was dispatched; a still-unknown placement may land later.
+    pub(crate) fn orders_cancel_all(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        let Some(entry) = self.account.reconcile.get_mut(symbol) else {
+            return;
+        };
+        // An order the store already shows is covered by this cancel-all itself.
+        let lost: Vec<_> = entry
+            .lost
+            .iter()
+            .filter(|(id, _)| {
+                !cx.store.orders().iter().any(|order| {
+                    order.symbol == symbol && order.client_order_id.as_ref() == Some(id)
+                })
+            })
+            .cloned()
+            .collect();
+        if lost.is_empty() {
+            return;
+        }
+        let ids: Vec<_> = lost.iter().map(|(id, _)| id.as_str()).collect();
+        cx.log(
+            LogLevel::Warning,
+            format!(
+                "Phemex cancel-all on {symbol} sent while placement {} has an unknown outcome; \
+                 it is canceled if the open-order read after its signed expiry finds it",
+                ids.join(", ")
+            ),
+        );
+        for item in lost {
+            if !entry.cancel.contains(&item) {
+                entry.cancel.push(item);
+            }
+        }
+    }
+    /// Cancels live orders of lost placements a cancel-all already covered.
+    /// A complete read proves every lost placement it postdates.
+    fn cancel_late_orders(&mut self, cx: &mut Cx<'_, Pending>, read: &OrdersRead, complete: bool) {
+        let Some(entry) = self.account.reconcile.get_mut(&read.symbol) else {
+            return;
+        };
+        let (mut late, mut handled, mut filled) = (Vec::new(), Vec::new(), Vec::new());
+        for order in cx.store.orders() {
+            let Some(client) = order.client_order_id.as_deref() else {
+                continue;
+            };
+            if order.symbol != read.symbol
+                || order.parent_id.is_some()
+                || !entry.cancel.iter().any(|(id, _)| id == client)
+            {
+                continue;
+            }
+            let open = matches!(order.status, OrderStatus::Open | OrderStatus::Updating);
+            if open {
+                late.push(order.id.clone());
+            }
+            if order.filled > 0. {
+                filled.push(format!("{} filled {}", order.id, order.filled));
+            }
+            if open || order.filled > 0. {
+                handled.push(client.to_owned());
+            }
+        }
+        if !filled.is_empty() {
+            cx.log(
+                LogLevel::Error,
+                format!(
+                    "Phemex order {} landed after cancel-all on {}; check the position",
+                    filled.join(", "),
+                    read.symbol
+                ),
+            );
+        }
+        entry.cancel.retain(|(id, _)| !handled.contains(id));
+        if complete {
+            entry
+                .cancel
+                .retain(|(_, generation)| *generation > read.generation);
+            entry
+                .lost
+                .retain(|(_, generation)| *generation > read.generation);
+        }
+        if !late.is_empty() {
+            self.cancel_late(cx, &read.symbol, late);
+        }
     }
     /// Starts each owed read once it is due and no placement on that symbol is in flight.
     pub(crate) fn orders_reconcile(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1106,6 +1202,7 @@ impl PhemexPerpetuals {
             }
             self.accept_write_order(cx, &row);
         }
+        self.cancel_late_orders(cx, &read, complete);
         let symbol = read.symbol.clone();
         if !complete {
             let Some(entry) = self.account.reconcile.get_mut(&symbol) else {
@@ -1124,7 +1221,7 @@ impl PhemexPerpetuals {
                 LogLevel::Error,
                 format!(
                     "Phemex {symbol} open orders include rows this engine cannot read; \
-                     cancel-all for {symbol} stays refused, cancel those orders individually"
+                     an order from the unknown placement may stay open, cancel those orders individually"
                 ),
             );
             self.orders_reconcile(cx);
@@ -1164,7 +1261,7 @@ impl PhemexPerpetuals {
         cx.log(
             LogLevel::Warning,
             format!(
-                "Phemex {} open-order reconciliation failed: {cause}; cancel-all stays fenced",
+                "Phemex {} open-order reconciliation failed: {cause}; retrying",
                 read.symbol
             ),
         );

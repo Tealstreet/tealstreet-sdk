@@ -1492,7 +1492,7 @@ fn documented_create_business_errors_do_not_fence_cancel_all() {
 }
 
 #[test]
-fn unproven_create_results_remain_fenced() {
+fn unproven_create_results_still_cancel_every_known_order() {
     for case in [
         "missing-client",
         "wrong-client",
@@ -1554,8 +1554,15 @@ fn unproven_create_results_remain_fenced() {
             }
             value
         });
-        assert!(writes(&a).is_empty(), "case {case}");
-        assert!(done(&a).is_err(), "case {case}: {a:?}");
+        let cancel = writes(&a)
+            .into_iter()
+            .find(|r| r.method == Method::Delete)
+            .unwrap_or_else(|| panic!("case {case}: cancel-all must go out: {a:?}"));
+        assert_eq!(
+            p(&cancel, "orderID").as_deref(),
+            Some("old-live"),
+            "case {case}"
+        );
     }
 }
 
@@ -1630,8 +1637,17 @@ fn proven_rejection_cannot_clear_older_transport_uncertainty() {
             symbol: "BTCUSDT".into(),
         },
     );
-    assert!(writes(&a).is_empty());
-    assert!(done(&a).is_err(), "{a:?}");
+    let cancel = writes(&a)
+        .into_iter()
+        .find(|r| r.method == Method::Delete)
+        .expect("cancel-all goes out despite the unknown placement");
+    assert_eq!(p(&cancel, "orderID").as_deref(), Some("old-live"));
+    let armed = warnings(&a);
+    assert!(
+        armed.iter().any(|m| m.contains("unknown-caller"))
+            && !armed.iter().any(|m| m.contains("rejected-caller")),
+        "only the unknown placement stays owed a late cancel: {armed:?}"
+    );
 }
 
 #[test]
@@ -1667,8 +1683,15 @@ fn non_success_http_cannot_prove_create_rejection() {
                 symbol: "BTCUSDT".into(),
             },
         );
-        assert!(writes(&a).is_empty(), "HTTP {status}");
-        assert!(done(&a).is_err(), "HTTP {status}");
+        let cancel = writes(&a)
+            .into_iter()
+            .find(|r| r.method == Method::Delete)
+            .unwrap_or_else(|| panic!("HTTP {status}: cancel-all must go out"));
+        assert_eq!(p(&cancel, "orderID").as_deref(), Some("old-live"));
+        assert!(
+            warnings(&a).iter().any(|m| m.contains("caller")),
+            "HTTP {status}: unknown placement stays owed a late cancel"
+        );
     }
 }
 
@@ -2137,6 +2160,26 @@ fn error_logs(actions: &[Action]) -> usize {
         .count()
 }
 
+fn warnings(actions: &[Action]) -> Vec<String> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Log {
+                level: safe_cex_engine::LogLevel::Warning,
+                message,
+            }) => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn deletes(actions: &[Action]) -> Vec<HttpRequest> {
+    writes(actions)
+        .into_iter()
+        .filter(|r| r.method == Method::Delete)
+        .collect()
+}
+
 fn rest_row(id: &str, client: &str) -> Value {
     json!({"orderID":id,"clOrdID":client,"symbol":"BTCUSDT","side":"Buy","posSide":"Merged","orderType":"Limit","ordStatus":"New","orderQtyRq":"0.01","cumQtyRq":"0","leavesQtyRq":"0.01","priceRp":"69000","transactTimeNs":3_000_000_000_u64})
 }
@@ -2149,7 +2192,7 @@ fn cancel_all_ids(
     e: &mut Engine<PhemexPerpetuals>,
     now: f64,
     command: safe_cex_engine::CommandId,
-) -> Option<Vec<String>> {
+) -> Vec<String> {
     let a = at(
         e,
         now,
@@ -2169,12 +2212,12 @@ fn cancel_all_ids(
                 .collect::<Vec<_>>()
         })
         .collect();
-    if ids.is_empty() {
-        assert!(done(&a).is_err(), "{a:?}");
-        return None;
-    }
+    assert!(
+        !ids.is_empty() || done(&a).is_ok(),
+        "cancel-all is never refused: {a:?}"
+    );
     ids.sort();
-    Some(ids)
+    ids
 }
 
 /// A create ACK that proves nothing: the fence rises, but the venue answered.
@@ -2200,10 +2243,6 @@ fn transport_uncertain_placement_reads_open_orders_after_its_signed_expiry() {
     let (timer, wake) = latest_timer(&a).expect("read scheduled");
     // Signed expiry is send time + 60 s (rounded to seconds), plus 5 s clock skew.
     assert_eq!(wake, 66_000.);
-    assert!(
-        cancel_all_ids(&mut e, 2000., 122).is_none(),
-        "fenced until read"
-    );
     let a = at(&mut e, wake, Event::TimerFired { timer });
     let read = open_order_reads(&a);
     assert_eq!(read.len(), 1);
@@ -2220,13 +2259,13 @@ fn transport_uncertain_placement_reads_open_orders_after_its_signed_expiry() {
     );
     assert!(e.store().order("revealed").is_some());
     assert_eq!(
-        cancel_all_ids(&mut e, wake + 2., 123).expect("fence lifted"),
+        cancel_all_ids(&mut e, wake + 2., 123),
         ["old-live", "revealed"]
     );
 }
 
 #[test]
-fn open_order_read_started_before_a_later_failure_keeps_the_fence() {
+fn open_order_read_started_before_a_later_failure_cannot_settle_it() {
     let mut e = rejection_engine(vec![live_row("old-live")]);
     let first = place_at(&mut e, 1000., 131, "first-unknown");
     let a = reply(&mut e, 1001., &first, 200, UNPROVEN_ACK);
@@ -2247,13 +2286,10 @@ fn open_order_read_started_before_a_later_failure_keeps_the_fence() {
             rest_row("first", "first-unknown"),
         ]),
     );
-    assert!(
-        cancel_all_ids(&mut e, 1005., 133).is_none(),
-        "a read predating the second failure cannot clear its fence"
-    );
+    assert_eq!(cancel_all_ids(&mut e, 1005., 133), ["first", "old-live"]);
     let fresh = open_order_reads(&a);
     assert_eq!(fresh.len(), 1, "a newer failure owes a newer read");
-    reply(
+    let a = reply(
         &mut e,
         1006.,
         &fresh[0],
@@ -2264,10 +2300,9 @@ fn open_order_read_started_before_a_later_failure_keeps_the_fence() {
             rest_row("second", "second-unknown"),
         ]),
     );
-    assert_eq!(
-        cancel_all_ids(&mut e, 1007., 134).expect("fresh read lifts the fence"),
-        ["first", "old-live", "second"]
-    );
+    let late = deletes(&a);
+    assert_eq!(late.len(), 1, "only the order the stale read missed: {a:?}");
+    assert_eq!(p(&late[0], "orderID").as_deref(), Some("second"));
 }
 
 #[test]
@@ -2283,7 +2318,7 @@ fn definite_rejection_owes_no_open_order_read() {
     );
     assert!(done(&a).is_err());
     assert!(open_order_reads(&a).is_empty());
-    assert_eq!(cancel_all_ids(&mut e, 1002., 152).unwrap(), ["old-live"]);
+    assert_eq!(cancel_all_ids(&mut e, 1002., 152), ["old-live"]);
 }
 
 #[test]
@@ -2293,7 +2328,6 @@ fn failed_read_retries_and_empty_code_reconciles() {
     let a = reply(&mut e, 1001., &create, 200, UNPROVEN_ACK);
     let read = open_order_reads(&a).remove(0);
     let a = reply(&mut e, 1002., &read, 500, "{}");
-    assert!(cancel_all_ids(&mut e, 1003., 142).is_none());
     let (timer, wake) = latest_timer(&a).expect("failed read schedules a retry");
     assert_eq!(wake, 3002.);
     let a = at(&mut e, wake, Event::TimerFired { timer });
@@ -2305,10 +2339,7 @@ fn failed_read_retries_and_empty_code_reconciles() {
         200,
         r#"{"code":10002,"msg":"OM_ORDER_NOT_FOUND","data":null}"#,
     );
-    assert_eq!(
-        cancel_all_ids(&mut e, wake + 2., 143).unwrap(),
-        ["old-live"]
-    );
+    assert_eq!(cancel_all_ids(&mut e, wake + 2., 143), ["old-live"]);
 }
 
 #[test]
@@ -2334,8 +2365,168 @@ fn persistently_unmappable_row_stops_retrying_with_one_error() {
         read = open_order_reads(&at(&mut e, now, Event::TimerFired { timer })).remove(0);
     }
     assert_eq!(errors, 1, "one Error once retrying is pointless");
-    assert!(
-        cancel_all_ids(&mut e, now + 1., 162).is_none(),
-        "an unreadable row may be the lost placement"
+    assert_eq!(
+        cancel_all_ids(&mut e, now + 1., 162),
+        ["old-live"],
+        "an unreadable row cannot hold back canceling the known orders"
     );
+}
+
+#[test]
+fn transport_timeout_cancel_all_goes_out_now_and_cancels_the_late_landing_after_expiry() {
+    let mut e = rejection_engine(vec![live_row("old-live")]);
+    let create = place_at(&mut e, 1000., 171, "lost-caller");
+    let a = at(
+        &mut e,
+        1500.,
+        Event::HttpFailed {
+            request: create.id,
+            error: "transport timeout",
+        },
+    );
+    assert!(
+        latest_timer(&a).is_some(),
+        "read scheduled after signed expiry"
+    );
+    let a = at(
+        &mut e,
+        2000.,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 172,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let cancel = deletes(&a);
+    assert_eq!(cancel.len(), 1, "cancel-all is sent immediately: {a:?}");
+    assert_eq!(p(&cancel[0], "orderID").as_deref(), Some("old-live"));
+    assert!(warnings(&a).iter().any(|m| m.contains("lost-caller")));
+    let a = reply(
+        &mut e,
+        2001.,
+        &cancel[0],
+        200,
+        r#"{"code":0,"data":{"orderID":"old-live","ordStatus":"Canceled"}}"#,
+    );
+    assert!(a.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 172,
+            result: Ok(_)
+        })
+    )));
+    let (timer, wake) = latest_timer(&a).expect("read still owed");
+    assert_eq!(wake, 66_000.);
+    let a = at(&mut e, wake, Event::TimerFired { timer });
+    let read = open_order_reads(&a).remove(0);
+    let a = reply(
+        &mut e,
+        wake + 1.,
+        &read,
+        200,
+        &rows(vec![
+            rest_row("landed", "lost-caller"),
+            rest_row("other", "fresh-caller"),
+        ]),
+    );
+    let late = deletes(&a);
+    assert_eq!(late.len(), 1, "{a:?}");
+    assert_eq!(p(&late[0], "orderID").as_deref(), Some("landed"));
+    assert!(warnings(&a).iter().any(|m| m.contains("landed")));
+    assert_eq!(
+        e.store().order("other").map(|o| o.status),
+        Some(OrderStatus::Open),
+        "only the uncertain placement's clOrdID is canceled"
+    );
+    let a = reply(
+        &mut e,
+        wake + 2.,
+        &late[0],
+        200,
+        r#"{"code":0,"data":{"orderID":"landed","ordStatus":"Canceled"}}"#,
+    );
+    assert!(
+        warnings(&a)
+            .iter()
+            .any(|m| m.contains("canceled late-landing order landed"))
+    );
+    assert!(
+        !a.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. }))),
+        "a venue-originated cancel completes no caller command"
+    );
+    assert_eq!(
+        e.store().order("landed").map(|o| o.status),
+        Some(OrderStatus::Canceled)
+    );
+}
+
+#[test]
+fn failed_late_cancel_is_reported_as_an_error() {
+    let mut e = rejection_engine(vec![]);
+    let create = place_at(&mut e, 1000., 181, "lost-caller");
+    let a = at(
+        &mut e,
+        1500.,
+        Event::HttpFailed {
+            request: create.id,
+            error: "transport timeout",
+        },
+    );
+    assert!(done(&a).is_err());
+    let a = at(
+        &mut e,
+        2000.,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 182,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert_eq!(done(&a), Ok("[]".into()), "nothing known to cancel yet");
+    let (timer, wake) = latest_timer(&a).unwrap();
+    let a = at(&mut e, wake, Event::TimerFired { timer });
+    let read = open_order_reads(&a).remove(0);
+    let a = reply(
+        &mut e,
+        wake + 1.,
+        &read,
+        200,
+        &rows(vec![rest_row("landed", "lost-caller")]),
+    );
+    let late = deletes(&a).remove(0);
+    let a = at(
+        &mut e,
+        wake + 2.,
+        Event::HttpFailed {
+            request: late.id,
+            error: "transport timeout",
+        },
+    );
+    assert_eq!(error_logs(&a), 1, "{a:?}");
+}
+
+#[test]
+fn placement_lost_after_cancel_all_is_not_canceled_by_it() {
+    let mut e = rejection_engine(vec![]);
+    assert_eq!(cancel_all_ids(&mut e, 900., 191), Vec::<String>::new());
+    let create = place_at(&mut e, 1000., 192, "after-cancel");
+    let a = at(
+        &mut e,
+        1500.,
+        Event::HttpFailed {
+            request: create.id,
+            error: "transport timeout",
+        },
+    );
+    let (timer, wake) = latest_timer(&a).unwrap();
+    let a = at(&mut e, wake, Event::TimerFired { timer });
+    let read = open_order_reads(&a).remove(0);
+    let a = reply(
+        &mut e,
+        wake + 1.,
+        &read,
+        200,
+        &rows(vec![rest_row("kept", "after-cancel")]),
+    );
+    assert!(deletes(&a).is_empty(), "{a:?}");
+    assert!(e.store().order("kept").is_some());
 }
