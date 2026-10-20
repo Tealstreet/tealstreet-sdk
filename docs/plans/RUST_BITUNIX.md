@@ -3202,3 +3202,18 @@ stays current (test-only follow-ups). Then mandatory Bitunix/baseBinance private
 public4gates before resolved-head push. All other modes/venues, including every
 Binance mode and Bitrue public, remain strict exact-head CI requirements; do not
 repeat the extra15localprofile batch. No sampling/output/performance waiver.
+
+The remaining source failure is one incoming PM race fixture expecting a single
+symbol DELETE. Our preserved paired implementation correctly sends regular and
+conditional DELETEs; update exact expectedcount to2 for both USD-M/PM. Both replies
+stay pending until the later order is inserted; originalCanceled/laterOpen checks
+unchanged. All19focused cancellation tests PASS and independent test audit PASS.
+
+Consumer-tail's firstbook wire control PASS, second wire-contract example hits
+spawnSync cargo ETIMEDOUT at unchanged120s while sharing the target/build lock
+with the full native rebuild. Preserve that failed tail log; no consumer result
+claimed for the second example. Root scheduled both Cargo users concurrently.
+Resume the wire/nativeconsumer tail serially AFTER the native batch finishes;
+keep timeout120s and every wire assertion unchanged. Product checks alreadyPASS,
+454compiled SDK and110host proofs remain current. Source-last batch refreshes
+root44/28/27 after the PM test-only correction. No performance job is running.

@@ -103,7 +103,7 @@ for (const profile of ['binance', 'binancepm'] as const) {
         vi.fn().mockImplementation(() => new Promise((resolve) => replies.push(resolve))),
       );
       const pending = exchange.cancelSymbolOrders('BTCUSDT');
-      await vi.waitFor(() => expect(replies.length).toBe(profile === 'binance' ? 2 : 1));
+      await vi.waitFor(() => expect(replies.length).toBe(2));
       store.addOrUpdateOrders([later]);
       for (const reply of replies) reply({ data: { code: 200 } });
       await pending;
