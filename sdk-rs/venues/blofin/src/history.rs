@@ -1,5 +1,6 @@
 //! Rare reads stream into typed results; they never change the account store.
 use super::*;
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Query,
@@ -8,13 +9,16 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+/// Pages per read before paging that still has a cursor is incomplete.
+const MAX_PAGES: u32 = 100;
+
 pub struct Request {
     command: CommandId,
     query: Query,
     rows: Rows,
-    cursor: String,
+    walk: CursorWalk,
+    /// Smallest numeric trade id on the current page: the next `after`.
     last_cursor: String,
-    page: u32,
     received: usize,
     reached_start: bool,
     seen: HashSet<String>,
@@ -260,9 +264,8 @@ impl Blofin {
                 command,
                 query,
                 rows,
-                cursor: String::new(),
+                walk: CursorWalk::new(MAX_PAGES),
                 last_cursor: String::new(),
-                page: 0,
                 received: 0,
                 reached_start: false,
                 seen: HashSet::new(),
@@ -341,8 +344,8 @@ impl Blofin {
             params.push(format!("end={}", num::format(to)));
         }
         params.push(format!("limit={limit}"));
-        if !request.cursor.is_empty() {
-            params.push(format!("after={}", encode(&request.cursor)));
+        if let Some(cursor) = request.walk.cursor() {
+            params.push(format!("after={}", encode(cursor)));
         }
         let path = format!("{endpoint}?{}", params.join("&"));
         let headers = if matches!(request.query, Query::PublicTrades { .. }) {
@@ -641,23 +644,29 @@ impl Blofin {
             (Query::Income { .. }, _) => (100, false),
             _ => (usize::MAX, true),
         };
-        if request.received >= page_limit && !request.reached_start && !enough {
-            if request.page >= 99
-                || request.last_cursor.is_empty()
-                || request.last_cursor == request.cursor
-            {
+        let want_more = request.received >= page_limit && !request.reached_start && !enough;
+        // A full page must yield its own cursor; without one the read cannot continue.
+        let stuck = want_more && request.last_cursor.is_empty();
+        let page = CursorPage {
+            next: Some(std::mem::take(&mut request.last_cursor)),
+            rows: request.received,
+            fresh: request.received,
+            want_more,
+        };
+        match request.walk.advance(page) {
+            CursorStep::More(_) if !stuck => {
+                request.received = 0;
+                self.history_page(cx, request);
+                return;
+            }
+            CursorStep::Done if !stuck => {}
+            _ => {
                 cx.done(
                     request.command,
                     Err("BloFin income pagination did not finish".into()),
                 );
                 return;
             }
-            request.cursor = request.last_cursor;
-            request.last_cursor = String::new();
-            request.received = 0;
-            request.page += 1;
-            self.history_page(cx, request);
-            return;
         }
         let result = match &mut request.rows {
             Rows::Fills(rows) => {

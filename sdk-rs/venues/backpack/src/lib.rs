@@ -31,7 +31,7 @@ pub struct Options {
 pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
-    History(history::Request),
+    History(Box<history::Request>),
     Markets {
         rows: Vec<Market>,
         skipped: Vec<String>,
@@ -718,7 +718,7 @@ impl Venue for Backpack {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if let Pending::History(request) = pending {
-            self.history_response(cx, request, response);
+            self.history_response(cx, *request, response);
             return;
         }
         if let Pending::Trade(request) = pending {
