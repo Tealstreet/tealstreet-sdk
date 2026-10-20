@@ -599,7 +599,7 @@ impl Hyperliquid {
             }
         }
         for m in &markets {
-            if m.active && !m.id.contains(':') {
+            if !m.id.contains(':') {
                 send(cx, "activeAssetData", None, Some(&m.id), None);
             }
         }
@@ -813,7 +813,7 @@ impl Hyperliquid {
                     }
                     if let Some(order) = self.map_order(cx, &row) {
                         orders.push(order);
-                    } else {
+                    } else if !self.excluded_coin(&row.coin) {
                         *valid = false;
                         cx.log(LogLevel::Warning,
                             "Hyperliquid owned order has unavailable market metadata; preserving previous orders");
@@ -1009,11 +1009,12 @@ impl Hyperliquid {
     ) {
         // Context discovery may be retrying. Unknown nonzero native ownership
         // cannot become a successful empty/partial authoritative account scope.
-        if state
-            .asset_positions
-            .iter()
-            .any(|row| row.position.szi != 0.0 && self.symbol(&row.position.coin).is_none())
-        {
+        // Rows TS hides by design (delisted, unquoted) are skipped, as in TS.
+        if state.asset_positions.iter().any(|row| {
+            row.position.szi != 0.0
+                && self.symbol(&row.position.coin).is_none()
+                && !self.excluded_coin(&row.position.coin)
+        }) {
             cx.log(LogLevel::Error,
                 "Hyperliquid owned position has unavailable market metadata; preserving previous account snapshot");
             return;

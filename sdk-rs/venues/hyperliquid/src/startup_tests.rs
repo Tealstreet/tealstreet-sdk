@@ -383,9 +383,12 @@ fn delisted_and_unquoted_core_perps_complete_discovery_without_retry() {
     assert!(!e.venue().core_discovery_incomplete);
     assert!(e.store().loaded().markets);
     assert!(e.store().market("BTC-PERP").is_some());
-    assert!(!e.store().market("MATIC-PERP").unwrap().active);
-    assert!(e.store().market("ETH-PERP").unwrap().active);
-    assert_eq!(e.store().ticker("ETH-PERP").unwrap().last, 0.0);
+    // Excluded by design, as TS hides them: neither market nor ticker.
+    assert!(e.store().market("MATIC-PERP").is_none());
+    assert!(e.store().market("ETH-PERP").is_none());
+    assert!(e.store().ticker("ETH-PERP").is_none());
+    assert_eq!(e.store().markets().len(), 1);
+    assert_eq!(e.store().tickers().len(), 1);
 }
 
 #[test]
@@ -413,40 +416,27 @@ fn unquoted_spot_contexts_complete_discovery_and_publish_owned_native_balance() 
         r#"{"balances":[{"coin":"BTC","token":1,"total":"2","hold":"0"},{"coin":"JEFF","token":2,"total":"500","hold":"0"}]}"#,
     );
     assert!(e.store().loaded().balance);
-    let jeff = e
-        .store()
-        .ticker("JEFF/USDC")
-        .expect("unquoted pair is a market");
-    assert_eq!((jeff.last, jeff.mid_price), (0.0, None));
-    // Valued at the venue's own mark; no mid/last is fabricated.
-    assert!((e.store().balance().total - 200.45).abs() < 1e-9);
+    // The unquoted pair is hidden like TS; its owned token keeps zero notional.
+    assert!(e.store().market("JEFF/USDC").is_none());
+    assert!(e.store().ticker("JEFF/USDC").is_none());
+    assert_eq!(e.store().balance().total, 200.0);
     let coins = e.store().coin_balances().unwrap();
     assert_eq!(coins[1].base, "JEFF");
     assert_eq!(coins[1].amount, 500.0);
-    assert!((coins[1].notional - 0.45).abs() < 1e-9);
+    assert_eq!(coins[1].notional, 0.0);
 }
 
 const UNQUOTED_ETH: &str =
     r#"[{"midPx":"100","markPx":"100"},{"midPx":null,"markPx":"200","oraclePx":"199"}]"#;
 
 #[test]
-fn owned_position_on_unquoted_market_applies_instead_of_freezing_the_account() {
+fn owned_position_on_unquoted_market_is_hidden_without_freezing_the_account() {
     let mut e = connect(false, true);
     let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, UNQUOTED_ETH));
-    let eth = e
-        .store()
-        .market("ETH-PERP")
-        .expect("unquoted row is a market");
-    assert!(eth.active);
-    assert_eq!(e.venue().assets["ETH-PERP"], 1);
-    assert_eq!(e.venue().coins["eth"], "ETH-PERP");
-    let ticker = e.store().ticker("ETH-PERP").unwrap();
-    assert_eq!(
-        (ticker.last, ticker.mark, ticker.index),
-        (0.0, 200.0, 199.0)
-    );
-    assert_eq!(ticker.mid_price, None, "no mid price is fabricated");
+    assert!(!e.venue().core_discovery_incomplete);
+    assert!(e.store().market("ETH-PERP").is_none());
+    assert!(e.store().ticker("ETH-PERP").is_none());
     let req = http(&e.drain_actions().collect::<Vec<_>>(), "perpDexs");
     reply(&mut e, &req, 1000.0, "[null]");
     let state = http(&e.drain_actions().collect::<Vec<_>>(), "clearinghouseState");
@@ -460,12 +450,41 @@ fn owned_position_on_unquoted_market_applies_instead_of_freezing_the_account() {
         &e.drain_actions().collect::<Vec<_>>(),
         "owned position has unavailable market metadata"
     ));
-    assert_eq!(e.store().position("ETH-PERP").unwrap().contracts, 3.0);
+    // Applied, not frozen; the excluded row stays hidden as in TS.
     assert!(e.store().loaded().positions);
+    assert!(e.store().position("ETH-PERP").is_none());
 }
 
 #[test]
-fn owned_position_on_delisted_hip3_market_applies_instead_of_freezing_the_dex() {
+fn owned_order_on_unquoted_market_is_hidden_without_freezing_orders() {
+    let mut e = connect(false, true);
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, UNQUOTED_ETH));
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "perpDexs");
+    reply(&mut e, &req, 1000.0, "[null]");
+    let req = http(&e.drain_actions().collect::<Vec<_>>(), "frontendOpenOrders");
+    reply(
+        &mut e,
+        &req,
+        1000.0,
+        r#"[{"coin":"ETH","oid":99,"side":"B","limitPx":"200","origSz":"2","sz":"2"},{"coin":"BTC","oid":100,"side":"B","limitPx":"90","origSz":"1","sz":"1"}]"#,
+    );
+    assert!(!notice(
+        &e.drain_actions().collect::<Vec<_>>(),
+        "owned order has unavailable market metadata"
+    ));
+    assert!(e.store().loaded().orders);
+    let ids = e
+        .store()
+        .orders()
+        .iter()
+        .map(|o| o.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, ["100"]);
+}
+
+#[test]
+fn owned_position_on_delisted_hip3_market_is_hidden_without_freezing_the_dex() {
     let universe = r#"{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50},{"name":"OLD","szDecimals":1,"maxLeverage":10,"isDelisted":true}]}"#;
     let contexts = r#"[{"midPx":"100","markPx":"100"},{"midPx":null,"markPx":"5","oraclePx":"5"}]"#;
     let mut e = connect(false, true);
@@ -475,12 +494,9 @@ fn owned_position_on_delisted_hip3_market_applies_instead_of_freezing_the_dex() 
     reply(&mut e, &req, 1000.0, r#"[null,{"name":"xyz"}]"#);
     let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
     reply(&mut e, &req, 1000.0, &tuple(universe, contexts));
-    let old = e
-        .store()
-        .market("XYZ|OLD-PERP")
-        .expect("delisted row is a market");
-    assert!(!old.active);
-    assert_eq!(e.venue().coins["xyz:old"], "XYZ|OLD-PERP");
+    assert!(e.store().market("XYZ|BTC-PERP").is_some());
+    assert!(e.store().market("XYZ|OLD-PERP").is_none());
+    assert!(e.store().ticker("XYZ|OLD-PERP").is_none());
     let state = e
         .drain_actions()
         .find_map(|a| match a {
@@ -498,11 +514,13 @@ fn owned_position_on_delisted_hip3_market_applies_instead_of_freezing_the_dex() 
         &mut e,
         &state,
         1000.0,
-        r#"{"assetPositions":[{"position":{"coin":"xyz:OLD","szi":"4","entryPx":"5","positionValue":"20","unrealizedPnl":"0","marginUsed":"2","leverage":{"type":"isolated","value":10}}}],"marginSummary":{"accountValue":"100","totalMarginUsed":"2"},"time":1000}"#,
+        r#"{"assetPositions":[{"position":{"coin":"xyz:OLD","szi":"4","entryPx":"5","positionValue":"20","unrealizedPnl":"0","marginUsed":"2","leverage":{"type":"isolated","value":10}}},{"position":{"coin":"xyz:BTC","szi":"1","entryPx":"100","positionValue":"100","unrealizedPnl":"0","marginUsed":"10","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"100","totalMarginUsed":"12"},"time":1000}"#,
     );
     assert!(!notice(
         &e.drain_actions().collect::<Vec<_>>(),
         "owned position has unavailable market metadata"
     ));
-    assert_eq!(e.store().position("XYZ|OLD-PERP").unwrap().contracts, 4.0);
+    // The dex snapshot applies: its listed position lands, the delisted one is hidden.
+    assert_eq!(e.store().position("XYZ|BTC-PERP").unwrap().contracts, 1.0);
+    assert!(e.store().position("XYZ|OLD-PERP").is_none());
 }
