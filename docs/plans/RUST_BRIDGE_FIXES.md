@@ -407,6 +407,16 @@ order codes, Paradex JWT/delegated dispatch and WEEX batch tails. Review found
 no payload, signing, entropy or retry changes. Actual combined WASM and broad
 gates remain pending for these newly added hooks.
 
+Group A implemented and independently reviewed PASS after fixing a genuine
+Bybit receipt-transfer omission in the initial single/batch planners. The new
+regression failed zero-versus-one receipt before the correction, then passed
+both initial/fallback and spot single controls. Five-crate native run passes
+635 cases, including 12 new regressions; strict all-target/all-feature Clippy,
+targeted formatting and diff checks pass. Tests cover Hyro shared/late waiters,
+rejected-link replacement and omitted trading-stop IDs, option generation,
+Binance PM/batches, OKX canonical symbols, Bitget rollback and ApeX reminting.
+No payload, signing, entropy or retry changes; broad artifact gates remain due.
+
 ### Phase 3c plan for command errors
 
 Plan audit passes with explicit error-only `Notice::CommandError { command,

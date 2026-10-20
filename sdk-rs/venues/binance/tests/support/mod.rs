@@ -20,6 +20,8 @@ pub struct Harness {
     pub timers: Vec<(TimerId, f64)>,
     pub done: Vec<(u32, Result<String, String>)>,
     pub logs: Vec<String>,
+    pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
+    pub progress_at_request: Vec<(RequestId, usize)>,
 }
 
 impl Harness {
@@ -47,6 +49,8 @@ impl Harness {
             timers: Vec::new(),
             done: Vec::new(),
             logs: Vec::new(),
+            progress: Vec::new(),
+            progress_at_request: Vec::new(),
         };
         harness.engine.start(harness.now);
         harness.collect();
@@ -70,7 +74,11 @@ impl Harness {
                 Action::SignPayload { .. } => {
                     panic!("delegated signing is unsupported in the binance test harness")
                 }
-                Action::Http(request) => self.requests.push(request),
+                Action::Http(request) => {
+                    self.progress_at_request
+                        .push((request.id, self.progress.len()));
+                    self.requests.push(request);
+                }
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
                 Action::WsConnectWithHeaders { .. } => {
                     panic!("Binance authenticates sockets with listen keys")
@@ -79,6 +87,9 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(Notice::CommandProgress { command, receipts }) => {
+                    self.progress.push((command, receipts))
+                }
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, result))
                 }

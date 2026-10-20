@@ -27,6 +27,8 @@ pub struct Harness {
     pub timers: Vec<(TimerId, f64)>,
     pub done: Vec<(u32, Result<String, String>)>,
     pub logs: Vec<String>,
+    pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
+    pub progress_at_request: Vec<(RequestId, usize)>,
 }
 
 impl Harness {
@@ -52,6 +54,8 @@ impl Harness {
             timers: Vec::new(),
             done: Vec::new(),
             logs: Vec::new(),
+            progress: Vec::new(),
+            progress_at_request: Vec::new(),
         };
         harness.engine.start(harness.now);
         harness.collect();
@@ -75,7 +79,11 @@ impl Harness {
     pub fn collect(&mut self) {
         for action in self.engine.drain_actions().collect::<Vec<_>>() {
             match action {
-                Action::Http(request) => self.requests.push(request),
+                Action::Http(request) => {
+                    self.progress_at_request
+                        .push((request.id, self.progress.len()));
+                    self.requests.push(request);
+                }
                 Action::SignPayload { .. } => {
                     panic!("Bybit signs requests locally")
                 }
@@ -95,6 +103,9 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(Notice::CommandProgress { command, receipts }) => {
+                    self.progress.push((command, receipts))
+                }
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, result))
                 }

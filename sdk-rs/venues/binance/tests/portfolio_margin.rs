@@ -238,3 +238,37 @@ fn margin_type_is_refused_on_a_cross_only_account() {
     assert!(h.requests.is_empty());
     assert!(matches!(h.result(5), Some(Err(message)) if message.contains("cross margin only")));
 }
+
+#[test]
+fn pm_strategy_receipt_uses_final_renamed_identity_before_write() {
+    let mut h = ready();
+    let mut stop = limit(0.0, 85000.0);
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.close = Some(true);
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 92,
+        orders: vec![stop],
+    }));
+    let request = h.take("/papi/v1/um/conditional/order");
+    let id = param(&request.url, "newClientStrategyId").unwrap();
+    assert_eq!(
+        h.progress,
+        vec![(
+            92,
+            vec![safe_cex_engine::OrderIdentityReceipt {
+                symbol: "BTCUSDT".into(),
+                kind: safe_cex_engine::OrderIdentityKind::ClientOrderId,
+                identity: id
+            }]
+        )]
+    );
+    assert_eq!(
+        h.progress_at_request
+            .iter()
+            .find(|(id, _)| *id == request.id)
+            .unwrap()
+            .1,
+        1
+    );
+}

@@ -477,8 +477,10 @@ fn uta_zero_amend_resolves_full_position_and_failed_replace_rolls_back_once() {
         200,
         r#"{"code":"00000","data":{}}"#,
     );
+    assert_eq!(h.progress.len(), 1);
     let (request, p) = body(&mut h, "/place-strategy-order");
     assert_eq!(p["qty"], "1");
+    assert_eq!(h.progress[0].1[0].identity, p["clientOid"]);
     assert_eq!(p["stopLoss"], "85");
     h.reply(
         request,
@@ -487,6 +489,9 @@ fn uta_zero_amend_resolves_full_position_and_failed_replace_rolls_back_once() {
     );
     let (rollback, p) = body(&mut h, "/place-strategy-order");
     assert_eq!(p["qty"], "0.5");
+    assert_eq!(h.progress.len(), 2);
+    assert_eq!(h.progress[1].1[0].identity, p["clientOid"]);
+    assert_ne!(h.progress[0].1[0].identity, h.progress[1].1[0].identity);
     assert_eq!(p["stopLoss"], "80");
     h.reply(
         rollback,
@@ -736,4 +741,93 @@ fn isolated_hedge_leverage_ack_only_updates_the_requested_long_side() {
         assert_eq!(h.engine.store().position("long").unwrap().leverage, 20.0);
         assert_eq!(h.engine.store().position("short").unwrap().leverage, 10.0);
     }
+}
+
+#[test]
+fn split_batch_and_uta_receipts_match_only_dispatched_native_ids() {
+    for unified in [false, true] {
+        let mut h = if unified { uta() } else { Harness::classic() };
+        h.engine.store_mut().update_markets(|m| {
+            m.precision.amount = 1.0;
+            m.limits.amount.max = 3.0;
+        });
+        let mut o = limit();
+        o["amount"] = json!(7);
+        place(&mut h, vec![o]);
+        let mut ids = Vec::new();
+        for _ in 0..if unified { 3 } else { 1 } {
+            let request = h.take(if unified {
+                "/place-order"
+            } else {
+                "/batch-place-order"
+            });
+            let p: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            let count = h
+                .progress_at_request
+                .iter()
+                .find(|(id, _)| *id == request.id)
+                .unwrap()
+                .1;
+            let (command, receipts) = &h.progress[count - 1];
+            assert_eq!(*command, 1);
+            let actual: Vec<_> = if unified {
+                vec![p["clientOid"].as_str().unwrap()]
+            } else {
+                p["orderList"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|o| o["clientOid"].as_str().unwrap())
+                    .collect()
+            };
+            assert_eq!(
+                receipts
+                    .iter()
+                    .map(|r| r.identity.as_str())
+                    .collect::<Vec<_>>(),
+                actual
+            );
+            assert!(receipts.iter().all(|r| r.symbol == "BTCUSDT"));
+            ids.extend(actual.into_iter().map(str::to_owned));
+            if unified {
+                h.reply(
+                    request.id,
+                    200,
+                    r#"{"code":"00000","data":{"orderId":"created"}}"#,
+                );
+            } else {
+                batch_success(&mut h, request.id, &["a", "b", "c"]);
+            }
+        }
+        assert_eq!(ids.len(), 3);
+        assert_eq!(
+            ids.iter().collect::<std::collections::HashSet<_>>().len(),
+            3
+        );
+    }
+}
+#[test]
+fn native_amend_receipt_excludes_unused_fallback_replacement() {
+    let mut h = Harness::classic();
+    h.command(Command::AmendOrder {
+        command: 91,
+        id: "1".into(),
+        price: Some(95.0),
+        amount: None,
+    });
+    let request = h.take("/modify-order");
+    let p: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(h.progress.len(), 1);
+    assert_eq!(h.progress[0].0, 91);
+    assert_eq!(h.progress[0].1.len(), 1);
+    assert_eq!(h.progress[0].1[0].identity, p["newClientOid"]);
+    assert_eq!(h.progress[0].1[0].symbol, "BTCUSDT");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"40017","msg":"cannot modify","data":null}"#,
+    );
+    let cancel = h.take("/batch-cancel-orders");
+    h.reply(cancel.id,200,r#"{"code":"00000","data":{"successList":[],"failureList":[{"orderId":"1","errorMsg":"cancel failed"}]}}"#);
+    assert_eq!(h.progress.len(), 1);
 }

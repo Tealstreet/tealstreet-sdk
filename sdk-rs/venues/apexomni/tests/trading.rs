@@ -672,3 +672,112 @@ fn unsupported_stp_rejects_single_and_mixed_batches_before_io_and_keeps_queue_us
         }
     }
 }
+
+#[test]
+fn parent_and_embedded_leg_receipts_precede_signed_request() {
+    for caller in [None, Some("actual-caller")] {
+        let mut e = ready();
+        let mut opts = order(
+            serde_json::json!({"amount":0.1,"price":53000,"stopLoss":50000,"takeProfit":65000}),
+        );
+        // Caller IDs with brackets are rejected by contract; generated brackets cover children.
+        if let Some(caller) = caller {
+            opts.client_order_id = Some(caller.into());
+            opts.stop_loss = None;
+            opts.take_profit = None;
+        }
+        let out = place(&mut e, vec![opts]);
+        let write = out
+            .iter()
+            .position(|a| matches!(a, Action::Http(_)))
+            .unwrap();
+        let receipts: Vec<_> = out[..write]
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandProgress {
+                    command: 42,
+                    receipts,
+                }) => Some(receipts),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        let Action::Http(request) = &out[write] else {
+            panic!()
+        };
+        let p = form(request);
+        let actual = if caller.is_some() {
+            vec![p["clientOrderId"].as_str()]
+        } else {
+            vec![
+                p["clientOrderId"].as_str(),
+                p["tpClientOrderId"].as_str(),
+                p["slClientOrderId"].as_str(),
+            ]
+        };
+        assert_eq!(
+            receipts
+                .iter()
+                .map(|r| r.identity.as_str())
+                .collect::<Vec<_>>(),
+            actual
+        );
+        assert!(receipts.iter().all(|r| r.symbol == "BTCUSDT"));
+    }
+}
+
+#[test]
+fn amendment_receipts_are_published_only_for_final_selected_replacement() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::AmendOrder {
+            command: 99,
+            id: "parent".into(),
+            price: Some(59000.0),
+            amount: None,
+        }),
+    );
+    let cancel_actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !cancel_actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandProgress { .. })))
+    );
+    let cancel = http(cancel_actions).remove(0);
+    // An additional fill discards the prebuilt replacement and selects new signed IDs.
+    amend_fill(&mut e, socket, NOW + 11.0, 1.0);
+    e.drain_actions().for_each(drop);
+    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    let out: Vec<_> = e.drain_actions().collect();
+    let write = out
+        .iter()
+        .position(|a| matches!(a, Action::Http(_)))
+        .unwrap();
+    let rows: Vec<_> = out[..write]
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandProgress {
+                command: 99,
+                receipts,
+            }) => Some(receipts),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let Action::Http(request) = &out[write] else {
+        panic!()
+    };
+    let p = form(request);
+    assert_eq!(p["size"], "3");
+    assert_eq!(
+        rows.iter().map(|r| r.identity.as_str()).collect::<Vec<_>>(),
+        [
+            p["clientOrderId"].as_str(),
+            p["tpClientOrderId"].as_str(),
+            p["slClientOrderId"].as_str()
+        ]
+    );
+}

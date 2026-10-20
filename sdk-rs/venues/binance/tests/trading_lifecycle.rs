@@ -116,10 +116,23 @@ fn replacement_uses_remaining_after_snapshot_fills_and_authoritative_cancel_ack(
         let mut h = ready(variant);
         amend(&mut h, variant);
         let cancel = h.take(path(variant));
+        assert!(h.progress.is_empty(), "replacement is not yet dispatched");
         assert_eq!(cancel.method, Method::Delete);
         h.reply(cancel.id, 200, "", &ack(variant, 12, "3", "CANCELED"));
         let place = h.take(path(variant));
         assert_eq!(place.method, Method::Post);
+        assert_eq!(h.progress.len(), 1);
+        assert_eq!(h.progress[0].0, 91);
+        assert_eq!(h.progress[0].1.len(), 1);
+        assert!(place.url.contains(&h.progress[0].1[0].identity));
+        assert_eq!(
+            h.progress_at_request
+                .iter()
+                .find(|(id, _)| *id == place.id)
+                .unwrap()
+                .1,
+            1
+        );
         assert_eq!(quantity(&place.url), Some("4"), "{variant:?}");
         assert_eq!(h.engine.store().order(id(variant)).unwrap().filled, 3.0);
     }

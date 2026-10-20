@@ -65,13 +65,16 @@ fn whole_batch_rejects_unhonorable_or_duplicate_caller_id_before_writes() {
 #[test]
 fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
     let mut e = trading_engine();
-    let mut out = place(
+    let out = place(
         &mut e,
         vec![order(
             r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":2,"price":38000,"stopLoss":36000,"takeProfit":42000}"#,
         )],
     );
-    let a = out.remove(0);
+    let a = out
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
     assert!(matches!(&a, Action::Http(r) if r.url.ends_with("/batch-orders")));
     reply(
         &mut e,
@@ -79,7 +82,10 @@ fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
         &envelope(r#"{"ordId":"1","sCode":"0","sMsg":""}"#),
         6.0,
     );
-    let a = actions(&mut e).remove(0);
+    let a = actions(&mut e)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
     assert!(
         matches!(&a, Action::Http(r) if r.body.as_ref().unwrap().contains("slTriggerPx") && r.body.as_ref().unwrap().contains("\"reduceOnly\":true"))
     );
@@ -89,7 +95,10 @@ fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
         &envelope(r#"{"algoId":"2","sCode":"0","sMsg":""}"#),
         7.0,
     );
-    let a = actions(&mut e).remove(0);
+    let a = actions(&mut e)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
     assert!(matches!(&a, Action::Http(r) if r.body.as_ref().unwrap().contains("tpTriggerPx")));
     reply(
         &mut e,
@@ -646,4 +655,56 @@ fn bybit_execution_controls_reject_the_whole_batch_before_writes() {
             Action::Notice(Notice::CommandDone { result: Err(message), .. })
                 if message.contains("only on Bybit"))));
     }
+}
+
+#[test]
+fn entry_and_algo_child_receipts_precede_each_write_and_use_sdk_symbol() {
+    let mut e = trading_engine();
+    let mut out = place(
+        &mut e,
+        vec![order(
+            r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":2,"price":38000,"stopLoss":36000,"takeProfit":42000}"#,
+        )],
+    );
+    let mut ids = std::collections::HashSet::new();
+    for i in 0..3 {
+        let write = out
+            .iter()
+            .position(|a| matches!(a, Action::Http(_)))
+            .unwrap();
+        let rows: Vec<_> = out[..write]
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandProgress {
+                    command: 1,
+                    receipts,
+                }) => Some(receipts),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].symbol, "BTCUSDT");
+        assert!(ids.insert(rows[0].identity.clone()));
+        let Action::Http(r) = &out[write] else {
+            panic!()
+        };
+        let body: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            rows[0].identity,
+            if i == 0 {
+                body[0]["clOrdId"].as_str().unwrap()
+            } else {
+                body["algoClOrdId"].as_str().unwrap()
+            }
+        );
+        reply(
+            &mut e,
+            &out[write],
+            &envelope(&format!(r#"{{"ordId":"{i}","algoId":"{i}","sCode":"0"}}"#)),
+            6.0 + i as f64,
+        );
+        out = actions(&mut e);
+    }
+    assert_eq!(ids.len(), 3);
 }

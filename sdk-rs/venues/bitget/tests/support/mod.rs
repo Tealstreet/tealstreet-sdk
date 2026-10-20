@@ -20,6 +20,8 @@ pub struct Harness {
     pub timers: Vec<(TimerId, f64)>,
     pub done: Vec<(u32, Result<String, String>)>,
     pub logs: Vec<String>,
+    pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
+    pub progress_at_request: Vec<(RequestId, usize)>,
 }
 impl Harness {
     pub fn started(options: Options) -> Self {
@@ -34,6 +36,8 @@ impl Harness {
             timers: vec![],
             done: vec![],
             logs: vec![],
+            progress: vec![],
+            progress_at_request: vec![],
         };
         h.engine.start(h.now);
         h.collect();
@@ -60,7 +64,10 @@ impl Harness {
                 Action::SignPayload { .. } => {
                     panic!("delegated signing is unsupported in the bitget test harness")
                 }
-                Action::Http(r) => self.requests.push(r),
+                Action::Http(r) => {
+                    self.progress_at_request.push((r.id, self.progress.len()));
+                    self.requests.push(r);
+                }
                 Action::WsConnect {
                     socket,
                     url,
@@ -80,6 +87,9 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(Notice::CommandProgress { command, receipts }) => {
+                    self.progress.push((command, receipts))
+                }
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, result))
                 }

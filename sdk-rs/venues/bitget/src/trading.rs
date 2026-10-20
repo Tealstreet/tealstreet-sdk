@@ -489,6 +489,7 @@ impl BitgetFutures {
         job.outstanding = true;
         let command = job.id;
         self.trading.active = Some(job);
+        cx.command_progress(command, call.identities());
         cx.request(
             method,
             format!("{}{path}", paths::REST),
@@ -2047,5 +2048,48 @@ fn place_opts(order: &Order) -> PlaceOrderOpts {
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,
         implied_volatility: None,
+    }
+}
+
+impl Planned {
+    fn identities(&self) -> Vec<OrderIdentityReceipt> {
+        let mut receipts = Vec::new();
+        match self.effect {
+            Effect::Place { .. } => self.payload.placement_identities(None, &mut receipts),
+            Effect::Amend { .. } => {
+                if let (Some(symbol), Some(identity)) =
+                    (&self.payload.symbol, &self.payload.new_client_oid)
+                {
+                    receipts.push(OrderIdentityReceipt {
+                        symbol: symbol.clone(),
+                        kind: OrderIdentityKind::ClientOrderId,
+                        identity: identity.clone(),
+                    });
+                }
+            }
+            _ => {}
+        }
+        receipts
+    }
+}
+impl Payload {
+    fn placement_identities(
+        &self,
+        outer_symbol: Option<&str>,
+        receipts: &mut Vec<OrderIdentityReceipt>,
+    ) {
+        let symbol = self.symbol.as_deref().or(outer_symbol);
+        if let (Some(symbol), Some(identity)) = (symbol, &self.client_oid) {
+            receipts.push(OrderIdentityReceipt {
+                symbol: symbol.into(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: identity.clone(),
+            });
+        }
+        if let Some(orders) = &self.order_list {
+            for order in orders {
+                order.placement_identities(symbol, receipts);
+            }
+        }
     }
 }

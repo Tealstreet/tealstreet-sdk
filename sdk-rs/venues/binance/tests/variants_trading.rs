@@ -508,3 +508,72 @@ fn inverse_full_stop_requires_zero_input_or_an_explicit_close_intent() {
         assert!(param(&placed.url, "quantity").is_none());
     }
 }
+
+#[test]
+fn generated_split_and_bracket_receipts_precede_each_actual_write() {
+    for variant in [Variant::Spot, Variant::CoinM] {
+        let mut h = ready(variant);
+        let mut o = order(variant, r#""reduceOnly":false"#);
+        o.amount = 7.0;
+        o.stop_loss = Some(90.0);
+        o.take_profit = Some(110.0);
+        place(&mut h, vec![o]);
+        let mut ids = std::collections::HashSet::new();
+        let mut writes = 0;
+        while let Some(request) = h.requests.first() {
+            let request_id = request.id;
+            let index = h
+                .progress_at_request
+                .iter()
+                .find(|(id, _)| *id == request_id)
+                .unwrap()
+                .1;
+            let (command, receipts) = &h.progress[index - 1];
+            assert_eq!(*command, 77);
+            assert!(!receipts.is_empty());
+            for receipt in receipts {
+                assert_eq!(
+                    receipt.kind,
+                    safe_cex_engine::OrderIdentityKind::ClientOrderId
+                );
+                assert_eq!(
+                    receipt.symbol,
+                    if variant == Variant::Spot {
+                        "BTCUSDT"
+                    } else {
+                        "BTCUSD_PERP"
+                    }
+                );
+                assert!(request.url.contains(&receipt.identity));
+                assert!(ids.insert(receipt.identity.clone()));
+            }
+            let request = h.requests.remove(0);
+            writes += 1;
+            let response = if request.url.contains("batchOrders") {
+                r#"[{"orderId":1},{"orderId":2},{"orderId":3},{"orderId":4},{"orderId":5}]"#
+            } else {
+                r#"{"orderId":1}"#
+            };
+            // Return one acknowledgement per submitted lot, preserving strict COIN-M counts.
+            let response = if request.url.contains("batchOrders") {
+                format!(
+                    "[{}]",
+                    (0..receipts.len())
+                        .map(|i| format!(r#"{{"orderId":{}}}"#, i + 1))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            } else {
+                response.into()
+            };
+            h.reply(request.id, 200, "", &response);
+        }
+        assert_eq!(
+            ids.len(),
+            6,
+            "every split entry and SL/TP has its actual identity"
+        );
+        assert!(writes > 0);
+        assert!(h.result(77).unwrap().is_ok());
+    }
+}

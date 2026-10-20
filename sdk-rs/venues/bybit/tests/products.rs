@@ -693,3 +693,32 @@ fn inverse_position_uses_native_mark_before_last_when_the_ticker_mark_is_cold() 
     assert_eq!(inverse.notional, 1000.0);
     assert_eq!(inverse.contracts, 0.01);
 }
+
+#[test]
+fn generated_option_identity_receipt_precedes_create() {
+    let mut h = ready(true);
+    h.command(Command::PlaceOrders {
+        command: 91,
+        orders: vec![order(OPTION, 0.12)],
+    });
+    let request = h.take("/v5/order/create");
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Identity {
+        order_link_id: String,
+    }
+    let wire: Identity = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(h.progress.last().unwrap().0, 91);
+    let receipts = &h.progress.last().unwrap().1;
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].symbol, OPTION);
+    assert_eq!(receipts[0].identity, wire.order_link_id);
+    assert_eq!(
+        h.progress_at_request
+            .iter()
+            .find(|(id, _)| *id == request.id)
+            .unwrap()
+            .1,
+        h.progress.len()
+    );
+}
