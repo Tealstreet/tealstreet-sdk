@@ -166,6 +166,14 @@
     "./node/kucoin": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/kucoin/safe_cex_wasm.js"
+    },
+    "./web/kraken": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/kraken/safe_cex_wasm.js"
+    },
+    "./node/kraken": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/kraken/safe_cex_wasm.js"
     }
   },
   "scripts": {

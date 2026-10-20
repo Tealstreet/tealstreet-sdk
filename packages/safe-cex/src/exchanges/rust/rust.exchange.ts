@@ -83,6 +83,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   cryptocom: 'cryptocom',
   kucoin: 'kucoin',
   hyperliquid: 'hyperliquid',
+  kraken: 'kraken',
   lighter: 'lighter',
   okx: 'okx',
   okxeu: 'okxeu',
@@ -223,6 +224,9 @@ export class RustEngineExchange extends BaseExchange {
     }
     this.applier = new FrameApplier(store, this.name === 'mexc' || this.name === 'blofin' || this.name === 'kucoin', this.name === 'bitgetinverse');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
+    if (this.name === 'kraken') {
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
+    }
     if (this.name === 'woo') {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
@@ -417,7 +421,7 @@ export class RustEngineExchange extends BaseExchange {
   snapshotFrame = () => this.host?.snapshot();
 
   updateSymbolMetadata = async (symbol: string) => {
-    if (!['mexc', 'woo'].includes(this.name) || this.isPublicDataOnly) return;
+    if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
     this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: rails } });
   };
@@ -681,7 +685,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['blofin', 'bitrue', 'hyperliquid', 'lighter', 'woo'].includes(this.name)
+      ...(['blofin', 'bitrue', 'hyperliquid', 'lighter', 'kraken', 'woo'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });

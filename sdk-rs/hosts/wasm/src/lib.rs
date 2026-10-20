@@ -19,12 +19,13 @@
     feature = "venue-backpack",
     feature = "venue-weex",
     feature = "venue-hyperliquid",
+    feature = "venue-kraken",
     feature = "venue-orderly",
     feature = "venue-lighter",
     feature = "venue-okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, woo or weex"
 );
 
 use safe_cex_engine::model::{CancelOrderRef, PlaceOrderOpts, StpMode};
@@ -53,6 +54,8 @@ use safe_cex_venue_bybit::{
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "venue-hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
+#[cfg(feature = "venue-kraken")]
+use safe_cex_venue_kraken::{Kraken, Options as KrakenOptions};
 #[cfg(feature = "venue-kucoin")]
 use safe_cex_venue_kucoin::{Kucoin, Options as KucoinOptions};
 #[cfg(feature = "venue-lighter")]
@@ -133,6 +136,7 @@ struct KucoinExtra {
     feature = "venue-backpack",
     feature = "venue-weex",
     feature = "venue-hyperliquid",
+    feature = "venue-kraken",
     feature = "venue-orderly",
     feature = "venue-lighter",
     feature = "venue-okx"
@@ -159,6 +163,7 @@ struct EngineOptions {
         feature = "venue-woo",
         feature = "venue-cryptocom",
         feature = "venue-hyperliquid",
+        feature = "venue-kraken",
         feature = "venue-orderly",
         feature = "venue-lighter",
         feature = "venue-bitget",
@@ -797,6 +802,7 @@ impl WasmEngine {
         feature = "venue-backpack",
         feature = "venue-weex",
         feature = "venue-hyperliquid",
+        feature = "venue-kraken",
         feature = "venue-orderly",
         feature = "venue-lighter",
         feature = "venue-okx"
@@ -811,7 +817,23 @@ impl WasmEngine {
         {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
+        #[cfg(feature = "venue-kraken")]
+        if venue == "kraken"
+            && !options.public_data_only
+            && options.key.as_deref().is_some_and(|key| !key.is_empty())
+            && let Some(secret) = options.secret.as_deref()
+        {
+            safe_cex_venue_kraken::sign::Signer::new(secret)
+                .map_err(|error| JsError::new(&error))?;
+        }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "venue-kraken")]
+            "kraken" => Box::new(Engine::new(Kraken::new(KrakenOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
             #[cfg(feature = "venue-asterdex")]
             "asterdex" => Box::new(Engine::new(AsterDex::new(AsterOptions {
                 testnet: options.testnet,

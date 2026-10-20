@@ -400,7 +400,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
       free: balance.free,
       total: balance.total,
       upnl: balance.upnl,
-      ...(venue.inverseNativeAmounts ? { coins: balance.coins ?? {} } : {}),
+      ...((venue.inverseNativeAmounts || venue.compareBalanceCoins) ? { coins: balance.coins ?? {} } : {}),
       ...(venue.compareBalanceCurrencies ? { currencies: balance.currencies ?? {} } : {}),
     },
     orders: orderRows,
@@ -560,7 +560,7 @@ async function runTs() {
   const wallStart = performance.now();
   const started = exchange.start();
   const subscribed = (async () => {
-    while (!store.markets.length) await new Promise((r) => setTimeout(r, 1));
+    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange,store))) await new Promise((r) => setTimeout(r, 1));
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
@@ -613,7 +613,7 @@ async function runTs() {
           free: store.balance.free,
           total: store.balance.total,
           upnl: store.balance.upnl,
-          ...(venue.inverseNativeAmounts ? { coins: store.balance.coins ?? {} } : {}),
+          ...((venue.inverseNativeAmounts || venue.compareBalanceCoins) ? { coins: store.balance.coins ?? {} } : {}),
           ...(venue.compareBalanceCurrencies ? { currencies: store.balance.currencies ?? {} } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),

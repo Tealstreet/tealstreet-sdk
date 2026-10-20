@@ -235,7 +235,7 @@ export class Tape {
     this.audit = this.venue.createSocketAudit?.(impl, { isPrivate: this.isPrivate, books: this.bookSymbols, tickers: this.publicTickers, records: this.records });
     this.responses = new Responses(this.records, this.keyFor, this.venue.checkRequest, (method, url) => this.venue.isWrite?.(method, url) ?? isWriteRequest(method, url), true, impl);
     this.frames = this.records.filter((r) => r.type === 'ws' || r.type === 'command' || r.type === 'close'
-      || (r.type === 'open' && (!venue.rust || this.bitget || venue.orderlyProtocol || ['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader', 'mexc', 'backpack', 'hyperliquid', 'bitrue', 'woo', 'lighter', 'kucoin', 'asterdex'].includes(venue.rust))));
+      || (r.type === 'open' && (!venue.rust || this.bitget || venue.orderlyProtocol || ['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader', 'mexc', 'backpack', 'hyperliquid', 'bitrue', 'woo', 'lighter', 'kucoin', 'asterdex', 'kraken'].includes(venue.rust))));
     this.startupDelivered = new Set();
     this.open = new Map();
     this.waiters = [];
@@ -690,7 +690,8 @@ export class Tape {
         throw new Error(`Taped login success preceded a valid login on ${socket.url}`);
       this.assertSubscribed(socket, message);
     }
-    deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame);
+    try { deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame); }
+    catch(error) { this.invalidSignatures++; throw error; }
   }
 
   async deliverFrame(frame) {

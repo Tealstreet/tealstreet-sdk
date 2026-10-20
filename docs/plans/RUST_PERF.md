@@ -17,10 +17,10 @@ OKX/Bybit diagnostic profiles also retain an OKX batch regression. These are
 recorded in `RUST_PERF_FIRST19.json.gz`; wider performance remains unproven.
 Earlier negative eleven-family results remain in `RUST_PERF_INITIAL11.json`.
 
-Current phase: merge landing `d9aa597fd3` (KuCoin and AsterDEX), preserving typed
-routing/deadlines, frame identity and all audit requirements. Extend isolated
-builds and static loaders to 17 families, reconcile frame-size hints for new
-optional tails, then review and verify before collecting new timings. The
+Current phase: KuCoin/AsterDEX integration `0a5ae08b39` and optional observer
+`82f74962b6` are reviewed and verified. Merge Kraken landing `7da56dc8a5`,
+then extend isolated builds/static loaders to18 families before collecting new
+timings. Preserve typed routing/deadlines, frame identity and all audit checks. The
 19-profile comparison was aborted, not silently resumed against changed source.
 The two bounded V8 diagnostics locate substantial audit/runtime work and do not
 establish packing or duplicate UTF8 validation as the dominant cause. Retain
@@ -948,3 +948,35 @@ tasks. The initial failed compile/typecheck logs remain retained alongside
 final passes. Kraken landed during these checks; hold the unrun17-family
 release and baseline builds and integrate18 before freezing measurement inputs.
 No new CPU gate or comparison pair has run.
+
+Kraken integration phase plan: preserve18 family feature isolation and all
+incoming futures signer/private feed/request and oracle contracts. Add only
+Kraken loader mappings/exports/selection checks and measured budget later.
+An independent pre-merge review found unsafe numeric batch IDs could collapse
+inside Kraken JSON form bodies; reproduce with adjacent >2^53 IDs, then use the
+shared lossless parser and preserve raw numeric nodes recursively. Keep strict
+inbound/outbound audit errors persistent. Focused/new harness checks, Kraken
+crate/host/SDK checks and independent review precede the merge checkpoint.
+
+Next bounded production hypothesis: a detached queue containing one string
+with a primitive finite clock can use the existing wsMessage binding once at
+the scheduled drain/barrier, avoiding a batch header, JS scratch packing and
+intermediate buffer copy. Multi-arrival partitions retain the full existing
+wsMessages validation and captured-input-before-actions ordering. Nonfinite or
+coercible clocks retain the binary path. Static Bitrue fixture inspection has
+3286 messages across2285 timestamp groups (1718 singleton groups), which
+motivates a test but does not establish actual drain counts or CPU improvement.
+Plan audit passes; verify deferral/raw clocks, actions/reentry/disposal, empty
+and oversized/Unicode payloads, invalid-clock fallback and unchanged burst
+ordering. Commit separately after independent source review. Preserve previous
+negative results; a fresh fixed diagnostic count and cohort must assess impact.
+
+Kraken integration verification:1600 Rust tests across136 groups pass, with
+strict all-target native/wasm workspace Clippy, fmt and bans. All44 typecheck
+and28 lint tasks pass; focused Kraken SDK journal test passes. Full329 harness
+tests pass. Independent loader and harness reviews pass after adding lossless
+Kraken nested numeric IDs: ordinary unsafe integers, decimal/exponent spellings
+and raw nodes remain distinct. Both lost-identity cases were demonstrated RED
+before fixing; signed request authentication and all audit checks remain fatal.
+This checkpoint has18 families/22 public fixtures/40 private variants. No18
+release/control build or new performance measurement has run.
