@@ -65,7 +65,7 @@ SDK.
   new venue to its tables. That test found HyroTrader's own `placeOrders`
   override placing the first order of a batch before the second one's ID was
   checked.
-- **Honoring venues** (rule in each venue's CLAUDE.md): Binance USD-M/PM/Spot,
+- **Honoring venues** (rule in each venue's CLAUDE.md): Binance USD-M/PM/Spot/Options,
   OKX (+EU/demo), Bybit linear/inverse/spot (+demo), Bitget (+inverse/USDC),
   KuCoin futures/spot, Phemex, BloFin, BingX, WEEX, Bitunix, Bitrue, Backpack,
   Coinbase (+spot), Crypto.com, WOO, Orderly family, Paradex, GRVT, ApeX Omni,

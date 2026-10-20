@@ -14,6 +14,7 @@ export type ExchangeName =
   | 'backpack'
   | 'binance'
   | 'binanceinverse'
+  | 'binanceoptions'
   | 'binancespot'
   | 'binancepm'
   | 'bingx'

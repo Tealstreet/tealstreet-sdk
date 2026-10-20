@@ -19,6 +19,7 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   backpack: 'https://api.backpack.exchange',
   binance: 'https://fapi.binance.com',
   binanceinverse: 'https://dapi.binance.com',
+  binanceoptions: 'https://eapi.binance.com',
   binancepm: 'https://papi.binance.com',
   binancespot: 'https://api.binance.com',
   bingx: 'https://open-api.bingx.com',

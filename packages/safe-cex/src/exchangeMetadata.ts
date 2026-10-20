@@ -79,6 +79,8 @@ export type ExchangeMetadata = {
    * (`ExchangeAccountConfig.enableOptionMarkets`).
    */
   supportsOptionsToggle?: boolean;
+  /** Whether every market on this exchange is an option, so options are on without a toggle (`binanceoptions`). */
+  optionsOnly?: boolean;
   /**
    * Whether this exchange trades inverse contracts in the same account as its linear derivatives, and therefore
    * offers a per-account "also trade inverse" toggle (`ExchangeAccountConfig.enableInverseMarkets`).
@@ -561,6 +563,48 @@ const BinancePMMetadata: ExchangeMetadata = {
   features: {
     kline: true,
     orderbook: true,
+    orders: true,
+    positions: true,
+    balance: true,
+  },
+};
+
+// REST only and not offered to any app: no websockets, and no private call has run against a live key.
+const BinanceOptionsMetadata: ExchangeMetadata = {
+  ...BinanceMetadata,
+  supportsPublicOnly: false,
+  exchangeName: 'binanceoptions' as ExchangeName,
+  prettyName: 'Binance Options',
+  enabled: false,
+  enabledInDev: false,
+  enableInPreview: false,
+  supportedOnMobile: false,
+  supportsTestnet: true,
+  optionsOnly: true,
+  supportsOptionsToggle: false,
+  latencyDomain: 'eapi.binance.com',
+  // Polls everything: /eapi/v1/ticker alone weighs 40 of the 400-a-minute budget.
+  tickInterval: 10_000,
+  positionModes: [PositionMode.OneWay],
+  marginTypes: [MarginType.Cross],
+  leverageMagnets: [1],
+  leverageSliderDisabled: true,
+  hidePositionModeSelector: true,
+  hideMarginTypeSelector: true,
+  supportsTrailingStopLoss: false,
+  supportedTPSLTriggerTypes: [],
+  defaultTPTriggerType: undefined,
+  defaultSLTriggerType: undefined,
+  supportsChaser: false,
+  supportsPositionMargin: false,
+  supportsPartialStops: false,
+  supportsInfinityStops: false,
+  supportsTunnel: false,
+  supportsTPSLCloseAttribute: false,
+  alwaysCalculateUnrealizedPnlFromLastPrice: false,
+  features: {
+    kline: true,
+    orderbook: false,
     orders: true,
     positions: true,
     balance: true,
@@ -2286,6 +2330,7 @@ export const exchangeMetadata: {
   bybitinverse: BybitInverseMetadata,
   binance: BinanceMetadata,
   binanceinverse: BinanceInverseMetadata,
+  binanceoptions: BinanceOptionsMetadata,
   binancepm: BinancePMMetadata,
   binancespot: BinanceSpotMetadata,
   bitget: BitgetMetadata,

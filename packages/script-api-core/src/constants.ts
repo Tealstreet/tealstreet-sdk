@@ -30,6 +30,7 @@ const EXCHANGE_NAMES = [
   'backpack',
   'binance',
   'binanceinverse',
+  'binanceoptions',
   'binancespot',
   'binancepm',
   'bingx',

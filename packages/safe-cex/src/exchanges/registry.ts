@@ -34,6 +34,12 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   binance: () =>
     import(/* webpackChunkName: "exchange-binance" */ './binance/binance.exchange').then((m) => m.BinanceExchange),
 
+  // Binance Options (European options, eapi)
+  binanceoptions: () =>
+    import(/* webpackChunkName: "exchange-binanceoptions" */ './binance/binanceoptions.exchange').then(
+      (m) => m.BinanceOptionsExchange,
+    ),
+
   // Binance Inverse (COIN-M Futures)
   binanceinverse: () =>
     import(/* webpackChunkName: "exchange-binanceinverse" */ './binance/binanceinverse.exchange').then(

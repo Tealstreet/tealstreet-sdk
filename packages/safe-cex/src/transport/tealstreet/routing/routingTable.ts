@@ -65,6 +65,7 @@ const WS = {
 const REST_JP: ExchangeName[] = [
   'binance',
   'binanceinverse',
+  'binanceoptions',
   'binancepm',
   'binancespot',
   'okx',
