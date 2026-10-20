@@ -1245,6 +1245,7 @@ impl WasmEngine {
     }
 
     /// The venue's capability record as JSON; fixed for the engine's lifetime.
+    /// Snapshot frames carry the same record for consumers without the engine.
     pub fn capabilities(&self) -> Result<String, JsError> {
         Ok(serde_json::to_string(&self.inner.capabilities())?)
     }
@@ -1320,7 +1321,9 @@ mod tests {
     ))]
     #[test]
     fn capabilities_match_the_former_bridge_name_lists() {
-        use safe_cex_engine::{AccountLookup, CancelAll, Capabilities, LeverageQuery, MaxLeverage};
+        use safe_cex_engine::{
+            AccountLookup, CancelAll, Capabilities, LeverageQuery, MaxLeverage, QuantityUnits,
+        };
         const ORDERLY: [&str; 6] = [
             "tealstreet-dex",
             "kodiakfi",
@@ -1486,6 +1489,15 @@ mod tests {
                 amend_with_symbol: venue == "kucoinspot",
                 order_book_query: any(&["asterdex", "polymarket"], venue),
                 options: false,
+                quantity_units: match venue {
+                    "mexc" | "blofin" | "kucoin" | "coinbase" | "coinbasespot" => {
+                        QuantityUnits::NativePlacement
+                    }
+                    "bitgetinverse" => QuantityUnits::InverseNative,
+                    "okx" | "okxeu" | "okxdemo" | "okxeudemo" => QuantityUnits::ContractCount,
+                    "binanceinverse" => QuantityUnits::InverseContractSized,
+                    _ => QuantityUnits::Base,
+                },
             };
             let Ok(engine) = super::WasmEngine::new(venue, &engine_options(venue, "")) else {
                 panic!("{venue} engine constructs");

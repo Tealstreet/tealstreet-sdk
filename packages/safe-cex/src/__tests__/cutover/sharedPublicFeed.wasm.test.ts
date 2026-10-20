@@ -362,12 +362,12 @@ describe('native public-feed ownership through real private workers', () => {
         settings: worker.store.fetchedLeverage,
       }).toEqual(before[index]);
       const mirrored = new DefaultStore();
-      const applier = new FrameApplier(mirrored, true);
+      const applier = new FrameApplier(mirrored);
       for (const frame of frames) applier.apply(new Frame(frame));
       expect(mirrored.tickersBySymbol['BTC-USD'].last).toBe(777);
       const snapshot = (worker.exchange as RustEngineExchange).snapshotFrame()!;
       const late = new DefaultStore();
-      new FrameApplier(late, true).apply(new Frame(snapshot));
+      new FrameApplier(late).apply(new Frame(snapshot));
       expect(late.tickersBySymbol['BTC-USD'].last).toBe(777);
       expect(late.balance).toEqual(worker.store.balance);
       expect(worker.store.tickersBySymbol['BTC-USD']).not.toBe(publicSide.account.store.tickersBySymbol['BTC-USD']);
@@ -432,13 +432,13 @@ describe('native public-feed ownership through real private workers', () => {
     // Frame-forwarding workers route callbacks on main; inspect the native frames too.
     await waitFor(() => {
       const late = new DefaultStore();
-      const applier = new FrameApplier(late, true);
+      const applier = new FrameApplier(late);
       const frame = new Frame(firstAccount.snapshotFrame()!);
       applier.apply(frame);
       expect(applier.books(frame)[0]?.orderbook.bids[0]).toMatchObject({ price: 776, amount: 2 });
     });
     await waitFor(() => {
-      const applier = new FrameApplier(new DefaultStore(), true);
+      const applier = new FrameApplier(new DefaultStore());
       const found = workers[0].frames.some((buffer) => {
         const frame = new Frame(buffer);
         applier.apply(frame);
@@ -451,7 +451,7 @@ describe('native public-feed ownership through real private workers', () => {
     const sibling = workers[1].worker.exchange as RustEngineExchange;
     const stopSiblingBook = sibling.listenOrderBook('BTC-USD', () => {});
     await waitFor(() => {
-      const applier = new FrameApplier(new DefaultStore(), true);
+      const applier = new FrameApplier(new DefaultStore());
       const frame = new Frame(sibling.snapshotFrame()!);
       applier.apply(frame);
       expect(applier.books(frame)[0]?.orderbook.bids[0]).toMatchObject({ price: 776, amount: 2 });

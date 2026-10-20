@@ -748,6 +748,7 @@ impl Venue for Kucoin {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
             cancel_all: safe_cex_engine::CancelAll::Native,
             ..safe_cex_engine::Capabilities::BASE
         }

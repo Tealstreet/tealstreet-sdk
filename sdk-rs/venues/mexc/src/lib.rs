@@ -495,6 +495,7 @@ impl Venue for MexcFutures {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
             leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
             ..safe_cex_engine::Capabilities::BASE
         }

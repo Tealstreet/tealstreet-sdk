@@ -1,4 +1,4 @@
-import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
+import type { Frame, QuantityUnits } from '@tealstreet/safe-cex-wasm/wire';
 import type {
   Candle,
   FetchedLeverage,
@@ -12,7 +12,14 @@ import type {
 } from '../types';
 import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
 
-import { LOADED_FLAG, MARKET_FLAG, orderEnums, positionEnums, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
+import {
+  LOADED_FLAG,
+  MARKET_FLAG,
+  marketQuantityUnits,
+  orderEnums,
+  positionEnums,
+  TICKER_FIELDS,
+} from '@tealstreet/safe-cex-wasm/wire';
 import { MarginType, OrderSide, PositionMode } from '../types';
 import { divide, subtract } from '../utils/safe-math';
 
@@ -24,6 +31,28 @@ export type FrameCandle = { symbol: string; interval: string; candle: Candle };
 export class FrameApplyError extends Error {}
 
 const finite = (value: number) => (Number.isNaN(value) ? undefined : value);
+
+/** The sizing rules each `QuantityUnits` convention implies for order and position extras. */
+type UnitProfile = {
+  nativePlacementAmounts: boolean;
+  inverseNativeAmounts: boolean;
+  contractCountAmounts: boolean;
+  inverseContractSized: boolean;
+};
+const unitProfile = (units: QuantityUnits): UnitProfile =>
+  Object.freeze({
+    nativePlacementAmounts: units === 'nativePlacement',
+    inverseNativeAmounts: units === 'inverseNative',
+    contractCountAmounts: units === 'contractCount',
+    inverseContractSized: units === 'inverseContractSized',
+  });
+const UNIT_PROFILES: Record<QuantityUnits, UnitProfile> = {
+  base: unitProfile('base'),
+  nativePlacement: unitProfile('nativePlacement'),
+  inverseNative: unitProfile('inverseNative'),
+  contractCount: unitProfile('contractCount'),
+  inverseContractSized: unitProfile('inverseContractSized'),
+};
 
 /**
  * Applies the Rust engine's flush frames to a `DefaultStore`, so every reader
@@ -41,13 +70,12 @@ export class FrameApplier {
   private readonly invalidMarketFrames = new WeakSet<Frame>();
   private marketsNeedSnapshot = false;
 
-  constructor(
-    private readonly store: Store,
-    private readonly nativePlacementAmounts = false,
-    private readonly inverseNativeAmounts = false,
-    private readonly contractCountAmounts = false,
-    private readonly inverseContractSized = false,
-  ) {}
+  // Each market's quantity convention, from its MARKETS flags; the venue's
+  // convention survives an empty table for rows outside it.
+  private marketUnits: QuantityUnits[] = [];
+  private venueUnits: QuantityUnits = 'base';
+
+  constructor(private readonly store: Store) {}
 
   /** Forwarding workers skip book reconstruction before transferring the frame. */
   apply(frame: Frame, applyBooks = true): void {
@@ -66,6 +94,9 @@ export class FrameApplier {
     let symbols = this.marketSymbols;
     let ids = this.marketIds;
     let contractSizes = this.contractSizes;
+    let marketUnits = this.marketUnits;
+    // Rows outside the market table keep the venue's convention, which every market shares.
+    const unitsOf = (market: number) => UNIT_PROFILES[marketUnits[market] ?? marketUnits[0] ?? this.venueUnits];
     const resolveSymbol = (market: number, fallback?: string) => symbols[market] ?? fallback ?? '';
     attempt(() => {
       markets = frame.markets();
@@ -76,6 +107,7 @@ export class FrameApplier {
         const rows: Writable<Market>[] = [];
         const nextSymbols: string[] = new Array(markets.count);
         const nextContractSizes = Array.from(markets.contractSize, (size) => (size > 0 ? size : 1));
+        const nextUnits = Array.from(markets.flags, marketQuantityUnits);
         for (let i = 0; i < markets.count; i++) {
           const flags = markets.flags[i];
           const flag = (bit: number) => ((flags & bit) !== 0 ? true : undefined);
@@ -85,7 +117,7 @@ export class FrameApplier {
             symbol: markets.symbol(i),
             ...(markets.prettySymbol?.(i) !== undefined
               ? { prettySymbol: markets.prettySymbol!(i) }
-              : this.contractCountAmounts &&
+              : nextUnits[i] === 'contractCount' &&
                 !markets.id(i).endsWith('-SWAP') && {
                   prettySymbol: `${markets.base(i)}/${markets.quote(i)} XPERP`,
                 }),
@@ -186,6 +218,7 @@ export class FrameApplier {
         symbols = nextSymbols;
         ids = rows.map((row) => row.id);
         contractSizes = nextContractSizes;
+        marketUnits = nextUnits;
       }
     });
 
@@ -259,12 +292,15 @@ export class FrameApplier {
           const symbol = resolveSymbol(orders.market[i], orders.symbol?.(i));
           const market = update.markets ? update.markets[orders.market[i]] : this.store.marketsBySymbol[symbol];
           const native = orders.remainingNative?.[i];
+          const { nativePlacementAmounts, inverseNativeAmounts, contractCountAmounts, inverseContractSized } = unitsOf(
+            orders.market[i],
+          );
           const canDeriveNative = contractSizes[orders.market[i]] > 0;
           const regular = enums.type === 'limit' || enums.type === 'market';
           const placementFill = orders.filledInPlacementUnits?.[i];
           const exactPlacementFill =
             placementFill !== undefined && Number.isFinite(placementFill) ? placementFill : undefined;
-          const nativeExtra = this.contractCountAmounts
+          const nativeExtra = contractCountAmounts
             ? native !== undefined && Number.isFinite(native)
               ? {
                   remainingNative: native,
@@ -291,9 +327,9 @@ export class FrameApplier {
                   remainingNative: native,
                   remainingNotional:
                     native *
-                    (this.inverseContractSized || this.nativePlacementAmounts ? contractSizes[orders.market[i]] : 1),
+                    (inverseContractSized || nativePlacementAmounts ? contractSizes[orders.market[i]] : 1),
                 }
-              : this.inverseNativeAmounts
+              : inverseNativeAmounts
                 ? { remainingNative: Math.max(0, subtract(orders.amount[i], orders.filled[i])) }
                 : undefined;
           const exactNative = finite(native ?? NaN);
@@ -302,7 +338,7 @@ export class FrameApplier {
           const extra =
             nativeExtra ||
             enums.rejectReason ||
-            this.nativePlacementAmounts ||
+            nativePlacementAmounts ||
             exactNative !== undefined ||
             exactPlacementFill !== undefined ||
             remainingNotional !== undefined ||
@@ -314,7 +350,7 @@ export class FrameApplier {
                   ...(remainingNotional !== undefined && { remainingNotional }),
                   ...(conditionalOrderPrice !== undefined && { conditionalOrderPrice }),
                   ...(enums.rejectReason && { rejectReason: enums.rejectReason as never }),
-                  ...(this.nativePlacementAmounts &&
+                  ...(nativePlacementAmounts &&
                     canDeriveNative && {
                       remainingNative:
                         native !== undefined && Number.isFinite(native)
@@ -394,6 +430,9 @@ export class FrameApplier {
           const symbol = resolveSymbol(positions.market[i], positions.symbol?.(i));
           const market = update.markets ? update.markets[positions.market[i]] : this.store.marketsBySymbol[symbol];
           const mode = enums.positionMode as PositionMode | undefined;
+          const { nativePlacementAmounts, inverseNativeAmounts, contractCountAmounts, inverseContractSized } = unitsOf(
+            positions.market[i],
+          );
           const id = positions.id(i) ?? (mode === PositionMode.Hedged ? `${symbol}:${enums.side}` : symbol);
           rows.push({
             id,
@@ -414,29 +453,29 @@ export class FrameApplier {
             unrealizedPnl: positions.unrealizedPnl[i],
             contracts: positions.contracts[i],
             ...(market &&
-              (this.nativePlacementAmounts ||
-                this.contractCountAmounts ||
+              (nativePlacementAmounts ||
+                contractCountAmounts ||
                 market?.isInverse ||
-                this.inverseNativeAmounts) && {
+                inverseNativeAmounts) && {
                 extra: {
-                  ...(this.nativePlacementAmounts && {
+                  ...(nativePlacementAmounts && {
                     contractsNative: divide(positions.contracts[i], contractSizes[positions.market[i]]),
                   }),
-                  ...(this.contractCountAmounts
+                  ...(contractCountAmounts
                     ? {
                         contractsNative: divide(
                           market?.isInverse ? positions.notional[i] : positions.contracts[i],
                           contractSizes[positions.market[i]],
                         ),
                       }
-                    : (market?.isInverse || this.inverseNativeAmounts) && {
+                    : (market?.isInverse || inverseNativeAmounts) && {
                         contractsNative: divide(
                           positions.notional[i],
-                          this.inverseContractSized || this.nativePlacementAmounts
+                          inverseContractSized || nativePlacementAmounts
                             ? contractSizes[positions.market[i]]
                             : 1,
                         ),
-                        ...(!this.nativePlacementAmounts && { unrealizedPnlNative: positions.unrealizedPnl[i] }),
+                        ...(!nativePlacementAmounts && { unrealizedPnlNative: positions.unrealizedPnl[i] }),
                       }),
                 },
               }),
@@ -511,6 +550,8 @@ export class FrameApplier {
     this.marketSymbols = symbols;
     this.marketIds = ids;
     this.contractSizes = contractSizes;
+    this.marketUnits = marketUnits;
+    if (marketUnits.length) this.venueUnits = marketUnits[0];
 
     let changed = false;
     for (const _key in update) {

@@ -1159,7 +1159,11 @@ impl Venue for BinanceFutures {
                 client_order_lookup: true,
                 ..safe_cex_engine::Capabilities::BASE
             },
-            Variant::Spot | Variant::CoinM => safe_cex_engine::Capabilities::NO_HISTORY,
+            Variant::Spot => safe_cex_engine::Capabilities::NO_HISTORY,
+            Variant::CoinM => safe_cex_engine::Capabilities {
+                quantity_units: safe_cex_engine::QuantityUnits::InverseContractSized,
+                ..safe_cex_engine::Capabilities::NO_HISTORY
+            },
         }
     }
 

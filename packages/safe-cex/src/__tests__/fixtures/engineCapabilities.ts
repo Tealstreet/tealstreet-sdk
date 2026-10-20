@@ -40,6 +40,15 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     amendWithSymbol: is('kucoinspot'),
     orderBookQuery: is('asterdex', 'polymarket'),
     options: false,
+    quantityUnits: is('mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot')
+      ? 'nativePlacement'
+      : is('bitgetinverse')
+        ? 'inverseNative'
+        : is(...OKX)
+          ? 'contractCount'
+          : is('binanceinverse')
+            ? 'inverseContractSized'
+            : 'base',
     ...overrides,
   };
   return JSON.stringify(record);
@@ -47,6 +56,6 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
 
 /** Adopts the exchange's record as engine creation would, for tests that inject their own host. */
 export const adoptEngineCapabilities = (exchange: RustEngineExchange, overrides: Partial<EngineCapabilities> = {}) =>
-  (exchange as unknown as { adoptCapabilities(record: EngineCapabilities): void }).adoptCapabilities(
+  (exchange as unknown as { adoptEngineCapabilities(record: EngineCapabilities): void }).adoptEngineCapabilities(
     JSON.parse(engineCapabilities(exchange.name, overrides)),
   );

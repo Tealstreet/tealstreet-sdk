@@ -204,3 +204,41 @@ describe('Rust bridge routes from the engine capability record', () => {
     expect(commands.map((c) => c.op)).not.toContain('placeOrders');
   });
 });
+
+/** A frame holding only a CAPABILITIES section: a flag word, then four-bit enum fields. */
+const capabilityFrame = (flags: number, enums: number) => {
+  const buffer = new ArrayBuffer(16 + 8 + 8);
+  const view = new DataView(buffer);
+  view.setUint32(0, 0x46584353, true);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 1, true);
+  view.setUint16(16, 19, true);
+  view.setUint32(20, 8, true);
+  view.setUint32(24, flags, true);
+  view.setUint32(28, enums, true);
+  return buffer;
+};
+
+describe('main-thread mirrors learn the record from snapshot frames', () => {
+  it('adopts the record a worker snapshot carries, without an engine', () => {
+    const mirror = new RustEngineExchange('binancespot', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    try {
+      expect(mirror.engineCapabilities).toBeUndefined();
+      expect(mirror.capabilities.orderHistory).toBe(true);
+      // No history axes, native cancel-all, base units.
+      mirror.applyWorkerFrame(capabilityFrame(0, 2 << 4));
+      expect(mirror.engineCapabilities).toMatchObject({ cancelAll: 'native', fillHistory: false });
+      expect(mirror.capabilities).toMatchObject({
+        fillHistory: false,
+        orderHistory: false,
+        incomeHistory: false,
+        incomeRange: false,
+      });
+      // The record is fixed for the engine's lifetime: later snapshots do not replace it.
+      mirror.applyWorkerFrame(capabilityFrame(0b1111, 0));
+      expect(mirror.engineCapabilities?.cancelAll).toBe('native');
+    } finally {
+      mirror.dispose();
+    }
+  });
+});

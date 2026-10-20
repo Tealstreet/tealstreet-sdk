@@ -401,6 +401,7 @@ impl Venue for Blofin {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             account_margin_type: true,

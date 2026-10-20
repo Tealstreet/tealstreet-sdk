@@ -97,7 +97,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | Kind | Section | Payload |
 | --- | --- | --- |
 | 1 | `STRINGS` | `u32 n`, `u32 offsets[n + 1]`, UTF-8 bytes |
-| 2 | `MARKETS` (replace) | `u32 n`; `u32 strings[n][4]` (id, symbol, base, quote); `u32 flags[n]`; f64 columns: precisionAmount, precisionPrice, minAmount, maxAmount, minLeverage, maxLeverage, minPrice, contractSize, takerFee, makerFee |
+| 2 | `MARKETS` (replace) | `u32 n`; `u32 strings[n][4]` (id, symbol, base, quote); `u32 flags[n]` (bits 0-5 active, inverse, spot, perpetual, expiring, read-only; bits 8-11 quantity units: base, native placement, inverse native, contract count, inverse contract-sized); f64 columns: precisionAmount, precisionPrice, minAmount, maxAmount, minLeverage, maxLeverage, minPrice, contractSize, takerFee, makerFee |
 | 3 | `TICKERS` (replace) | `u32 n`; `u32 market[n]`; 11 f64 columns in ticker field order; optional appended `u32 symbol[n]`, `u32 id[n]` string references |
 | 4 | `TICKER_DELTAS` | f64 `[ticker, mask, ...changed values]` repeated |
 | 5 | `BOOK` | `u32 market`, `u32 bids`, `u32 asks`, `u32 0`; f64 rows `[price, amount, total]` for bids then asks |
@@ -114,6 +114,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 16 | `INSTRUMENT_CLASSIFICATIONS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][3]` (native symbolType, marketRegion, underlyingTicker); absent and explicitly empty strings differ |
 | 17 | `DERIVATIVE_PRODUCTS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 kind[n]` (1 Future, 2 Call, 3 Put); `u32 strings[n][5]` (underlying, settleAsset, premiumAsset, style, settlement); aligned f64 expiry[n], strike[n]; unknown terms are absent |
 | 18 | `POSITION_GREEKS` (optional replace with POSITIONS) | `u32 n`; `u32 strings[n][2]` (position ID, units); aligned f64 delta[n], gamma[n], vega[n], theta[n] |
+| 19 | `CAPABILITIES` (snapshot frames only) | `u32` flags (bits 0-10: clientOrderLookup, fillHistory, orderHistory, incomeHistory, fillsByOrderId, accountLeverage, accountMarginType, cancelWithSymbols, amendWithSymbol, orderBookQuery, options); `u32` four-bit fields: account, cancelAll, leverageQuery, maxLeverage, quantityUnits |
 
 The envelope remains FORMAT 1; native `sections()` and JS reject other formats.
 Section revision 0 preserves the layouts above. Revision 1 has explicit fixed

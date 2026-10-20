@@ -1047,9 +1047,11 @@ struct BookBaseline {
 
 impl<V: Venue> Engine<V> {
     pub fn new(venue: V) -> Self {
+        let mut store = Store::default();
+        store.set_quantity_units(venue.capabilities().quantity_units);
         Self {
             venue,
-            store: Store::default(),
+            store,
             io: Io::default(),
             started: false,
             shared_books: HashMap::new(),
@@ -1633,6 +1635,7 @@ impl<V: Venue> Engine<V> {
         let mut w = FrameWriter::new(buffer, now);
         let everything = self.store.everything();
         self.store.write(&everything, &mut w);
+        self.venue.capabilities().write(&mut w);
         for (symbol, book) in self.books() {
             if let Some(market) = self.store.market_index(symbol) {
                 // Recovering consumers may have missed the original invalidation frame.

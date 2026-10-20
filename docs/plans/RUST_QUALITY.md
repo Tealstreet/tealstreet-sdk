@@ -122,7 +122,8 @@ Bridge (contract change):
 8. Engine-reported capabilities replace 76 venue-name branches in
    `rust.exchange.ts` and `FrameApplier` positional booleans. Capability
    record: done (`Venue::capabilities()`, `exchange.capabilities`); market
-   quantity units in the frame: open. tealstreet-next:
+   quantity units in the frame: done (MARKETS flag bits, snapshot
+   `CAPABILITIES` section for frame consumers). tealstreet-next:
    `collectAccountAxes.ts`, `ClosedPositions.tsx`, `symbolScopedFills.ts`.
    Keep `contractsNative`/`remainingNative` names (**risky** if their
    computation moves).

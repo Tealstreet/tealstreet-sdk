@@ -470,6 +470,11 @@ impl Venue for BitgetFutures {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
+            quantity_units: if self.inverse() {
+                safe_cex_engine::QuantityUnits::InverseNative
+            } else {
+                safe_cex_engine::QuantityUnits::Base
+            },
             ..safe_cex_engine::Capabilities::BASE
         }
     }

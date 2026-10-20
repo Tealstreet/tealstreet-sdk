@@ -15,7 +15,9 @@ pub mod socket;
 pub mod store;
 pub mod wire;
 
-pub use capabilities::{AccountLookup, CancelAll, Capabilities, LeverageQuery, MaxLeverage};
+pub use capabilities::{
+    AccountLookup, CancelAll, Capabilities, LeverageQuery, MaxLeverage, QuantityUnits,
+};
 pub use credentials::ReadCredentials;
 pub use engine::{
     Action, Command, CommandId, Cx, Engine, Event, Fill, HttpRequest, LogLevel, Method, Notice,
