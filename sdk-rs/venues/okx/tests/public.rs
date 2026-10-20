@@ -343,7 +343,11 @@ fn candle_reads_use_ts_bounds_limit_and_historical_fallback() {
             to_ms: None,
         }),
     );
-    let request = actions(&mut e).remove(0);
+    // The clock jumps far past startup, so an engine startup notice may precede the read.
+    let request = actions(&mut e)
+        .into_iter()
+        .find(|action| matches!(action, Action::Http(_)))
+        .unwrap();
     assert!(
         matches!(&request, Action::Http(r) if r.url.ends_with("bar=1m&limit=300&before=1799982000000&after=1800000000000"))
     );
