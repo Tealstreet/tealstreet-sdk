@@ -345,6 +345,8 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
     // require per-order success; replacements reconcile final remaining quantity.
     // Full-position TP/SL batches coalesce sibling edits. Setting ACKs fence
     // stale reads; cancel ACKs preserve newer terminal events.
+    // Native-only cancellation admission rejects absent-store IDs before writes;
+    // TS takes full Order objects, so no reference result is rewritten for it.
     // TS never emits Bitunix live fills. This independent tape oracle validates
     // cumulative quantities/costs; it does not copy anything from Rust's output.
     const totals = new Map();

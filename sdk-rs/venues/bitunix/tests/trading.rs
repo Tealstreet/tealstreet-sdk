@@ -5,6 +5,68 @@ use safe_cex_engine::{Action, Command, Event, Notice};
 use support::*;
 
 #[test]
+fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
+    for mixed in [false, true] {
+        let (mut e, _) = startup();
+        assert!(e.store().loaded().orders);
+        assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
+        e.drain_actions().for_each(drop);
+        e.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 991,
+                ids: if mixed {
+                    vec!["one".into(), "missing-native-order".into()]
+                } else {
+                    vec!["missing-native-order".into()]
+                },
+            }),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_))),
+            "cancellation wrote before rejecting an unknown ID: {actions:?}"
+        );
+        assert!(
+            actions.iter().any(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
+                    if error.contains("missing-native-order") && error.contains("not found")
+            )),
+            "missing cancellation error: {actions:?}"
+        );
+        assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
+    }
+}
+
+#[test]
+fn an_empty_cancellation_list_remains_a_successful_noop() {
+    let (mut e, _) = startup();
+    e.drain_actions().for_each(drop);
+    e.handle(
+        2000.0,
+        Event::Command(Command::CancelOrders {
+            command: 992,
+            ids: vec![],
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 992, result: Ok(result) })
+            if result == "[]"
+    )));
+    assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
+}
+
+#[test]
 fn nonmultiple_splits_conserve_native_quantity_and_honor_maximum() {
     for (amount, maximum, step, expected) in [
         (250.0, 100.0, 0.001, vec![100.0, 100.0, 50.0]),

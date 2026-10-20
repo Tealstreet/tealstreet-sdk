@@ -3018,3 +3018,19 @@ remain pending. The separate Bitunix unknown-cancel regression proves failure on
 prior production: named-error assertion sees CommandDone Ok([]) for an unknown
 ID; preserve /tmp/bitunix-702-cancel-fail-before.log. Its test/source fix is kept
 outside the landing merge commit and follows immediately afterward.
+
+Bitunix absent-ID follow-up COMPLETE: fail-before sees false Ok([]); the bounded
+plan now errors with the ID before any job dispatch, including mixed batches.
+All81Bitunix tests PASS; independent implementation audit PASS. Empty lists still
+succeed without writes; native deduplication, sibling protection and ACK handling
+are unchanged. This is native command admission (TS accepts full Order objects),
+so no TS result or oracle normalization is changed. Incoming cancellation audit
+now lists the actual27th Bitunix crate separately from WEEX.
+
+Refresh scripts/logs use /tmp/bitunix-702-* without overwriting earlier evidence.
+Native/source/compiled+consumer batches run on the resolved frozen source; no
+performance job overlaps them. Then run the remaining final Bitunix, pending
+OKX public and Paradex/Bitrue gates; add refreshed KuCoin futures/Spot and base
+Binance private/public because the required landing changed their production
+cancel/broker behavior. Already-passed opt3OKXEU/private results are retained,
+not repeated to select samples. Exact-head CI refreshes all31rows before merge.

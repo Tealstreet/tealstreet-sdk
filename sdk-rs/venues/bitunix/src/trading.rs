@@ -775,9 +775,9 @@ impl BitunixFutures {
         let selected: HashSet<_> = ids.iter().map(String::as_str).collect();
         let mut replacements = vec![];
         for id in ids {
-            let Some(o) = cx.store.order(id) else {
-                continue;
-            };
+            let o = cx.store.order(id).ok_or_else(|| {
+                format!("Bitunix order {id} not found; cancellation requires a reconciled order")
+            })?;
             let n = self
                 .account
                 .native

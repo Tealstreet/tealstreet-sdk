@@ -706,3 +706,6 @@ quantity. Public `ft`/`nft` may be ISO strings: the next funding time uses `nft`
 
 The replay compares client IDs from TS order `info` with typed Rust fields; this
 is a metadata projection, not a claimed TS client-ID loss.
+
+Rust cancellation rejects absent-store IDs before any batch write because native
+symbol and protection identity require reconciliation. Empty lists remain no-ops.

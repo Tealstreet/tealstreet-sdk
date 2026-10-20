@@ -1,6 +1,6 @@
 # Unknown order cancellation audit
 
-Scope: `CancelOrders` on all 26 Rust venue crates and their registered exchange
+Scope: `CancelOrders` on all 27 Rust venue crates and their registered exchange
 aliases. A nonempty ID absent from the store must produce a native cancellation
 request or an explicit command error. Store absence is not proof that an order is
 absent at the exchange. Empty requested lists remain valid no-ops.
@@ -18,6 +18,7 @@ race behavior belongs to the separate order-races lane and is unchanged here.
 | OKX: `okx`, `okxeu`, `okxdemo`, `okxeudemo` | **Fixed:** explicit error; instrument and algo family require stored order | `okx/src/trading.rs` `plan_cancel`; new `okx/tests/trading.rs` regression |
 | BloFin: `blofin` | **Fixed:** explicit error; symbol and trigger provenance are required | `blofin/src/trading.rs` `cancel_targets`; new `blofin/tests/trading.rs` regression |
 | Bitget: `bitget`, `bitgetusdc`, `bitgetinverse` | **Fixed:** explicit error before expanding shared native identities | `bitget/src/trading.rs` `CancelOrders`; new `bitget/tests/trading.rs` regression |
+| Bitunix: `bitunix` | Explicit missing-order error before batch planning; native symbol/protection identity requires reconciliation | `bitunix/src/trading.rs` `plan_cancel`; `bitunix/tests/trading.rs` unknown/mixed and empty-list controls |
 | Bitrue: `bitrue` | **Fixed:** explicit error before cancel step planning | `bitrue/src/trading.rs` `CancelOrders`; new `bitrue/tests/trading.rs` regression |
 | Crypto.com: `cryptocom` | **Fixed:** explicit error; ordinary and advanced requests require different paths | `cryptocom/src/trading.rs` `CancelOrders`; new `cryptocom/tests/trading.rs` regression |
 | Hyperliquid: `hyperliquid`, `hyperliquidspot` | **Fixed:** explicit error; native action requires asset identity | `hyperliquid/src/trading.rs` `CancelOrders`; new `hyperliquid/tests/trading.rs` regression |
@@ -45,8 +46,8 @@ race behavior belongs to the separate order-races lane and is unchanged here.
 The table has separate rows for Kraken/KuCoin spot implementations inside their
 parent crates; all paths refer to `sdk-rs/venues/`. Unsupported shared commands
 (such as `CancelOrdersWithSymbols` on venues that cannot honor it) continue to
-return explicit unsupported-command errors. Bitunix has no separate registered
-Rust venue; the WEEX crate is the registered implementation audited here.
+return explicit unsupported-command errors. Bitunix has its own registered
+futures crate and is audited separately from WEEX.
 
 ## Regression evidence
 
