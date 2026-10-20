@@ -159,6 +159,24 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  breakoutprop: {
+    // Public polling, duplicate quote levels and the cancellation precondition
+    // are fixed in the TS reference. Native tests pin safety corrections; no
+    // account economics or request values are replaced by this entry.
+    notes: [
+      'Select exact account code/suffix instead of a substring that can trade another account.',
+      'Fence concurrent old-session 401s behind the newer login generation.',
+      'Retain native positionCode so same-symbol lots are not silently collapsed by DefaultStore.',
+      'Validate selected portfolio identity and publish sections atomically after parsing.',
+      'Read documented top-level limitPrice/stopPrice while retaining legacy leg-price payloads.',
+      'Fence stale portfolio reads behind acknowledged writes.',
+      'Public-only sessions poll quotes; synthetic books contain one placeholder level per side.',
+      'Placement returns the SDK string-array order ID contract rather than a raw native number.',
+      'Send the standard If-Match precondition on cancellation; retain ACK identity for immediate cancellation.',
+      'Reject silently ignored attached protections, unsupported trigger sources, close flags and maxSlippagePct before any batch write.',
+      'Reject unsafe amendments after partial fills or competing order changes.',
+    ],
+  },
   // Paired TS fixes: retain both rolling-volume sides and open price across
   // ticker deltas; derive quote volume/change from current last; accept native
   // empty-string clears and nanosecond funding timestamps in either JSON form.

@@ -991,7 +991,7 @@ mod tests {
 
         let examples: Vec<Example<'static>> =
             serde_json::from_str(include_str!("../tests/fixtures/routing-plans.json")).unwrap();
-        assert_eq!(examples.len(), 52);
+        assert_eq!(examples.len(), 56);
         for example in examples {
             let state = state(example.plan);
             for http in example.http {
@@ -1006,6 +1006,9 @@ mod tests {
                 };
                 if let Some(key) = http.request.headers.get("x-mbx-apikey") {
                     request.headers.push(("x-mbx-apikey", key.clone()));
+                }
+                if let Some(session) = http.request.headers.get("Authorization") {
+                    request.headers.push(("Authorization", session.clone()));
                 }
                 let actual = state.http(&request).unwrap();
                 let rewritten = if actual.prefix.is_empty() {
