@@ -87,6 +87,7 @@ struct Harness {
     engine: Engine<TestVenue>,
     requests: Vec<HttpRequest>,
     done: Vec<Result<String, String>>,
+    failures: Vec<safe_cex_engine::VenueError>,
 }
 impl Harness {
     fn new(initial: Option<(Order, &str)>) -> Self {
@@ -108,6 +109,7 @@ impl Harness {
             engine,
             requests: Vec::new(),
             done: Vec::new(),
+            failures: Vec::new(),
         };
         h.collect();
         h
@@ -143,6 +145,10 @@ impl Harness {
                     self.requests.push(r);
                 }
                 Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(result),
+                Action::Notice(Notice::CommandFailed { error, .. }) => {
+                    self.failures.push(error.clone());
+                    self.done.push(Err(error.legacy_text()))
+                }
                 _ => {}
             }
         }
@@ -1263,6 +1269,10 @@ fn a_failed_bracket_replacement_says_the_original_was_cancelled() {
         error.starts_with("original bracket cancelled; replacement failed: BingX 101204"),
         "{error}"
     );
+    assert_eq!(
+        h.failures[0].outcome, None,
+        "the cancel already took effect"
+    );
 
     // A failed cancellation is not reported as a cancelled bracket.
     let mut stop = order();
@@ -1280,6 +1290,49 @@ fn a_failed_bracket_replacement_says_the_original_was_cancelled() {
     });
     h.reply(r#"{"code":109500,"msg":"busy"}"#);
     assert!(!h.done[0].as_ref().unwrap_err().contains("original bracket"));
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (body, kind, outcome) in [
+        (
+            r#"{"code":101204,"msg":"Insufficient margin"}"#,
+            Some(ErrorKind::Rejected),
+            Some(Outcome::Rejected),
+        ),
+        (
+            r#"{"code":100410,"msg":"rate limited"}"#,
+            Some(ErrorKind::RateLimited),
+            Some(Outcome::Rejected),
+        ),
+        (
+            r#"{"code":80012,"msg":"service unavailable"}"#,
+            Some(ErrorKind::VenueUnavailable),
+            Some(Outcome::Unknown),
+        ),
+        (
+            r#"{"code":0,"msg":"","data":{"order":{}}}"#,
+            None,
+            Some(Outcome::Unknown),
+        ),
+        ("not json", None, Some(Outcome::Unknown)),
+        (r#"{"code":109500,"msg":"system busy"}"#, None, None),
+    ] {
+        let mut h = Harness::new(None);
+        h.place(vec![opts()]);
+        h.reply(body);
+        let [error] = h.failures.as_slice() else {
+            panic!("{body}: {:?}", h.failures);
+        };
+        assert_eq!((error.kind, error.outcome), (kind, outcome), "{body}");
+        assert_eq!(h.done, [Err(error.message.clone())], "text is unchanged");
+    }
+    let mut h = Harness::new(None);
+    h.place(vec![opts()]);
+    h.failed();
+    assert_eq!(h.failures[0].outcome, Some(Outcome::Unknown));
+    assert_eq!(h.failures[0].kind, Some(ErrorKind::Network));
 }
 
 #[test]

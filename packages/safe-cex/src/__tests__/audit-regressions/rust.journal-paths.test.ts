@@ -7,6 +7,7 @@ import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter'
 import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { DefaultStore } from '../../store/store.base';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import { PositionSide } from '../../types';
 
 type Command = (command: Record<string, unknown>, options?: { report?: boolean }) => Promise<unknown>;
@@ -19,6 +20,7 @@ afterEach(() => {
 const make = (name: ExchangeName, responses: Record<string, unknown>) => {
   const exchange = new RustEngineExchange(name, { key: 'k', secret: 's', passphrase: 'p' }, new DefaultStore());
   exchanges.push(exchange);
+  adoptEngineCapabilities(exchange);
   const command = vi.spyOn(exchange as unknown as { command: Command }, 'command').mockImplementation(async (c) => {
     const response = responses[String(c.op)];
     if (response instanceof Error) throw response;

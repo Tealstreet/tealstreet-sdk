@@ -3,11 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ExchangeName, Market } from '../../types';
 
 import { mapBlofinClosedPosition } from '../../exchanges/blofin/blofin.income';
-import { isBaseCapabilityFallback } from '../../exchanges/base';
 import { mapBybitClosedPnl } from '../../exchanges/bybit/bybit.closed-pnl';
 import { mapOkxClosedPosition } from '../../exchanges/okx/okx.closed-pnl';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 type Command = (command: Record<string, unknown>) => Promise<unknown>;
 
@@ -19,6 +19,7 @@ afterEach(() => {
 const make = (name: ExchangeName, rows: unknown, options: Record<string, unknown> = {}) => {
   const exchange = new RustEngineExchange(name, { key: 'k', secret: 's', passphrase: 'p', ...options }, new DefaultStore());
   exchanges.push(exchange);
+  adoptEngineCapabilities(exchange);
   const command = vi
     .spyOn(exchange as unknown as { command: Command }, 'command')
     .mockImplementation(async () => (rows instanceof Error ? Promise.reject(rows) : rows));
@@ -55,7 +56,7 @@ describe('Rust closed PnL reads the engine rows through the TS mappers', () => {
       mapBybitClosedPnl(BYBIT_ROWS[1], 'acct', true),
       mapBybitClosedPnl(BYBIT_ROWS[0], 'acct', false),
     ]);
-    expect(isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')).toBe(false);
+    expect(exchange.capabilities.closedPnl).toBe(true);
   });
 
   it('bybitinverse treats every row as inverse, as its TS venue does', async () => {
@@ -110,12 +111,12 @@ describe('Rust closed PnL reads the engine rows through the TS mappers', () => {
     await expect(exchange.fetchClosedPnl({ symbol: 'BTCUSDT', accountName: 'a' })).resolves.toEqual([]);
   });
 
-  it('public sessions read nothing and venues without the endpoint keep the branded fallback', async () => {
+  it('public sessions read nothing and venues without the endpoint report no closed-PnL capability', async () => {
     const { exchange, command } = make('bybit', BYBIT_ROWS, { publicDataOnly: true });
     await expect(exchange.fetchClosedPnl({ symbol: 'BTCUSDT', accountName: 'a' })).resolves.toEqual([]);
     expect(command).not.toHaveBeenCalled();
     for (const name of ['bybitspot', 'binance', 'hyperliquid'] as const) {
-      expect(isBaseCapabilityFallback(make(name, []).exchange.fetchClosedPnl, 'fetchClosedPnl')).toBe(true);
+      expect(make(name, []).exchange.capabilities.closedPnl).toBe(false);
     }
   });
 });
