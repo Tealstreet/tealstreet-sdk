@@ -342,7 +342,7 @@ fn a_full_filtered_native_page_reports_incomplete_instead_of_false_absence() {
     assert!(result(&mut e).unwrap_err().starts_with("INCOMPLETE:"));
 }
 
-// TS oracle: BaseExchange.findOrderByClientOrderId checks the symbol-scoped
+// TS oracle: the inherited client-ID helper checks the symbol-scoped
 // store, then Bitrue.fetchOrdersForSymbol's documented v2 openOrders schema.
 // Closed orders are not queried, so absence must never be definitive.
 #[derive(serde::Deserialize)]

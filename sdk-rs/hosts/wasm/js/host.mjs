@@ -23,6 +23,7 @@ export class EngineHost {
     this.timers = new Map();
     this.commands = new Map();
     this.requests = new Map();
+    this.signings = new Map();
     this.nextCommand = 1;
     this.disposed = false;
   }
@@ -77,6 +78,11 @@ export class EngineHost {
     this.disposed = true;
     for (const controller of this.requests.values()) controller.abort();
     this.requests.clear();
+    for (const pending of this.signings.values()) {
+      pending.controller.abort();
+      this.transport.clearTimeout(pending.timer);
+    }
+    this.signings.clear();
     for (const pending of this.commands.values()) pending.reject(new Error('engine disposed'));
     this.commands.clear();
     for (const socket of this.sockets.values()) socket.close();
@@ -137,6 +143,37 @@ export class EngineHost {
     }
   }
 
+  signPayload(action) {
+    const id = action.request;
+    const controller = new AbortController();
+    const finish = (error, result) => {
+      const pending = this.signings.get(id);
+      if (!pending || pending.controller !== controller || this.disposed) return;
+      this.signings.delete(id);
+      this.transport.clearTimeout(pending.timer);
+      if (error) {
+        controller.abort();
+        this.run(this.engine.payloadSignFailed(id, String(error?.message ?? error), this.transport.now()));
+      } else {
+        this.run(this.engine.payloadSigned(id, result.signature, JSON.stringify(Object.entries(result.headers ?? {})), this.transport.now()));
+      }
+    };
+    const timer = this.transport.setTimeout(() => finish(new Error('Payload signing timed out')), action.timeoutMs);
+    this.signings.set(id, { controller, timer });
+    Promise.resolve().then(() => {
+      if (this.disposed || controller.signal.aborted) return;
+      if (!this.transport.signPayload) throw new Error('Payload signing is not configured');
+      return this.transport.signPayload(action.payload, { signal: controller.signal });
+    }).then((result) => {
+      if (this.disposed || controller.signal.aborted) return;
+      if (!result || typeof result.signature !== 'string'
+        || (result.headers !== undefined && (!result.headers || typeof result.headers !== 'object' || Array.isArray(result.headers)
+          || Object.values(result.headers).some((value) => typeof value !== 'string')))) {
+        finish(new Error('Invalid payload signer result'));
+      } else finish(undefined, result);
+    }).catch((error) => finish(new Error(String(error?.message ?? error))));
+  }
+
   run(actionsJson) {
     if (this.disposed || !actionsJson) return;
     for (const action of JSON.parse(actionsJson)) this.execute(action);
@@ -146,6 +183,9 @@ export class EngineHost {
     if (this.disposed) return;
     const { engine, transport } = this;
     switch (action.op) {
+      case 'signPayload':
+        this.signPayload(action);
+        break;
       case 'wsConnect': {
         const id = action.socket;
         if (action.headers?.length && !transport.webSocketHeaders) {

@@ -28,6 +28,7 @@
     "rust:test-bitget-parity": "node --test sdk-rs/harness/bitget-parity.integration.mjs",
     "rust:private-tape-bitrue": "node sdk-rs/harness/private-tape-bitrue.mjs",
     "rust:private-tape-paradex": "node sdk-rs/harness/private-tape-paradex.mjs",
+    "rust:private-tape-kucoinspot": "node sdk-rs/harness/private-tape-kucoinspot.mjs",
     "rust:private-tape-bitget": "node sdk-rs/harness/private-tape-bitget.mjs",
     "rust:lighter-signing-vectors": "node --import tsx sdk-rs/harness/lighter-signing-vectors.mjs",
     "rust:private-tape-kraken": "node sdk-rs/harness/private-tape-kraken.mjs",

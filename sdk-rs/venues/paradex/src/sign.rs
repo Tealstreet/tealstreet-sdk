@@ -19,7 +19,8 @@ pub struct SystemConfig {
 }
 
 pub struct Credentials {
-    key: Felt,
+    key: Option<Felt>,
+    public_key: Option<String>,
     address_felt: Felt,
     address: String,
     subkey: String,
@@ -126,7 +127,8 @@ impl Credentials {
             derive_ethereum(key, config)?
         };
         Ok(Self {
-            key,
+            key: Some(key),
+            public_key: None,
             address_felt,
             address,
             subkey: subkey.into(),
@@ -136,6 +138,40 @@ impl Credentials {
 
     pub fn address(&self) -> &str {
         &self.address
+    }
+    pub fn delegated(
+        key: &str,
+        address: &str,
+        subkey: &str,
+        config: &SystemConfig,
+    ) -> Result<Self, String> {
+        let address_felt = felt(address).map_err(|_| "Invalid Paradex account address")?;
+        if key.is_empty()
+            || address_felt == Felt::ZERO
+            || felt(subkey).map_err(|_| "Invalid Paradex subkey address")? == Felt::ZERO
+        {
+            return Err("Invalid Paradex account or subkey address".into());
+        }
+        Ok(Self {
+            key: None,
+            public_key: Some(key.into()),
+            address_felt,
+            address: address.to_lowercase(),
+            subkey: subkey.into(),
+            chain_id: chain_id(&config.starknet_chain_id)?,
+        })
+    }
+    pub fn payload_request(&self, hash: &str) -> Option<safe_cex_engine::PayloadSignRequest> {
+        Some(safe_cex_engine::PayloadSignRequest {
+            exchange_name: "paradex",
+            key: self.public_key.as_ref()?.clone(),
+            payload: hash.into(),
+            scheme: "stark",
+            encoding: "felt-pair",
+        })
+    }
+    pub fn is_delegated(&self) -> bool {
+        self.public_key.is_some()
     }
     pub fn subkey(&self) -> &str {
         &self.subkey
@@ -164,7 +200,10 @@ impl Credentials {
             self.address_felt,
             hash_elements(&fields),
         ]);
-        let (r, s) = starknet::sign(&hash, &self.key).map_err(|_| "Paradex signing failed")?;
+        let Some(key) = self.key.as_ref() else {
+            return Ok(format!("{hash:#x}"));
+        };
+        let (r, s) = starknet::sign(&hash, key).map_err(|_| "Paradex signing failed")?;
         Ok(format!(
             "[\"{}\",\"{}\"]",
             U256::from_be_bytes(r.to_bytes_be()),

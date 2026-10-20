@@ -11,6 +11,7 @@
     feature = "apexomni",
     feature = "asterdex",
     feature = "kucoin",
+    feature = "kucoinspot",
     feature = "blofin",
     feature = "bybit",
     feature = "woo",
@@ -27,12 +28,14 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, woo or weex"
 );
 
+#[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
+use safe_cex_engine::model::CancelOrderRef;
 use safe_cex_engine::model::PlaceOrderOpts;
 #[cfg(feature = "asterdex")]
-use safe_cex_engine::model::{CancelOrderRef, StpMode};
+use safe_cex_engine::model::StpMode;
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
@@ -63,7 +66,11 @@ use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOpt
 #[cfg(feature = "kraken")]
 use safe_cex_venue_kraken::{Kraken, Options as KrakenOptions};
 #[cfg(feature = "kucoin")]
-use safe_cex_venue_kucoin::{Kucoin, Options as KucoinOptions};
+use safe_cex_venue_kucoin::Kucoin;
+#[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+use safe_cex_venue_kucoin::Options as KucoinOptions;
+#[cfg(feature = "kucoinspot")]
+use safe_cex_venue_kucoin::spot::KucoinSpot;
 #[cfg(feature = "lighter")]
 use safe_cex_venue_lighter::{Lighter, Options as LighterOptions};
 #[cfg(feature = "mexc")]
@@ -115,7 +122,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
 }
 
-#[cfg(feature = "kucoin")]
+#[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct KucoinExtra {
@@ -129,6 +136,7 @@ struct KucoinExtra {
     feature = "apexomni",
     feature = "asterdex",
     feature = "kucoin",
+    feature = "kucoinspot",
     feature = "blofin",
     feature = "bybit",
     feature = "woo",
@@ -164,6 +172,7 @@ struct EngineOptions {
         feature = "apexomni",
         feature = "asterdex",
         feature = "kucoin",
+        feature = "kucoinspot",
         feature = "blofin",
         feature = "bybit",
         feature = "woo",
@@ -186,6 +195,7 @@ struct EngineOptions {
         feature = "apexomni",
         feature = "asterdex",
         feature = "kucoin",
+        feature = "kucoinspot",
         feature = "blofin",
         feature = "bybit",
         feature = "cryptocom",
@@ -210,11 +220,15 @@ struct EngineOptions {
     #[cfg(feature = "paradex")]
     #[serde(default)]
     subkey_address: Option<String>,
+    #[cfg(feature = "paradex")]
+    #[serde(default)]
+    payload_signer: bool,
     #[cfg(any(feature = "backpack", feature = "bitrue"))]
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
         feature = "kucoin",
+        feature = "kucoinspot",
         feature = "okx",
         feature = "weex",
         feature = "blofin",
@@ -248,7 +262,7 @@ struct EngineOptions {
     #[serde(default)]
     asterdex: AsterConfig,
 
-    #[cfg(feature = "kucoin")]
+    #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
     #[serde(default)]
     extra: Option<KucoinExtra>,
     #[cfg(feature = "weex")]
@@ -339,9 +353,15 @@ enum ActionOut<'a> {
         #[serde(rename = "timeoutMs", skip_serializing_if = "Option::is_none")]
         timeout_ms: Option<u32>,
         url: &'a str,
-        headers: Vec<(&'static str, &'a str)>,
+        headers: Vec<(&'a str, &'a str)>,
         #[serde(skip_serializing_if = "Option::is_none")]
         body: Option<&'a str>,
+    },
+    SignPayload {
+        request: u32,
+        payload: &'a safe_cex_engine::PayloadSignRequest,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: u32,
     },
     SetTimer {
         timer: u32,
@@ -421,8 +441,23 @@ fn encode(actions: &[Action]) -> String {
                     .headers
                     .iter()
                     .map(|(name, value)| (*name, value.as_str()))
+                    .chain(
+                        request
+                            .signer_headers
+                            .iter()
+                            .map(|(name, value)| (name.as_str(), value.as_str())),
+                    )
                     .collect(),
                 body: request.body.as_deref(),
+            },
+            Action::SignPayload {
+                request,
+                payload,
+                timeout_ms,
+            } => ActionOut::SignPayload {
+                request: request.0,
+                payload,
+                timeout_ms: *timeout_ms,
             },
             Action::SetTimer { timer, at_ms } => ActionOut::SetTimer {
                 timer: timer.0,
@@ -452,7 +487,7 @@ fn encode(actions: &[Action]) -> String {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
-    #[cfg(feature = "apexomni")]
+    #[cfg(any(feature = "apexomni", feature = "kucoinspot"))]
     GetAccount {
         command: u32,
     },
@@ -481,7 +516,7 @@ enum CommandIn {
         command: u32,
         ids: Vec<String>,
     },
-    #[cfg(feature = "asterdex")]
+    #[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
     CancelOrdersWithSymbols {
         command: u32,
         orders: Vec<CancelOrderRef>,
@@ -489,6 +524,16 @@ enum CommandIn {
     AmendOrder {
         command: u32,
         id: String,
+        #[serde(default)]
+        price: Option<f64>,
+        #[serde(default)]
+        amount: Option<f64>,
+    },
+    #[cfg(feature = "kucoinspot")]
+    AmendOrderWithSymbol {
+        command: u32,
+        id: String,
+        symbol: String,
         #[serde(default)]
         price: Option<f64>,
         #[serde(default)]
@@ -605,7 +650,7 @@ enum CommandIn {
 impl From<CommandIn> for Command {
     fn from(command: CommandIn) -> Self {
         match command {
-            #[cfg(feature = "apexomni")]
+            #[cfg(any(feature = "apexomni", feature = "kucoinspot"))]
             CommandIn::GetAccount { command } => Self::FetchAccount { command },
             CommandIn::FindOrderByClientOrderId {
                 command,
@@ -629,7 +674,7 @@ impl From<CommandIn> for Command {
             }
             CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
             CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
-            #[cfg(feature = "asterdex")]
+            #[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
             CommandIn::CancelOrdersWithSymbols { command, orders } => {
                 Self::CancelOrdersWithSymbols { command, orders }
             }
@@ -641,6 +686,20 @@ impl From<CommandIn> for Command {
             } => Self::AmendOrder {
                 command,
                 id,
+                price,
+                amount,
+            },
+            #[cfg(feature = "kucoinspot")]
+            CommandIn::AmendOrderWithSymbol {
+                command,
+                id,
+                symbol,
+                price,
+                amount,
+            } => Self::AmendOrderWithSymbol {
+                command,
+                id,
+                symbol,
                 price,
                 amount,
             },
@@ -787,6 +846,7 @@ impl WasmEngine {
         feature = "apexomni",
         feature = "asterdex",
         feature = "kucoin",
+        feature = "kucoinspot",
         feature = "blofin",
         feature = "bybit",
         feature = "woo",
@@ -830,6 +890,7 @@ impl WasmEngine {
                 key: options.key,
                 paradex_address: options.paradex_address,
                 subkey_address: options.subkey_address,
+                payload_signer: options.payload_signer,
             }))),
             #[cfg(feature = "apexomni")]
             "apexomni" => Box::new(Engine::new(ApexOmni::new(ApexOmniOptions {
@@ -930,6 +991,15 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            #[cfg(feature = "kucoinspot")]
+            "kucoinspot" => Box::new(Engine::new(KucoinSpot::new(KucoinOptions {
+                broker: options.extra.and_then(|e| e.kucoin_broker),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
             }))),
             #[cfg(feature = "kucoin")]
             "kucoin" => Box::new(Engine::new(Kucoin::new(KucoinOptions {
@@ -1139,6 +1209,47 @@ impl WasmEngine {
         self.flush()
     }
 
+    #[wasm_bindgen(js_name = payloadSigned)]
+    pub fn payload_signed(
+        &mut self,
+        request: u32,
+        signature: &str,
+        headers: &str,
+        now: f64,
+    ) -> String {
+        let request = RequestId(request);
+        match serde_json::from_str::<Vec<(String, String)>>(headers) {
+            Ok(headers) => self.inner.handle(
+                now,
+                Event::PayloadSigned {
+                    request,
+                    signature,
+                    headers,
+                },
+            ),
+            Err(_) => self.inner.handle(
+                now,
+                Event::PayloadSignFailed {
+                    request,
+                    error: "Invalid payload signer headers",
+                },
+            ),
+        }
+        self.flush()
+    }
+
+    #[wasm_bindgen(js_name = payloadSignFailed)]
+    pub fn payload_sign_failed(&mut self, request: u32, error: &str, now: f64) -> String {
+        self.inner.handle(
+            now,
+            Event::PayloadSignFailed {
+                request: RequestId(request),
+                error,
+            },
+        );
+        self.flush()
+    }
+
     pub fn timer(&mut self, timer: u32, now: f64) -> String {
         let timer = TimerId(timer);
         self.inner.handle(now, Event::TimerFired { timer });
@@ -1181,7 +1292,10 @@ mod tests {
     #[test]
     fn account_command_aliases_share_the_engine_read() {
         for (op, enabled) in [
-            ("getAccount", cfg!(feature = "apexomni")),
+            (
+                "getAccount",
+                cfg!(any(feature = "apexomni", feature = "kucoinspot")),
+            ),
             ("fetchAccount", cfg!(feature = "asterdex")),
         ] {
             let parsed =
@@ -1216,6 +1330,7 @@ mod tests {
                 timeout_ms: route.map(|_| 5_000),
                 url: "https://venue.test/time".into(),
                 headers: vec![],
+                signer_headers: vec![],
                 body: None,
             })
         })
@@ -1236,7 +1351,28 @@ mod tests {
 
     use super::*;
 
-    #[cfg(feature = "asterdex")]
+    #[test]
+    fn amendment_symbol_context_is_preserved_for_spot_builds() {
+        let wire = serde_json::from_str::<CommandIn>(
+            r#"{"op":"amendOrderWithSymbol","command":19,"id":"unobserved","symbol":"BTC-USDT","price":100}"#,
+        );
+        #[cfg(feature = "kucoinspot")]
+        assert!(
+            matches!(Command::from(wire.unwrap()), Command::AmendOrderWithSymbol { command: 19, id, symbol, price: Some(100.0), amount: None }
+            if id == "unobserved" && symbol == "BTC-USDT")
+        );
+        #[cfg(not(feature = "kucoinspot"))]
+        assert!(wire.is_err());
+        let legacy = serde_json::from_str::<CommandIn>(
+            r#"{"op":"amendOrder","command":19,"id":"legacy","symbol":"ignored","price":100}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(Command::from(legacy), Command::AmendOrder { command: 19, id, price: Some(100.0), amount: None } if id == "legacy")
+        );
+    }
+
+    #[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
     #[test]
     fn cancellation_with_symbols_preserves_caller_identity() {
         let wire: CommandIn = serde_json::from_str(
@@ -1248,7 +1384,7 @@ mod tests {
         );
     }
 
-    // These methods are exposed by the SDK only for Aster. Keep their wire
+    // Account, book and STP methods are exposed by the SDK only for Aster. Keep their wire
     // parsers out of other single-venue builds while retaining the shared
     // engine command types for native hosts.
     #[test]
@@ -1261,6 +1397,13 @@ mod tests {
             r#"{"op":"setStpMode","command":19,"mode":"EXPIRE_MAKER"}"#,
         ];
         for (index, json) in commands.into_iter().enumerate() {
+            if index == 0 {
+                assert_eq!(
+                    serde_json::from_str::<CommandIn>(json).is_ok(),
+                    cfg!(any(feature = "asterdex", feature = "kucoinspot"))
+                );
+                continue;
+            }
             let parsed = serde_json::from_str::<CommandIn>(json);
             #[cfg(feature = "asterdex")]
             match (index, Command::from(parsed.unwrap())) {

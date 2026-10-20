@@ -462,8 +462,12 @@ secret and sign elsewhere. It receives the exact bytes the venue would HMAC
 and returns the value for the signature slot, plus headers to add to the same
 request. Paradex is covered in `exchanges/paradex/CLAUDE.md`.
 `utils/payloadSigner.ts` routes both modes through one function, so local
-signing and delegated signing share the same payload. It signs REST only: with it set, `start()` skips the private
-websocket. Tests: `src/__tests__/payload-signer.test.ts`.
+signing and delegated signing share the same payload. Binance and Bybit skip
+the private websocket with this REST signer. Paradex obtains its JWT through
+the payload signer and uses that JWT on its private websocket too.
+The Rust Paradex host returns signatures as typed engine events; callers keep
+the same callback contract. Tests: `src/__tests__/payload-signer.test.ts` and
+`src/__tests__/paradex.payload-signer.test.ts`.
 
 ## Account data on shared public markets (`loadAccountMarketOverlay`)
 
@@ -518,6 +522,9 @@ HOW uses the package's raw adapter so signed request strings, large native IDs,
 status/error bodies and response headers survive unchanged. Preserve the venue
 factory gates (BingX private defaults to HOW unless explicitly disabled; Binance
 public clients bypass ordinary proxies; WEEX/GRVT/BloFin do not install HOW).
+KuCoin futures and spot install HOW for private clients even if
+`tealstreetTunnel` is false or unset. Paradex payload signing skips its API
+factory's HOW adapter; JWT acquisition uses a direct request in every mode.
 Account normalization already applies metadata; do not normalize explicit
 headless options again at this boundary. Engine socket effects carry optional
 public/private/business roles; new venues with shared URLs must supply the role.

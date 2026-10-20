@@ -12,6 +12,9 @@ export interface HttpResponse {
 }
 
 export interface Transport {
+  signPayload?(request: {
+    exchangeName: 'paradex'; key: string; payload: string; scheme: 'stark'; encoding: 'felt-pair';
+  }, context: { signal: AbortSignal }): Promise<{ signature: string; headers?: Record<string, string> }> | { signature: string; headers?: Record<string, string> };
   /** Header-capable raw socket constructor for HOW and relay protocol clients. */
   WebSocket?: typeof globalThis.WebSocket;
   /** Server fetch does not add browser Origin/Referer headers automatically. */
@@ -61,6 +64,8 @@ export interface WasmEngineLike {
   httpChunk(request: number, data: Uint8Array, now: number): string;
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
+  payloadSigned?(request: number, signature: string, headers: string, now: number): string;
+  payloadSignFailed?(request: number, error: string, now: number): string;
   timer(timer: number, now: number): string;
 }
 

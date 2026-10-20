@@ -715,6 +715,7 @@ mod tests {
             timeout_ms: None,
             url: "https://venue.invalid".into(),
             headers: vec![],
+            signer_headers: vec![],
             body: None,
         };
         assert_eq!(state.http(&request).unwrap().prefix, "public");
@@ -751,6 +752,7 @@ mod tests {
             timeout_ms: None,
             url: "https://fapi.asterdex.com/fapi/v3/account?signature=exact".into(),
             headers: vec![("x-mbx-apikey", "read-wallet".into())],
+            signer_headers: vec![],
             body: None,
         };
         assert_eq!(state.http(&request).unwrap().prefix, "secondary-cors");
@@ -787,6 +789,7 @@ mod tests {
             timeout_ms: None,
             url: "https://venue.test/time".into(),
             headers: vec![],
+            signer_headers: vec![],
             body: None,
         };
         let direct = state.http(&request).unwrap();
@@ -973,6 +976,7 @@ mod tests {
                     timeout_ms: None,
                     url: http.request.url,
                     headers: vec![("Content-Type", "application/json".into())],
+                    signer_headers: vec![],
                     body: None,
                 };
                 if let Some(key) = http.request.headers.get("x-mbx-apikey") {

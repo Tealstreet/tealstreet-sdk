@@ -35,6 +35,7 @@ fn http_request(id: u32, url: String) -> HttpRequest {
         timeout_ms: None,
         url,
         headers: vec![("Content-Type", "application/json".into())],
+        signer_headers: vec![],
         body: Some(r#"{"id":18446744073709551615}"#.into()),
     }
 }
@@ -1253,6 +1254,7 @@ async fn explicit_public_routes_reach_direct_and_cors_without_account_authorizat
                 timeout_ms: None,
                 url,
                 headers: vec![],
+                signer_headers: vec![],
                 body: None,
             },
             send.clone(),
@@ -1281,6 +1283,7 @@ async fn raw_native_transport_rejects_unconfigured_public_cors_route() {
             timeout_ms: None,
             url: "https://venue.invalid/time".into(),
             headers: vec![],
+            signer_headers: vec![],
             body: None,
         },
         send,
@@ -1312,6 +1315,7 @@ async fn typed_clock_deadline_stays_active_while_native_response_body_stalls() {
             timeout_ms: Some(5_000),
             url: origin,
             headers: vec![],
+            signer_headers: vec![],
             body: None,
         },
         send,

@@ -151,6 +151,13 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  // KuCoin Spot: emit each native execution once even across replay, preserve
+  // newer private state across stale REST snapshots, and retain good orders
+  // when active-symbol discovery fails or active-order rows have invalid
+  // financial geometry. Encode caller order IDs as URL components on cancel.
+  // Native regressions cover these cases;
+  // standard replay compares both outputs without rewriting either result.
+  kucoinspot() {},
   // Paired production fixes, compared without rewriting either replay result:
   // preserve full-depth incremental books; verify subscription acknowledgements;
   // fence polled candles against newer trades and reject older trade buckets;

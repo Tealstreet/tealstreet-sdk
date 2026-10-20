@@ -111,3 +111,36 @@ with real suffixed paths, host route metadata and array regression cases.
 Independent re-review passes for the corrected wrapper, route policy and
 inventory scope. Root focused TS checks passed 241 tests before the final
 auth-path/array cases were added; full rerun is required for the final head.
+
+## Implementation checkpoint
+
+- Bitrue implementation `c114e7af84`, fresh fixture `62b5c23ca6`: 67 native
+  tests, 22 TS contracts/history tests and the real WASM SDK boundary pass.
+  Standard public/private gates pass; exact proof is `/tmp/parity-bitrue-proof.json`.
+  Public medians TS/Rust 272.549/221.129 ms CPU, 178.799/143.902 ms steady,
+  18,556,825/2,658,340 retained bytes. WASM 748,567 bytes.
+- Paradex phase peer review passes after auth-route and query serializer fixes.
+  Engine 61, native host 40, Paradex 113 tests pass; host tests 58 and a real
+  SDK-to-WASM delegated signing vector pass. Native disposal now cancels the
+  pending signer callback when the host receiver closes. Standard behavioral
+  replays pass, but the signing addition currently exceeds the fixed WASM
+  budget by 1,453 bytes; size work is still required before landing.
+- KuCoin spot peer reviews found and fixed dropped late executions, unsafe
+  partial/malformed snapshots, and missing caller context on uncached native
+  amendment/cancellation. Legacy amendment parsing remains unchanged; a
+  spot-only `amendOrderWithSymbol` operation carries the explicit context.
+  Entire KuCoin crate with spot: 142 tests and all-target Clippy pass.
+- Shared integration peer review passes. Currency and lookup result comparison
+  symmetrically project transfer-model financial fields and identity for both
+  implementations; tests prove financial/identity corruption still differs.
+  Harness 314 tests pass. Routing/SDK focused suite 239 tests passes. Full root
+  typecheck (44 tasks) and lint (28 tasks) pass before the final small edits.
+- KuCoin private HOW now follows actual TS API factories even when the tunnel
+  preference is false/unset; eighteen real-factory cases and six serialized
+  native golden cases cover that policy. Paradex JWT fetch always goes direct.
+- Intentional KuCoin spot TS fixes: deduplicate executions, preserve newer
+  private state and last-good orders across stale/failed/malformed reads, and
+  encode caller IDs as URL components. Listed in `KNOWN_TS_FIXES`; no financial
+  output rewriting is used.
+- Remaining: size budget, all final-head public/private replays (including
+  KuCoin futures/spot and Binance), complete checks, adversarial PR review and CI.

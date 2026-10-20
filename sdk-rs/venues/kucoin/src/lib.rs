@@ -3,6 +3,8 @@ mod account;
 mod funding;
 mod history;
 pub mod sign;
+#[cfg(feature = "spot")]
+pub mod spot;
 mod trading;
 mod wire;
 

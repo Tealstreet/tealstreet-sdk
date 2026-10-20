@@ -902,8 +902,12 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 ## Rust engine
 
-`engine: 'rust'` selects `sdk-rs/venues/kucoin` for Classic linear futures.
-Spot remains on its separate HF adapter. Placement amounts stay native lots;
+`engine: 'rust'` selects `sdk-rs/venues/kucoin` for Classic linear futures or
+its feature-gated `KucoinSpot` state machine for spot. Spot retains the TS HF
+endpoints, base-unit sizing, supplied depth50 snapshots, native alteration,
+trade-account holdings, open-only non-definitive client-ID lookup, and fixed
+leverage-one/isolated/one-way settings. Its inherited unsupported history
+capabilities stay branded; see `docs/plans/venue-ports/KUCOIN_SPOT.md`. Placement amounts stay native lots;
 order/position/fill quantities exposed by the store are base units, while book
 amounts keep the native lot convention of the TS adapter. A replacement converts
 base amounts back to lots once. `extra.kucoinBroker` reaches the Rust signer.

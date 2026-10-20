@@ -262,6 +262,9 @@ fn place_operations(
     let signer = account
         .credentials()
         .ok_or("Paradex signer is not initialized")?;
+    if signer.is_delegated() && orders.len() > 1 {
+        return Err("Paradex batch orders are not supported with payloadSigner, which signs one order per request".into());
+    }
     let mut operations = VecDeque::new();
     let mut chunk = Vec::new();
     fn flush(
@@ -801,6 +804,15 @@ impl Trading {
         error: &str,
     ) {
         self.complete(cx, account, request, Err(error.into()), false);
+    }
+    pub fn on_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        account: &mut Account,
+        request: Request,
+        error: &str,
+    ) {
+        self.complete(cx, account, request, Err(error.into()), true);
     }
     fn complete(
         &mut self,

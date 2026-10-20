@@ -13,6 +13,8 @@ import { exchangeMetadata } from '../exchangeMetadata';
 import { createExchangeAPI, createInfoAPI } from '../exchanges/hyperliquid/hyperliquid.api';
 import { createAPI as createSpotAPI } from '../exchanges/hyperliquid/hyperliquidspot.api';
 import { createAPI as createParadexAPI } from '../exchanges/paradex/paradex.api';
+import { createAPI as createKucoinAPI } from '../exchanges/kucoin/kucoin.api';
+import { createKucoinSpotAPI } from '../exchanges/kucoin/kucoinspot.api';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
 import { setDefaultTransport } from './registry';
@@ -424,7 +426,7 @@ describe('engine HTTP routing at the raw transport boundary', () => {
             mocks.createAdapter.mockClear();
             await createEngineTransport(exchange, resolved, raw).request(input);
             const how =
-              exchange === 'hyperliquid' || exchange === 'hyperliquidspot'
+              ['hyperliquid', 'hyperliquidspot', 'kucoin', 'kucoinspot'].includes(exchange)
                 ? !resolved.publicDataOnly
                 : exchange === 'bingx'
                   ? resolved.tealstreetTunnel !== false
@@ -928,7 +930,8 @@ describe('Hyperliquid uses the factories original publicDataOnly option', () => 
 
 describe('Paradex matches the production API factory adapter gate', () => {
   const permutations = ([undefined, false, true] as const).flatMap((publicDataOnly) =>
-    ([undefined, false, true] as const).map((tealstreetTunnel) => ({ publicDataOnly, tealstreetTunnel })),
+    ([undefined, false, true] as const).flatMap((tealstreetTunnel) =>
+      [undefined, async () => ({ signature: 'delegated' })].map((payloadSigner) => ({ publicDataOnly, tealstreetTunnel, payloadSigner }))),
   );
 
   it.each(permutations)('publicOnly=$publicDataOnly tunnel=$tealstreetTunnel', async (flags) => {
@@ -950,6 +953,28 @@ describe('Paradex matches the production API factory adapter gate', () => {
       host.connect(socketUrl, { channel, onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() });
     }
     expect(raw.connect.mock.calls.map(([url]) => url)).toEqual([socketUrl, socketUrl]);
+    host.dispose?.();
+  });
+});
+
+describe('KuCoin matches the production API factories adapter gate', () => {
+  const permutations = (['kucoin', 'kucoinspot'] as const).flatMap((exchange) =>
+    ([undefined, false, true] as const).flatMap((publicDataOnly) =>
+      ([undefined, false, true] as const).map((tealstreetTunnel) => ({ exchange, publicDataOnly, tealstreetTunnel })),
+    ),
+  );
+  it.each(permutations)('$exchange publicOnly=$publicDataOnly tunnel=$tealstreetTunnel', async ({ exchange, ...flags }) => {
+    const opts = options({ ...flags, passphrase: 'passphrase' });
+    const factory = exchange === 'kucoin' ? createKucoinAPI : createKucoinSpotAPI;
+    const client = factory(opts, { name: exchange } as BaseExchange);
+    const factoryUsesHow = client.defaults.adapter === mocks.adapter;
+    const raw = makeRaw();
+    const base = exchange === 'kucoin' ? 'https://api-futures.kucoin.com' : 'https://api.kucoin.com';
+    const host = createEngineTransport(exchange, opts, raw);
+    await host.request(request(`${base}/api/v1/accounts`));
+    expect(mocks.adapter).toHaveBeenCalledTimes(factoryUsesHow ? 1 : 0);
+    expect(raw.request).toHaveBeenCalledTimes(factoryUsesHow ? 0 : 1);
+    expect(resolveEngineRoutingPlan(exchange, opts, base).http.mode).toBe(factoryUsesHow ? 'how' : 'direct');
     host.dispose?.();
   });
 });

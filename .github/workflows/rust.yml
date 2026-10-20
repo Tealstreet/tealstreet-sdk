@@ -134,6 +134,9 @@ jobs:
           - venue: kucoin
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-kucoin
+          - venue: kucoinspot
+            books: BTC-USDT,ETH-USDT
+            private_script: rust:private-tape-kucoinspot
           - venue: bingx
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-bingx

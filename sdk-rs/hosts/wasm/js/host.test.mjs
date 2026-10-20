@@ -406,3 +406,94 @@ test('public HTTP routing metadata survives actions without changing ordinary re
 test('the raw host rejects unconfigured CORS routing before touching the network', async () => {
   await assert.rejects(nativeTransport().request({method:'GET',route:'publicCors',url:'https://venue.test/time',headers:{}}),/not configured/);
 });
+
+test('delegated signing crosses back as an event before HTTP and forwards the opaque answer', async () => {
+  const calls = [];
+  const engine = {
+    payloadSigned(id, signature, headers, now) {
+      calls.push(['signed', id, signature, Object.fromEntries(JSON.parse(headers)), now]);
+      return JSON.stringify([{ op: 'http', request: id, method: 'POST', url: 'https://venue.test/order', headers: [], body: signature }]);
+    },
+    httpStart: () => '', httpChunk: () => '', httpEnd: () => '',
+  };
+  const payload = { exchangeName: 'paradex', key: 'public', payload: '0x123', scheme: 'stark', encoding: 'felt-pair' };
+  const host = new EngineHost(engine, {
+    now: () => 100, setTimeout, clearTimeout,
+    signPayload: async (request, { signal }) => {
+      calls.push(['sign', request, signal.aborted]);
+      return { signature: 'opaque answer', headers: { 'X-Proof': 'proof' } };
+    },
+    request: async (request) => { calls.push(['http', request]); return { status: 200, body: new Uint8Array() }; },
+  });
+  host.execute({ op: 'signPayload', request: 7, payload, timeoutMs: 1000 });
+  assert.equal(calls.length, 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls[0], ['sign', payload, false]);
+  assert.deepEqual(calls[1], ['signed', 7, 'opaque answer', { 'X-Proof': 'proof' }, 100]);
+  assert.equal(calls[2][0], 'http');
+  assert.equal(calls[2][1].body, 'opaque answer');
+  assert.equal(host.signings.size, 0);
+  host.dispose();
+});
+
+test('delegated signing timeouts abort the signer and discard a late signature', async () => {
+  let timeout;
+  let resolveSign;
+  let signal;
+  const events = [];
+  const host = new EngineHost({
+    payloadSignFailed: (...args) => (events.push(args), ''),
+    payloadSigned() { throw new Error('late signature must not enter engine'); },
+  }, {
+    now: () => 200,
+    setTimeout: (fn) => (timeout = fn, 1), clearTimeout() {},
+    signPayload: (_, context) => (signal = context.signal, new Promise((resolve) => { resolveSign = resolve; })),
+  });
+  host.execute({ op: 'signPayload', request: 8, payload: {}, timeoutMs: 20_000 });
+  await Promise.resolve();
+  timeout();
+  assert.equal(signal.aborted, true);
+  assert.deepEqual(events, [[8, 'Payload signing timed out', 200]]);
+  assert.equal(host.signings.size, 0);
+  resolveSign({ signature: 'late' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(events.length, 1);
+  host.dispose();
+});
+
+test('host disposal cancels pending signatures and prevents subsequent engine calls', async () => {
+  let resolveSign;
+  let signal;
+  let timers = 0;
+  const host = new EngineHost({
+    payloadSignFailed() { throw new Error('disposed'); }, payloadSigned() { throw new Error('disposed'); },
+  }, {
+    now: () => 0,
+    setTimeout: () => (++timers), clearTimeout: () => --timers,
+    signPayload: (_, context) => (signal = context.signal, new Promise((resolve) => { resolveSign = resolve; })),
+  });
+  host.execute({ op: 'signPayload', request: 9, payload: {}, timeoutMs: 20_000 });
+  await Promise.resolve();
+  host.dispose();
+  assert.equal(signal.aborted, true);
+  assert.equal(timers, 0);
+  assert.equal(host.signings.size, 0);
+  resolveSign({ signature: 'late' });
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test('missing, rejected and malformed delegated signers fail without making HTTP requests', async () => {
+  for (const signPayload of [undefined, () => { throw new Error('denied'); }, () => ({ signature: 123 }), () => ({ signature: 'answer', headers: { 'X-Proof': 123 } })]) {
+    const failures = [];
+    const host = new EngineHost({ payloadSignFailed: (...args) => (failures.push(args), '') }, {
+      now: () => 0, setTimeout, clearTimeout, signPayload,
+      request() { throw new Error('must never issue HTTP'); },
+    });
+    host.execute({ op: 'signPayload', request: 10, payload: {}, timeoutMs: 1000 });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(failures.length, 1);
+    assert.match(failures[0][1], /not configured|denied|Invalid payload signer result/);
+    assert.equal(host.signings.size, 0);
+    host.dispose();
+  }
+});

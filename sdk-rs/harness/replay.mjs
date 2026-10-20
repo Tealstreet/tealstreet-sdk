@@ -11,6 +11,7 @@ import { axiosClients, venueOf } from './venues.mjs';
 import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { retainedMemory, settledMemory } from './memory.mjs';
+import { currencyBalances, lookupResult } from './account-shapes.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -451,7 +452,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
       total: balance.total,
       upnl: balance.upnl,
       ...((venue.inverseNativeAmounts || venue.compareBalanceCoins) ? { coins: balance.coins ?? {} } : {}),
-      ...(venue.compareBalanceCurrencies ? { currencies: balance.currencies ?? {} } : {}),
+      ...(venue.compareBalanceCurrencies ? { currencies: currencyBalances(balance.currencies) } : {}),
     },
     orders: orderRows,
     positions: positionRows,
@@ -668,7 +669,7 @@ async function runTs() {
           total: store.balance.total,
           upnl: store.balance.upnl,
           ...((venue.inverseNativeAmounts || venue.compareBalanceCoins) ? { coins: store.balance.coins ?? {} } : {}),
-          ...(venue.compareBalanceCurrencies ? { currencies: store.balance.currencies ?? {} } : {}),
+          ...(venue.compareBalanceCurrencies ? { currencies: currencyBalances(store.balance.currencies) } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.
@@ -793,8 +794,10 @@ writeFileSync(
       ),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
-    commands: result.commands.map((result, index) => venue.commandResult?.(result,
-      records.filter((record) => record.type === 'command')[index], index + 1) ?? result),
+    commands: result.commands.map((result, index) => {
+      const command = records.filter((record) => record.type === 'command')[index];
+      return lookupResult(venue.commandResult?.(result, command, index + 1) ?? result, command);
+    }),
   }),
 );
 realClearTimeout(replayDeadline);

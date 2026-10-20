@@ -1351,7 +1351,7 @@ impl Bitrue {
                 let schema = serde_json::from_str::<OrdersEnvelope>(response.body)
                     .is_ok_and(|v| v.data.is_empty());
                 if let Some((command, client_order_id)) = lookup {
-                    // BaseExchange only checks open orders. A failed read falls
+                    // TS only checks open orders. A failed read falls
                     // back to the cache, and every miss remains non-definitive.
                     if !schema || invalid {
                         cx.log(

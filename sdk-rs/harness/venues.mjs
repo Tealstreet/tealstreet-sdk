@@ -5,6 +5,7 @@ import { APEX_SEED, apexWireBody, createApexSocketAudit, prepareApexReplay, prep
 import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
+import { kucoinspot } from './kucoinspot.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import { paradexProtocol } from './paradex-protocol.mjs';
 import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
@@ -1126,6 +1127,7 @@ export const VENUES = {
     ...kucoin,
     requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),
   },
+  kucoinspot,
   bybit: bybit('bybit', 'BybitExchange'),
   bybitinverse: bybit('bybitinverse', 'BybitInverseExchange'),
   bybitspot: bybit('bybitspot', 'BybitSpotExchange'),

@@ -35,6 +35,12 @@ interface Case {
 }
 
 const cases: Case[] = [
+  { name: 'kucoin-private-default-how', exchange: 'kucoin', baseURL: 'https://api-futures.kucoin.com', options: {}, how: true },
+  { name: 'kucoin-private-explicit-false-how', exchange: 'kucoin', baseURL: 'https://api-futures.kucoin.com', options: { tealstreetTunnel: false }, how: true },
+  { name: 'kucoin-public-direct', exchange: 'kucoin', baseURL: 'https://api-futures.kucoin.com', options: { publicDataOnly: true, tealstreetTunnel: true } },
+  { name: 'kucoinspot-private-default-how', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com', options: {}, how: true },
+  { name: 'kucoinspot-private-explicit-false-how', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com', options: { tealstreetTunnel: false }, how: true },
+  { name: 'kucoinspot-public-direct', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com', options: { publicDataOnly: true, tealstreetTunnel: true } },
   { name: 'direct-provider', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: {}, direct: true },
   { name: 'tealstreet-direct', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: {} },
   { name: 'asia-pool', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: { tealstreetProxy: true } },

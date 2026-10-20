@@ -31,6 +31,7 @@ default = [
     "bitrue",
     "binance",
     "kucoin",
+    "kucoinspot",
     "bybit",
     "hyperliquid",
     "okx",
@@ -46,6 +47,7 @@ default = [
 cryptocom = ["dep:safe-cex-venue-cryptocom"]
 binance = ["dep:safe-cex-venue-binance"]
 kucoin = ["dep:safe-cex-venue-kucoin"]
+kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot"]
 bybit = ["dep:safe-cex-venue-bybit"]
 hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
 okx = ["dep:safe-cex-venue-okx"]
