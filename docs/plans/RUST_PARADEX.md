@@ -162,3 +162,29 @@ merge and create a fresh follow-up branch.
   remains phase6 and default TS retirement remains phase9; no default-runtime
   cutover or generated-WASM publishing is claimed. The TS implementation remains
   the independently executing oracle alongside the other landing-branch venues.
+
+### Harness audit checkpoint
+
+- Independent phase5 audit found replay replaced recorded control errors with
+  synthetic success ACKs. Recorded errors now fail closed, successful ACKs bind
+  to actual request IDs, and shared-URL open/close/reopen controls follow the
+  subscribed role rather than its connection ordinal. Harness172 tests pass.
+- The stricter check exposed a genuine live protocol defect in both runtimes:
+  legacy JSON ping messages receive invalid-request errors. Official protocol
+  control pings are answered by hosts; both venues now retain watchdogs without
+  sending unsupported application pings. A fresh20second recording is required;
+  the first tape is rejected, never trimmed to hide the error.
+- First single-venue WASM size was1,490,030 bytes, above the unchanged1,258,291
+  budget. Fixed EIP712 hashing replaces dynamic ABI parsing and narrowly scoped
+  Pedersen/Cairo encodings replace the generic StarkNet SDK dependency. Four
+  existing signature tests plus two independently vectored formula tests pass;
+  reduced artifact size is awaiting measurement and independent review.
+- TS replay preloads only the SDK code before constructor/baseline measurement,
+  matching the existing Rust module-load boundary. Account/signing I/O remains
+  measured; the memory algorithm and thresholds are unchanged.
+- Repository typecheck44 tasks and lint28 tasks pass. First full test run passed
+  6,913 safe-cex cases but timed out on two unrelated HyroTrader lazy imports;
+  rerun with serialized tasks is in progress. The full JS host suite needs the
+  Binance-enabled artifact; the Paradex-only build cannot run its Binance test.
+- No public/private replay, performance, artifact-size, finalCI or merge gate is
+  claimed at this checkpoint.
