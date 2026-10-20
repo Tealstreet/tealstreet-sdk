@@ -34,22 +34,28 @@ fn ready_with_policy(private: bool, policy: PublicFeedPolicy) -> (Engine<Hyperli
             r#"{"balances":[{"coin":"USDC","token":0,"hold":"2","total":"14.625485"},{"coin":"PURR","token":1,"hold":"10","total":"2000"}]}"#,
         );
     }
-    let socket = e.drain_actions().find_map(|action| match action {
-        Action::WsConnect {
-            socket, channel, ..
-        } => {
-            assert_eq!(
-                channel,
-                Some(if private {
-                    SocketChannel::Private
-                } else {
-                    SocketChannel::Public
-                })
-            );
-            Some(socket)
+    let mut socket = None;
+    for action in e.drain_actions().collect::<Vec<_>>() {
+        match action {
+            Action::WsConnect {
+                socket: s, channel, ..
+            } => {
+                assert_eq!(
+                    channel,
+                    Some(if private {
+                        SocketChannel::Private
+                    } else {
+                        SocketChannel::Public
+                    })
+                );
+                socket = Some(s);
+            }
+            Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => {
+                support::reply(&mut e, &r, 200, "[]");
+            }
+            _ => {}
         }
-        _ => None,
-    });
+    }
     let s = socket.unwrap();
     e.handle(1000.0, Event::WsOpened { socket: s });
     (e, s)
@@ -1314,4 +1320,72 @@ fn shared_spot_prices_preserve_direct_private_valuation_cadence_and_raw_holdings
             assert_eq!(e.store().balance().upnl, 0.);
         }
     }
+}
+
+#[test]
+fn spot_open_orders_are_loaded_and_externally_canceled_orders_are_removed() {
+    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
+        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+        ..Options::default()
+    }));
+    e.start(1000.0);
+    let r = take_http(&mut e);
+    support::reply(&mut e, &r, 200, META);
+    let rows = r#"[{"coin":"@1","side":"B","limitPx":"0.0009","sz":"5","oid":77,"timestamp":1000,"origSz":"5","orderType":"Limit","tif":"Gtc","reduceOnly":false,"isTrigger":false,"triggerPx":"0","isPositionTpsl":false}]"#;
+    // Reads are paced; wait_http advances the read budget's timers.
+    let balance = e.wait_http(|r| support::kind(r) == "spotClearinghouseState");
+    support::reply(&mut e, &balance, 200, r#"{"balances":[]}"#);
+    let orders = e.wait_http(|r| support::kind(r) == "frontendOpenOrders");
+    support::reply(&mut e, &orders, 200, rows);
+    let order = e.store().order("77").expect("resting spot order loaded");
+    assert_eq!(order.symbol, "HFUN/USDC");
+    assert_eq!(order.amount, 5.0);
+    let orders = e.wait_http(|r| support::kind(r) == "frontendOpenOrders");
+    support::reply(&mut e, &orders, 200, "[]");
+    assert!(
+        e.store().order("77").is_none(),
+        "order canceled elsewhere stayed open"
+    );
+}
+#[test]
+fn open_order_read_sent_before_a_full_fill_cannot_restore_the_order() {
+    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
+        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+        ..Options::default()
+    }));
+    e.start(1000.0);
+    let r = take_http(&mut e);
+    support::reply(&mut e, &r, 200, META);
+    let rows = r#"[{"coin":"@1","side":"B","limitPx":"0.0009","sz":"5","oid":78,"timestamp":1000,"origSz":"5","orderType":"Limit","tif":"Gtc","reduceOnly":false,"isTrigger":false,"triggerPx":"0","isPositionTpsl":false}]"#;
+    let balance = e.wait_http(|r| support::kind(r) == "spotClearinghouseState");
+    support::reply(&mut e, &balance, 200, r#"{"balances":[]}"#);
+    let orders = e.wait_http(|r| support::kind(r) == "frontendOpenOrders");
+    support::reply(&mut e, &orders, 200, rows);
+    let socket = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1000.0, Event::WsOpened { socket });
+    assert!(e.store().order("78").is_some());
+    // The next open-order read is sent before the fill and answered after it.
+    let stale = e.wait_http(|r| support::kind(r) == "frontendOpenOrders");
+    support::message(
+        &mut e,
+        socket,
+        11_001.0,
+        r#"{"channel":"userFills","data":{"isSnapshot":false,"fills":[{"coin":"@1","side":"B","px":"0.0009","sz":"5","time":11001,"tid":31,"oid":78}]}}"#,
+    );
+    assert!(e.store().order("78").is_none());
+    support::reply(&mut e, &stale, 200, rows);
+    assert!(
+        e.store().order("78").is_none(),
+        "stale read restored a filled order"
+    );
 }

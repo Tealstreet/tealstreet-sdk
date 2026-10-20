@@ -29,7 +29,7 @@ impl Venue for Probe {
                     Pending::Markets {
                         rows: vec![],
                         ranges: Default::default(),
-                        bad: false,
+                        skipped: Default::default(),
                     },
                 )
                 .unwrap();

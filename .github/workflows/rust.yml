@@ -96,6 +96,46 @@ jobs:
       - name: Lint every crate for wasm32
         run: cargo clippy --locked --workspace --target wasm32-unknown-unknown -- -D warnings
 
+  families:
+    name: Rust / wasm families
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      WASM_BINDGEN_VERSION: 0.2.129
+      # Budget per single-venue browser bundle.
+      WASM_BUDGET_BYTES: 1258291
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
+            sdk-rs/target
+          key: ${{ runner.os }}-cargo-families-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-families-
+            ${{ runner.os }}-cargo-gate-
+      - name: Install pinned toolchain and wasm-bindgen
+        run: |
+          (cd sdk-rs && rustup show)
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+          fi
+      - run: yarn install --frozen-lockfile --network-timeout 600000
+      - name: Build every venue family package
+        run: yarn rust:build-wasm --families
+      - name: Load every family and check venue isolation and size
+        run: yarn rust:test-families
+
   # Replays recorded traffic through TS and Rust: output must be identical, and
   # on public data Rust must use less CPU and less memory (see the plan's gates).
   gate:

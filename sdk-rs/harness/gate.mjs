@@ -455,6 +455,7 @@ KNOWN_TS_FIXES.hyperliquidspot = {
       'Reject unsupported spot leverage, margin transitions and standalone trigger placement before a write.',
       'Deduplicate native live executions and suppress historical fill snapshots.',
       'Retry failed bootstrap reads without replacing a valid market table with an empty snapshot.',
+      'Read frontendOpenOrders so external cancels and pre-existing orders reconcile; the TS spot fetchOrders stub never reads open orders.',
     ],
 };
 KNOWN_TS_FIXES.krakenspot = {
@@ -740,6 +741,8 @@ for (let run = 0; run < runs; run++) {
   // instead of retaining proven position/Greek state. Dedicated API tests compare
   // options terms/queries/signing, and assert native option depth25 separately.
   if (values.venue === 'bitrue') fixBitrue(ts, tape);
+  if (values.venue === 'hyperliquidspot')
+    rust.requests = rust.requests.filter((key) => !key.includes('"type":"frontendOpenOrders"'));
   if (values.venue === 'mexc') {
     // The official sub.tickers sparse all-contract feed prevents stale prices
     // past the first 100 detailed subscriptions. Add that exact expected TS

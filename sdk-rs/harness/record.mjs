@@ -134,7 +134,7 @@ const recording = {
   },
 };
 
-const { WasmEngine } = await loadEngine(venue.rust, options);
+const { WasmEngine } = await loadEngine();
 let frames = 0;
 let updates = 0;
 const seenBooks = new Set();

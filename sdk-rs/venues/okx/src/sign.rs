@@ -36,33 +36,8 @@ impl Credentials {
     }
 }
 
-// Gregorian civil date from Unix days (400-year eras); no clock or locale.
 fn iso_timestamp(ms: f64) -> String {
-    let ms = ms.floor() as i64;
-    let days = ms.div_euclid(86_400_000);
-    let within = ms.rem_euclid(86_400_000);
-    let (year, month, day) = civil_date(days);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
-        within / 3_600_000,
-        within / 60_000 % 60,
-        within / 1000 % 60,
-        within % 1000
-    )
-}
-
-pub(crate) fn civil_date(days: i64) -> (i64, i64, i64) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let mut year = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = mp + if mp < 10 { 3 } else { -9 };
-    year += i64::from(month <= 2);
-    (year, month, day)
+    safe_cex_engine::time::iso_millis(ms.floor() as i64)
 }
 
 #[cfg(test)]
