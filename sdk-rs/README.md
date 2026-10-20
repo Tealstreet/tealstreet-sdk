@@ -49,7 +49,11 @@ Venues emit real URLs and logical socket roles; the core never chooses a proxy.
 `createEngineTransport`, reusing TS routing, proxy authorization and HOW/relay.
 Explicit headless/direct options stay direct. `createEngineObject` accepts the
 same factory as `createTransport` for account-backed Workers deployments and
-refuses proxy/tunnel flags when no factory is configured.
+refuses proxy/tunnel flags when no factory is configured. The returned
+transport's credential-free `engineOptions` carry protocol choices derived from
+those same routes. SDK and Workers constructors apply them after caller options;
+GRVT therefore uses first-frame session auth on its proxy and cookie upgrade
+headers on a direct connection.
 
 Native launchers serialize the TS-resolved, token-free routing policy and supply
 a context token callback to `NetworkTransport::with_routing`; see
@@ -57,6 +61,14 @@ a context token callback to `NetworkTransport::with_routing`; see
 into the native host. Secondary signing keys remain unsupported and fail before
 engine startup, so the host cannot silently bypass their distinct read egress.
 
+From the repository root, `corepack yarn rust:build-wasm` builds a separate
+browser/Workers and Node package for each venue family. Use
+`corepack yarn rust:build-wasm --venue hyperliquid` to build one family.
+Bindings live under `hosts/wasm/pkg/{web,node}/<family>/`; aliases such as
+`coinbasespot` share their family's package. SDK and Workers loaders select
+the family before loading WASM. Cargo's default features retain all venues
+for workspace checks; release packages use one `venue-<family>` feature.
+CI checks each family against `harness/wasm-budgets.json`.
 ## Replay tapes
 
 From the repository root, `corepack yarn rust:test-harness` checks the tape

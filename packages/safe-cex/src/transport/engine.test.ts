@@ -6,6 +6,8 @@ import type { ExchangeName, ExchangeOptions } from '../types';
 import { Blob as NodeBlob } from 'node:buffer';
 import { deflateSync, gzipSync } from 'node:zlib';
 
+import { createEngineObject } from '@tealstreet/safe-cex-wasm/workers';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { accountToExchangeOptions } from '../createExchangeFromAccount';
@@ -102,6 +104,67 @@ afterEach(() => {
 });
 
 describe('engine HTTP routing at the raw transport boundary', () => {
+  it.each(['coinbase', 'coinbasespot'] as const)('preserves %s venue JWT separately from REST proxy authorization', async (exchange) => {
+    const raw = makeRaw();
+    const opts = options({ tealstreetProxy: true, tealstreetTunnel: false });
+    const input = { ...request('https://api.coinbase.com/api/v3/brokerage/orders?cursor=a%2Fb'), headers: { authorization: 'Bearer venue-jwt', 'Content-Type': 'application/json' } };
+    await createEngineTransport(exchange, opts, raw).request(input);
+    const output = raw.request.mock.lastCall![0];
+    expect(output.headers['Coinbase-Authorization']).toBe('Bearer venue-jwt');
+    expect(output.headers.Authorization).toBe('Bearer proxy-jwt');
+    expect(output.headers.authorization).toBeUndefined();
+    expect(output.url).toBe(`${PRIVATE_PROXY_ASIA}/${input.url}`);
+    expect(output.body).toBe(input.body);
+    expect(input.headers.authorization).toBe('Bearer venue-jwt');
+    const plan = resolveEngineRoutingPlan(exchange, opts, 'https://api.coinbase.com');
+    expect(plan.http.headerAliases).toEqual({ Authorization: 'Coinbase-Authorization' });
+    expect(JSON.stringify(plan)).not.toMatch(/venue-jwt|proxy-jwt|venue-secret/);
+  });
+
+  it.each(['coinbase', 'coinbasespot'] as const)('keeps standard %s Authorization for direct and HOW routes', async (exchange) => {
+    for (const mode of ['direct', 'HOW'] as const) {
+      const raw = makeRaw();
+      const opts = options({ tealstreetProxy: mode === 'HOW', tealstreetTunnel: mode === 'HOW' });
+      const input = { ...request('https://api.coinbase.com/api/v3/brokerage/orders'), headers: { Authorization: 'Bearer venue-jwt' } };
+      await createEngineTransport(exchange, opts, raw).request(input);
+      const headers = mode === 'HOW' ? mocks.adapter.mock.lastCall![0].headers.toJSON() : raw.request.mock.lastCall![0].headers;
+      expect(headers.Authorization).toBe('Bearer venue-jwt');
+      expect(headers['Coinbase-Authorization']).toBeUndefined();
+      expect(resolveEngineRoutingPlan(exchange, opts, 'https://api.coinbase.com').http.headerAliases).toBeUndefined();
+    }
+  });
+
+  it('does not invent Coinbase venue authorization for unsigned public proxy requests', async () => {
+    const raw = makeRaw();
+    await createEngineTransport('coinbase', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw)
+      .request({ ...request('https://api.international.coinbase.com/api/v1/instruments/'), headers: {} });
+    expect(raw.request.mock.lastCall![0].headers['Coinbase-Authorization']).toBeUndefined();
+    expect(raw.request.mock.lastCall![0].headers.Authorization).toBe('Bearer proxy-jwt');
+  });
+
+  it('fails closed on conflicting Coinbase proxy aliases before token acquisition or network I/O', async () => {
+    const raw = makeRaw();
+    await expect(createEngineTransport('coinbase', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw)
+      .request({ ...request('https://api.coinbase.com/api/v3/brokerage/orders'), headers: { Authorization: 'Bearer venue-jwt', 'Coinbase-Authorization': 'Bearer conflicting-jwt' } }))
+      .rejects.toThrow('header alias conflicts');
+    expect(mocks.token).not.toHaveBeenCalled();
+    expect(raw.request).not.toHaveBeenCalled();
+  });
+
+  it('rejects proxy authorization that replaces Coinbase venue credential bytes', async () => {
+    const raw = makeRaw();
+    const provider = {
+      ...directTransport,
+      rest: () => ({ proxied: true, authorize: async (config: InternalAxiosRequestConfig) => {
+        config.headers.set('Coinbase-Authorization', 'Bearer overwritten-venue-jwt');
+        config.headers.set('Authorization', 'Bearer proxy-jwt');
+      } }),
+    };
+    await expect(createEngineTransport('coinbase', options({ transport: provider, tealstreetTunnel: false }), raw)
+      .request({ ...request('https://api.coinbase.com/api/v3/brokerage/orders'), headers: { Authorization: 'Bearer venue-jwt' } }))
+      .rejects.toThrow('changed signed request bytes or headers');
+    expect(raw.request).not.toHaveBeenCalled();
+  });
   it('never sends a proxy write after disposal while its token was pending', async () => {
     let token!: (value: string) => void;
     mocks.token.mockImplementationOnce(
@@ -384,6 +447,31 @@ describe('engine HTTP routing at the raw transport boundary', () => {
       url: `${PRIVATE_PROXY_JP}/https://api.mexc.com/api/v1/private/order/list/open_orders`,
       headers: { Authorization: 'venue-session', 'Tealstreet-Authorization': 'Bearer proxy-jwt' },
     });
+  });
+
+  it.each([
+    ['direct', false, false],
+    ['proxy', true, false],
+    ['HOW', true, true],
+  ] as const)('preserves Breakout DXAPI session authorization through %s routing', async (_label, tealstreetProxy, tealstreetTunnel) => {
+    const raw = makeRaw();
+    const url = 'https://breakout.prosp.devexperts.com/dxsca-web/accounts/default%3A00002/portfolio';
+    const input = { method: 'GET', url, headers: { Authorization: 'DXAPI documented-session' } };
+    const opts = options({ tealstreetProxy, tealstreetTunnel });
+    const routed = createEngineTransport('breakoutprop', opts, raw);
+    try {
+      await routed.request(input);
+      const delivered = tealstreetTunnel ? mocks.adapter.mock.lastCall![0] : raw.request.mock.lastCall![0];
+      const headers = tealstreetTunnel ? delivered.headers.toJSON() : delivered.headers;
+      expect(headers.Authorization).toBe('DXAPI documented-session');
+      expect(headers['Tealstreet-Authorization']).toBe(tealstreetProxy && !tealstreetTunnel ? 'Bearer proxy-jwt' : undefined);
+      expect(headers['Coinbase-Authorization']).toBeUndefined();
+      const plan = resolveEngineRoutingPlan('breakoutprop', opts, 'https://breakout.prosp.devexperts.com');
+      expect(plan.http.authorizationHeader).toBe('Tealstreet-Authorization');
+      expect(plan.http.authorize).toBe(tealstreetProxy && !tealstreetTunnel);
+      expect(plan.http.mode).toBe(tealstreetTunnel ? 'how' : 'direct');
+      if (tealstreetTunnel) expect(raw.request).not.toHaveBeenCalled();
+    } finally { routed.dispose!(); }
   });
 
   it('fails closed if a tunnel adapter returns parsed JSON', async () => {
@@ -988,6 +1076,44 @@ describe('Hyperliquid uses the factories original publicDataOnly option', () => 
     expect(mocks.adapter).toHaveBeenCalledTimes(1);
     expect(raw.request).not.toHaveBeenCalled();
     expect(resolveEngineRoutingPlan('hyperliquid', opts, 'https://api.hyperliquid.xyz').http.mode).toBe('how');
+  });
+});
+
+
+describe('Workers derives GRVT protocol options from its account transport', () => {
+  it.each([true, false])('uses the actual private route when proxied=%s even if the caller flag conflicts', async (proxied) => {
+    let captured: Record<string, unknown> | undefined;
+    let metadata: Transport['engineOptions'];
+    const EngineObject = createEngineObject({
+      loadEngine: async () => ({
+        WasmEngine: class {
+          constructor(_venue: string, json: string) { captured = JSON.parse(json); }
+          start() { return ''; }
+        } as unknown as new (venue: string, json: string) => import('@tealstreet/safe-cex-wasm/host').WasmEngineLike,
+      }),
+      createTransport: (venue: string, accountOptions: Record<string, unknown>, raw: Transport) => {
+        const routed = createEngineTransport(venue as ExchangeName, {
+          ...accountOptions, transport: proxied ? tealstreetTransport : directTransport,
+        } as ExchangeOptions, raw);
+        metadata = routed.engineOptions;
+        return routed;
+      },
+    });
+    const object = new EngineObject({ storage: { setAlarm() {} } });
+    const client = { send() {} };
+    // fetch() registers connected clients before forwarding their messages.
+    Object.assign(object, { clients: new Set([client]) });
+    try {
+      await object.receive(client, JSON.stringify({ op: 'start', venue: 'grvt', options: {
+        key: 'venue-key', secret: 'venue-secret', grvtTradingAccountId: '777', grvtSessionProxy: !proxied,
+      } }));
+      expect(captured?.grvtSessionProxy).toBe(proxied);
+      expect(captured?.privateWsHeaders).toBe(true);
+      expect(captured?.key).toBe('venue-key');
+      expect(metadata).toEqual({ grvtSessionProxy: proxied });
+    } finally {
+      object.leave(client);
+    }
   });
 });
 

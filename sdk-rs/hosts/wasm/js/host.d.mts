@@ -12,6 +12,8 @@ export interface HttpResponse {
 }
 
 export interface Transport {
+  /** Host-derived protocol options; apply after caller options when constructing the engine. */
+  engineOptions?: Readonly<Record<string, unknown>>;
   /** Header-capable raw socket constructor for HOW and relay protocol clients. */
   WebSocket?: typeof globalThis.WebSocket;
   /** Server fetch does not add browser Origin/Referer headers automatically. */
@@ -49,6 +51,7 @@ export interface EngineHandlers {
 
 /** The subset of the wasm-bindgen engine the host drives. */
 export interface WasmEngineLike {
+  accountId?(): string | undefined;
   start(now: number): string;
   command(json: string, now: number): string;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
@@ -70,6 +73,7 @@ export interface WasmEngineLike {
 }
 
 export class EngineHost {
+  accountId(): string | undefined;
   constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers, options?: { batchMessages?: boolean });
   start(): void;
   /** Resolves with the command's result for commands that report one. */

@@ -28,6 +28,10 @@ impl Venue for RecordingVenue {
     }
     fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
     fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+    fn on_tick_interval(&mut self, cx: &mut Cx<'_, ()>, interval_ms: f64) {
+        self.0
+            .push((cx.now, SocketId(0), format!("tick:{interval_ms}")));
+    }
     fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
     fn on_command(&mut self, cx: &mut Cx<'_, ()>, _: Command) {
         self.0.push((cx.now, SocketId(0), "command".into()));
@@ -122,6 +126,36 @@ fn mixed_websocket_bursts_preserve_timestamps_actions_and_close_barriers() {
     assert_eq!(
         host.engine.venue().0.last(),
         Some(&(15.0, SocketId(1), "binary:[]".into()))
+    );
+}
+
+#[test]
+fn tick_configuration_is_a_timestamped_barrier_between_mixed_bursts() {
+    let mut host = host();
+    let events = host.event_sender();
+    for (event, at) in [
+        (HostEvent::WsMessage(SocketId(1), "first".into()), 11.0),
+        (HostEvent::WsBinary(SocketId(2), vec![255]), 12.0),
+        (HostEvent::TickIntervalChanged(f64::INFINITY), 13.0),
+        (HostEvent::WsMessage(SocketId(1), "after".into()), 14.0),
+    ] {
+        events.send_at(event, at).unwrap();
+    }
+    dispatch_next(&mut host);
+    assert_eq!(host.engine.venue().0.len(), 2);
+    assert!(matches!(
+        host.pending.as_ref().unwrap().event,
+        HostEvent::TickIntervalChanged(interval) if interval.is_infinite()
+    ));
+    dispatch_next(&mut host);
+    assert_eq!(
+        host.engine.venue().0.last(),
+        Some(&(13.0, SocketId(0), "tick:inf".into()))
+    );
+    dispatch_next(&mut host);
+    assert_eq!(
+        host.engine.venue().0.last(),
+        Some(&(14.0, SocketId(1), "after".into()))
     );
 }
 

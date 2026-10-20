@@ -5,7 +5,15 @@ import { setTimeout as realTimeout } from 'node:timers';
 export const retainedMemory = (before, after, wasmBytes = 0) =>
   after.heapUsed - before.heapUsed + after.arrayBuffers - before.arrayBuffers + wasmBytes;
 
-// Net growth from loaded code permits signed releases of setup storage.
+// Include verifier setup's full allocation/release lifecycle in both runners.
+// Sampling after setup could subtract temporary loader objects from retention.
+export const baselineBeforeSetup = async ({ baseline, initialize }) => {
+  const before = await baseline();
+  await initialize();
+  return before;
+};
+
+// Net growth permits signed releases of temporary setup storage.
 // Validate absolute counters, the aggregate and exact component arithmetic.
 export const memoryMetricErrors = (metrics, { allowNegativeRetained = false } = {}) => {
   const errors = [];
@@ -37,9 +45,10 @@ export const memoryMetricErrors = (metrics, { allowNegativeRetained = false } = 
   return errors;
 };
 
-// Immediate-only samples can agree before delayed backing-store cleanup runs.
+// Complete code flushing as well as object collection before measuring retention.
+// New heap lows restart the quiet window; return the actual current sample.
 export const settledMemory = async ({
-  collect = () => globalThis.gc?.(),
+  collect = () => globalThis.gc?.({ type: 'major', execution: 'async', flavor: 'last-resort' }),
   sample = () => process.memoryUsage(),
   pause = () => new Promise((resolve) => realTimeout(resolve, 10)),
   now = () => performance.now(),
@@ -54,10 +63,14 @@ export const settledMemory = async ({
   let sampleCount = 0;
   let transitionCount = 0;
   let lastArrayBuffers;
+  let heapLow = Infinity;
+  let heapStableSince = now();
+  let heapTransitionCount = 0;
+  let lastHeapUsed;
   let longestCollectionMs = 0;
   while (now() <= deadline) {
     const collectStarted = now();
-    collect();
+    await collect();
     longestCollectionMs = Math.max(longestCollectionMs, now() - collectStarted);
     await pause();
     const memory = sample();
@@ -65,20 +78,26 @@ export const settledMemory = async ({
     sampleCount++;
     if (sampleCount > 1 && memory.arrayBuffers !== lastArrayBuffers) transitionCount++;
     lastArrayBuffers = memory.arrayBuffers;
+    lastHeapUsed = memory.heapUsed;
     if (time > deadline) break;
     if (memory.arrayBuffers === previous) stable++;
     else {
       stable = 0;
       stableSince = time;
     }
-    if (stable >= 2 && time - stableSince >= quietMs) return memory;
+    if (memory.heapUsed < heapLow) {
+      if (Number.isFinite(heapLow)) heapTransitionCount++;
+      heapLow = memory.heapUsed;
+      heapStableSince = time;
+    }
+    if (stable >= 2 && time - stableSince >= quietMs && time - heapStableSince >= quietMs) return memory;
     previous = memory.arrayBuffers;
   }
   const elapsedMs = now() - started;
   throw Object.assign(
     new Error(
-      `Backing-buffer memory did not settle (samples=${sampleCount}, transitions=${transitionCount}, lastArrayBuffers=${lastArrayBuffers}, elapsedMs=${elapsedMs}, longestGC=${longestCollectionMs.toFixed(1)}ms)`,
+      `Heap/backing-buffer memory did not settle (samples=${sampleCount}, transitions=${transitionCount}, lastArrayBuffers=${lastArrayBuffers}, elapsedMs=${elapsedMs}, heapTransitions=${heapTransitionCount}, lastHeapUsed=${lastHeapUsed}, longestGC=${longestCollectionMs.toFixed(1)}ms)`,
     ),
-    { sampleCount, transitionCount, lastArrayBuffers, elapsedMs, longestCollectionMs },
+    { sampleCount, transitionCount, lastArrayBuffers, elapsedMs, heapTransitionCount, lastHeapUsed, longestCollectionMs },
   );
 };

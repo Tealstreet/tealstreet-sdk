@@ -178,8 +178,10 @@ const KEEPALIVE_MS = 30_000;
  * A Durable Object class running one engine. `loadEngine(venue)` resolves the
  * venue-specific wasm-bindgen module (`{ WasmEngine }`) the deployment bundles; `flush`
  * gives the store and book cadences in ms. Account-backed deployments supply
- * `createTransport(venue, options, raw)` from safe-cex createEngineTransport;
- * the default is an explicitly direct engine host.
+ * `createTransport(venue, options, raw)` from safe-cex's createEngineTransport;
+ * the default is an explicitly direct engine host. The returned transport
+ * supplies engineOptions for protocol choices tied to its resolved routes,
+ * overriding conflicting caller flags before engine construction.
  */
 export const createEngineObject = ({ loadEngine, createTransport, flush = { store: 250, books: 60 } }) =>
   class EngineObject {
@@ -237,7 +239,7 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
           const raw = workersTransport();
           const transport = createTransport ? createTransport(message.venue, message.options, raw) : raw;
           const host = new EngineHost(
-            new WasmEngine(message.venue, JSON.stringify({ ...message.options, privateWsHeaders: transport.webSocketHeaders })),
+            new WasmEngine(message.venue, JSON.stringify({ ...message.options, ...transport.engineOptions, privateWsHeaders: transport.webSocketHeaders })),
             transport,
             {
               onFrame: (frame) => this.broadcast(frame),

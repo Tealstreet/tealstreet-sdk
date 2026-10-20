@@ -1,5 +1,10 @@
 /** Aliases share one engine binary; unsupported names fail before loading wasm. */
 const families = Object.freeze({
+  coinbase: 'coinbase',
+  polymarket: 'polymarket',
+  grvt: 'grvt',
+  breakoutprop: 'breakoutprop',
+  coinbasespot: 'coinbase',
   phemex: 'phemex',
   paradex: 'paradex',
   apexomni: 'apexomni',

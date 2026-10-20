@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const init = vi.hoisted(() => ({
+  coinbase: vi.fn(async () => undefined),
+  polymarket: vi.fn(async () => undefined),
+  grvt: vi.fn(async () => undefined),
+  breakoutprop: vi.fn(async () => undefined),
   phemex: vi.fn(async () => undefined),
   paradex: vi.fn(async () => undefined),
   apexomni: vi.fn(async () => undefined),
@@ -24,6 +28,10 @@ const init = vi.hoisted(() => ({
   weex: vi.fn(async () => undefined),
 }));
 
+vi.mock('@tealstreet/safe-cex-wasm/web/coinbase', () => ({ default: init.coinbase, WasmEngine: class {} }));
+vi.mock('@tealstreet/safe-cex-wasm/web/polymarket', () => ({ default: init.polymarket, WasmEngine: class {} }));
+vi.mock('@tealstreet/safe-cex-wasm/web/grvt', () => ({ default: init.grvt, WasmEngine: class {} }));
+vi.mock('@tealstreet/safe-cex-wasm/web/breakoutprop', () => ({ default: init.breakoutprop, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/phemex', () => ({ default: init.phemex, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/paradex', () => ({ default: init.paradex, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/apexomni', () => ({ default: init.apexomni, WasmEngine: class {} }));
@@ -77,11 +85,19 @@ describe.runIf(process.env.SAFE_CEX_WASM_TESTS)('browser Rust engine selection',
     expect(init.apexomni).not.toHaveBeenCalled();
     expect(init.phemex).not.toHaveBeenCalled();
     expect(init.paradex).not.toHaveBeenCalled();
+    expect(init.coinbase).not.toHaveBeenCalled();
+    expect(init.polymarket).not.toHaveBeenCalled();
+    expect(init.grvt).not.toHaveBeenCalled();
+    expect(init.breakoutprop).not.toHaveBeenCalled();
   });
 
   it('initializes each requested family separately', async () => {
     const { loadWebEngine } = await import('../exchanges/rust/loadWebEngine');
     const families = {
+      coinbase: ['coinbase', 'coinbasespot'],
+      polymarket: ['polymarket'],
+      grvt: ['grvt'],
+      breakoutprop: ['breakoutprop'],
       phemex: ['phemex'],
       paradex: ['paradex'],
       apexomni: ['apexomni'],
@@ -109,7 +125,7 @@ describe.runIf(process.env.SAFE_CEX_WASM_TESTS)('browser Rust engine selection',
       expect(engines.every((engine) => engine === engines[0])).toBe(true);
       return engines[0];
     }));
-    expect(new Set(modules).size).toBe(21);
+    expect(new Set(modules).size).toBe(25);
     for (const initialize of Object.values(init)) expect(initialize).toHaveBeenCalledTimes(1);
   });
 

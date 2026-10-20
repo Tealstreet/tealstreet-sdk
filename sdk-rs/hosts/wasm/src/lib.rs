@@ -5,12 +5,16 @@
 //! JSON array string, or an empty string when there are none. `wsMessageActions`
 //! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
 #[cfg(not(any(
+    feature = "venue-grvt",
     feature = "venue-paradex",
     feature = "venue-bitrue",
+    feature = "venue-coinbase",
     feature = "venue-binance",
     feature = "venue-apexomni",
     feature = "venue-asterdex",
+    feature = "venue-breakoutprop",
     feature = "venue-kucoin",
+    feature = "venue-polymarket",
     feature = "venue-blofin",
     feature = "venue-bybit",
     feature = "venue-woo",
@@ -28,7 +32,7 @@
     feature = "venue-okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -53,12 +57,18 @@ use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
 use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
 #[cfg(feature = "venue-blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
+#[cfg(feature = "venue-breakoutprop")]
+use safe_cex_venue_breakoutprop::{BreakoutProp, Options as BreakoutOptions};
 #[cfg(feature = "venue-bybit")]
 use safe_cex_venue_bybit::{
     BybitLinear, Endpoints as BybitEndpoints, Options as BybitOptions, Variant as BybitVariant,
 };
+#[cfg(feature = "venue-coinbase")]
+use safe_cex_venue_coinbase::{Coinbase, Options as CoinbaseOptions};
 #[cfg(feature = "venue-cryptocom")]
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
+#[cfg(feature = "venue-grvt")]
+use safe_cex_venue_grvt::{Grvt, Options as GrvtOptions};
 #[cfg(feature = "venue-hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
 #[cfg(feature = "venue-kraken")]
@@ -77,6 +87,10 @@ use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions,
 use safe_cex_venue_paradex::{Options as ParadexOptions, Paradex};
 #[cfg(feature = "venue-phemex")]
 use safe_cex_venue_phemex::{Options as PhemexOptions, PhemexPerpetuals};
+#[cfg(feature = "venue-polymarket")]
+use safe_cex_venue_polymarket::{
+    Options as PolymarketOptions, Polymarket, PolymarketOptions as PolymarketAccountOptions,
+};
 #[cfg(feature = "venue-weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 #[cfg(feature = "venue-woo")]
@@ -91,6 +105,7 @@ use batch::{MessageBatch, Payload, dispatch_events};
 mod profile;
 
 trait AnyEngine {
+    fn account_id(&self) -> Option<String>;
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
     fn drain(&mut self) -> Vec<Action>;
@@ -99,6 +114,9 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    fn account_id(&self) -> Option<String> {
+        Engine::account_id(self).map(str::to_owned)
+    }
     fn start(&mut self, now: f64) {
         Engine::start(self, now);
     }
@@ -133,11 +151,14 @@ struct KucoinExtra {
 }
 
 #[cfg(any(
+    feature = "venue-coinbase",
     feature = "venue-paradex",
     feature = "venue-binance",
     feature = "venue-apexomni",
     feature = "venue-asterdex",
+    feature = "venue-breakoutprop",
     feature = "venue-kucoin",
+    feature = "venue-polymarket",
     feature = "venue-blofin",
     feature = "venue-bybit",
     feature = "venue-woo",
@@ -145,6 +166,7 @@ struct KucoinExtra {
     feature = "venue-bingx",
     feature = "venue-mexc",
     feature = "venue-bitget",
+    feature = "venue-grvt",
     feature = "venue-bitrue",
     feature = "venue-backpack",
     feature = "venue-phemex",
@@ -158,6 +180,12 @@ struct KucoinExtra {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[cfg(feature = "venue-coinbase")]
+    #[serde(default)]
+    spot_only: bool,
+    #[cfg(feature = "venue-polymarket")]
+    #[serde(default)]
+    polymarket: Option<PolymarketAccountOptions>,
     #[cfg(feature = "venue-lighter")]
     #[serde(default)]
     api_key_index: Option<String>,
@@ -169,6 +197,8 @@ struct EngineOptions {
     #[serde(default)]
     lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
+        feature = "venue-grvt",
+        feature = "venue-coinbase",
         feature = "venue-paradex",
         feature = "venue-binance",
         feature = "venue-apexomni",
@@ -193,9 +223,12 @@ struct EngineOptions {
     #[serde(default)]
     key: Option<String>,
     #[cfg(any(
+        feature = "venue-grvt",
+        feature = "venue-coinbase",
         feature = "venue-binance",
         feature = "venue-apexomni",
         feature = "venue-asterdex",
+        feature = "venue-breakoutprop",
         feature = "venue-kucoin",
         feature = "venue-blofin",
         feature = "venue-bybit",
@@ -222,7 +255,11 @@ struct EngineOptions {
     #[cfg(feature = "venue-paradex")]
     #[serde(default)]
     subkey_address: Option<String>,
-    #[cfg(any(feature = "venue-backpack", feature = "venue-bitrue"))]
+    #[cfg(any(
+        feature = "venue-backpack",
+        feature = "venue-bitrue",
+        feature = "venue-breakoutprop"
+    ))]
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
@@ -266,12 +303,27 @@ struct EngineOptions {
     #[cfg(feature = "venue-weex")]
     #[serde(default)]
     private_ws_headers: bool,
+    #[cfg(feature = "venue-grvt")]
+    #[serde(default)]
+    grvt_trading_account_id: Option<String>,
+    #[cfg(feature = "venue-grvt")]
+    #[serde(default)]
+    grvt_signer_address: Option<String>,
+    #[cfg(feature = "venue-grvt")]
+    #[serde(default)]
+    grvt_session_proxy: bool,
     #[cfg(feature = "venue-bybit")]
     #[serde(default)]
     endpoints: Option<EndpointOptions>,
-    #[cfg(feature = "venue-orderly")]
+    #[cfg(any(feature = "venue-orderly", feature = "venue-breakoutprop"))]
     #[serde(default)]
     tick_interval: Option<f64>,
+    #[cfg(feature = "venue-breakoutprop")]
+    #[serde(default)]
+    subaccount: Option<String>,
+    #[cfg(feature = "venue-breakoutprop")]
+    #[serde(default)]
+    polling_enabled: Option<bool>,
 }
 #[cfg(feature = "venue-asterdex")]
 #[derive(Deserialize, Default)]
@@ -593,11 +645,11 @@ enum CommandIn {
     FetchStpMode {
         command: u32,
     },
-    #[cfg(feature = "venue-asterdex")]
+    #[cfg(any(feature = "venue-asterdex", feature = "venue-polymarket"))]
     FetchAccount {
         command: u32,
     },
-    #[cfg(feature = "venue-asterdex")]
+    #[cfg(any(feature = "venue-asterdex", feature = "venue-polymarket"))]
     FetchOrderBook {
         command: u32,
         symbol: String,
@@ -734,9 +786,9 @@ impl From<CommandIn> for Command {
             }
             #[cfg(feature = "venue-asterdex")]
             CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
-            #[cfg(feature = "venue-asterdex")]
+            #[cfg(any(feature = "venue-asterdex", feature = "venue-polymarket"))]
             CommandIn::FetchAccount { command } => Self::FetchAccount { command },
-            #[cfg(feature = "venue-asterdex")]
+            #[cfg(any(feature = "venue-asterdex", feature = "venue-polymarket"))]
             CommandIn::FetchOrderBook {
                 command,
                 symbol,
@@ -858,11 +910,14 @@ pub struct WasmEngine {
 #[wasm_bindgen]
 impl WasmEngine {
     #[cfg(any(
+        feature = "venue-coinbase",
         feature = "venue-paradex",
         feature = "venue-binance",
         feature = "venue-apexomni",
         feature = "venue-asterdex",
+        feature = "venue-breakoutprop",
         feature = "venue-kucoin",
+        feature = "venue-polymarket",
         feature = "venue-blofin",
         feature = "venue-bybit",
         feature = "venue-woo",
@@ -870,6 +925,7 @@ impl WasmEngine {
         feature = "venue-bingx",
         feature = "venue-mexc",
         feature = "venue-bitget",
+        feature = "venue-grvt",
         feature = "venue-bitrue",
         feature = "venue-backpack",
         feature = "venue-phemex",
@@ -900,6 +956,49 @@ impl WasmEngine {
                 .map_err(|error| JsError::new(&error))?;
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "venue-breakoutprop")]
+            "breakoutprop" => Box::new(Engine::new(BreakoutProp::new(BreakoutOptions {
+                key: options.key.unwrap_or_default(),
+                secret: options.secret.unwrap_or_default(),
+                subaccount: options.subaccount,
+                public_data_only: options.public_data_only,
+                tick_interval: if options.polling_enabled == Some(false) {
+                    f64::INFINITY
+                } else {
+                    options.tick_interval.unwrap_or(2_000.0)
+                },
+                timeout_ms: options
+                    .recv_window
+                    .unwrap_or(20_000.0)
+                    .clamp(1.0, u32::MAX as f64) as u32,
+            }))),
+            #[cfg(feature = "venue-grvt")]
+            "grvt" => Box::new(Engine::new(Grvt::new(GrvtOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                trading_account_id: options.grvt_trading_account_id,
+                signer_address: options.grvt_signer_address,
+                session_proxy: options.grvt_session_proxy,
+            }))),
+            #[cfg(feature = "venue-coinbase")]
+            "coinbase" | "coinbasespot" => Box::new(Engine::new(
+                Coinbase::new(CoinbaseOptions {
+                    key: options.key.unwrap_or_default(),
+                    secret: options.secret.unwrap_or_default(),
+                    public_data_only: options.public_data_only,
+                    spot_only: venue == "coinbasespot" || options.spot_only,
+                    testnet: options.testnet,
+                })
+                .map_err(|error| JsError::new(&error))?,
+            )),
+            #[cfg(feature = "venue-polymarket")]
+            "polymarket" => Box::new(Engine::new(Polymarket::new(PolymarketOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                polymarket: options.polymarket,
+            }))),
             #[cfg(feature = "venue-paradex")]
             "paradex" => Box::new(Engine::new(Paradex::new(ParadexOptions {
                 testnet: options.testnet,
@@ -1276,9 +1375,45 @@ impl WasmEngine {
     }
 
     pub fn command(&mut self, command_json: &str, now: f64) -> Result<String, JsError> {
+        #[derive(Deserialize)]
+        struct Header<'a> {
+            #[serde(borrow)]
+            op: std::borrow::Cow<'a, str>,
+        }
+        let header: Header<'_> = serde_json::from_str(command_json)?;
+        if header.op == "setTickInterval" {
+            #[derive(Deserialize)]
+            #[serde(untagged)]
+            enum Interval {
+                Millis(f64),
+                Paused(()),
+            }
+            #[derive(Deserialize)]
+            struct Control {
+                interval: Interval,
+            }
+            let control: Control = serde_json::from_str(command_json)?;
+            let interval_ms = match control.interval {
+                Interval::Millis(ms) => ms,
+                Interval::Paused(()) => f64::INFINITY,
+            };
+            if interval_ms.is_nan() || interval_ms <= 0.0 {
+                return Err(JsError::new(
+                    "Polling interval must be positive or null to pause",
+                ));
+            }
+            self.inner
+                .handle(now, Event::TickIntervalChanged { interval_ms });
+            return Ok(self.flush());
+        }
         let command: CommandIn = serde_json::from_str(command_json)?;
         self.inner.handle(now, Event::Command(command.into()));
         Ok(self.flush())
+    }
+
+    #[wasm_bindgen(js_name = accountId)]
+    pub fn account_id(&self) -> Option<String> {
+        self.inner.account_id()
     }
 
     /// Everything that changed since the previous call as one flush frame
@@ -1335,7 +1470,13 @@ mod action_tests {
     fn account_command_aliases_share_the_engine_read() {
         for (op, enabled) in [
             ("getAccount", cfg!(feature = "venue-apexomni")),
-            ("fetchAccount", cfg!(feature = "venue-asterdex")),
+            (
+                "fetchAccount",
+                cfg!(any(
+                    feature = "venue-asterdex",
+                    feature = "venue-polymarket"
+                )),
+            ),
         ] {
             let parsed =
                 serde_json::from_str::<CommandIn>(&format!(r#"{{"op":"{op}","command":77}}"#));
@@ -1425,6 +1566,10 @@ mod action_tests {
     }
 
     impl AnyEngine for Messages {
+        fn account_id(&self) -> Option<String> {
+            None
+        }
+
         fn start(&mut self, _now: f64) {}
         fn handle(&mut self, now: f64, event: Event<'_>) {
             if let Event::WsBinary { socket, data } = event {
@@ -1566,9 +1711,7 @@ mod action_tests {
         );
     }
 
-    // These methods are exposed by the SDK only for Aster. Keep their wire
-    // parsers out of other single-venue builds while retaining the shared
-    // engine command types for native hosts.
+    // Compile command parsers only for venues that expose each SDK method.
     #[test]
     fn aster_commands_follow_the_compiled_venue_feature() {
         let commands = [
@@ -1619,10 +1762,26 @@ mod action_tests {
                 _ => panic!("Aster command {index} changed its wire mapping"),
             }
             #[cfg(not(feature = "venue-asterdex"))]
-            assert!(
-                parsed.is_err(),
-                "unsupported Aster command {index} must reject"
-            );
+            if cfg!(feature = "venue-polymarket") && matches!(index, 2 | 3) {
+                let command = Command::from(parsed.unwrap());
+                assert!(matches!(
+                    (index, command),
+                    (2, Command::FetchAccount { command: 19 })
+                        | (
+                            3,
+                            Command::FetchOrderBook {
+                                command: 19,
+                                symbol: _,
+                                limit: Some(50)
+                            }
+                        )
+                ));
+            } else {
+                assert!(
+                    parsed.is_err(),
+                    "unsupported venue command {index} must reject"
+                );
+            }
         }
     }
 

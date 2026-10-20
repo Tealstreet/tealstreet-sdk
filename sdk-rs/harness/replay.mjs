@@ -10,7 +10,8 @@ import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from
 import { axiosClients, venueOf } from './venues.mjs';
 import { createTape, withTimeout, replayStoreReady, ReplayClock, prepareTsReplaySockets } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
-import { retainedMemory, settledMemory } from './memory.mjs';
+import { baselineBeforeSetup, retainedMemory, settledMemory } from './memory.mjs';
+import { deterministicReplay, replayTransportReady } from './polling.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -67,7 +68,7 @@ if (values.venue === 'hyrotrader' && replayOptions.endpoints) {
   process.env.NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL = replayOptions.endpoints.publicWs;
   process.env.NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL = replayOptions.endpoints.privateWs;
 }
-const publicReplayClock = !isPrivate && (values.venue === 'mexc' || values.venue === 'bitrue' || venue.orderlyProtocol === true);
+const publicReplayClock = deterministicReplay(venue, isPrivate);
 const credentials = { key: replayOptions.key, secret: replayOptions.secret, passphrase: replayOptions.passphrase };
 const replayDeadline = realTimeout(() => {
   console.error('Replay exceeded its 120-second deadline');
@@ -79,8 +80,10 @@ const until = async (predicate, label) => withTimeout((async () => {
   while (!predicate()) await new Promise((resolve) => realTimeout(resolve, 5));
 })(), label, 15000);
 
-await venue.prepareReplay?.({ isPrivate, options: replayOptions });
-await venue.initializeReplay?.(values.impl, replayOptions);
+const initializeReplay = async () => {
+  await venue.prepareReplay?.({ isPrivate, options: replayOptions });
+  await venue.initializeReplay?.(values.impl, replayOptions);
+};
 
 const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
@@ -112,13 +115,13 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark,
     buffersBefore: heapBefore.arrayBuffers,
     buffersAfter: memory.arrayBuffers,
     wasmBytes: linearBytes,
-    // What the implementation keeps alive beyond the harness and loaded code.
+    // Retain the complete setup/import lifecycle and reserved WASM symmetrically.
     retainedBytes: retainedMemory(heapBefore, memory, linearBytes),
     ...diagnostics,
   };
 };
 
-/** Loaded code and constructors precede the baseline; collect settled net growth. */
+/** Include implementation setup/imports; collect settled retained net growth. */
 const baseline = () => settledMemory({ pause: () => new Promise((resolve) => realTimeout(resolve, 10)) });
 
 const sortBook = (book) => ({
@@ -155,6 +158,7 @@ const marketFields = (m) => ({
 });
 
 async function runRust() {
+  const heapBefore = await baselineBeforeSetup({ baseline, initialize: initializeReplay });
   const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
@@ -240,7 +244,6 @@ async function runRust() {
     },
   }, { batchMessages: values.delivery === 'batch' });
   const hostProfile = profile ? (await import('./profile-host.mjs')).profileHost(host, profile) : undefined;
-  const heapBefore = await baseline();
   const cpuSampler = values['cpu-profile']
     ? await (await import('./cpu-profile.mjs')).startCpuProfile(values['cpu-profile']) : undefined;
   let frames, metrics, replayError;
@@ -264,7 +267,7 @@ async function runRust() {
         while (
           !replayStoreReady(status?.loaded ?? 0, isPrivate && accountReady) ||
           (tape.audit?.ready && !tape.audit.ready()) ||
-          !tape.open.size
+          !replayTransportReady(venue, tape.open.size)
         ) {
           if (performance.now() > deadline) throw new Error('Replay timed out waiting for Rust startup');
           host.flush();
@@ -325,7 +328,9 @@ async function runRust() {
   }
   const tickerRows = [];
   for (let i = 0; i < tickers.count; i++) {
-    const row = { symbol: tickers.market[i] === NONE ? tickers.identity?.(i).symbol : markets.symbol(tickers.market[i]) };
+    const row = {
+      symbol: tickers.market[i] === NONE ? tickers.identity?.(i).symbol : markets.symbol(tickers.market[i]),
+    };
     for (const [field, column] of Object.entries(tickers.columns)) row[field] = column[i];
     tickerRows.push(row);
   }
@@ -372,14 +377,16 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
       ...orderEnums(orders.enums[i]),
     };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
-    if (venue.inverseNativeAmounts) row.extra = { remainingNative: Math.round(Math.max(0, row.amount - row.filled) * 1e12) / 1e12 };
+    if (venue.inverseNativeAmounts)
+      row.extra = { remainingNative: Math.round(Math.max(0, row.amount - row.filled) * 1e12) / 1e12 };
     orderRows.push(row);
   }
   const positionRows = [];
   for (let i = 0; i < (positions?.count ?? 0); i++) {
     const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
     for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
-    if (venue.inverseNativeAmounts) row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
+    if (venue.inverseNativeAmounts)
+      row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
     positionRows.push(row);
   }
   const settingRows = [];
@@ -401,7 +408,8 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
       free: balance.free,
       total: balance.total,
       upnl: balance.upnl,
-      ...((venue.inverseNativeAmounts || venue.compareBalanceCoins) ? { coins: balance.coins ?? {} } : {}),
+      ...(venue.inverseNativeAmounts || venue.compareBalanceCoins ? { coins: balance.coins ?? {} } : {}),
+      ...(venue.currencyBalances && balance.currencies !== undefined ? { currencies: balance.currencies } : {}),
       ...(venue.compareBalanceCurrencies ? { currencies: balance.currencies ?? {} } : {}),
     },
     orders: orderRows,
@@ -418,6 +426,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 }
 
 async function runTs() {
+  const heapBefore = await baselineBeforeSetup({ baseline, initialize: initializeReplay });
   const tape = createTape(records, venue, isPrivate, { impl: 'ts', books: bookSymbols, credentials, cadence: values.cadence, engineOptions: replayOptions });
   tape.cadence = values.cadence;
   const clock = publicReplayClock ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
@@ -489,9 +498,14 @@ async function runTs() {
   const { DefaultStore } = await import('../../packages/safe-cex/src/store/store.base.ts');
   const adapter = async (config) => {
     const base = config.baseURL ?? '';
-    const url = new URL(config.url.startsWith('http') ? config.url : `${base}${config.url}`);
-    for (const [key, value] of Object.entries(config.params ?? {})) {
-      if (value !== undefined) url.searchParams.set(key, String(value));
+    const url = new URL(config.url.startsWith('http') ? config.url : `${base.replace(/\/+$/, '')}/${config.url.replace(/^\/+/, '')}`);
+    const serializer = typeof config.paramsSerializer === 'function' ? config.paramsSerializer : config.paramsSerializer?.serialize;
+    if (serializer) {
+      for (const [key, value] of new URLSearchParams(serializer(config.params ?? {}))) url.searchParams.append(key, value);
+    } else {
+      for (const [key, value] of Object.entries(config.params ?? {})) {
+        if (value !== undefined) url.searchParams.set(key, String(value));
+      }
     }
     const {
       status,
@@ -543,7 +557,8 @@ async function runTs() {
   exchange.emitter.on('callMethod', ({ method, args, requestId }) => {
     setImmediate(async () => {
       try {
-        if (!['removeOrders', 'fetchAndSetOrders'].includes(method)) throw new Error(`Unsupported taped worker method ${method}`);
+        if (!['removeOrders', 'fetchAndSetOrders'].includes(method))
+          throw new Error(`Unsupported taped worker method ${method}`);
         const result = await exchange[method](...args);
         exchange.emitter.emit('callMethod:done', { requestId, success: true, result });
       } catch (error) {
@@ -558,12 +573,12 @@ async function runTs() {
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
   await venue.prepareTsTransport?.(exchange, adapter);
   const finalBooks = {};
-  const heapBefore = await baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   const started = exchange.start();
   const subscribed = (async () => {
-    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange,store))) await new Promise((r) => realTimeout(r, 1));
+    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange, store)))
+      await new Promise((r) => realTimeout(r, 1));
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
@@ -580,12 +595,13 @@ async function runTs() {
       }
     },
     async (accountReady) => {
-      await (accountReady ? Promise.all([started, subscribed]) : subscribed);
-      await prepareTsReplaySockets(tape, () => venue.prepareTsReady?.(exchange, { isPrivate }), until);
+      await (accountReady || venue.polling ? Promise.all([started, subscribed]) : subscribed);
+      if (venue.polling === true) await venue.prepareTsReady?.(exchange, { isPrivate });
+      else await prepareTsReplaySockets(tape, () => venue.prepareTsReady?.(exchange, { isPrivate }), until);
       await until(() => venue.tsBooksSubscribed(exchange, bookSymbols.length), 'TS book subscriptions');
       const loaded = () => accountReady ? Object.values(store.loaded).every(Boolean) : store.loaded.markets && store.loaded.tickers;
-      await until(() => !isPrivate || loaded(), 'TS account startup');
-      await until(() => tape.open.size > 0, 'TS initial socket');
+      await until(() => !(isPrivate || venue.polling === true) || loaded(), 'TS account startup');
+      await until(() => replayTransportReady(venue, tape.open.size), 'TS initial transport');
     },
     (record) => runTsCommand(exchange, store, record),
     clock,
@@ -617,7 +633,10 @@ async function runTs() {
           free: store.balance.free,
           total: store.balance.total,
           upnl: store.balance.upnl,
-          ...((venue.inverseNativeAmounts || venue.compareBalanceCoins) ? { coins: store.balance.coins ?? {} } : {}),
+          ...(venue.inverseNativeAmounts || venue.compareBalanceCoins ? { coins: store.balance.coins ?? {} } : {}),
+          ...(venue.currencyBalances && store.balance.currencies !== undefined
+            ? { currencies: store.balance.currencies }
+            : {}),
           ...(venue.compareBalanceCurrencies ? { currencies: store.balance.currencies ?? {} } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),
@@ -750,7 +769,9 @@ function normalizeAccount(account) {
     entryPrice: p.entryPrice,
     contracts: p.contracts,
     notional: p.notional,
-    ...(venue.inverseNativeAmounts ? { contractsNative: p.extra?.contractsNative, unrealizedPnlNative: p.extra?.unrealizedPnlNative } : {}),
+    ...(venue.inverseNativeAmounts
+      ? { contractsNative: p.extra?.contractsNative, unrealizedPnlNative: p.extra?.unrealizedPnlNative }
+      : {}),
     leverage: p.leverage,
     unrealizedPnl: p.unrealizedPnl,
     liquidationPrice: p.liquidationPrice,
@@ -808,8 +829,11 @@ writeFileSync(
       ),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
-    commands: result.commands.map((result, index) => venue.commandResult?.(result,
-      records.filter((record) => record.type === 'command')[index], index + 1) ?? result),
+    commands: result.commands.map(
+      (result, index) =>
+        venue.commandResult?.(result, records.filter((record) => record.type === 'command')[index], index + 1) ??
+        result,
+    ),
   }),
 );
 realClearTimeout(replayDeadline);

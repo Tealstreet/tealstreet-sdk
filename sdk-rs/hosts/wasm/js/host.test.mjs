@@ -508,6 +508,53 @@ test('disposal while draining a batch prevents its enclosing flush or command', 
   }
 });
 
+test('account identity is read from the live engine and unavailable after disposal', () => {
+  let account;
+  const host = new EngineHost({ accountId: () => account }, {});
+  assert.equal(host.accountId(), undefined);
+  account = 'selected-portfolio';
+  assert.equal(host.accountId(), 'selected-portfolio');
+  host.dispose();
+  assert.throws(() => host.accountId(), /disposed/);
+  assert.equal(new EngineHost({}, {}).accountId(), undefined);
+});
+
+test('account identity drains queued discovery before reading the live engine', () => {
+  const f = fixture();
+  let account;
+  f.engine.wsMessage = () => { account = 'queued-portfolio'; return ''; };
+  f.engine.accountId = () => account;
+  f.send(1, 'discovery');
+  assert.equal(account, undefined);
+  assert.equal(f.host.accountId(), 'queued-portfolio');
+  assert.equal(f.tasks.size, 0);
+  f.host.dispose();
+});
+
+test('account identity stops after queued actions dispose the host', () => {
+  const f = fixture();
+  let reads = 0;
+  f.engine.accountId = () => { reads++; return 'stale'; };
+  f.engine.wsMessage = () => '[{"op":"log","level":"error","message":"stop"}]';
+  f.host.handlers.onLog = () => f.host.dispose();
+  f.send(1, 'invalidate');
+  assert.throws(() => f.host.accountId(), /engine disposed/);
+  assert.equal(reads, 0);
+});
+
+test('tick interval changes drain prior arrivals and resolve without a reply ID', async () => {
+  const f = fixture();
+  f.send(1, 'before interval');
+  await f.host.command({ op: 'setTickInterval', interval: 250 });
+  assert.deepEqual(f.calls, [
+    ['single', [[1, 1, 'before interval']]],
+    ['command', '{"op":"setTickInterval","interval":250}', 2],
+  ]);
+  assert.equal(f.host.commands.size, 0);
+  assert.equal(f.host.nextCommand, 1);
+  f.host.dispose();
+});
+
 for (const entry of ['legacy', 'actions', 'bytes']) {
   test(`WebSocket actions preserve ordering and empty results with ${entry}`, () => {
     const calls = [];

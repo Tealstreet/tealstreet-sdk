@@ -25,6 +25,7 @@ export interface EngineHttpRoute {
   authorize: boolean;
   authorizationHeader: string;
   headers: Record<string, string>;
+  headerAliases?: Record<string, string>;
   tunnelUrl?: string;
 }
 
@@ -52,6 +53,22 @@ export interface EngineRoutingPlan {
 
 type Request = Parameters<Transport['request']>[0];
 const orderlyExchanges = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
+const coinbaseExchanges = new Set<ExchangeName>(['coinbase', 'coinbasespot']);
+
+const httpHeaderAliases = (exchange: ExchangeName, proxied: boolean, how: boolean): Record<string, string> =>
+  coinbaseExchanges.has(exchange) && proxied && !how ? { Authorization: 'Coinbase-Authorization' } : {};
+
+const aliasHeaders = (headers: AxiosHeaders, aliases: Record<string, string>): void => {
+  for (const [source, target] of Object.entries(aliases)) {
+    const value = headers.get(source);
+    if (value === undefined || source.toLowerCase() === target.toLowerCase()) continue;
+    const previous = headers.get(target);
+    if (typeof value !== 'string' || (previous !== undefined && previous !== value))
+      throw new Error('Engine HTTP header alias conflicts with an existing header');
+    headers.delete(source);
+    headers.set(target, value);
+  }
+};
 
 export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: ExchangeName): void => {
   if (exchange === 'asterdex' && options.secondary_key && options.secondary_secret) return;
@@ -118,6 +135,7 @@ export const resolveEngineRoutingPlan = (
     if (target !== baseURL && !target.endsWith(`/${baseURL}`)) throw new Error('Unsupported native URL rewrite');
     const how =
       usesTunnel(exchange, options) && Boolean(provider.restAdapter({ exchange, options, variant: { raw: true } }));
+    const headerAliases = httpHeaderAliases(exchange, route.proxied, how);
     return {
       mode: how ? 'how' : 'direct',
       prefix: target === baseURL ? '' : target.slice(0, -baseURL.length - 1),
@@ -127,6 +145,7 @@ export const resolveEngineRoutingPlan = (
         ...venueHeaders(exchange, options),
         ...(route.proxied && provider === tealstreetTransport ? TEALSTREET_REST_HEADERS : {}),
       },
+      ...(Object.keys(headerAliases).length ? { headerAliases } : {}),
       ...(how ? { tunnelUrl: routing.howEgress === 'jp' ? TOKYO_HOW_EGRESS : SINGAPORE_HOW_EGRESS } : {}),
     };
   };
@@ -266,13 +285,14 @@ const httpTransport = (
     signal.addEventListener('abort', cleanup, { once: true });
     try {
       signal.throwIfAborted();
-      const signed = orderlyExchanges.has(exchange)
+      const signed = orderlyExchanges.has(exchange) || coinbaseExchanges.has(exchange)
         ? { url: request.url, method: request.method, body: request.body, headers: Object.entries(request.headers) }
         : undefined;
       const route =
         publicPrefix === undefined
           ? restRoute(provider, exchange, options, routing, request, transport.serverHeaders)
           : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
+      const aliases = httpHeaderAliases(exchange, route.proxied, Boolean(adapter));
       const config = {
         method: request.method,
         url: route.baseURL ?? request.url,
@@ -282,18 +302,21 @@ const httpTransport = (
         timeout: deadlineMs,
         signal,
       } as InternalAxiosRequestConfig;
+      aliasHeaders(config.headers, aliases);
       const originalUrl = config.url;
       if (route.proxied && route.authorize) await untilAborted(route.authorize(config), signal);
       signal.throwIfAborted();
-      // ED25519 covers Orderly's exact method, path/query and JSON bytes. Proxy
-      // authorization may add headers, but must never rewrite a signed packet.
+      // Proxy auth may add credentials or apply a declared host header alias;
+      // the venue's signed packet and credential bytes remain unchanged.
       if (signed && (
         request.url !== signed.url || request.method !== signed.method || request.body !== signed.body ||
         config.url !== originalUrl || config.baseURL !== signed.url ||
         config.method !== signed.method || config.data !== signed.body ||
         config.params !== undefined || config.signal !== signal ||
-        signed.headers.some(([name, value]) => config.headers.get(name) !== value)
-      )) throw new Error('Orderly transport authorization changed signed request bytes or headers');
+        signed.headers.some(([name, value]) => config.headers.get(
+          Object.entries(aliases).find(([source]) => source.toLowerCase() === name.toLowerCase())?.[1] ?? name,
+        ) !== value)
+      )) throw new Error('Engine transport authorization changed signed request bytes or headers');
       config.timeout = Math.max(1, deadlineMs - (Date.now() - started));
       if (adapter) {
         const response = await untilAborted(adapter(config), signal);
@@ -405,6 +428,12 @@ export const createEngineTransport = (
     ? httpTransport(exchange, readOptions, transport, provider, resolved(exchange, readOptions, provider).restRouting)
     : undefined;
   return {
+    // Protocol negotiation must use the same resolved route as connect(),
+    // including hosts (such as Workers) which construct the engine themselves.
+    engineOptions: {
+      ...transport.engineOptions,
+      ...(exchange === 'grvt' ? { grvtSessionProxy: Boolean(routes.private.host) } : {}),
+    },
     webSocketHeaders: transport.webSocketHeaders,
     now: () => transport.now(),
     setTimeout: (fn, ms) => transport.setTimeout(fn, ms),

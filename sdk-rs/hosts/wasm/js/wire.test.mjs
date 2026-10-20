@@ -231,14 +231,17 @@ test('position IDs survive transfer and legacy frames never read the next sectio
 });
 
 function balanceFrame(coins, currencies) {
-  const currencyRows = Object.entries(currencies ?? {});
+  const coinsAbsent = coins === undefined;
+  const currencyRows = Array.isArray(currencies)
+    ? currencies.map(({ currency, ...balance }) => [currency, balance]) : Object.entries(currencies ?? {});
+  if (currencies) coins ??= [];
   const strings = [...(coins?.map((c) => c.base) ?? []), ...currencyRows.map(([currency]) => currency)];
   const stringBuffer = stringFrame(strings).buffer;
   const count = coins?.length ?? 0;
   const at = (36 + count * 4 + 7) & ~7;
-  const coinLength = coins || currencies ? at + count * 16 : 32;
-  const currencyAt = (coinLength + 4 + currencyRows.length * 4 + 7) & ~7;
-  const length = currencies ? currencyAt + currencyRows.length * 32 : coinLength;
+  const tail = at + count * 16;
+  const currencyAt = (tail + 8 + currencyRows.length * 4 + 7) & ~7;
+  const length = currencies ? currencyAt + currencyRows.length * 32 : coins ? tail : 32;
   const result = new ArrayBuffer(16 + 8 + length + stringBuffer.byteLength - 16);
   const view = new DataView(result);
   new Uint8Array(result).set(new Uint8Array(stringBuffer, 0, 16));
@@ -255,11 +258,12 @@ function balanceFrame(coins, currencies) {
     });
   }
   if (currencies) {
-    view.setUint32(24 + coinLength, currencyRows.length, true);
-    currencyRows.forEach(([, values], i) => {
-      view.setUint32(24 + coinLength + 4 + i * 4, count + i, true);
-      ['used', 'free', 'total', 'upnl'].forEach((field, column) => {
-        view.setFloat64(24 + currencyAt + column * currencyRows.length * 8 + i * 8, values[field], true);
+    view.setUint32(24 + tail, currencyRows.length, true);
+    view.setUint32(24 + tail + 4, Number(coinsAbsent), true);
+    currencyRows.forEach(([, balance], i) => {
+      view.setUint32(24 + tail + 8 + i * 4, count + i, true);
+      ['total', 'free', 'used', 'upnl'].forEach((field, column) => {
+        view.setFloat64(24 + currencyAt + (column * currencyRows.length + i) * 8, balance[field], true);
       });
     });
   }
@@ -277,6 +281,64 @@ test('optional collateral columns survive buffer transfer and distinguish absent
   assert.deepEqual(new Frame(transferred).balance().coins, { BTC: coins[0], ETH: coins[1] });
 });
 
+test('prediction metadata is optional, lossless and isolated from following sections', () => {
+  const strings = stringFrame(['0xcondition', 'Yes', 'Will café open?', 'Exact description', '2026-12-31T00:00:00Z', 'cafe-open']);
+  const data = numericFrame([
+    { kind: SECTION.PREDICTION_MARKETS, length: 48, write(view, offset) {
+      view.setUint32(offset, 1, true);
+      view.setUint32(offset + 4, 7, true);
+      for (let i = 0; i < 6; i++) view.setUint32(offset + 8 + i * 4, i, true);
+      view.setUint32(offset + 32, 1, true);
+      view.setFloat64(offset + 40, 0.001, true);
+    } },
+    { kind: SECTION.PREDICTION_HOLDINGS, length: 24, write(view, offset) {
+      view.setUint32(offset, 2, true);
+      view.setUint32(offset + 4, 7, true);
+      view.setUint32(offset + 8, 9, true);
+      view.setUint32(offset + 12, 1, true);
+      view.setUint32(offset + 16, 2, true);
+    } },
+  ]);
+  data.strings = strings.strings;
+  const markets = data.predictionMarkets();
+  assert.deepEqual([...markets.market], [7]);
+  assert.deepEqual([...markets.flags], [1]);
+  assert.deepEqual([...markets.tickSize], [0.001]);
+  assert.equal(markets.conditionId(0), '0xcondition');
+  assert.equal(markets.outcome(0), 'Yes');
+  assert.equal(markets.question(0), 'Will café open?');
+  assert.equal(markets.description(0), 'Exact description');
+  assert.equal(markets.endDate(0), '2026-12-31T00:00:00Z');
+  assert.equal(markets.slug(0), 'cafe-open');
+  assert.deepEqual([...data.predictionHoldings().market], [7, 9]);
+  assert.deepEqual([...data.predictionHoldings().flags], [1, 2]);
+  assert.equal(strings.predictionMarkets(), undefined);
+  assert.equal(strings.predictionHoldings(), undefined);
+  const empty = numericFrame([
+    { kind: SECTION.PREDICTION_MARKETS, length: 8, write(view, offset) { view.setUint32(offset, 0, true); } },
+    { kind: SECTION.PREDICTION_HOLDINGS, length: 8, write(view, offset) { view.setUint32(offset, 0, true); } },
+  ]);
+  assert.equal(empty.predictionMarkets().count, 0);
+  assert.equal(empty.predictionHoldings().count, 0);
+});
+
+test('spot currency columns retain reserved quantities and explicitly clear an empty snapshot', () => {
+  const coins = [{ base: 'BTC', amount: 0.1, notional: 5000 }];
+  const currencies = [{ currency: 'BTC', total: 2, free: 1.25, used: 0.75, upnl: 0 },
+    { currency: '__proto__', total: 3, free: 0, used: 3, upnl: -1 }];
+  const source = balanceFrame(coins, currencies);
+  const result = new Frame(structuredClone(source, { transfer: [source] })).balance();
+  assert.deepEqual(result.coins, { BTC: coins[0] });
+  assert.deepEqual(result.currencies.BTC, { total: 2, free: 1.25, used: 0.75, upnl: 0 });
+  assert.equal(Object.getPrototypeOf(result.currencies), Object.prototype);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(result.currencies, '__proto__').value,
+    { total: 3, free: 0, used: 3, upnl: -1 });
+  assert.deepEqual(new Frame(balanceFrame([], [])).balance().currencies, {});
+  assert.equal(new Frame(balanceFrame(coins)).balance().currencies, undefined);
+  assert.equal(new Frame(balanceFrame(undefined, currencies)).balance().coins, undefined);
+  assert.deepEqual(new Frame(balanceFrame([], [])).balance().coins, {});
+});
+
 test('optional currency balances preserve full values, coexist with coins, and clear explicitly', () => {
   const currencies = {
     USDT: { used: 1.25, free: 8.75, total: 10, upnl: -3 },
@@ -284,10 +346,10 @@ test('optional currency balances preserve full values, coexist with coins, and c
   };
   assert.equal(new Frame(balanceFrame()).balance().currencies, undefined);
   assert.equal(new Frame(balanceFrame([])).balance().currencies, undefined);
-  assert.deepEqual(new Frame(balanceFrame(undefined, {})).balance(), { used: 1, free: 2, total: 3, upnl: 4, coins: {}, currencies: {} });
+  assert.deepEqual(new Frame(balanceFrame(undefined, {})).balance(), { used: 1, free: 2, total: 3, upnl: 4, currencies: {} });
   const currencyOnly = new Frame(balanceFrame(undefined, currencies)).balance();
   assert.deepEqual(currencyOnly.currencies, currencies);
-  assert.deepEqual(currencyOnly.coins, {});
+  assert.equal(currencyOnly.coins, undefined);
   const coins = [{ base: 'BTC', amount: 0.1, notional: 5000 }];
   const buffer = balanceFrame(coins, currencies);
   const transferred = structuredClone(buffer, { transfer: [buffer] });

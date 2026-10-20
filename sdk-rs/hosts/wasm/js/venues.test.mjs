@@ -6,6 +6,10 @@ import { loadEngine } from './engine.node.mjs';
 
 const require = createRequire(import.meta.url);
 const aliases = {
+  coinbase: ['coinbase', 'coinbasespot'],
+  polymarket: ['polymarket'],
+  grvt: ['grvt'],
+  breakoutprop: ['breakoutprop'],
   phemex: ['phemex'],
   paradex: ['paradex'],
   apexomni: ['apexomni'],

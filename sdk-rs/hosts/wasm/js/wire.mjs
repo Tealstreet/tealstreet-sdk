@@ -16,6 +16,8 @@ export const SECTION = {
   STATUS: 10,
   FILLS: 11,
   SETTINGS: 12,
+  PREDICTION_MARKETS: 13,
+  PREDICTION_HOLDINGS: 14,
 };
 
 export const NONE = 0xffffffff;
@@ -157,6 +159,37 @@ export class Frame {
     };
   }
 
+  /** Optional outcome identity/signing metadata, keyed by current market index. */
+  predictionMarkets() {
+    const section = this.first(SECTION.PREDICTION_MARKETS);
+    if (!section) return undefined;
+    const { buffer } = this;
+    const count = this.view.getUint32(section.offset, true);
+    const market = new Uint32Array(buffer, section.offset + 4, count);
+    const refs = new Uint32Array(buffer, section.offset + 4 + count * 4, count * 6);
+    const flags = new Uint32Array(buffer, section.offset + 4 + count * 28, count);
+    const tickSize = new Float64Array(buffer, align8(section.offset + 4 + count * 32), count);
+    return { count, market, flags, tickSize,
+      conditionId: (i) => this.string(refs[i * 6]),
+      outcome: (i) => this.string(refs[i * 6 + 1]),
+      question: (i) => this.string(refs[i * 6 + 2]),
+      description: (i) => this.string(refs[i * 6 + 3]),
+      endDate: (i) => this.string(refs[i * 6 + 4]),
+      slug: (i) => this.string(refs[i * 6 + 5]),
+    };
+  }
+
+  /** Optional holding settlement flags; an empty table clears previous flags. */
+  predictionHoldings() {
+    const section = this.first(SECTION.PREDICTION_HOLDINGS);
+    if (!section) return undefined;
+    const count = this.view.getUint32(section.offset, true);
+    return { count,
+      market: new Uint32Array(this.buffer, section.offset + 4, count),
+      flags: new Uint32Array(this.buffer, section.offset + 4 + count * 4, count),
+    };
+  }
+
   /** Tickers, replacing any earlier table: `market[i]` and one column per field. */
   tickers() {
     const section = this.first(SECTION.TICKERS);
@@ -262,21 +295,24 @@ export class Frame {
       const base = this.string(refs[i]);
       Object.defineProperty(coins, base, { value: { base, amount: amounts[i], notional: notionals[i] }, enumerable: true, configurable: true });
     }
-    const currencyOffset = at + count * 16;
-    if (currencyOffset >= section.offset + section.length) return { used, free, total, upnl, coins };
-    const currencyCount = new Uint32Array(this.buffer, currencyOffset, 1)[0];
-    const currencyRefs = new Uint32Array(this.buffer, currencyOffset + 4, currencyCount);
-    const currencyAt = align8(currencyOffset + 4 + currencyCount * 4);
-    const currencyValues = new Float64Array(this.buffer, currencyAt, currencyCount * 4);
+    const tail = at + count * 16;
+    if (tail >= section.offset + section.length) return { used, free, total, upnl, coins };
+    const n = new Uint32Array(this.buffer, tail, 1)[0];
+    const flags = new Uint32Array(this.buffer, tail + 4, 1)[0];
+    const names = new Uint32Array(this.buffer, tail + 8, n);
+    const data = align8(tail + 8 + n * 4);
+    const totals = new Float64Array(this.buffer, data, n);
+    const available = new Float64Array(this.buffer, data + n * 8, n);
+    const held = new Float64Array(this.buffer, data + n * 16, n);
+    const unrealized = new Float64Array(this.buffer, data + n * 24, n);
     const currencies = {};
-    for (let i = 0; i < currencyCount; i++) {
-      const currency = this.string(currencyRefs[i]);
-      Object.defineProperty(currencies, currency, {
-        value: { used: currencyValues[i], free: currencyValues[currencyCount + i], total: currencyValues[currencyCount * 2 + i], upnl: currencyValues[currencyCount * 3 + i] },
+    for (let i = 0; i < n; i++) {
+      Object.defineProperty(currencies, this.string(names[i]), {
+        value: { total: totals[i], free: available[i], used: held[i], upnl: unrealized[i] },
         enumerable: true, configurable: true,
       });
     }
-    return { used, free, total, upnl, coins, currencies };
+    return { used, free, total, upnl, ...(flags & 1 ? {} : { coins }), currencies };
   }
 
   status() {

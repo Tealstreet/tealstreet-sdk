@@ -1,3 +1,3 @@
-export type VenueFamily = 'phemex' | 'paradex' | 'apexomni' | 'kraken' | 'asterdex' | 'kucoin' | 'backpack' | 'binance' | 'bingx' | 'bitget' | 'bitrue' | 'blofin' | 'bybit' | 'cryptocom' | 'hyperliquid' | 'lighter' | 'mexc' | 'orderly' | 'okx' | 'weex' | 'woo';
+export type VenueFamily = 'coinbase' | 'polymarket' | 'grvt' | 'breakoutprop' | 'phemex' | 'paradex' | 'apexomni' | 'kraken' | 'asterdex' | 'kucoin' | 'backpack' | 'binance' | 'bingx' | 'bitget' | 'bitrue' | 'blofin' | 'bybit' | 'cryptocom' | 'hyperliquid' | 'lighter' | 'mexc' | 'orderly' | 'okx' | 'weex' | 'woo';
 /** Rejects unsupported names before loading an engine. */
 export function venueFamily(venue: string): VenueFamily;

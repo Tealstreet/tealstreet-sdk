@@ -12,6 +12,8 @@ export const SECTION: {
   STATUS: 10;
   FILLS: 11;
   SETTINGS: 12;
+  PREDICTION_MARKETS: 13;
+  PREDICTION_HOLDINGS: 14;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -62,6 +64,23 @@ export type MarketTable = { count: number; flags: Uint32Array } & Columns<Market
   base(i: number): string;
   quote(i: number): string;
 };
+export interface PredictionMarketTable {
+  count: number;
+  market: Uint32Array;
+  flags: Uint32Array;
+  tickSize: Float64Array;
+  conditionId(i: number): string;
+  outcome(i: number): string;
+  question(i: number): string;
+  description(i: number): string;
+  endDate(i: number): string;
+  slug(i: number): string;
+}
+export interface PredictionHoldingTable {
+  count: number;
+  market: Uint32Array;
+  flags: Uint32Array;
+}
 export interface TickerIdentity { id: string; symbol: string }
 export type TickerTable = { count: number; market: Uint32Array; identity?(i: number): TickerIdentity } & Columns<TickerField>;
 export interface BookRows {
@@ -125,6 +144,8 @@ export class Frame {
   readonly time: number;
   string(index: number): string | undefined;
   markets(): MarketTable | undefined;
+  predictionMarkets(): PredictionMarketTable | undefined;
+  predictionHoldings(): PredictionHoldingTable | undefined;
   tickers(): TickerTable | undefined;
   tickerDeltas(): Float64Array | undefined;
   books(): Generator<BookRows>;

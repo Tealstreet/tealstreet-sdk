@@ -10,8 +10,16 @@ import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { parseRequestJson } from './request-json.mjs';
-import { fixBlofinAccount, fixWeexConditionals, fixPhemexAccount, fixLighterFills, fixLighterCommands, fixKrakenOutput } from './known-ts-fixes.mjs';
+import {
+  fixBlofinAccount,
+  fixWeexConditionals,
+  fixPhemexAccount,
+  fixLighterFills,
+  fixLighterCommands,
+  fixKrakenOutput,
+} from './known-ts-fixes.mjs';
 import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
+import { fixCoinbase, COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
@@ -155,6 +163,62 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  breakoutprop: {
+    // Public polling, duplicate quote levels and the cancellation precondition
+    // are fixed in the TS reference. Native tests pin safety corrections; no
+    // account economics or request values are replaced by this entry.
+    notes: [
+      'Select exact account code/suffix instead of a substring that can trade another account.',
+      'Fence concurrent old-session 401s behind the newer login generation.',
+      'Retain native positionCode so same-symbol lots are not silently collapsed by DefaultStore.',
+      'Validate selected portfolio identity and publish sections atomically after parsing.',
+      'Read documented top-level limitPrice/stopPrice while retaining legacy leg-price payloads.',
+      'Fence stale portfolio reads behind acknowledged writes.',
+      'Public-only sessions poll quotes; synthetic books contain one placeholder level per side.',
+      'Placement returns the SDK string-array order ID contract rather than a raw native number.',
+      'Send the standard If-Match precondition on cancellation; retain ACK identity for immediate cancellation.',
+      'Reject silently ignored attached protections, unsupported trigger sources, close flags and maxSlippagePct before any batch write.',
+      'Reject unsafe amendments after partial fills or competing order changes.',
+    ],
+  },
+  // Paired TS fixes: retain both rolling-volume sides and open price across
+  // ticker deltas; derive quote volume/change from current last; accept native
+  // empty-string clears and nanosecond funding timestamps in either JSON form.
+  // Rust also anchors sequences from subscribe ACKs and isolates candle intervals.
+  // Private reads preserve zero free collateral, exact native IDs/timestamps and
+  // CROSS margin metadata; failed/malformed/stale reads never clear live state.
+  // Successful revision-matching empty snapshots remove ghosts and retain
+  // tombstones against delayed stream events. Session code 1000 refreshes once
+  // even when delivered in an HTTP-200 error envelope.
+  // Orders use exact EIP-712 integers, distinct reducing bracket children,
+  // native symbol-cancel filters and remaining quantity on partial-fill amend.
+  // Conditional replacement retains native execution price separately from
+  // its trigger; mapped orders keep explicit client IDs. Refreshed cookies
+  // agree with proxy-session headers and reconnect the private socket.
+  // The private server ping receives pong rather than being ignored.
+  // Rust also refuses replacement after observed execution/lifecycle progress
+  // or stale cancellation proof, rechecking deferred/resigned dispatches.
+  grvt() {},
+  polymarket() {
+    // Reference repairs (not output normalization): preserve initial array books,
+    // every sorted absolute depth change, dynamic ticks and event watermarks;
+    // use complete Gamma keyset discovery and interval-minute sampled candles.
+    // Native regressions additionally pin: one fill per owned execution across
+    // settlement statuses, zero resolution price, failed/stale snapshot guards,
+    // reported partial batch IDs, partially matched GTC acknowledgements, and
+    // coherent final-fill cancel proofs with replacement leaves rounded down.
+    // Share sizing uses financial half-up precision, correcting TS toFixed's
+    // binary midpoint artifact; JavaScript formatting is never emulated.
+    // Unbounded history supplies the API max selector; upper-only and zero-wire
+    // start timestamps reject explicitly. Paired cumulative/execution evidence
+    // and association-covered final reads fence amend races and missing fields.
+    // Authoritative order removals cannot be reopened by delayed stream frames.
+    // Unsupported history contracts fail explicitly instead of empty success.
+  },
+  // Independent documented payload oracle; paired public spot reference repairs
+  // leave the real TS Store/worker serialization and measured CPU/memory intact.
+  coinbase: (ts) => fixCoinbase(ts, tapeRecords),
+  coinbasespot: (ts) => fixCoinbase(ts, tapeRecords),
   phemex(ts) {
     // Independent execution/cumulative-size/flat-settings oracle from taped venue rows.
     if (ts.account) fixPhemexAccount(ts.account, tapeRecords);
@@ -774,12 +838,16 @@ for (let run = 0; run < runs; run++) {
   // KNOWN_TS_FIXES: KuCoin TS has no futures history implementations. The
   // synthetic tape declares independent documented query expectations; never
   // derive this reference from the Rust result.
-  if (values.venue === 'kucoin') tapeRecords.filter((r) => r.type === 'command').forEach((record, index) => {
-    if (record.expected !== undefined) {
-      if (!['fetchFills', 'fetchOrderHistory', 'fetchIncome', 'fetchPublicTrades'].includes(record.op)) throw new Error('KuCoin expected oracle is restricted to missing TS query methods');
-      ts.commands[index] = { ok: record.expected };
-    }
-  });
+  if (values.venue === 'kucoin')
+    tapeRecords
+      .filter((r) => r.type === 'command')
+      .forEach((record, index) => {
+        if (record.expected !== undefined) {
+          if (!['fetchFills', 'fetchOrderHistory', 'fetchIncome', 'fetchPublicTrades'].includes(record.op))
+            throw new Error('KuCoin expected oracle is restricted to missing TS query methods');
+          ts.commands[index] = { ok: record.expected };
+        }
+      });
   if (!sameCommandResults(ts.commands, rust.commands))
     differences.push(`command results: ts=${JSON.stringify(ts.commands)} rust=${JSON.stringify(rust.commands)}`);
   normalizeBingxPublic(ts);
@@ -853,10 +921,18 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
-if (venue.family === 'orderly') console.log(`(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`);
+if (venue.family === 'orderly')
+  console.log(
+    `(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`,
+  );
 if (values.venue.startsWith('okx'))
   console.log(
     `(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`,
+  );
+
+if (venue.family === 'coinbase')
+  console.log(
+    `(documented Coinbase corrections: ${COINBASE_TS_FIXES.length}; native JWT and independent oracles checked)`,
   );
 
 const failures = [...differences];

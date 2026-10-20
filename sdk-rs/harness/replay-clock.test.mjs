@@ -4,6 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import { ReplayClock } from './tape.mjs';
 import { venueOf } from './venues.mjs';
+import { deterministicReplay } from './polling.mjs';
 
 const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
 const clockSource = source.slice(source.indexOf('const clockStart = '), source.indexOf('const config = '));
@@ -43,21 +44,21 @@ test('missing or nonfinite recorded epochs preserve the real clock', () => {
   }
 });
 
-test('only MEXC, Bitrue and Orderly public replays install the virtual timer clock in either runtime', () => {
+test('polling and scoped MEXC, Bitrue and Orderly public replays share virtual clocks in either runtime', () => {
   const predicate = source.match(/^const publicReplayClock = .*;$/m)?.[0];
   assert.ok(predicate);
   const constructors = [...source.matchAll(/const clock = publicReplayClock \? new ReplayClock\(metadata\?\.epoch \?\? Date\.now\(\)\) : undefined;/g)];
   assert.equal(constructors.length, 2, 'both actual runtime constructors share the scoped predicate');
   for (const name of ['binance', 'bybit', 'okx', 'cryptocom', 'weex', 'bingx', 'mexc', 'blofin',
-    'backpack', 'bitget', 'hyperliquid', 'bitrue', 'woo', 'lighter', 'orderly', 'tealstreet-dex', 'woofi']) {
+    'backpack', 'bitget', 'hyperliquid', 'bitrue', 'woo', 'lighter', 'orderly', 'tealstreet-dex', 'woofi', 'breakoutprop', 'coinbase', 'grvt', 'polymarket']) {
     for (const isPrivate of [false, true]) {
-      const venue = { orderlyProtocol: ['orderly', 'tealstreet-dex', 'woofi'].includes(name) };
+      const venue = { rust: name, polling: name === 'breakoutprop', orderlyProtocol: ['orderly', 'tealstreet-dex', 'woofi'].includes(name) };
       for (const constructor of constructors) {
         const clock = vm.runInNewContext(`${predicate}\n${constructor[0]}\nclock`, {
-          values: { venue: name }, venue, isPrivate, metadata: { epoch: 123 },
+          deterministicReplay, values: { venue: name }, venue, isPrivate, metadata: { epoch: 123 },
           ReplayClock: class { constructor(epoch) { this.epoch = epoch; } },
         });
-        const expected = !isPrivate && (name === 'mexc' || name === 'bitrue' || venue.orderlyProtocol);
+        const expected = name === 'breakoutprop' || (!isPrivate && (name === 'mexc' || name === 'bitrue' || venue.orderlyProtocol));
         assert.equal(Boolean(clock), expected, `${name} private=${isPrivate}`);
         if (clock) assert.equal(clock.epoch, 123);
       }
@@ -71,7 +72,7 @@ test('recorded metadata options and testnet preserve credential and explicit con
     venue: { options: { testnet: false, applicationId: 'venue' },
       publicOptions: { key: 'public-key' }, replayCredentials: { key: 'private-key', secret: 'private-secret' } },
     metadata: { options: { applicationId: 'recorded', testnet: false, key: 'metadata-key' }, testnet: true },
-    config, isPrivate, values: { venue: 'orderly' },
+    config, isPrivate, deterministicReplay, values: { venue: 'orderly' },
   });
   for (const isPrivate of [false, true]) {
     const options = run(isPrivate);
@@ -97,7 +98,7 @@ test('both Bitrue replay clocks activate subscribed fallback depth after its pro
   const subscribe = (channel) => JSON.stringify({ event: 'sub', params: { channel } });
   for (const constructor of constructors) {
     const clock = vm.runInNewContext(`${predicate}\n${constructor[0]}\nclock`, {
-      values: { venue: 'bitrue' }, venue, isPrivate: false,
+      deterministicReplay, values: { venue: 'bitrue' }, venue, isPrivate: false,
       metadata: { epoch: 1700000000000 }, Date, ReplayClock,
     });
     assert.ok(clock, 'actual runtime clock selection must drive the Bitrue fallback timer');

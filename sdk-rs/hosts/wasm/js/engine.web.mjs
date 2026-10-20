@@ -5,6 +5,10 @@ import { venueFamily } from './venues.mjs';
 
 function importEngine(family) {
   switch (family) {
+    case 'coinbase': return import('../pkg/web/coinbase/safe_cex_wasm.js');
+    case 'polymarket': return import('../pkg/web/polymarket/safe_cex_wasm.js');
+    case 'grvt': return import('../pkg/web/grvt/safe_cex_wasm.js');
+    case 'breakoutprop': return import('../pkg/web/breakoutprop/safe_cex_wasm.js');
     case 'phemex': return import('../pkg/web/phemex/safe_cex_wasm.js');
     case 'paradex': return import('../pkg/web/paradex/safe_cex_wasm.js');
     case 'apexomni': return import('../pkg/web/apexomni/safe_cex_wasm.js');

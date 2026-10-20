@@ -26,6 +26,7 @@ vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
       }
 
       start = () => '';
+      accountId = () => undefined;
       command = () => '';
       takeFrame = () => undefined;
       snapshotFrame = () => {

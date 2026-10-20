@@ -51,7 +51,7 @@ export class EngineHost {
     if (this.disposed) return Promise.reject(new Error('engine disposed'));
     this.drainMessages();
     if (this.disposed) return Promise.reject(new Error('engine disposed'));
-    const reply = command.op === 'setTickerSymbols' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
+    const reply = command.op === 'setTickerSymbols' || command.op === 'setTickInterval' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
@@ -97,6 +97,13 @@ export class EngineHost {
     this.drainMessages();
     if (this.disposed) throw new Error('engine disposed');
     return this.engine.snapshotFrame(this.transport.now()).buffer;
+  }
+
+  accountId() {
+    if (this.disposed) throw new Error('engine disposed');
+    this.drainMessages();
+    if (this.disposed) throw new Error('engine disposed');
+    return this.engine.accountId?.();
   }
 
   dispose() {

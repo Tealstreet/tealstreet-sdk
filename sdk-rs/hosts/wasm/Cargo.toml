@@ -9,7 +9,33 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 profiling = []
-default = ["venue-paradex", "venue-phemex", "venue-apexomni", "venue-kraken", "venue-asterdex", "venue-kucoin", "venue-orderly", "venue-bitrue", "venue-lighter", "venue-woo", "venue-backpack", "venue-binance", "venue-bingx", "venue-bitget", "venue-blofin", "venue-bybit", "venue-cryptocom", "venue-hyperliquid", "venue-mexc", "venue-okx", "venue-weex"]
+default = [
+    "venue-backpack",
+    "venue-binance",
+    "venue-bingx",
+    "venue-bitget",
+    "venue-blofin",
+    "venue-bybit",
+    "venue-cryptocom",
+    "venue-hyperliquid",
+    "venue-mexc",
+    "venue-okx",
+    "venue-weex",
+    "venue-bitrue",
+    "venue-lighter",
+    "venue-woo",
+    "venue-orderly",
+    "venue-asterdex",
+    "venue-kucoin",
+    "venue-kraken",
+    "venue-apexomni",
+    "venue-paradex",
+    "venue-phemex",
+    "venue-coinbase",
+    "venue-polymarket",
+    "venue-grvt",
+    "venue-breakoutprop",
+]
 venue-backpack = ["dep:safe-cex-venue-backpack"]
 venue-binance = ["dep:safe-cex-venue-binance"]
 venue-bingx = ["dep:safe-cex-venue-bingx"]
@@ -21,24 +47,53 @@ venue-hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
 venue-mexc = ["dep:safe-cex-venue-mexc"]
 venue-okx = ["dep:safe-cex-venue-okx"]
 venue-weex = ["dep:safe-cex-venue-weex"]
-
 venue-bitrue = ["dep:safe-cex-venue-bitrue"]
 venue-lighter = ["dep:safe-cex-venue-lighter"]
 venue-woo = ["dep:safe-cex-venue-woo"]
-
 venue-orderly = ["dep:safe-cex-venue-orderly"]
-
 venue-asterdex = ["dep:safe-cex-venue-asterdex"]
 venue-kucoin = ["dep:safe-cex-venue-kucoin"]
-
 venue-kraken = ["dep:safe-cex-venue-kraken"]
-
 venue-apexomni = ["dep:safe-cex-venue-apexomni"]
-
 venue-paradex = ["dep:safe-cex-venue-paradex"]
 venue-phemex = ["dep:safe-cex-venue-phemex"]
+venue-coinbase = ["dep:safe-cex-venue-coinbase"]
+venue-polymarket = ["dep:safe-cex-venue-polymarket"]
+venue-grvt = ["dep:safe-cex-venue-grvt"]
+venue-breakoutprop = ["dep:safe-cex-venue-breakoutprop"]
+
+# Keep landing feature names available to direct Cargo callers.
+backpack = ["venue-backpack"]
+binance = ["venue-binance"]
+bingx = ["venue-bingx"]
+bitget = ["venue-bitget"]
+blofin = ["venue-blofin"]
+bybit = ["venue-bybit"]
+cryptocom = ["venue-cryptocom"]
+hyperliquid = ["venue-hyperliquid"]
+mexc = ["venue-mexc"]
+okx = ["venue-okx"]
+weex = ["venue-weex"]
+bitrue = ["venue-bitrue"]
+lighter = ["venue-lighter"]
+woo = ["venue-woo"]
+orderly = ["venue-orderly"]
+asterdex = ["venue-asterdex"]
+kucoin = ["venue-kucoin"]
+kraken = ["venue-kraken"]
+apexomni = ["venue-apexomni"]
+paradex = ["venue-paradex"]
+phemex = ["venue-phemex"]
+coinbase = ["venue-coinbase"]
+polymarket = ["venue-polymarket"]
+grvt = ["venue-grvt"]
+breakoutprop = ["venue-breakoutprop"]
 
 [dependencies]
+safe-cex-venue-breakoutprop = { path = "../../venues/breakoutprop", optional = true }
+safe-cex-venue-grvt = { workspace = true, optional = true }
+safe-cex-venue-polymarket = { path = "../../venues/polymarket", optional = true }
+safe-cex-venue-coinbase = { path = "../../venues/coinbase", optional = true }
 safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }
 safe-cex-venue-phemex = { workspace = true, optional = true }
 safe-cex-venue-apexomni = { path = "../../venues/apexomni", optional = true }

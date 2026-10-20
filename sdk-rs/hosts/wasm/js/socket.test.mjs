@@ -240,3 +240,20 @@ test('unsupported binary does not report another close after a queued text actio
   assert.equal(host.sockets.size, 0);
   host.dispose();
 });
+
+test('existing Coinbase text sockets preserve their private role and opt out of binary ingress', () => {
+  const received = [];
+  let handlers;
+  const host = new EngineHost({
+    wsMessage: (...args) => { received.push(args); return ''; },
+  }, {
+    now: () => 42,
+    connect: (_url, value) => { handlers = value; return { close() {} }; },
+  }, {}, { batchMessages: false });
+  host.execute({ op: 'wsConnect', socket: 10, url: 'wss://advanced-trade-ws-user.coinbase.com', channel: 'private' });
+  assert.equal(handlers.binary, false);
+  assert.equal(handlers.channel, 'private');
+  handlers.onMessage('{"channel":"heartbeats","sequence_num":0,"events":[]}');
+  assert.deepEqual(received, [[10, '{"channel":"heartbeats","sequence_num":0,"events":[]}', 42]]);
+  host.dispose();
+});

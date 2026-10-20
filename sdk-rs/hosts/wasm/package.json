@@ -198,6 +198,38 @@
     "./node/paradex": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/paradex/safe_cex_wasm.js"
+    },
+    "./web/coinbase": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/coinbase/safe_cex_wasm.js"
+    },
+    "./node/coinbase": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/coinbase/safe_cex_wasm.js"
+    },
+    "./web/polymarket": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/polymarket/safe_cex_wasm.js"
+    },
+    "./node/polymarket": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/polymarket/safe_cex_wasm.js"
+    },
+    "./web/grvt": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/grvt/safe_cex_wasm.js"
+    },
+    "./node/grvt": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/grvt/safe_cex_wasm.js"
+    },
+    "./web/breakoutprop": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/breakoutprop/safe_cex_wasm.js"
+    },
+    "./node/breakoutprop": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/breakoutprop/safe_cex_wasm.js"
     }
   },
   "scripts": {

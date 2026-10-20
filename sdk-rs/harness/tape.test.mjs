@@ -1246,7 +1246,13 @@ test('venue socket keys preserve bullet tokens while normalizing generated conne
   const urlKey = (value) => canonicalUrl(value, new Set(), venue);
   const tape = new Tape([], venue);
   let received;
-  tape.connect('wss://bullet.test/socket?token=public&connectId=runtime', () => {}, (text) => { received = text; });
+  tape.connect(
+    'wss://bullet.test/socket?token=public&connectId=runtime',
+    () => {},
+    (text) => {
+      received = text;
+    },
+  );
   await new Promise(setImmediate);
   const socket = await tape.socketFor('wss://bullet.test/socket?token=public&connectId=recorded', undefined, 0);
   socket.onMessage('depth');
@@ -1262,7 +1268,11 @@ test('recorded welcomes establish readiness once without consuming business fram
   ];
   const tape = new Tape(records, { startupMessage: (r) => JSON.parse(r.text).type === 'welcome' });
   const observed = [];
-  tape.connect(url, () => observed.push('open'), (text) => observed.push(JSON.parse(text).type));
+  tape.connect(
+    url,
+    () => observed.push('open'),
+    (text) => observed.push(JSON.parse(text).type),
+  );
   const frames = await tape.play(undefined, async () => {
     await new Promise(setImmediate);
     assert.deepEqual(observed, ['open', 'welcome']);
@@ -1274,32 +1284,47 @@ test('recorded welcomes establish readiness once without consuming business fram
 
 test('startup replay never invents a welcome or pulls one past business traffic', async () => {
   const url = 'wss://bullet.test/endpoint?token=recorded';
-  for (const rows of [[], [
-    { type: 'ws', t: 1, url, text: '{"type":"message"}' },
-    { type: 'ws', t: 2, url, text: '{"type":"welcome"}' },
-  ]]) {
+  for (const rows of [
+    [],
+    [
+      { type: 'ws', t: 1, url, text: '{"type":"message"}' },
+      { type: 'ws', t: 2, url, text: '{"type":"welcome"}' },
+    ],
+  ]) {
     const tape = new Tape(rows, { startupMessage: (r) => JSON.parse(r.text).type === 'welcome' });
     const observed = [];
-    tape.connect(url, () => {}, (text) => observed.push(text));
+    tape.connect(
+      url,
+      () => {},
+      (text) => observed.push(text),
+    );
     await new Promise(setImmediate);
     assert.deepEqual(observed, []);
   }
 });
 
-
 test('KuCoin shared Tape binds signed headers, caller IDs, body types and response stages', () => {
   const venue = venueOf('kucoin');
   const url = 'https://api-futures.kucoin.com/api/v1/orders';
   const body = JSON.stringify({ symbol: 'XBTUSDTM', clientOid: 'caller-exact', size: '2' });
-  const tape = new Tape([
-    { type: 'command', op: 'placeOrders', orders: [{ clientOrderId: 'caller-exact' }] },
-    { type: 'http', method: 'POST', url, requestBody: body, status: 200, body: '{}', availableAfter: 10 },
-  ], venue, true);
+  const tape = new Tape(
+    [
+      { type: 'command', op: 'placeOrders', orders: [{ clientOrderId: 'caller-exact' }] },
+      { type: 'http', method: 'POST', url, requestBody: body, status: 200, body: '{}', availableAfter: 10 },
+    ],
+    venue,
+    true,
+  );
   const headers = (payload) => {
     const timestamp = String(Date.now());
     const hmac = (value) => createHmac('sha256', 'replay-secret').update(value).digest('base64');
-    return { 'KC-API-KEY': 'replay-key', 'KC-API-KEY-VERSION': '2', 'KC-API-TIMESTAMP': timestamp,
-      'KC-API-PASSPHRASE': hmac('replay-passphrase'), 'KC-API-SIGN': hmac(timestamp + 'POST/api/v1/orders' + (payload ?? '')) };
+    return {
+      'KC-API-KEY': 'replay-key',
+      'KC-API-KEY-VERSION': '2',
+      'KC-API-TIMESTAMP': timestamp,
+      'KC-API-PASSPHRASE': hmac('replay-passphrase'),
+      'KC-API-SIGN': hmac(timestamp + 'POST/api/v1/orders' + (payload ?? '')),
+    };
   };
   tape.time = 9;
   assert.equal(tape.respond('POST', url, body, headers(body)).status, 599);
@@ -1320,21 +1345,30 @@ test('KuCoin shared Tape audits the recorded welcome, topics and JSON pong acros
   const url = endpoint + '?token=public-token&connectId=recorded';
   const topic = '/contractMarket/snapshot:XBTUSDTM';
   const records = [
-    { type: 'http', method: 'POST', url: 'https://api-futures.kucoin.com/api/v1/bullet-public', status: 200,
-      body: JSON.stringify({ code: '200000', data: { token: 'public-token', instanceServers: [{ endpoint }] } }) },
+    {
+      type: 'http',
+      method: 'POST',
+      url: 'https://api-futures.kucoin.com/api/v1/bullet-public',
+      status: 200,
+      body: JSON.stringify({ code: '200000', data: { token: 'public-token', instanceServers: [{ endpoint }] } }),
+    },
     { type: 'ws', t: 1, url, socket: 0, text: '{"type":"welcome"}' },
     { type: 'ws', t: 2, url, socket: 0, text: JSON.stringify({ type: 'message', topic }) },
   ];
   const tape = new Tape(records, venue, false, 500, 'rust');
   const observed = [];
-  const socket = tape.connect(endpoint + '?token=public-token&connectId=runtime', () => {}, (text) => {
-    const message = JSON.parse(text);
-    observed.push(message);
-    if (message.type === 'welcome') {
-      tape.send(socket, JSON.stringify({ type: 'subscribe', topic, privateChannel: false }));
-      tape.send(socket, '{"type":"ping","id":"heartbeat"}');
-    }
-  });
+  const socket = tape.connect(
+    endpoint + '?token=public-token&connectId=runtime',
+    () => {},
+    (text) => {
+      const message = JSON.parse(text);
+      observed.push(message);
+      if (message.type === 'welcome') {
+        tape.send(socket, JSON.stringify({ type: 'subscribe', topic, privateChannel: false }));
+        tape.send(socket, '{"type":"ping","id":"heartbeat"}');
+      }
+    },
+  );
   const ticks = [];
   const frames = await tape.play((t) => ticks.push(t));
   await new Promise(setImmediate);
@@ -1351,30 +1385,55 @@ test('startup welcomes match socket ordinals and cannot bypass recorded closes',
   const venue = { startupMessage: (r) => JSON.parse(r.text).type === 'welcome' };
   const tape = new Tape([{ type: 'ws', t: 1, url, socket: 1, text: '{"type":"welcome"}' }], venue);
   const seen = [];
-  tape.connect(url, () => {}, () => seen.push(0));
+  tape.connect(
+    url,
+    () => {},
+    () => seen.push(0),
+  );
   await new Promise(setImmediate);
   assert.deepEqual(seen, []);
-  tape.connect(url, () => {}, () => seen.push(1));
+  tape.connect(
+    url,
+    () => {},
+    () => seen.push(1),
+  );
   await new Promise(setImmediate);
   assert.deepEqual(seen, [1]);
-  const closed = new Tape([
-    { type: 'close', t: 0, url, socket: 0 },
-    { type: 'ws', t: 1, url, socket: 0, text: '{"type":"welcome"}' },
-  ], venue);
-  closed.connect(url, () => {}, () => assert.fail('welcome bypassed close'));
+  const closed = new Tape(
+    [
+      { type: 'close', t: 0, url, socket: 0 },
+      { type: 'ws', t: 1, url, socket: 0, text: '{"type":"welcome"}' },
+    ],
+    venue,
+  );
+  closed.connect(
+    url,
+    () => {},
+    () => assert.fail('welcome bypassed close'),
+  );
   await new Promise(setImmediate);
 });
 
 test('factory keeps command stage, response time, headers and generated-ID validation independent', () => {
   const url = 'https://api.bitget.com/api/v2/mix/order/modify-order';
-  const response = (requestBody, extras) => ({ type: 'http', method: 'POST', url, requestBody, status: 200, body: '{\"code\":\"00000\"}', ...extras });
+  const response = (requestBody, extras) => ({
+    type: 'http',
+    method: 'POST',
+    url,
+    requestBody,
+    status: 200,
+    body: '{\"code\":\"00000\"}',
+    ...extras,
+  });
   const stagedVenue = {
     rust: 'bitget',
     checkRequest: (_method, _url, _body, headers) => headers?.auth === 'fixture',
   };
-  const tape = createTape([
-    response({ orderId: '1', newClientOid: 'expected' }, { afterCommand: 2, availableAfter: 100 }),
-  ], stagedVenue, true);
+  const tape = createTape(
+    [response({ orderId: '1', newClientOid: 'expected' }, { afterCommand: 2, availableAfter: 100 })],
+    stagedVenue,
+    true,
+  );
   const body = { orderId: '1', newClientOid: 'fresh' };
   const headers = { auth: 'fixture' };
   tape.commandIndex = 1;
@@ -1396,11 +1455,17 @@ test('missing recorded welcome keeps readiness bounded and wrong tokens never ma
   const url = 'wss://bullet.test/socket?token=public';
   const venue = { startupMessage: (record) => JSON.parse(record.text).type === 'welcome' };
   const tape = new Tape([], venue, false, 25);
-  tape.connect(url, () => {}, () => assert.fail('invented welcome'));
-  await assert.rejects(tape.play(undefined, () => new Promise(() => {})), /Replay startup/);
+  tape.connect(
+    url,
+    () => {},
+    () => assert.fail('invented welcome'),
+  );
+  await assert.rejects(
+    tape.play(undefined, () => new Promise(() => {})),
+    /Replay startup/,
+  );
   await assert.rejects(tape.socketFor(url.replace('public', 'private')), /socket/);
 });
-
 
 {
 const URL = 'https://example.test/order';
@@ -1822,6 +1887,65 @@ test('legacy sockets keep subscription, delivery and close behavior without corr
   assert.equal(tape.invalidSignatures, 0);
 });
 
+test('Coinbase same-URL sockets retain exact channel and product scope across batches and unsubscribe', async () => {
+  const url = 'wss://advanced-trade-ws.coinbase.com';
+  const tape = new Tape([], VENUES.coinbase, false, 20);
+  const receivedA = [],
+    receivedB = [];
+  const a = tape.connect(
+    url,
+    () => {},
+    (text) => receivedA.push(JSON.parse(text)),
+  );
+  const b = tape.connect(
+    url,
+    () => {},
+    (text) => receivedB.push(JSON.parse(text)),
+  );
+  await new Promise(setImmediate);
+  const send = (socket, channel, product_ids, type = 'subscribe') =>
+    tape.send(socket, JSON.stringify({ type, channel, product_ids }));
+  send(a, 'level2', ['BTC-USD', 'ETH-USD']);
+  send(a, 'heartbeats', []);
+  send(b, 'level2', ['SOL-USD']);
+  send(b, 'candles', ['ETH-USD']);
+  const frame = (channel, product) => ({
+    url,
+    text: JSON.stringify({
+      channel,
+      sequence_num: 0,
+      events: [{ type: 'snapshot', product_id: product, updates: [] }],
+    }),
+  });
+  for (const product of ['BTC-USD', 'ETH-USD', 'SOL-USD']) {
+    const record = frame('l2_data', product);
+    const socket = await tape.socketFor(url, record.text);
+    assert.equal(socket, product === 'SOL-USD' ? b : a);
+    tape.deliver(socket, record.text);
+  }
+  const candle = frame('candles', 'ETH-USD');
+  const candleSocket = await tape.socketFor(url, candle.text);
+  assert.equal(candleSocket, b);
+  tape.deliver(candleSocket, candle.text);
+  assert.deepEqual(
+    receivedA.map((r) => r.events[0].product_id),
+    ['BTC-USD', 'ETH-USD'],
+  );
+  assert.deepEqual(
+    receivedB.map((r) => [r.channel, r.events[0].product_id]),
+    [
+      ['l2_data', 'SOL-USD'],
+      ['candles', 'ETH-USD'],
+    ],
+  );
+  send(a, 'level2', ['ETH-USD'], 'unsubscribe');
+  assert.equal(await tape.socketFor(url, frame('l2_data', 'BTC-USD').text), a);
+  assert.equal(await tape.socketFor(url, candle.text), b);
+  await assert.rejects(tape.socketFor(url, frame('l2_data', 'ETH-USD').text), /replay timeout/);
+  tape.close(a);
+  await assert.rejects(tape.socketFor(url, frame('l2_data', 'BTC-USD').text), /replay timeout/);
+  tape.close(b);
+});
 
 test('wait markers advance virtual timers and onTick without sockets or commands, including Bitget', async () => {
   const clock = new ReplayClock(1000);
@@ -1832,16 +1956,22 @@ test('wait markers advance virtual timers and onTick without sockets or commands
     tape.deliverFrame = () => assert.fail('wait delivered a Bitget frame');
     tape.respond = () => assert.fail('wait performed an HTTP request');
     const observed = [];
-    const count = await tape.play((time) => observed.push(['tick', time]), undefined,
-      () => assert.fail('wait executed a command'), clock,
-      () => setTimeout(() => observed.push(['timer']), 10));
+    const count = await tape.play(
+      (time) => observed.push(['tick', time]),
+      undefined,
+      () => assert.fail('wait executed a command'),
+      clock,
+      () => setTimeout(() => observed.push(['timer']), 10),
+    );
     assert.equal(count, 1);
     assert.equal(tape.time, 50);
     assert.equal(Date.now(), 1050);
     assert.deepEqual(observed, [['timer'], ['tick', 50]]);
     assert.equal(tape.commandIndex, 0);
     assert.deepEqual(tape.results, []);
-  } finally { clock.restore(); }
+  } finally {
+    clock.restore();
+  }
 });
 
 test('paced waits observe real timer work without socket traffic or extra commands', async () => {
@@ -1851,9 +1981,16 @@ test('paced waits observe real timer work without socket traffic or extra comman
   let fired = false;
   const ticks = [];
   const before = performance.now();
-  const count = await tape.play((time) => ticks.push(time), undefined,
-    () => assert.fail('wait executed a command'), undefined,
-    () => setTimeout(() => { fired = true; }, 5));
+  const count = await tape.play(
+    (time) => ticks.push(time),
+    undefined,
+    () => assert.fail('wait executed a command'),
+    undefined,
+    () =>
+      setTimeout(() => {
+        fired = true;
+      }, 5),
+  );
   assert(performance.now() - before >= 25);
   assert.equal(fired, true);
   assert.equal(count, 1);

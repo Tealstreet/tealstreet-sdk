@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
-import { memoryMetricErrors, retainedMemory } from './memory.mjs';
+import { baselineBeforeSetup, memoryMetricErrors, retainedMemory } from './memory.mjs';
 
 // Evaluate the actual measurement function without starting a fixture replay.
 const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
@@ -32,9 +32,10 @@ test('optional Rust sampling starts after baseline and stops after CPU cutoff be
   const events = [];
   const { startCpuProfile } = await import('./cpu-profile.mjs');
   const rust = source.indexOf('async function runRust');
-  const start = source.indexOf('  const heapBefore = await baseline();', rust);
+  const start = source.indexOf('  const cpuSampler = ', rust);
+  const setup = source.slice(source.indexOf('  const heapBefore = await baselineBeforeSetup(', rust), source.indexOf("  const { EngineHost }", rust));
   const end = source.indexOf('    host.start();', start);
-  const startup = source.slice(start, end).replace("(await import('./cpu-profile.mjs')).startCpuProfile", 'startCpuProfile');
+  const startup = (setup + source.slice(start, end)).replace("(await import('./cpu-profile.mjs')).startCpuProfile", 'startCpuProfile');
   for (const enabled of [false, true]) {
     events.length = 0;
     let samples = 0;
@@ -56,14 +57,14 @@ test('optional Rust sampling starts after baseline and stops after CPU cutoff be
           writeProfile: async () => {},
         });
       },
-      retainedMemory,
+      retainedMemory, baselineBeforeSetup, initializeReplay: async () => events.push('initialize'),
     };
     const begun = await vm.runInNewContext(`(async () => { ${startup}\nreturn { cpuSampler, cpuStart, wallStart }; } finally {} })()`, context);
     const measure = vm.runInNewContext(`${measureSource}\nmeasure`, context);
     await measure(begun.cpuStart, begun.wallStart, { heapUsed: 1000, arrayBuffers: 200 },
       () => { events.push('WASM'); return 100; }, undefined, begun.cpuSampler);
     assert.equal(samples, enabled ? 1 : 0);
-    assert.deepEqual(events, ['baseline', ...(enabled ? ['Profiler.start'] : []), 'processStart', 'threadStart', 'wall',
+    assert.deepEqual(events, ['baseline', 'initialize', ...(enabled ? ['Profiler.start'] : []), 'processStart', 'threadStart', 'wall',
       'processCutoff', 'threadCutoff', 'wall', ...(enabled ? ['Profiler.stop'] : []), 'baseline', 'WASM']);
   }
 });
@@ -71,7 +72,7 @@ test('optional Rust sampling starts after baseline and stops after CPU cutoff be
 test('a failed Rust measurement window still stops the local sampler', async () => {
   const events = [];
   const error = new Error('replay failed');
-  const start = source.indexOf('  const heapBefore = await baseline();', source.indexOf('async function runRust'));
+  const start = source.indexOf('  const cpuSampler = ', source.indexOf('async function runRust'));
   const end = source.indexOf('  const protocolErrors = tape.audit?.errors() ?? [];', start);
   const window = source.slice(start, end).replace("(await import('./cpu-profile.mjs')).startCpuProfile", 'startCpuProfile');
   await assert.rejects(vm.runInNewContext(`(async () => { ${window} })()`, {
@@ -88,7 +89,7 @@ test('a failed Rust measurement window still stops the local sampler', async () 
 test('sampling cleanup retains a simultaneous replay error before the write error', async () => {
   const replayError = new Error('replay failed');
   const cleanupError = new Error('profile write failed');
-  const start = source.indexOf('  const heapBefore = await baseline();', source.indexOf('async function runRust'));
+  const start = source.indexOf('  const cpuSampler = ', source.indexOf('async function runRust'));
   const end = source.indexOf('  const protocolErrors = tape.audit?.errors() ?? [];', start);
   const window = source.slice(start, end).replace("(await import('./cpu-profile.mjs')).startCpuProfile", 'startCpuProfile');
   await assert.rejects(vm.runInNewContext(`(async () => { ${window} })()`, {
