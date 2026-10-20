@@ -26,6 +26,7 @@ import { fixBinanceSpotFills, fixBinanceFilledStatus } from './binance-protocol.
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
 import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
+import { compareCoinbaseSpotMidpoints } from './coinbase-spot-midpoints.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -1049,7 +1050,14 @@ for (let run = 0; run < runs; run++) {
       `HTTP write sequence run ${run + 1}: ts=${JSON.stringify(tsWrites)} rust=${JSON.stringify(rustWrites)}`,
     );
   compare('market', ts.markets, rust.markets);
-  compare('ticker', ts.tickers, rust.tickers);
+  // Prove cosmetic spot-estimate midpoints against native decimal inputs.
+  // Neither output is rewritten; private and financial comparisons stay exact.
+  const midpoints = !isPrivate && ['coinbase', 'coinbasespot'].includes(values.venue)
+    ? compareCoinbaseSpotMidpoints({ venue: values.venue, records: tapeRecords, ts, rust })
+    : undefined;
+  if (midpoints?.equivalent)
+    console.log(`(Coinbase public spot decimal midpoints run ${run + 1}: ${JSON.stringify(midpoints.exceptions)})`);
+  else compare('ticker', ts.tickers, rust.tickers);
   for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
     if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
       differences.push(`book ${symbol} differs`);
