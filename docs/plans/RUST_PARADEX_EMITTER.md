@@ -1,0 +1,50 @@
+# Paradex and exchange listener audit repairs
+
+Branch `feat/rust-paradex-emitter`, based on landing `c44f22bd8e`.
+Task: `.aimux/plans/paradex-and-emitter.md`; spec/process:
+`RUST_REWRITE.md`, `VENUE_PORT_BRIEF.md`, production-impact rule in
+`RUST_AUDITS.md`. Full automatic execution, no TS venue deletion.
+
+## Phases
+
+1. Listener isolation: retain TinyEmitter API and delivery semantics, catch each
+   subscriber failure, visibly report its cause without recursive failure, and
+   prove later subscribers receive the same event for TS and Rust accounts.
+2. Public/private data: re-verify blank summary/position numbers and malformed
+   SBE handling. Coordinate startup/row tolerance with codex-u1pmrg; avoid
+   duplicating its repairs. Keep valid account state and healthy sockets usable.
+3. Trading/errors: Error-level failed child protection; continue independent
+   placement operations and retain accepted IDs with visible per-order errors;
+   preserve venue rejection details; serialize leverage as a JSON integer.
+   Preflight remains atomic, failed entries skip their children, ambiguous writes
+   never retry. Coordinate bridge error delivery with codex-c6nf4w.
+4. Gates/landing: regressions for each surviving finding, independent review at
+   each phase; native venue tests/format/Clippy/bans, SDK tests/typecheck/lint,
+   WASM build/Clippy and Binance/Paradex private replay. Public output/CPU/memory
+   gates run in CI on committed fixtures; no local CPU admission wait. Open PR
+   into `feat/rust-rewrite`, post adversarial correctness reviews, fix/repeat,
+   merge only on green CI, then cut a fresh follow-up branch.
+
+## Risks and verification
+
+- Keep once/off/context, listener mutation and nested emit behavior intact.
+  An error/log listener throwing must still allow its peers and cannot recurse.
+- Partial batch responses can contain both accepted IDs and rejections. Correlate
+  accepted IDs to caller identities and retain complete preflight checks.
+  Command return shape stays the established array of successful venue IDs;
+  visible Error notices carry per-order failures, with rejection on total failure.
+- Inspect current routing/signing/error contracts before changes. No full
+  request/response dumps or signed diagnostics. Account failures retain last-good
+  state; optional blank values must not discard economically valid positions.
+- Each phase includes a plan audit, failure reproduction, focused verification,
+  independent sub-agent bug review, repairs and a stable commit. Record evidence
+  here and in the PR; no generated reports or profiler output are committed.
+
+## Progress
+
+- Fresh branch created from fetched landing. Initial worktree setup could not
+  find Corepack; retry with the configured Node22 PATH passed frozen install.
+- Re-verified placement stop/lost-ID path, Warning-level child failure, generic
+  rejection messages and float leverage against current source. Phase1 shared
+  emitter implementation and independent plan audit delegated; phase2 read-only
+  audit delegated. Coordination requests sent to the two named lanes.
