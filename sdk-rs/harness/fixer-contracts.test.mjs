@@ -130,6 +130,13 @@ test('primitive request/subscription array edits have explicit permissions', () 
   assert.ok(audit('binance', { requests: ['GET a'] }, (output) => { output.requests = []; }).errors.length);
 });
 
+test('MEXC may add expected subscriptions but never drop an observed one', () => {
+  const added = audit('mexc', { subscriptions: ['b', 'c'] }, (output) => { output.subscriptions = ['a', 'b', 'c']; });
+  assert.deepEqual(added.errors, []);
+  assert.ok(audit('mexc', { subscriptions: ['a', 'b'] }, (output) => { output.subscriptions = ['a']; }).errors.length);
+  assert.ok(audit('mexc', { requests: ['GET a'] }, (output) => { output.requests = []; }).errors.length);
+});
+
 test('reconstructed fill rows permit only their declared historical leaves', () => {
   const result = audit('phemex', account(), (output) => {
     output.account.fills = [{ id: 'b', symbol: 'ETHUSDT', side: 'sell', amount: 2, price: 20 }];

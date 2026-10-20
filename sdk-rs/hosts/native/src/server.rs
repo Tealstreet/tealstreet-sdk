@@ -652,6 +652,7 @@ fn command_id(command: &mut Command) -> Option<&mut u32> {
         | Command::FetchOrderBook { command, .. }
         | Command::SetStpMode { command, .. }
         | Command::FetchLeverage { command, .. }
+        | Command::FetchMaxLeverage { command, .. }
         | Command::Query { command, .. }
         | Command::FetchCandles { command, .. } => Some(command),
         Command::SetTickerSymbols { .. }

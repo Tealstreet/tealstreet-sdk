@@ -83,6 +83,8 @@ export const FIXER_CONTRACTS = deepFreeze({
   bybitspot: contract([
     ...bybit, 'markets[].precision.amount', 'markets[].limits.amount.max',
   ], [...requestArrays, ...subscriptionArrays]),
+  // Expected TS feed set gains only the documented all-contract mini ticker.
+  mexc: contract(['subscriptions[]'], [{ path: 'subscriptions', add: true, reorder: true }]),
   blofin: contract(['account.positions[].marginSize', 'account.balance.used', 'account.balance.upnl']),
   weex: contract(['account.orders[].type', 'account.orders[].price']),
   phemex: contract([
