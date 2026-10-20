@@ -95,7 +95,9 @@ yarn test           # Vitest
 - Axios `config.timeout` is one deadline for the complete tunnel request, not
   only the post-send response wait. Token retrieval, socket/time sync,
   authentication, simulation, and response handling all consume the same
-  budget. When it expires, the adapter rejects with
+  budget. `config.signal` cancels only its request, including token waits,
+  without closing a shared connection or cancelling another request's refresh.
+  When the deadline expires, the adapter rejects with
   `TradeTunnelTimeoutError` and must not transmit the now-stale request.
 - A `Bad` authentication state is connection-scoped. Concurrent Axios requests
   share one refresh/token-send attempt per `HOWWebSocket` through the adapter's
@@ -104,14 +106,26 @@ yarn test           # Vitest
   waits under its own complete-request deadline; if it joined an attempt owned
   by a shorter-deadline request, it may elect a new attempt rather than inherit
   the other request's `TradeTunnelTimeoutError` context. Non-timeout refresh
-  failures remain shared and propagate to every joined caller.
+  failures remain shared and propagate to every joined caller. A disposed
+  adapter's typed `TradeTunnelDisposedError` is also owner-scoped: surviving
+  adapters sharing the default HOW connection elect another refresh instead
+  of inheriting that disposal.
 - TradeTunnel can auto-authenticate backend-whitelisted client IPs by sending an
   unsolicited successful `rpc.auth` frame after connect. The Axios adapter must
   honor an already-`Good` socket before fetching a JWT; otherwise trusted
   headless tools block on token acquisition even though the server already
   admitted them. Non-whitelisted connections retain the normal JWT flow.
 - Browser uses native WebSocket and sends its own UA; Node.js/Bun must use a
-  constructor path that accepts headers.
+  constructor path that accepts headers. Workers pass their fetch-upgrade
+  constructor through `CreateAxiosHttpOverWebsocketAdapterOptions.WebSocket`
+  and the fourth `RelayWebSocket` constructor argument, preserving required
+  WAF upgrade headers and raw binary frames. An injected HOW adapter owns its
+  regional clients; its `dispose()` cancels pending requests and closes those
+  clients without touching the default runtime singletons.
+- Engine Node hosts inject the header-capable constructor from `nativeTransport`
+  into HOW and relay, including in pure ESM. It resolves `ws` beside the host's
+  declared dependency through `createRequire`; do not rely on bundled dynamic
+  `require` shims to load a header-capable socket.
 - Short-lived Node tools that touch HOW should call `disposeHOWWebSockets()`
   before exit. The SG/JA HOW clients are module-singletons, so exchange-level
   disposal alone does not close their sockets/timers.

@@ -29,7 +29,7 @@ fn startup() -> (
     let business = initial
         .iter()
         .find_map(|a| match a {
-            Action::WsConnect { socket, url } if url.ends_with("/business") => Some(*socket),
+            Action::WsConnect { socket, url, .. } if url.ends_with("/business") => Some(*socket),
             _ => None,
         })
         .unwrap();
@@ -47,7 +47,7 @@ fn startup() -> (
     let private = pending
         .iter()
         .find_map(|a| match a {
-            Action::WsConnect { socket, url } if url.ends_with("/private") => Some(*socket),
+            Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(*socket),
             _ => None,
         })
         .unwrap();
@@ -320,7 +320,7 @@ fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
     let socket = out
         .iter()
         .find_map(|a| match a {
-            Action::WsConnect { socket, url } if url.ends_with("/private") => Some(*socket),
+            Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(*socket),
             _ => None,
         })
         .unwrap();

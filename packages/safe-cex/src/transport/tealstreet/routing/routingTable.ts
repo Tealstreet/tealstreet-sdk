@@ -3,6 +3,7 @@ import type { RoutingTable } from './types';
 
 import { isTokyoEgress } from '@tealstreet/http-over-websocket/src/egressRegion';
 import { exchangeMetadata } from '../../../exchangeMetadata';
+import { BASE_WS_PRIVATE_UTA_URL } from '../../../exchanges/bitget/bitget.types';
 
 // THE declarative routing table. Every value here was previously hardcoded and
 // scattered (getPrivateProxy's regex, the HOW TOKYO_EGRESS list, ~18 per-exchange
@@ -106,8 +107,14 @@ const okxeuWs: WsGroup = {
 };
 const bitgetWs: WsGroup = {
   // bitget.ws-secondary-public reuses the same public fallback host as ws-public.
-  public: { kind: 'fallbackOnly', fallback: WS.bitgetPublic },
-  private: { kind: 'fallbackOnly', fallback: WS.bitgetPrivate },
+  public: { kind: 'fallbackOnly', fallback: WS.bitgetPublic, initialSilentConnects: 1 },
+  private: {
+    kind: 'fallbackOnly',
+    fallback: WS.bitgetPrivate,
+    initialSilentConnects: 1,
+    ignoredMessages: ['pong'],
+    directUrls: [BASE_WS_PRIVATE_UTA_URL],
+  },
 };
 const coinbaseWs: WsGroup = { private: { kind: 'proxyConditional', host: WS.coinbase } };
 const bybitBrazilPrivateWs = {
@@ -167,12 +174,7 @@ const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
 // bybitinverse, bybitspot, and bybitdemo (extends BybitExchange {}). HyroTrader
 // is Bybit-compatible but direct to a first-party simulator, so it intentionally
 // stays out of this list.
-const HOW_REGION_CONDITIONAL: ExchangeName[] = [
-  'bybit',
-  'bybitdemo',
-  'bybitinverse',
-  'bybitspot',
-];
+const HOW_REGION_CONDITIONAL: ExchangeName[] = ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot'];
 
 // The set of exchanges is enumerated exactly once, at the type level (ExchangeName)
 // and at runtime by exchangeMetadata's keys — which TypeScript pins to ExchangeName

@@ -63,7 +63,7 @@ pub struct Account {
     pub uta: bool,
     pub detected: bool,
     pub authenticated: bool,
-    pub fallback: bool,
+    pub needs_recovery: bool,
     poll: Option<TimerId>,
     probe_retry: Option<TimerId>,
     probe_retries: u8,
@@ -1269,7 +1269,7 @@ impl BitgetFutures {
             if self.account.last_payload <= since {
                 self.account.degraded = true;
                 if !self.account.uta {
-                    self.account.fallback = true;
+                    self.account.needs_recovery = true;
                 }
                 cx.log(LogLevel::Warning, "Bitget private stream has no authenticated payload after a write; reconciling and reconnecting");
                 self.refresh_positions(cx);

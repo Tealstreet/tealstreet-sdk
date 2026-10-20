@@ -25,6 +25,7 @@ import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
+import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
@@ -154,6 +155,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   start = async () => {
+    assertEngineAccountRouting(this.options);
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
@@ -166,7 +168,7 @@ export class RustEngineExchange extends BaseExchange {
     const { key, secret, passphrase, testnet, applicationId, vault, hyperliquidBuilder, enableSpotMarkets } =
       this.options;
     const publicDataOnly = this.isPublicDataOnly;
-    const transport = engineTransport();
+    const transport = createEngineTransport(this.name, this.options, engineTransport());
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
       JSON.stringify({
@@ -185,16 +187,7 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.host = new EngineHost(
       engine,
-      this.name === 'backpack'
-        ? {
-            webSocketHeaders: transport.webSocketHeaders,
-            now: virtualClock.getCurrentTimeMs,
-            connect: transport.connect.bind(transport),
-            request: transport.request.bind(transport),
-            setTimeout: transport.setTimeout.bind(transport),
-            clearTimeout: transport.clearTimeout.bind(transport),
-          }
-        : transport,
+      this.name === 'backpack' ? { ...transport, now: virtualClock.getCurrentTimeMs } : transport,
       {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,

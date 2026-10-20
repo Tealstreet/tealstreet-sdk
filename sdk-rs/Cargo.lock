@@ -3615,12 +3615,15 @@ dependencies = [
 name = "safe-cex-native"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "flate2",
  "futures-util",
  "reqwest",
  "rustls",
  "safe-cex-engine",
  "safe-cex-venue-binance",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-tungstenite",
 ]

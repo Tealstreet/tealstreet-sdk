@@ -37,4 +37,6 @@ export type HOWRegion = 'JA' | 'SG';
 export interface CreateAxiosHttpOverWebsocketAdapterOptions {
   customParser?: (str: string) => any;
   region?: HOWRegion;
+  /** Host-provided, header-capable socket (for example a Workers fetch upgrade). */
+  WebSocket?: typeof WebSocket;
 }

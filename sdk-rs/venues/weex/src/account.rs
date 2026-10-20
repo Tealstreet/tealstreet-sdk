@@ -218,8 +218,11 @@ impl WeexFutures {
     }
     fn connect_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(credentials) = &self.credentials {
-            self.account.socket =
-                Some(cx.connect_with_headers(PRIVATE_WS, credentials.ws_headers(cx.now)));
+            self.account.socket = Some(cx.connect_with_headers_channel(
+                PRIVATE_WS,
+                credentials.ws_headers(cx.now),
+                safe_cex_engine::SocketChannel::Private,
+            ));
             self.account.last_received = cx.now;
             self.account.watchdog = Some(cx.set_timer(5_000.0));
         }

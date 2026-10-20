@@ -32,4 +32,3 @@ pub const UTA_CANCEL_STRATEGY: &str = "/api/v3/trade/cancel-strategy-order";
 pub const UTA_SET_LEVERAGE: &str = "/api/v3/account/set-leverage";
 pub const UTA_SET_MODE: &str = "/api/v3/account/set-hold-mode";
 pub const ORDER_DETAIL: &str = "/api/v2/mix/order/detail";
-pub const PRIVATE_FALLBACK: &str = "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private";

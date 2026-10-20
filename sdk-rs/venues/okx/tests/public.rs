@@ -365,7 +365,7 @@ fn public_topics_keep_their_order_and_cap_across_market_boundaries() {
     let socket = actions(&mut e)
         .into_iter()
         .find_map(|action| match action {
-            Action::WsConnect { socket, url } if url.ends_with("/public") => Some(socket),
+            Action::WsConnect { socket, url, .. } if url.ends_with("/public") => Some(socket),
             _ => None,
         })
         .unwrap();
