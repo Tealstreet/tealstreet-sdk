@@ -507,7 +507,14 @@ KNOWN_TS_FIXES.phemex = [];
 // regressions cover these TS defects; no replay normalization is applied.
 KNOWN_TS_FIXES.paradex = [];
 // Native rejection/missing-ACK controls preserve immediate subscriptions.
-KNOWN_TS_FIXES.apexomni = ['Close rejected private logins and bound missing login ACK/account-stream readiness independently of pongs; preserve immediate subscriptions.'];
+// Balance UPnL uses the live last price like TS; with only a zero/invalid
+// placeholder quote Rust uses reported position PnL (TS prices it at 0).
+KNOWN_TS_FIXES.apexomni = [
+  'Close rejected private logins and bound missing login ACK/account-stream readiness independently of pongs; preserve immediate subscriptions.',
+  // Private tape: real quote 60000 == entry 60000 and native unrealisedPnl 0,
+  // yet TS shows balance 1300 / upnl -300 at startup checkpoints 0-2.
+  'Never price positions at an all-zero placeholder ticker: TS fabricates a startup loss (balance total/upnl) until its next balance fetch.',
+];
 KNOWN_TS_FIXES.cryptocom = ['Close rejected private authentication and enforce an independent auth deadline while preserving server heartbeat replies.'];
 KNOWN_TS_FIXES.kraken = {
     output: fixKrakenOutput,
@@ -579,10 +586,8 @@ KNOWN_TS_FIXES.kucoin = [
 // execution. Only the exact private fixture and exact legacy TS fills may be
 // corrected; the independent l/L table never reads or changes Rust output.
 KNOWN_TS_FIXES.bitrue = BITRUE_TS_FIXES;
-// Rust refuses zero/non-finite ticker-derived position losses and aggregates
-// position UPnL instead of treating sumOpenRealizedAmount as unrealized money;
-// fixBitrue zeroes only the exact snapshot's position-free currency UPnL TS
-// copied from sumOpenRealizedAmount.
+// Rust refuses zero/non-finite ticker-derived position losses; per-currency
+// UPnL is sumOpenRealizedAmount exactly as TS publishes it.
 KNOWN_TS_FIXES.bitget = {
   // Each correction is covered by documented-payload Rust tests. Normal
   // tapes still compare unchanged; these notes do not rewrite mismatches.

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { BaseCapabilityMethod, BaseExchange, isBaseCapabilityFallback } from '../../exchanges/base';
+import { BaseExchange, CAPABILITY_METHODS, type ExchangeCapabilities } from '../../exchanges/base';
 import { exchangeRegistry } from '../../exchanges/registry';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeName, ExchangeOptions } from '../../types';
@@ -46,11 +46,15 @@ const createImplementation = async (exchangeName: ExchangeName, publicDataOnly =
   return exchange;
 };
 
-const expectImplemented = (exchange: BaseExchange, method: BaseCapabilityMethod, exchangeName: ExchangeName) => {
+const expectImplemented = (
+  exchange: BaseExchange,
+  capability: keyof ExchangeCapabilities,
+  exchangeName: ExchangeName,
+) => {
   expect(
-    isBaseCapabilityFallback(exchange[method], method),
-    `${exchangeName}: metadata advertises a capability but ${method} is the inert BaseExchange fallback`,
-  ).toBe(false);
+    exchange.capabilities[capability],
+    `${exchangeName}: metadata advertises a capability but ${CAPABILITY_METHODS[capability]} is inert`,
+  ).toBe(true);
 };
 
 afterEach(() => {
@@ -83,7 +87,7 @@ describe('exchange metadata runtime non-fallback invariants', () => {
     });
 
     for (const name of advertised) {
-      expectImplemented(await createImplementation(name), 'placeOrder', name);
+      expectImplemented(await createImplementation(name), 'trading', name);
       expect(exchangeMetadata[name].features.orders, `${name}: stop capability requires order management`).toBe(true);
     }
   });
@@ -96,8 +100,8 @@ describe('exchange metadata runtime non-fallback invariants', () => {
     expect(advertised).toEqual(['bybit']);
     for (const name of advertised) {
       const exchange = await createImplementation(name);
-      for (const method of ['fetchOptionChain', 'fetchOptionExpiries', 'fetchAccountGreeks'] as const) {
-        expectImplemented(exchange, method, name);
+      for (const capability of ['optionChain', 'optionExpiries', 'accountGreeks'] as const) {
+        expectImplemented(exchange, capability, name);
       }
     }
   });
@@ -108,7 +112,7 @@ describe('exchange metadata runtime non-fallback invariants', () => {
     );
 
     for (const name of advertised) {
-      expectImplemented(await createImplementation(name, true), 'start', name);
+      expectImplemented(await createImplementation(name, true), 'startup', name);
     }
   });
 

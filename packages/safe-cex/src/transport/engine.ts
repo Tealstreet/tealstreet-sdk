@@ -7,6 +7,7 @@ import { AxiosHeaders } from 'axios';
 
 import { SINGAPORE_HOW_EGRESS, TOKYO_HOW_EGRESS } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { bindSocketMessages } from '@tealstreet/safe-cex-wasm/host';
+import { captureProxyTokenProvider, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { directTransport } from './direct';
@@ -356,6 +357,10 @@ const httpTransport = (
     : undefined;
   let disposed = false;
   const pending = new Set<AbortController>();
+  // Multi-tenant hosts bind proxy tokens to the account's async context. Engine
+  // requests start from timers, sockets and shared public feeds, so keep the
+  // provider of the context that created this account's transport.
+  const proxyTokenProvider = captureProxyTokenProvider();
   const request: Transport['request'] = async (request): Promise<HttpResponse> => {
     if (disposed) throw new Error('Engine transport disposed');
     const controller = new AbortController();
@@ -395,7 +400,12 @@ const httpTransport = (
       } as InternalAxiosRequestConfig;
       aliasHeaders(config.headers, aliases);
       const originalUrl = config.url;
-      if (route.proxied && route.authorize) await untilAborted(route.authorize(config), signal);
+      const authorize = route.proxied ? route.authorize : undefined;
+      if (authorize)
+        await untilAborted(
+          withProxyTokenProvider(proxyTokenProvider, () => authorize(config)),
+          signal,
+        );
       signal.throwIfAborted();
       // Proxy auth may add credentials or apply a declared host header alias;
       // the venue's signed packet and credential bytes remain unchanged.
@@ -419,7 +429,10 @@ const httpTransport = (
         throw new Error('Engine transport authorization changed signed request bytes or headers');
       config.timeout = Math.max(1, deadlineMs - (Date.now() - started));
       if (adapter) {
-        const response = await untilAborted(adapter(config), signal);
+        const response = await untilAborted(
+          withProxyTokenProvider(proxyTokenProvider, () => adapter(config)),
+          signal,
+        );
         // A raw tunnel response keeps native IDs and signed decimal lexemes intact.
         if (typeof response.data !== 'string') throw new Error('Engine tunnel requires a raw response body');
         cleanup();
@@ -491,6 +504,8 @@ export const createEngineTransport = (
     business: wsRoute(routing.wsBusiness),
   };
   const productRoutes = publicWsRoutes(exchange, options, provider) ?? [];
+  // Relay sockets read the proxy token on open; see `httpTransport`.
+  const proxyTokenProvider = captureProxyTokenProvider();
   const requireSocketHeaders = (url: string) => {
     const connection = provider.wsConnection(url);
     // Tealstreet's identification headers are supplied by the browser itself.
@@ -615,9 +630,11 @@ export const createEngineTransport = (
             headers: { ...connection.headers, ...headers },
             ALPNProtocols: ['http/1.1'],
           };
-          const relay = transport.WebSocket
-            ? new RelayWebSocket(target, [], relayOptions, transport.WebSocket)
-            : new RelayWebSocket(target, [], relayOptions);
+          const relay = withProxyTokenProvider(proxyTokenProvider, () =>
+            transport.WebSocket
+              ? new RelayWebSocket(target, [], relayOptions, transport.WebSocket)
+              : new RelayWebSocket(target, [], relayOptions),
+          );
           socket = relay;
           relay.addEventListener('open', () => {
             if (!closed) {
