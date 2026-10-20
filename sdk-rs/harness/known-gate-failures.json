@@ -97,10 +97,11 @@
       "ciRuns": [
         39460207328,
         39463152700,
-        39469014934
+        39469014934,
+        39475320150
       ],
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39463152700",
-      "note": "Same tape f117e75e and identical Coinbase code; TS output and final account identical across runs. Rust checkpoints 6-10 differ only by when the in-flight census at record 86 resolves. The union of both observed path sets is declared (overseer option a); follow-up (b) routed to claude-ftr6h9. CFM ES256 checkpoint 12 shows the TS-side twin (run 39469014934 vs 39463152700); its 11 extra paths are declared the same way. Both sets are tracked for removal by claude-ftr6h9 item 9."
+      "note": "Same tape f117e75e and identical Coinbase code; TS output and final account identical across runs. Rust checkpoints 6-10 differ only by when the in-flight census at record 86 resolves. The union of both observed path sets is declared (overseer option a); follow-up (b) routed to claude-ftr6h9. CFM ES256 checkpoint 12 shows the TS-side twin (run 39469014934 vs 39463152700); its 11 extra paths are declared the same way. Both sets are tracked for removal by claude-ftr6h9 item 9. INTX ES256 showed the identical 18-path Rust-side set in run 39475320150; declared the same way."
     },
     "paradexRehash20261021": {
       "ciRun": 39471227996,
@@ -16100,6 +16101,29 @@
             "checkpoint 8 account.orders[4].status",
             "checkpoint 8 account.orders[4].type",
             "checkpoint 8 account.orders[5]"
+          ]
+        },
+        {
+          "divergence": "Replay race (Coinbase INTX ES256 (same scenario as EdDSA), record 86 cancelOrders, t=9600): the Rust REST order census is still in flight when checkpoint 6 is captured. It lands either at checkpoint 6 (time-in-force populated, closed market order 40 dropped; order 13 keeps the census time-in-force until the next full refresh after checkpoint 10) or at checkpoint 7. Both states are tape-backed; TS and both final states are identical across runs. Declared so either outcome passes. Follow-up: make the census read deterministic under replay (incidentals lane claude-ftr6h9, item 9).",
+          "keys": [
+            "checkpoint 6 account.orders.length",
+            "checkpoint 6 account.orders[0].timeInForce",
+            "checkpoint 6 account.orders[1].timeInForce",
+            "checkpoint 6 account.orders[2].timeInForce",
+            "checkpoint 6 account.orders[3].timeInForce",
+            "checkpoint 6 account.orders[4].id",
+            "checkpoint 6 account.orders[4].status",
+            "checkpoint 6 account.orders[4].type",
+            "checkpoint 6 account.orders[4].side",
+            "checkpoint 6 account.orders[4].price",
+            "checkpoint 6 account.orders[4].parentId",
+            "checkpoint 6 account.orders[4].filled",
+            "checkpoint 6 account.orders[4].remaining",
+            "checkpoint 6 account.orders[5]",
+            "checkpoint 7 account.orders[1].timeInForce",
+            "checkpoint 8 account.orders[1].timeInForce",
+            "checkpoint 9 account.orders[1].timeInForce",
+            "checkpoint 10 account.orders[1].timeInForce"
           ]
         }
       ]
