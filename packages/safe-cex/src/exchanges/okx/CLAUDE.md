@@ -1118,6 +1118,12 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 ## Rust replay depth correction
 
+Price updates cache native market IDs to current ticker rows. Rebuild this
+derived map after either authoritative market or ticker table replacement;
+preserve Store's last duplicate-symbol row and known markets without tickers.
+Mark/index readiness still records those known markets for private trigger
+fallbacks. Repeated updates reuse the readiness ID instead of allocating it.
+
 Books retain every venue level. Never filter bids/asks by the last trade price:
 trades can lag book updates, so that filter permanently deletes valid liquidity.
 The Rust replay oracle includes this correction explicitly in `KNOWN_TS_FIXES`.

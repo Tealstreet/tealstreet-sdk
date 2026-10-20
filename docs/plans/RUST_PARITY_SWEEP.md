@@ -501,3 +501,25 @@ than treating the original port boundary as a waiver.
   signing/keepalive sources are unchanged from reviewed b88. Independent lookup
   repair re-review also PASS at b88, with cache and PM canonical-ID safeguards
   accepted. Final merged-source quality and gates follow this source freeze.
+
+### Final performance diagnosis and bounded OKX price indexing
+
+- Source8258 quality PASS:2562native+3doctests, native/WASM Clippy/fmt/bans;
+  root44/28/27 with7624SDKtests per target; compiled409/409 and host68/68.
+  Combined GRVT19frames/2perpetuals/5commands and all4OKXprivate gates PASS.
+- Final inverse public gate failed CPU: main TS2308.8/Rust2432.5ms and steady
+  1660.7/1821.0ms; strict output and retained memory passed. Preserve the full
+  first sequence, including per-run variation (Rustmain2536/2432/2054ms).
+  Independent diagnosis found no new public hotpath regression, but no claim
+  that variance alone explains the failure. No blind sampling or threshold change.
+- CI8258 passed36/37checks; sole Hyro steadyCPU miss5.4/5.6ms, while mainCPU,
+  correctness and memory passed. Independent review supports one unchanged
+  job control, not repeated retries. A new runtime commit instead requires
+  fresh exact-head CI; the original failure stays linked in PR comments.
+- Remove concrete OKX price-update overhead: cache native IDs to current
+  ticker rows and avoid repeated readiness ID allocations. Rebuild only after
+  either complete table commit; retain duplicate-symbol selection, missing
+  ticker readiness and underlying fanout. Numeric logic and dirty-mask writer
+  are unchanged. Four new event-driven controls cover these invariants.
+  OKX94/94, strict Clippy/fmt PASS; independent source review PASS. Rebuilt
+  public/private gates must establish actual performance; no speedup is inferred.

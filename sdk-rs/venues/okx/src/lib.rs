@@ -112,6 +112,7 @@ pub struct Okx {
     candles: HashMap<(String, String), u32>,
     products: HashMap<String, Product>,
     underlying_products: HashMap<String, Vec<String>>,
+    price_tickers: HashMap<String, Option<u32>>,
 }
 
 impl Okx {
@@ -144,6 +145,7 @@ impl Okx {
             candles: HashMap::new(),
             products: HashMap::new(),
             underlying_products: HashMap::new(),
+            price_tickers: HashMap::new(),
         }
     }
 
@@ -488,17 +490,19 @@ impl Okx {
         }
         let _ = json::each::<wire::Prices<'_>>(data.get(), |p| {
             let mut update = |id: &str| {
-                let Some(m) = cx.store.market_by_id(id) else {
+                let Some(index) = self.price_tickers.get(id).copied() else {
                     return;
                 };
-                let symbol = m.symbol.clone();
-                if channel == "mark-price" {
+                if channel == "mark-price" && !self.marks.contains(id) {
                     self.marks.insert(id.to_owned());
                 }
-                if channel == "index-tickers" {
+                if channel == "index-tickers" && !self.indexes.contains(id) {
                     self.indexes.insert(id.to_owned());
                 }
-                cx.store.update_ticker(&symbol, |t| match channel {
+                let Some(index) = index else {
+                    return;
+                };
+                cx.store.update_ticker_at(index, |t| match channel {
                     "tickers" => {
                         t.bid = num::parse(p.bid_px);
                         t.ask = num::parse(p.ask_px);
@@ -868,6 +872,7 @@ impl Venue for Okx {
                     return;
                 }
                 cx.store.set_markets(rows);
+                self.price_tickers = price_ticker_indexes(cx.store);
                 self.underlying_products.clear();
                 for market in cx.store.markets() {
                     if let Some(product) = self.products.get(&market.id) {
@@ -907,6 +912,7 @@ impl Venue for Okx {
                     return;
                 }
                 cx.store.set_tickers(rows);
+                self.price_tickers = price_ticker_indexes(cx.store);
                 self.connect(cx, PUBLIC);
                 self.connect(cx, BUSINESS);
                 self.account_start(cx);
@@ -1139,6 +1145,26 @@ impl Venue for Okx {
     }
 }
 
+fn price_ticker_indexes(store: &safe_cex_engine::Store) -> HashMap<String, Option<u32>> {
+    // Match Store's last duplicate symbol lookup, independently of either table's order.
+    let symbols: HashMap<&str, u32> = store
+        .tickers()
+        .iter()
+        .enumerate()
+        .map(|(index, ticker)| (ticker.symbol.as_str(), index as u32))
+        .collect();
+    store
+        .markets()
+        .iter()
+        .map(|market| {
+            (
+                market.id.clone(),
+                symbols.get(market.symbol.as_str()).copied(),
+            )
+        })
+        .collect()
+}
+
 #[derive(serde::Serialize)]
 struct Topic<'a> {
     channel: &'a str,
@@ -1263,4 +1289,128 @@ fn subtract_bars(end: f64, interval: &str, count: u32) -> Option<f64> {
         _ => return None,
     };
     Some(end - duration * f64::from(count))
+}
+
+#[cfg(test)]
+mod price_index_tests {
+    use super::*;
+    use safe_cex_engine::{Action, Engine, Event};
+
+    const MARKET: &str = r#"{"instId":"BTC-USDT-SWAP","instType":"SWAP","ctType":"linear","ctVal":"0.01","ctValCcy":"BTC","settleCcy":"USDT","lotSz":"0.01","tickSz":"0.1","minSz":"0.01","maxIcebergSz":"1000","maxLmtSz":"1000","maxMktSz":"1000","maxStopSz":"1000","maxTriggerSz":"1000","maxTwapSz":"1000","lever":"100"}"#;
+    fn request(e: &mut Engine<Okx>) -> safe_cex_engine::HttpRequest {
+        e.drain_actions()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .expect("seed request")
+    }
+    fn reply(e: &mut Engine<Okx>, request: safe_cex_engine::HttpRequest, rows: &str) {
+        e.handle(
+            1.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: &format!(r#"{{"code":"0","data":[{rows}]}}"#),
+                },
+            },
+        );
+    }
+    fn engine() -> Engine<Okx> {
+        Engine::new(Okx::new(Options {
+            public_data_only: true,
+            ..Options::default()
+        }))
+    }
+
+    #[test]
+    fn successful_catalog_and_ticker_commits_each_rebuild_price_identity() {
+        let mut e = engine();
+        e.store_mut().set_tickers(vec![
+            Ticker {
+                symbol: "OTHER".into(),
+                ..Ticker::default()
+            },
+            Ticker {
+                symbol: "BTCUSDT".into(),
+                ..Ticker::default()
+            },
+        ]);
+        e.start(0.0);
+        let r = request(&mut e);
+        reply(&mut e, r, MARKET);
+        assert_eq!(e.venue().price_tickers.get("BTC-USDT-SWAP"), Some(&Some(1)));
+        let r = request(&mut e);
+        reply(
+            &mut e,
+            r,
+            r#"{"instId":"BTC-USDT-SWAP","bidPx":"1","askPx":"3","last":"2","open24h":"1","volCcy24h":"4","vol24h":"5"}"#,
+        );
+        assert_eq!(e.venue().price_tickers.get("BTC-USDT-SWAP"), Some(&Some(0)));
+    }
+
+    #[test]
+    fn known_markets_without_tickers_still_record_readiness_but_unknown_ids_do_not() {
+        let mut e = engine();
+        e.start(0.0);
+        let r = request(&mut e);
+        reply(&mut e, r, MARKET);
+        let r = request(&mut e);
+        reply(&mut e, r, "");
+        assert_eq!(e.venue().price_tickers.get("BTC-USDT-SWAP"), Some(&None));
+        let socket = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, url, .. } if url.ends_with("/public") => Some(socket),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(2.0, Event::WsOpened { socket });
+        for _ in 0..2 {
+            e.handle(3.0, Event::WsMessage { socket, text: r#"{"arg":{"channel":"mark-price"},"data":[{"instId":"BTC-USDT-SWAP","markPx":"2"},{"instId":"UNKNOWN-SWAP","markPx":"3"}]}"# });
+            e.handle(3.0, Event::WsMessage { socket, text: r#"{"arg":{"channel":"index-tickers"},"data":[{"instId":"BTC-USDT","idxPx":"4"},{"instId":"UNKNOWN","idxPx":"5"}]}"# });
+        }
+        assert_eq!(e.venue().marks.len(), 1);
+        assert_eq!(e.venue().indexes.len(), 1);
+        assert!(e.venue().marks.contains("BTC-USDT-SWAP"));
+        assert!(e.venue().indexes.contains("BTC-USDT-SWAP"));
+        assert!(e.store().tickers().is_empty());
+    }
+
+    #[test]
+    fn incomplete_or_failed_catalog_does_not_publish_staged_price_identity() {
+        let mut e = engine();
+        e.start(0.0);
+        let r = request(&mut e);
+        e.handle(
+            1.0,
+            Event::HttpStart {
+                request: r.id,
+                status: 200,
+                headers: "",
+            },
+        );
+        let chunk = format!(r#"{{"code":"50113","data":[{MARKET},"#);
+        e.handle(
+            2.0,
+            Event::HttpChunk {
+                request: r.id,
+                data: chunk.as_bytes(),
+            },
+        );
+        assert!(e.venue().price_tickers.is_empty());
+        assert!(e.store().markets().is_empty());
+        e.handle(
+            3.0,
+            Event::HttpChunk {
+                request: r.id,
+                data: b"{}]}",
+            },
+        );
+        e.handle(4.0, Event::HttpEnd { request: r.id });
+        assert!(e.venue().price_tickers.is_empty());
+        assert!(e.store().markets().is_empty());
+    }
 }
