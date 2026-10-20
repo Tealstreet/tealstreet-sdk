@@ -76,3 +76,11 @@ Task: `.aimux/plans/paradex-and-emitter.md`; spec/process:
   Known TS placement bugs are declared in the harness without normalizing output.
   Lifecycle-only differences were not used as repair criteria. README's obsolete
   payload-signing rejection claim was also corrected against delegated tests.
+- Phase4 local gates PASS: release standalone Paradex WASM is 1,231,577 bytes
+  (fixed budget 1,258,291); actual WASM payload-signer tests 2/2 pass. Focused SDK
+  tests 59/59 pass. Fresh generated private replays are identical: Paradex
+  TS/Rust main 555.1/330.0ms, steady 197.6/120.1ms, retained 38.9/6.7MB;
+  Binance main 100.8/41.1ms, steady 16.3/20.2ms, retained 13.7/1.1MB.
+  Private timing is informational, not a performance admission claim. Full WASM
+  Clippy passes. Public output/CPU/memory and workspace checks remain CI gates.
+  No local public timing run or CPU-admission wait was performed.
