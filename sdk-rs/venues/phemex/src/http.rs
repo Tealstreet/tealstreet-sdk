@@ -57,7 +57,8 @@ impl PhemexPerpetuals {
     fn dispatch_http(&self, cx: &mut Cx<'_, Pending>, request: Request) {
         // Definitive lookup always targets the identity that placed the order.
         // Select and sign at dispatch, after the shared read quota permits it.
-        let primary = matches!(&request.pending, Pending::History(request) if request.is_lookup());
+        let primary = matches!(&request.pending, Pending::History(request) if request.is_lookup())
+            || matches!(&request.pending, Pending::Orders(_));
         let credentials = if request.method == Method::Get && !primary {
             self.read_credentials.as_ref().or(self.credentials.as_ref())
         } else {

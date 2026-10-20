@@ -451,3 +451,37 @@ fn trade_permission_denied_fails_the_order_without_deactivating_a_read_key() {
     );
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 31, result: Err(m) }) if m.contains("Permission denied"))));
 }
+#[test]
+fn market_entry_with_tpsl_names_the_unsupported_legs() {
+    let (mut e, _, _) = ready(false);
+    let mut o = opts("market", 99.);
+    o.take_profit = Some(110.);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 44,
+            orders: vec![opts("limit", 99.), o],
+        }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 44, result: Err(m) }) if m.contains("take-profit/stop-loss legs on a market entry"))));
+}
+#[test]
+fn market_entry_with_zero_brackets_places_only_the_entry() {
+    let (mut e, _, _) = ready(false);
+    let mut o = opts("market", 99.);
+    o.stop_loss = Some(0.);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 45,
+            orders: vec![o],
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, r#"{"error":[],"result":{"txid":["ENTRY"]}}"#);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 45, result: Ok(ids) }) if ids == r#"["ENTRY"]"#)));
+}

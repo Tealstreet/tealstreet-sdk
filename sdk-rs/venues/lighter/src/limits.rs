@@ -167,7 +167,7 @@ impl Lighter {
     ) {
         match action {
             VenueAction::FetchAccountTier => {
-                self.refresh_limits(cx);
+                // Cached only: the limits read keeps its own cadence (none at startup).
                 let tier = self
                     .limits
                     .tier

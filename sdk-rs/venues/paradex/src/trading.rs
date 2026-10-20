@@ -6,6 +6,7 @@ use crate::{
 };
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -35,7 +36,8 @@ struct Placement {
 enum Kind {
     Place {
         expected: Vec<Option<String>>,
-        child: bool,
+        /// The bracket leg this request places, `None` for an entry.
+        leg: Option<&'static str>,
         batch: bool,
     },
     Amend {
@@ -103,18 +105,6 @@ pub struct Trading {
     amend_locks: HashSet<String>,
 }
 
-fn encode(text: &str) -> String {
-    let mut output = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-            output.push(char::from(b));
-        } else {
-            use std::fmt::Write;
-            write!(output, "%{b:02X}").unwrap();
-        }
-    }
-    output
-}
 fn positive(v: f64) -> bool {
     v.is_finite() && v > 0.
 }
@@ -141,6 +131,26 @@ fn native_batch(o: &PlaceOrderOpts) -> bool {
         && o.sl_trigger_type.is_none()
         && o.close != Some(true)
         && o.time_in_force != Some(TimeInForce::FillOrKill)
+}
+/// A wrong-side leg would trigger at once or never; reject it rather than place an unprotected entry.
+fn bracket_sides(o: &PlaceOrderOpts) -> Result<(), String> {
+    let Some(entry) = o.price else {
+        return Ok(());
+    };
+    let long = o.side == OrderSide::Buy;
+    for (leg, price, above) in [
+        ("take-profit", o.take_profit, long),
+        ("stop-loss", o.stop_loss, !long),
+    ] {
+        if let Some(price) = price.filter(|&p| if above { p <= entry } else { p >= entry }) {
+            let relation = if above { "above" } else { "below" };
+            let side = if long { "buy" } else { "sell" };
+            return Err(format!(
+                "Paradex {leg} {price} must be {relation} the {side} entry price {entry}"
+            ));
+        }
+    }
+    Ok(())
 }
 fn client_id() -> Result<String, String> {
     safe_cex_crypto::uuid::uuid().map(|id| format!("ts_{id}"))
@@ -289,13 +299,14 @@ fn place_operations(
             body: Some(body),
             kind: Kind::Place {
                 expected,
-                child: false,
+                leg: None,
                 batch: true,
             },
         });
         chunk.clear();
         Ok(())
     }
+    orders.iter().try_for_each(bracket_sides)?;
     for o in orders {
         let execution = if capped(o) {
             if !o.max_slippage_pct.is_some_and(f64::is_finite)
@@ -333,24 +344,13 @@ fn place_operations(
             body: Some(serde_json::to_string(&payload).map_err(|e| e.to_string())?),
             kind: Kind::Place {
                 expected,
-                child: false,
+                leg: None,
                 batch: false,
             },
         });
-        let brackets_valid = o.price.is_none_or(|entry| match o.side {
-            OrderSide::Buy => {
-                o.take_profit.is_none_or(|p| p > entry) && o.stop_loss.is_none_or(|p| p < entry)
-            }
-            OrderSide::Sell => {
-                o.take_profit.is_none_or(|p| p < entry) && o.stop_loss.is_none_or(|p| p > entry)
-            }
-        });
-        if !brackets_valid {
-            continue;
-        }
-        for (kind, price) in [
-            (OrderType::TakeProfit, o.take_profit),
-            (OrderType::StopLoss, o.stop_loss),
+        for (kind, leg, price) in [
+            (OrderType::TakeProfit, "take-profit", o.take_profit),
+            (OrderType::StopLoss, "stop-loss", o.stop_loss),
         ] {
             if let Some(price) = price {
                 if !positive(price) {
@@ -387,7 +387,7 @@ fn place_operations(
                     body: Some(serde_json::to_string(&payload).map_err(|e| e.to_string())?),
                     kind: Kind::Place {
                         expected: vec![None],
-                        child: true,
+                        leg: Some(leg),
                         batch: false,
                     },
                 });
@@ -888,26 +888,35 @@ impl Trading {
         match result {
             Ok(ids) => job.results.extend(ids),
             Err(error) => {
-                if let Kind::Place {
-                    child, expected, ..
-                } = &request.kind
-                {
-                    cx.log(
-                        LogLevel::Error,
-                        if *child {
-                            format!("Paradex TP/SL placement failed: {error}")
-                        } else {
+                if let Kind::Place { leg, expected, .. } = &request.kind {
+                    let next_leg = match job.operations.front().map(|op| &op.kind) {
+                        Some(Kind::Place {
+                            leg: Some(next), ..
+                        }) => Some(*next),
+                        _ => None,
+                    };
+                    let message = match (leg, next_leg) {
+                        (Some(leg), Some(next)) => format!(
+                            "Paradex TP/SL {leg} placement failed: {error}; still placing the {next}"
+                        ),
+                        (Some(leg), None) => format!(
+                            "Paradex TP/SL {leg} placement failed: {error}; no other leg remains to send"
+                        ),
+                        (None, _) => {
                             format!("Paradex placement failed for client IDs {expected:?}: {error}")
-                        },
-                    );
-                    while job
-                        .operations
-                        .front()
-                        .is_some_and(|op| matches!(op.kind, Kind::Place { child: true, .. }))
-                    {
-                        job.operations.pop_front();
-                    }
-                    if !child {
+                        }
+                    };
+                    cx.log(LogLevel::Error, message);
+                    // A failed entry orphans its children; a failed child must not skip its
+                    // sibling, or a rejected TP would leave the position without its SL.
+                    if leg.is_none() {
+                        while job
+                            .operations
+                            .front()
+                            .is_some_and(|op| matches!(op.kind, Kind::Place { leg: Some(_), .. }))
+                        {
+                            job.operations.pop_front();
+                        }
                         job.errors.push(error);
                     }
                 } else {
