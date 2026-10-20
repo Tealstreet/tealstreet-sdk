@@ -10,7 +10,7 @@ import { supportedTools, tools } from './tools';
 const live: any[] = [];
 afterEach(() => live.splice(0).forEach((e) => e.dispose?.()));
 
-const construct = async (name: 'bybit' | 'binancepm') => {
+const construct = async (name: 'bybit' | 'binancepm' | 'binanceoptions') => {
   const Exchange = await exchangeRegistry[name]();
   const exchange = new Exchange(name, { key: 'k', secret: 's', publicDataOnly: true }, new DefaultStore());
   live.push(exchange);
@@ -43,6 +43,10 @@ describe('option tools', () => {
     const bybit = await construct('bybit');
     expect(names(bybit, true)).toEqual(expect.arrayContaining(OPTION_TOOLS));
     for (const name of OPTION_TOOLS) expect(names(bybit, false)).not.toContain(name);
+  });
+
+  it('lists them on an options-only exchange with options on, as readConfig sets it', async () => {
+    expect(names(await construct('binanceoptions'), true)).toEqual(expect.arrayContaining(OPTION_TOOLS));
   });
 
   it('lists none on a venue without option methods, even with options on', async () => {
