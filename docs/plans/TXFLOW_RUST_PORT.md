@@ -311,3 +311,22 @@ accepted, 347 harness tests pass on Node 24; Node 22 verification is running.
 A native limit/market batch proof verifies distinct minted cloids (13 trading
 tests pass). These are harness/test changes, with no Rust production change
 after the combined release build started.
+
+### Complete gate checkpoint before Coinbase integration
+
+All required gates pass on `59d6814c66` with Phemex merged: bans, formatting,
+workspace Clippy/tests (1,929 tests), Wasm Clippy, 347 Node 22 harness tests,
+77 Wasm wrapper tests, 60 host tests, root typecheck/lint/tests (44/28/27 tasks).
+The generated-cloid regression additionally passes the 13-test trading suite
+and venue Clippy. An over-parallelized JavaScript check hit wall-time deadlines;
+the unchanged suites pass sequentially after compilation settles.
+
+Combined-build TxFlow private replay: PASS, 35 frames, 15 commands, eight writes,
+one execution, stored caller IDs/time-in-force and both leverage rails compared.
+Combined public replay: PASS, 125 frames, 78 markets/tickers, two books,
+TS/Rust CPU 69.8/51.3 ms (1.36x), retained memory 14.0/1.9 MB (7.24x).
+Binance regressions: public PASS (873 frames, 917 markets, 783 tickers, three
+books; CPU 194.9/95.5 ms, memory 24.7/3.2 MB); private PASS (14 frames).
+
+The final fetch exposed Coinbase landing `5c0e437faf`; merge its current host,
+transport and harness changes before PR creation and repeat affected checks.
