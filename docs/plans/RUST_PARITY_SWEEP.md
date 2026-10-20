@@ -15,6 +15,8 @@ perpetuals only. Earlier mixed-product work below is historical and superseded;
 the final implementation retains exact cancellation, session and keepalive
 repairs without exposing unrequested product kinds.
 
+Final local receipts and attempt boundaries: [RUST_PARITY_SWEEP_FINAL.md](RUST_PARITY_SWEEP_FINAL.md).
+
 ## Phases and verification
 
 1. Discovery/public data: read the brief/spec and merged PR limitations;
@@ -575,3 +577,23 @@ than treating the original port boundary as a waiver.
   generic native exported-plan consumer needs no venue-specific mapping.
   Red/green258-case receipts inspected independently. Final source frozen
   after this reviewed repair; rebuild and affected root/compiled checks follow.
+
+### Final evidence and review convergence
+
+- Frozen runtime96a39f0421:71selectedreplays (33public/38private) and the
+  additional combinedGRVTprivate proof PASS. All26unique feature budgets
+  remain below1258291bytes; maximumParadex1255331. Root44/28/27tasks,
+  SDK7652per target,compiled421+host68,harness574,native2633+3doctests,
+  19venuecontrols+11integrations and strictqualitychecks PASS.
+- Initial WOOsteady and Breakoutmain CPU misses remain recorded. Independent
+  artifact/source/per-run reviews justified exactly one unchanged three-pair
+  control for each; both PASS, as did same-headCI. No input/binary/scoring
+  changes or further unchanged retries.136unique successful childsteps across
+  138actualstepattempts;72acceptedreplays across74actualattempts.
+- Independent final reconstruction review PASS validates every command, exact
+  PASS output, control count, budget, source and binding hash. Correctness
+  findings and repair re-reviews are posted onPR1340. Fullfinaltables and
+  provenance are inRUST_PARITY_SWEEP_FINAL.md; prior receipts stay historical.
+- RuntimeheadCI39/39PASS. This documentation-only checkpoint changes no
+  runtime source; wait for exact final PR-head greenCI, merge into
+  feat/rust-rewrite, then cut a fresh follow-up branch.

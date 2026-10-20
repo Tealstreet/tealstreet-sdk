@@ -1,5 +1,7 @@
 # Parity sweep final local evidence
 
+Current final receipts: [RUST_PARITY_SWEEP_FINAL.md](RUST_PARITY_SWEEP_FINAL.md).
+
 This records the completed pre-`86ed5e3d2e` landing-integration sequence.
 The later landing union and PR-review repairs require fresh affected checks;
 the progress plan records that follow-up without erasing these receipts.
