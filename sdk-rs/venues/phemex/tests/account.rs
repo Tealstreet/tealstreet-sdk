@@ -241,6 +241,39 @@ fn rest_and_ws_balance_conventions_match_across_currencies_and_pnl_signs() {
 }
 
 #[test]
+fn rest_and_account_push_publish_per_currency_balances() {
+    use safe_cex_engine::model::{Balance, CurrencyBalance};
+    let currency = |currency: &str, total: f64, used: f64, free: f64, upnl: f64| CurrencyBalance {
+        currency: currency.into(),
+        balance: Balance {
+            total,
+            used,
+            free,
+            upnl,
+        },
+    };
+    let (mut e, a, socket) = started();
+    seed(&mut e, &a);
+    let usdc = currency("USDC", 100., 19., 181., 100.);
+    assert_eq!(
+        e.store().currency_balances().unwrap(),
+        &[usdc.clone(), currency("USDT", 990., 69., 931., 10.)]
+    );
+    authenticate(&mut e, socket);
+    // The negative-used USDC row is rejected; only USDT moves.
+    ws(
+        &mut e,
+        socket,
+        r#"{"timestamp":1700000001000000000,"accounts_p":[{"currency":"USDT","accountBalanceRv":"1100","totalUsedBalanceRv":"70"},{"currency":"USDC","accountBalanceRv":"5","totalUsedBalanceRv":"-1"}]}"#,
+    );
+    assert_eq!(
+        e.store().currency_balances().unwrap(),
+        &[usdc, currency("USDT", 1090., 70., 1030., 10.)]
+    );
+    assert_eq!(e.store().balance().total, 1190.);
+}
+
+#[test]
 fn independent_currency_failure_keeps_prior_slice_and_flat_settings() {
     let (mut e, a, _) = started();
     seed(&mut e, &a);

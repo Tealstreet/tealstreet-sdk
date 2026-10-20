@@ -2,8 +2,8 @@
 //! ambiguous transport failures never cause a mutation to be retried.
 use crate::{Pending, PhemexPerpetuals};
 use safe_cex_engine::model::{
-    MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionMode,
-    PositionSide, StopTriggerType, TimeInForce,
+    MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
+    PlaceOrderOpts, PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
@@ -124,7 +124,7 @@ enum CancelResult {
 }
 
 fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: String) {
-    cx.log(LogLevel::Error, &error);
+    cx.command_error(command, &error);
     cx.done(command, Err(error));
 }
 fn query(pairs: Vec<(&str, String)>) -> String {
@@ -1044,6 +1044,16 @@ impl PhemexPerpetuals {
             return;
         }
         if let Call::Place { order, .. } = &step.call {
+            if let Some(identity) = &order.client_order_id {
+                cx.command_progress(
+                    id,
+                    vec![OrderIdentityReceipt {
+                        symbol: order.symbol.clone(),
+                        kind: OrderIdentityKind::ClientOrderId,
+                        identity: identity.clone(),
+                    }],
+                );
+            }
             cx.store.upsert_order((**order).clone());
         }
         self.dispatch(cx, Some(id), step);

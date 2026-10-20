@@ -91,7 +91,9 @@ High:
 Medium:
 - ~~Phemex cancel-all fails while any place is in flight (`phemex/src/trading.rs:806`).~~ Pending placements are fenced before resolving native cancellation targets. See [verification](RUST_ORDER_RACES.md).
   Verification found the uncertain-placement fence never cleared on Phemex (cancel-all
-  failed for the session); a post-failure `activeList` read now reconciles it.
+  failed for the session). Owner decision: Phemex cancel-all is never refused for an
+  uncertain placement; it cancels every known order at once, and after the lost write's
+  signed expiry an `activeList` read cancels any late-landed order from it.
 - ~~Cancel-all misses just-placed orders: okx, asterdex, breakoutprop, bitget, blofin, bitrue.~~ Retained acknowledgement routes, pending-placement fences and SDK attempted-symbol scopes cover the gap; Aster/Breakout acknowledgement caches already existed and were retained. See [verification](RUST_ORDER_RACES.md).
 - ~~Backpack amend replaces full size after partial fill (`backpack/src/trading.rs:411`).~~ Replacement subtracts prior and cancel-racing executions and requires definitive cancellation. See [verification](RUST_ORDER_RACES.md).
 - ~~No per-order lock between amend and cancel in most venues.~~ Shared scoped admission covers concurrent/preplanned cancel-replace adapters; existing serial-intent or explicit-lock paths remain. Binance/Bybit findings belong to their lane. See [verification](RUST_ORDER_RACES.md).
@@ -435,11 +437,18 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   market orders; spot cancel uses `C`; amend keeps TIF; PM conditional client id
   `newClientStrategyId`; PM TRIGGERED closes; PM cancel-all both endpoints;
   COIN-M rejects caller client ids; spot retired streams; depth snapshot retry.
+- Verify live (unconfirmed, no code change): a COIN-M triggered stop that keeps its
+  `orderId` after `EXPIRED` and then rests on the book might leave the row Canceled
+  and block later order snapshots; several `x=CALCULATED` liquidation partials with
+  `t=0` on one order would dedupe to the first fill (`account.rs` execution dedupe).
+  Both need a captured live packet before changing behaviour.
 
 ### Bybit family
-- High: Brazil inverse/option sockets routed to the linear host (engine
+- ~~High: Brazil inverse/option sockets routed to the linear host (engine
   transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
-  `bybit/src/lib.rs:407`).
+  `bybit/src/lib.rs:407`).~~ Fixed: browser and native hosts pick a product route
+  by native URL (`publicWsRoutes`): inverse/spot use the `bybitinverse`/`bybitspot`
+  hosts as TS does; options stay direct (no option proxy is deployed).
 - ~~High: per-coin balances never set (`account.rs:662`).~~ Fixed: `Balance.coins`
   (equity, else wallet balance; USD value, else amount) from every accepted wallet
   read, merged from stream pushes with explicit zeros; failed reads keep holdings.
@@ -464,7 +473,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 - ~~Medium: no UNIFIED retry on the wallet call.~~ Fixed: a CONTRACT read refused
   with `accountType only support UNIFIED` switches the account to UTA and retries
   once; other errors never change the account type.
-- Medium: demo reduce-only fill check missing.
+- ~~Medium: demo reduce-only fill check missing.~~ Fixed: a locally published Demo
+  reduce-only limit is checked against its executions at 1 s, 3 s and 8.25 s; a
+  complete cursor walk (20 pages, as TS) proving a full fill retires it (terminal
+  fence); otherwise, or on failure, orders are re-read after the grace. Partial,
+  failed or capped walks never prove a fill.
 - ~~Medium: Hyro tears down on one bad poll (`account.rs:1838`).~~ Fixed: a periodic
   read failing in transport or at the venue keeps the ready stream and last-good
   state and retries next tick; malformed content and initial snapshots still
@@ -762,8 +775,9 @@ No confirmed highs.
 
 ### Crypto.com
 Mostly matches TS.
-- Medium: per-coin balances (`position_balances`) dropped
-  (`cryptocom/src/account.rs:232`) — resilience lane. ~~Caller client id refused
+- Medium: ~~per-coin balances (`position_balances`) dropped
+  (`cryptocom/src/account.rs:232`)~~ — published with the aggregate (REST and
+  `user.balance`). ~~Caller client id refused
   on stop/TP orders (`trading.rs:76`).~~ Matches TS and the client-order-id
   contract (`rust.exchange.ts` rejects it before the engine); a change is a
   contract decision, not a port bug.
@@ -791,7 +805,9 @@ Mostly matches TS.
   malformed snapshot never sets loaded.
 
 ### Cross-venue: per-coin balances and snapshot starvation
-- Per-coin balances missing on Bybit, Crypto.com, ~~Bitrue~~; check every venue.
+- Per-coin balances missing on Bybit (venues-a lane), ~~Crypto.com~~, ~~Bitrue~~;
+  ~~check every venue~~: GRVT, MEXC and Phemex also dropped the per-currency
+  balances TS publishes and now set them; ApeX and Backpack publish none in TS.
 - Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
   check every venue that fences REST snapshots by stream revision.
 

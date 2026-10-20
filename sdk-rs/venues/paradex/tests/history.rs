@@ -388,3 +388,205 @@ fn zero_order_limit_means_unbounded_and_public_trade_limit_clamps_to_one() {
     let rows: Vec<serde_json::Value> = serde_json::from_str(h.result(18).unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
 }
+
+/// Pins the exact request sequence of each paged read. Paging refactors keep
+/// it; a deliberate request change updates it with its bug-fix regression.
+#[test]
+fn paged_request_sequences_are_pinned() {
+    let path = |url: &str| url.split_once("/v1").map_or(url, |(_, p)| p).to_owned();
+    let mut sent = Vec::new();
+    let mut h = private();
+    let page = |id: &str, next: Option<&str>, row: &str| {
+        let row = row
+            .replace("fill-a", id)
+            .replace(r#""id":"123""#, &format!(r#""id":"{id}""#));
+        match next {
+            Some(n) => format!(r#"{{"next":"{n}","results":[{row}]}}"#),
+            None => format!(r#"{{"results":[{row}]}}"#),
+        }
+    };
+    read(
+        &mut h,
+        1,
+        Query::Fills {
+            symbol: Some("BTC-USD-PERP".into()),
+            order_id: None,
+            from_ms: Some(1_681_375_000_000.),
+            to_ms: Some(1_681_375_200_000.),
+            limit: Some(5),
+        },
+    );
+    for (id, next) in [("f1", Some("c1")), ("f2", None)] {
+        let r = h.take("/fills?");
+        sent.push(path(&r.url));
+        h.respond(r, 200, &page(id, next, FILL));
+    }
+    assert!(h.result(1).is_ok());
+    read(
+        &mut h,
+        2,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: Some(1_681_375_000_000.),
+            to_ms: Some(1_681_375_200_000.),
+            limit: None,
+        },
+    );
+    for (id, next) in [("o1", Some("c2")), ("o2", None)] {
+        let r = h.take("/orders-history?");
+        sent.push(path(&r.url));
+        h.respond(r, 200, &page(id, next, ORDER));
+    }
+    assert!(h.result(2).is_ok());
+    read(
+        &mut h,
+        3,
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: Some(1_681_375_000_000.),
+            to_ms: Some(1_681_375_200_000.),
+            limit: None,
+        },
+    );
+    for (id, next) in [("i1", Some("c3")), ("i2", None)] {
+        let r = h.take("/fills?");
+        sent.push(path(&r.url));
+        h.respond(r, 200, &page(id, next, FILL));
+    }
+    assert!(h.result(3).is_ok());
+    assert_eq!(sent, PINNED);
+}
+
+const PINNED: [&str; 6] = [
+    "/fills?market=BTC-USD-PERP&page_size=5&start_at=1681375000000&end_at=1681375200000",
+    "/fills?market=BTC-USD-PERP&page_size=5&start_at=1681375000000&end_at=1681375200000&cursor=c1",
+    "/orders-history?market=BTC-USD-PERP&page_size=100&start_at=1681375000000&end_at=1681375200000",
+    "/orders-history?market=BTC-USD-PERP&page_size=100&start_at=1681375000000&end_at=1681375200000&cursor=c2",
+    "/fills?page_size=500&start_at=1681375000000&end_at=1681375200000",
+    "/fills?page_size=500&start_at=1681375000000&end_at=1681375200000&cursor=c3",
+];
+
+#[test]
+fn fills_by_order_id_walk_past_pages_of_other_orders() {
+    // The limit counts fills the read keeps, not raw rows before filtering.
+    let mut h = private();
+    read(
+        &mut h,
+        1,
+        Query::Fills {
+            symbol: Some("BTC-USD-PERP".into()),
+            order_id: Some("target".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(2),
+        },
+    );
+    let other = |id: &str| {
+        FILL.replace("fill-a", id)
+            .replace(r#""order_id":"123""#, r#""order_id":"other""#)
+    };
+    h.reply(
+        "/fills?",
+        &format!(
+            r#"{{"next":"c1","results":[{},{}]}}"#,
+            other("x1"),
+            other("x2")
+        ),
+    );
+    let target = FILL
+        .replace("fill-a", "t1")
+        .replace(r#""order_id":"123""#, r#""order_id":"target""#);
+    h.reply("cursor=c1", &format!(r#"{{"results":[{target}]}}"#));
+    let rows: Vec<serde_json::Value> = serde_json::from_str(h.result(1).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], "t1");
+}
+
+#[test]
+fn fills_send_their_start_bound() {
+    let mut h = private();
+    read(
+        &mut h,
+        1,
+        Query::Fills {
+            symbol: Some("BTC-USD-PERP".into()),
+            order_id: None,
+            from_ms: Some(1_681_375_000_000.),
+            to_ms: None,
+            limit: Some(5),
+        },
+    );
+    let r = h.take("/fills?");
+    assert!(r.url.contains("start_at=1681375000000"), "{}", r.url);
+}
+
+#[test]
+fn a_page_cap_with_a_pending_cursor_is_incomplete_not_partial_success() {
+    let mut h = private();
+    read(
+        &mut h,
+        1,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    for page in 0..50 {
+        let row = ORDER.replace(r#""id":"123""#, &format!(r#""id":"o{page}""#));
+        h.reply(
+            "/orders-history?",
+            &format!(r#"{{"next":"c{page}","results":[{row}]}}"#),
+        );
+    }
+    assert!(h.result(1).unwrap_err().contains("INCOMPLETE"));
+    assert!(!h.pending.iter().any(|r| r.url.contains("/orders-history?")));
+}
+
+#[test]
+fn a_limited_order_history_stops_at_its_limit_instead_of_paging_to_the_cap() {
+    let mut h = private();
+    read(
+        &mut h,
+        1,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(2),
+        },
+    );
+    let rows: Vec<String> = (0..3)
+        .map(|i| ORDER.replace(r#""id":"123""#, &format!(r#""id":"o{i}""#)))
+        .collect();
+    h.reply(
+        "/orders-history?",
+        &format!(r#"{{"next":"c1","results":[{}]}}"#, rows.join(",")),
+    );
+    let result: Vec<serde_json::Value> = serde_json::from_str(h.result(1).unwrap()).unwrap();
+    assert_eq!(result.len(), 2);
+    assert!(!h.pending.iter().any(|r| r.url.contains("/orders-history?")));
+}
+
+#[test]
+fn a_lookup_found_in_history_finishes_without_walking_more_pages() {
+    let mut h = private();
+    read(
+        &mut h,
+        10,
+        Query::OrderByClientId {
+            symbol: "BTC-USD-PERP".into(),
+            client_order_id: "caller".into(),
+        },
+    );
+    h.reply("/orders?", r#"{"results":[]}"#);
+    h.reply(
+        "/orders-history?",
+        &format!(r#"{{"next":"h2","results":[{ORDER}]}}"#),
+    );
+    let result: serde_json::Value = serde_json::from_str(h.result(10).unwrap()).unwrap();
+    assert_eq!(result["found"], true);
+    assert!(!h.pending.iter().any(|r| r.url.contains("cursor=h2")));
+}

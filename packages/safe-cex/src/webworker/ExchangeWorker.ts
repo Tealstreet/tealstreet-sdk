@@ -1,7 +1,10 @@
+import type { CommandProgress } from '@tealstreet/safe-cex-wasm/host';
+import type { SerializedCommandError } from '../commandOutcome';
 import type { Exchange } from '../exchanges/base';
 import type { PackedTickerDelta, Store } from '../store/store.interface';
 import type { ExchangeName, ExchangeOptions, OrderFillEvent, StoreData, Ticker } from '../types';
-import type { StoreWorkerPayload, StoreWorkerStorePayload } from './StoreWorkerPayload';
+import type { StoreWorkerCommandProgress, StoreWorkerPayload, StoreWorkerStorePayload } from './StoreWorkerPayload';
+import type { TwapInstance } from './twap/TwapInstance';
 
 import throttle from 'lodash/throttle';
 
@@ -24,6 +27,7 @@ import { TwapHandler } from './handlers/TwapHandler';
 import { UiStateHandler } from './handlers/UiStateHandler';
 import { UpdatePositionsHandler } from './handlers/UpdatePositionsHandler';
 import { exchangeDependentPostprocessors, independentPostprocessors } from './postProcessors/registry';
+import { twapManager } from './twap/TwapManager';
 
 type WorkerSentryControl = {
   reportKey?: string;
@@ -79,6 +83,8 @@ const splitWorkerLogExtra = (extra: Record<string, any> | undefined) => {
   return { extra: plainExtra, sentryTags, sentryExtra, suppressConsoleLog };
 };
 
+const USER_STARTED_ALGORITHMS = new Set<StoreWorkerPayload['op']>(['chaser:start', 'twap:start', 'twap:resume']);
+
 export class ExchangeWorker {
   private readonly _exchangeName: ExchangeName;
   private readonly _accountName: string;
@@ -98,6 +104,21 @@ export class ExchangeWorker {
   // concurrent startup instead of letting it race and clobber fresh state.
   private _startupToken = 0;
   private _cancelStartup: (() => void) | null = null;
+  private _generation = 0;
+  private _started = false;
+  private _stopped = false;
+  private _disposed = false;
+  private _recovering = false;
+  private _recoveryAttempted = false;
+  private _recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private _recoveryUpdateIds: StoreData['updateIds'] | undefined;
+  private _unsubscribeStore: (() => void) | null = null;
+  private readonly _ownedTwaps = new Set<TwapInstance>();
+  private readonly _publicDemand = new Map<string, StoreWorkerPayload>();
+  private readonly _pendingRequests = new Map<string, { payload: StoreWorkerPayload; generation: number }>();
+  private _pendingFailureTimer: ReturnType<typeof setTimeout> | null = null;
+  private _activeTickerSymbols: string[] = [];
+  private _latestUiState: StoreWorkerPayload | null = null;
 
   private readonly _handlerClasses = [
     OHLCVSubscriptionsHandler,
@@ -290,6 +311,8 @@ export class ExchangeWorker {
    */
   async start(): Promise<boolean> {
     const startupToken = this._startupToken;
+    const generation = ++this._generation;
+    let startupTimeout: ReturnType<typeof setTimeout> | undefined;
     const cancelledPromise = new Promise<'cancelled'>((resolve) => {
       this._cancelStartup = () => {
         resolve('cancelled');
@@ -319,10 +342,15 @@ export class ExchangeWorker {
         return false;
       }
       this._exchange = new Exchange(this._exchangeName, this._options, this._store);
+      if (this._recoveryAttempted) this._exchange.setActiveTickerSymbols(this._activeTickerSymbols);
       if (this._exchange instanceof RustEngineExchange && mainAcceptsFrames()) {
         // Main reads venue data straight from the frames; store payloads carry the rest.
         this._forwardsFrames = true;
-        this._exchange.onFrame = (frame) => this._ctx.postMessage({ op: 'frame', data: frame }, [frame]);
+        this._exchange.onFrame = (frame) => {
+          if (generation === this._generation && !this._stopped) {
+            this._ctx.postMessage({ op: 'frame', data: frame }, [frame]);
+          }
+        };
       }
 
       // When privateOnly, disable public websocket connections before start().
@@ -339,7 +367,7 @@ export class ExchangeWorker {
       const START_TIMEOUT_MS = 30_000;
       const startPromise = this._exchange.start().then(() => 'started' as const);
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(
+        startupTimeout = setTimeout(
           () => reject(new Error(`Exchange start timed out after ${START_TIMEOUT_MS / 1000}s`)),
           START_TIMEOUT_MS,
         );
@@ -357,9 +385,14 @@ export class ExchangeWorker {
 
       this._throttledStoreUpdate.cancel();
       this._storeUpdate(this._store.serialize(), { forceFullStore: true });
+      if (this._exchange?.isDisposed) return false;
+      this._started = true;
       return true;
     } catch (e) {
-      if (startupToken !== this._startupToken || this._exchange?.isDisposed) {
+      if (
+        startupToken !== this._startupToken ||
+        (this._exchange?.isDisposed && !(this._exchange instanceof RustEngineExchange && this._exchange.isEngineDead))
+      ) {
         console.warn(`Error starting exchange (disposed, suppressing): ${this._exchangeName}`, e);
         return false;
       }
@@ -369,11 +402,18 @@ export class ExchangeWorker {
       // Only bybit self-tags (BybitTradingMarketsRequestError); every other
       // venue arrived unlabelled and indistinguishable from any other worker
       // error. The phase is orthogonal to `worker_error_family` — both ride.
-      this.logError(`Error starting exchange: ${this._exchangeName}${detail}`, e, {
-        sentryTags: { worker_error_phase: 'startup' },
-      });
+      if (this._exchange instanceof RustEngineExchange && this._exchange.isEngineDead) {
+        // The adapter already emitted the fatal error. Keep the startup context
+        // without sending a second error for the same trap.
+        this.log('warn', `Error starting exchange: ${this._exchangeName}${detail}`, { worker_error_phase: 'startup' });
+      } else {
+        this.logError(`Error starting exchange: ${this._exchangeName}${detail}`, e, {
+          sentryTags: { worker_error_phase: 'startup' },
+        });
+      }
       return false;
     } finally {
+      if (startupTimeout !== undefined) clearTimeout(startupTimeout);
       if (startupToken === this._startupToken) {
         this._cancelStartup = null;
       }
@@ -705,6 +745,10 @@ export class ExchangeWorker {
     return this._exchange;
   }
 
+  get isRecovering() {
+    return this._recovering;
+  }
+
   sendSnapshot() {
     this._throttledStoreUpdate.cancel();
     if (this._exchange?.isDisposed) {
@@ -718,19 +762,45 @@ export class ExchangeWorker {
   }
 
   dispose() {
+    if (this._disposed) return;
+    this._disposed = true;
+    this._stopped = true;
+    this._started = false;
+    this._recovering = false;
+    this._generation++;
+    this._throttledStoreUpdate.cancel();
+    if (this._recoveryTimer !== null) clearTimeout(this._recoveryTimer);
+    this._recoveryTimer = null;
+    this._publicDemand.clear();
+    this._latestUiState = null;
+    this._deferInterruptedRequests({
+      message: 'Exchange disposed; interrupted operation outcomes are unknown and were not replayed.',
+      name: 'EngineDisposedError',
+      code: 'ENGINE_DISPOSED',
+    });
+    this._messageBuffer = [];
     // Bump the token so any in-flight start() observes the change after its
     // next await and bails instead of proceeding to clobber state.
     this._startupToken++;
     this._cancelStartup?.();
     this._cancelStartup = null;
-    if (this._exchange) {
-      chaserOrderManagerInstance.cleanupExchange(this._exchange);
+    try {
+      this._stopOwnedTwaps();
+      if (this._exchange) chaserOrderManagerInstance.cleanupExchange(this._exchange);
+    } finally {
+      try {
+        // Native pending-command rejections (or acknowledgements already
+        // queued) reach their original caller before the task fallback.
+        this._exchange?.dispose();
+      } finally {
+        this._clearRuntimePipeline();
+      }
     }
-    this._exchange?.dispose();
-    this._clearRuntimePipeline();
   }
 
   private _clearRuntimePipeline() {
+    this._unsubscribeStore?.();
+    this._unsubscribeStore = null;
     this._throttledStoreUpdate.cancel();
     this._handlers.forEach((handler) => handler.dispose());
     this._handlers = [];
@@ -739,6 +809,26 @@ export class ExchangeWorker {
   }
 
   handlePayload = (payload: StoreWorkerPayload) => {
+    if (payload.op === 'dispose' || payload.op === 'deactivate') {
+      this.dispose();
+      if (payload.op === 'deactivate') {
+        this._exchange = null;
+        this._ctx.postMessage({ op: 'deactivate-status', data: true });
+      }
+      return;
+    }
+    if (this._stopped) {
+      this._rejectUnavailablePayload(payload);
+      return;
+    }
+    const isDemand = this._recordPublicDemand(payload);
+    const isUiState = payload.op === 'ui:state';
+    if (isUiState) this._latestUiState = { ...payload, data: { ...payload.data } };
+    if (this._recovering || (this._exchange instanceof RustEngineExchange && this._exchange.isEngineDead)) {
+      // Subscription state is safe to retain; trading/query requests are never replayed.
+      if (!isDemand && !isUiState) this._rejectUnavailablePayload(payload);
+      return;
+    }
     if (!this._exchange) {
       // Buffer messages until exchange is initialized
       const MAX_BUFFER_SIZE = 1000;
@@ -759,6 +849,8 @@ export class ExchangeWorker {
       }
       return;
     }
+    const requestKey = this._requestKey(payload);
+    if (requestKey) this._pendingRequests.set(requestKey, { payload, generation: this._generation });
     switch (payload.op) {
       case 'store':
         this._exchange.store.update(payload.data);
@@ -784,24 +876,265 @@ export class ExchangeWorker {
           });
         }
         break;
-      case 'dispose':
-        this.dispose();
-        break;
-      case 'deactivate':
-        this.log('info', `Deactivating exchange: ${this._exchangeName}`);
-        this.dispose();
-        this._exchange = null;
-        this._clearRuntimePipeline();
-        this._ctx.postMessage({ op: 'deactivate-status', data: true });
-        break;
       case 'sayHi':
         break;
       default:
+        // TWAP construction is synchronous. Track the actual instances made by
+        // this dispatch rather than using account names in the global manager.
+        const dispatchGeneration = this._generation;
+        const previousTwaps =
+          typeof payload.op === 'string' && payload.op.startsWith('twap:')
+            ? new Set(twapManager.runningTwaps.values())
+            : null;
         for (let i = 0; i < this._handlers.length; i++) {
           this._handlers[i].handle(payload);
         }
+        if (previousTwaps) {
+          for (const twap of this._ownedTwaps) {
+            if (twapManager.getById(twap.id) !== twap) this._ownedTwaps.delete(twap);
+          }
+          for (const twap of twapManager.runningTwaps.values()) {
+            if (!previousTwaps.has(twap)) {
+              if (dispatchGeneration !== this._generation || this._recovering || this._stopped) {
+                void twap
+                  .terminate()
+                  .catch((error: unknown) => this.logError('Unable to stop interrupted TWAP.', error));
+              } else this._ownedTwaps.add(twap);
+            }
+          }
+        }
     }
   };
+
+  private _recordPublicDemand(payload: StoreWorkerPayload): boolean {
+    const book = payload.op === 'subscribeOrderBook' || payload.op === 'unsubscribeOrderBook';
+    const candle = payload.op === 'subscribeOHLCV' || payload.op === 'unsubscribeOHLCV';
+    if (!book && !candle) return false;
+    const data = payload.data;
+    if (!data || typeof data !== 'object') return true;
+    if (data.subId !== undefined && typeof data.subId !== 'string' && typeof data.subId !== 'number') return true;
+    // Unsubscribe handlers identify the stream by subId alone; the caller need
+    // not repeat its symbol or candle interval.
+    const key = JSON.stringify([book ? 'book' : 'candle', data.subId]);
+    if (payload.op.startsWith('unsubscribe')) this._publicDemand.delete(key);
+    else if (typeof data.symbol === 'string') this._publicDemand.set(key, { ...payload, data: { ...data } });
+    return true;
+  }
+
+  private _requestKey(payload: StoreWorkerPayload) {
+    if (!['callMethod', 'updatePositions', 'exec'].includes(payload.op)) return undefined;
+    const id = payload.op === 'exec' ? payload.data?.reqId : payload.data?.requestId;
+    return typeof id === 'string' || typeof id === 'number' ? JSON.stringify([payload.op, id]) : undefined;
+  }
+
+  private _replyRequestKey(message: StoreWorkerPayload) {
+    const op =
+      message.op === 'callMethod:done'
+        ? 'callMethod'
+        : message.op === 'updatePositions:done'
+          ? 'updatePositions'
+          : message.op === 'exec-result'
+            ? 'exec'
+            : undefined;
+    if (!op) return undefined;
+    const data = Array.isArray(message.data) ? message.data[0] : message.data;
+    return this._requestKey({ op, data });
+  }
+
+  private _completeRequest(message: StoreWorkerPayload) {
+    const key = this._replyRequestKey(message);
+    if (key) this._pendingRequests.delete(key);
+  }
+
+  private _forwardLateReply(message: StoreWorkerPayload, generation: number) {
+    const key = this._replyRequestKey(message);
+    const data = Array.isArray(message.data) ? message.data[0] : message.data;
+    // A completed command's correlated result belongs to its original caller,
+    // including known write IDs acknowledged just before the trap. This cannot
+    // publish state or complete a request from the replacement generation.
+    if (!key || typeof data?.success !== 'boolean' || this._pendingRequests.get(key)?.generation !== generation) return;
+    this._pendingRequests.delete(key);
+    this._ctx.postMessage(message);
+  }
+
+  private _deferInterruptedRequests(fallback: SerializedCommandError) {
+    // Explicit disposal after a trap must retain that generation's grace
+    // window, rather than erase its native command-specific interruption.
+    if (this._pendingFailureTimer !== null || !this._pendingRequests.size) return;
+    const interrupted = [...this._pendingRequests.entries()];
+    this._pendingFailureTimer = setTimeout(() => {
+      this._pendingFailureTimer = null;
+      for (const [key, request] of interrupted) {
+        if (this._pendingRequests.get(key) !== request) continue;
+        this._pendingRequests.delete(key);
+        // Only these RPC methods dispatch venue writes. An executor's text and
+        // caller IDs cannot be inferred here; actual native errors win first.
+        const method = request.payload.op === 'callMethod' ? request.payload.data?.method : undefined;
+        const details: SerializedCommandError = {
+          ...fallback,
+          ...(typeof method === 'string' && { command: method }),
+          ...(['setLeverage', 'changeMarginType', 'changePositionMode', 'scheduleCancel'].includes(method) && {
+            outcome: 'unknown' as const,
+          }),
+        };
+        this._rejectUnavailablePayload(request.payload, fallback.message, details);
+      }
+    }, 0);
+  }
+
+  private _rejectUnavailablePayload(
+    payload: StoreWorkerPayload,
+    message = 'Rust engine unavailable; operation was not replayed. Reinitialize the account if recovery failed.',
+    errorDetails?: SerializedCommandError,
+  ) {
+    if (payload.op === 'callMethod') {
+      this._ctx.postMessage({
+        op: 'callMethod:done',
+        data: {
+          requestId: payload.data?.requestId,
+          success: false,
+          result: errorDetails ?? { message, name: 'EngineUnavailableError' },
+        },
+      });
+    } else if (payload.op === 'updatePositions') {
+      this._ctx.postMessage({
+        op: 'updatePositions:done',
+        data: {
+          requestId: payload.data?.requestId,
+          success: false,
+          reason: message,
+          ...(errorDetails && { errorDetails }),
+        },
+      });
+    } else if (payload.op === 'exec') {
+      this._ctx.postMessage({
+        op: 'exec-result',
+        data: [
+          {
+            reqId: payload.data?.reqId,
+            handled: true,
+            success: false,
+            error: message,
+            ...(errorDetails && { errorDetails }),
+          },
+        ],
+      });
+    } else if (USER_STARTED_ALGORITHMS.has(payload.op)) {
+      this.logError(message, new Error(message), { payloadOp: payload.op }, false);
+    }
+    // Store sync, UI state and stop/cleanup ops have nothing left to act on; an
+    // error per routine message would toast on every symbol switch.
+  }
+
+  private _stopOwnedTwaps() {
+    for (const twap of this._ownedTwaps) {
+      void twap.terminate().catch((error: unknown) => this.logError('Unable to stop interrupted TWAP.', error));
+    }
+    this._ownedTwaps.clear();
+  }
+
+  private _invalidateReadiness() {
+    const unavailable = {
+      loaded: { markets: false, tickers: false, balance: false, orders: false, positions: false },
+      activeChasers: [],
+      activeTWAPs: [],
+    };
+    this._store.update(unavailable);
+    // Availability is host lifecycle metadata. Keep last known venue values
+    // until a replacement emits its real native empty/full snapshots.
+    this._ctx.postMessage({ op: 'store', data: unavailable });
+  }
+
+  private _handleEngineDead(error: Error) {
+    // Startup belongs to store.webworker's !started cleanup. Never race it by
+    // scheduling a replacement before that initial start has returned.
+    if (this._stopped) return;
+    // BaseExchange.dispose resets its store. Preserve the last native freshness
+    // counters before releasing it, so the replacement cannot rewind them.
+    this._recoveryUpdateIds = { ...this._store.updateIds };
+    if (!this._started || this._recovering) {
+      this._invalidateReadiness();
+      return;
+    }
+    const cannotRecover = this._recoveryAttempted || this._options.publicFeed?.mode === 'shared';
+    this._started = false;
+    this._recovering = true;
+    this._activeTickerSymbols = [...(this._exchange?.getActiveTickerSymbols() ?? [])];
+    this._deferInterruptedRequests({
+      message:
+        'Rust engine stopped; operation outcome is unknown. Reconcile the account before retrying; no operation was replayed.',
+      name: 'EngineDeadError',
+      code: 'ENGINE_DEAD',
+    });
+    // Stop TWAPs while their handler context is still current, so the final
+    // completed state reaches the main thread that persists and resumes them.
+    this._stopOwnedTwaps();
+    this._generation++;
+    this._clearRuntimePipeline();
+    if (this._exchange) {
+      chaserOrderManagerInstance.cleanupExchange(this._exchange);
+      this._exchange.dispose();
+    }
+    this._messageBuffer = [];
+    this._invalidateReadiness();
+    this.log('warn', 'Rust engine stopped; interrupted writes may have an unknown outcome and will not be replayed.', {
+      reason: error.message,
+    });
+    if (cannotRecover) {
+      this._stopped = true;
+      this._recovering = false;
+      const message =
+        this._options.publicFeed?.mode === 'shared'
+          ? 'Rust shared public feed requires a fresh provider attachment and account init after engine failure.'
+          : 'Rust engine recovery exhausted; reinitialize the account to retry.';
+      this._ctx.postMessage({ op: 'warning', data: [message] });
+      return;
+    }
+    this._recoveryAttempted = true;
+    const token = this._startupToken;
+    this._recoveryTimer = setTimeout(() => {
+      this._recoveryTimer = null;
+      void this._recoverEngine(token).catch((failure: unknown) => {
+        if (token !== this._startupToken || this._stopped) return;
+        this.dispose();
+        this.logError('Rust engine recovery failed; reinitialize the account.', failure);
+      });
+    }, 500);
+  }
+
+  private async _recoverEngine(token: number) {
+    if (token !== this._startupToken || this._stopped) return;
+    const previousUpdateIds = this._recoveryUpdateIds ?? this._store.serialize().updateIds;
+    this._store = new DefaultStore();
+    this._store.update({
+      updateIds: {
+        orders: (previousUpdateIds?.orders ?? 0) + 1,
+        positions: (previousUpdateIds?.positions ?? 0) + 1,
+      },
+    });
+    this._lastSentMarketsVersion = null;
+    this._lastSentTickersVersion = null;
+    this._lastSentTickerBaseline = null;
+    this._lastSentOrdersUpdateId = null;
+    this._lastSentPositionsUpdateId = null;
+    this._lastPayloadHadActiveChasers = false;
+    // In frame mode this is deliberately a FULL reset payload, rather than a
+    // derived-only payload, so stale balances/orders/loaded flags disappear.
+    this._ctx.postMessage({ op: 'store', data: this._sanitizeForPostMessage(this._store.serialize()) });
+    const started = await this.start();
+    if (token !== this._startupToken || this._stopped) return;
+    if (!started || this._exchange?.isDisposed) {
+      this.dispose();
+      this._ctx.postMessage({ op: 'warning', data: ['Rust engine recovery failed; reinitialize the account.'] });
+      return;
+    }
+    this._recovering = false;
+    if (this._latestUiState) this.handlePayload(this._latestUiState);
+    for (const demand of this._publicDemand.values()) this.handlePayload(demand);
+    if (this._stopped || this._exchange?.isDisposed) return;
+    this.sendSnapshot();
+    if (!this._stopped && !this._exchange?.isDisposed) this._ctx.postMessage({ op: 'ws-reconnected' });
+  }
 
   private _initializeProcessorsAndHandlers() {
     // In hosted mode, independent post-processors run client-side (ExchangeServerWorker).
@@ -817,19 +1150,56 @@ export class ExchangeWorker {
       (Cls) => new (Cls as any)(this._accountName, this._exchangeName, this._options, this._exchange!),
     );
 
+    const generation = this._generation;
+    const handlerContext = new Proxy(this._ctx, {
+      get: (target, property) =>
+        property === 'postMessage'
+          ? (...args: Parameters<Worker['postMessage']>) => {
+              if (generation === this._generation && !this._stopped) {
+                this._completeRequest(args[0]);
+                target.postMessage(...args);
+              } else {
+                this._forwardLateReply(args[0], generation);
+              }
+            }
+          : Reflect.get(target, property),
+    });
     this._handlers = this._handlerClasses.map(
       (Handler) =>
-        new Handler(this._accountName, this._exchangeName, this._exchange!, this._ctx, this._settings, this._metadata),
+        new Handler(
+          this._accountName,
+          this._exchangeName,
+          this._exchange!,
+          handlerContext,
+          this._settings,
+          this._metadata,
+        ),
     );
   }
 
   private _setupExchangeEventListeners() {
-    this._exchange!.store.subscribe((data) => {
-      this._throttledStoreUpdate(data);
+    const exchange = this._exchange!;
+    const generation = this._generation;
+    const isCurrent = () => generation === this._generation && !this._stopped;
+    this._unsubscribeStore = exchange.store.subscribe((data) => {
+      if (isCurrent()) this._throttledStoreUpdate(data);
     });
+    if (exchange instanceof RustEngineExchange) {
+      exchange.on('command-progress', (progress: CommandProgress) => {
+        // A command deadline can remove its RPC before native code chooses an
+        // identity. The current account still owns those later receipts; closed
+        // generations can neither publish them nor relabel them as a new host.
+        if (!isCurrent()) return;
+        const data: StoreWorkerCommandProgress = { ...progress, account: this._accountName, generation };
+        this._ctx.postMessage({ op: 'command-progress', data });
+      });
+      exchange.on('engine-dead', (error: Error) => {
+        if (isCurrent()) this._handleEngineDead(error);
+      });
+    }
 
     this._exchange!.on('fill', (event: OrderFillEvent) => {
-      if (!this._forwardsFrames) this._ctx.postMessage({ op: 'fill', data: event });
+      if (isCurrent() && !this._forwardsFrames) this._ctx.postMessage({ op: 'fill', data: event });
     });
 
     const logEvents = [
@@ -855,15 +1225,22 @@ export class ExchangeWorker {
     ];
     logEvents.forEach((event) => {
       this._exchange!.on(event, (...args: any[]) => {
-        this._ctx.postMessage({ op: event, data: args });
+        const message = { op: event as StoreWorkerPayload['op'], data: args };
+        if (isCurrent()) {
+          this._completeRequest(message);
+          this._ctx.postMessage(message);
+        } else {
+          this._forwardLateReply(message, generation);
+        }
       });
     });
 
     this._exchange!.on('ws-reconnected', () => {
-      this._ctx.postMessage({ op: 'ws-reconnected' });
+      if (isCurrent()) this._ctx.postMessage({ op: 'ws-reconnected' });
     });
 
     this._exchange!.on('deactivate', () => {
+      if (!isCurrent()) return;
       this.log('info', `Exchange emitted deactivate event: ${this._exchangeName}`);
       // Dispose through the worker so any in-flight start() gets cancelled.
       this.dispose();
