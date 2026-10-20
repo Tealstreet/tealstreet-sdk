@@ -281,3 +281,15 @@ Seven new pure regressions and two new CLI controls reproduce these gaps;
 included). The original binary controls had four failures; adding candidate
 controls produced seven failures before the repair. Focused independent
 rereview and final integrated verification remain pending before merge.
+
+
+Focused rereview closed both P2s at `fcaf6d6723`, then identified duplicate raw
+JSON members as another way for streaming and last-wins parsers to see different
+catalog rows. Literal and escaped-equivalent duplicate `products` regressions
+both fail before repair. Coinbase catalog and WS proof now use the same decoded
+unique-key validation extracted from Kraken's existing independent harness;
+Kraken retains that validation. Nested duplicates, escaped Unicode keys, valid
+independent scopes and malformed grammar are covered. All 700 harness tests
+pass (96 midpoint tests, 15 CLI tests, eight shared JSON tests included).
+Outputs and production mappings remain unchanged; final focused rereview is
+pending. Rust source has not changed since the latest landing merge.

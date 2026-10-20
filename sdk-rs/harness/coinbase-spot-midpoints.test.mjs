@@ -176,6 +176,16 @@ test('permits varying catalogs only when every numerically matching candidate pr
   f.records.push(catalog(latest, 1, 20));
   assert.equal(compareCoinbaseSpotMidpoints(f).equivalent, true);
 });
+for (const key of ['products', '\\u0070roducts'])
+  test(`rejects duplicate raw catalog members decoded as ${key}`, () => {
+    const f = fixture();
+    const original = JSON.parse(f.records[1].body);
+    const first = clone(original.products);
+    first[0].price = '0.018750000000000001';
+    f.records[1].body = '{"products":' + JSON.stringify(first) + ',"' + key + '":' +
+      JSON.stringify(original.products) + ',"num_products":4,"pagination":' + JSON.stringify(original.pagination) + '}';
+    assert.equal(compareCoinbaseSpotMidpoints(f).equivalent, false);
+  });
 test('failed later catalog reads retain the previous validated candidate', () => {
   const f = fixture();
   f.records.push({ ...f.records[1], requestOrdinal: 1, t: 20, status: 503, body: 'unavailable' });

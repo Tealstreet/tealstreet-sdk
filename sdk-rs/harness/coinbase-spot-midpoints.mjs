@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { parseUniqueJson } from './json-unique.mjs';
 
 const root = 'https://api.coinbase.com';
 const catalogPath = '/api/v3/brokerage/market/products';
@@ -93,7 +94,7 @@ function publicCatalog(venue, records) {
         continue;
       }
       requireThat(socket !== undefined && record.socket === socket, 'unproven socket ownership');
-      const message = JSON.parse(record.text);
+      const message = parseUniqueJson(record.text);
       requireThat(
         ['heartbeats', 'subscriptions', 'l2_data', 'candles', 'market_trades'].includes(message.channel),
         'nonpublic or ticker-revising socket source',
@@ -142,7 +143,7 @@ function publicCatalog(venue, records) {
       typeof record.body === 'string' && record.body.length <= 16 * 1024 * 1024,
       'invalid catalog response size',
     );
-    const body = JSON.parse(record.body);
+    const body = parseUniqueJson(record.body);
     requireThat(
       body.pagination?.has_next === false &&
         body.pagination?.has_prev === false &&

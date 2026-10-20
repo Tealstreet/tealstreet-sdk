@@ -58,6 +58,13 @@ const gate = (venue, isPrivate = false, defect) => {
       records[1].body = JSON.stringify(earlier);
       records.push(later);
     }
+    if (midpointIssue === 'duplicate-keys') {
+      const original = JSON.parse(records[1].body);
+      const first = structuredClone(original.products);
+      first[0].price = '0.018750000000000001';
+      records[1].body = '{"products":' + JSON.stringify(first) + ',"\\u0070roducts":' +
+        JSON.stringify(original.products) + ',"num_products":2,"pagination":' + JSON.stringify(original.pagination) + '}';
+    }
     if (midpointIssue === 'binary') {
       records.push({ type: 'open', url: 'wss://advanced-trade-ws.coinbase.com', socket: 0 });
       records.push({
@@ -333,7 +340,7 @@ test('Coinbase CLI reports independent public midpoint proofs for both aliases o
 });
 
 test('Coinbase CLI refuses invalid inputs and contradictory scope instead of masking ticker failures', () => {
-  for (const issue of ['price', 'volume', 'quote', 'missing-native', 'field', 'private-contradiction', 'selector', 'binary', 'unconsumed']) {
+  for (const issue of ['price', 'volume', 'quote', 'missing-native', 'field', 'private-contradiction', 'selector', 'binary', 'unconsumed', 'duplicate-keys']) {
     const result = gate('coinbase', false, 'coinbase-midpoint:' + issue);
     assert.equal(result.status, 1, issue + ': ' + result.stderr + result.stdout);
     assert.match(result.stdout, /ticker DEEP-USD:/);
