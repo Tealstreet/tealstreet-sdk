@@ -136,7 +136,6 @@ pub struct AccountState {
     /// `unifiedMarginStatus` 1 is a classic account: USDT only, CONTRACT wallet.
     classic: bool,
     tick_timer: Option<TimerId>,
-    partial_stop_refresh: Option<TimerId>,
     position_version: u32,
     positions_generation: u32,
     positions: Option<PositionsJoin>,
@@ -868,16 +867,6 @@ impl BybitLinear {
         }
     }
 
-    pub(crate) fn schedule_partial_stop_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.variant == crate::Variant::Inverse {
-            return;
-        }
-        if let Some(timer) = self.account.partial_stop_refresh.take() {
-            cx.clear_timer(timer);
-        }
-        self.account.partial_stop_refresh = Some(cx.set_timer(250.0));
-    }
-
     pub(crate) fn note_order_terminal(&mut self, ids: &[String]) {
         // Terminal rows can be removed, or share the snapshot issue timestamp.
         self.account.revision = self.account.revision.wrapping_add(1);
@@ -887,20 +876,9 @@ impl BybitLinear {
     }
 
     fn remember_terminal_order(&mut self, id: &str) {
-        if !(self.variant == crate::Variant::Demo || self.variant.is_hyro()) {
-            return;
-        }
-        self.cache_terminal_order(id);
-    }
-
-    pub(crate) fn note_partial_stop_canceled(&mut self, id: &str) {
-        self.account.revision = self.account.revision.wrapping_add(1);
-        // The replacement refresh can read a replica still serving the canceled leg.
-        self.cache_terminal_order(id);
-    }
-
-    fn cache_terminal_order(&mut self, id: &str) {
-        if !self.account.terminal_orders.insert(id.to_owned()) {
+        if !(self.variant == crate::Variant::Demo || self.variant.is_hyro())
+            || !self.account.terminal_orders.insert(id.to_owned())
+        {
             return;
         }
         self.account.recent_terminal_orders.push_back(id.to_owned());
@@ -957,9 +935,6 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_private_closed(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(timer) = self.account.partial_stop_refresh.take() {
-            cx.clear_timer(timer);
-        }
         self.account.authed = false;
         if !self.variant.is_hyro() {
             self.account.session_version += 1;
@@ -1303,22 +1278,6 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.account.partial_stop_refresh == Some(timer) {
-            self.account.partial_stop_refresh = None;
-            if self.variant.is_hyro() {
-                if self.account.authed && self.account.handshake.is_none() {
-                    if self.account.snapshot.is_some() {
-                        self.account.revision = self.account.revision.wrapping_add(1);
-                    } else {
-                        self.start_hyro_snapshot(cx);
-                    }
-                }
-            } else {
-                self.account.orders_follow_up |= self.account.orders.is_some();
-                self.fetch_orders(cx);
-            }
-            return;
-        }
         if self.account.handshake_timer == Some(timer) {
             self.account.handshake_timer = None;
             self.fail_hyro(cx, "private handshake acknowledgement timed out");
@@ -1527,9 +1486,6 @@ impl BybitLinear {
         let Some(mut mapped) = map_order(row, cx.store, cx.now) else {
             return;
         };
-        if self.stale_terminal_snapshot(&mapped) {
-            return;
-        }
         self.note_position_bound(&mapped);
         if mapped.terminal {
             let ids = mapped
