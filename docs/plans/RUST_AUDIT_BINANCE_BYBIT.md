@@ -240,3 +240,10 @@ reverification has begun while this first patch completes its gates.
   from order type would incorrectly reject triggered STOP_MARKET executions.
   The original stop tests remain unchanged; all 138 Binance tests, strict
   Clippy and formatting pass after this narrower correction.
+- Independent final review reran 14 audit trading, 9 execution-event and 19
+  lifecycle tests (42 total), all passing, and closed the snapshot ordering
+  finding. Merged landing PR #1342 (`fc809a9d85`) at `1611908137` after it landed:
+  the shared public-feed/consumer path changes require fresh selected artifacts,
+  all 23 family replay invocations and root/combined-host verification again.
+  Read-only integration review confirms trading dispatch, account callbacks,
+  fill emission and order-store paths are unchanged by that merge.
