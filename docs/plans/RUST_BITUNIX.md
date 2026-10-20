@@ -1003,3 +1003,20 @@ except ETH1712/1968, where TS3RPS read dispatch delays recovery. Preserve
 these two failures, checkpoint source before investigating causal replay
 limiter epoch/request completion and native read pacing. No public gate PASS
 claim, push or merge until the unchanged strict comparison passes.
+
+### KuCoin shared request-budget correction plan
+
+Source audit proves native omitted TS's shared xhr maxRPS3 budget: public
+reads, snapshots, public/private bullet tokens, account reads and settings
+use the same queue; create/cancel alone use unlimitedXHR. Remaining two ETH
+flush differences expose this dispatch difference. Implement a sans-I/O
+3per1000ms FIFO for those exact routes, signing only when dispatched. Keep
+streamed responses, typed pending jobs, generation guards, explicit roles,
+read retries, and unlimited placement/cancellation semantics. Audit timer
+boundaries/reentrancy, fresh signatures and failure behavior. Add meaningful
+quota/FIFO/window/sign-at-dispatch tests; adapt scripted helpers to actual
+causal timers without weakening payload/state assertions. Independent plan
+and implementation review, new artifact and unchanged complete gates follow.
+No arbitrary sleeps, TS limiter bypass, hash/timestamp normalization or
+sample removal. Existing340helpers and all native/source checks are green
+at checkpoint2a3ed236f6; strict public gate remains pending this correction.
