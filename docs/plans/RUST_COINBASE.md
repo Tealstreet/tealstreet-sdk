@@ -343,3 +343,23 @@ CI's five secret-scan findings were inspected locally with the same gitleaks
 two match PEM delimiter labels/invalid `AAAA` inputs rather than key material.
 Only their exact historical commit/path/rule/line fingerprints are ignored;
 the default detection rules and future source scans remain enabled.
+
+### Review repair checkpoint
+
+All six round-one findings now have fixes and focused regressions. Delivery
+baselines survive REST scans/removals; typed REST sizing or native placement
+metadata proves spot user quantities before normalization/editing. Unknown
+zero-remainder terminal updates apply immediately without inventing sizing
+provenance. Bounded detail reads retry transient failures and isolate socket
+generations. Identity recovery is independent of positive fills, merges external
+execution fences, and retires known spot reservations. History uses the API's
+default creation-time order. Streaming intervals retain TS's wider set while
+REST keeps its documented granularities. Daily candles backfill reconnects,
+including subscriptions added offline, and compare cumulative bucket volume in
+both arrival orders. Quote/base sizing is the fifteenth declared TS correction.
+
+Strict targeted Clippy/formatting and all103 venue tests pass; harness274 pass.
+Independent public/history re-review is clear. A fresh reviewer is checking the
+account/trading repairs; latest Aster landing integration and affected combined
+acceptance gates remain pending. CI's frozen reference entry-point classification
+failure is fixed, with three passing targeted checks (one web-only skip).

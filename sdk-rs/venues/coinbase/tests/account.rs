@@ -589,3 +589,142 @@ fn cfm_timed_scans(fail_initial_scan: bool) {
         );
     }
 }
+
+fn next_read(s: &mut Session, suffix: &str) -> HttpRequest {
+    for _ in 0..200 {
+        let requests = s.collect();
+        for r in requests {
+            if r.url.contains(suffix) {
+                return r;
+            }
+            s.answer(r);
+        }
+        s.fire();
+    }
+    panic!("missing read {suffix}");
+}
+
+#[test]
+fn rest_fill_observation_does_not_consume_delayed_user_execution() {
+    let mut s = Session::new("INTX", false).ready();
+    let initial = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "2");
+    s.message(0, "snapshot", &format!("[{initial}]"));
+    assert!(fills(&mut s.e).is_empty());
+    let held = next_read(&mut s, "/orders/historical/batch");
+    let filled = user_order("order-a", "BTC-PERP-INTX", "OPEN", "1", "1");
+    complete_scan(
+        &mut s,
+        held,
+        &format!(r#"{{"orders":[{filled}],"has_next":false}}"#),
+    );
+    assert_eq!(s.e.store().order("order-a").unwrap().filled, 1.0);
+    assert!(fills(&mut s.e).is_empty());
+    s.message(1, "update", &format!("[{filled}]"));
+    assert_eq!(fills(&mut s.e), vec![1.0]);
+    s.message(2, "update", &format!("[{filled}]"));
+    assert!(fills(&mut s.e).is_empty());
+}
+
+#[test]
+fn rest_open_order_removal_retains_previously_emitted_fill_baseline() {
+    let mut s = Session::new("INTX", false).ready();
+    s.message(0, "snapshot", "[]");
+    fills(&mut s.e);
+    let partial = user_order("order-a", "BTC-PERP-INTX", "OPEN", "1", "1");
+    s.message(1, "update", &format!("[{partial}]"));
+    assert_eq!(fills(&mut s.e), vec![1.0]);
+    let held = next_read(&mut s, "/orders/historical/batch");
+    complete_scan(&mut s, held, r#"{"orders":[],"has_next":false}"#);
+    assert!(s.e.store().order("order-a").is_none());
+    let terminal = user_order("order-a", "BTC-PERP-INTX", "FILLED", "2", "0");
+    s.message(2, "update", &format!("[{terminal}]"));
+    assert_eq!(fills(&mut s.e), vec![1.0]);
+    s.message(3, "update", &format!("[{terminal}]"));
+    assert!(fills(&mut s.e).is_empty());
+}
+
+fn size_detail(id: &str, config: &str) -> String {
+    format!(
+        r#"{{"order":{{"order_id":"{id}","product_id":"BTC-USD","order_configuration":{config}}}}}"#
+    )
+}
+
+#[test]
+fn external_quote_sized_limit_waits_for_denomination_and_uses_base_remaining() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let row = user_order("quote-limit", "BTC-USD", "OPEN", "0.1", "50");
+    s.message(0, "snapshot", &format!("[{row}]"));
+    assert!(s.e.store().orders().is_empty());
+    let request = next_read(&mut s, "/orders/historical/quote-limit");
+    s.reply(
+        request,
+        200,
+        &size_detail(
+            "quote-limit",
+            r#"{"limit_limit_gtc":{"quote_size":"60","limit_price":"100"}}"#,
+        ),
+    );
+    let order = s.e.store().order("quote-limit").unwrap();
+    assert_eq!(
+        (order.amount, order.filled, order.remaining),
+        (0.6, 0.1, 0.5)
+    );
+    assert!(fills(&mut s.e).is_empty());
+}
+
+#[test]
+fn external_quote_sized_market_does_not_add_quote_leaves_to_base_fills() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let row = user_order("quote-market", "BTC-USD", "OPEN", "0.1", "50")
+        .replace("\"order_type\":\"Limit\"", "\"order_type\":\"Market\"");
+    s.message(0, "snapshot", &format!("[{row}]"));
+    let request = next_read(&mut s, "/orders/historical/quote-market");
+    s.reply(
+        request,
+        200,
+        &size_detail(
+            "quote-market",
+            r#"{"market_market_ioc":{"quote_size":"60"}}"#,
+        ),
+    );
+    let order = s.e.store().order("quote-market").unwrap();
+    assert_eq!(
+        (order.amount, order.filled, order.remaining),
+        (0.6, 0.1, 0.5)
+    );
+}
+
+#[test]
+fn failed_external_denomination_read_preserves_prior_snapshot_until_recovery() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let initial = user_order("base-order", "BTC-USD", "OPEN", "0", "1");
+    s.message(0, "snapshot", &format!("[{initial}]"));
+    let request = next_read(&mut s, "/orders/historical/base-order");
+    s.reply(
+        request,
+        200,
+        &size_detail(
+            "base-order",
+            r#"{"limit_limit_gtc":{"base_size":"1","limit_price":"100"}}"#,
+        ),
+    );
+    assert!(s.e.store().order("base-order").is_some());
+    let quote = user_order("quote-order", "BTC-USD", "OPEN", "0", "50");
+    s.message(1, "snapshot", &format!("[{quote}]"));
+    let request = next_read(&mut s, "/orders/historical/quote-order");
+    s.reply(request, 503, r#"{"error":"temporary"}"#);
+    assert!(s.e.store().order("base-order").is_some());
+    assert!(s.e.store().order("quote-order").is_none());
+    s.message(2, "snapshot", &format!("[{quote}]"));
+    let request = next_read(&mut s, "/orders/historical/quote-order");
+    s.reply(
+        request,
+        200,
+        &size_detail(
+            "quote-order",
+            r#"{"limit_limit_gtc":{"quote_size":"50","limit_price":"100"}}"#,
+        ),
+    );
+    assert!(s.e.store().order("base-order").is_none());
+    assert_eq!(s.e.store().order("quote-order").unwrap().amount, 0.5);
+}

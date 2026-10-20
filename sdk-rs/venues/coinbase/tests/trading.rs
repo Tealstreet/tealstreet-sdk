@@ -15,6 +15,7 @@ const INTX_POSITIONS: &str = r#"{"positions":[{"symbol":"BTC-PERP-INTX","positio
 const CFM_POSITIONS: &str = r#"{"positions":[{"product_id":"BTC-CDE","side":"SHORT","number_of_contracts":"2","avg_entry_price":"100","current_price":"90","unrealized_pnl":"0.2"}]}"#;
 
 struct Session {
+    details: std::collections::HashMap<String, String>,
     results: Vec<(u32, Result<String, String>)>,
     e: Engine<Coinbase>,
     timers: Vec<(f64, TimerId)>,
@@ -36,6 +37,7 @@ impl Session {
         );
         e.start(1000.0);
         Self {
+            details: std::collections::HashMap::new(),
             e,
             timers: vec![],
             now: 1000.0,
@@ -102,6 +104,14 @@ impl Session {
             INTX_POSITIONS.into()
         } else if url.contains("/cfm/positions") {
             CFM_POSITIONS.into()
+        } else if let Some(id) = url
+            .split("/orders/historical/")
+            .nth(1)
+            .filter(|id| !id.starts_with("batch"))
+        {
+            self.details.get(id).cloned().unwrap_or_else(|| format!(
+                r#"{{"order":{{"order_id":"{id}","product_id":"BTC-USD","order_configuration":{{"limit_limit_gtc":{{"base_size":"1","limit_price":"100"}}}}}}}}"#
+            ))
         } else if url.contains("/orders/historical/batch") {
             r#"{"orders":[],"has_next":false}"#.into()
         } else if url.contains("/products") {
@@ -183,7 +193,9 @@ impl Session {
             let mut writes = vec![];
             for r in self.collect() {
                 if r.method == safe_cex_engine::Method::Post
-                    || r.url.contains("/orders/historical/") && !r.url.contains("/batch")
+                    || self.kind == "INTX"
+                        && r.url.contains("/orders/historical/")
+                        && !r.url.contains("/batch")
                 {
                     writes.push(r);
                 } else {
@@ -213,10 +225,26 @@ impl Session {
         panic!("no command result");
     }
     fn seed(&mut self, id: &str, product: &str, size: &str, price: &str) {
+        self.details.insert(id.into(), format!(r#"{{"order":{{"order_id":"{id}","product_id":"{product}","order_configuration":{{"limit_limit_gtc":{{"base_size":"{size}","limit_price":"{price}"}}}}}}}}"#));
         let orders = format!(
             r#"[{{"order_id":"{id}","client_order_id":"original-client","product_id":"{product}","status":"OPEN","order_side":"BUY","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"{size}","limit_price":"{price}","stop_price":"0","avg_price":"0"}}]"#
         );
         self.message(0, "snapshot", &orders);
+        self.reconcile_order(id);
+    }
+    fn reconcile_order(&mut self, id: &str) {
+        for _ in 0..100 {
+            if self.e.store().order(id).is_some() {
+                return;
+            }
+            for r in self.collect() {
+                self.answer(r);
+            }
+            if self.e.store().order(id).is_none() {
+                self.fire();
+            }
+        }
+        panic!("seed order did not reconcile");
     }
 }
 
@@ -479,6 +507,7 @@ fn cancel_checks_every_native_result_and_only_successes_become_canceling() {
     let mut s = Session::new("DEFAULT", true).ready();
     s.seed("one", "BTC-USD", "1", "100");
     s.message(1,"update",r#"[{"order_id":"two","product_id":"BTC-USD","status":"OPEN","order_side":"BUY","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"2","limit_price":"100","stop_price":"0"}]"#);
+    s.reconcile_order("two");
     s.command(Command::CancelOrders {
         command: 6,
         ids: vec!["one".into(), "two".into()],
@@ -1073,6 +1102,158 @@ fn early_fill_without_client_id_is_coalesced_with_later_ack_reservation() {
         );
     }
     s.closing(261, 1.0);
+    let r = s.write();
+    assert_eq!(
+        create_wire(&r)
+            .order_configuration
+            .market_market_ioc
+            .unwrap()
+            .base_size,
+        "1"
+    );
+}
+
+#[test]
+fn lost_spot_create_response_recovers_identity_from_zero_fill_user_order() {
+    for event in ["update", "snapshot"] {
+        let mut s = Session::new("DEFAULT", true).ready();
+        s.message(0, "snapshot", "[]");
+        let mut order = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0);
+        order.client_order_id = Some("recover-client".into());
+        s.command(Command::PlaceOrders {
+            command: 270,
+            orders: vec![order],
+        });
+        let r = s.write();
+        s.e.handle(
+            s.now,
+            Event::HttpFailed {
+                request: r.id,
+                error: "response lost",
+            },
+        );
+        assert!(s.done(270).is_err());
+        s.message(1, event, r#"[{"order_id":"recovered","client_order_id":"recover-client","product_id":"BTC-USD","status":"OPEN","order_side":"BUY","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"100","avg_price":"0"}]"#);
+        assert!(s.e.store().order("recovered").is_some());
+        s.command(Command::CancelSymbolOrders {
+            command: 271,
+            symbol: "BTC-USD".into(),
+        });
+        let cancel = s.write();
+        assert!(cancel.url.ends_with("/batch_cancel"));
+        assert_eq!(
+            cancel.body.as_deref(),
+            Some(r#"{"order_ids":["recovered"]}"#)
+        );
+    }
+}
+
+#[test]
+fn recovered_zero_fill_cfm_identity_keeps_closing_exposure_reserved() {
+    let mut s = Session::new("DEFAULT", false).ready();
+    s.message(0, "snapshot", "[]");
+    let mut order = opts("BTC-CDE", OrderType::Limit, OrderSide::Buy, 1.0);
+    order.client_order_id = Some("recover-cfm".into());
+    order.reduce_only = Some(true);
+    s.command(Command::PlaceOrders {
+        command: 280,
+        orders: vec![order],
+    });
+    let r = s.write();
+    s.e.handle(
+        s.now,
+        Event::HttpFailed {
+            request: r.id,
+            error: "response lost",
+        },
+    );
+    assert!(s.done(280).is_err());
+    s.message(1,"update",r#"[{"order_id":"recovered-cfm","client_order_id":"recover-cfm","product_id":"BTC-CDE","status":"OPEN","order_side":"BUY","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"100","avg_price":"0"}]"#);
+    let mut next = opts("BTC-CDE", OrderType::Market, OrderSide::Buy, 2.0);
+    next.reduce_only = Some(true);
+    s.command(Command::PlaceOrders {
+        command: 281,
+        orders: vec![next],
+    });
+    assert!(s.done(281).is_err());
+    s.command(Command::CancelSymbolOrders {
+        command: 282,
+        symbol: "BTC-CDE".into(),
+    });
+    let cancel = s.write();
+    assert_eq!(
+        cancel.body.as_deref(),
+        Some(r#"{"order_ids":["recovered-cfm"]}"#)
+    );
+}
+
+#[test]
+fn acknowledged_spot_order_pruned_by_snapshot_has_no_stale_cancel_reservation() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    s.message(0, "snapshot", "[]");
+    s.command(Command::PlaceOrders {
+        command: 290,
+        orders: vec![opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0)],
+    });
+    let r = s.write();
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"spot-ack"}}"#,
+    );
+    assert!(s.done(290).is_ok());
+    s.message(1, "snapshot", "[]");
+    assert!(s.e.store().order("spot-ack").is_none());
+    s.command(Command::CancelSymbolOrders {
+        command: 291,
+        symbol: "BTC-USD".into(),
+    });
+    assert_eq!(s.done(291).unwrap(), "null");
+}
+
+#[test]
+fn quote_sized_zero_fill_spot_user_order_never_gains_native_edit_proof() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    s.message(0, "snapshot", "[]");
+    s.details.insert("quote-order".into(), r#"{"order":{"order_id":"quote-order","product_id":"BTC-USD","order_configuration":{"limit_limit_gtc":{"quote_size":"200","limit_price":"100"}}}}"#.into());
+    s.message(1,"update",r#"[{"order_id":"quote-order","product_id":"BTC-USD","status":"OPEN","order_side":"BUY","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"200","limit_price":"100","avg_price":"0"}]"#);
+    s.reconcile_order("quote-order");
+    assert_eq!(s.e.store().order("quote-order").unwrap().amount, 2.0);
+    s.command(Command::AmendOrder {
+        command: 300,
+        id: "quote-order".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    assert!(s.done(300).unwrap_err().contains("provenance"));
+}
+
+#[test]
+fn recovered_client_identity_coalesces_earlier_external_fill_without_create_ack() {
+    let mut s = Session::new("INTX", false).ready();
+    s.message(0, "snapshot", "[]");
+    s.closing(310, 1.0);
+    let r = s.write();
+    let client = create_wire(&r).client_order_id;
+    s.e.handle(
+        s.now,
+        Event::HttpFailed {
+            request: r.id,
+            error: "response lost",
+        },
+    );
+    assert!(s.done(310).is_err());
+    s.filled_sell(1, "recovered-fill", "1");
+    s.message(2, "update", &format!(r#"[{{"order_id":"recovered-fill","client_order_id":"{client}","product_id":"BTC-PERP-INTX","status":"FILLED","order_side":"SELL","order_type":"Market","cumulative_quantity":"1","leaves_quantity":"0","avg_price":"100"}}]"#));
+    for _ in 0..2 {
+        let r = s.next_position_read();
+        s.reply(
+            r,
+            200,
+            &INTX_POSITIONS.replace("\"net_size\":\"2\"", "\"net_size\":\"1\""),
+        );
+    }
+    s.closing(311, 1.0);
     let r = s.write();
     assert_eq!(
         create_wire(&r)

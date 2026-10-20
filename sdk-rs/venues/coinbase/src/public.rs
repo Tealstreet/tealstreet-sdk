@@ -50,6 +50,7 @@ struct Daily {
     day: f64,
     rows: BTreeMap<u64, Candle>,
     seeded: bool,
+    refresh: bool,
     retry: Option<TimerId>,
 }
 #[derive(Default)]
@@ -399,6 +400,22 @@ impl Coinbase {
             self.subscription(cx, "candles", symbols.clone(), true);
             self.subscription(cx, "market_trades", symbols, true);
         }
+        let refresh: Vec<_> = self
+            .public
+            .daily
+            .iter()
+            .filter_map(|(symbol, state)| state.refresh.then_some(symbol.clone()))
+            .collect();
+        let day = (cx.now / 86400000.).floor() * 86400.;
+        for symbol in refresh {
+            let state = self.public.daily.get_mut(&symbol).unwrap();
+            state.refresh = false;
+            if state.day != day {
+                state.day = day;
+                state.rows.clear();
+            }
+            self.daily_seed(cx, &symbol, day);
+        }
         true
     }
     fn invalidate(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -416,6 +433,16 @@ impl Coinbase {
         self.public.open = false;
         self.public.sequence = None;
         self.invalidate(cx);
+        // A reconnect only supplies the current five-minute bucket.
+        self.public.daily_generation = self.public.daily_generation.wrapping_add(1);
+        for state in self.public.daily.values_mut() {
+            state.generation = self.public.daily_generation;
+            state.seeded = false;
+            state.refresh = true;
+            if let Some(timer) = state.retry.take() {
+                cx.clear_timer(timer);
+            }
+        }
         if let Some(timer) = self.public.watchdog.take() {
             cx.clear_timer(timer);
         }
@@ -485,9 +512,12 @@ impl Coinbase {
             total.close = row.close;
             total.volume += row.volume;
         }
-        if let Some((_, last)) = self.public.candles.get_mut(&(symbol.into(), "1d".into())) {
-            *last = Some(total);
-            cx.candle(symbol, "1d", total);
+        // Longer chart intervals retain TS's daily source-candle contract.
+        for ((market, interval), (_, last)) in &mut self.public.candles {
+            if market == symbol && interval_seconds(interval).is_some_and(|s| s >= 86400.) {
+                *last = Some(total);
+                cx.candle(symbol, interval, total);
+            }
         }
     }
     fn daily_update(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, row: Candle) {
@@ -510,12 +540,17 @@ impl Coinbase {
         if row.timestamp.fract() != 0. || row.timestamp % 300. != 0. {
             return;
         }
-        self.public
+        let entry = self
+            .public
             .daily
             .get_mut(symbol)
             .unwrap()
             .rows
-            .insert(row.timestamp as u64, row);
+            .entry(row.timestamp as u64)
+            .or_insert(row);
+        if row.volume >= entry.volume {
+            *entry = row;
+        }
         if new {
             self.daily_seed(cx, symbol, day);
         }
@@ -1256,17 +1291,30 @@ impl Coinbase {
                             {
                                 continue;
                             }
+                            if seconds >= 300. {
+                                let Some(old) = *last else {
+                                    continue;
+                                };
+                                if time < old.timestamp {
+                                    continue;
+                                }
+                                let next = Candle {
+                                    high: old.high.max(trade.price),
+                                    low: old.low.min(trade.price),
+                                    close: trade.price,
+                                    ..old
+                                };
+                                *last = Some(next);
+                                cx.candle(symbol, interval, next);
+                                continue;
+                            }
                             let bucket = (time / seconds).floor() * seconds;
                             let next = match *last {
                                 Some(old) if old.timestamp == bucket => Candle {
                                     high: old.high.max(trade.price),
                                     low: old.low.min(trade.price),
                                     close: trade.price,
-                                    volume: if seconds < 300. {
-                                        old.volume + trade.size
-                                    } else {
-                                        old.volume
-                                    },
+                                    volume: old.volume + trade.size,
                                     ..old
                                 },
                                 Some(old) if old.timestamp > bucket => continue,
@@ -1276,7 +1324,7 @@ impl Coinbase {
                                     high: trade.price,
                                     low: trade.price,
                                     close: trade.price,
-                                    volume: if seconds < 300. { trade.size } else { 0. },
+                                    volume: trade.size,
                                 },
                             };
                             *last = Some(next);
@@ -1389,7 +1437,7 @@ impl Coinbase {
                     .candles
                     .keys()
                     .any(|(s, _)| ws_symbol(s) == ws_symbol(&symbol));
-                let daily = interval == "1d";
+                let daily = interval_seconds(&interval).is_some_and(|s| s >= 86400.);
                 self.public
                     .candles
                     .entry((symbol.clone(), interval))
@@ -1403,10 +1451,13 @@ impl Coinbase {
                         Daily {
                             generation: self.public.daily_generation,
                             day,
+                            refresh: !self.public.open,
                             ..Daily::default()
                         },
                     );
-                    self.daily_seed(cx, &symbol, day);
+                    if self.public.open {
+                        self.daily_seed(cx, &symbol, day);
+                    }
                 }
                 if first {
                     self.subscription(cx, "candles", vec![ws_symbol(&symbol)], true);
@@ -1419,7 +1470,11 @@ impl Coinbase {
                     *count = count.saturating_sub(1);
                     if *count == 0 {
                         self.public.candles.remove(&key);
-                        if key.1 == "1d"
+                        if interval_seconds(&key.1).is_some_and(|s| s >= 86400.)
+                            && !self.public.candles.keys().any(|(market, interval)| {
+                                market == &symbol
+                                    && interval_seconds(interval).is_some_and(|s| s >= 86400.)
+                            })
                             && let Some(state) = self.public.daily.remove(&symbol)
                             && let Some(timer) = state.retry
                         {
@@ -1490,7 +1545,28 @@ impl Coinbase {
     }
 }
 fn interval_seconds(s: &str) -> Option<f64> {
-    interval(s).map(|(_, seconds)| seconds)
+    Some(match s {
+        "1s" => 1.,
+        "5s" => 5.,
+        "15s" => 15.,
+        "30s" => 30.,
+        "3m" => 180.,
+        "3h" => 10800.,
+        "4h" => 14400.,
+        "5h" => 18000.,
+        "7h" => 25200.,
+        "8h" => 28800.,
+        "9h" => 32400.,
+        "10h" => 36000.,
+        "11h" => 39600.,
+        "12h" => 43200.,
+        "24h" => 86400.,
+        "2d" => 172800.,
+        "3d" => 259200.,
+        "1w" => 604800.,
+        "1M" => 2592000.,
+        _ => return interval(s).map(|(_, seconds)| seconds),
+    })
 }
 
 fn display_round(value: f64) -> f64 {

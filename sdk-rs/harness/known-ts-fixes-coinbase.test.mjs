@@ -214,6 +214,43 @@ test('currency correction changes only the documented held-total defect', () => 
   a.balance.currencies.BTC.total = 999;
   assert.throws(() => fixCoinbase({ account: a }, records), /unexpected TS/);
 });
+
+test('quote-sized spot order correction requires exact native detail proof and legacy quantities', () => {
+  const raw = { ...row('quote-order', 1, 100, 100), client_order_id: '' };
+  const detail = http('/orders/historical/quote-order', {
+    order: {
+      order_id: 'quote-order',
+      product_id: 'BTC-USD',
+      order_configuration: { limit_limit_gtc: { quote_size: '200', limit_price: '100' } },
+    },
+  });
+  const records = [meta, http('/products', { products: [market] }), ws('snapshot', [raw]), detail];
+  const legacy = { id: 'quote-order', type: 'limit', price: 100, amount: 101, filled: 1, remaining: 100 };
+  const a = account();
+  a.orders = [{ ...legacy }];
+  fixCoinbase({ account: a }, records);
+  assert.deepEqual(a.orders, [{ ...legacy, amount: 2, remaining: 1 }]);
+  const withoutProof = account();
+  withoutProof.orders = [{ ...legacy }];
+  fixCoinbase({ account: withoutProof }, records.slice(0, -1));
+  assert.deepEqual(withoutProof.orders, [legacy]);
+  const failedProof = structuredClone(records);
+  failedProof.at(-1).status = 503;
+  const failed = account();
+  failed.orders = [{ ...legacy }];
+  fixCoinbase({ account: failed }, failedProof);
+  assert.deepEqual(failed.orders, [legacy]);
+  const wrong = account();
+  wrong.orders = [{ ...legacy, remaining: 999 }];
+  assert.throws(() => fixCoinbase({ account: wrong }, records), /unexpected TS/);
+  const wrongIdentity = structuredClone(records);
+  const body = JSON.parse(wrongIdentity.at(-1).body);
+  body.order.product_id = 'ETH-USD';
+  wrongIdentity.at(-1).body = JSON.stringify(body);
+  const mismatched = account();
+  mismatched.orders = [{ ...legacy }];
+  assert.throws(() => fixCoinbase({ account: mismatched }, wrongIdentity), /product mismatch/);
+});
 test('CFM PnL and spot leverage repairs require exact known legacy values', () => {
   const records = [
     { ...meta, profile: 'cfm' },
@@ -322,7 +359,11 @@ test('command-owned replies cannot serve before the triggering command', () => {
     for (const r of tape.records.filter(
       (r) =>
         r.type === 'http' &&
-        (r.method !== 'GET' || r.url.includes('sort_by=') || r.url.includes('/ticker?') || r.url.includes('/candles?')),
+        (r.method !== 'GET' ||
+          r.url.includes('sort_by=') ||
+          r.url.includes('order_status=FILLED') ||
+          r.url.includes('/ticker?') ||
+          r.url.includes('/candles?')),
     )) {
       assert.ok(r.afterCommand > 0, `missing command stage ${r.method} ${r.url}`);
       assert.equal(
@@ -330,6 +371,22 @@ test('command-owned replies cannot serve before the triggering command', () => {
         undefined,
       );
       assert.equal(selectResponse([r], Infinity, { write: r.method !== 'GET', commandIndex: r.afterCommand }), r);
+    }
+  }
+});
+
+test('order history tapes use default sorting and external spot orders have native detail proof', () => {
+  for (const profile of ['intx', 'cfm', 'spot']) {
+    const tape = coinbasePrivateTape({ profile });
+    const history = tape.records.filter((r) => r.type === 'http' && r.url.includes('order_status=FILLED'));
+    assert.ok(history.length > 0);
+    assert.ok(history.every((r) => !new URL(r.url).searchParams.has('sort_by')));
+    if (profile === 'spot') {
+      for (const id of ['11', '12', '13', '21']) {
+        const proof = tape.records.find((r) => r.type === 'http' && r.url.endsWith(`/orders/historical/${id}`));
+        assert.ok(proof);
+        assert.ok(JSON.parse(proof.body).order.order_configuration.limit_limit_gtc.base_size);
+      }
     }
   }
 });

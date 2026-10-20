@@ -752,6 +752,51 @@ impl Coinbase {
             false,
         ))
     }
+    pub(crate) fn trading_observed_order(&mut self, cx: &Cx<'_, Pending>, order: &Order) {
+        let Some(client) = order.client_order_id.as_deref() else {
+            return;
+        };
+        let Some(reservation) = self.trading.reductions.get(client) else {
+            return;
+        };
+        if reservation.symbol != order.symbol
+            || reservation.side != order.side
+            || reservation
+                .native_id
+                .as_deref()
+                .is_some_and(|id| id != order.id)
+            || !order
+                .extra
+                .as_ref()
+                .and_then(|e| e.remaining_native.zip(e.filled_in_placement_units))
+                .is_some_and(|(remaining, filled)| remaining + filled == reservation.amount)
+        {
+            return;
+        }
+        let external_key = format!("\0external:{}", order.id);
+        if self
+            .trading
+            .reductions
+            .get(&external_key)
+            .is_some_and(|f| f.symbol != order.symbol || f.side != order.side)
+        {
+            return;
+        }
+        let external = self.trading.reductions.remove(&external_key);
+        let reservation = self.trading.reductions.get_mut(client).unwrap();
+        reservation.native_id = Some(order.id.clone());
+        if let Some(external) = external {
+            reservation.accounted_fill = reservation.accounted_fill.max(external.accounted_fill);
+        }
+        self.private_placement_finished(client);
+        if cx
+            .store
+            .market(&order.symbol)
+            .is_some_and(|m| m.is_spot == Some(true))
+        {
+            self.trading.reductions.remove(client);
+        }
+    }
     pub(crate) fn trading_observed_fill(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -775,20 +820,6 @@ impl Coinbase {
         let Some(scale) = m.contract_size.filter(|s| s.is_finite() && *s > 0.0) else {
             return;
         };
-        if let Some(client) = &order.client_order_id
-            && let Some(f) = self.trading.reductions.get_mut(client)
-            && f.native_id.is_none()
-            && f.symbol == order.symbol
-            && f.side == order.side
-            && order
-                .extra
-                .as_ref()
-                .and_then(|e| e.remaining_native.zip(e.filled_in_placement_units))
-                .is_some_and(|(remaining, filled)| remaining + filled == f.amount)
-        {
-            f.native_id = Some(order.id.clone());
-            return;
-        }
         let Some(position) = self
             .observed_position_native(cx, &order.symbol, order.side)
             .filter(|n| *n > 0.0)
@@ -1313,6 +1344,7 @@ impl Coinbase {
                             reservation.accounted_fill.max(external.accounted_fill);
                     }
                 }
+                self.private_base_order(&id);
                 self.private_placement_finished(&payload.client_order_id);
                 // An earlier user-stream update or deduplicated client ID owns its state.
                 if cx.store.order(&id).is_none() && self.account.terminal_fill(&id).is_none() {
@@ -1321,6 +1353,13 @@ impl Coinbase {
                     order.last_update = cx.now;
                     self.private_order_changed(&id);
                     cx.store.upsert_order(order);
+                }
+                if cx
+                    .store
+                    .market(&order.symbol)
+                    .is_some_and(|m| m.is_spot == Some(true))
+                {
+                    self.trading.reductions.remove(&payload.client_order_id);
                 }
                 Ok(Some(id))
             }

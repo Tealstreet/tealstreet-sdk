@@ -8,6 +8,16 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const ROOT: &str = "/api/v3/brokerage";
 const STATUSES: [&str; 5] = ["PENDING", "OPEN", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"];
 const MAX_ROWS: usize = 10000;
+#[derive(Clone, Copy)]
+enum SizeUnit {
+    Base,
+    Quote,
+    Unknown,
+}
+struct DeferredOrder {
+    text: String,
+    snapshot: bool,
+}
 #[derive(Clone)]
 pub(crate) struct Editable {
     pub native_product: String,
@@ -46,6 +56,10 @@ pub enum Request {
         read_revision: u64,
     },
     Orders(Orders),
+    OrderDetails {
+        id: String,
+        socket: SocketId,
+    },
 }
 #[derive(Default)]
 struct Snapshot {
@@ -55,6 +69,8 @@ struct Snapshot {
     fill_values: HashMap<String, f64>,
     raw_count: usize,
     invalid: bool,
+    complete: bool,
+    pending: usize,
 }
 #[derive(Default)]
 pub(crate) struct Account {
@@ -83,8 +99,16 @@ pub(crate) struct Account {
     position_generation: u64,
     terminal_fills: HashMap<String, (u64, f64)>,
     versions: HashMap<String, u64>,
-    totals: HashMap<String, f64>,
-    fill_values: HashMap<String, f64>,
+    // REST state must not consume a delayed execution or forget one already delivered.
+    stream_totals: HashMap<String, f64>,
+    stream_values: HashMap<String, f64>,
+    stream_fifo: VecDeque<String>,
+    units: HashMap<String, SizeUnit>,
+    unit_fifo: VecDeque<String>,
+    deferred: HashMap<String, Vec<DeferredOrder>>,
+    deferred_rows: usize,
+    deferred_bytes: usize,
+    detail_retries: HashMap<String, (u8, Option<TimerId>)>,
     terminal: HashSet<String>,
     terminal_fifo: VecDeque<String>,
     snapshot: Option<Snapshot>,
@@ -183,10 +207,32 @@ fn multiplier(m: &Market) -> Result<f64, String> {
         Ok(1.0)
     }
 }
+fn configuration_unit(c: &wire::Configuration<'_>) -> Result<SizeUnit, String> {
+    let configs = [
+        c.market_market_ioc.as_ref(),
+        c.market_market_fok.as_ref(),
+        c.limit_limit_gtc.as_ref(),
+        c.limit_limit_gtd.as_ref(),
+        c.limit_limit_fok.as_ref(),
+        c.sor_limit_ioc.as_ref(),
+        c.stop_limit_stop_limit_gtc.as_ref(),
+        c.stop_limit_stop_limit_gtd.as_ref(),
+    ];
+    if configs.iter().flatten().count() != 1 {
+        return Err("Coinbase ambiguous sizing configuration".into());
+    }
+    let size = configs.into_iter().flatten().next().unwrap();
+    match (size.base_size.is_empty(), size.quote_size.is_empty()) {
+        (false, true) if unsigned(&size.base_size)? > 0.0 => Ok(SizeUnit::Base),
+        (true, false) if unsigned(&size.quote_size)? > 0.0 => Ok(SizeUnit::Quote),
+        _ => Err("Coinbase ambiguous sizing configuration".into()),
+    }
+}
 struct Mapped {
     order: Order,
     proof: Option<Editable>,
     average: f64,
+    unit: SizeUnit,
 }
 pub(crate) fn map_order(
     store: &safe_cex_engine::Store,
@@ -200,6 +246,14 @@ fn map_order_detail(
     store: &safe_cex_engine::Store,
     text: &str,
     now: f64,
+) -> Result<Mapped, String> {
+    map_order_with_unit(store, text, now, None)
+}
+fn map_order_with_unit(
+    store: &safe_cex_engine::Store,
+    text: &str,
+    now: f64,
+    known_unit: Option<SizeUnit>,
 ) -> Result<Mapped, String> {
     let r: wire::OrderRow<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
     if !safe_id(&r.order_id) {
@@ -231,6 +285,7 @@ fn map_order_detail(
     let kind;
     let mut tif = None;
     let mut proof = None;
+    let unit;
     if let Some(c) = &r.order_configuration {
         let configs = [
             c.market_market_ioc.as_ref(),
@@ -265,6 +320,7 @@ fn map_order_detail(
         if kind == OrderType::Market {
             price = r.average_filled_price.map_or(0.0, |n| n.0);
         }
+        unit = configuration_unit(c)?;
         amount = if !config.base_size.is_empty() {
             unsigned(&config.base_size)?
         } else {
@@ -320,18 +376,39 @@ fn map_order_detail(
             .leaves_quantity
             .ok_or("Coinbase missing remaining size")?
             .0;
-        amount = filled + remaining;
         if kind == OrderType::StopLoss && !r.stop_price.is_empty() {
             price = unsigned(&r.stop_price)?
         } else if !r.limit_price.is_empty() {
             price = unsigned(&r.limit_price)?
         }
+        unit = known_unit
+            .or_else(|| (m.is_spot != Some(true)).then_some(SizeUnit::Base))
+            .ok_or("Coinbase user order sizing provenance missing")?;
+        let remaining = match unit {
+            SizeUnit::Base => remaining,
+            SizeUnit::Quote if remaining == 0.0 => 0.0,
+            SizeUnit::Unknown if remaining == 0.0 => 0.0,
+            SizeUnit::Unknown => return Err("Coinbase user order sizing provenance missing".into()),
+            SizeUnit::Quote => {
+                let conversion = if kind == OrderType::Market {
+                    r.avg_price.or(r.average_filled_price).map_or(0.0, |n| n.0)
+                } else {
+                    unsigned(&r.limit_price)?
+                };
+                if conversion <= 0.0 {
+                    return Err("Coinbase quote-sized user order lacks price".into());
+                }
+                remaining / conversion
+            }
+        };
+        amount = filled + remaining;
         if kind == OrderType::Limit
             && matches!(r.order_type.as_ref(), "LIMIT" | "Limit")
             && m.contract_size == Some(1.0)
             && m.is_spot == Some(true)
             && m.is_expiring != Some(true)
             && scale == 1.0
+            && matches!(unit, SizeUnit::Base)
             && r.status == "OPEN"
             && filled == 0.0
             && r.reduce_only != Some(true)
@@ -425,9 +502,151 @@ fn map_order_detail(
         },
         proof,
         average,
+        unit,
     })
 }
 impl Coinbase {
+    fn remember_unit(&mut self, id: &str, unit: SizeUnit) {
+        if matches!(unit, SizeUnit::Unknown) {
+            return;
+        }
+        if self.account.units.insert(id.into(), unit).is_none() {
+            self.account.unit_fifo.push_back(id.into());
+        }
+        while self.account.unit_fifo.len() > MAX_ROWS * 2 {
+            if let Some(old) = self.account.unit_fifo.pop_front() {
+                self.account.units.remove(&old);
+            }
+        }
+    }
+    pub(crate) fn private_base_order(&mut self, id: &str) {
+        self.remember_unit(id, SizeUnit::Base);
+    }
+    fn stream_baseline(&mut self, cx: &Cx<'_, Pending>, id: &str, filled: f64, value: f64) {
+        if self
+            .account
+            .stream_totals
+            .insert(id.into(), filled)
+            .is_none()
+        {
+            self.account.stream_fifo.push_back(id.into());
+        }
+        self.account.stream_values.insert(id.into(), value);
+        let mut attempts = self.account.stream_fifo.len();
+        while self.account.stream_fifo.len() > MAX_ROWS * 2 && attempts > 0 {
+            attempts -= 1;
+            if let Some(old) = self.account.stream_fifo.pop_front() {
+                if cx
+                    .store
+                    .order(&old)
+                    .is_some_and(|o| o.status == OrderStatus::Open)
+                {
+                    self.account.stream_fifo.push_back(old);
+                } else {
+                    self.account.stream_totals.remove(&old);
+                    self.account.stream_values.remove(&old);
+                }
+            }
+        }
+    }
+    fn map_user_order(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        text: &str,
+        snapshot: bool,
+    ) -> Result<Option<Mapped>, String> {
+        let row: wire::OrderRow<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        let known = self
+            .account
+            .units
+            .get(row.order_id.as_ref())
+            .copied()
+            .or_else(|| {
+                self.account
+                    .pending_clients
+                    .contains(row.client_order_id.as_ref())
+                    .then_some(SizeUnit::Base)
+            });
+        let known = known.or_else(|| {
+            // A terminal zero remainder has no placement-currency quantity to convert.
+            (row.leaves_quantity.is_some_and(|n| n.0 == 0.0)
+                && matches!(
+                    row.status.as_ref(),
+                    "FILLED" | "CANCELLED" | "EXPIRED" | "FAILED"
+                ))
+            .then_some(SizeUnit::Unknown)
+        });
+        let m = market(cx.store, &row.product_id).ok_or("Coinbase order market missing")?;
+        if row.order_configuration.is_some() || known.is_some() || m.is_spot != Some(true) {
+            let mapped = map_order_with_unit(cx.store, text, cx.now, known)?;
+            self.remember_unit(&mapped.order.id, mapped.unit);
+            return Ok(Some(mapped));
+        }
+        if !safe_id(&row.order_id)
+            || text.len() > 65536
+            || self.account.deferred_rows >= MAX_ROWS
+            || self.account.deferred_bytes + text.len() > 4 * 1024 * 1024
+            || self
+                .account
+                .deferred
+                .get(row.order_id.as_ref())
+                .is_some_and(|rows| rows.len() >= 64)
+        {
+            return Err("Coinbase unresolved user order limit".into());
+        }
+        let id = row.order_id.into_owned();
+        let first = !self.account.deferred.contains_key(&id);
+        self.account
+            .deferred
+            .entry(id.clone())
+            .or_default()
+            .push(DeferredOrder {
+                text: text.into(),
+                snapshot,
+            });
+        self.account.deferred_rows += 1;
+        self.account.deferred_bytes += text.len();
+        if snapshot && let Some(s) = &mut self.account.snapshot {
+            s.pending += 1;
+        }
+        if first {
+            let socket = self
+                .account
+                .socket
+                .ok_or("Coinbase private socket missing")?;
+            self.account.detail_retries.insert(id.clone(), (0, None));
+            self.account_read(cx, Request::OrderDetails { id, socket });
+        }
+        Ok(None)
+    }
+    fn take_deferred(&mut self, id: &str) -> Vec<DeferredOrder> {
+        self.account.detail_retries.remove(id);
+        let rows = self.account.deferred.remove(id).unwrap_or_default();
+        self.account.deferred_rows -= rows.len();
+        self.account.deferred_bytes -= rows.iter().map(|row| row.text.len()).sum::<usize>();
+        rows
+    }
+    fn fail_details(&mut self, cx: &mut Cx<'_, Pending>, id: &str, socket: SocketId) {
+        if self.account.socket != Some(socket) {
+            return;
+        }
+        if let Some((attempt, timer)) = self.account.detail_retries.get_mut(id)
+            && *attempt < 3
+        {
+            *attempt += 1;
+            *timer = Some(cx.set_timer(
+                (1000.0 * 2f64.powi(i32::from(*attempt))).max(self.account.backoff_until - cx.now),
+            ));
+            return;
+        }
+        let rows = self.take_deferred(id);
+        if let Some(s) = &mut self.account.snapshot {
+            s.pending -= rows.iter().filter(|r| r.snapshot).count();
+            s.invalid = true;
+        }
+        self.finish_user_snapshot(cx);
+        self.account_poll(cx, true);
+    }
     pub(crate) fn private_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.credentials.is_none() {
             return;
@@ -443,6 +662,7 @@ impl Coinbase {
                 None,
             ),
             Request::DetectCfm { .. } => (format!("{ROOT}/cfm/balance_summary"), None),
+            Request::OrderDetails { id, .. } => (format!("{ROOT}/orders/historical/{id}"), None),
             Request::Balance => {
                 if self.account.kind == Some(ProductKind::Intx) {
                     (format!("{ROOT}/intx/portfolio/{id}"), None)
@@ -502,8 +722,11 @@ impl Coinbase {
             Request::Orders(_) => Some(3),
             _ => None,
         };
+        let detail = matches!(req, Request::OrderDetails { .. }).then(|| req.clone());
         if let Err(e) = self.request(cx, Method::Get, path, None, at, Pending::Account(req)) {
             if let Some(req) = retry {
+                self.private_failed(cx, req, &e)
+            } else if let Some(req) = detail {
                 self.private_failed(cx, req, &e)
             } else {
                 cx.log(LogLevel::Warning, e);
@@ -553,6 +776,14 @@ impl Coinbase {
         self.account.payload = cx.now;
         self.account.sequence = None;
         self.account.snapshot = None;
+        self.account.deferred.clear();
+        self.account.deferred_rows = 0;
+        self.account.deferred_bytes = 0;
+        for (_, (_, timer)) in self.account.detail_retries.drain() {
+            if let Some(timer) = timer {
+                cx.clear_timer(timer);
+            }
+        }
         self.account.has_snapshot = false;
         self.account.socket = Some(cx.connect_channel(
             "wss://advanced-trade-ws-user.coinbase.com",
@@ -618,6 +849,14 @@ impl Coinbase {
         }
         self.account.opened = false;
         self.account.snapshot = None;
+        self.account.deferred.clear();
+        self.account.deferred_rows = 0;
+        self.account.deferred_bytes = 0;
+        for (_, (_, timer)) in self.account.detail_retries.drain() {
+            if let Some(timer) = timer {
+                cx.clear_timer(timer);
+            }
+        }
         self.account.sequence = None;
         if self.account.reconnect.is_none() {
             let delay = (2000.0 * 2f64.powi(i32::from(self.account.reconnect_failures.min(4))))
@@ -719,8 +958,6 @@ impl Coinbase {
                 self.account.terminal.remove(&old);
                 self.account.terminal_fills.remove(&old);
                 self.account.versions.remove(&old);
-                self.account.totals.remove(&old);
-                self.account.fill_values.remove(&old);
             }
         }
         cx.store.update_order(id, |o| {
@@ -739,6 +976,18 @@ impl Coinbase {
         }
     }
     pub(crate) fn private_on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if let Some(id) = self
+            .account
+            .detail_retries
+            .iter()
+            .find_map(|(id, (_, pending))| (*pending == Some(timer)).then(|| id.clone()))
+        {
+            self.account.detail_retries.get_mut(&id).unwrap().1 = None;
+            if let Some(socket) = self.account.socket {
+                self.account_read(cx, Request::OrderDetails { id, socket });
+            }
+            return true;
+        }
         if self
             .account
             .startup_retry
@@ -825,6 +1074,7 @@ impl Coinbase {
                         return Err("Coinbase orders exceed limit".into());
                     }
                     let mapped = map_order_detail(cx.store, text, cx.now)?;
+                    self.remember_unit(&mapped.order.id, mapped.unit);
                     let o = mapped.order;
                     if mapped.average > 0.0 {
                         s.fill_values
@@ -991,8 +1241,57 @@ impl Coinbase {
             Request::Orders(_) => Some(3),
             _ => None,
         };
+        let detail_failure = match &req {
+            Request::OrderDetails { id, socket } => Some((id.clone(), *socket)),
+            _ => None,
+        };
         let result: Result<(), String> = (|| {
             match req {
+                Request::OrderDetails { id, socket } => {
+                    if self.account.socket != Some(socket) {
+                        return Ok(());
+                    }
+                    let detail: wire::OrderDetail<'_> =
+                        serde_json::from_str(response.body).map_err(|e| e.to_string())?;
+                    let row = detail.order;
+                    if row.order_id != id {
+                        return Err("Coinbase order detail identity mismatch".into());
+                    }
+                    let unit = configuration_unit(&row.order_configuration)?;
+                    let deferred = self.take_deferred(&id);
+                    for pending in deferred {
+                        if pending.snapshot
+                            && let Some(s) = &mut self.account.snapshot
+                        {
+                            s.pending -= 1;
+                        }
+                        let mapped = (|| {
+                            let original: wire::OrderRow<'_> =
+                                serde_json::from_str(&pending.text).map_err(|e| e.to_string())?;
+                            if original.product_id != row.product_id {
+                                return Err("Coinbase order detail product mismatch".into());
+                            }
+                            map_order_with_unit(cx.store, &pending.text, cx.now, Some(unit))
+                        })();
+                        match mapped {
+                            Ok(mapped) => {
+                                self.remember_unit(&id, unit);
+                                if pending.snapshot {
+                                    self.stage_user_order(mapped);
+                                } else {
+                                    self.apply_user_order(cx, mapped);
+                                }
+                            }
+                            Err(error) => {
+                                cx.log(LogLevel::Warning, error);
+                                if let Some(s) = &mut self.account.snapshot {
+                                    s.invalid = true;
+                                }
+                            }
+                        }
+                    }
+                    self.finish_user_snapshot(cx);
+                }
                 Request::Portfolios => {
                     let data: wire::Portfolios =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
@@ -1198,6 +1497,9 @@ impl Coinbase {
         if let Err(e) = result {
             if let Some(req) = retry {
                 self.private_failed(cx, req, &e);
+            } else if let Some((id, socket)) = detail_failure {
+                cx.log(LogLevel::Warning, e);
+                self.fail_details(cx, &id, socket);
             } else {
                 cx.log(LogLevel::Warning, e);
                 if let Some(slot) = slot {
@@ -1239,20 +1541,7 @@ impl Coinbase {
         s.rows
             .retain(|id, o| !self.account.terminal.contains(id) || o.status != OrderStatus::Open);
         for o in s.rows.values() {
-            if !self
-                .account
-                .versions
-                .get(&o.id)
-                .is_some_and(|v| *v > s.revision)
-                && let Some(value) = s.fill_values.get(&o.id)
-            {
-                self.account.fill_values.insert(o.id.clone(), *value);
-            }
-            self.account
-                .totals
-                .entry(o.id.clone())
-                .and_modify(|q| *q = q.max(o.filled))
-                .or_insert(o.filled);
+            self.trading_observed_order(cx, o);
         }
         self.account.proofs = s.proofs;
         self.account.proofs.retain(|id, _| {
@@ -1260,12 +1549,6 @@ impl Coinbase {
                 .get(id)
                 .is_some_and(|o| o.status == OrderStatus::Open)
         });
-        self.account
-            .fill_values
-            .retain(|id, _| s.rows.contains_key(id) || self.account.terminal.contains(id));
-        self.account
-            .totals
-            .retain(|id, _| s.rows.contains_key(id) || self.account.terminal.contains(id));
         self.account
             .versions
             .retain(|id, _| s.rows.contains_key(id) || self.account.terminal.contains(id));
@@ -1290,6 +1573,7 @@ impl Coinbase {
             Request::SpotBalance => self.account.inflight[1] = false,
             Request::Positions { .. } => self.account.inflight[2] = false,
             Request::Orders(_) => self.account.inflight[3] = false,
+            Request::OrderDetails { id, socket } => self.fail_details(cx, &id, socket),
         }
     }
     pub(crate) fn private_on_message(
@@ -1362,126 +1646,134 @@ impl Coinbase {
             self.private_disconnect(cx);
             return true;
         }
-        let mut events = vec![];
         let mut frame_rows = 0;
         for event in parsed_events {
             let Some(raw) = event.orders else { continue };
             frame_rows += raw.len();
-            if frame_rows > MAX_ROWS {
+            if frame_rows > MAX_ROWS || !matches!(event.kind.as_ref(), "snapshot" | "update") {
                 self.private_disconnect(cx);
                 return true;
             }
-            if !matches!(event.kind.as_ref(), "snapshot" | "update") {
-                cx.log(LogLevel::Warning, "Coinbase unknown user event");
-                self.private_disconnect(cx);
-                return true;
-            }
-            let mut rows = vec![];
-            let mut invalid = false;
-            for text in &raw {
-                match map_order_detail(cx.store, text.get(), cx.now) {
-                    Ok(mapped) => rows.push(mapped),
-                    Err(e) => {
-                        cx.log(LogLevel::Warning, e);
-                        invalid = true;
-                        if let Some(s) = &mut self.account.snapshot {
-                            s.invalid = true
-                        }
-                    }
-                }
-            }
-            events.push((event.kind.into_owned(), raw.len(), rows, invalid));
-        }
-        self.account.sequence = Some(seq);
-        self.account.received = cx.now;
-        self.account.payload = cx.now;
-        for (kind, count, rows, invalid) in events {
-            if kind == "snapshot" {
+            let snapshot = event.kind == "snapshot";
+            if snapshot {
                 let revision = self.account.revision;
                 let s = self.account.snapshot.get_or_insert_with(|| Snapshot {
                     revision,
                     ..Default::default()
                 });
-                s.invalid |= invalid;
-                s.raw_count += count;
+                s.raw_count += raw.len();
+                s.complete = raw.len() < 50;
                 if s.raw_count > MAX_ROWS {
-                    cx.log(LogLevel::Warning, "Coinbase user snapshot exceeds limit");
                     self.private_disconnect(cx);
                     return true;
                 }
-                for mapped in rows {
-                    if mapped.average > 0.0 {
-                        s.fill_values.insert(
-                            mapped.order.id.clone(),
-                            mapped.order.filled * mapped.average,
-                        );
-                    }
-                    if let Some(p) = mapped.proof {
-                        s.proofs.insert(mapped.order.id.clone(), p);
-                    }
-                    s.rows.insert(mapped.order.id.clone(), mapped.order);
-                }
-                if count < 50 {
-                    let s = self.account.snapshot.take().unwrap();
-                    if !s.invalid {
-                        self.account.reconnect_failures = 0;
-                        self.account.has_snapshot = true;
-                        for o in s.rows.values() {
-                            self.account
-                                .totals
-                                .entry(o.id.clone())
-                                .and_modify(|q| *q = q.max(o.filled))
-                                .or_insert(o.filled);
+            }
+            for text in raw {
+                match self.map_user_order(cx, text.get(), snapshot) {
+                    Ok(Some(mapped)) if snapshot => self.stage_user_order(mapped),
+                    Ok(Some(mapped)) => self.apply_user_order(cx, mapped),
+                    Ok(None) => {}
+                    Err(error) => {
+                        cx.log(LogLevel::Warning, error);
+                        if let Some(s) = &mut self.account.snapshot {
+                            s.invalid = true;
                         }
-                        let revision = s.revision;
-                        let mut changed = cx
-                            .store
-                            .orders()
-                            .iter()
-                            .map(|o| o.id.clone())
-                            .collect::<HashSet<_>>();
-                        changed.extend(s.rows.keys().cloned());
-                        self.commit_orders(
-                            cx,
-                            Orders {
-                                rows: s.rows,
-                                proofs: s.proofs,
-                                fill_values: s.fill_values,
-                                invalid: false,
-                                revision,
-                                kind: self.account.kind.unwrap_or(ProductKind::Spot),
-                                status: 0,
-                                page: 1,
-                                cursor: String::new(),
-                                cursors: HashSet::new(),
-                            },
-                        );
-                        self.account.revision = self.account.revision.wrapping_add(1);
-                        self.account.snapshot_revision = self.account.revision;
-                        for id in changed {
-                            self.account.versions.insert(id, self.account.revision);
-                        }
-                    } else {
-                        cx.log(LogLevel::Warning, "Coinbase rejected partial user snapshot");
-                        self.account_poll(cx, true);
                     }
-                }
-            } else {
-                for mapped in rows {
-                    self.apply_user_order(cx, mapped)
                 }
             }
+            self.finish_user_snapshot(cx);
         }
+        self.account.payload = cx.now;
         true
+    }
+    fn stage_user_order(&mut self, mapped: Mapped) {
+        let Some(s) = &mut self.account.snapshot else {
+            return;
+        };
+        if mapped.average > 0.0 {
+            s.fill_values.insert(
+                mapped.order.id.clone(),
+                mapped.order.filled * mapped.average,
+            );
+        }
+        if let Some(p) = mapped.proof {
+            s.proofs.insert(mapped.order.id.clone(), p);
+        }
+        s.rows.insert(mapped.order.id.clone(), mapped.order);
+    }
+    fn finish_user_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self
+            .account
+            .snapshot
+            .as_ref()
+            .is_some_and(|s| s.complete && s.pending == 0)
+        {
+            return;
+        }
+        let s = self.account.snapshot.take().unwrap();
+        if s.invalid {
+            cx.log(LogLevel::Warning, "Coinbase rejected partial user snapshot");
+            self.account_poll(cx, true);
+            return;
+        }
+        self.account.reconnect_failures = 0;
+        self.account.has_snapshot = true;
+        for o in s.rows.values() {
+            if self
+                .account
+                .stream_totals
+                .get(&o.id)
+                .is_none_or(|prior| o.filled > *prior)
+            {
+                self.stream_baseline(
+                    cx,
+                    &o.id,
+                    o.filled,
+                    s.fill_values.get(&o.id).copied().unwrap_or(0.0),
+                );
+            }
+        }
+        let revision = s.revision;
+        let mut changed = cx
+            .store
+            .orders()
+            .iter()
+            .map(|o| o.id.clone())
+            .collect::<HashSet<_>>();
+        changed.extend(s.rows.keys().cloned());
+        self.commit_orders(
+            cx,
+            Orders {
+                rows: s.rows,
+                proofs: s.proofs,
+                fill_values: s.fill_values,
+                invalid: false,
+                revision,
+                kind: self.account.kind.unwrap_or(ProductKind::Spot),
+                status: 0,
+                page: 1,
+                cursor: String::new(),
+                cursors: HashSet::new(),
+            },
+        );
+        self.account.revision = self.account.revision.wrapping_add(1);
+        self.account.snapshot_revision = self.account.revision;
+        for id in changed {
+            self.account.versions.insert(id, self.account.revision);
+        }
     }
     fn apply_user_order(&mut self, cx: &mut Cx<'_, Pending>, mapped: Mapped) {
         let mut o = mapped.order;
+        if cx.store.order(&o.id).is_none() && cx.store.orders().len() >= MAX_ROWS {
+            cx.log(LogLevel::Warning, "Coinbase live order limit");
+            self.account_poll(cx, true);
+            return;
+        }
         let old = self
             .account
-            .totals
+            .stream_totals
             .get(&o.id)
             .copied()
-            .or_else(|| cx.store.order(&o.id).map(|o| o.filled))
             .or_else(|| {
                 self.account
                     .snapshot
@@ -1518,7 +1810,7 @@ impl Coinbase {
                 let old_value = if previous == 0.0 {
                     Some(0.0)
                 } else {
-                    self.account.fill_values.get(&o.id).copied().or_else(|| {
+                    self.account.stream_values.get(&o.id).copied().or_else(|| {
                         self.account
                             .snapshot
                             .as_ref()
@@ -1554,12 +1846,8 @@ impl Coinbase {
                 }
             }
         }
-        if mapped.average > 0.0 {
-            self.account
-                .fill_values
-                .insert(o.id.clone(), mapped.average * o.filled);
-        }
-        self.account.totals.insert(o.id.clone(), o.filled);
+        self.stream_baseline(cx, &o.id, o.filled, mapped.average * o.filled);
+        self.trading_observed_order(cx, &o);
         if let Some(client) = &o.client_order_id {
             self.account.pending_clients.remove(client);
         }
@@ -1584,8 +1872,6 @@ impl Coinbase {
                     self.account.terminal.remove(&id);
                     self.account.terminal_fills.remove(&id);
                     self.account.versions.remove(&id);
-                    self.account.totals.remove(&id);
-                    self.account.fill_values.remove(&id);
                     self.account.proofs.remove(&id);
                 }
             }
@@ -1599,7 +1885,13 @@ impl Coinbase {
             }
             s.rows.insert(o.id.clone(), o.clone());
         }
-        cx.store.upsert_order(o);
+        if !cx
+            .store
+            .order(&o.id)
+            .is_some_and(|prior| prior.filled > o.filled)
+        {
+            cx.store.upsert_order(o);
+        }
     }
 }
 #[cfg(test)]

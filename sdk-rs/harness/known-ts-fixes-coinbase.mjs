@@ -18,7 +18,8 @@ export const COINBASE_TS_FIXES = [
   'cancel outcomes are checked per ID and INTX replacement waits for authoritative zero-fill cancellation',
   'typed fills, terminal order history and public trades replace inherited query stubs; public maker sides become taker sides',
   'unavailable income and exact client-ID lookup fail explicitly instead of claiming an empty result',
-  'daily candles seed the full day and replace cumulative five-minute buckets without double counting',
+  'daily candles seed the full day and backfill reconnect gaps before replacing cumulative five-minute buckets',
+  'spot quote-sized user orders normalize quote leaves separately from base fills using authoritative sizing provenance',
 ];
 const parse = parseRequestJson;
 const route = (record) => new URL(record.url).pathname;
@@ -126,7 +127,7 @@ function correctFills(account, records, markets) {
     account.fills = expected;
   }
 }
-function correctOrders(account, records) {
+function correctOrders(account, records, markets) {
   const latest = new Map();
   for (const { message } of frames(records))
     for (const event of message.channel === 'user' ? (message.events ?? []) : [])
@@ -140,6 +141,27 @@ function correctOrders(account, records) {
     }
     if (row.type === 'limit' && raw.stop_price === '0')
       sameOrChange(row, 'price', 0, number(raw.limit_price), 'zero-stop ordinary limit price');
+    if (row.type !== 'limit' || markets.get(raw.product_id)?.product_type !== 'SPOT') continue;
+    const proofs = records.filter(
+      (r) => successful(r) && r.method === 'GET' && route(r) === `/api/v3/brokerage/orders/historical/${raw.order_id}`,
+    );
+    for (const proof of proofs) {
+      const detail = parse(proof.body).order;
+      assert.equal(detail.order_id, raw.order_id, 'Coinbase sizing proof order mismatch');
+      assert.equal(detail.product_id, raw.product_id, 'Coinbase sizing proof product mismatch');
+      const configs = Object.values(detail.order_configuration ?? {}).filter((c) => c != null);
+      assert.equal(configs.length, 1, 'ambiguous Coinbase sizing proof');
+      const config = detail.order_configuration.limit_limit_gtc;
+      if (!config?.quote_size || config.base_size) continue;
+      assert.ok(number(config.quote_size) > 0, 'invalid Coinbase quote sizing proof');
+      const price = number(raw.limit_price),
+        filled = number(raw.cumulative_quantity),
+        leaves = number(raw.leaves_quantity);
+      assert.ok(price > 0 && filled >= 0 && leaves >= 0, 'invalid Coinbase quote order economics');
+      assert.equal(row.filled, filled, 'unexpected TS Coinbase quote-sized filled quantity');
+      sameOrChange(row, 'remaining', leaves, leaves / price, 'quote-sized remaining quantity');
+      sameOrChange(row, 'amount', filled + leaves, filled + leaves / price, 'quote-sized order amount');
+    }
   }
 }
 function correctBalances(account, records) {
@@ -194,7 +216,7 @@ function queryHeads(records, command, path, key, markets) {
     const p = url.searchParams;
     p.set('limit', String(key === 'trades' ? (command.limit ?? 100) : Math.min(command.limit ?? 100, 100)));
     if (key === 'trades') return url;
-    p.set('sort_by', key === 'fills' ? 'TRADE_TIME' : 'CREATED_TIME');
+    if (key === 'fills') p.set('sort_by', 'TRADE_TIME');
     if (key === 'orders')
       for (const status of ['FILLED', 'CANCELLED', 'EXPIRED', 'FAILED']) p.append('order_status', status);
     if (command.symbol) p.set('product_ids', nativeSymbol(product.product_id));
@@ -524,7 +546,7 @@ export function fixCoinbase(ts, records) {
   correctCommands(ts, records, markets);
   if (!ts.account) return;
   correctFills(ts.account, records, markets);
-  correctOrders(ts.account, records);
+  correctOrders(ts.account, records, markets);
   correctBalances(ts.account, records);
   correctSettings(ts.account, markets);
 }

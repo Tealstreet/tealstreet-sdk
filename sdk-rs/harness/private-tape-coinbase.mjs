@@ -263,6 +263,8 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
       }
   };
   openStage();
+  if (profile === 'spot')
+    for (const row of active) http('GET', `${root}/orders/historical/${row.order_id}`, { order: row });
   message(privateSocket, 'subscriptions', [{ subscriptions: { user: [], heartbeats: [] } }]);
   heartbeat();
   user('snapshot', active.map(wsOrder));
@@ -495,7 +497,7 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
           : '';
   http(
     'GET',
-    `${root}/orders/historical/batch?limit=2&sort_by=CREATED_TIME&order_status=FILLED&order_status=CANCELLED&order_status=EXPIRED&order_status=FAILED&product_ids=${main}&product_type=${type}${expiry}&start_date=${encodeURIComponent(new Date(from).toISOString())}&end_date=${encodeURIComponent(new Date(to + 1).toISOString())}`,
+    `${root}/orders/historical/batch?limit=2&order_status=FILLED&order_status=CANCELLED&order_status=EXPIRED&order_status=FAILED&product_ids=${main}&product_type=${type}${expiry}&start_date=${encodeURIComponent(new Date(from).toISOString())}&end_date=${encodeURIComponent(new Date(to + 1).toISOString())}`,
     { orders: [terminal], has_next: true, cursor: 'history-page-2' },
   );
   const cancelled = order('81', {

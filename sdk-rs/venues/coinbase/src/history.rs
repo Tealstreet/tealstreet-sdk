@@ -346,7 +346,7 @@ impl Coinbase {
                     req.limit.min(100)
                 ),
                 Kind::Orders => format!(
-                    "/api/v3/brokerage/orders/historical/batch?limit={}&sort_by=CREATED_TIME&order_status=FILLED&order_status=CANCELLED&order_status=EXPIRED&order_status=FAILED",
+                    "/api/v3/brokerage/orders/historical/batch?limit={}&order_status=FILLED&order_status=CANCELLED&order_status=EXPIRED&order_status=FAILED",
                     req.limit.min(100)
                 ),
                 Kind::Trades => format!(

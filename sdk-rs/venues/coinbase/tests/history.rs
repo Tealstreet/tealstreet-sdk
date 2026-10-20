@@ -297,6 +297,41 @@ fn unfilled_canceled_history_accepts_empty_cumulative_average() {
         ("order-a", "canceled", 2.0, 0.0, NOW, None)
     );
 }
+
+#[test]
+fn order_history_uses_documented_default_sort_across_pages() {
+    let mut d = Driver::new(true, "BTC-USD", false);
+    d.query(Query::OrderHistory {
+        symbol: Some("BTC-USD".into()),
+        from_ms: Some(NOW),
+        to_ms: Some(NOW + 1000.0),
+        limit: Some(2),
+    });
+    let r = d.request();
+    assert!(!r.url.contains("sort_by="));
+    let newer = order("BTC-USD", "0", "")
+        .replace("order-a", "newer")
+        .replace("00:00:00Z", "00:00:01Z");
+    d.reply(
+        r,
+        200,
+        &format!(r#"{{"orders":[{newer}],"has_next":true,"cursor":"next"}}"#),
+    );
+    let r = d.request();
+    assert!(!r.url.contains("sort_by="));
+    assert!(r.url.ends_with("cursor=next"));
+    let older = order("BTC-USD", "0", "");
+    d.reply(
+        r,
+        200,
+        &format!(r#"{{"orders":[{older}],"has_next":false}}"#),
+    );
+    let rows: Vec<Historic> = serde_json::from_str(&d.result().unwrap()).unwrap();
+    assert_eq!(
+        rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        vec!["newer", "order-a"]
+    );
+}
 #[test]
 fn cfm_history_returns_native_contract_amounts() {
     let mut d = Driver::new(true, "BTC-CDE", true);

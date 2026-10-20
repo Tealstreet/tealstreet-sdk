@@ -242,3 +242,18 @@ pub struct EditSource<'a> {
     #[serde(default, borrow)]
     pub attached_order_configuration: Option<&'a RawValue>,
 }
+
+#[derive(Deserialize)]
+pub struct OrderDetail<'a> {
+    #[serde(borrow)]
+    pub order: OrderSizing<'a>,
+}
+#[derive(Deserialize)]
+pub struct OrderSizing<'a> {
+    #[serde(borrow)]
+    pub order_id: Cow<'a, str>,
+    #[serde(borrow)]
+    pub product_id: Cow<'a, str>,
+    #[serde(borrow)]
+    pub order_configuration: Configuration<'a>,
+}

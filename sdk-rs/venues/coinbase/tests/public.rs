@@ -3,6 +3,146 @@ use safe_cex_engine::{Action, Command, Engine, Event, Notice, Venue};
 use safe_cex_venue_coinbase::{Coinbase, Options};
 use support::*;
 const SYMBOL: &str = "BTC-PERP-INTX";
+
+fn candle_rows(e: &mut Driver, now: f64) -> Vec<[f64; 6]> {
+    let Some(frame) = e.take_frame(now) else {
+        return vec![];
+    };
+    let mut rows = vec![];
+    for (kind, payload) in safe_cex_engine::wire::sections(frame) {
+        if kind != 6 {
+            continue;
+        }
+        let count = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+        let start = (4 + count * 8 + 7) & !7;
+        for row in payload[start..start + count * 48].as_chunks::<48>().0 {
+            rows.push(std::array::from_fn(|i| {
+                f64::from_le_bytes(row[i * 8..i * 8 + 8].try_into().unwrap())
+            }));
+        }
+    }
+    rows
+}
+
+#[test]
+fn seconds_and_three_minute_streams_use_trades_and_roll_over() {
+    for (interval, timestamp, expected) in [
+        ("1s", 182., [110., 110., 110., 110., 3.]),
+        ("3m", 180., [100., 110., 100., 110., 5.]),
+    ] {
+        let (mut e, socket) = ready();
+        e.take_frame(1000.);
+        e.handle(
+            1000.,
+            Event::Command(Command::SubscribeCandles {
+                symbol: SYMBOL.into(),
+                interval: interval.into(),
+            }),
+        );
+        let subscriptions: Vec<_> = e
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::WsSend { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            subscriptions
+                .iter()
+                .any(|text| text.contains("market_trades"))
+        );
+        message(
+            &mut e,
+            socket,
+            r#"{"channel":"candles","sequence_num":0,"events":[{"type":"update","candles":[{"product_id":"BTC-PERP-INTX","start":"0","open":"1","high":"2","low":"1","close":"2","volume":"99"}]}]}"#,
+        );
+        assert!(candle_rows(&mut e, 2000.).is_empty());
+        message(
+            &mut e,
+            socket,
+            r#"{"channel":"market_trades","sequence_num":1,"events":[{"type":"update","trades":[{"product_id":"BTC-PERP-INTX","time":"1970-01-01T00:03:01Z","price":"100","size":"2"},{"product_id":"BTC-PERP-INTX","time":"1970-01-01T00:03:02Z","price":"110","size":"3"}]}]}"#,
+        );
+        let rows = candle_rows(&mut e, 2000.);
+        assert_eq!(rows.len(), if interval == "1s" { 2 } else { 1 });
+        assert_eq!(
+            rows.last(),
+            Some(&[
+                timestamp,
+                expected[0],
+                expected[1],
+                expected[2],
+                expected[3],
+                expected[4]
+            ])
+        );
+        message(
+            &mut e,
+            socket,
+            r#"{"channel":"market_trades","sequence_num":2,"events":[{"type":"update","trades":[{"product_id":"BTC-PERP-INTX","time":"1970-01-01T00:06:00Z","price":"90","size":"4"}]}]}"#,
+        );
+        assert_eq!(
+            candle_rows(&mut e, 2000.),
+            vec![[360., 90., 90., 90., 90., 4.]]
+        );
+    }
+}
+
+#[test]
+fn four_hour_stream_forwards_five_minute_candles_and_trade_prices() {
+    let (mut e, socket) = ready();
+    e.take_frame(1000.);
+    e.handle(
+        1000.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: SYMBOL.into(),
+            interval: "4h".into(),
+        }),
+    );
+    assert!(e.drain_actions().any(|action| matches!(action,
+        Action::WsSend { text, .. } if text.contains("candles"))));
+    message(
+        &mut e,
+        socket,
+        r#"{"channel":"candles","sequence_num":0,"events":[{"type":"update","candles":[{"product_id":"BTC-PERP-INTX","start":"300","open":"2","high":"4","low":"1","close":"3","volume":"5"}]}]}"#,
+    );
+    assert_eq!(candle_rows(&mut e, 2000.), vec![[300., 2., 4., 1., 3., 5.]]);
+    message(
+        &mut e,
+        socket,
+        r#"{"channel":"market_trades","sequence_num":1,"events":[{"type":"update","trades":[{"product_id":"BTC-PERP-INTX","time":"1970-01-01T00:05:01Z","price":"3.5","size":"2"}]}]}"#,
+    );
+    assert_eq!(
+        candle_rows(&mut e, 2000.),
+        vec![[300., 2., 4., 1., 3.5, 5.]]
+    );
+}
+
+#[test]
+fn streaming_intervals_do_not_expand_the_rest_granularity_whitelist() {
+    let (mut e, _) = ready();
+    for interval in ["1s", "3m", "4h"] {
+        e.handle(
+            2000.,
+            Event::Command(Command::FetchCandles {
+                command: 42,
+                symbol: SYMBOL.into(),
+                interval: interval.into(),
+                limit: Some(2),
+                from_ms: None,
+                to_ms: None,
+            }),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+        assert!(actions.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandDone { command: 42, result: Err(error) })
+                if error == "Unsupported Coinbase candle interval")));
+    }
+}
 #[test]
 fn discovers_instruments_without_credentials_and_keeps_full_depth() {
     let (mut e, socket) = ready();
@@ -286,6 +426,200 @@ fn daily_candle_seed_retains_earlier_day_and_counts_bucket_volume_once() {
         at += 8 + len;
     }
     assert_eq!(volume, Some(109.));
+}
+
+#[test]
+fn daily_candles_backfill_reconnect_gaps_and_reject_old_seed_generations() {
+    fn reopen(
+        e: &mut Driver,
+        socket: safe_cex_engine::SocketId,
+        now: f64,
+    ) -> (safe_cex_engine::SocketId, safe_cex_engine::HttpRequest) {
+        e.drain_actions().for_each(drop);
+        e.handle(now, Event::WsClosed { socket, code: 1006 });
+        let timer = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, .. } => Some(timer),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(now + 1000., Event::TimerFired { timer });
+        let socket = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(now + 1000., Event::WsOpened { socket });
+        let request = requests(e).pop().unwrap();
+        assert!(request.url.contains("granularity=FIVE_MINUTE"));
+        (socket, request)
+    }
+
+    let (mut e, socket) = ready();
+    e.take_frame(1000.);
+    e.handle(
+        86500000.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: SYMBOL.into(),
+            interval: "1d".into(),
+        }),
+    );
+    let initial = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &initial,
+        200,
+        r#"{"candles":[{"start":"86400","open":"100","high":"110","low":"90","close":"105","volume":"5"}]}"#,
+    );
+    assert_eq!(
+        candle_rows(&mut e, 86500000.),
+        vec![[86400., 100., 110., 90., 105., 5.]]
+    );
+
+    let (socket, stale) = reopen(&mut e, socket, 87399000.);
+    assert!(stale.url.contains("start=86400"));
+    message(
+        &mut e,
+        socket,
+        r#"{"channel":"candles","sequence_num":0,"events":[{"type":"update","candles":[{"product_id":"BTC-PERP-INTX","start":"87300","open":"120","high":"125","low":"115","close":"124","volume":"2"}]}]}"#,
+    );
+    assert!(candle_rows(&mut e, 87400000.).is_empty());
+    let (_, fresh) = reopen(&mut e, socket, 87401000.);
+    reply(
+        &mut e,
+        &stale,
+        200,
+        r#"{"candles":[{"start":"86400","open":"1","high":"999","low":"1","close":"1","volume":"999"}]}"#,
+    );
+    assert!(candle_rows(&mut e, 87402000.).is_empty());
+    reply(
+        &mut e,
+        &fresh,
+        200,
+        r#"{"candles":[{"start":"86400","open":"100","high":"115","low":"80","close":"106","volume":"7"},{"start":"86700","open":"106","high":"120","low":"100","close":"110","volume":"3"},{"start":"87000","open":"110","high":"130","low":"105","close":"120","volume":"4"},{"start":"87300","open":"120","high":"125","low":"115","close":"123","volume":"1"}]}"#,
+    );
+    assert_eq!(
+        candle_rows(&mut e, 87402000.),
+        vec![[86400., 100., 130., 80., 124., 16.]]
+    );
+}
+
+#[test]
+fn daily_subscriptions_before_first_open_or_during_reconnect_seed_at_open() {
+    for reconnect in [false, true] {
+        let mut e = Engine::new(
+            Coinbase::new(Options {
+                public_data_only: true,
+                ..Options::default()
+            })
+            .unwrap(),
+        );
+        e.start(86696000.);
+        let request = requests(&mut e).pop().unwrap();
+        e.handle(
+            86696000.,
+            Event::HttpResponse {
+                request: request.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body: INSTRUMENTS,
+                },
+            },
+        );
+        let mut socket = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .unwrap();
+        if reconnect {
+            e.handle(86696000., Event::WsOpened { socket });
+            e.drain_actions().for_each(drop);
+            e.handle(86697000., Event::WsClosed { socket, code: 1006 });
+            let timer = e
+                .drain_actions()
+                .find_map(|action| match action {
+                    Action::SetTimer { timer, .. } => Some(timer),
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(86698000., Event::TimerFired { timer });
+            socket = e
+                .drain_actions()
+                .find_map(|action| match action {
+                    Action::WsConnect { socket, .. } => Some(socket),
+                    _ => None,
+                })
+                .unwrap();
+        }
+        e.take_frame(86698000.);
+        e.handle(
+            86699000.,
+            Event::Command(Command::SubscribeCandles {
+                symbol: SYMBOL.into(),
+                interval: "1d".into(),
+            }),
+        );
+        assert!(requests(&mut e).is_empty());
+        assert!(candle_rows(&mut e, 86699000.).is_empty());
+        e.handle(86701000., Event::WsOpened { socket });
+        let seed = requests(&mut e).pop().unwrap();
+        assert!(seed.url.contains("start=86400&end=86701"));
+        reply(
+            &mut e,
+            &seed,
+            200,
+            r#"{"candles":[{"start":"86400","open":"100","high":"110","low":"90","close":"105","volume":"7"},{"start":"86700","open":"105","high":"115","low":"100","close":"110","volume":"2"}]}"#,
+        );
+        assert_eq!(
+            candle_rows(&mut e, 86701000.),
+            vec![[86400., 100., 115., 90., 110., 9.]]
+        );
+    }
+}
+
+#[test]
+fn delayed_websocket_bucket_cannot_regress_a_newer_rest_daily_seed() {
+    let (mut e, socket) = ready();
+    e.take_frame(1000.);
+    e.handle(
+        86500000.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: SYMBOL.into(),
+            interval: "1d".into(),
+        }),
+    );
+    let seed = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &seed,
+        200,
+        r#"{"candles":[{"start":"86400","open":"100","high":"150","low":"90","close":"130","volume":"10"}]}"#,
+    );
+    candle_rows(&mut e, 86500000.);
+    message(
+        &mut e,
+        socket,
+        r#"{"channel":"candles","sequence_num":0,"events":[{"type":"update","candles":[{"product_id":"BTC-PERP-INTX","start":"86400","open":"100","high":"140","low":"90","close":"120","volume":"8"}]}]}"#,
+    );
+    assert_eq!(
+        candle_rows(&mut e, 86500000.),
+        vec![[86400., 100., 150., 90., 130., 10.]]
+    );
+    message(
+        &mut e,
+        socket,
+        r#"{"channel":"candles","sequence_num":1,"events":[{"type":"update","candles":[{"product_id":"BTC-PERP-INTX","start":"86400","open":"100","high":"160","low":"80","close":"135","volume":"11"}]}]}"#,
+    );
+    assert_eq!(
+        candle_rows(&mut e, 86500000.),
+        vec![[86400., 100., 160., 80., 135., 11.]]
+    );
 }
 
 #[test]
