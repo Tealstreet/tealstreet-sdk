@@ -191,6 +191,11 @@ struct EngineOptions {
     #[cfg(feature = "lighter")]
     #[serde(default)]
     lighter_stop_slippage_pct: Option<f64>,
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    lighter_remote_signer: bool,
+    #[cfg(feature = "lighter")]
+    lighter_signer_provider: Option<String>,
     #[cfg(any(
         feature = "grvt",
         feature = "coinbase",
@@ -692,16 +697,21 @@ impl WasmEngine {
                 })))
             }
             #[cfg(feature = "lighter")]
-            "lighter" => Box::new(Engine::new(Lighter::new(LighterOptions {
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                application_id: options.application_id,
-                api_key_index: options.api_key_index,
-                integrator_account_index: options.lighter_integrator_account_index,
-                stop_slippage_pct: options.lighter_stop_slippage_pct.unwrap_or(1.0),
-            }))),
+            "lighter" | "lighter-robinhood" => {
+                Box::new(Engine::new(Lighter::new(LighterOptions {
+                    robinhood: venue == "lighter-robinhood",
+                    remote_signer: options.lighter_remote_signer,
+                    signer_provider: options.lighter_signer_provider,
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    api_key_index: options.api_key_index,
+                    integrator_account_index: options.lighter_integrator_account_index,
+                    stop_slippage_pct: options.lighter_stop_slippage_pct.unwrap_or(1.0),
+                })))
+            }
             #[cfg(feature = "bitrue")]
             "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
                 public_data_only: options.public_data_only,

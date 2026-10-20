@@ -7,11 +7,11 @@ phase-9 decision and gate results live in [RUST_REWRITE.md](RUST_REWRITE.md).
 
 ## What is ready, and what is still a deletion blocker
 
-The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **44**.
+The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **45**.
 The two registries currently default **9 names** to `RustEngineExchange`:
 `coinbase`, `coinbasespot`, and Orderly's `tealstreet-dex`, `kodiakfi`, `mode`,
 `salsadex`, `what`, `woofi`, plus testnet-only `txflow`. They default the other **40 names** to TypeScript,
-including **35 names with an available Rust adapter**. Registration in
+including **36 names with an available Rust adapter**. Registration in
 `RUST_VENUES` proves the adapter exists; it does not prove every optional product,
 credential mode, consumer, or live deployment is ready to delete.
 
@@ -48,8 +48,8 @@ of saved accounts.
 | `hyperliquidspot` | No | TS required; perps coverage cannot substitute for saved spot accounts. |
 | `kraken` | Yes | TS default; futures adapter. |
 | `krakenspot` | No | TS required; Kraken futures signing/protocol does not cover Kraken spot. |
-| `lighter` | Yes | TS default; keep wallet approval/account-tier helpers and prove all current credential/remote-signing modes. |
-| `lighter-robinhood` | No | TS required; it loads `LighterExchange`, but the Rust alias/config is not registered. Must prove broker config and add an explicit alias before cutover. |
+| `lighter` | Yes | TS default; local signing on main/test chains 304/300. Remote-only account snapshot polling, payload-only public startup and mixed local/callback behavior match the current TS startup contract; no supported remote transaction signer in TS. Keep wallet approval/account-tier helpers, the wrapper's API-key-index parser and TS oracle; [variant evidence](LIGHTER_VARIANTS_PORT.md). |
+| `lighter-robinhood` | Yes | TS default; explicit Rust alias with Robinhood main/test URLs, USDG, signing chains 466324/300 and no default zkLighter integrator attribution. Same credential modes and retained helper/oracle requirements as `lighter`; [variant evidence](LIGHTER_VARIANTS_PORT.md). |
 | `mexc` | Yes | TS default; conditional/trailing and native-unit proofs still required when removing reference coverage. |
 | `paradex` | Yes | TS default; retain binary/text feed and Starknet account mode checks. |
 | `phemex` | Yes | TS default; retain native account identity and shared broker constants. |
@@ -60,8 +60,8 @@ of saved accounts.
 | `breakoutprop` | Yes | TS default, legacy DXtrade only and disabled in production/preview (`enabledInDev: true`); authenticated REST polling, no venue WebSocket or anonymous public feed. Username/password and exact FULL_TRADING account selection are required even for public-data-only reads; `supportsChaser: false` remains enforced by metadata. LIMIT/MARKET/last-price STOP, GTC, reduce-only as CLOSE, confirmed zero-fill cancel-replace; caller IDs, attached brackets/close-all and leverage/margin/mode changes unsupported. One-way/cross account model, native lot IDs and explicitly estimated margin/PnL; quote-derived books/live candles are synthetic. Generic fills/order/income history remain branded inert fallbacks, public trades unsupported; internal cancel history proof is not a history-query implementation. Public fixture is documented/scripted under the recorded waiver, with live credential capture/connectivity still unverified; read [RUST_BREAKOUTPROP.md](RUST_BREAKOUTPROP.md). |
 | `bitunix` | None | TS required. Roster work-in-progress is not a registered Rust adapter; an explicit port or supported-product retirement decision remains necessary. |
 
-The 5 names absent from `RUST_VENUES` are exactly `bitunix`, `hyperliquidspot`,
-`krakenspot`, `kucoinspot`, `lighter-robinhood`.
+The 4 names absent from `RUST_VENUES` are exactly `bitunix`, `hyperliquidspot`,
+`krakenspot`, `kucoinspot`.
 Do not silently route them through another family's adapter.
 
 Native consumer proof includes both WebSocket venues and HTTP-polling venues.
@@ -212,7 +212,7 @@ keep derived display/store fields and sequencing while inputs become Rust frames
    corpus. Keep absence of optional data distinct from an authoritative empty
    snapshot, updateId bumps, native units, terminal fences and serialize/stub
    parity. Run integration/build/replay controls as applicable.
-2. **Close unsupported aliases/products.** Port the 6 missing names or obtain an
+2. **Close unsupported aliases/products.** Port the 4 missing names or obtain an
    explicit supported-product retirement decision in a separate change. A
    perps port never retires a saved spot/inverse account implicitly. Audit
    all credential/signing modes, proxy/tunnel/region, secondary keys, product
@@ -765,7 +765,7 @@ Appendix B), 10 Orderly audit files, three Coinbase reference subclasses/socket
 types and eight Orderly reference broker subclasses/socket types. Appendix B
 now names all 32 exact class targets, adding the 30 previously absent callers
 and extending the existing two client-ID entries. These counts are test/reference
-source counts for that checkpoint; the current runtime totals are 49 names / 44 Rust aliases.
+source counts for that checkpoint; the current runtime totals are 49 names / 45 Rust aliases.
 
 That checkpoint's Coinbase/Orderly frozen-module graph below additionally includes signing/API/type/
 utility imports: **79 static imports in 40 caller files** at this review
