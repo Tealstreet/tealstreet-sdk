@@ -461,7 +461,14 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
           return !sequence || !lastSequence || sequence > lastSequence;
         });
         bufferedUpdates = [];
-        for (const update of replay) applyIncrement(update);
+        for (let i = 0; i < replay.length; i++) {
+          if (!snapshotLoaded) {
+            // A gap retains its first delta; keep the rest for the newer snapshot.
+            bufferedUpdates = bufferedUpdates.concat(replay.slice(i));
+            break;
+          }
+          applyIncrement(replay[i]);
+        }
 
         if (snapshotLoaded) emitOrderBook();
       } catch (err: any) {

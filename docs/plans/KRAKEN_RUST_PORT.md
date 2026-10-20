@@ -281,3 +281,13 @@ final native-source floor independently reviewed with 22 account tests passing.
 First CI also exposed a WOO steady-state timing miss (17.9/18.9 ms); verify its
 unchanged strict gate in the updated CI run. Push reviewed fixes, wait for all CI
 to pass, then merge #1323 into feat/rust-rewrite and cut a fresh follow-up branch.
+
+### KuCoin landing integration
+
+Base advanced to 373cc09864 while final reviewed head CI was running, creating
+registration/build conflicts. Adopt incoming layout and union Kraken with KuCoin:
+Cargo.lock retains incoming packages plus the exact Kraken package/dependency;
+Wasm feature defaults retain incoming multiline form; build aliases and imports
+include both. Preserve incoming request/lot/generation contracts alongside the
+Kraken sticky protocol oracle, ticker corrections and ACK progress fixes.
+Independent integration code-correctness review and all affected gates follow.
