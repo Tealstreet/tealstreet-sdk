@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const credentials = { key: `0x${'1'.padStart(64, '0')}`, paradexAddress: '0x123', subkeyAddress: '0x456' };
 const market: Market = {
@@ -31,7 +32,9 @@ describe('Rust Paradex account boundary', () => {
         commands.push(command);
         return JSON.stringify([{ op: 'done', command: command.command, result: '["42"]' }]);
       },
-      takeFrame: () => undefined, snapshotFrame: () => new Uint8Array(),
+      takeFrame: () => new Uint8Array(consumerFrame({
+        loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+      })), snapshotFrame: () => new Uint8Array(),
       wsOpen: noActions, wsMessage: noActions, wsClose: noActions,
       httpStart: noActions, httpChunk: noActions, httpEnd: noActions, httpFailed: noActions, timer: noActions,
     };

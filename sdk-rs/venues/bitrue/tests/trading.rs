@@ -6,10 +6,15 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_bitrue::{Bitrue, Options};
 const CONTRACT: &str = r#"[{"symbol":"E-BTC-USDT","pricePrecision":1,"multiplier":0.001,"minOrderVolume":1,"maxMarketVolume":10,"maxLimitVolume":10,"minOrderMoney":5,"status":1,"side":1,"type":"E","multiplierCoin":"BTC"}]"#;
+enum Trace {
+    Progress(u32, Vec<OrderIdentityReceipt>),
+    Http(safe_cex_engine::RequestId),
+}
 struct Harness {
     e: Engine<Bitrue>,
     requests: Vec<HttpRequest>,
     notices: Vec<Notice>,
+    trace: Vec<Trace>,
     timers: Vec<(TimerId, f64)>,
     sockets: Vec<(SocketId, String)>,
 }
@@ -25,6 +30,7 @@ impl Harness {
             e,
             requests: vec![],
             notices: vec![],
+            trace: vec![],
             timers: vec![],
             sockets: vec![],
         };
@@ -49,6 +55,13 @@ impl Harness {
     }
     fn collect(&mut self) {
         for action in self.e.drain_actions() {
+            match &action {
+                Action::Http(r) => self.trace.push(Trace::Http(r.id)),
+                Action::Notice(Notice::CommandProgress { command, receipts }) => {
+                    self.trace.push(Trace::Progress(*command, receipts.clone()))
+                }
+                _ => {}
+            }
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::Notice(n) => self.notices.push(n),
@@ -349,6 +362,7 @@ fn amend_reads_then_cancels_then_verifies_before_replacing_remaining_with_new_id
     h.reply(request, &detail("CANCELLED", 0.004, ""));
     let request = h.take(Method::Post, "/fapi/v2/order");
     let row = body(&request);
+    assert_eq!(placement_receipts(&h, &request).len(), 2);
     assert_eq!(row["volume"], "0.006");
     assert_eq!(row["price"], 1990.0);
     assert_ne!(row["clientOrderId"], "callerOld");
@@ -374,6 +388,11 @@ fn amend_final_fill_or_missing_protection_provenance_never_places() {
         );
         let request = h.take(Method::Get, "/fapi/v2/order?");
         h.reply(request, &final_reply);
+        assert!(
+            !h.notices
+                .iter()
+                .any(|n| matches!(n, Notice::CommandProgress { .. }))
+        );
         assert!(h.failed());
         assert_eq!(h.writes(), 0);
     }
@@ -988,6 +1007,68 @@ fn missing_leverage_and_invalid_caller_null_fail_before_writes() {
     assert!(serde_json::from_str::<PlaceOrderOpts>(r#"{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000,"clientOrderId":null}"#).is_err());
 }
 
+fn placement_receipts(h: &Harness, request: &HttpRequest) -> Vec<OrderIdentityReceipt> {
+    let row = body(request);
+    let mut ids = vec![row["clientOrderId"].as_str().unwrap().to_owned()];
+    if let Some(children) = row["triggerOrderCreateParams"].as_array() {
+        ids.extend(
+            children
+                .iter()
+                .map(|child| child["clientOrderId"].as_str().unwrap().to_owned()),
+        );
+    }
+    let expected: Vec<_> = ids
+        .into_iter()
+        .map(|identity| OrderIdentityReceipt {
+            symbol: "E-BTC-USDT".into(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity,
+        })
+        .collect();
+    let write = h
+        .trace
+        .iter()
+        .position(|event| matches!(event, Trace::Http(id) if *id == request.id))
+        .unwrap();
+    assert!(write > 0);
+    match &h.trace[write - 1] {
+        Trace::Progress(command, receipts) => {
+            assert_eq!(*command, 7);
+            assert_eq!(receipts, &expected);
+        }
+        _ => panic!("placement must be preceded by its typed receipts"),
+    }
+    expected
+}
+
+#[test]
+fn receipts_cover_final_split_parents_and_embedded_children_before_each_write() {
+    let mut h = Harness::new();
+    h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.025,"price":2000,"stopLoss":1800,"takeProfit":2200}]"#);
+    let mut ids = std::collections::HashSet::new();
+    for index in 0..3 {
+        let request = h.take(Method::Post, "/fapi/v2/order");
+        let receipts = placement_receipts(&h, &request);
+        assert_eq!(receipts.len(), 3);
+        for receipt in receipts {
+            assert!(ids.insert(receipt.identity));
+        }
+        h.reply(
+            request,
+            &format!(r#"{{"code":"0","data":{{"orderId":"parent-{index}"}}}}"#),
+        );
+    }
+    assert_eq!(ids.len(), 9);
+}
+
+#[test]
+fn receipts_preserve_a_caller_id_without_minting_another_namespace() {
+    let mut h = Harness::new();
+    h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.005,"price":2000,"clientOrderId":"caller-exact"}]"#);
+    let request = h.take(Method::Post, "/fapi/v2/order");
+    assert_eq!(placement_receipts(&h, &request)[0].identity, "caller-exact");
+}
+
 #[test]
 fn missing_cancel_identity_is_reported_without_blocking_known_ids() {
     let mut h = Harness::new();
@@ -1429,4 +1510,53 @@ fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
     h.place(&app("stop_market", 1800.0, r#","triggerPrice":1790"#));
     assert!(h.failed());
     assert_eq!(h.writes(), 0);
+}
+
+#[test]
+fn failed_protective_census_read_reports_once_through_the_placement() {
+    let (mut h, _) = protective_ack();
+    let mut census = post_write_census(&mut h);
+    h.notices.clear();
+    // Reads may retry; exhaust every attempt of the post-write census.
+    for _ in 0..10 {
+        h.e.handle(
+            100.0,
+            Event::HttpFailed {
+                request: census.id,
+                error: "census transport failed",
+            },
+        );
+        h.collect();
+        match h
+            .requests
+            .iter()
+            .position(|r| r.method == Method::Get && r.url.contains("/fapi/v2/openOrders"))
+        {
+            Some(index) => census = h.requests.remove(index),
+            None => break,
+        }
+    }
+    assert!(h.failed(), "an uncertain protective placement fails");
+    let error = h
+        .notices
+        .iter()
+        .position(|n| matches!(n, Notice::CommandError { command: 7, message } if message.contains("census transport failed")));
+    let done = h.notices.iter().position(|n| {
+        matches!(
+            n,
+            Notice::CommandDone {
+                command: 7,
+                result: Err(_)
+            }
+        )
+    });
+    assert!(error.is_some() && error < done, "{:?}", h.notices);
+    // An uncorrelated Error log would surface as a second toast beside Done Err.
+    assert!(!h.notices.iter().any(|n| matches!(
+        n,
+        Notice::Log {
+            level: safe_cex_engine::LogLevel::Error,
+            ..
+        }
+    )));
 }

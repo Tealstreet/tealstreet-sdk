@@ -21,6 +21,64 @@ fn done(
         .unwrap()
 }
 #[test]
+fn every_spot_bracket_leg_receipts_its_exact_native_cl_ord_id_before_dispatch() {
+    let (mut e, _, _) = ready(false);
+    let mut order = opts("limit", 99.);
+    order.stop_loss = Some(95.);
+    order.take_profit = Some(105.);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![order],
+        }),
+    );
+    let mut identities = std::collections::HashSet::new();
+    for index in 0..3 {
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let (at, receipts) = actions
+            .iter()
+            .enumerate()
+            .find_map(|(i, action)| match action {
+                Action::Notice(Notice::CommandProgress {
+                    command: 91,
+                    receipts,
+                }) => Some((i, receipts)),
+                _ => None,
+            })
+            .unwrap();
+        let (write_at, request) = actions
+            .iter()
+            .enumerate()
+            .find_map(|(i, action)| match action {
+                Action::Http(request) if request.url.ends_with("AddOrder") => Some((i, request)),
+                _ => None,
+            })
+            .unwrap();
+        assert!(at < write_at);
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].symbol, "XBT/USD");
+        assert_eq!(
+            receipts[0].kind,
+            safe_cex_engine::OrderIdentityKind::ClientOrderId
+        );
+        let actual = request
+            .body
+            .as_deref()
+            .unwrap()
+            .split('&')
+            .find_map(|part| part.strip_prefix("cl_ord_id="))
+            .unwrap();
+        assert_eq!(receipts[0].identity, actual);
+        assert!(identities.insert(receipts[0].identity.clone()));
+        reply(
+            &mut e,
+            request,
+            &format!(r#"{{"error":[],"result":{{"txid":["accepted-{index}"]}}}}"#),
+        );
+    }
+}
+#[test]
 fn native_place_types_exact_client_id_and_trailing_distance() {
     for (kind, raw, expected) in [
         ("limit", "limit", "price=98"),
@@ -452,31 +510,26 @@ fn trade_permission_denied_fails_the_order_without_deactivating_a_read_key() {
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 31, result: Err(m) }) if m.contains("Permission denied"))));
 }
 #[test]
-fn market_entry_with_tpsl_legs_fails_before_any_write_unless_legs_are_disabled() {
-    for (stop_loss, take_profit) in [
-        (Some(95.), None),
-        (None, Some(105.)),
-        (Some(95.), Some(105.)),
-    ] {
-        let (mut e, _, _) = ready(false);
-        let mut o = opts("market", 99.);
-        o.stop_loss = stop_loss;
-        o.take_profit = take_profit;
-        e.handle(
-            NOW,
-            Event::Command(Command::PlaceOrders {
-                command: 44,
-                orders: vec![opts("limit", 99.), o],
-            }),
-        );
-        let actions = e.drain_actions().collect::<Vec<_>>();
-        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 44, result: Err(m) }) if m.contains("market entry"))));
-    }
+fn market_entry_with_tpsl_names_the_unsupported_legs() {
+    let (mut e, _, _) = ready(false);
+    let mut o = opts("market", 99.);
+    o.take_profit = Some(110.);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 44,
+            orders: vec![opts("limit", 99.), o],
+        }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 44, result: Err(m) }) if m.contains("take-profit/stop-loss legs on a market entry"))));
+}
+#[test]
+fn market_entry_with_zero_brackets_places_only_the_entry() {
     let (mut e, _, _) = ready(false);
     let mut o = opts("market", 99.);
     o.stop_loss = Some(0.);
-    o.take_profit = Some(0.);
     e.handle(
         NOW,
         Event::Command(Command::PlaceOrders {
@@ -485,9 +538,10 @@ fn market_entry_with_tpsl_legs_fails_before_any_write_unless_legs_are_disabled()
         }),
     );
     let r = requests(&mut e).pop().unwrap();
-    assert!(r.body.as_ref().unwrap().contains("ordertype=market"));
     reply(&mut e, &r, r#"{"error":[],"result":{"txid":["ENTRY"]}}"#);
-    assert_eq!(done(&mut e, 45).unwrap(), r#"["ENTRY"]"#);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 45, result: Ok(ids) }) if ids == r#"["ENTRY"]"#)));
 }
 
 #[test]

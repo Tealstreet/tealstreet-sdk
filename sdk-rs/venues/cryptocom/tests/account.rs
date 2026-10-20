@@ -510,3 +510,65 @@ fn fill_count(bytes: &[u8]) -> u32 {
     }
     0
 }
+const COINS: &str = r#""position_balances":[{"instrument_name":"USD","quantity":"1000","max_withdrawal_balance":"950"},{"instrument_name":"CRO","quantity":"5","max_withdrawal_balance":"7"},{"instrument_name":"BTC","quantity":"1e","max_withdrawal_balance":"1"},{"quantity":"1"}]"#;
+fn coins(h: &Harness) -> Vec<(String, f64, f64, f64, f64)> {
+    h.engine
+        .store()
+        .currency_balances()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            let b = &c.balance;
+            (c.currency.clone(), b.total, b.free, b.used, b.upnl)
+        })
+        .collect()
+}
+#[test]
+fn balance_snapshot_publishes_per_coin_balances_and_skips_bad_coins() {
+    let mut h = Harness::new();
+    h.reply("get-positions", EMPTY);
+    h.reply(
+        "user-balance",
+        &BALANCE.replace(r#""10"}"#, &format!(r#""10",{COINS}}}"#)),
+    );
+    h.reply("private/get-open-orders", EMPTY);
+    assert_eq!(
+        (
+            h.engine.store().balance().total,
+            h.engine.store().balance().free
+        ),
+        (1000.0, 950.0)
+    );
+    assert_eq!(
+        coins(&h),
+        [
+            ("CRO".into(), 5.0, 7.0, 0.0, 0.0),
+            ("USD".into(), 1000.0, 950.0, 50.0, 0.0)
+        ]
+    );
+    assert!(warned(
+        &h,
+        "skipped 2 unmappable currency balance rows (first: BTC)"
+    ));
+}
+#[test]
+fn pushed_balance_publishes_per_coin_balances_with_the_aggregate() {
+    let mut h = Harness::new();
+    h.load();
+    assert_eq!(h.engine.store().currency_balances(), Some(&[][..]));
+    h.ws(
+        "user.balance",
+        &format!(
+            r#"{{"total_margin_balance":"2000","total_available_balance":"1900","total_initial_margin":"100","total_session_unrealized_pnl":"0",{COINS}}}"#
+        ),
+    );
+    assert_eq!(h.engine.store().balance().total, 2000.0);
+    assert_eq!(coins(&h).len(), 2);
+    assert_eq!(coins(&h)[1], ("USD".into(), 1000.0, 950.0, 50.0, 0.0));
+    h.ws(
+        "user.balance",
+        r#"{"total_margin_balance":"2100","total_available_balance":"1900","total_initial_margin":"100","total_session_unrealized_pnl":"0","position_balances":"garbled"}"#,
+    );
+    assert_eq!(h.engine.store().balance().total, 2100.0);
+    assert_eq!(coins(&h).len(), 2);
+}

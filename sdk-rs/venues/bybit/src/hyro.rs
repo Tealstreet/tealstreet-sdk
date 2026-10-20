@@ -5,7 +5,7 @@ use crate::sign::{Body, Query};
 use crate::wire::{OrderRow, Placed, Status, present};
 use crate::{BybitLinear, Pending, Rest, venue_error};
 use safe_cex_engine::model::{Order, OrderStatus, OrderType, PlaceOrderOpts};
-use safe_cex_engine::{CommandId, Cx, LogLevel, Response};
+use safe_cex_engine::{CommandId, Cx, Response};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 
@@ -18,6 +18,7 @@ pub(crate) struct State {
 }
 
 struct Create {
+    identity_dispatched: bool,
     base: Body,
     stop_body: Option<String>,
     blocked: bool,
@@ -143,6 +144,19 @@ impl BybitLinear {
         // Retries keep the original lots and trigger direction even when
         // current prices, precision or the position have changed.
         if let Some(group) = self.trading.hyro.groups.get_mut(&key) {
+            cx.command_progress(
+                command,
+                group
+                    .creates
+                    .iter()
+                    .filter(|create| create.identity_dispatched)
+                    .map(|create| safe_cex_engine::OrderIdentityReceipt {
+                        symbol: create.symbol.clone(),
+                        kind: safe_cex_engine::OrderIdentityKind::ClientOrderId,
+                        identity: create.link.clone(),
+                    })
+                    .collect(),
+            );
             group.waiters.push(command);
             if group.running {
                 return;
@@ -239,6 +253,7 @@ impl BybitLinear {
                     extra: None,
                 };
                 Ok(Create {
+                    identity_dispatched: false,
                     base,
                     stop_body,
                     blocked: false,
@@ -321,6 +336,15 @@ impl BybitLinear {
             );
             return;
         }
+        create.identity_dispatched = true;
+        let receipt = safe_cex_engine::OrderIdentityReceipt {
+            symbol: create.symbol.clone(),
+            kind: safe_cex_engine::OrderIdentityKind::ClientOrderId,
+            identity: create.link.clone(),
+        };
+        for command in &group.waiters {
+            cx.command_progress(*command, vec![receipt.clone()]);
+        }
         let body = create
             .base
             .clone()
@@ -379,8 +403,8 @@ impl BybitLinear {
                 create.link
             )
         };
-        cx.log(LogLevel::Error, message.clone());
         for command in group.waiters.drain(..) {
+            cx.command_error(command, message.clone());
             cx.done(command, Err(message.clone()));
         }
         group.running = false;
@@ -388,6 +412,7 @@ impl BybitLinear {
             if group.index == 0 {
                 self.trading.hyro.groups.remove(key);
             } else if let Ok(link) = safe_cex_crypto::uuid::uuid() {
+                create.identity_dispatched = false;
                 create.link = link.clone();
                 create.optimistic.client_order_id = Some(link);
                 create.uncertain = false;
