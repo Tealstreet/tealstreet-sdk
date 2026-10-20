@@ -15,6 +15,7 @@ const ORDER: &str = r#"{"id":"order-1","symbol":"BTC-USDT","clientOid":"caller-1
 struct H {
     e: Engine<KucoinSpot>,
     actions: Vec<Action>,
+    failures: Vec<safe_cex_engine::VenueError>,
     requests: Vec<HttpRequest>,
     now: f64,
     public: SocketId,
@@ -45,6 +46,7 @@ impl H {
         let mut h = Self {
             e: Engine::new(KucoinSpot::new(options)),
             actions: vec![],
+            failures: vec![],
             requests: vec![],
             now: 1700000000000.0,
             public: SocketId(0),
@@ -139,6 +141,15 @@ impl H {
                 self.actions
                     .retain(|a| !matches!(a,Action::SetTimer{timer:old,..}if timer==old));
             }
+            // Failures as the plain text the host renders.
+            let action = match action {
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    let result = Err(error.legacy_text());
+                    self.failures.push(error);
+                    Action::Notice(Notice::CommandDone { command, result })
+                }
+                action => action,
+            };
             self.actions.push(action);
         }
     }
@@ -1892,6 +1903,57 @@ fn spot_invalid_negotiated_heartbeat_intervals_reject_before_connecting() {
         }
     }
 }
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
+    let unknown = (None, Some(Outcome::Unknown));
+    for (status, body, classified) in [
+        (503, r#"{"code":"500000","msg":"busy"}"#, unknown),
+        (
+            200,
+            r#"{"code":"200004","msg":"Balance insufficient"}"#,
+            rejected(ErrorKind::Rejected),
+        ),
+        (
+            401,
+            r#"{"code":"400003","msg":"KC-API-KEY not exists"}"#,
+            rejected(ErrorKind::AuthInvalid),
+        ),
+        (200, r#"{"code":"200000","data":{}}"#, unknown),
+    ] {
+        let mut h = H::new(true);
+        h.command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![place(None)],
+        });
+        let r = h.http("/hf/orders");
+        h.respond(&r, status, body);
+        let text = h.done(1).unwrap_err();
+        let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+        assert_eq!(
+            ((error.kind, error.outcome), error.legacy_text()),
+            (classified, text),
+            "{status} {body}"
+        );
+    }
+    let mut h = H::new(true);
+    h.command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![place(None)],
+    });
+    let r = h.http("/hf/orders");
+    h.event(Event::HttpFailed {
+        request: r.id,
+        error: "reset",
+    });
+    assert_eq!(
+        (h.failures[0].kind, h.failures[0].outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
+}
+
 #[test]
 fn balance_events_faster_than_the_heal_read_cannot_starve_the_balance() {
     let mut h = H::new(true);
