@@ -683,7 +683,9 @@ impl BreakoutProp {
                 self.auth_error = error.into();
                 if !cx.store.loaded().markets {
                     self.auth_failed = true;
-                    cx.log(LogLevel::Error, format!("DXtrade startup failed: {error}"));
+                    let message = format!("DXtrade startup failed: {error}");
+                    cx.log(LogLevel::Error, &message);
+                    cx.startup_failed(message);
                 }
                 if matches!(operation, Operation::Login) {
                     self.session.login_pending = false;
@@ -1092,6 +1094,9 @@ impl Venue for BreakoutProp {
                 );
             }
             Command::SetTickerSymbols { .. } => {}
+            Command::Venue { command, .. } => {
+                safe_cex_engine::unsupported_venue_action(cx, command)
+            }
             Command::SubscribeOrderBook { symbol } => {
                 let entry = self.books.entry(symbol).or_default();
                 entry.0 += 1;

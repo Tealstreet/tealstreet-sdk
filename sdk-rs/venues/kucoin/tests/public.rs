@@ -802,7 +802,7 @@ fn missing_welcome_reconnects_even_if_an_early_pong_arrives() {
 }
 
 #[test]
-fn private_snapshot_starts_only_once_after_private_welcome() {
+fn private_snapshot_starts_once_at_launch_independent_of_welcome() {
     let mut e = Engine::new(Kucoin::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
@@ -822,9 +822,13 @@ fn private_snapshot_starts_only_once_after_private_welcome() {
         &r,
         r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100"}]}"#,
     );
-    let tokens = requests(&mut e);
+    let launched = requests(&mut e);
+    assert!(launched.iter().any(|r| r.url.contains("/positions")));
+    let tokens = launched
+        .into_iter()
+        .filter(|r| r.url.contains("/bullet-"))
+        .collect::<Vec<_>>();
     assert_eq!(tokens.len(), 3);
-    assert!(tokens.iter().all(|r| r.url.contains("/bullet-")));
     let r = tokens
         .iter()
         .find(|r| r.url.ends_with("bullet-private"))
@@ -849,7 +853,7 @@ fn private_snapshot_starts_only_once_after_private_welcome() {
     welcome(&mut e, socket);
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(
-        actions
+        !actions
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("/positions")))
     );

@@ -120,6 +120,13 @@ enum CommandIn {
         command: u32,
         mode: StpMode,
     },
+    FetchAccountTier {
+        command: u32,
+    },
+    SetAccountTier {
+        command: u32,
+        tier: String,
+    },
     FetchLeverage {
         command: u32,
         symbol: String,
@@ -298,6 +305,14 @@ impl From<CommandIn> for Command {
             },
             #[cfg(feature = "command-asterdex")]
             CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
+            CommandIn::FetchAccountTier { command } => Self::Venue {
+                command,
+                action: crate::VenueAction::FetchAccountTier,
+            },
+            CommandIn::SetAccountTier { command, tier } => Self::Venue {
+                command,
+                action: crate::VenueAction::SetAccountTier { tier },
+            },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchMaxLeverage { command, symbol } => {
                 Self::FetchMaxLeverage { command, symbol }
@@ -509,6 +524,25 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn account_tier_ops_decode_to_venue_actions() {
+        assert_eq!(
+            decode_command(r#"{"op":"setAccountTier","command":5,"tier":"plus"}"#).unwrap(),
+            Command::Venue {
+                command: 5,
+                action: crate::VenueAction::SetAccountTier {
+                    tier: "plus".into()
+                },
+            }
+        );
+        assert_eq!(
+            decode_command(r#"{"op":"fetchAccountTier","command":6}"#).unwrap(),
+            Command::Venue {
+                command: 6,
+                action: crate::VenueAction::FetchAccountTier,
+            }
+        );
+    }
     #[test]
     fn symbol_context_commands_follow_the_compiled_parser_features() {
         let account = decode_command(r#"{"op":"getAccount","command":77}"#);

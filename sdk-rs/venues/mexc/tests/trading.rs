@@ -31,12 +31,10 @@ fn ready() -> TestEngine {
 }
 fn results(e: &mut TestEngine) -> Vec<Result<String, String>> {
     e.drain_actions()
-        .filter_map(|a| {
-            if let Action::Notice(Notice::CommandDone { result, .. }) = a {
-                Some(result)
-            } else {
-                None
-            }
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
+            _ => None,
         })
         .collect()
 }
@@ -268,10 +266,20 @@ fn partial_batch_success_and_cancel_failures_preserve_known_venue_state() {
         300.0,
         r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0},{"errorCode":600,"errorMsg":"bad volume"}]}"#,
     );
+    let failure = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("partial batch failure");
+    let partial = failure.partial.as_deref().expect("accepted ids");
+    assert_eq!(partial.order_ids, ["one"]);
+    assert_eq!((partial.total, partial.failed_index), (2, 1));
+    assert!(failure.message.contains("bad volume"), "{failure:?}");
     assert!(
-        results(&mut e)[0]
-            .as_ref()
-            .unwrap_err()
+        failure
+            .legacy_text()
             .contains("\"partialOrderIds\":[\"one\"]")
     );
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);

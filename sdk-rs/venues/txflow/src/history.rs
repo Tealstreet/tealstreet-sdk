@@ -169,9 +169,7 @@ struct Income<'a> {
     category: &'static str,
 }
 fn number(text: &str) -> Result<f64, String> {
-    text.parse::<f64>()
-        .ok()
-        .filter(|n| n.is_finite())
+    safe_cex_engine::num::parse_decimal(text)
         .ok_or_else(|| "Malformed TxFlow history number".into())
 }
 fn side(text: &str) -> Result<OrderSide, String> {
