@@ -68,8 +68,12 @@ impl Coinbase {
         let headers = if public {
             Ok(vec![])
         } else {
-            self.credentials
-                .as_ref()
+            let credentials = if request.method == Method::Get {
+                self.read_credentials.as_ref().or(self.credentials.as_ref())
+            } else {
+                self.credentials.as_ref()
+            };
+            credentials
                 .ok_or_else(|| "Coinbase credentials unavailable".to_owned())
                 .and_then(|credentials| credentials.headers(request.method, &request.path, cx.now))
         };

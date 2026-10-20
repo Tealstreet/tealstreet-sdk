@@ -30,15 +30,29 @@ snapshot and recover gaps. Daily candles seed the full current day and replace
 cumulative native five-minute buckets. REST lists stream through typed rows.
 Failed or partially invalid snapshots preserve the previous account state;
 user cumulative fills emit only positive increments at the incremental price.
+An order or position row that cannot map (a bracket or TWAP placed on
+Coinbase's site, an unknown side) is skipped and logged; the store keeps its
+copy of that ID, a snapshot where no row maps keeps all known rows, and a
+skipped position never becomes a synthesized flat one. Skipped live orders are
+still included in cancel-symbol. Portfolio discovery retries a probe only on
+408/429/5xx; any other failure moves to the next portfolio.
 
 Positions and store order amounts use base units. CFM placement and query sizes
 remain native contract counts; contract size converts store sizes and quote
 notionals. Spot leverage is one; derivatives retain the documented account
 leverage and fixed cross/one-way model. Unsupported account mutations fail.
-Market IOC, GTC/PostOnly limits and last-price stop-limit orders are supported.
-Reduce/close requests require explicit size and observed opposite-position
-capacity, reserved across queued and in-flight writes. This client bound cannot
-prevent concurrent external account writes; no native reduce-only flag exists.
+Market IOC (a GTC market order is sent as IOC), GTC/PostOnly limits and
+last-price stop-limit orders are supported. Derivative reduce/close requests
+require explicit size and observed opposite-position capacity, reserved across
+queued and in-flight writes. Protective stops and other closing orders reserve
+that capacity separately, so a full-size stop and take-profit can coexist;
+executed and unidentified reductions count against both. This client bound
+cannot prevent concurrent external account writes; no native reduce-only flag
+exists. Spot reduce-only is sent as a plain order. A definite 4xx placement
+rejection releases its reservation with Coinbase's message; a lost response,
+408 or 5xx keeps it until the client ID appears or 30 s pass with a later order
+snapshot. Saved read-only keys sign REST reads; writes and the user stream keep
+the trading key.
 Caller IDs are nonempty strings of at most 128 characters without whitespace
 or control characters, preserved verbatim for one plain Limit/Market order.
 Spot edits require exact current zero-fill LIMIT decimal provenance. INTX

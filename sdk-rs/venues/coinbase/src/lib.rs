@@ -21,6 +21,8 @@ pub struct Options {
     pub public_data_only: bool,
     pub spot_only: bool,
     pub testnet: bool,
+    /// A saved read-only key signs REST reads; writes and the user stream keep the primary key.
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProductKind {
@@ -38,6 +40,7 @@ pub struct Coinbase {
     pub(crate) options: Options,
     pub(crate) public: public::Public,
     pub(crate) credentials: Option<sign::Credentials>,
+    pub(crate) read_credentials: Option<sign::Credentials>,
     rest: rest::Rest,
     pub(crate) account: account::Account,
     pub(crate) trading: trading::Trading,
@@ -53,6 +56,16 @@ impl Coinbase {
         } else {
             Some(sign::Credentials::new(&raw_key, &secret)?)
         };
+        let read = options.read_credentials.take();
+        let read_credentials = match (&credentials, read) {
+            (Some(_), Some(read)) => {
+                read.validate()?;
+                let key = Zeroizing::new(read.key);
+                let secret = Zeroizing::new(read.secret);
+                Some(sign::Credentials::new(&key, &secret)?)
+            }
+            _ => None,
+        };
         options.key = credentials
             .as_ref()
             .map_or_else(String::new, |c| c.key().to_owned());
@@ -60,6 +73,7 @@ impl Coinbase {
             options,
             public: public::Public::default(),
             credentials,
+            read_credentials,
             rest: rest::Rest::default(),
             account: account::Account::default(),
             trading: trading::Trading::default(),
