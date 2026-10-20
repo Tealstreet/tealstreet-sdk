@@ -767,10 +767,12 @@ Signing and integer scaling exact; no highs.
 
 ### Polymarket (development-only)
 CLOB V2 signing and amounts match the official client.
-- Medium: one `null` in a Gamma market row breaks the venue with no retry
-  (`polymarket/src/wire.rs:33`, `lib.rs:688,832`).
-- Low: cancel-all reports failure after a successful cancel; one bad position
-  row freezes positions; auth failures invisible.
+- Medium: ~~one `null` in a Gamma market row breaks the venue with no retry
+  (`polymarket/src/wire.rs:33`, `lib.rs:688,832`).~~ Nulls tolerated, bad rows
+  skipped, market/midpoint reads retry (≤30 s).
+- Low: cancel-all reports failure after a successful cancel (kept: the test
+  deliberately requires proof for each cached order); ~~one bad position
+  row freezes positions~~; auth failures invisible.
 
 ### Registration and options (all RUST_VENUES aliases)
 Alias→product mapping, credentials, testnet, routing and broker/builder
@@ -787,11 +789,13 @@ with its production/proxy gate).
 
 ### Backpack
 Signing, order payloads (incl. app stop shapes), amend, cancel and positions match.
-- Medium: spot markets dropped — 88 SPOT pairs vanish and open spot orders
+- Medium: ~~spot markets dropped — 88 SPOT pairs vanish and open spot orders
   can't be seen or cancelled (`backpack/src/lib.rs:543`); decided: retire
-  Backpack spot (remove any spot surface, no port). A mark-price failure or one bad ticker row
-  blocks startup (`lib.rs:211,787`).
-- Low: one bad fill row fails fill history (`history.rs:312`). Verify live:
+  Backpack spot (remove any spot surface, no port).~~ No spot surface remains in
+  the Rust crate. ~~A mark-price failure or one bad ticker row
+  blocks startup (`lib.rs:211,787`).~~ Bad rows skipped; startup proceeds on last
+  price until marks load.
+- Low: ~~one bad fill row fails fill history (`history.rs:312`).~~ Verify live:
   open-order rows with `"quantity": null`.
 
 ### BreakoutProp (disabled in production)
