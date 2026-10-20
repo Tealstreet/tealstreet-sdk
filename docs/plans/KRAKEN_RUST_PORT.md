@@ -260,3 +260,24 @@ pass after. Final venue tests 92/92 and all-target Clippy pass. Independent fina
 review: 22 account tests pass; no remaining private/trading/signing findings.
 All fresh code-correctness findings and accepted follow-ups are posted on #1323.
 Final affected workspace/Wasm/replay checks are being repeated before push.
+
+### Review fixes: all affected gates green
+
+Final source 7b8fc04d9a: 92 Kraken / 1,361 workspace tests, 236 harness tests,
+75 real-Wasm tests and 45 host tests PASS. Bans, workspace format, workspace
+all-target Clippy and Wasm Clippy PASS. Root checks remain 44 typecheck, 28 lint
+and 27 test tasks green; no TS source changed in the review fixes.
+
+Rebuilt single-venue public PASS: CPU TS/Rust 890.8/139.0 ms (6.41x), steady
+670.5/74.3 ms (9.03x), process 1,005.1/257.4 ms (3.91x), retained 17.8/2.1 MB
+(8.67x). Same 9,641-frame live fixture, 207 markets/tickers and two full-depth
+books. Browser Wasm 858,567 bytes, budget 1,258,291. Kraken 49-frame private
+correctness PASS on both single and combined builds. Binance public/private
+PASS: public CPU 183.7/83.4 ms (2.20x), retained 18.9/3.0 MB (6.29x).
+Final local secret scan passes over the PR range (12 implementation commits).
+
+All code-correctness review findings and accepted follow-ups are posted on #1323;
+final native-source floor independently reviewed with 22 account tests passing.
+First CI also exposed a WOO steady-state timing miss (17.9/18.9 ms); verify its
+unchanged strict gate in the updated CI run. Push reviewed fixes, wait for all CI
+to pass, then merge #1323 into feat/rust-rewrite and cut a fresh follow-up branch.
