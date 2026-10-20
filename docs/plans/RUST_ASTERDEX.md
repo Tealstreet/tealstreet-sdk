@@ -294,3 +294,12 @@ and native execution identity are independent of stale order-state rejection.
 Three new regressions cover both mode directions and subsequent order fields,
 reordered/delayed/duplicate fills and invalid-price retry. All89 Aster tests and
 strict clippy pass. Remaining fixes and their re-reviews are in progress.
+
+Workers boundary fix now consumes timeoutMs, preserves default20seconds and
+uses5seconds for clock probes, including a stalled response body; unconfigured
+publicCors rejects before fetch. Host51/51 tests pass. Independent reviewer
+reproduced both focused cases and verified the fix. The secret scanner flags
+only ten historical copies of Aster's explicitly published demonstration key;
+exact commit/path/rule/line exclusions preserve all future scans. Independent
+review fetched the official docs and verified that exact demonstration literal;
+local new-commit scan reports zero findings. No global allowlist was widened.
