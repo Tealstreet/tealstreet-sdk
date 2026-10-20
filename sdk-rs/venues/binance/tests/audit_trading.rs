@@ -467,3 +467,160 @@ fn pm_symbol_cancel_applies_only_to_captured_native_incarnations() {
         }
     }
 }
+
+#[test]
+fn pm_cross_symbol_client_reuse_fences_the_captured_native_after_row_removal() {
+    for bulk in [false, true] {
+        let mut h = ready(Variant::PortfolioMargin);
+        let mut markets = h.engine.store().markets().to_vec();
+        let mut eth = markets[0].clone();
+        eth.id = "ETH/USDT:USDT".into();
+        eth.symbol = "ETHUSDT".into();
+        eth.base = "ETH".into();
+        markets.push(eth);
+        h.engine.store_mut().set_markets(markets);
+        fill(&mut h, Variant::PortfolioMargin, 7, "FILLED");
+        // Seed both refresh keys before the repeated client gains its second
+        // symbol key, so iteration order cannot accidentally rescue both cancels.
+        let new = |symbol: &str, client: &str, native: u64| {
+            format!(
+                r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"s":"{symbol}","c":"{client}","i":{native},"S":"BUY","o":"LIMIT","f":"GTC","q":"9","p":"101","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","t":0}}}}"#
+            )
+        };
+        h.message("/pm/ws", &new("BTCUSDT", "refresh", 100));
+        h.message("/pm/ws", &new("ETHUSDT", "refresh", 101));
+        for (round, symbol, native) in [(0, "ETHUSDT", 13), (1, "BTCUSDT", 14)] {
+            h.message("/pm/ws", &new(symbol, "maker", native));
+            let command = 95 + round;
+            h.event(Event::Command(if bulk {
+                Command::CancelSymbolOrders {
+                    command,
+                    symbol: symbol.into(),
+                }
+            } else {
+                Command::CancelOrders {
+                    command,
+                    ids: vec!["maker".into()],
+                }
+            }));
+            let cancel = h.take(if bulk {
+                "/papi/v1/um/allOpenOrders"
+            } else {
+                "/papi/v1/um/order"
+            });
+            let conditional = bulk.then(|| h.take("/papi/v1/um/conditional/allOpenOrders"));
+            h.advance(10_000.0);
+            h.respond("/papi/v1/um/openOrders", 200, "[]");
+            h.respond("/papi/v1/um/conditional/openOrders", 200, "[]");
+            assert!(h.engine.store().order("maker").is_none());
+            let unknown = r#"{"code":-2011,"msg":"Unknown order sent."}"#;
+            h.reply(cancel.id, 400, "", unknown);
+            if let Some(cancel) = conditional {
+                h.reply(cancel.id, 400, "", unknown);
+            }
+            assert!(h.result(command).unwrap().is_ok());
+            h.message("/pm/ws", &new(symbol, "refresh", 102 + u64::from(round)));
+            h.advance(10_000.0);
+            let stale = format!(
+                r#"[{{"symbol":"{symbol}","orderId":{native},"clientOrderId":"maker","price":"101","origQty":"9","executedQty":"0","type":"LIMIT","side":"BUY","status":"NEW"}}]"#
+            );
+            h.respond("/papi/v1/um/openOrders", 200, &stale);
+            h.respond("/papi/v1/um/conditional/openOrders", 200, "[]");
+            assert!(
+                h.engine.store().order("maker").is_none(),
+                "bulk={bulk} {symbol}/{native}: stale replica reopened the canceled native incarnation"
+            );
+        }
+    }
+}
+
+#[test]
+fn pm_old_symbol_cancel_success_cannot_modify_a_reused_client_row_or_amend_it() {
+    for amendment in [false, true] {
+        for terminal_first in [false, true] {
+            let variant = Variant::PortfolioMargin;
+            let mut h = ready(variant);
+            if amendment {
+                amend(&mut h, variant, 98, None);
+            } else {
+                h.event(Event::Command(Command::CancelOrders {
+                    command: 98,
+                    ids: vec!["maker".into()],
+                }));
+            }
+            let cancel = h.take("/papi/v1/um/order");
+            h.message("/pm/ws", r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"ETHUSDT","c":"maker","i":13,"S":"BUY","o":"LIMIT","f":"GTC","q":"9","p":"101","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","t":0}}"#);
+            let before = h.engine.store().order("maker").unwrap().clone();
+            assert_eq!(before.symbol, "ETHUSDT");
+            h.message("/pm/ws", r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"BTCUSDT","c":"maker","i":12,"S":"BUY","o":"LIMIT","f":"GTC","q":"7","p":"100","x":"NEW","X":"NEW","l":"0","z":"2","L":"0","t":0}}"#);
+            assert_eq!(h.engine.store().order("maker"), Some(&before));
+            if terminal_first {
+                h.message("/pm/ws", r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"BTCUSDT","c":"maker","i":12,"S":"BUY","o":"LIMIT","f":"GTC","q":"7","p":"100","x":"CANCELED","X":"CANCELED","l":"0","z":"2","L":"0","t":0}}"#);
+                assert_eq!(h.engine.store().order("maker"), Some(&before));
+            }
+            h.reply(cancel.id, 200, "", &ack(3, "CANCELED"));
+            assert!(h.result(98).unwrap().is_err());
+            assert_eq!(h.engine.store().order("maker"), Some(&before));
+            assert!(
+                !h.requests
+                    .iter()
+                    .any(|request| request.method == Method::Post)
+            );
+            // Late old-symbol execution remains deliverable, but cannot touch ETH.
+            fill(&mut h, variant, 4, "PARTIALLY_FILLED");
+            assert_eq!(h.engine.store().order("maker"), Some(&before));
+            h.advance(10_000.0);
+            h.respond("/papi/v1/um/openOrders", 200, r#"[{"symbol":"BTCUSDT","orderId":12,"clientOrderId":"maker","price":"100","origQty":"7","executedQty":"2","type":"LIMIT","side":"BUY","status":"PARTIALLY_FILLED"}]"#);
+            h.respond("/papi/v1/um/conditional/openOrders", 200, "[]");
+            assert_eq!(
+                h.engine.store().order("maker"),
+                Some(&before),
+                "stale old BTC snapshot displaced new ETH row"
+            );
+        }
+    }
+}
+
+#[test]
+fn pm_old_symbol_strategy_ack_and_stream_cannot_retire_the_new_symbol_row() {
+    for terminal_first in [false, true] {
+        let mut h = ready_orders(Variant::PortfolioMargin, Some(false));
+        h.event(Event::Command(Command::CancelOrders {
+            command: 99,
+            ids: vec!["stop".into()],
+        }));
+        let cancel = h.take(conditional_path(Variant::PortfolioMargin));
+        let update = |symbol: &str, native: u64, status: &str| {
+            format!(
+                r#"{{"e":"CONDITIONAL_ORDER_TRADE_UPDATE","fs":"UM","so":{{"s":"{symbol}","c":"stop","si":{native},"S":"SELL","st":"STOP_MARKET","q":"9","p":"0","sp":"89","os":"{status}","R":true,"wt":"MARK_PRICE","ps":"BOTH","cp":false,"i":0}}}}"#
+            )
+        };
+        h.message("/pm/ws", &update("ETHUSDT", 43, "NEW"));
+        let before = h.engine.store().order("stop").unwrap().clone();
+        assert_eq!(before.symbol, "ETHUSDT");
+        h.message("/pm/ws", &update("BTCUSDT", 42, "NEW"));
+        assert_eq!(h.engine.store().order("stop"), Some(&before));
+        if terminal_first {
+            h.message("/pm/ws", &update("BTCUSDT", 42, "CANCELED"));
+            assert_eq!(h.engine.store().order("stop"), Some(&before));
+        }
+        h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSDT","strategyId":42,"newClientStrategyId":"stop","strategyStatus":"CANCELED"}"#);
+        assert!(h.result(99).unwrap().is_err());
+        h.message("/pm/ws", &update("BTCUSDT", 42, "CANCELED"));
+        assert_eq!(h.engine.store().order("stop"), Some(&before));
+        h.advance(10_000.0);
+        h.respond("/papi/v1/um/openOrders", 200, "[]");
+        h.respond("/papi/v1/um/conditional/openOrders", 200, r#"[{"symbol":"BTCUSDT","strategyId":42,"newClientStrategyId":"stop","strategyStatus":"NEW","strategyType":"STOP_MARKET","origQty":"7","price":"0","side":"SELL","stopPrice":"90"}]"#);
+        assert_eq!(h.engine.store().order("stop"), Some(&before));
+        h.message("/pm/ws", &update("ETHUSDT", 43, "NEW"));
+        h.advance(10_000.0);
+        h.respond("/papi/v1/um/openOrders", 200, "[]");
+        h.respond("/papi/v1/um/conditional/openOrders", 200, r#"[{"symbol":"ETHUSDT","strategyId":43,"newClientStrategyId":"stop","strategyStatus":"NEW","strategyType":"STOP_MARKET","origQty":"9","price":"0","side":"SELL","stopPrice":"89"}]"#);
+        assert_eq!(h.engine.store().orders().len(), 1);
+        let current = h.engine.store().order("stop").unwrap();
+        assert_eq!(
+            (current.symbol.as_str(), current.status),
+            ("ETHUSDT", OrderStatus::Open)
+        );
+    }
+}

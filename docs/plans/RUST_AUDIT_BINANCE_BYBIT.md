@@ -217,3 +217,19 @@ reverification has begun while this first patch completes its gates.
 - Replied through the explicitly requested Aimux thread; requested the peer's
   PR/landing commit for integration. Native venues currently clear their local
   books on gaps, but filter those subscribed identities out of `books()`.
+
+### Final native-incarnation review checkpoint
+
+- Independent review found that a symbol-scoped native map alone cannot protect
+  the globally keyed caller-ID row when a client ID moves from BTC to ETH.
+  Cancellation now records the captured old native terminal evidence separately
+  from updating the current row; successful/unknown and individual/bulk replies
+  use the same current-symbol, native-ID and regular/strategy-family guard.
+- Old PM terminal events arriving before the REST reply, strategy events,
+  missing current rows and Spot late unquantified executions have regressions.
+  Genuine executions remain observable without changing the newer foreign-symbol
+  row. Ambiguous canonical-ID terminal fallbacks were removed.
+- All 137 Binance native tests, strict Clippy and formatting pass. Independent
+  review reran 13 audit trading and 19 lifecycle tests and closed every finding.
+  Final selected Binance WASM rebuild/replays and combined-host checks follow;
+  the completed final Bybit/Aster replay gates remain recorded in their logs.

@@ -593,3 +593,52 @@ fn inverse_closed_order_stays_closed_after_unknown_cancel_and_delayed_partial() 
         (OrderStatus::Closed, 7.0, 0.0)
     );
 }
+
+#[test]
+fn spot_cancel_all_keeps_cross_symbol_client_reuse_and_fences_the_old_native() {
+    for empty_ack in [false, true] {
+        let mut h = ready(Variant::Spot);
+        h.event(Event::Command(Command::CancelSymbolOrders {
+            command: 98,
+            symbol: "BTCUSDT".into(),
+        }));
+        let cancel = h.take("/api/v3/openOrders");
+        h.message("ws-api/v3", r#"{"subscriptionId":0,"event":{"e":"executionReport","i":44,"s":"ETHUSDT","c":"maker","S":"BUY","o":"LIMIT","X":"NEW","x":"NEW","p":"100","L":"0","q":"9","z":"0","l":"0"}}"#);
+        let before = h.engine.store().order("maker").unwrap().clone();
+        assert_eq!(before.symbol, "ETHUSDT");
+        h.message("ws-api/v3", r#"{"subscriptionId":0,"event":{"e":"executionReport","i":12,"s":"BTCUSDT","c":"maker","S":"BUY","o":"LIMIT","X":"NEW","x":"NEW","p":"9000","L":"0","q":"7","z":"2","l":"0"}}"#);
+        assert_eq!(h.engine.store().order("maker"), Some(&before));
+        let reply = if empty_ack {
+            "[]".to_owned()
+        } else {
+            format!(
+                "[{},{}]",
+                ack(Variant::Spot, 12, "3", "CANCELED"),
+                ack(Variant::Spot, 13, "2", "CANCELED")
+            )
+        };
+        h.reply(cancel.id, 200, "", &reply);
+        assert!(h.result(98).unwrap().is_ok());
+        assert_eq!(h.engine.store().order("maker"), Some(&before));
+        assert_eq!(
+            h.engine.store().order("second").unwrap().status,
+            OrderStatus::Canceled
+        );
+        let _ = h.engine.take_frame(h.now);
+        fill(&mut h, Variant::Spot, "3", "PARTIALLY_FILLED");
+        fill(&mut h, Variant::Spot, "3", "PARTIALLY_FILLED");
+        assert_eq!(h.engine.store().order("maker"), Some(&before));
+        let frame = h.engine.take_frame(h.now);
+        let count = frame.map_or(0, |frame| {
+            safe_cex_engine::wire::sections(frame)
+                .find(|(kind, _)| *kind == 11)
+                .map_or(0, |(_, payload)| {
+                    u32::from_le_bytes(payload[..4].try_into().unwrap())
+                })
+        });
+        assert_eq!(count, u32::from(empty_ack));
+        h.advance(10_000.0);
+        h.respond("/api/v3/openOrders", 200, r#"[{"symbol":"BTCUSDT","orderId":12,"clientOrderId":"maker","price":"9000","origQty":"7","executedQty":"2","type":"LIMIT","side":"BUY","status":"PARTIALLY_FILLED"}]"#);
+        assert_eq!(h.engine.store().order("maker"), Some(&before));
+    }
+}
