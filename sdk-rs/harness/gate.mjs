@@ -843,7 +843,9 @@ for (let run = 0; run < runs; run++) {
     if (result[impl].unserved) differences.push(`${impl}: ${result[impl].unserved} unserved requests`);
   }
   for (const field of ['outbound', 'subscriptions', 'candles', 'bookEvents', 'wsRequests']) {
-    if (field === 'outbound' && venue.family === 'bybit') {
+    // Implementation-tagged fixture requests (e.g. TS-only probes) are audited
+    // by each transport's consumption check; compare the shared remainder.
+    if (field === 'outbound' && tape.some((record) => record.type === 'http' && record.impl !== undefined)) {
       const selected = (impl) => new Set(tape.filter((record) => record.type === 'http' && record.impl === impl)
         .map((record) => requestKey(record.method, record.url, record.requestBody, callerIdsOf(tape), venue)));
       if (!equal(ts.outbound?.filter((key) => !selected('ts').has(key)), rust.outbound?.filter((key) => !selected('rust').has(key))))
