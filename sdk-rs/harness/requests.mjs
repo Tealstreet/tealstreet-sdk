@@ -154,6 +154,18 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
   )}`;
 };
 
+export const subscriptionMessage = (message) => {
+  const method = String(message.method ?? message.reqType ?? message.op ?? message.event ?? '').toUpperCase();
+  if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return undefined;
+  const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
+  const topics =
+    message.params?.channels ??
+    message.params ??
+    message.args ??
+    (typeof message.topic === 'string' ? [message.topic] : message.dataType ? [message.dataType] : []);
+  return Array.isArray(topics) ? { op, topics } : undefined;
+};
+
 export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) => {
   let message;
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
@@ -178,6 +190,9 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     message = { ...message };
     delete message.id;
     delete message.req_id;
+    if (options.orderlyProtocol && method === 'auth' && message.params) {
+      message.params = { ...message.params, timestamp: '<timestamp>', sign: '<signature>' };
+    }
     // Crypto.com's audit validates auth and heartbeat identity before capture.
     if (options.cryptoProtocol) {
       delete message.nonce;

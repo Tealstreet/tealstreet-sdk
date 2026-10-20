@@ -1,4 +1,4 @@
-import { OrderSide, OrderType } from '../../types';
+import { OrderSide, OrderType } from '../../../types';
 
 export const RECV_WINDOW = 20_000;
 export const BROKER_ID = 'ab82cb09-cfec-4473-80a3-b740779d0644'; // tealstreet

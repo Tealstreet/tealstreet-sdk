@@ -708,3 +708,33 @@ and green, including nonfinite ticks, unchanged snapshots and no dirty frame.
 All 87 Lighter native tests pass. Independent TS/native guard audit passes;
 final independent harness audit passes. Final-source build/artifact checks and
 CI remain required before merge.
+
+### Fifteen-venue landing integration
+
+The fourteen-venue source `66b27530c1` passed all 24 CI checks, 40 replay gates
+(18 public/22 private), 1,185 native tests, 194 harness helpers and the local
+12 required Bybit/Binance gates. Combined WASM59/host38/frame10 and root
+licenses31/typecheck44/lint28/test27 passed; both safe-cex suites passed 6,924
+cases. After final PR evidence was posted, the authorized match-head merge
+was rejected atomically: Orderly #1318 had advanced the landing branch to
+`f66bdc26f9`. Preserve those successful historical results; integrate Orderly
+and wait for new exact-head CI instead of bypassing conflicts/checks.
+
+Keep all five Bybit profiles and strict gates while adding Orderly broker ×
+network coverage. Position-ID string references append after the same nine
+position numeric columns, opt-in only; preserve the independent native order
+tail and optional balance collateral tail. Frame10 and host/wire45 tests pass.
+Independent WASM/wire review passes. CI has fifteen base crates and retains the
+same individual bundle budget and every Bybit public/private gate.
+
+Orderly's whole-batch Bybit BBO/TickSize rejection precedes readiness, active
+queue, planning and signing. Idle and busy mixed batches were proved red/green,
+with immediate exact error and unchanged actions/store/frame. All 84 Orderly
+native cases, strict Clippy/fmt and independent guard review pass. TS wrapper88
+cases pass after updating stale WOO negative-registration assertions for newly
+registered separate Orderly aliases. Production guards are preserved. Typecheck,
+lint and workspace/WASM Clippy pass. Final harness union224 tests and scoped
+lint pass, including negative extra/missing Orderly command-result oracles. The
+combined release build and all 74 actual WASM tests pass. Independent harness
+and WASM/wire audits pass. New-source replay gates/CI remain required before
+merge.

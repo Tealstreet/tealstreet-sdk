@@ -79,6 +79,8 @@ const isPrivate =
   );
 const options = {
   ...venue.options,
+  ...metadata?.options,
+  ...(typeof metadata?.testnet === 'boolean' ? { testnet: metadata.testnet } : {}),
   ...(isPrivate
     ? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', ...venue.replayCredentials }
     : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }),
@@ -167,7 +169,7 @@ async function runRust() {
   const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
-  const { WasmEngine, wasmMemoryBytes } = await loadEngine();
+  const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust, options);
   const tape = new Tape(records, venue, isPrivate, 30000, 'rust', bookSymbols, options);
   const encoder = new TextEncoder();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
@@ -281,6 +283,7 @@ async function runRust() {
   clearInterval(flushTimer);
   host.flush();
   const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark);
+  const protocolErrors = tape.audit?.errors() ?? [];
   host.dispose();
   clock?.restore();
 
@@ -327,7 +330,7 @@ async function runRust() {
     writes: tape.writes,
     subscriptions: [...tape.subscriptions].sort(),
     unusedWrites: tape.unusedWrites(),
-    protocolErrors: tape.audit?.errors() ?? [],
+    protocolErrors,
     wsRequests: [...tape.sentRequests].sort(),
     store: { markets: marketRows, tickers: tickerRows },
     books: bookRows,
@@ -664,6 +667,7 @@ async function runTs() {
         })),
       }
     : undefined;
+  const protocolErrors = tape.audit?.errors() ?? [];
   exchange.dispose();
   clock?.restore();
   return {
@@ -676,7 +680,7 @@ async function runTs() {
     writes: tape.writes,
     subscriptions: [...tape.subscriptions].sort(),
     unusedWrites: tape.unusedWrites(),
-    protocolErrors: tape.audit?.errors() ?? [],
+    protocolErrors,
     wsRequests: [...tape.sentRequests].sort(),
     store: snapshot,
     books: bookCopies,

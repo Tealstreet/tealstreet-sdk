@@ -232,7 +232,12 @@ export class Frame {
     const count = new Uint32Array(buffer, section.offset, 1)[0];
     const market = new Uint32Array(buffer, section.offset + 4, count);
     const enums = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
-    return { count, market, enums, ...columns(buffer, align8(section.offset + 4 + count * 8), count, POSITION_COLUMNS) };
+    const data = align8(section.offset + 4 + count * 8);
+    const idsAt = data + count * 8 * POSITION_COLUMNS.length;
+    const ids = idsAt + count * 4 <= section.offset + section.length
+      ? new Uint32Array(buffer, idsAt, count) : undefined;
+    return { count, market, enums, ...columns(buffer, data, count, POSITION_COLUMNS),
+      id: (i) => ids ? this.string(ids[i]) : undefined };
   }
 
   balance() {

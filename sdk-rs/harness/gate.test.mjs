@@ -12,6 +12,7 @@ const gate = (venue, isPrivate = false, defect) => {
   const cwd = mkdtempSync(join(tmpdir(), 'safe-cex-gate-'));
   const tape = join(cwd, 'tape.jsonl');
   const records = [{ type: 'meta', private: isPrivate }];
+  if (defect === 'orderly-missing-result') records.push({ type: 'command', op: 'fetchFills' });
   if (defect?.startsWith('impl-plans')) {
     for (const [impl, filters] of [
       ['ts', [undefined]],
@@ -37,6 +38,7 @@ const gate = (venue, isPrivate = false, defect) => {
     import { syncBuiltinESMExports } from 'node:module';
     const venue = ${JSON.stringify(venue)};
     const isPrivate = ${JSON.stringify(isPrivate)};
+    const isOrderly = ${JSON.stringify(VENUES[venue].family === 'orderly')};
     const defect = ${JSON.stringify(defect ?? null)};
     // The gate must override an explicit parent opt-in for both implementations,
     // while retaining unrelated replay configuration in the child environment.
@@ -68,13 +70,16 @@ const gate = (venue, isPrivate = false, defect) => {
         tickers: [rust ? { last: 100, ask: 0, bid: 0, symbol: 'BTCUSDT' }
                       : { symbol: 'BTCUSDT', bid: 0, ask: 0, last: 100 }],
         books: { BTCUSDT: { bids: [[99, 1]], asks: [[101, 1]] } },
-        commands: [{ ok: { count: 1, ids: ['one', 'two'] } }],
+        // Orderly's strict oracle requires exactly one result per taped command.
+        // This smoke tape has none; populated command comparisons run below.
+        commands: isOrderly ? [] : [{ ok: { count: 1, ids: ['one', 'two'] } }],
         ...(isPrivate ? { account: {
           hedged: ['backpack', 'cryptocom'].includes(venue),
           balance: { used: 0, free: 100, total: 100, upnl: 0 },
           orders: [], positions: [], settings: [], fills: [],
         } } : {}),
       };
+      if (defect === 'orderly-extra-result') output.commands.push({ ok: [] });
       if (rust && defect === 'comparisons') {
         output.markets[0].precision.price = 0.2;
         output.tickers[0].last = 101;
@@ -138,6 +143,14 @@ test('gate CLI rejects independent market, ticker, book and ordered command mism
   for (const difference of ['market BTCUSDT:', 'ticker BTCUSDT:', 'book BTCUSDT differs', 'command results:'])
     assert.ok(result.stdout.includes(difference), `${difference}\n${result.stdout}`);
   assert.doesNotMatch(result.stderr, /ReferenceError/);
+});
+
+test('gate CLI retains the strict Orderly command count oracle', () => {
+  for (const defect of ['orderly-extra-result', 'orderly-missing-result']) {
+    const result = gate('tealstreet-dex', true, defect);
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, /missing TS command result/);
+  }
 });
 
 test('gate CLI validates every memory component on later private runs', () => {

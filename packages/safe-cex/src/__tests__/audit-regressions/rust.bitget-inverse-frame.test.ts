@@ -20,6 +20,7 @@ it('preserves inverse native quantities and collateral after worker frame hydrat
       ...cols({ price: 50000, amount: 1000, filled: 100, remaining: 0.018, lastUpdate: 1, takeProfit: NaN, stopLoss: NaN }),
     }),
     positions: () => ({ count: 1, market: Uint32Array.of(0), enums: Uint32Array.of(0),
+      id: () => undefined,
       ...cols({ entryPrice: 40000, notional: 1000, leverage: 10, unrealizedPnl: 0.002, realizedPnl: 0,
         contracts: 0.02, liquidationPrice: 20000, marginSize: 0.01, lastUpdate: 1 }),
     }),
@@ -30,7 +31,7 @@ it('preserves inverse native quantities and collateral after worker frame hydrat
   new FrameApplier(store, false, true).apply(frame);
   expect(store.markets[0].isInverse).toBe(true);
   expect(store.orders[0]).toMatchObject({ amount: 1000, filled: 100, remaining: 0.018, extra: { remainingNative: 900 } });
-  expect(store.positions[0]).toMatchObject({ contracts: 0.02, notional: 1000,
+  expect(store.positions[0]).toMatchObject({ id: 'BTCUSD', contracts: 0.02, notional: 1000,
     extra: { contractsNative: 1000, unrealizedPnlNative: 0.002 } });
   expect(store.balance.coins).toEqual(coins);
   const originalOrders = frame.orders();

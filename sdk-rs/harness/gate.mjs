@@ -11,7 +11,8 @@ import { sameCommandResults, stable } from './tape.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands } from './known-ts-fixes.mjs';
-import { venueOf } from './venues.mjs';
+import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
+import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
 
@@ -162,6 +163,8 @@ const KNOWN_TS_FIXES = {
     // The tape compares converged state: no account values are rewritten here.
   },
 
+  // Independent documented-tape oracle; native request/protocol counters remain exact.
+  orderly: (ts) => fixOrderly(ts, tapeRecords),
   lighter: {
     fills: fixLighterFills,
     commands: fixLighterCommands,
@@ -501,6 +504,9 @@ const KNOWN_TS_FIXES = {
     ts.account.fills = fills;
   },
 };
+
+for (const alias of Object.keys(ORDERLY_BROKERS)) KNOWN_TS_FIXES[alias] = KNOWN_TS_FIXES.orderly;
+
 const normalizeBingxPublic = (ts) => {
   // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
   // integer step 1. Correct that precision and its synthetic ticker touch only.
@@ -662,8 +668,8 @@ for (let run = 0; run < runs; run++) {
       KNOWN_TS_FIXES.lighter.commands(ts.commands, tapeRecords);
     }
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-      const left = JSON.stringify(ts.account[field]);
-      const right = JSON.stringify(rust.account[field]);
+      const left = JSON.stringify(stable(ts.account[field]));
+      const right = JSON.stringify(stable(rust.account[field]));
       if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
     }
   }
@@ -735,6 +741,7 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
+if (venue.family === 'orderly') console.log(`(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`);
 if (values.venue.startsWith('okx'))
   console.log(
     `(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`,

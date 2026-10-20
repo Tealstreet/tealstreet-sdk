@@ -44,10 +44,10 @@ describe('Rust WOO execution history boundary', () => {
     expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'fetchFills', from: undefined, to: undefined });
   });
 
-  it('registers WOO alone and preserves caller IDs and slippage through placement', async () => {
+  it('registers WOO beside Orderly brokers and preserves caller IDs and slippage through placement', async () => {
     expect(isRustVenue('woo')).toBe(true);
-    expect(isRustVenue('woofi')).toBe(false);
-    expect(isRustVenue('kodiakfi')).toBe(false);
+    expect(isRustVenue('woofi')).toBe(true);
+    expect(isRustVenue('kodiakfi')).toBe(true);
     const { exchange, command } = setup();
     const opts = { symbol: 'BTCUSDT', type: OrderType.Market, side: OrderSide.Buy, amount: 1,
       maxSlippagePct: 0.25, clientOrderId: '9007199254740991' };
