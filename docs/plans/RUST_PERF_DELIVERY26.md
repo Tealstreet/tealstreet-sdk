@@ -273,3 +273,38 @@ in the new release proof, without claiming byte identity to the prior release.
 `RUST_PERF_DELIVERY26_SPOT_RELEASE.json.gz` records release, original-control,
 roster, size and real-WASM check evidence, including failures. The final 63-private
 and 36-profile before/after performance collection is still unexecuted.
+
+
+## Host ordering review before public sampling
+
+Fresh adversarial source review at `46624f485a` found two P2 issues: a later
+invalid timestamp can reject a partition after earlier partitions drained
+unexecuted actions; and an asynchronously decoded raw frame can enter at time
+17 after a timer/control at 18. Decode overtaking existed before this branch,
+but preserving the older raw timestamp introduces backward engine event time.
+
+Intentionally stop the collection for correctness repair: 19 private gates
+passed, the twentieth (Kraken) replay received SIGINT, and zero public samples
+ran. Full endpoint/per-gate guards pass (30,769 unique files/303 rows). This is
+an explicit review stop, not a venue correctness or numerical performance
+failure. `RUST_PERF_DELIVERY26_HOST_REVIEW.json.gz` retains configuration, runner,
+raw outputs and interruption evidence; all earlier cohorts remain immutable.
+
+Plan: validate/coerce every captured batch timestamp before any partition
+crosses WASM. Reserve asynchronous raw arrivals synchronously in a host-wide
+FIFO; fill those slots after decode, then dispatch the ready prefix. Queue
+commands, timers, HTTP, open/close and flush events behind earlier reservations,
+keeping their captured timestamps. Preserve fast ready-text batching, limits,
+action/reentrancy order, cancellation and disposal. Synchronous snapshot/account
+reads expose committed state; an unresolved asynchronous payload cannot be
+included in a synchronous read. Propagate the optional hook through native,
+Workers and SDK relay transports. Add RED-to-GREEN counterexamples for delayed
+decode, cross-socket/control order, failures/disposal, and partition atomicity.
+
+Audit the analogous native multi-thread producer-side decode ordering before
+finalizing scope. If confirmed, enqueue raw frames before decoding and resolve
+at their actor inbox position, preserving routing health, failure close codes,
+finite-prefix fairness and batch bounds. No clock clamping. Independently
+review repairs, run affected source/actual-WASM checks, commit, refresh shared
+controls only where needed, and declare a fresh final collection. No public
+performance measurements or numerical tuning occurred in this repair phase.
