@@ -7,6 +7,7 @@ mod rate;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::ErrorKind;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Market, Ticker};
@@ -462,7 +463,9 @@ impl WeexFutures {
             }
             Task::Candles { command, .. } => cx.done(command, Err(error.into())),
             Task::Account(r) => self.account_failed(cx, r, error),
-            Task::Trade(r) => self.trade_failed(cx, r, error),
+            Task::Trade(r) => {
+                self.trade_failed(cx, r, trading::unknown(error).kind(ErrorKind::Network))
+            }
             Task::History(r) => self.history_failed(cx, r, error),
             Task::Markets(_) => {
                 if self.startup_retry.is_none() {
@@ -717,6 +720,11 @@ impl Venue for WeexFutures {
                 .max(cx.now + rate::delay(response, cx.now));
         }
         if response.status >= 400 {
+            if let Task::Trade(request) = p.task {
+                let error = trading::http_failure(response.status, response.body);
+                self.trade_failed(cx, request, error);
+                return;
+            }
             self.fail(
                 cx,
                 p.task,
