@@ -367,3 +367,64 @@ fn overlapping_catalogue_and_ticker_retries_keep_one_walk_and_protect_live_field
             .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
     );
 }
+
+#[test]
+fn failed_account_config_is_retried_by_the_account_timer() {
+    let mut engine = Engine::new(Okx::new(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("pass".into()),
+        ..Options::default()
+    }));
+    engine.start(0.);
+    let request = actions(&mut engine).remove(0);
+    reply(&mut engine, &request, &envelope(MARKET), 1.);
+    let config = actions(&mut engine)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut engine,
+        &config,
+        r#"{"code":"50011","msg":"rate limit","data":[]}"#,
+        2.,
+    );
+    let timer = actions(&mut engine)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 5_002.,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(5_002., Event::TimerFired { timer });
+    let config = actions(&mut engine)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .expect("config retried after failure");
+    reply(
+        &mut engine,
+        &config,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        5_003.,
+    );
+    let mut pending: Vec<_> = actions(&mut engine)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/api/v5/account") || r.url.contains("/api/v5/trade")))
+        .collect();
+    while let Some(a) = pending.pop() {
+        let body = if matches!(&a, Action::Http(r) if r.url.contains("account-position-risk")) {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else {
+            envelope("")
+        };
+        reply(&mut engine, &a, &body, 5_004.);
+        pending.extend(actions(&mut engine).into_iter().filter(|a| {
+            matches!(a, Action::Http(r) if r.url.contains("/api/v5/account") || r.url.contains("/api/v5/trade"))
+        }));
+    }
+    let loaded = engine.store().loaded();
+    assert!(loaded.balance && loaded.orders && loaded.positions);
+}

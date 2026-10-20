@@ -701,7 +701,8 @@ impl Okx {
                 }
             }
             Request::Orders { .. } => self.account.orders_in_flight = false,
-            Request::Config => {}
+            // The retry timer re-enters account_start, which is guarded by this flag.
+            Request::Config => self.account_started = false,
         }
         cx.log(LogLevel::Error, error);
         if self.account.retry.is_none() {
