@@ -1,7 +1,6 @@
 //! Orderly limits each public socket to one hundred topics. Keep funding on
 //! dedicated ninety-topic shards so books and candles retain the main socket.
 use crate::{Connection, Orderly, Pending, wire::Envelope};
-use safe_cex_engine::{Cx, LogLevel, SocketId, TimerId};
 use safe_cex_engine::socket::{Tick as SocketTick, Timeout};
 use safe_cex_engine::{Cx, LogLevel, PublicFeedPolicy, SocketId, TimerId};
 use serde::Serialize;

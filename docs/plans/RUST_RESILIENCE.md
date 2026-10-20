@@ -3,35 +3,37 @@
 Scope: `RUST_QUALITY.md` shared helpers 3 and 5; `RUST_AUDITS.md` cross-venue
 "rows and subscriptions" and "per-coin balances and snapshot starvation"; the
 private-row, app stop payload, BreakoutProp authenticated startup and MEXC
-bootstrap remainder handed over in codex-u1pmrg's public-startup handoff
-(`RUST_PRIVATE_ROWS_TICKERS.md`, `RUST_APP_STOP_PAYLOADS.md` on that branch).
-Public discovery retries land separately through the public-startup PR.
+bootstrap remainder handed over from the public-startup work
+(`RUST_PRIVATE_ROWS_TICKERS.md`, `RUST_APP_STOP_PAYLOADS.md`).
 
-## PRs, in order
+## PRs
 
-1. `engine::backoff::Backoff`: one formula for the remaining 38 inline
-   exponential retry delays and the socket supervisor, constants unchanged
-   (identical for every reachable attempt). Unsupervised socket reconnects use
-   the supervisor's jitter (75-100% of the delay, seeded from host time) so
-   clients dropped together do not reconnect together; REST retries stay exact.
-2. Private-row isolation (after the public-startup PR merges): an engine
-   snapshot builder where a rejected row keeps the store's copy of its id and
-   an unidentified rejection blocks absence-based removal in its scope.
-   Venues: Bitget, Phemex, MEXC, KuCoin, Kraken, Orderly, Coinbase,
-   BreakoutProp, Hyperliquid, Lighter, Paradex, TxFlow, Bitrue, BloFin.
-   WOO, Crypto.com, AsterDEX, BingX, WEEX, ApeX, GRVT, Polymarket and Backpack
-   row tolerance belongs to the venues-b lane; OKX to venues-a.
-3. App stop payload request tests from tealstreet-next's order constructors;
-   Kraken futures and spot market-entry TP/SL rejected with a clear error;
-   Lighter trailing never falls through to a plain market order.
-4. BreakoutProp authenticated discovery startup; MEXC position-mode and
-   plan-list bootstrap recovery without a false invalid-credentials result.
-5. Per-coin balances (Crypto.com, Bitrue) and revision-discard snapshot
-   starvation (WEEX, Bitrue). Bybit per-coin balances belong to venues-a.
+1. `engine::backoff::Backoff` (#1391): one formula for the inline exponential
+   retry delays (REST reads, snapshot retries, startup discovery) and the socket
+   supervisor, constants unchanged for every reachable attempt. Socket
+   reconnects all moved onto `engine::socket::Supervisor`, which owns their
+   jitter (75-100% of the delay) through `backoff::jitter`.
+2. App stop payloads (#1396, merged): protective orders accept the app's
+   `triggerPrice == price`; Kraken Spot refuses a mismatched trigger; Lighter
+   refuses trailing stops instead of placing a market order.
+3. Per-currency balances on Crypto.com, GRVT, MEXC and Phemex (#1399, merged).
+4. Snapshot starvation (#1419, merged): `engine::fence::StaleGuard` on Bitrue,
+   Backpack, BingX, Kraken Spot, KuCoin Spot, Orderly, Polymarket and WOO;
+   WEEX balance reads no longer fence.
+5. MEXC refused key fails startup instead of polling forever (#1431, merged;
+   test helper fix #1440).
+6. Private-row isolation (#1459): `engine::coverage::SnapshotCoverage` on
+   Bitget (replacing #1356's whole-snapshot freeze), Binance USD-M/COIN-M,
+   Hyperliquid, Lighter, Orderly and Paradex. MEXC, Crypto.com, BingX, BloFin,
+   Bitrue, KuCoin, OKX, Kraken futures, Backpack and GRVT catalogue-filtered
+   rows belong to claude-cbzmw6; WOO/AsterDEX/WEEX/ApeX/Polymarket rows to the
+   venues-b lane.
+7. Startup discovery retries honour 418/429 and `Retry-After` (next).
 
-Each fix gets a reproducing regression; gates run for every touched venue plus
-Binance; each PR gets adversarial sub-agent reviews posted on it.
+Not done, by decision: BreakoutProp authenticated discovery startup. The venue
+is disabled in production and preview (`enabled: false`,
+`enableInPreview: false`; the legacy DXtrade pool is frozen), so by the
+production-impact rule the work has no user impact (overseer, 2026-10-21).
 
-## Progress
-
-- PR 1: `feat/rust-backoff-schedule`.
+Each fix has a reproducing regression; each PR gets adversarial sub-agent
+reviews posted on it.
