@@ -104,10 +104,12 @@ describe('OKX account equity anchor', () => {
     let fresh: typeof store.balance | undefined;
     const tick = exchange.tick();
     // Let the real formatter calculate first, then deliver WS before tick commits.
-    queueMicrotask(() => queueMicrotask(() => {
-      exchange.applyAccountEquity([{ totalEq: '40400', details: [{ ccy: 'USD', eq: '400' }] }]);
-      fresh = store.balance;
-    }));
+    queueMicrotask(() =>
+      queueMicrotask(() => {
+        exchange.applyAccountEquity([{ totalEq: '40400', details: [{ ccy: 'USD', eq: '400' }] }]);
+        fresh = store.balance;
+      }),
+    );
     await tick;
     expect(store.balance).toBe(fresh);
   });
@@ -118,9 +120,17 @@ describe('OKX account equity anchor', () => {
     const writes = vi.spyOn(store, 'update');
     let beforeWs = -1;
     vi.spyOn(exchange, 'fetchMarkets').mockResolvedValue(store.markets);
-    vi.spyOn(exchange, 'fetchTickersRaw').mockResolvedValue([{
-      instId: 'BTC-USD-SWAP', last: '40000', open24h: '40000', bidPx: '39999', askPx: '40001', volCcy24h: '1', vol24h: '1',
-    }]);
+    vi.spyOn(exchange, 'fetchTickersRaw').mockResolvedValue([
+      {
+        instId: 'BTC-USD-SWAP',
+        last: '40000',
+        open24h: '40000',
+        bidPx: '39999',
+        askPx: '40001',
+        volCcy24h: '1',
+        vol24h: '1',
+      },
+    ]);
     for (const socket of [exchange.publicWebsocket, exchange.businessWebsocket, exchange.privateWebsocket]) {
       vi.spyOn(socket, 'connectAndSubscribe').mockImplementation(() => {});
     }
@@ -136,7 +146,9 @@ describe('OKX account equity anchor', () => {
     });
     await exchange.start();
     expect(beforeWs).toBeGreaterThanOrEqual(0);
-    const totals = writes.mock.calls.slice(beforeWs).flatMap(([update]) => update.balance ? [update.balance.total] : []);
+    const totals = writes.mock.calls
+      .slice(beforeWs)
+      .flatMap(([update]) => (update.balance ? [update.balance.total] : []));
     expect(totals.length).toBeGreaterThanOrEqual(2);
     expect(totals.every((total) => total === 40387.18)).toBe(true);
     expect(store.balance).toMatchObject({ total: 40387.18, free: 40317 });

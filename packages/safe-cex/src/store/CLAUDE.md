@@ -264,7 +264,6 @@ inverse publishes native amount/filled, so its adapter can subtract those values
 when the exact optional tail is absent. Order rejection metadata must survive
 alongside the native sizing fields.
 
-
 OKX frame bridges keep native contract-count placement amounts separately from
 base-sized fills and remaining quantities. Exact native leaves populate
 `remainingNative`; regular order cumulative native fills are amount minus those
@@ -274,3 +273,12 @@ PnL is already converted to USD, so do not relabel it as coin-native PnL. Both
 the worker and main-thread frame appliers use this OKX profile; other venue
 quantity profiles keep their existing conventions. Strictly admitted X-Perp
 market IDs retain their dated identity and their base/quote XPERP display label.
+
+## Prediction-market frame metadata
+
+Optional typed `PREDICTION_MARKETS` and `PREDICTION_HOLDINGS` sections carry
+outcome condition/question/tick/neg-risk metadata and redemption/merge flags.
+The numeric market and position tables retain their existing shapes. Both
+worker and main-thread FrameApplier instances retain metadata across later
+position-only frames; explicit empty sections clear it. Holdings removed from
+the authoritative position table lose their flags before later reopening.

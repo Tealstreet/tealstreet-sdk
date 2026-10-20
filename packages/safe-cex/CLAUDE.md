@@ -540,6 +540,14 @@ hosts consume these hints before network I/O. Public CORS routes come from the
 provider (and serialized native plan), never venue URLs. Missing native CORS
 policy fails explicitly; normal requests retain account routing and deadlines.
 
+Engine venue requests use native authorization headers. On Coinbase and its
+spot alias, an ordinary REST proxy owns `Authorization`, so the host moves the
+venue JWT to `Coinbase-Authorization` before acquiring proxy authorization.
+Direct and HOW requests retain the original `Authorization`. Native plans carry
+this as optional per-route `headerAliases`; native code applies those aliases
+before route authorization and has no Coinbase routing table. Alias conflicts
+fail before network I/O. Plans contain header names, never credential values.
+
 **The default is `directTransport` (`transport/direct.ts`).** Every Tealstreet entry
 point imports `transport/registerTealstreetTransport` as a side effect: the web main
 thread (through `apps/web/src/registerTealstreetRealm.ts`, which also registers the

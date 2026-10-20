@@ -57,6 +57,8 @@ import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
+  coinbase: 'coinbase',
+  coinbasespot: 'coinbasespot',
   apexomni: 'apexomni',
   asterdex: 'asterdex',
   binance: 'binance',
@@ -83,6 +85,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   hyrotrader: 'hyrotrader',
   cryptocom: 'cryptocom',
   kucoin: 'kucoin',
+  polymarket: 'polymarket',
   hyperliquid: 'hyperliquid',
   paradex: 'paradex',
   kraken: 'kraken',
@@ -104,8 +107,11 @@ const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
+const coinbaseClientOrderIdRule = patternClientOrderIdRule('Coinbase', /^\S{1,128}$/u, { mint: () => `tealstreet-${uuid()}` });
 const mintBinanceClientOrderId = () => 'x-s3vFFRQp' + uuid();
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  coinbase: coinbaseClientOrderIdRule,
+  coinbasespot: coinbaseClientOrderIdRule,
   binance: patternClientOrderIdRule('Binance', /^[.A-Z:/a-z0-9_-]{1,36}$/, { mint: mintBinanceClientOrderId }),
   binancepm: patternClientOrderIdRule('Binance PM', /^[.A-Z:/a-z0-9_-]{1,32}$/, { mint: mintBinanceClientOrderId }),
   phemex: patternClientOrderIdRule('Phemex', /^.{1,40}$/, { mint: () => `${PHEMEX_BROKER_ID}_${uuid()}` }),
@@ -227,6 +233,15 @@ export class RustEngineExchange extends BaseExchange {
     this.isSpot = exchangeName === 'bybitspot';
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
+    if (exchangeName === 'polymarket') {
+      this.cancelAllOrders = async () => {
+        await this.command({ op: 'cancelSymbolOrders', symbol: '' });
+      };
+      this.fetchSymbolMaxLeverage = async (symbol: string) => {
+        const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+        return Math.max(rails.buyLeverage, rails.sellLeverage);
+      };
+    }
     if (exchangeName === 'apexomni') {
       this.getAccount = async () => {
         await this.ensureHost();
@@ -242,7 +257,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     this.applier = new FrameApplier(
       store,
-      this.name === 'mexc' || this.name === 'blofin' || this.name === 'kucoin',
+      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
       this.name === 'bitgetinverse',
       ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
     );
@@ -268,6 +283,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   get isPublicDataOnly(): boolean {
+    if (this.name === 'polymarket') return this.options.publicDataOnly === true || !this.options.key;
     if (this.name === 'paradex') {
       return (
         this.options.publicDataOnly === true ||
@@ -285,6 +301,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   protected override get canSign(): boolean {
+    if (['coinbase', 'coinbasespot'].includes(this.name)) return Boolean(this.options.key);
     if (this.name !== 'asterdex') return super.canSign;
     if (!this.options.key) return false;
     if (this.options.remoteSigner) return true;
@@ -332,12 +349,26 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
     if (
-      !['hyperliquid', 'paradex', 'lighter'].includes(this.name) &&
+      !['hyperliquid', 'paradex', 'lighter', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) &&
       !this.isPublicDataOnly &&
       (!this.options.key ||
         !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
     ) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
+    }
+    if (this.name === 'polymarket' && !this.isPublicDataOnly) {
+      if (!/^(?:0x)?[a-fA-F0-9]{64}$/.test(this.options.key)) {
+        throw new Error('Polymarket requires a local 32-byte wallet private key');
+      }
+      const { apiKey, apiSecret, apiPassphrase, signerType = 0, funderAddress } = this.options.polymarket ?? {};
+      const credentials = [apiKey, apiSecret, apiPassphrase];
+      if (credentials.some((value) => value !== undefined) && !credentials.every((value) => typeof value === 'string' && value.trim())) {
+        throw new Error('Polymarket requires all three L2 API credentials together');
+      }
+      if (![0, 1, 2, 3].includes(signerType)) throw new Error('Invalid Polymarket signature type');
+      if ((signerType !== 0 || funderAddress !== undefined) && !/^0x[a-fA-F0-9]{40}$/.test(funderAddress ?? '')) {
+        throw new Error('Polymarket requires a valid funder address for non-EOA signing');
+      }
     }
     if (orderlyNames.has(this.name) && !this.isPublicDataOnly) {
       if (!this.options.applicationId || !/^[A-Za-z0-9_-]+$/.test(this.options.applicationId)) {
@@ -401,6 +432,7 @@ export class RustEngineExchange extends BaseExchange {
         ...(this.name === 'apexomni' ? { omniKeySeed } : {}),
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
+        ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: this.name === 'kucoin' ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
         ...(['backpack', 'bitrue'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
@@ -416,6 +448,7 @@ export class RustEngineExchange extends BaseExchange {
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
+        ...(this.name === 'polymarket' ? { polymarket: this.options.polymarket } : {}),
         ...(this.name === 'paradex' ? { paradexAddress, subkeyAddress } : {}),
         ...(this.name === 'asterdex'
           ? {
@@ -437,7 +470,7 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.host = new EngineHost(
       engine,
-      this.name === 'backpack' || orderlyNames.has(this.name)
+      ['backpack', 'coinbase', 'coinbasespot'].includes(this.name) || orderlyNames.has(this.name)
         ? { ...transport, now: virtualClock.getCurrentTimeMs }
         : transport,
       {
@@ -574,6 +607,11 @@ export class RustEngineExchange extends BaseExchange {
 
   private command = <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
     if (!this.host) return Promise.reject(new Error(`${this.name} engine is not started`));
+    if (['coinbase', 'coinbasespot'].includes(this.name)) {
+      const invalid = (value: unknown): boolean => typeof value === 'number' ? !Number.isFinite(value)
+        : Boolean(value && typeof value === 'object' && Object.values(value).some(invalid));
+      if (invalid(command)) return Promise.reject(new Error('Coinbase command numbers must be finite'));
+    }
     return this.host.command(command) as Promise<T>;
   };
 
@@ -652,7 +690,14 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   getAccount = async (): Promise<ExchangeAccount> => {
-    if (this.name === 'asterdex') return this.command<ExchangeAccount>({ op: 'fetchAccount' });
+    if (['coinbase', 'coinbasespot'].includes(this.name)) {
+      if (!this.host) await this.start();
+      await this.untilLoaded();
+      const userId = this.host?.accountId();
+      if (!userId || this.isPublicDataOnly) throw new Error('Coinbase private portfolio ID is unavailable');
+      return { userId };
+    }
+    if (this.name === 'asterdex' || this.name === 'polymarket') return this.command<ExchangeAccount>({ op: 'fetchAccount' });
     if (!orderlyNames.has(this.name)) throw new Error('Not implemented');
     if (!this.host) await this.start();
     await this.untilLoaded();
@@ -722,9 +767,9 @@ export class RustEngineExchange extends BaseExchange {
     return market.limits.leverage.max;
   };
 
-  fetchOrderBook = async (symbol: string, limit = 100): Promise<OrderBook> => {
-    if (this.name !== 'asterdex') throw new Error('Orderbook snapshot queries are unavailable for this venue');
-    return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit });
+  fetchOrderBook = async (symbol: string, limit?: number): Promise<OrderBook> => {
+    if (this.name !== 'asterdex' && this.name !== 'polymarket') throw new Error('Orderbook snapshot queries are unavailable for this venue');
+    return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit: this.name === 'asterdex' ? limit ?? 100 : limit });
   };
 
   private candleInterval = (interval: OHLCVOptions['interval']): OHLCVOptions['interval'] =>
@@ -744,6 +789,10 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   fetchHistoricalFills = (opts: ExecutionsOptions) => {
+    if (['coinbase', 'coinbasespot'].includes(this.name)
+      && [opts.from, opts.to].some((value) => value !== undefined && !Number.isFinite(value))) {
+      return Promise.reject(new Error('Coinbase history bounds must be finite'));
+    }
     const milliseconds = (value?: number) => {
       if (value === undefined || !Number.isFinite(value) || (this.name === 'woo' && value < 0)) return undefined;
       const alreadyMilliseconds = this.name === 'woo' ? value >= 1_000_000_000_000 : value > 1_000_000_000_000;
@@ -752,7 +801,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['apexomni', 'blofin', 'bitrue', 'hyperliquid', 'paradex', 'lighter', 'kraken', 'woo'].includes(this.name)
+      ...(['apexomni', 'blofin', 'bitrue', 'hyperliquid', 'paradex', 'lighter', 'kraken', 'woo', 'coinbase', 'coinbasespot'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });
@@ -761,7 +810,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (['asterdex', 'blofin', 'bitrue', 'paradex'].includes(this.name) || orderlyNames.has(this.name))
+      if (['asterdex', 'blofin', 'bitrue', 'paradex', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) || orderlyNames.has(this.name))
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
@@ -777,6 +826,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   fetchHistoricalOrders = (opts?: OrderHistoryOptions) => {
+    if (['coinbase', 'coinbasespot'].includes(this.name) && (opts?.orderId !== undefined || opts?.status !== undefined)) {
+      return Promise.reject(new Error('Coinbase order history does not support orderId or status filters'));
+    }
     if (orderlyNames.has(this.name) && (opts?.orderId !== undefined || opts?.status !== undefined)) {
       return Promise.reject(new Error('Orderly order history does not support orderId or status filters'));
     }

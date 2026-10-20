@@ -197,7 +197,12 @@ async function runRust() {
     webSocketHeaders: true,
     connect: (url, { headers, onOpen, onMessage, onBinary, onClose }) => {
       venue.validateSocket?.(url, headers);
-      const socket = tape.connect(url, onOpen, (data) => typeof data === 'string' ? onMessage(data) : onBinary?.(data), onClose);
+      const socket = tape.connect(
+        url,
+        onOpen,
+        (data) => (typeof data === 'string' ? onMessage(data) : onBinary?.(data)),
+        onClose,
+      );
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
     },
     request: async ({ method, url, body: requestBody, headers, signal }) => {
@@ -220,7 +225,16 @@ async function runRust() {
   const engine = new WasmEngine(venue.rust, JSON.stringify(options));
   if (process.env.RUST_MEMORY_TRACE) {
     let last = wasmMemoryBytes();
-    for (const method of ['start', 'httpStart', 'httpChunk', 'httpEnd', 'wsMessage', 'wsMessageActions', 'wsMessageBytes', 'takeFrame']) {
+    for (const method of [
+      'start',
+      'httpStart',
+      'httpChunk',
+      'httpEnd',
+      'wsMessage',
+      'wsMessageActions',
+      'wsMessageBytes',
+      'takeFrame',
+    ]) {
       if (typeof engine[method] !== 'function') continue;
       const original = engine[method].bind(engine);
       engine[method] = (...args) => {
@@ -309,7 +323,9 @@ async function runRust() {
   }
   const tickerRows = [];
   for (let i = 0; i < tickers.count; i++) {
-    const row = { symbol: tickers.market[i] === NONE ? tickers.identity?.(i).symbol : markets.symbol(tickers.market[i]) };
+    const row = {
+      symbol: tickers.market[i] === NONE ? tickers.identity?.(i).symbol : markets.symbol(tickers.market[i]),
+    };
     for (const [field, column] of Object.entries(tickers.columns)) row[field] = column[i];
     tickerRows.push(row);
   }
@@ -422,14 +438,16 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
       ...orderEnums(orders.enums[i]),
     };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
-    if (venue.inverseNativeAmounts) row.extra = { remainingNative: Math.round(Math.max(0, row.amount - row.filled) * 1e12) / 1e12 };
+    if (venue.inverseNativeAmounts)
+      row.extra = { remainingNative: Math.round(Math.max(0, row.amount - row.filled) * 1e12) / 1e12 };
     orderRows.push(row);
   }
   const positionRows = [];
   for (let i = 0; i < (positions?.count ?? 0); i++) {
     const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
     for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
-    if (venue.inverseNativeAmounts) row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
+    if (venue.inverseNativeAmounts)
+      row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
     positionRows.push(row);
   }
   const settingRows = [];
@@ -451,7 +469,8 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
       free: balance.free,
       total: balance.total,
       upnl: balance.upnl,
-      ...((venue.inverseNativeAmounts || venue.compareBalanceCoins) ? { coins: balance.coins ?? {} } : {}),
+      ...(venue.inverseNativeAmounts || venue.compareBalanceCoins ? { coins: balance.coins ?? {} } : {}),
+      ...(venue.currencyBalances && balance.currencies !== undefined ? { currencies: balance.currencies } : {}),
       ...(venue.compareBalanceCurrencies ? { currencies: balance.currencies ?? {} } : {}),
     },
     orders: orderRows,
@@ -534,8 +553,13 @@ async function runTs() {
   const adapter = async (config) => {
     const base = config.baseURL ?? '';
     const url = new URL(config.url.startsWith('http') ? config.url : `${base}${config.url}`);
-    for (const [key, value] of Object.entries(config.params ?? {})) {
-      if (value !== undefined) url.searchParams.set(key, String(value));
+    const serializer = typeof config.paramsSerializer === 'function' ? config.paramsSerializer : config.paramsSerializer?.serialize;
+    if (serializer) {
+      for (const [key, value] of new URLSearchParams(serializer(config.params ?? {}))) url.searchParams.append(key, value);
+    } else {
+      for (const [key, value] of Object.entries(config.params ?? {})) {
+        if (value !== undefined) url.searchParams.set(key, String(value));
+      }
     }
     const {
       status,
@@ -597,7 +621,8 @@ async function runTs() {
   exchange.emitter.on('callMethod', ({ method, args, requestId }) => {
     setImmediate(async () => {
       try {
-        if (!['removeOrders', 'fetchAndSetOrders'].includes(method)) throw new Error(`Unsupported taped worker method ${method}`);
+        if (!['removeOrders', 'fetchAndSetOrders'].includes(method))
+          throw new Error(`Unsupported taped worker method ${method}`);
         const result = await exchange[method](...args);
         exchange.emitter.emit('callMethod:done', { requestId, success: true, result });
       } catch (error) {
@@ -614,7 +639,8 @@ async function runTs() {
   const finalBooks = {};
   const started = exchange.start();
   const subscribed = (async () => {
-    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange,store))) await new Promise((r) => realTimeout(r, 1));
+    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange, store)))
+      await new Promise((r) => realTimeout(r, 1));
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
@@ -643,7 +669,8 @@ async function runTs() {
     clock,
   );
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
-  if (venue.tsReplaySettled) await until(() => venue.tsReplaySettled(exchange, bookSymbols.length), 'TS pending book snapshots');
+  if (venue.tsReplaySettled)
+    await until(() => venue.tsReplaySettled(exchange, bookSymbols.length), 'TS pending book snapshots');
   await within(venue.settleTs?.(exchange, { isPrivate, clock }) ?? Promise.resolve(), 15_000, 'TS pending venue reads');
   await settle();
   tape.assertWritesConsumed();
@@ -669,7 +696,10 @@ async function runTs() {
           free: store.balance.free,
           total: store.balance.total,
           upnl: store.balance.upnl,
-          ...((venue.inverseNativeAmounts || venue.compareBalanceCoins) ? { coins: store.balance.coins ?? {} } : {}),
+          ...(venue.inverseNativeAmounts || venue.compareBalanceCoins ? { coins: store.balance.coins ?? {} } : {}),
+          ...(venue.currencyBalances && store.balance.currencies !== undefined
+            ? { currencies: store.balance.currencies }
+            : {}),
           ...(venue.compareBalanceCurrencies ? { currencies: store.balance.currencies ?? {} } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),
@@ -739,7 +769,9 @@ function normalizeAccount(account) {
     entryPrice: p.entryPrice,
     contracts: p.contracts,
     notional: p.notional,
-    ...(venue.inverseNativeAmounts ? { contractsNative: p.extra?.contractsNative, unrealizedPnlNative: p.extra?.unrealizedPnlNative } : {}),
+    ...(venue.inverseNativeAmounts
+      ? { contractsNative: p.extra?.contractsNative, unrealizedPnlNative: p.extra?.unrealizedPnlNative }
+      : {}),
     leverage: p.leverage,
     unrealizedPnl: p.unrealizedPnl,
     liquidationPrice: p.liquidationPrice,
@@ -795,8 +827,11 @@ writeFileSync(
       ),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
-    commands: result.commands.map((result, index) => venue.commandResult?.(result,
-      records.filter((record) => record.type === 'command')[index], index + 1) ?? result),
+    commands: result.commands.map(
+      (result, index) =>
+        venue.commandResult?.(result, records.filter((record) => record.type === 'command')[index], index + 1) ??
+        result,
+    ),
   }),
 );
 realClearTimeout(replayDeadline);

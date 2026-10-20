@@ -1,0 +1,151 @@
+//! Coinbase Advanced Trade: public INTX discovery and native account products.
+mod account;
+mod account_wire;
+mod history;
+mod public;
+mod rest;
+mod sign;
+mod trading;
+mod wire;
+
+use safe_cex_engine::book::Book;
+use safe_cex_engine::{Command, Cx, Response, SocketId, TimerId, Venue};
+use serde::Deserialize;
+use zeroize::Zeroizing;
+
+#[derive(Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Options {
+    pub key: String,
+    pub secret: String,
+    pub public_data_only: bool,
+    pub spot_only: bool,
+    pub testnet: bool,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProductKind {
+    Intx,
+    Cfm,
+    Spot,
+}
+pub enum Pending {
+    Public(public::Request),
+    Account(account::Request),
+    Trading(trading::Request),
+    History(history::Request),
+}
+pub struct Coinbase {
+    pub(crate) options: Options,
+    pub(crate) public: public::Public,
+    pub(crate) credentials: Option<sign::Credentials>,
+    rest: rest::Rest,
+    pub(crate) account: account::Account,
+    pub(crate) trading: trading::Trading,
+    pub(crate) history: history::History,
+}
+impl Coinbase {
+    pub fn new(options: Options) -> Result<Self, String> {
+        let mut options = options;
+        let raw_key = Zeroizing::new(std::mem::take(&mut options.key));
+        let secret = Zeroizing::new(std::mem::take(&mut options.secret));
+        let credentials = if options.public_data_only || raw_key.is_empty() {
+            None
+        } else {
+            Some(sign::Credentials::new(&raw_key, &secret)?)
+        };
+        options.key = credentials
+            .as_ref()
+            .map_or_else(String::new, |c| c.key().to_owned());
+        Ok(Self {
+            options,
+            public: public::Public::default(),
+            credentials,
+            rest: rest::Rest::default(),
+            account: account::Account::default(),
+            trading: trading::Trading::default(),
+            history: history::History::default(),
+        })
+    }
+}
+impl Venue for Coinbase {
+    type Pending = Pending;
+    fn account_id(&self) -> Option<&str> {
+        self.account.portfolio_id.as_deref()
+    }
+    fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.credentials.is_some() {
+            self.private_start(cx);
+        } else {
+            self.public_start(cx);
+        }
+    }
+    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        if !self.public_open(cx, socket) {
+            self.private_on_open(cx, socket);
+        }
+    }
+    fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        if !self.public_message(cx, socket, text) {
+            self.private_on_message(cx, socket, text);
+        }
+    }
+    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
+        if !self.public_close(cx, socket) {
+            self.private_on_close(cx, socket);
+        }
+    }
+    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        match pending {
+            Pending::Public(p) => self.public_response(cx, p, response),
+            Pending::Account(p) => self.private_on_response(cx, p, response),
+            Pending::Trading(p) => self.trading_response(cx, p, response),
+            Pending::History(p) => self.history_response(cx, p, response),
+        }
+    }
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        match pending {
+            Pending::Public(p) => self.public_item(cx, p, item),
+            Pending::Account(p) => self.private_on_item(cx, p, item),
+            Pending::Trading(_) => {}
+            Pending::History(p) => self.history_item(cx, p, item),
+        }
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        match pending {
+            Pending::Public(p) => self.public_failed(cx, p, error),
+            Pending::Account(p) => self.private_failed(cx, p, error),
+            Pending::Trading(p) => self.trading_failed(cx, p, error),
+            Pending::History(p) => self.history_failed(cx, p, error),
+        }
+    }
+    fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if !self.rest_timer(cx, timer) && !self.public_timer(cx, timer) {
+            self.private_on_timer(cx, timer);
+        }
+    }
+    fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Some(Command::Query { command, query }) = self
+            .public_command(cx, command)
+            .and_then(|command| self.trading_command(cx, command))
+        {
+            self.history_start(cx, command, query);
+        }
+    }
+
+    fn book(&self, symbol: &str) -> Option<&Book> {
+        self.public
+            .books
+            .get(symbol)
+            .filter(|b| b.live)
+            .map(|b| &b.book)
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        Box::new(
+            self.public
+                .books
+                .iter()
+                .filter(|(_, b)| b.live)
+                .map(|(s, b)| (s.as_str(), &b.book)),
+        )
+    }
+}
