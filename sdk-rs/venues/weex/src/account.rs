@@ -900,7 +900,7 @@ mod tests {
     use super::*;
     #[test]
     fn bounded_terminal_memory_keeps_ws_floor_but_accepts_old_authoritative_active_rows() {
-        let mut state = State::default();
+        let mut state = State::new();
         for i in 0..=TERMINAL_LIMIT {
             state.terminal((i + 1).to_string(), 1_773_295_700_000.0 + i as f64);
         }
