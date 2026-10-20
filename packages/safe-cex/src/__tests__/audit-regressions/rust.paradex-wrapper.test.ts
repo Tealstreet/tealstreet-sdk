@@ -1,6 +1,6 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeOptions, Market, PlaceOrderOpts } from '../../types';
+import type { ExchangeOptions, Market, PayloadSignerRequest, PlaceOrderOpts } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -43,7 +43,7 @@ describe('Rust Paradex account boundary', () => {
     const exchange = new RustEngineExchange('paradex', { ...credentials, secret: '', ...options }, store);
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
     exchanges.push(exchange);
-    return { exchange, load, construct, commands };
+    return { exchange, load, construct, commands, engine };
   };
   afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
@@ -89,6 +89,22 @@ describe('Rust Paradex account boundary', () => {
     await exchange.start();
     expect(construct).toHaveBeenCalledOnce();
     expect(remoteSigner.sign).not.toHaveBeenCalled();
+  });
+
+  it('calls the payload callback with the TS options receiver and one argument', async () => {
+    const payload = { exchangeName: 'paradex', key: 'public-subkey', payload: '0x123', scheme: 'stark', encoding: 'felt-pair' };
+    const payloadSigner = vi.fn(function (this: ExchangeOptions, request: PayloadSignerRequest) {
+      expect(this.key).toBe('public-subkey');
+      expect(arguments.length).toBe(1);
+      expect(request).toEqual(payload);
+      return { signature: 'opaque' };
+    });
+    const { exchange, engine } = setup({ payloadSigner, key: 'public-subkey' });
+    engine.start = () => JSON.stringify([{ op: 'signPayload', request: 1, payload, timeoutMs: 20_000 }]);
+    engine.payloadSigned = () => '[]';
+    engine.payloadSignFailed = () => '[]';
+    await exchange.start();
+    await vi.waitFor(() => expect(payloadSigner).toHaveBeenCalledOnce());
   });
 
   it('honors caller IDs verbatim and mints bounded attributed IDs', async () => {

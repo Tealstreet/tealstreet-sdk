@@ -129,7 +129,8 @@ auth-path/array cases were added; full rerun is required for the final head.
   partial/malformed snapshots, and missing caller context on uncached native
   amendment/cancellation. Legacy amendment parsing remains unchanged; a
   spot-only `amendOrderWithSymbol` operation carries the explicit context.
-  Entire KuCoin crate with spot: 142 tests and all-target Clippy pass.
+  Entire KuCoin crate with spot at that checkpoint: 122 tests and all-target
+  Clippy pass (corrected the earlier summed total; individual groups unchanged).
 - Shared integration peer review passes. Currency and lookup result comparison
   symmetrically project transfer-model financial fields and identity for both
   implementations; tests prove financial/identity corruption still differs.
@@ -144,3 +145,28 @@ auth-path/array cases were added; full rerun is required for the final head.
   output rewriting is used.
 - Remaining: size budget, all final-head public/private replays (including
   KuCoin futures/spot and Binance), complete checks, adversarial PR review and CI.
+
+### Landing integration and review follow-up
+
+- Merged landing Phemex `45d7a3fb98` in `db10d6bfd3`, retaining both sets of
+  host/SDK registrations, harness controls, optional byte/text APIs and signing
+  callbacks. This imports the landing structure only; Phemex capability gaps
+  remain outside this lane's scope.
+- Fresh independent review found two inherited TS financial bugs in KuCoin
+  spot: malformed WS executions/order rows could reach the store, and missing/
+  null required REST balance fields became zeros. Fixes preserve good state,
+  validate execution fields before emission, and retain late executions before
+  stale-order/terminal fences. Follow-up review also guards a newer WS row
+  whose total size is smaller than a previously observed cumulative fill.
+- Bitrue private tape now includes a positive client-ID lookup in addition to
+  non-definitive misses; the comparison promotes documented raw client-ID
+  aliases while retaining all financial/native identities.
+- Repository tests pass (27 tasks; safe-cex 7,254 tests in each invocation),
+  root typecheck and lint pass. Subsequent small fixes need focused/final checks.
+- Size experiment: removing the body re-parser and using a bounded vector
+  made the pre-landing artifact only 125 bytes over budget. The landing's
+  optional text byte/batch ABI raises the excess to 3,591 bytes. A formatter
+  experiment added 36 bytes and was reverted. The next reviewable trim is to
+  omit optional text byte/batch exports from the standalone Paradex build:
+  its hot path is SBE binary, and the host already supports ordinary text
+  fallback for control messages. Combined builds retain those optional APIs.

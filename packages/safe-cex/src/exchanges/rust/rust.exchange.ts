@@ -390,7 +390,7 @@ export class RustEngineExchange extends BaseExchange {
     let transport = createEngineTransport(this.name, this.options, engineTransport());
     if (this.name === 'paradex') {
       transport = paradexSigningTransport(this.options, transport);
-      if (this.options.payloadSigner) transport = { ...transport, signPayload: this.options.payloadSigner };
+      if (this.options.payloadSigner) transport = { ...transport, signPayload: (request) => this.options.payloadSigner!(request) };
     }
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
