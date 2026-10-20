@@ -244,3 +244,22 @@ Remaining process: push and PR into `feat/rust-rewrite`, post independent
 code-correctness reviews, fix/review findings, merge only after green CI, then
 cut a fresh follow-up branch. Private live credentials remain unverified;
 scripted private coverage must not be presented as a live account test.
+
+## PR code-correctness review checkpoint
+
+PR [#1339](https://github.com/Tealstreet/tealstreet-sdk/pull/1339) targets
+`feat/rust-rewrite`. Three independent reviews are posted as PR comments:
+public/host/harness (no new findings), trading/queries, and auth/account.
+Trading found a spot-only zero-disabled bracket regression: `stopLoss: 0` or
+`takeProfit: 0` must omit that child, preserving TS behavior. The spot preflight
+and wire filter are fixed; negative/nonfinite batch protection and the parent
+perpetual contract remain intact. Native full crate passes 90 tests; reviewer
+independently reran 32 spot, 11 Kraken trading and 18 TS contract tests.
+Rebuilt Hyperliquid gates are in progress; the source change requires an
+updated artifact hash and superseding measurements before final push.
+
+Auth review found two Kraken P2s now being fixed: a final trade and filled
+lifecycle row in one batch can double-emit, and exhausted explicit signature
+rejection can warn instead of failing account validation. Both findings have
+standalone repro probes; closure requires independent regression review and
+rebuilt Kraken gates. No merge until all findings close and CI is green.

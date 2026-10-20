@@ -296,6 +296,72 @@ fn spot_limit_brackets_preserve_caller_cloid_and_never_reduce_only() {
     assert_eq!(wires[0]["t"]["limit"]["tif"], "Alo");
 }
 #[test]
+fn spot_zero_bracket_prices_disable_only_the_requested_child() {
+    for (stop, take, children) in [
+        (0.0, 0.0, Vec::<&str>::new()),
+        (0.0, 0.3, vec!["tp"]),
+        (0.18, 0.0, vec!["sl"]),
+    ] {
+        let (mut e, _) = ready(true);
+        e.drain_actions().for_each(drop);
+        let mut o = order("PURR/USDC");
+        o.stop_loss = Some(stop);
+        o.take_profit = Some(take);
+        e.handle(
+            3000.0,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![o],
+            }),
+        );
+        let r = take_http(&mut e);
+        let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+        let wires = p["action"]["orders"].as_array().unwrap();
+        assert_eq!(wires.len(), 1 + children.len());
+        assert_eq!(
+            p["action"]["grouping"],
+            if children.is_empty() {
+                "na"
+            } else {
+                "normalTpsl"
+            }
+        );
+        for (wire, kind) in wires.iter().skip(1).zip(children) {
+            assert_eq!(wire["t"]["trigger"]["tpsl"], kind);
+            assert!(
+                wire["t"]["trigger"]["triggerPx"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<f64>()
+                    .unwrap()
+                    > 0.0
+            );
+        }
+    }
+}
+#[test]
+fn spot_invalid_bracket_prices_still_reject_the_batch_before_writes() {
+    for trigger in [-0.1, f64::NAN, f64::INFINITY] {
+        let (mut e, _) = ready(true);
+        e.drain_actions().for_each(drop);
+        let mut bad = order("PURR/USDC");
+        bad.stop_loss = Some(trigger);
+        e.handle(
+            3000.0,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![order("PURR/USDC"), bad],
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+        )));
+    }
+}
+#[test]
 fn spot_market_order_uses_last_mid_with_five_percent_gtc_envelope() {
     let (mut e, _) = ready(true);
     e.drain_actions().for_each(drop);

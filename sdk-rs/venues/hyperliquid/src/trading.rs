@@ -388,7 +388,7 @@ impl Hyperliquid {
             if [o.stop_loss, o.take_profit]
                 .into_iter()
                 .flatten()
-                .any(|p| !p.is_finite() || p <= 0.0)
+                .any(|p| !p.is_finite() || p < 0.0 || (!self.spot && p == 0.0))
             {
                 return Err("Invalid bracket trigger price".into());
             }
@@ -488,7 +488,7 @@ impl Hyperliquid {
         let mut wires = vec![main];
         if opts.kind == OrderType::Limit {
             for (kind, value) in [("sl", opts.stop_loss), ("tp", opts.take_profit)] {
-                if let Some(trigger) = value {
+                if let Some(trigger) = value.filter(|p| !self.spot || *p != 0.0) {
                     wires.push(OrderWire {
                         a: asset,
                         b: opts.side != OrderSide::Buy,
