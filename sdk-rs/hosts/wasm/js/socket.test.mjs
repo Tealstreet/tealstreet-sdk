@@ -129,3 +129,13 @@ test('existing Coinbase text sockets preserve their private role and opt out of 
   assert.deepEqual(received, [[10, '{"channel":"heartbeats","sequence_num":0,"events":[]}', 42]]);
   host.dispose();
 });
+
+for (const [format, compress] of [['gzip', gzipSync], ['deflate', deflateSync]]) {
+  test(`${format} rejects expansion beyond the message cap without delivering data`, async () => {
+    const failed = new Promise((resolve) => {
+      const receive = socketMessages(() => assert.fail('oversized payload delivered'), resolve);
+      receive(compress(Buffer.alloc(16 * 1024 * 1024 + 1, 120)));
+    });
+    assert.match(String(await failed), /exceeds limit/);
+  });
+}

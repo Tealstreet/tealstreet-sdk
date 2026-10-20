@@ -22,6 +22,11 @@ impl<K: PartialEq> Backoff<K> {
             .any(|read| &read.key == key && read.timer.is_some())
     }
 
+    /// No read has failed without a later success.
+    pub fn idle(&self) -> bool {
+        self.reads.is_empty()
+    }
+
     /// At most one retry per independent read; no write request enters this API.
     pub fn failed<P>(&mut self, cx: &mut Cx<'_, P>, key: K) {
         let index = match self.reads.iter().position(|read| read.key == key) {
@@ -40,8 +45,9 @@ impl<K: PartialEq> Backoff<K> {
             return;
         }
         read.attempts = read.attempts.saturating_add(1);
-        let delay = (1_000u32 << read.attempts.saturating_sub(1).min(5)).min(30_000);
-        read.timer = Some(cx.set_timer(f64::from(delay)));
+        let delay = crate::backoff::Backoff::new(1_000.0, 5, 30_000.0)
+            .delay(read.attempts.saturating_sub(1));
+        read.timer = Some(cx.set_timer(delay));
         cx.log(
             LogLevel::Warning,
             "Public discovery read failed; retry scheduled",

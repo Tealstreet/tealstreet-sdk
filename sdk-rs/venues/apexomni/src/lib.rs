@@ -13,7 +13,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::{Command, Cx, Method, RequestId, Response, SocketId, TimerId, Venue};
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -22,6 +22,15 @@ pub struct Options {
     pub passphrase: Option<String>,
     pub omni_key_seed: Option<String>,
     pub tick_interval_ms: Option<f64>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        safe_cex_crypto::secrets::erase(&mut self.omni_key_seed);
+    }
 }
 
 pub enum Pending {
@@ -39,7 +48,7 @@ pub enum Pending {
 }
 
 pub struct ApexOmni {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     rest: &'static str,
     contracts: HashMap<String, public::ContractConfig>,
     public: public::Public,
@@ -74,6 +83,7 @@ struct Envelope<'a> {
 
 impl ApexOmni {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             rest: if options.testnet {
                 "https://testnet.omni.apex.exchange/api"
