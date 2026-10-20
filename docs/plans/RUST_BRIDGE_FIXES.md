@@ -355,6 +355,8 @@ PASS. The later full phase-3a run passes all 7,807 SDK unit cases.
   new-test 20 ms deadline expired before first dispatch while startup work
   drained; the fixture now observes the first dispatch before queuing command
   two and uses 1 s command deadlines. Existing assertions/deadlines are intact.
+- Follow-up on this stable artifact passes all 451 SDK WASM cases in 18 files.
+  The first-six checkpoint is committed and pushed as `c3747accfe`.
 
 ### Phase 3b remaining venue plans and audit
 
@@ -379,3 +381,18 @@ Each slice runs scoped native tests/strict Clippy and independent implementation
 review before its checkpoint. Tests compare receipts to final outgoing fields
 before I/O, including omitted IDs, caller/generated variants and delayed or
 rejected replacements. Combined artifact and broad gates follow stable sources.
+
+Root additionally covers caller-only Crypto.com, Orderly and WOO. Orderly's
+retained Place order supplies the actual client ID. Crypto.com retains an
+optional receipt on Call::Place before Params serialization; WOO retains it on
+Accepted::Regular before query construction. Emit at selected dispatch, never
+for cancels/amends/protection without a new ID. Tests prove exact outgoing
+caller value and absence when omitted. These hooks close actual-value reporting
+for caller-only venues without introducing native ID generation.
+
+Caller-only slice implemented and independently reviewed PASS. All 246 native
+tests and strict Clippy for Crypto.com, Orderly and WOO pass; three new cases
+exercise supplied/absent IDs and compare final native fields in action order.
+Selected crate formatting passes. Combined-artifact verification for these hooks
+follows the remaining native slices; the existing 451-case run covers only the
+first-six checkpoint artifact.

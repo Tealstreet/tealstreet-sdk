@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Clone)]
 pub enum Call {
-    Place,
+    Place(Option<OrderIdentityReceipt>),
     Amend,
     Cancel,
     CancelSymbol,
@@ -140,6 +140,14 @@ impl Cryptocom {
                     },
                 )
                 .text("quantity", num::format(order.amount));
+            let receipt = order
+                .client_order_id
+                .as_ref()
+                .map(|id| OrderIdentityReceipt {
+                    symbol: order.symbol.clone(),
+                    kind: OrderIdentityKind::ClientOrderId,
+                    identity: id.clone(),
+                });
             if let Some(id) = order.client_order_id {
                 params = params.text("client_oid", id);
             }
@@ -185,7 +193,7 @@ impl Cryptocom {
                     "private/create-order"
                 },
                 params,
-                call: Call::Place,
+                call: Call::Place(receipt),
             });
         }
         Ok(Job {
@@ -350,6 +358,9 @@ impl Cryptocom {
             };
             if let Some(step) = job.steps.pop_front() {
                 self.trading.active = true;
+                if let Call::Place(Some(receipt)) = &step.call {
+                    cx.command_progress(command, vec![receipt.clone()]);
+                }
                 self.signed(
                     cx,
                     step.path,
@@ -408,7 +419,7 @@ impl Cryptocom {
                 ));
             }
             match request.step.call {
-                Call::Place | Call::Amend => {
+                Call::Place(_) | Call::Amend => {
                     #[derive(Deserialize)]
                     struct Created<'a> {
                         #[serde(borrow)]

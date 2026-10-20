@@ -26,6 +26,64 @@ fn body(r: &safe_cex_engine::HttpRequest) -> serde_json::Value {
 const ALGO: &str = r#"[{"algo_order_id":100,"root_algo_order_id":100,"symbol":"PERP_BTC_USDC","algo_type":"POSITIONAL_TP_SL","algo_status":"NEW","margin_mode":"CROSS","child_orders":[{"algo_order_id":101,"root_algo_order_id":100,"algo_type":"STOP_LOSS","side":"SELL","algo_status":"NEW","trigger_price":49000,"type":"CLOSE_POSITION","reduce_only":true,"quantity":0},{"algo_order_id":102,"root_algo_order_id":100,"algo_type":"TAKE_PROFIT","side":"SELL","algo_status":"NEW","trigger_price":55000,"type":"CLOSE_POSITION","reduce_only":true,"quantity":0}]}]"#;
 
 #[test]
+fn receipts_report_actual_caller_id_before_write_and_preserve_absence() {
+    for supplied in [false, true] {
+        let (mut e, _) = ready();
+        actions(&mut e);
+        let mut order: PlaceOrderOpts = serde_json::from_str(
+            r#"{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}"#,
+        )
+        .unwrap();
+        order.client_order_id = supplied.then(|| "caller-opaque-9007199254740995".into());
+        e.handle(
+            2000.0,
+            Event::Command(Command::PlaceOrders {
+                command: 71,
+                orders: vec![order],
+            }),
+        );
+        let out = actions(&mut e);
+        let http = out
+            .iter()
+            .position(|a| matches!(a, Action::Http(_)))
+            .unwrap();
+        let receipts: Vec<_> = out
+            .iter()
+            .enumerate()
+            .filter_map(|(i, action)| {
+                if let Action::Notice(Notice::CommandProgress {
+                    command: 71,
+                    receipts,
+                }) = action
+                {
+                    assert!(i < http);
+                    Some(receipts)
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect();
+        let Action::Http(request) = &out[http] else {
+            unreachable!()
+        };
+        let payload = body(request);
+        if supplied {
+            assert_eq!(receipts.len(), 1);
+            assert_eq!(receipts[0].symbol, "BTCUSDC");
+            assert_eq!(
+                receipts[0].kind,
+                safe_cex_engine::OrderIdentityKind::ClientOrderId
+            );
+            assert_eq!(payload["client_order_id"], receipts[0].identity);
+        } else {
+            assert!(receipts.is_empty());
+            assert!(payload.get("client_order_id").is_none());
+        }
+    }
+}
+
+#[test]
 fn caller_id_is_exact_and_documented_tif_is_native() {
     let (mut e, _) = ready();
     requests(&mut e);

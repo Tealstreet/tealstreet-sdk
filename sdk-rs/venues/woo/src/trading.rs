@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Clone)]
 enum Accepted {
-    Regular,
+    Regular(Option<OrderIdentityReceipt>),
     Algo,
     Ids(Vec<String>),
     CancelAll,
@@ -476,7 +476,13 @@ impl Woo {
                         "/v1/order",
                         params,
                         None,
-                        Accepted::Regular,
+                        Accepted::Regular(o.client_order_id.as_ref().map(|identity| {
+                            OrderIdentityReceipt {
+                                symbol: o.symbol.clone(),
+                                kind: OrderIdentityKind::ClientOrderId,
+                                identity: identity.clone(),
+                            }
+                        })),
                     ));
                 }
                 if o.stop_loss.is_some_and(|v| v > 0.0) || o.take_profit.is_some_and(|v| v > 0.0) {
@@ -1031,6 +1037,13 @@ impl Woo {
                             _ => (),
                         }
                     }
+                    if let Step::Write {
+                        accepted: Accepted::Regular(Some(receipt)),
+                        ..
+                    } = &outbound
+                    {
+                        cx.command_progress(command, vec![receipt.clone()]);
+                    }
                     let result = self.signed(
                         cx,
                         method,
@@ -1284,7 +1297,7 @@ impl Woo {
                         return Err("WOO mutation was not accepted".into());
                     }
                     match accepted {
-                        Accepted::Regular => {
+                        Accepted::Regular(_) => {
                             #[derive(Deserialize)]
                             struct Placed {
                                 #[serde(deserialize_with = "id")]

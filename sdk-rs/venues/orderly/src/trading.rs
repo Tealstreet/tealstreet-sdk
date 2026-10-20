@@ -1143,6 +1143,18 @@ impl Orderly {
         let credentials = self.account.credentials.as_ref().unwrap();
         match credentials.headers(step.method, &step.path, step.body.as_deref(), cx.now) {
             Ok(headers) => {
+                if let Effect::Place(order) = &step.effect
+                    && let Some(identity) = &order.client_order_id
+                {
+                    cx.command_progress(
+                        command,
+                        vec![OrderIdentityReceipt {
+                            symbol: order.symbol.clone(),
+                            kind: OrderIdentityKind::ClientOrderId,
+                            identity: identity.clone(),
+                        }],
+                    );
+                }
                 cx.request(
                     step.method,
                     format!("{}{}", self.rest(), step.path),

@@ -28,6 +28,64 @@ fn placed(e: &mut TestEngine, orders: Vec<PlaceOrderOpts>) -> Vec<Action> {
     );
     e.drain_actions().collect()
 }
+
+#[test]
+fn caller_identity_precedes_write_and_omission_is_preserved() {
+    for supplied in [false, true] {
+        let mut e = engine();
+        let mut o = opts();
+        o.client_order_id = supplied.then(|| "123456789".into());
+        let out = placed(&mut e, vec![o]);
+        let http = out
+            .iter()
+            .position(|a| matches!(a, Action::Http(_)))
+            .unwrap();
+        let receipts: Vec<_> = out
+            .iter()
+            .enumerate()
+            .filter_map(|(i, action)| {
+                if let Action::Notice(Notice::CommandProgress {
+                    command: 1,
+                    receipts,
+                }) = action
+                {
+                    assert!(i < http);
+                    Some(receipts)
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect();
+        let Action::Http(request) = &out[http] else {
+            unreachable!()
+        };
+        if supplied {
+            assert_eq!(receipts.len(), 1);
+            assert_eq!(receipts[0].symbol, "BTCUSDT");
+            assert_eq!(
+                receipts[0].kind,
+                safe_cex_engine::OrderIdentityKind::ClientOrderId
+            );
+            assert!(
+                request
+                    .body
+                    .as_deref()
+                    .unwrap()
+                    .contains(&format!("client_order_id={}", receipts[0].identity))
+            );
+        } else {
+            assert!(receipts.is_empty());
+            assert!(
+                !request
+                    .body
+                    .as_deref()
+                    .unwrap()
+                    .contains("client_order_id=")
+            );
+        }
+    }
+}
 fn req(actions: &[Action], method: Method, path: &str) -> HttpRequest {
     actions
         .iter()
