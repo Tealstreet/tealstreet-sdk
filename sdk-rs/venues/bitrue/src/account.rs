@@ -560,6 +560,14 @@ impl Bitrue {
             order
                 .time_in_force
                 .get_or_insert(TimeInForce::GoodTillCancel);
+            if let Some(extra) = &mut order.extra {
+                // Bitrue uses base units for both placement and the public order.
+                extra.remaining_native = None;
+                extra.filled_in_placement_units = None;
+                if *extra == OrderExtra::default() {
+                    order.extra = None;
+                }
+            }
         }
         let definitive = order.is_none().then_some(false);
         let result = serde_json::to_string(&Lookup {

@@ -359,6 +359,8 @@ struct LookupOrder {
     client_order_id: Option<String>,
     filled: f64,
     remaining: f64,
+    time_in_force: Option<String>,
+    extra: Option<std::collections::BTreeMap<String, f64>>,
 }
 const LOOKUP_ROW: &str = r#"{"orderId":2334151155877155281,"clientOrderId":"caller-id","price":59000,"origQty":0.004,"executedQty":0.001,"status":"PART_FILLED","type":"LIMIT","side":"BUY","action":"OPEN","transactTime":1700000000123}"#;
 fn lookup(e: &mut Engine<Bitrue>, symbol: &str, client_order_id: &str) {
@@ -401,7 +403,11 @@ fn fetched_order() -> Order {
         trigger_type: None,
         take_profit: None,
         stop_loss: None,
-        extra: None,
+        extra: Some(safe_cex_engine::model::OrderExtra {
+            remaining_native: Some(0.003),
+            filled_in_placement_units: Some(0.001),
+            ..Default::default()
+        }),
     }
 }
 #[test]
@@ -433,6 +439,8 @@ fn client_lookup_reads_native_open_orders_exactly_without_mutating_account_state
     assert_eq!(order.symbol, SYMBOL);
     assert_eq!(order.filled, 0.001);
     assert_eq!(order.remaining, 0.003);
+    assert_eq!(order.time_in_force.as_deref(), Some("GoodTillCancel"));
+    assert!(order.extra.is_none());
     assert!(e.store().orders().is_empty());
     assert!(!e.store().loaded().orders);
 }
@@ -540,4 +548,19 @@ fn client_lookup_preserves_ts_native_and_parent_identity_aliases() {
         lookup(&mut e, SYMBOL, id);
         assert!(lookup_result(&mut e).found);
     }
+}
+
+#[test]
+fn lookup_copy_retains_other_extra_fields_and_does_not_clear_store_unit_metadata() {
+    let mut e = engine();
+    let mut order = fetched_order();
+    order.extra.as_mut().unwrap().remaining_notional = Some(177.0);
+    e.store_mut().upsert_order(order.clone());
+    lookup(&mut e, SYMBOL, "caller-id");
+    let found = lookup_result(&mut e).order.unwrap();
+    assert_eq!(
+        found.extra.unwrap(),
+        std::collections::BTreeMap::from([("remainingNotional".into(), 177.0)])
+    );
+    assert_eq!(e.store().orders(), &[order]);
 }
