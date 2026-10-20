@@ -561,3 +561,30 @@ The landing then advanced through transport PR#1313 and Bitrue PR#1314 to
 matrix tests and twelfth venue without removing the profile guards or gates.
 Completed eleven-venue runs are historical; final validation must include the
 new landing and Bitrue. Preserve the fixed per-venue size budget.
+
+### Twelve-venue transport integration
+
+Resolve the two shared TS conflicts as the union of routed host transports and
+all five Bybit profiles. Preserve raw account/factory routing, secondary-key
+rejection, explicit Hyro origins, native quantities, protection/client-ID guards
+and Backpack clock/disposal binding. All 265 focused routing/HOW/native-matrix/
+equivalence/adapter/wrapper cases pass; independent shell review passes. The
+172 harness cases pass; independent whole-diff and Bybit-specific reviews pass
+with exact request/write/subscription/memory audits unchanged.
+
+The new Bitrue crate requires the three optional placement fields in amendment
+reconstruction and an early whole-batch Bybit-control guard. Both invalid-later
+batch regressions were proved red (one write escaped) and green. The incoming
+Bitrue account test's socket pattern needed `..` for the new action fields.
+Its two socket sites also lacked required explicit roles; public/private tags
+now preserve the real URLs and reconnect paths. Bybit's central role selection
+is tested across all five profiles and both networks, including identical Hyro
+public/private URLs, initial connections and reconnects. Native/Clippy and
+independent review are being finalized after these minimal integration fixes.
+
+The root-owned union audit passes: twelve features match twelve CI jobs, all
+Bybit profile steps stay in the Bybit job, the fixed 1,258,291-byte budget is
+unchanged, and optional wsMessage output, buffer reuse and role/context
+serialization survive. Typecheck44, lint28 and licenses31 pass. The corrected
+combined release build passed; combined functional, 35 replay gates and final
+head CI are pending. Do not use the earlier partial matrix as final evidence.

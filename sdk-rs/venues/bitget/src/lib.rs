@@ -123,14 +123,14 @@ impl BitgetFutures {
         let url = if index == 3 {
             if self.account.uta {
                 paths::UTA_PRIVATE
-            } else if self.account.fallback {
-                paths::PRIVATE_FALLBACK
             } else {
                 paths::PRIVATE
             }
         } else {
             paths::PUBLIC
         };
+        let recover =
+            index == 3 && std::mem::take(&mut self.account.needs_recovery) && !self.account.uta;
         let connection = &mut self.sockets[index];
         if let Some(socket) = connection.socket.take() {
             cx.close(socket);
@@ -141,7 +141,16 @@ impl BitgetFutures {
         if let Some(timer) = connection.reconnect.take() {
             cx.clear_timer(timer);
         }
-        connection.socket = Some(cx.connect(url));
+        connection.socket = Some(cx.connect_feed(
+            url,
+            if index == 3 {
+                safe_cex_engine::SocketChannel::Private
+            } else {
+                safe_cex_engine::SocketChannel::Public
+            },
+            ["primary", "secondary-1", "secondary-2", "private"][index],
+            recover,
+        ));
         connection.open = false;
         connection.last_received = cx.now;
         connection.watchdog = Some(cx.set_timer(5_000.0));

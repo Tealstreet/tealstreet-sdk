@@ -1,7 +1,7 @@
 //! Product differences from Bybit's V5 instruments, demo and WebSocket docs.
 mod support;
 
-use safe_cex_engine::{Command, Event};
+use safe_cex_engine::{Command, Event, SocketChannel};
 use safe_cex_venue_bybit::{Endpoints, Options, Variant};
 use support::{ACCOUNT_INFO, FEE_RATES, Harness, INSTRUMENTS, PRELAUNCH, TICKERS};
 
@@ -61,6 +61,84 @@ fn every_public_profile_requests_its_complete_market_sources() {
         }
         expected.sort();
         assert_eq!(sent, expected, "startup source mismatch for {variant:?}");
+    }
+}
+
+#[test]
+fn every_profile_preserves_socket_roles_and_origins_through_reconnect() {
+    for variant in [
+        Variant::Linear,
+        Variant::Inverse,
+        Variant::Spot,
+        Variant::Demo,
+        Variant::Hyrotrader,
+    ] {
+        for testnet in [false, true] {
+            let mut options = public_options(variant);
+            options.public_data_only = false;
+            options.key = Some("test-key".into());
+            options.secret = Some("test-secret".into());
+            options.testnet = testnet;
+            if let Some(endpoints) = &mut options.endpoints {
+                // Roles must survive even when a compatible API shares a URL.
+                endpoints.public_ws = "wss://hyro.example/shared-feed".into();
+                endpoints.private_ws = endpoints.public_ws.clone();
+            }
+            let mut h = Harness::started(options);
+            if h.has_request("status=PreLaunch") {
+                h.respond("status=PreLaunch", 200, PRELAUNCH);
+            }
+            if h.has_request("/v5/account/fee-rate") {
+                h.respond("/v5/account/fee-rate", 200, FEE_RATES);
+            }
+            if h.has_request("/v5/account/info") {
+                h.respond("/v5/account/info", 200, ACCOUNT_INFO);
+            }
+            h.respond("/v5/market/instruments-info", 200, INSTRUMENTS);
+            h.respond("/v5/market/tickers", 200, TICKERS);
+            let category = if variant.is_spot() {
+                "spot"
+            } else if variant.is_inverse() {
+                "inverse"
+            } else {
+                "linear"
+            };
+            let network = if testnet { "-testnet" } else { "" };
+            let expected_public = if variant.is_hyro() {
+                "wss://hyro.example/shared-feed".into()
+            } else {
+                format!("wss://stream{network}.bybit.com/v5/public/{category}")
+            };
+            let expected_private = if variant.is_hyro() {
+                "wss://hyro.example/shared-feed".into()
+            } else if variant == Variant::Demo && !testnet {
+                "wss://stream-demo.bybit.com/v5/private".into()
+            } else {
+                format!("wss://stream{network}.bybit.com/v5/private")
+            };
+            for (role, expected) in [
+                (SocketChannel::Public, expected_public),
+                (SocketChannel::Private, expected_private),
+            ] {
+                let socket = h
+                    .socket_channels
+                    .iter()
+                    .find(|(_, channel)| channel.as_ref() == Some(&role))
+                    .map(|(socket, _)| *socket)
+                    .expect("declared role");
+                assert_eq!(
+                    h.sockets.iter().find(|(id, _)| *id == socket).unwrap().1,
+                    expected,
+                    "{variant:?} testnet={testnet}"
+                );
+                h.event(Event::WsClosed { socket, code: 1006 });
+                h.advance(501.0);
+                let (new_socket, new_role) = h.socket_channels.last().unwrap();
+                assert_ne!(*new_socket, socket);
+                assert_eq!(new_role.as_ref(), Some(&role));
+                assert_eq!(h.sockets.last().unwrap().1, expected);
+            }
+        }
     }
 }
 

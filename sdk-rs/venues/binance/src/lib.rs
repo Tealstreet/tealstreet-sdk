@@ -319,7 +319,14 @@ impl BinanceFutures {
     }
 
     fn connect_url(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, url: &str) {
-        let socket = cx.connect(url);
+        let socket = cx.connect_channel(
+            url,
+            if matches!(channel, Channel::Private) {
+                safe_cex_engine::SocketChannel::Private
+            } else {
+                safe_cex_engine::SocketChannel::Public
+            },
+        );
         let connection = self.connection(channel);
         connection.socket = Some(socket);
         connection.open = false;

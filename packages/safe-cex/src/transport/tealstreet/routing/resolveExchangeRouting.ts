@@ -33,6 +33,9 @@ const resolveWs = (strategy: WsStrategy | undefined, o: RoutingOptions, egress: 
   // Declared fallback candidates ride along only on a DIRECT resolution (see WsStrategy).
   if (resolved.tunnelled) return resolved;
   const out = { ...resolved };
+  if (strategy.initialSilentConnects !== undefined) out.initialSilentConnects = strategy.initialSilentConnects;
+  if (strategy.ignoredMessages) out.ignoredMessages = strategy.ignoredMessages;
+  if (strategy.directUrls) out.directUrls = strategy.directUrls;
   if (strategy.fallback && !out.fallback) out.fallback = strategy.fallback;
   if (strategy.relayUpstream) out.relay = buildRelayUrl(egress, strategy.relayUpstream);
   return out;

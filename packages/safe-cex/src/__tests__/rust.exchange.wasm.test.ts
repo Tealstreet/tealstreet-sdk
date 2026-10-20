@@ -8,6 +8,8 @@ import { HYROTRADER_PROD_URL, HYROTRADER_SIMULATOR_URL } from '../exchanges/bybi
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
+import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
+import { PRIVATE_PROXY_JP } from '../transport/tealstreet/transportResolution';
 import { OrderSide, OrderStatus, OrderType } from '../types';
 import { virtualClock } from '../utils/virtualClock';
 
@@ -364,6 +366,84 @@ describe('RustEngineExchange', () => {
     await expect(exchange.updateSymbolMetadata('BTCUSDT')).resolves.toBeUndefined();
   });
 
+  it('routes real engine HTTP and private sockets through the account provider', async () => {
+    const tape = recordedOkxTransport();
+    const outgoing: Array<Parameters<Transport['request']>[0]> = [];
+    const sockets: string[] = [];
+    let tokens = 0;
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => ({
+      ...tape.transport,
+      request: async (request) => {
+        outgoing.push(request);
+        return tape.transport.request(request);
+      },
+      connect: (url, handlers) => {
+        sockets.push(url);
+        return tape.transport.connect(url, handlers);
+      },
+    }));
+    exchange = new RustEngineExchange(
+      'okx',
+      {
+        key: 'venue-key',
+        secret: 'venue-secret',
+        passphrase: 'venue-pass',
+        tealstreetProxy: true,
+        tealstreetTunnel: false,
+        transport: {
+          ...tealstreetTransport,
+          rest: (context) => ({
+            ...tealstreetTransport.rest(context),
+            authorize: async (request) => {
+              request.headers.set('Authorization', `Bearer fixture-${++tokens}`);
+            },
+          }),
+        },
+      },
+      new DefaultStore(),
+    );
+    await exchange.start();
+    expect(
+      await exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        side: OrderSide.Buy,
+        type: OrderType.Limit,
+        amount: 1,
+        price: 39000,
+      }),
+    ).toEqual(['4242']);
+    expect(outgoing.every((request) => request.url.startsWith(`${PRIVATE_PROXY_JP}/https://www.okx.com/`))).toBe(true);
+    expect(outgoing.map((request) => request.headers.Authorization)).toEqual(
+      outgoing.map((_, at) => `Bearer fixture-${at + 1}`),
+    );
+    const placement = outgoing.find((request) => request.url.endsWith('/trade/batch-orders'))!;
+    expect(placement.headers['OK-ACCESS-SIGN']).toBeTruthy();
+    expect(placement.body).toContain('39000');
+    expect(sockets).toContain('wss://fsjnpy143pbz.asia.tealstreet.io/okx/private');
+    expect(sockets).toContain('wss://fsjnpy143pbz.asia.tealstreet.io/okx/business');
+  });
+
+  it('rejects secondary signing keys before transport creation or engine startup', async () => {
+    let transports = 0;
+    setRustEngineTransport(() => {
+      transports++;
+      return recordedTransport().transport;
+    });
+    exchange = new RustEngineExchange(
+      'binance',
+      {
+        key: 'primary-key',
+        secret: 'primary-secret',
+        secondary_key: 'read-key',
+        secondary_secret: 'read-secret',
+      },
+      new DefaultStore(),
+    );
+    await expect(exchange.start()).rejects.toThrow('secondary signing keys are unsupported');
+    expect(transports).toBe(0);
+  });
+
   it('fills the store from engine frames and serves books to listeners', async () => {
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);
@@ -430,6 +510,36 @@ describe('RustEngineExchange', () => {
 
     await expect(exchange.start()).rejects.toThrow('remote signing is unsupported');
     expect(tape.requests).toEqual([]);
+  });
+
+  it('keeps all three real Bitget public feeds direct on their first connection', async () => {
+    const opened: Array<{ url: string; channel?: string; context?: { feed: string; recover: boolean } }> = [];
+    const raw: Transport = {
+      ...recordedTransport().transport,
+      connect: (url, handlers) => {
+        opened.push({ url, channel: handlers.channel, context: handlers.context });
+        setTimeout(handlers.onOpen, 0);
+        return { send() {}, close() {} };
+      },
+      request: async ({ url }) => {
+        const path = new URL(url).pathname;
+        const data = path.endsWith('/contracts')
+          ? [{ symbol: 'BTCUSDT', baseCoin: 'BTC', quoteCoin: 'USDT', symbolStatus: 'normal', pricePlace: '1', priceEndStep: '1', sizeMultiplier: '0.001', minTradeNum: '0.001', maxOrderQty: '120', maxLever: '125' }]
+          : [{ symbol: 'BTCUSDT', bidPr: '99.9', askPr: '100.1', lastPr: '100', indexPrice: '99', changeUtc24h: '0.01', baseVolume: '1000', quoteVolume: '100000', fundingRate: '0.0001' }];
+        return { status: 200, body: new TextEncoder().encode(JSON.stringify({ code: '00000', data })) };
+      },
+    };
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => raw);
+    exchange = new RustEngineExchange('bitget', {
+      key: '', secret: '', publicDataOnly: true, tealstreetProxy: false, tealstreetTunnel: false,
+      transport: tealstreetTransport,
+    }, new DefaultStore());
+    await exchange.start();
+    await until(() => opened.length === 3);
+    expect(opened.map(({ url }) => url)).toEqual(Array(3).fill('wss://ws.bitget.com/v2/ws/public'));
+    expect(opened.every(({ channel, context }) => channel === 'public' && context?.recover === false)).toBe(true);
+    expect(new Set(opened.map(({ context }) => context?.feed))).toEqual(new Set(['primary', 'secondary-1', 'secondary-2']));
   });
 
   it.each(['bitget', 'bitgetusdc'] as const)('rejects private %s without a nonempty passphrase', async (venue) => {

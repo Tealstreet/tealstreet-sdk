@@ -179,8 +179,8 @@ Response: `{ "event_rep": "rep", "channel": "<topic>", "data": [...] }` -- resol
 **Ping/pong** (reversed, `bitrue.ws-private.ts:235-239`):
 
 - Server sends `{ "event": "ping" }` message
-- Client does NOT respond with pong (only records `pingAt` timestamp)
-- No health check timeout is set (unlike public WS)
+- Client replies with `{ "event": "pong", "ts": <same timestamp> }`; numeric `{ "ping": <value> }` messages receive `{ "pong": <same value> }`
+- A 20-second watchdog starts with the connection, including sockets that never receive their first ping
 
 **Event types handled** (`onMessage`, line 33-67):
 
@@ -230,7 +230,7 @@ Both WebSockets use the `BaseWebSocket.onClose()` handler:
 | `positionType`     | 1 = cross, 2 = isolated                          |
 | `futureModel`      | Always `normal`                                  |
 | `conditionOrder`   | `true` for standalone stop/TP orders             |
-| `clientOrderId`    | UUID for standalone conditional orders            |
+| `clientOrderId`    | UUID for standalone conditional orders           |
 | `triggerType`      | 1 = stop loss, 2 = take profit                   |
 | `triggerPriceType` | 1 = last price, 2 = mark price                   |
 
@@ -240,6 +240,9 @@ Attached TP/SL values are atomic children of a normal LIMIT or MARKET parent:
 `triggerType` (1 SL / 2 TP), `triggerPriceType` (1 last / 2 mark),
 `triggerPrice`, `type: 'MARKET'`, and `price: 0`. Child direction and size are
 bound by Bitrue to the parent; do not send standalone or sibling close orders.
+Standalone SL/TP always uses `open: 'CLOSE'`. The default SL reference is mark
+price; the default TP reference is last price, for both standalone and attached
+legs. Each leg reads its own `slTriggerType` / `tpTriggerType`.
 Attached TP/SL on a conditional parent fails before placement. `placeOrder()` /
 `placeOrders()` refetch attached-order state because the placement response is
 not authoritative for the children.
@@ -292,7 +295,7 @@ No native order amendment. Updates implemented as:
 
 ### Order Cancellation (`cancelOrders`, `bitrue.exchange.ts:1013-1051`)
 
-1. Build cancel payloads with `contractName`, `conditionOrder` flag (true for non-Limit orders), and either `clientOrderId` or `orderId`
+1. Build cancel payloads with `contractName`, the exact native `orderId`, and `conditionOrder` true only for SL/TP orders. A local order ID must never be sent as a caller client order ID
 2. Chunk into groups of 50
 3. Execute each chunk in `Promise.all()` (parallel within chunk)
 4. **Critical**: After cancellation, calls `callMethodInWorker('removeOrders', orderIds)` because Bitrue WebSocket does **not** reliably send cancel updates
@@ -324,7 +327,18 @@ When called without specific symbols:
 | `TRADE`              | `PART_FILLED` | `OrderStatus.Open`     | Emit fill event |
 | `CANCEL`             | `CANCELED`    | `OrderStatus.Canceled` | Update store    |
 
-Market orders (`type === OrderType.Market`) are silently ignored in WS handler (`bitrue.ws-private.ts:186-188`).
+Market executions are included. The documented private quantities have fixed units:
+`q` already contains the face-value conversion; `volume`, cumulative `z` and
+execution `l` are contracts. Convert native cumulative fills once using
+`market.contractSize` (the multiplier), then compute `remaining = amount - filled`.
+`l` is an execution size, never remaining size. Emit one positive cumulative delta
+per execution at `L`, falling back to the change in cumulative `z * ap` value only
+when `L` is absent. REST snapshots already in the store prime that watermark.
+
+Recent progress and terminal states are bounded to 500 orders. Repeated or older
+frames cannot decrease filled quantity, raise remaining quantity, reopen a terminal
+order, or downgrade Filled to Canceled. Terminal state survives removal by REST
+reconciliation; a final Filled update may upgrade Canceled.
 
 ## Symbol Format
 
@@ -342,7 +356,7 @@ Market orders (`type === OrderType.Market`) are silently ignored in WS handler (
 
 ### Market Precision (`fetchMarkets`, `bitrue.exchange.ts:587-618`)
 
-- `precision.amount`: `market.multiplier` (contract multiplier, used as step size)
+- `precision.amount` and `contractSize`: `market.multiplier` (contract multiplier, used as step size)
 - `precision.price`: `1 / 10 ** market.pricePrecision` (e.g., pricePrecision=2 -> 0.01)
 - `limits.amount.min`: `market.minOrderVolume * multiplier`
 - `limits.amount.max`: `market.maxMarketVolume * multiplier`
@@ -351,6 +365,10 @@ Market orders (`type === OrderType.Market`) are silently ignored in WS handler (
 ### Price Rounding
 
 Uses `adjust()` utility from `../../utils/safe-math` for rounding prices and amounts to market precision.
+Public depth quantities, ticker `vol` and quote `amount`, and candle `vol` are
+native contract quantities; multiply by the contract multiplier before publishing
+base volume or quote turnover. Historical WebSocket candles use the same symbol
+multiplier as live candles.
 
 ### Kline Timezone Conversion (`mapKline`, `bitrue.ws-public.ts:80-105`)
 
@@ -505,7 +523,7 @@ order downsizing".
 
 14. **Priority symbols**: `listenOHLCV()` adds the symbol to `prioritySymbols` set, which causes `fetchAndEmitOrders()` to fetch that symbol's orders first (`bitrue.exchange.ts:1054-1056`).
 
-15. **WS order multiplier**: In private WS order handler, `remaining` and `filled` quantities are multiplied by `market.info.multiplier` to convert from contract units (`bitrue.ws-private.ts:196-197`).
+15. **WS order multiplier**: `q` is base quantity; `z` and `l` are native contracts. Multiply cumulative `z` once, derive remaining from total minus filled, and use `L` as execution price. Never guess units by comparing cumulative fills with the total.
 
 16. **Enforce WS tunnel**: `enforceWsTunnel: true` in metadata -- requires WebSocket tunnel for browser operation.
 
@@ -578,3 +596,31 @@ Fresh deterministic Bitrue regressions live under `src/__tests__/audit-regressio
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `clientOrderId` on the regular payload, rule 1-31 characters (Bitrue: shorter than 32).
+
+## Rust private snapshot corrections
+
+The Rust lane streams `/fapi/v2/account.data.account` and per-symbol
+`/fapi/v2/openOrders.data` into atomic typed snapshots. Missing or malformed data
+retains the previous snapshot. New stream activity or acknowledged settings writes
+invalidates older reads. Open-order reads are paced at the authenticated client
+limit; startup orders become loaded only after every symbol has a valid snapshot.
+
+REST account positions and `origQty` / `executedQty` retain the existing base-unit
+contract. Only private WebSocket `z` / `l` and public contract volumes scale by the
+multiplier. Metadata lookups read account leverage and position type; unknown flat
+metadata fails rather than probing with a write.
+
+`conditionOrder` plus `triggerType` takes precedence over the execution `type`
+(`MARKET` or `LIMIT`) when classifying conditional orders. Documented `childOrders`
+are flattened with exact child IDs and parent IDs; bound children close the parent
+side and retain their trigger prices. A malformed child invalidates that symbol's
+entire snapshot. Missing trigger-reference data remains unknown rather than guessed.
+
+The live [official futures documentation](https://www.bitrue.com/api_docs_includes_file/futures/index.html)
+contains current conditional/child schemas; the older GitHub v2 Markdown omits some
+of those fields. Its private payload section documents the original quantity's face
+value, cumulative fills, current execution size/price, and timestamp-echo pong.
+
+The Rust candle-history reader rejects a malformed timestamp anywhere in a
+response before applying the requested time window. It never reports a partial
+or empty successful history by silently dropping malformed rows.
