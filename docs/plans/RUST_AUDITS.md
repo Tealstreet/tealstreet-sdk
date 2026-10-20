@@ -197,8 +197,22 @@ reference and lazy-decode regressions pass (29 reader cases); independent review
 passes. The canonical three-run Hyperliquid Spot gate passes: TS/Rust main
 46.3/41.6 ms, steady 17.1/11.8 ms, retained 18.9/6.9 MB. No budget, fixture or
 shared engine hot path changed. Host JS tests pass 89/89 and actual-writer
-cross-language tests 7/7. Final affected-venue replays and exact-head CI follow;
-the prior Bitrue job failed dependency installation with registry HTTP 502.
+cross-language tests 7/7. All 12 rebuilt affected-venue gates pass at `560b969297`. Final public main/
+steady CPU ms (TS → Rust): Binance 189.7/100.8 → 89.2/35.1; Hyperliquid
+442.3/32.2 → 60.0/19.9; OKX 2155.2/1668.3 → 1905.5/1461.2; GRVT
+302.8/195.5 → 110.1/56.1; KuCoin 424.9/263.6 → 220.3/121.7; KuCoin spot
+571.4/350.8 → 501.4/322.6. Every retained-memory comparison and all six private
+correctness gates pass. Fresh Bitrue CI passes after the prior registry HTTP 502.
+CI still requires confirmation: Hyperliquid Spot startup missed by 0.7 ms and
+Paradex by 15.6 ms (both steady/memory/output pass); the prior identical native
+Paradex integration passed 317.5/303.7 ms TS/Rust. A bounded unchanged-production-code
+retry accompanies the fixture checkpoint. Native CI additionally identified two
+Paradex candle tests assuming an early market-only startup frame; repaired
+fixtures consume full MARKETS and retain candle quantity/rewind assertions.
+Both original failures reproduce with a passing control; all 32 public tests and
+formatting pass, and independent review passes. Full workspace native tests run
+with no-fail-fast to discover any remaining stale fixtures in one pass. Refreshed
+SDK recovery/contract/worker tests also pass 62/62.
 
 ## Security
 
