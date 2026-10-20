@@ -942,3 +942,21 @@ division by contractSize, preserving chaser placement units (0.3 / 0.1 = 3 lots)
 
 The bridge also restores position extra.contractsNative; cross-trade closes use
 that native lot count instead of the published base position quantity.
+
+
+### Rust cancellation scope
+
+The Rust futures venue keeps symbol cancellation on `/api/v3/orders?symbol=…`,
+preserving that symbol's separate TP/SL stop book. Only account-wide cancellation
+(the empty-symbol engine command) deletes both `/api/v3/orders` and
+`/api/v1/stopOrders`. The Rust SDK overrides `cancelAllOrders()` to dispatch that
+account-wide command even when the local store is empty; it must not inherit the
+base class's per-symbol loop. The replay harness uses the TS symbol method unchanged.
+
+Futures cancellation by native order ID does not require a symbol. Rust sends
+uncached IDs directly to `/api/v1/orders/{id}` and continues later IDs even when
+an earlier cancellation fails, then reports the failure. Cached orders retain
+their native symbol query; virtual legs deduplicate to the parent ID. Only a 404
+tries the corresponding stop-book identity. Empty native identities reject before
+I/O. The official futures cancel-by-ID endpoint documents the ID-only shape:
+https://www.kucoin.com/docs-new/rest/futures-trading/orders/cancel-order-by-orderld.

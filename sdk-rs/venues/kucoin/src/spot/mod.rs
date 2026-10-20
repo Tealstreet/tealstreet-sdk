@@ -174,14 +174,11 @@ impl KucoinSpot {
             read_credentials
                 .as_ref()
                 .or(self.credentials.as_ref())
-                .map_or_else(Vec::new, |c| {
+                .map_or_else(sign::public_headers, |c| {
                     sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
                 })
         } else {
-            vec![
-                ("X-CHANNEL-API-CODE", "3zexp".into()),
-                ("Content-Type", "application/json".into()),
-            ]
+            sign::public_headers()
         };
         cx.request(
             method,
@@ -192,7 +189,13 @@ impl KucoinSpot {
         );
     }
     fn streamed(&self, cx: &mut Cx<'_, Pending>, path: &str, at: ArrayAt, pending: Pending) {
-        cx.request_streamed(Method::Get, format!("{REST}{path}"), vec![], at, pending);
+        cx.request_streamed(
+            Method::Get,
+            format!("{REST}{path}"),
+            sign::public_headers(),
+            at,
+            pending,
+        );
     }
     fn bullet(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         let c = &mut self.sockets[channel];
