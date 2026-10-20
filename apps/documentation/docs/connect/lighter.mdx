@@ -75,7 +75,7 @@ Lighter's main website may be unavailable in restricted jurisdictions. If you ca
 - At the time of this writing there is no IP Whitelist option.
 - Input an API Key Index and click the **Generate** button.
   - Keys 0 through 3 are usually used by Lighter. So you should start with index 4 and up.
-  - Lighter suports making **maker-only** keys. For most users this is not recommended.
+  - Lighter supports making **maker-only** keys. For most users this is not recommended.
 
 <div class="text--center">
     <img src={AuthorizeWallet} alt="Authorize Wallet" style={{ width: 600 }} />
@@ -102,8 +102,8 @@ Now let us proceed back to where we left the Tealstreet API page:
   - **Name**: Enter any label you want (for example, `lighter-01`).
   - **Color**: Choose the color you want this account to use in the terminal.
   - **Use Tealstreet WebSocket Route**: Keep this enabled for Tealstreet's optimized WebSocket routing unless you have excellent internet and are not in a restricted jurisdiction.
-  - **Account Index**: Enter your Lighter account index (the L1 wallet address you made the API Keys with).
-  - **API Key Index**: Enter the numeric index of the API key you created. Lighter recommends using an indice of 4 or higher.
+  - **Account Index**: Enter the numeric Lighter account index shown in the Lighter API key window. Tealstreet can sometimes resolve an L1 wallet address, but the numeric account index is preferred and avoids ambiguity across Lighter deployments such as Robinhood Chain.
+  - **API Key Index**: Enter the numeric index of the API key you created. Lighter recommends using an index of 4 or higher.
   - **Public Key**: Paste the public key exactly as shown in Lighter.
   - **Private Key**: Paste the private key exactly as shown in Lighter.
   - **Approve Builder Fee**: Tick the box to approve Tealstreet as a builder if you permit it to charge fees on your behalf. This is required for attributed orders to be placed through Tealstreet.
@@ -120,7 +120,7 @@ Lighter usually reserves API Key Indices 0 through 3 for their own use and they 
 - **What is a builder fee, and does Lighter charge one?**
   - A builder fee is an integrator fee configured through Lighter's [Partner Attribution Program](https://docs.lighter.xyz/integrations/partner-attribution). It allows a partner frontend, such as Tealstreet, to charge trading fees on orders routed through that frontend after the user approves the fee configuration.
   - Lighter currently charges no maker or taker fees for Standard Accounts, as described in Lighter's [Trading Fees](https://docs.lighter.xyz/trading/trading-fees) docs.
-  - Tealstreet's Lighter API form does not charge a fee just for linking your key. During the link flow, you approve Tealstreet as a builder partner to charge **0% maker** and **0.025% (2.5 bps) taker** fees on trades routed through Tealstreet.
+  - Tealstreet's Lighter API form does not charge a fee just for linking your key. During the link flow, you approve Tealstreet as a builder partner to charge **0% maker** and **0.025% (2.5 bps) taker** fees on trades routed through Tealstreet. This also applies to the Robinhood chain on Lighter.
 
 - **What are Lighter account tiers?**
   - Lighter has Standard, Premium, and Plus account tiers. These can affect fees, latency, rate limits, and official competition eligibility.
@@ -132,7 +132,7 @@ Lighter at the time of this writing does not support changing to Plus tier over 
 :::
 
 - **Why did my API Expire suddenly?**
-  - Lighter utilizes the first 4 (0-3) indices for their own use. If you re-auth using their front-end it can reset the first 0-3 indices. This is why Lighter recommends using an indice of 4 or higher to avoid this issue.
+  - Lighter utilizes the first 4 (0-3) indices for their own use. If you re-auth using their front-end it can reset the first 0-3 indices. This is why Lighter recommends using an index of 4 or higher to avoid this issue.
 
 ---
 
