@@ -2633,3 +2633,21 @@ hide this distinct pre-start failure or rerun unchanged to select green.
 Read-only bounded GC/counter diagnostics must classify it before performance
 work; production memory policy, deadlines, warmup and metrics stay unchanged.
 Exact-head CI must still validate all lifecycle cases before merge.
+
+
+Read-only preconstructor diagnostic completed without running a replay/gate.
+All three arrayBuffers samples are exactly 2,377,281 bytes; settlement finishes
+at 965.18 ms. Requested 10 ms pauses take 10.52/170.23/112.53 ms and full GCs
+take 22.74/304.65/343.95 ms. The observed pressure is scheduling/GC wall latency,
+not moving backing counters; the original failed run lacks samples, so its exact
+cause remains unproven. Preserve /tmp/bitunix-1a10-baseline-diag.json. There is
+no evidence warranting a production sampler, deadline, warmup or metric change.
+
+Final verification runtime is standardized explicitly to CI's pinned Node 22
+(.github/workflows/ci.yml:23 and rust.yml:214), installed v22.23.3. Previous
+source/compiled checks and failed baseline used v24.21.0 and stay recorded. Run
+a distinct supported-runtime compatibility check on the final combined artifact
+(SDK, host/product/wire/server and all nine scripted lifecycle cases), then
+all remaining sequential release replays under Node 22. No deadline/threshold
+changes or hidden replacement of failed Node 24 evidence. Exact-head CI remains
+the required final lifecycle and complete profile validation before merge.
