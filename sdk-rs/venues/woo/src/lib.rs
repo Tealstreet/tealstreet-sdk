@@ -8,6 +8,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
     num,
@@ -56,11 +57,7 @@ pub enum Pending {
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    received: f64,
     ping_at: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
 }
 struct Buffered {
     time: f64,
@@ -89,6 +86,7 @@ pub struct Woo {
     options: Options,
     rest: &'static str,
     public: Connection,
+    public_supervisor: Supervisor,
     depth: HashMap<String, Depth>,
     candles: HashMap<(String, String), CandleState>,
     generation: u64,
@@ -207,6 +205,12 @@ impl Woo {
             },
             options,
             public: Connection::default(),
+            public_supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(6_000.0),
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
             depth: HashMap::new(),
             candles: HashMap::new(),
             generation: 0,
@@ -330,6 +334,7 @@ impl Woo {
         } else {
             "wss://wss.woox.io/ws/stream/"
         };
+        self.public_supervisor.connecting(cx);
         self.public.socket = Some(cx.connect_channel(
             format!("{host}{}", self.options.application_id.as_deref().unwrap_or("undefined")),
             SocketChannel::Public,
@@ -622,14 +627,12 @@ impl Venue for Woo {
             return;
         }
         self.public.open = true;
-        self.public.received = cx.now;
-        self.public.attempts = 0;
         self.public.ping_at = cx.now;
+        self.public_supervisor.opened(cx);
         cx.send(socket, r#"{"event":"ping"}"#);
         for topic in ["tickers", "bbos", "markprices"] {
             self.topic(cx, topic, true);
         }
-        self.public.watchdog = Some(cx.set_timer(6000.0));
         let symbols: Vec<_> = self.depth.keys().cloned().collect();
         for symbol in symbols {
             if let Some(m) = cx.store.market(&symbol) {
@@ -660,7 +663,7 @@ impl Venue for Woo {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.received = cx.now;
+        self.public_supervisor.received(cx.now);
         if let Ok(msg) = serde_json::from_str::<TickerMessage<'_>>(text)
             && msg.event.is_empty()
             && matches!(msg.topic.as_ref(), "tickers" | "bbos" | "markprices")
@@ -715,14 +718,7 @@ impl Venue for Woo {
         }
         self.public.socket = None;
         self.public.open = false;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
-        self.public.attempts += 1;
-        self.public.reconnect =
-            Some(cx.set_timer(
-                (1000.0 * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30_000.0),
-            ));
+        self.public_supervisor.retry(cx);
         for (symbol, state) in &mut self.depth {
             cx.book_changed(symbol);
             self.generation += 1;
@@ -1060,25 +1056,24 @@ impl Venue for Woo {
             self.funding = Some(cx.set_timer(60_000.0));
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect_public(cx);
-            return;
-        }
-        if self.public.watchdog == Some(timer) {
-            if cx.now - self.public.received >= 20_000.0 {
-                if let Some(s) = self.public.socket {
-                    cx.close(s);
-                    self.on_close(cx, s, 1006);
-                }
-            } else {
+        match self.public_supervisor.on_timer(cx, timer) {
+            SocketTick::Unhandled => (),
+            SocketTick::Reconnect => return self.connect_public(cx),
+            SocketTick::Ping => {
                 if let Some(s) = self.public.socket {
                     self.public.ping_at = cx.now;
                     cx.send(s, r#"{"event":"ping"}"#);
                 }
-                self.public.watchdog = Some(cx.set_timer(6000.0));
+                return;
             }
-            return;
+            SocketTick::TimedOut(_) => {
+                if let Some(s) = self.public.socket {
+                    cx.close(s);
+                    self.on_close(cx, s, 1006);
+                }
+                return;
+            }
+            SocketTick::Handled => return,
         }
         let retry = self.depth.iter().find_map(|(s, d)| {
             if matches!(d.sync,Sync::Retry(t) if t==timer) {

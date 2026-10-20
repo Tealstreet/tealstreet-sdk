@@ -7,6 +7,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{self, Config, Supervisor};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
 };
@@ -15,8 +16,7 @@ use wire::*;
 
 const REST: &str = "https://api.mexc.com";
 const WS: &str = "wss://contract.mexc.com/edge";
-const HEARTBEAT_MS: f64 = 8_000.0;
-const SILENCE_MS: f64 = 20_000.0;
+const PING: &str = r#"{"method":"ping"}"#;
 const MAX_BUFFERED: usize = 2_000;
 
 #[derive(Default)]
@@ -41,10 +41,6 @@ pub enum Pending {
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    heartbeat: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    last_received: f64,
-    attempts: u32,
 }
 
 struct BookState {
@@ -63,6 +59,7 @@ pub struct MexcFutures {
     account: account::Account,
     trading: trading::Trading,
     public: Connection,
+    public_supervisor: Supervisor,
     books: HashMap<String, BookState>,
     volume_units: HashMap<String, f64>,
     ticker_symbols: Vec<String>,
@@ -91,6 +88,11 @@ impl MexcFutures {
             account: account::Account::new(),
             trading: trading::Trading::default(),
             public: Connection::default(),
+            public_supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(8_000.0),
+                ..Config::default()
+            }),
             books: HashMap::new(),
             volume_units: HashMap::new(),
             ticker_symbols: vec![],
@@ -449,8 +451,12 @@ impl MexcFutures {
             volume: raw.q,
         }
     }
-    fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+    fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.public_supervisor.connecting(cx);
         self.public.socket = Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
+    }
+    fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.connect_public(cx);
         self.account_start(cx);
         if self.options.public_data_only || self.options.key.as_ref().is_none_or(|s| s.is_empty()) {
             cx.store.set_orders(vec![]);
@@ -518,10 +524,8 @@ impl Venue for MexcFutures {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.last_received = cx.now;
-        cx.send(socket, r#"{"method":"ping"}"#);
-        self.public.heartbeat = Some(cx.set_timer(HEARTBEAT_MS));
+        self.public_supervisor.opened(cx);
+        cx.send(socket, PING);
         // Sparse once-per-second prices cover every listed market. Detailed
         // subscriptions provide funding, index and open-interest quantities.
         cx.send(
@@ -549,7 +553,7 @@ impl Venue for MexcFutures {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.last_received = cx.now;
+        self.public_supervisor.received(cx.now);
         let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
@@ -609,13 +613,7 @@ impl Venue for MexcFutures {
         self.public.socket = None;
         self.public.open = false;
         self.ticker_subscriptions.clear();
-        if let Some(timer) = self.public.heartbeat.take() {
-            cx.clear_timer(timer);
-        }
-        self.public.attempts += 1;
-        self.public.reconnect = Some(
-            cx.set_timer((500.0 * 2f64.powi(self.public.attempts.min(6) as i32)).min(30_000.0)),
-        );
+        self.public_supervisor.retry(cx);
         for state in self.books.values_mut() {
             state.version = None;
             state.buffering = None;
@@ -820,22 +818,20 @@ impl Venue for MexcFutures {
                 );
             }
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.public.socket =
-                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
-        }
-        if self.public.heartbeat == Some(timer) {
-            self.public.heartbeat = None;
-            if let Some(socket) = self.public.socket {
-                if cx.now - self.public.last_received >= SILENCE_MS {
-                    cx.close(socket);
-                    self.on_close(cx, socket, 1006);
-                } else {
-                    cx.send(socket, r#"{"method":"ping"}"#);
-                    self.public.heartbeat = Some(cx.set_timer(HEARTBEAT_MS));
+        match self.public_supervisor.on_timer(cx, timer) {
+            socket::Tick::Reconnect => self.connect_public(cx),
+            socket::Tick::Ping => {
+                if let Some(socket) = self.public.socket {
+                    cx.send(socket, PING);
                 }
             }
+            socket::Tick::TimedOut(_) => {
+                if let Some(socket) = self.public.socket {
+                    cx.close(socket);
+                    self.on_close(cx, socket, 1006);
+                }
+            }
+            _ => (),
         }
         let symbols: Vec<_> = self
             .books

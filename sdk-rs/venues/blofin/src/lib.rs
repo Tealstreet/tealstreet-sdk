@@ -7,6 +7,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
@@ -47,10 +48,6 @@ pub enum Pending {
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
 }
 #[derive(Default)]
 struct DepthState {
@@ -69,6 +66,7 @@ pub struct Blofin {
     account: account::Account,
     trading: trading::Trading,
     public: Connection,
+    public_supervisor: Supervisor,
     books: HashMap<String, DepthState>,
     candles: HashMap<(String, String), CandleState>,
 }
@@ -127,6 +125,13 @@ impl Blofin {
             account: account::Account::new(),
             trading: trading::Trading::default(),
             public: Connection::default(),
+            public_supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 20_000.0,
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(5_000.0),
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
             books: HashMap::new(),
             candles: HashMap::new(),
         }
@@ -144,9 +149,18 @@ impl Blofin {
         } else {
             "wss://openapi.blofin.com/ws/public"
         };
+        self.public_supervisor.connecting(cx);
         self.public.socket = Some(cx.connect_channel(url, safe_cex_engine::SocketChannel::Public));
-        self.public.last_received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(5_000.0));
+    }
+    fn public_close(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.public.socket = None;
+        self.public.open = false;
+        for state in self.books.values_mut() {
+            state.sequence = None;
+            state.book.clear();
+            state.resync = false;
+        }
+        self.public_supervisor.retry(cx);
     }
     fn read(&self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
         cx.request_streamed(
@@ -426,8 +440,7 @@ impl Venue for Blofin {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.last_received = cx.now;
+        self.public_supervisor.opened(cx);
         self.subscribe_all(cx);
         cx.send(socket, "ping");
     }
@@ -439,7 +452,7 @@ impl Venue for Blofin {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.last_received = cx.now;
+        self.public_supervisor.received(cx.now);
         if text == "pong" {
             return;
         }
@@ -509,21 +522,7 @@ impl Venue for Blofin {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.socket = None;
-        self.public.open = false;
-        if let Some(timer) = self.public.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        for state in self.books.values_mut() {
-            state.sequence = None;
-            state.book.clear();
-            state.resync = false;
-        }
-        self.public.attempts += 1;
-        self.public.reconnect =
-            Some(cx.set_timer(
-                (1000.0 * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30_000.0),
-            ));
+        self.public_close(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
@@ -692,22 +691,20 @@ impl Venue for Blofin {
         if self.account_timer(cx, timer) {
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect(cx);
-        } else if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.last_received >= 20_000.0 {
-                if let Some(socket) = self.public.socket {
-                    cx.close(socket);
-                    self.on_close(cx, socket, 1006);
-                }
-            } else {
+        match self.public_supervisor.on_timer(cx, timer) {
+            SocketTick::Reconnect => self.connect(cx),
+            SocketTick::Ping => {
                 if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
                     cx.send(socket, "ping");
                 }
-                self.public.watchdog = Some(cx.set_timer(5_000.0));
             }
+            SocketTick::TimedOut(_) => {
+                if let Some(socket) = self.public.socket {
+                    cx.close(socket);
+                }
+                self.public_close(cx);
+            }
+            SocketTick::Handled | SocketTick::Unhandled => {}
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {

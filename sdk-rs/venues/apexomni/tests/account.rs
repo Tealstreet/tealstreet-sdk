@@ -821,8 +821,13 @@ fn silent_private_handshake_is_closed_and_reconnected_without_open_event() {
             _ => None,
         })
         .unwrap();
-    let timer = actions
+    let private = actions
         .iter()
+        .position(|a| matches!(a, Action::WsConnect { socket: s, .. } if *s == socket))
+        .unwrap();
+    let timer = actions[..private]
+        .iter()
+        .rev()
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if *at_ms == 5010.0 => Some(*timer),
             _ => None,
