@@ -879,29 +879,22 @@ fn explicit_active_flag_overrides_a_contradictory_canceled_status() {
 }
 
 #[test]
-fn invalid_dynamic_leverage_limits_reject_without_native_write() {
-    for (min, max) in [
-        (30.0, 20.0),
-        (f64::NAN, 20.0),
-        (1.0, 0.0),
-        (1.0, f64::INFINITY),
-    ] {
+fn generated_client_ids_do_not_collide_across_instances_at_the_same_timestamp() {
+    let mut ids = std::collections::HashSet::new();
+    for _ in 0..16 {
         let mut h = Harness::new();
-        h.engine.store_mut().update_markets(|market| {
-            market.limits.leverage.min = min;
-            market.limits.leverage.max = max;
-        });
-        h.command(Command::SetLeverage {
-            command: 99,
-            symbol: "BTCUSDT".into(),
-            leverage: 5.0,
-            side: None,
-        });
+        let mut o = order();
+        o.client_order_id = None;
+        place(&mut h, vec![o]);
         h.metadata(false, "CROSS");
-        assert!(!h.actions.iter().any(
-            |action| matches!(action, Action::Http(request) if request.method != Method::Get)
-        ));
-        assert!(h.done(99).as_ref().unwrap_err().contains("leverage limits"));
+        let r = h.take("/api/v1/orders");
+        let body: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+        let id = body["clientOid"].as_str().unwrap();
+        assert!(!id.is_empty() && id.len() <= 40);
+        assert!(
+            ids.insert(id.to_owned()),
+            "new sessions must not reuse an exchange idempotency key"
+        );
     }
 }
 
@@ -949,5 +942,32 @@ fn an_empty_native_cancel_id_never_becomes_a_bulk_delete() {
         });
         assert!(!h.has("/api/v1/orders"));
         assert!(h.done(1).is_err());
+    }
+}
+
+#[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let mut h = Harness::new();
+        h.engine.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        h.command(Command::SetLeverage {
+            command: 99,
+            symbol: "BTCUSDT".into(),
+            leverage: 5.0,
+            side: None,
+        });
+        h.metadata(false, "CROSS");
+        assert!(!h.actions.iter().any(
+            |action| matches!(action, Action::Http(request) if request.method != Method::Get)
+        ));
+        assert!(h.done(99).as_ref().unwrap_err().contains("leverage limits"));
     }
 }

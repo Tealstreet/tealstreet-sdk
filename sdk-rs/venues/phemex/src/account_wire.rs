@@ -290,6 +290,15 @@ impl OrderRow<'_> {
             _ => None,
         }
     }
+    /// A status or order type this engine does not model (a newer venue type,
+    /// or one placed outside Tealstreet). Such a row is skipped, not fatal.
+    pub fn unrecognized(&self) -> bool {
+        self.status().is_none()
+            || !matches!(
+                self.kind.as_ref(),
+                "Market" | "Limit" | "Stop" | "StopLimit" | "MarketIfTouched" | "LimitIfTouched"
+            )
+    }
     pub fn orders(&self, now: f64) -> Option<Vec<Order>> {
         if self.order_id.is_empty() || self.symbol.is_empty() {
             return None;
