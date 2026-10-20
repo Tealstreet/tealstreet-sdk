@@ -59,3 +59,9 @@ Branch `feat/rust-grvt`, based on `origin/feat/rust-rewrite`. PR and merge targe
 - Verification: 18 history tests; 62 total GRVT native tests PASS; all-target clippy PASS. Independent bounded TS review also PASS: conditional replacements keep native execution price separate from changed trigger price, refreshed cookies/session headers agree, connected private socket refreshes with the session, and mapped orders retain explicit client IDs. Targeted TS 39 tests PASS; full root typecheck 44 tasks PASS, root lint running.
 - Native margin-mode mutation and hedged position mode remain explicit unsupported capabilities matching current TS surface; private reads preserve actual native CROSS/ISOLATED settings. Transfers, vaults, options/futures and STABLE_PERP are outside this perpetuals port.
 - Public fixture/signature-validated private harness and final integration/CI gates next. No gate is waived.
+
+### Harness integration checkpoint
+
+- Public fixture contains the recorded 20-second, 194-market session with 4,694 WS frames and 75 snapshots across two books. Private tape independently validates EIP-712 signatures, exact native identities/economics, session rejection and identical resend, four single-use writes and individual fills. Initial private gate PASS; harness tests 158 PASS before the added public-credential leak assertion.
+- Independent phase-5 review found two harness gaps still open: stale REST sessions remain statically accepted after rotation, and socket auth audit needs per-connection generations to forbid same-connection reauth. These are being fixed before the final gate run.
+- Full root typecheck (44 tasks) and lint (28 tasks) PASS. Root tests running. Native workspace check found the pre-existing Bitrue WsConnect test pattern missing new fields; fetched landing already fixes it. Integrate landing before final checks; its new max-slippage model field also requires GRVT initializer updates.

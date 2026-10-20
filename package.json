@@ -19,6 +19,7 @@
     "rust:record": "node sdk-rs/harness/record.mjs",
     "rust:private-tape-backpack": "node sdk-rs/harness/private-tape-backpack.mjs",
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
+    "rust:private-tape-grvt": "node sdk-rs/harness/private-tape-grvt.mjs",
     "rust:private-tape-bitrue": "node sdk-rs/harness/private-tape-bitrue.mjs",
     "rust:private-tape-bitget": "node sdk-rs/harness/private-tape-bitget.mjs",
     "rust:private-tape-hyperliquid": "node sdk-rs/harness/private-tape-hyperliquid.mjs",
