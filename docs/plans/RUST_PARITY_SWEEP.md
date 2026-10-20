@@ -279,3 +279,25 @@ than treating the original port boundary as a waiver.
   PASS (`/tmp/parity-grvt-ts-cancel-review.md`). Removing only the API retry
   guard makes the real401/code1000 lifecycle regression fail; exact source was
   restored and all checks pass. No test skips or timeout increases.
+
+### GRVT native trading/query checkpoint and final hardening
+
+- Native exact-symbol cancellation streams the complete `{sa}` open-orders
+  read, validates typed rows and final slim envelope before any write, and
+  stages only exact native instrument identities. Partial/auth-rejected reads
+  reset staging without losing the original lifecycle baseline. Native-ID
+  dispatch, per-write/auth guards, partial failures and pending ACK state reuse
+  the existing sequenced job machinery; global cancellation is unchanged.
+- Independent review found and verified two repairs: the initially unstreamed
+  unbounded list now uses `request_streamed`/`on_item`; mixed ACK/Order proofs
+  and explicit error/code fields cannot bypass rejection through fallback,
+  including null/false/zero markers. The paired TS Order-proof guard was also
+  tightened after its earlier checkpoint.
+- GRVT104/104 native (19mixed-product cases), strict Clippy and independent
+  final native review PASS. TS168/168 focused, full SDK typecheck/lint and
+  independent final re-review PASS. Independent signatures pin every product
+  hash/decimal refresh; chunked read/partial-failure/retry controls prove no
+  cancellation prefix escapes a failed/incomplete snapshot.
+- New roster PRs Coinbase1325/Polymarket1327/Breakout1328/perf-docs1331 were
+  independently audited: no additional declared supported gap; live-key and
+  TS-unsupported limitations are preserved in the census/PR draft.

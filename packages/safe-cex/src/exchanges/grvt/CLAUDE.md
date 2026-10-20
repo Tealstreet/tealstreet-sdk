@@ -442,7 +442,10 @@ ID. Disposing during reads/authentication stops writes; cancellation failures st
 are never retried on ambiguous network failure. Individual writes preserve
 raw responses too: they require an explicit accepted ACK or a returned order
 matching the requested native/client ID, account and instrument. Missing,
-false, malformed or mismatched acknowledgements stop all remaining writes;
+false, malformed or mismatched acknowledgements stop all remaining writes.
+Explicit error/code aliases (`e`, `error`, `c`, `code`) invalidate both snapshot
+rows and returned Order proofs even alongside success fields; mixed Ack/Order
+objects are rejected regardless of the acknowledgement value;
 no local terminal state is inferred from an ACK. Client-only cancellations
 refuse the trading client's internal authentication resend; a fresh complete
 snapshot is required after session rejection. An exact native-ID cancellation

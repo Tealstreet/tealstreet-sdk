@@ -408,6 +408,51 @@ describe('GRVT exact instrument cancellation', () => {
     expect(f.current.has('0x2')).toBe(true);
   });
 
+  it.each(
+    ['e', 'error', 'c', 'code'].flatMap((alias) =>
+      ['envelope', 'native-order', 'client-order', 'snapshot-row'].map((boundary) => [alias, boundary] as const),
+    ),
+  )('rejects explicit %s at the %s boundary despite otherwise valid success proof', async (alias, boundary) => {
+    const target = order(instruments[0], boundary === 'client-order' ? '0x00' : '0x1', '9');
+    const sibling = order(instruments[0], '0x2', '2');
+    const f = fixture([target, sibling]);
+    const error = alias === 'c' || alias === 'code' ? 1000 : { code: 1000, message: 'rejected' };
+    if (boundary === 'snapshot-row') f.setSnapshot({ r: [{ ...target, [alias]: error }, sibling] });
+    else
+      f.setAcknowledgement(
+        boundary === 'envelope' ? { r: { a: true }, [alias]: error } : { r: { ...target, [alias]: error } },
+      );
+    await expect(f.exchange.cancelSymbolOrders(instruments[0].toUpperCase())).rejects.toThrow();
+    expect(f.requests.map((r) => r.path)).toEqual(
+      boundary === 'snapshot-row' ? ['/lite/v1/open_orders'] : ['/lite/v1/open_orders', '/lite/v1/cancel_order'],
+    );
+    expect(f.current.has('0x2')).toBe(true);
+  });
+
+  it.each(['e', 'error', 'c', 'code'])(
+    'does not ignore explicit null/zero/false %s fields in an Order proof',
+    async (alias) => {
+      for (const value of [null, 0, false]) {
+        const f = fixture([order(instruments[0], '0x1'), order(instruments[0], '0x2', '2')]);
+        f.setAcknowledgement({ r: { ...order(instruments[0], '0x1'), [alias]: value } });
+        await expect(f.exchange.cancelSymbolOrders(instruments[0].toUpperCase())).rejects.toThrow();
+        expect(f.requests.map((r) => r.path)).toEqual(['/lite/v1/open_orders', '/lite/v1/cancel_order']);
+        expect(f.current.has('0x2')).toBe(true);
+      }
+    },
+  );
+
+  it.each(['a', 'ack'].flatMap((alias) => [false, true, null].map((value) => [alias, value] as const)))(
+    'rejects mixed Order+%s:%j rather than falling through to Order proof',
+    async (alias, value) => {
+      const f = fixture([order(instruments[0], '0x1'), order(instruments[0], '0x2', '2')]);
+      f.setAcknowledgement({ r: { ...order(instruments[0], '0x1'), [alias]: value } });
+      await expect(f.exchange.cancelSymbolOrders(instruments[0].toUpperCase())).rejects.toThrow();
+      expect(f.requests.map((r) => r.path)).toEqual(['/lite/v1/open_orders', '/lite/v1/cancel_order']);
+      expect(f.current.has('0x2')).toBe(true);
+    },
+  );
+
   it('rejects a mismatched client-ID order acknowledgement', async () => {
     const f = fixture([order(instruments[0], '0x00', '9')]);
     f.setAcknowledgement({ r: order(instruments[0], '0x9', '8') });

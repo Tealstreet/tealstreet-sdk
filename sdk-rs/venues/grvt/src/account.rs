@@ -90,6 +90,17 @@ pub(crate) struct Account {
     prior_lifecycle: HashMap<String, (u64, Option<String>)>,
 }
 impl Account {
+    pub(crate) fn cancellation_evidence(&self) -> HashMap<String, (Option<String>, Option<u64>)> {
+        self.order_created
+            .keys()
+            .map(|id| {
+                (
+                    id.clone(),
+                    (self.native_ids.get(id).cloned(), self.order_created(id)),
+                )
+            })
+            .collect()
+    }
     pub(crate) fn order_progress(&self, client: &str) -> Option<&OrderProgress> {
         self.progress.get(client)
     }

@@ -1808,6 +1808,7 @@ export class GrvtExchange extends BaseExchange {
       const clientIds = new Set<string>();
       for (const value of rows) {
         const row = object(value);
+        if (['e', 'error', 'c', 'code'].some((key) => key in row)) throw malformed();
         if (field(row, 'sub_account_id', 'sa') !== account) throw malformed();
         const legs = field(row, 'legs', 'l');
         if (!Array.isArray(legs) || legs.length !== 1) throw malformed();
@@ -1872,6 +1873,7 @@ export class GrvtExchange extends BaseExchange {
           Object.keys(ackEnvelope).some((key) => !['r', 'result', 'ri', 'request_id'].includes(key))
         ) throw invalidAck();
         const ack = object(field(ackEnvelope, 'result', 'r'));
+        if (['e', 'error', 'c', 'code'].some((key) => key in ack)) throw invalidAck();
         if ('ack' in ack || 'a' in ack) {
           const accepted = field(ack, 'ack', 'a');
           if (
