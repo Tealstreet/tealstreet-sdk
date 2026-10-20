@@ -134,6 +134,9 @@ jobs:
           - venue: mexc
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-mexc
+          - venue: polymarket
+            books: xi-jinping-out-before-2027-Yes,will-gavin-newsom-win-the-2028-democratic-presidential-nomination-568-Yes
+            private_script: rust:private-tape-polymarket
           - venue: kucoin
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-kucoin

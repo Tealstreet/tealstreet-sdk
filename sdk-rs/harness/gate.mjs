@@ -177,6 +177,22 @@ const KNOWN_TS_FIXES = {
   // Rust also refuses replacement after observed execution/lifecycle progress
   // or stale cancellation proof, rechecking deferred/resigned dispatches.
   grvt() {},
+  polymarket() {
+    // Reference repairs (not output normalization): preserve initial array books,
+    // every sorted absolute depth change, dynamic ticks and event watermarks;
+    // use complete Gamma keyset discovery and interval-minute sampled candles.
+    // Native regressions additionally pin: one fill per owned execution across
+    // settlement statuses, zero resolution price, failed/stale snapshot guards,
+    // reported partial batch IDs, partially matched GTC acknowledgements, and
+    // coherent final-fill cancel proofs with replacement leaves rounded down.
+    // Share sizing uses financial half-up precision, correcting TS toFixed's
+    // binary midpoint artifact; JavaScript formatting is never emulated.
+    // Unbounded history supplies the API max selector; upper-only and zero-wire
+    // start timestamps reject explicitly. Paired cumulative/execution evidence
+    // and association-covered final reads fence amend races and missing fields.
+    // Authoritative order removals cannot be reopened by delayed stream frames.
+    // Unsupported history contracts fail explicitly instead of empty success.
+  },
   // Independent documented payload oracle; paired public spot reference repairs
   // leave the real TS Store/worker serialization and measured CPU/memory intact.
   coinbase: (ts) => fixCoinbase(ts, tapeRecords),

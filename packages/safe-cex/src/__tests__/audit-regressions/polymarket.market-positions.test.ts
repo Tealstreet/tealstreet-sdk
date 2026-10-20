@@ -71,6 +71,28 @@ describe('Polymarket Gamma and Data API contracts', () => {
     exchange.dispose();
   });
 
+  it('scopes discovery only when explicit marketSlugs are supplied and keeps every outcome', async () => {
+    for (const marketSlugs of [undefined, ['v2-adapter', 'another-market']]) {
+      const exchange = new PolymarketExchange('polymarket', { key: '', secret: '', publicDataOnly: true, polymarket: { marketSlugs } }, new DefaultStore());
+      const getGammaMarkets = vi.fn().mockResolvedValue([gammaMarket]);
+      (exchange as any).api = { getGammaMarkets };
+      await expect(exchange.fetchMarkets()).resolves.toHaveLength(2);
+      expect(getGammaMarkets).toHaveBeenCalledWith({ active: true, closed: false, ...(marketSlugs === undefined ? {} : { slug: marketSlugs }) });
+      exchange.dispose();
+    }
+  });
+
+  it('rejects invalid explicit marketSlugs before market discovery', async () => {
+    for (const marketSlugs of [[], [''], [' '], ['same', 'same'], [1], 'cafe', Array.from({ length: 101 }, (_, i) => String(i))]) {
+      const exchange = new PolymarketExchange('polymarket', { key: '', secret: '', publicDataOnly: true, polymarket: { marketSlugs: marketSlugs as string[] } }, new DefaultStore());
+      const getGammaMarkets = vi.fn();
+      (exchange as any).api = { getGammaMarkets };
+      await expect(exchange.fetchMarkets()).rejects.toThrow(/marketSlugs/);
+      expect(getGammaMarkets).not.toHaveBeenCalled();
+      exchange.dispose();
+    }
+  });
+
   it('maps current Data API holdings instead of replaying trade history', async () => {
     const store = new DefaultStore();
     const exchange = new PolymarketExchange(
