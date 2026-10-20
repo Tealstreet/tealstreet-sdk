@@ -374,3 +374,41 @@ Clippy pass. Independent read-only code-correctness reviews found and closed
 two follow-up provenance/lifecycle cases; round4 reports no remaining material
 findings. Public and integration re-reviews are also clear. Full acceptance
 replays and CI must run on the refreshed landing branch before merge.
+
+### Post-review acceptance (cb132db8b1, landing6945ee83b4)
+
+All three independent code-correctness re-reviews are clear, including the
+landing conflict resolutions. The incoming Bitget frame mock now implements
+the position-ID accessor and asserts the symbol fallback; its regression failed
+before the fixture fix. No production economics or assertions were weakened.
+
+Refreshed acceptance results:
+
+- Bans, workspace fmt, workspace/all-target Clippy and WASM host Clippy pass.
+- Native workspace1083tests, including82Orderly tests, pass.
+- Orderly single-venue WASM783885bytes within1258291budget.
+- Public three-run gate:639inputs,144markets,144tickers,two books, identical
+  output. Median main CPU TS180.1ms/Rust118.3ms(1.52x), steady138.2/80.6ms
+  (1.71x), process216.3/181.2ms. Retained2.0/1.4MB(1.46x), linear0.7MB.
+- All14broker/network private gates pass, each14commands, with exact signing,
+  requests, write order and socket protocol checks.
+- Combined WASM build passes; SDK WASM46tests, host42tests and harness188tests
+  pass. The initial harness run had one20ms routing timeout during concurrent
+  checks; the isolated complete rerun passes.
+- Binance public873inputs,917markets,783tickers,three books; CPU main
+  TS232.3/Rust123.2ms, steady135.3/56.2ms, retained4.3/2.5MB. Private14inputs
+  passes. Landing is still6945ee83b4 at the final fetch.
+- Whole-repository typecheck44tasks and lint28tasks pass; package lint passes
+  again after the Bitget fixture edit.
+- Full SDK default run:6933passed/3failed across472files. The Bitget mock was
+  fixed; the metadata sweep passes on rerun. HYRO's two dynamic imports exceed
+  their default5s timeout locally; the isolated10-test file passes with a30s
+  CLI-only timeout(17.91s total). No source timeout was changed. All6936test
+  cases are covered by the full run plus these reruns; default-budget CI is
+  still required to pass before merge.
+
+Fourteen declared TS corrections remain independently guarded in the replay
+oracle. Public fixture is the committed live20s recording; private validation
+uses documented deterministic test payloads, not live credentials. Required
+remaining work: publish refreshed results, wait for all CI checks green, merge
+PR1318 into feat/rust-rewrite and cut a fresh branch from the updated landing.
