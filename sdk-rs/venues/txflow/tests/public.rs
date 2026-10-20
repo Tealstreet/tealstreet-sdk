@@ -246,6 +246,42 @@ fn snapshot_books_skip_unsynchronized_subscriptions_but_clear_stale_ones() {
     assert_eq!(listed(&e), ["BTC-USDC"]);
 }
 #[test]
+fn live_frames_publish_no_book_before_first_snapshot_but_clear_stale_ones() {
+    use safe_cex_engine::wire::{section, sections};
+    let has_book = |e: &mut Engine<TxFlow>, now: f64| {
+        e.take_frame(now)
+            .is_some_and(|frame| sections(frame).any(|(kind, _)| kind == section::BOOK))
+    };
+    let (mut e, node, _) = ready();
+    has_book(&mut e, 1500.0);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTC-USDC".into(),
+        }),
+    );
+    // The node opening resets every ladder; none has been published yet.
+    e.handle(2100.0, Event::WsOpened { socket: node });
+    assert!(!has_book(&mut e, 2300.0));
+    message(
+        &mut e,
+        node,
+        3000.0,
+        r#"{"channel":"l2Book","data":{"coin":"1","time":3000,"levels":[[{"px":"80","sz":"1"}],[{"px":"81","sz":"2"}]]}}"#,
+    );
+    assert!(has_book(&mut e, 3100.0));
+    e.handle(
+        4000.0,
+        Event::WsClosed {
+            socket: node,
+            code: 1006,
+        },
+    );
+    // A published book that goes stale is cleared in the next live frame.
+    assert!(has_book(&mut e, 4100.0));
+    assert!(e.book("BTC-USDC").is_none());
+}
+#[test]
 fn documented_funding_and_api_last_are_independent() {
     let (mut e, node, api) = ready();
     message(
