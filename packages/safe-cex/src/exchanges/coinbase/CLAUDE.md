@@ -56,7 +56,8 @@ rejection releases its reservation with Coinbase's message; a lost response,
 snapshot (and, for derivatives, a later position read). Saved read-only keys
 sign REST reads once `key_permissions` shows both keys on the same portfolio;
 otherwise the read key is refused with an error and reads use the trading key
-on the primary route. Writes and the user stream keep the trading key.
+on the primary route; a later 401 on a read-key request does the same instead
+of deactivating the account. Writes and the user stream keep the trading key.
 Caller IDs are nonempty strings of at most 128 characters without whitespace
 or control characters, preserved verbatim for one plain Limit/Market order.
 Spot edits require exact current zero-fill LIMIT decimal provenance. INTX
