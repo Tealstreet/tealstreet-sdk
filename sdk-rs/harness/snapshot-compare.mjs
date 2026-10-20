@@ -1,4 +1,5 @@
 import { stable } from './tape.mjs';
+import { comparesField } from './comparison-policy.mjs';
 
 export function duplicateSymbols(rows, label) {
   const seen = new Map();
@@ -46,7 +47,7 @@ export function compareSnapshots(left, right, label = 'snapshot') {
 
 // Check the public/private snapshot contract even when both producers erase
 // the same section. Schema failures share the non-exempt coverage prefix.
-export function snapshotCoverageErrors(snapshot, label = 'snapshot', { isPrivate } = {}) {
+export function snapshotCoverageErrors(snapshot, label = 'snapshot', { isPrivate, venue } = {}) {
   const prefix = `checkpoint coverage ${label}:`;
   const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
   if (!object(snapshot)) return [`${prefix} snapshot object missing`];
@@ -56,6 +57,38 @@ export function snapshotCoverageErrors(snapshot, label = 'snapshot', { isPrivate
   if (!object(snapshot.books)) errors.push(`${prefix} books object missing`);
   if (isPrivate === true && !object(snapshot.account)) errors.push(`${prefix} private account object missing`);
   if (isPrivate === false && snapshot.account !== undefined) errors.push(`${prefix} public snapshot contains account`);
+  if (object(snapshot.account)) {
+    const account = snapshot.account;
+    const requireFields = (row, fields, path) => {
+      if (!object(row)) { errors.push(`${prefix} ${path} row object missing`); return; }
+      for (const field of fields) if (!Object.hasOwn(row, field)) errors.push(`${prefix} ${path}.${field} missing`);
+    };
+    if (!Object.hasOwn(account, 'hedged') || typeof account.hedged !== 'boolean')
+      errors.push(`${prefix} account.hedged boolean missing`);
+    if (!Object.hasOwn(account, 'balance')) errors.push(`${prefix} account.balance missing`);
+    else if (account.balance !== null) {
+      if (!object(account.balance)) errors.push(`${prefix} account.balance object or null required`);
+      else for (const field of ['used', 'free', 'total', 'upnl']) {
+        if (!Object.hasOwn(account.balance, field)) errors.push(`${prefix} account.balance.${field} missing`);
+        else if (account.balance[field] !== null && !Number.isFinite(account.balance[field]))
+          errors.push(`${prefix} account.balance.${field} finite number or null required`);
+      }
+    }
+    const rowFields = {
+      orders: ['takeProfit', 'stopLoss', 'conditionalOrderPrice', 'parentId', 'takeProfitTrigger', 'stopLossTrigger',
+        ...(comparesField(venue, 'clientOrderId') ? ['clientOrderId'] : [])],
+      positions: ['realizedPnl'], settings: [],
+      fills: ['executionId', 'fee', 'timestamp', ...(comparesField(venue, 'fillPrice') ? ['price'] : [])],
+      flatPositionPnl: ['symbol', 'side', 'positionMode', 'realizedPnl'],
+    };
+    for (const [section, fields] of Object.entries(rowFields)) {
+      if (!Object.hasOwn(account, section) || !Array.isArray(account[section])) {
+        errors.push(`${prefix} account.${section} rows missing`);
+        continue;
+      }
+      for (const [index, row] of account[section].entries()) requireFields(row, fields, `account.${section}[${index}]`);
+    }
+  }
   return errors;
 }
 

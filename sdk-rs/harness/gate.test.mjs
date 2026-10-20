@@ -111,6 +111,11 @@ const gate = (venue, isPrivate = false, defect) => {
       const rust = impl === 'rust';
       if (rust && defect === 'command-timeout') return { status: 1, stderr: 'ReplayTimeout [Error]: replay timeout: command getAccount\\n' };
       if (rust && defect === 'runner-crash') return { status: 1, stderr: 'Error: loader failure\\n' };
+      const emptyAccount = () => ({
+        hedged: ['backpack', 'cryptocom'].includes(venue),
+        balance: { used: 0, free: 100, total: 100, upnl: 0 },
+        orders: [], positions: [], settings: [], fills: [], flatPositionPnl: [],
+      });
       const output = {
         frames: 1, unserved: 0, missingWrites: 0, unusedWrites: 0,
         invalidSignatures: 0, protocolErrors: [], wsRequests: [], subscriptions: [], requests: [], writes: [], writeCount: 0,
@@ -134,13 +139,9 @@ const gate = (venue, isPrivate = false, defect) => {
         // Orderly and Coinbase require exactly one result per taped command.
         // This smoke tape has none; populated command comparisons run below.
         commands: strictCommandCount ? [] : [{ ok: { count: 1, ids: ['one', 'two'] } }],
-        checkpoints: args.includes('--performance') ? [] : expectedCheckpointPlan(records, venueOf(venue), impl).map((point) => ({ ...point, markets: [], tickers: [], books: {}, ...(isPrivate ? { account: {} } : {}) })),
+        checkpoints: args.includes('--performance') ? [] : expectedCheckpointPlan(records, venueOf(venue), impl).map((point) => ({ ...point, markets: [], tickers: [], books: {}, ...(isPrivate ? { account: emptyAccount() } : {}) })),
         transportReceipt: {},
-        ...(isPrivate ? { account: {
-          hedged: ['backpack', 'cryptocom'].includes(venue),
-          balance: { used: 0, free: 100, total: 100, upnl: 0 },
-          orders: [], positions: [], settings: [], fills: [],
-        } } : {}),
+        ...(isPrivate ? { account: emptyAccount() } : {}),
       };
       if (['orderly-extra-result', 'coinbase-extra-result'].includes(defect)) output.commands.push({ ok: [] });
       if (defect?.startsWith('live-smoke')) {
@@ -168,6 +169,22 @@ const gate = (venue, isPrivate = false, defect) => {
         if (defect === 'checkpoint-coverage-erase-account') for (const point of output.checkpoints) delete point.account;
         if (defect === 'checkpoint-coverage-erase-books') for (const point of output.checkpoints) delete point.books;
         if (defect === 'checkpoint-coverage-erase-final-books') delete output.books;
+        if (defect.startsWith('checkpoint-coverage-erase-section:'))
+          for (const point of output.checkpoints) delete point.account[defect.split(':')[1]];
+        if (defect.startsWith('checkpoint-coverage-erase-balance:'))
+          for (const point of output.checkpoints) delete point.account.balance[defect.split(':')[1]];
+        if (defect.startsWith('checkpoint-coverage-erase-row:')) {
+          const [, section, field] = defect.split(':');
+          const complete = {
+            orders: { clientOrderId: null, takeProfit: null, stopLoss: null, conditionalOrderPrice: null, parentId: null, takeProfitTrigger: null, stopLossTrigger: null },
+            positions: { realizedPnl: 0 }, fills: { price: 100, fee: null, timestamp: null, executionId: null },
+            flatPositionPnl: { symbol: 'BTCUSDT', side: 'long', positionMode: null, realizedPnl: 0 },
+          };
+          for (const point of output.checkpoints) {
+            point.account[section] = [structuredClone(complete[section])];
+            delete point.account[section][0][field];
+          }
+        }
       }
       if (defect?.startsWith('impl-plans')) {
         output.writes = (rust ? ['Order', 'StopOrder', 'tpslOrder'] : [undefined]).map((orderFilter) =>
@@ -341,5 +358,22 @@ test('gate CLI independently enforces checkpoint coverage when both implementati
     assert.equal(result.status, 1, result.stderr + result.stdout);
     assert.match(result.stdout, /checkpoint coverage ts(?: point \d+| final)?:/, result.stderr);
     assert.match(result.stdout, /checkpoint coverage rust(?: point \d+| final)?:/);
+  }
+});
+
+test('gate CLI rejects shared private financial-section and widened-row omissions before final convergence', () => {
+  const defects = [
+    ...['orders', 'positions', 'settings', 'fills', 'flatPositionPnl', 'hedged', 'balance'].map((field) => 'erase-section:' + field),
+    ...['used', 'free', 'total', 'upnl'].map((field) => 'erase-balance:' + field),
+    ...['clientOrderId', 'takeProfit', 'stopLoss', 'conditionalOrderPrice', 'parentId', 'takeProfitTrigger', 'stopLossTrigger'].map((field) => 'erase-row:orders:' + field),
+    'erase-row:positions:realizedPnl',
+    ...['price', 'fee', 'timestamp', 'executionId'].map((field) => 'erase-row:fills:' + field),
+    'erase-row:flatPositionPnl:realizedPnl',
+  ];
+  for (const defect of defects) {
+    const result = gate('binance', true, 'checkpoint-coverage-' + defect);
+    assert.equal(result.status, 1, result.stderr + result.stdout);
+    assert.match(result.stdout, /checkpoint coverage ts point \d+:/, defect);
+    assert.match(result.stdout, /checkpoint coverage rust point \d+:/, defect);
   }
 });

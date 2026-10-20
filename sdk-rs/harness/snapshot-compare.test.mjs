@@ -5,7 +5,9 @@ import { compareCheckpoints, compareSnapshots, duplicateSymbols, checkpointCover
 const snapshot = () => ({
   markets: [{ symbol: 'BTC' }], tickers: [{ symbol: 'BTC', last: 100 }], books: {},
   account: {
-    orders: [{ id: '1', symbol: 'BTC', clientOrderId: 'caller', takeProfit: 110, stopLoss: 90, conditionalOrderPrice: 99, parentId: 'parent' }],
+    hedged: false, balance: { used: 20, free: 80, total: 100, upnl: 0 }, settings: [], flatPositionPnl: [],
+    orders: [{ id: '1', symbol: 'BTC', clientOrderId: 'caller', takeProfit: 110, stopLoss: 90, conditionalOrderPrice: 99, parentId: 'parent',
+      takeProfitTrigger: 'mark_price', stopLossTrigger: 'last_price' }],
     positions: [{ symbol: 'BTC', realizedPnl: 7 }],
     fills: [{ id: '1', price: 100, fee: 0.1, timestamp: 123, executionId: 'exec' }],
   },
@@ -112,4 +114,59 @@ test('coverage rejects identical financial-section erasure and public/private sc
   assert.deepEqual(snapshotCoverageErrors(publicSnapshot, 'ts final', { isPrivate: false }), []);
   assert(snapshotCoverageErrors({ ...publicSnapshot, account: {} }, 'ts final', { isPrivate: false }).length);
   assert(snapshotCoverageErrors(publicSnapshot, 'rust final', { isPrivate: true }).length);
+});
+
+test('private coverage rejects shared missing sections and newly compared row fields', () => {
+  const original = snapshot();
+  assert.deepEqual(snapshotCoverageErrors(original, 'private', { isPrivate: true }), []);
+  for (const field of ['orders', 'positions', 'settings', 'fills', 'flatPositionPnl', 'hedged', 'balance']) {
+    for (const mutate of [
+      (value) => { delete value.account[field]; },
+      (value) => { value.account[field] = field === 'hedged' ? null : {}; },
+    ]) {
+      const missing = structuredClone(original); mutate(missing);
+      assert.deepEqual(compareSnapshots(missing, structuredClone(missing)), []);
+      const errors = snapshotCoverageErrors(missing, 'private', { isPrivate: true });
+      assert.ok(errors.some((error) => error.includes(`account.${field}`)), field);
+      assert.ok(errors.every((error) => error.startsWith('checkpoint coverage ')));
+    }
+  }
+  for (const [section, fields] of Object.entries({
+    orders: ['clientOrderId', 'takeProfit', 'stopLoss', 'conditionalOrderPrice', 'parentId', 'takeProfitTrigger', 'stopLossTrigger'],
+    positions: ['realizedPnl'], fills: ['price', 'fee', 'timestamp', 'executionId'],
+  })) for (const field of fields) {
+    const missing = structuredClone(original); delete missing.account[section][0][field];
+    assert.deepEqual(compareSnapshots(missing, structuredClone(missing)), []);
+    assert.ok(snapshotCoverageErrors(missing, 'private', { isPrivate: true })
+      .some((error) => error.includes(`account.${section}[0].${field} missing`)), `${section}.${field}`);
+  }
+  const flat = structuredClone(original);
+  flat.account.flatPositionPnl.push({ symbol: 'BTC', side: 'long', positionMode: null });
+  assert.ok(snapshotCoverageErrors(flat, 'private', { isPrivate: true }).some((error) => error.includes('flatPositionPnl[0].realizedPnl missing')));
+});
+
+test('private balance preserves explicit unavailable evidence while rejecting absent or malformed financial values', () => {
+  const original = snapshot();
+  original.account.balance = null;
+  assert.deepEqual(snapshotCoverageErrors(original, 'startup', { isPrivate: true }), []);
+  original.account.balance = { used: null, free: null, total: null, upnl: null };
+  assert.deepEqual(snapshotCoverageErrors(original, 'startup', { isPrivate: true }), []);
+  for (const field of ['used', 'free', 'total', 'upnl']) {
+    const missing = structuredClone(original); delete missing.account.balance[field];
+    assert.ok(snapshotCoverageErrors(missing, 'private', { isPrivate: true }).some((error) => error.includes(`balance.${field} missing`)));
+    for (const value of [undefined, NaN, Infinity, '100', false, {}]) {
+      const malformed = structuredClone(original); malformed.account.balance[field] = value;
+      assert.ok(snapshotCoverageErrors(malformed, 'private', { isPrivate: true }).some((error) => error.includes(`balance.${field} finite number or null`)));
+    }
+  }
+});
+
+test('private row coverage rejects null, scalar and sparse rows even when both streams agree', () => {
+  for (const section of ['orders', 'positions', 'settings', 'fills', 'flatPositionPnl']) {
+    for (const rows of [[null], [0], [[]], new Array(1)]) {
+      const malformed = snapshot(); malformed.account[section] = rows;
+      assert.ok(snapshotCoverageErrors(malformed, 'private', { isPrivate: true })
+        .some((error) => error.includes(`account.${section}[0] row object missing`)));
+    }
+  }
 });

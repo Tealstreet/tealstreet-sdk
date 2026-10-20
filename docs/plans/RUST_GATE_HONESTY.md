@@ -167,3 +167,12 @@ never retry an unchanged failed performance measurement to obtain a pass.
   `710a58aa511ed26bfe55bad1fef6b67a2544e5a119178560763261675d8862bf`.
   Its financial gate remains FAIL on 22 client-ID/TIF diagnostics, never ignored
   by the integration test or exempted through a variable capture hash.
+- Round 2 review found shared omission of account subsections could still pass
+  when `account: {}` remained. Coverage now requires normalized financial arrays,
+  explicit hedge/balance evidence and the newly compared row fields; all such
+  omissions are non-exempt. Actual CLI controls erase the same 24 sections/row
+  keys on both checkpoint producers while leaving complete final outputs: all
+  fail. Gate tests 16/16 and unit/financial/policy controls 18/18 PASS.
+  Compatibility audit of 714 historical replay artifacts / 2,884 snapshots found
+  only the intentionally new flat-PnL and leg-trigger fields absent, no unrelated
+  schema gaps. No values were inferred or existing scope normalized away.

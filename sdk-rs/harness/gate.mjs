@@ -207,8 +207,8 @@ for (let run = 0; run < correctnessRuns; run++) {
   // Inspect original arrays before a fixer or Map can erase duplicate rows.
   for (const [impl, output] of [['ts', ts], ['rust', rust]])
     {
-      differences.push(...snapshotCoverageErrors(output, `${impl} final`, { isPrivate }));
-      differences.push(...checkpointCoverageErrors(output.checkpoints, checkpointPlans[impl], impl, { isPrivate }));
+      differences.push(...snapshotCoverageErrors(output, `${impl} final`, { isPrivate, venue: values.venue }));
+      differences.push(...checkpointCoverageErrors(output.checkpoints, checkpointPlans[impl], impl, { isPrivate, venue: values.venue }));
       for (const field of ['markets', 'tickers']) differences.push(...duplicateSymbols(output[field], `${impl} ${field}`));
       differences.push(...(output.duplicateSymbols ?? []).map((error) => `${impl}: ${error}`));
     }
