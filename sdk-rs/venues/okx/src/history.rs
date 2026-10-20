@@ -1,6 +1,7 @@
 //! Typed, streamed rare reads. Native derivative quantities are contract counts.
 use crate::{Okx, Pending};
 use safe_cex_engine::model::{Order, OrderExtra, OrderSide, OrderStatus, OrderType, TimeInForce};
+use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::{CommandId, Cx, LogLevel, Method, Query, Response, TimerId, num};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -239,11 +240,8 @@ fn fill_seconds(value: f64) -> f64 {
         value.floor()
     }
 }
-fn optional(value: &str) -> Option<f64> {
-    value.parse::<f64>().ok().filter(|v| v.is_finite())
-}
 fn positive(value: &str) -> Option<f64> {
-    optional(value).filter(|v| *v > 0.0)
+    parse_decimal(value).filter(|v| *v > 0.0)
 }
 fn text(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.into())
@@ -780,11 +778,11 @@ impl Okx {
                     side: row.side.into(),
                     commission: {
                         let value = first(&[row.fee, row.fill_fee]);
-                        optional(if value.is_empty() { "0" } else { value }).map(f64::abs)
+                        parse_decimal(if value.is_empty() { "0" } else { value }).map(f64::abs)
                     },
                     commission_asset: text(first(&[row.fee_ccy, row.ccy])),
                     position_side: (!row.pos_side.is_empty()).then(|| hedge(row.pos_side)),
-                    realized_pnl: optional(row.fill_pnl),
+                    realized_pnl: parse_decimal(row.fill_pnl),
                     maker: (!row.exec_type.is_empty())
                         .then(|| row.exec_type.eq_ignore_ascii_case("M")),
                 };

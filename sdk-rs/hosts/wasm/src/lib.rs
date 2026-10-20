@@ -437,6 +437,9 @@ fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Opti
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
     Deactivate,
+    StartupFailed {
+        detail: &'a safe_cex_engine::VenueError,
+    },
     WsConnect {
         #[serde(skip_serializing_if = "is_false")]
         binary: bool,
@@ -591,6 +594,9 @@ fn encode(actions: &[Action]) -> String {
                 command: *command,
                 message,
             },
+            Action::Notice(Notice::StartupFailed { error }) => {
+                ActionOut::StartupFailed { detail: error }
+            }
             Action::Notice(Notice::Log { level, message }) => ActionOut::Log {
                 level: match level {
                     LogLevel::Info => "info",

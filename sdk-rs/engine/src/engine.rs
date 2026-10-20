@@ -125,6 +125,11 @@ pub enum Notice {
         command: CommandId,
         receipts: Vec<OrderIdentityReceipt>,
     },
+    /// Startup cannot complete without intervention (bad configuration or an
+    /// account the venue refuses); hosts fail `start` with it.
+    StartupFailed {
+        error: VenueError,
+    },
     /// Completes a command with a structured failure; hosts report it like a
     /// `CommandDone` error, plus the detail.
     CommandFailed {
@@ -924,6 +929,12 @@ impl<P> Cx<'_, P> {
                 .actions
                 .push(Action::Notice(Notice::CommandError { command, message }));
         }
+    }
+
+    pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
+        self.io.actions.push(Action::Notice(Notice::StartupFailed {
+            error: error.into(),
+        }));
     }
 
     pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {

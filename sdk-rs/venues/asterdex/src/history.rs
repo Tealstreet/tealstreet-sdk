@@ -2,6 +2,7 @@
 use crate::{AsterDex, Pending, account, sign::Query};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
+use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
 use safe_cex_engine::{CommandId, Cx, Query as Read, Response, TimerId};
 use safe_cex_venue_binance::wire::{HistoricalOrderRow, UserTrade};
@@ -220,11 +221,8 @@ fn native_error(body: &str) -> Option<String> {
     };
     (code < 0).then(|| format!("Aster API error {code}: {}", error.msg))
 }
-fn number(text: &str) -> Option<f64> {
-    text.parse::<f64>().ok().filter(|v| v.is_finite())
-}
 fn nonzero(text: &str) -> Option<f64> {
-    number(text).filter(|v| *v != 0.0)
+    parse_decimal(text).filter(|v| *v != 0.0)
 }
 fn side(text: &str) -> &'static str {
     if text == "SELL" { "sell" } else { "buy" }
@@ -458,8 +456,8 @@ impl AsterDex {
                 };
                 // TS normalizes cumulative PnL across all native rows before
                 // filtering invalid execution sizes. Keep that baseline intact.
-                let price = number(&r.price).unwrap_or(f64::NAN);
-                let qty = number(&r.qty).unwrap_or(f64::NAN);
+                let price = parse_decimal(&r.price).unwrap_or(f64::NAN);
+                let qty = parse_decimal(&r.qty).unwrap_or(f64::NAN);
                 rows.push(Execution {
                     id: r.id.to_string(),
                     timestamp: (r.time / 1000.0).floor(),
@@ -469,7 +467,7 @@ impl AsterDex {
                     price,
                     qty,
                     side: side(&r.side),
-                    commission: r.commission.as_deref().and_then(number),
+                    commission: r.commission.as_deref().and_then(parse_decimal),
                     commission_asset: r.commission_asset.map(|s| s.into_owned()),
                     position_side: rail(r.position_side.as_deref()),
                     pnl_group: r
@@ -478,7 +476,7 @@ impl AsterDex {
                         .filter(|side| !side.is_empty())
                         .unwrap_or("BOTH")
                         .to_ascii_uppercase(),
-                    realized_pnl: r.realized_pnl.as_deref().and_then(number),
+                    realized_pnl: r.realized_pnl.as_deref().and_then(parse_decimal),
                     maker: r.maker,
                 });
             }
@@ -504,7 +502,8 @@ impl AsterDex {
                         return;
                     }
                 };
-                let (Some(amount), Some(filled)) = (number(&r.orig_qty), number(&r.executed_qty))
+                let (Some(amount), Some(filled)) =
+                    (parse_decimal(&r.orig_qty), parse_decimal(&r.executed_qty))
                 else {
                     *invalid = true;
                     return;
@@ -530,7 +529,7 @@ impl AsterDex {
                     *invalid = true;
                     return;
                 };
-                let Some(income) = number(&r.income) else {
+                let Some(income) = parse_decimal(&r.income) else {
                     *invalid = true;
                     return;
                 };
@@ -555,7 +554,8 @@ impl AsterDex {
                     *invalid = true;
                     return;
                 };
-                let (Some(price), Some(qty)) = (number(r.price), number(r.qty)) else {
+                let (Some(price), Some(qty)) = (parse_decimal(r.price), parse_decimal(r.qty))
+                else {
                     *invalid = true;
                     return;
                 };
@@ -564,7 +564,7 @@ impl AsterDex {
                     symbol: symbol.clone(),
                     price,
                     qty,
-                    quote_qty: r.quote_qty.and_then(number).unwrap_or(price * qty),
+                    quote_qty: r.quote_qty.and_then(parse_decimal).unwrap_or(price * qty),
                     timestamp: r.time,
                     side: if r.is_buyer_maker { "sell" } else { "buy" },
                 });

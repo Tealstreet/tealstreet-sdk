@@ -76,6 +76,9 @@ function validateNotice(text: string): void {
     case 'deactivate':
       if (keys(value, ['type'])) return;
       break;
+    case 'startupFailed':
+      if (keys(value, ['type', 'detail']) && record(value.detail) && typeof value.detail.message === 'string') return;
+      break;
   }
   throw error();
 }
