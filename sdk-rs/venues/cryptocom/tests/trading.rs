@@ -363,6 +363,9 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
             )),
             "missing cancellation error: {actions:?}"
         );
-        assert_eq!(h.engine.store().order("123").unwrap().status, OrderStatus::Open);
+        assert_eq!(
+            h.engine.store().order("123").unwrap().status,
+            OrderStatus::Open
+        );
     }
 }
