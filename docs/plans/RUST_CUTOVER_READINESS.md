@@ -4,6 +4,12 @@ Branch: `feat/rust-cutover-readiness`, based on `origin/feat/rust-rewrite`.
 This change proves consumer contracts and records the deletion prerequisites;
 it does not delete TypeScript venues or enable Rust by default.
 
+GRVT's apparent non-perpetual catalog gap is resolved separately by an
+[explicit supported-product retirement decision](GRVT_PRODUCTS_DECISION.md):
+TS discovery defaults to perpetuals, and Future/Call/Put are unexposed latent
+mapper paths. Retain TS and all other consumer/dependency gates; this decision
+does not enable non-perpetual products or default cutover.
+
 ## Plan and verification
 
 1. **Consumer conformance.** Add a deterministic Vitest `*.wasm.test.ts`

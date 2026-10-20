@@ -1,6 +1,7 @@
 //! Lighter perpetuals: deterministic public streams and engine-owned recovery.
 mod account;
 mod history;
+mod limits;
 pub mod sign;
 mod trading;
 mod wire;
@@ -29,9 +30,12 @@ fn revalue_position(position: &mut Position, price: f64) {
 #[derive(Clone, Debug)]
 pub struct Options {
     pub testnet: bool,
+    pub robinhood: bool,
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+    pub remote_signer: bool,
+    pub signer_provider: Option<String>,
     pub application_id: Option<String>,
     pub api_key_index: Option<String>,
     pub integrator_account_index: Option<u64>,
@@ -41,9 +45,12 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             testnet: false,
+            robinhood: false,
             public_data_only: false,
             key: None,
             secret: None,
+            remote_signer: false,
+            signer_provider: None,
             application_id: None,
             api_key_index: None,
             integrator_account_index: None,
@@ -124,6 +131,7 @@ pub struct Lighter {
     options: Options,
     account: account::Account,
     trading: trading::Trading,
+    limits: limits::Limits,
     metadata: HashMap<String, MarketMeta>,
     symbols: HashMap<String, String>,
     public: Connection,
@@ -158,6 +166,7 @@ impl Lighter {
             options,
             account: account::Account::default(),
             trading: trading::Trading::default(),
+            limits: limits::Limits::default(),
             metadata: HashMap::new(),
             symbols: HashMap::new(),
             public: Connection::default(),
@@ -172,20 +181,33 @@ impl Lighter {
         }
     }
     fn host(&self) -> &'static str {
-        if self.options.testnet {
-            "https://testnet-api.lighter.xyz"
-        } else {
-            "https://mainnet.zklighter.elliot.ai"
+        match (self.options.robinhood, self.options.testnet) {
+            (false, false) => "https://mainnet.zklighter.elliot.ai",
+            (false, true) => "https://testnet-api.lighter.xyz",
+            (true, false) => "https://api.rh.lighter.xyz",
+            (true, true) => "https://api.rh-testnet.lighter.xyz",
         }
     }
     fn chain_id(&self) -> u32 {
-        if self.options.testnet { 300 } else { 304 }
+        match (self.options.robinhood, self.options.testnet) {
+            (_, true) => 300,
+            (true, false) => 466_324,
+            (false, false) => 304,
+        }
     }
     fn ws_url(&self) -> &'static str {
-        if self.options.testnet {
-            "wss://testnet.zklighter.elliot.ai/stream"
+        match (self.options.robinhood, self.options.testnet) {
+            (false, false) => "wss://mainnet.zklighter.elliot.ai/stream",
+            (false, true) => "wss://testnet.zklighter.elliot.ai/stream",
+            (true, false) => "wss://api.rh.lighter.xyz/stream",
+            (true, true) => "wss://api.rh-testnet.lighter.xyz/stream",
+        }
+    }
+    fn quote(&self) -> &'static str {
+        if self.options.robinhood {
+            "USDG"
         } else {
-            "wss://mainnet.zklighter.elliot.ai/stream"
+            "USDC"
         }
     }
     fn symbol_for_id(&self, id: &str) -> Option<&str> {
@@ -845,14 +867,20 @@ impl Venue for Lighter {
                         .or(m.default_initial_margin_fraction)
                         .unwrap_or(0.0);
                     let (base, quote) = if let Some((b, q)) = m.symbol.split_once('/') {
-                        (b, q)
+                        (
+                            b,
+                            q.split('/')
+                                .next()
+                                .filter(|q| !q.is_empty())
+                                .unwrap_or(self.quote()),
+                        )
                     } else if let Some(q) = ["USDT", "USDC", "USDG"]
                         .into_iter()
                         .find(|q| m.symbol.ends_with(q))
                     {
                         (&m.symbol[..m.symbol.len() - q.len()], q)
                     } else {
-                        (m.symbol.as_ref(), "USDC")
+                        (m.symbol.as_ref(), self.quote())
                     };
                     let symbol = m.symbol.to_string();
                     metadata.insert(
@@ -1348,5 +1376,75 @@ impl Venue for Lighter {
                 .filter(|(_, s)| s.subscribers > 0)
                 .map(|(s, state)| (s.as_str(), &state.book)),
         )
+    }
+}
+
+#[cfg(test)]
+mod deployment_tests {
+    use super::{Lighter, Options};
+    use crate::sign::{Signer, Transaction};
+    use safe_cex_crypto::lighter::{SchnorrNonce, public_key, schnorr_verify};
+
+    #[test]
+    fn deployment_transactions_bind_the_selected_chain_and_auth_tokens_do_not() {
+        let key = format!("01{}", "00".repeat(39));
+        let mut raw_key = [0; 40];
+        raw_key[0] = 1;
+        let public = public_key(&raw_key).unwrap();
+        let mut tokens = Vec::new();
+        for (robinhood, testnet, chain) in [
+            (false, false, 304_u64),
+            (false, true, 300),
+            (true, false, 466_324),
+            (true, true, 300),
+        ] {
+            let venue = Lighter::new(Options {
+                robinhood,
+                testnet,
+                ..Options::default()
+            });
+            let signer = Signer::new(&key, venue.chain_id(), 42, 3).unwrap();
+            let signed = signer
+                .sign_with_nonce(
+                    &Transaction::Cancel {
+                        market_id: 1,
+                        order_id: 99,
+                    },
+                    7,
+                    1_700_000_000_000,
+                    SchnorrNonce::from_bytes(&[66; 40]).unwrap(),
+                )
+                .unwrap();
+            assert_eq!(
+                u64::from_le_bytes(signed.data[..8].try_into().unwrap()),
+                chain
+            );
+            let signature = signed
+                .signature
+                .as_bytes()
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect::<Vec<_>>();
+            assert!(schnorr_verify(&signed.data, &public, &signature).unwrap());
+            for other_chain in [300_u64, 304, 466_324]
+                .into_iter()
+                .filter(|other| *other != chain)
+            {
+                let mut cross_chain = signed.data.clone();
+                cross_chain[..8].copy_from_slice(&other_chain.to_le_bytes());
+                assert!(!schnorr_verify(&cross_chain, &public, &signature).unwrap());
+            }
+            tokens.push(
+                signer
+                    .auth_token_with_nonce(
+                        1_700_000_060,
+                        SchnorrNonce::from_bytes(&[66; 40]).unwrap(),
+                    )
+                    .unwrap(),
+            );
+        }
+        assert!(tokens.windows(2).all(|pair| pair[0] == pair[1]));
     }
 }

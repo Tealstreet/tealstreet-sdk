@@ -213,3 +213,95 @@ test('GRVT session rejection invalidates HTTP-200 lite and full error aliases', 
     assert.equal(tape.invalidSignatures, 1);
   }
 });
+
+test('GRVT indexed public subscriptions match the original prefix scan through mutations and generations', () => {
+  const url = 'wss://market-data.grvt.io/ws';
+  const audit = venue.createSocketAudit('rust', { isPrivate: false, books: [] });
+  const oldSets = new Map(), expected = [];
+  const instruments = ['BTC', 'BTC@nested', 'BTC@nested@', '', null, 0, false, undefined, 'undefined', 'other'];
+  const streams = ['v1.book.s', 'v1.book.s:extra', 'v1.book.s@nested'];
+  const operations = [
+    [1, true, streams[0], ['BTC@500-50', 'BTC@500-50', 'BTC@100-10', 'BTC@nested@500', '@', 'null@', '0@', 'false@', 'undefined@']],
+    [1, true, streams[1], ['BTC@500']], [1, true, streams[2], ['BTC@nested@@500']],
+    [2, true, streams[0], ['other@500']],
+    [1, false, streams[0], ['BTC@500-50', 'absent@500']],
+    [1, false, streams[0], ['BTC@100-10']],
+    [1, false, streams[0], ['BTC@nested@500']],
+    [1, true, streams[0], ['BTC@nested@500', null, 0, false, 'no-delimiter']],
+    [1, false, streams[0], ['BTC@nested@500', 'BTC@nested@500']],
+    [2, false, streams[0], ['other@500']],
+  ];
+  for (const [generation, add, stream, selectors] of operations) {
+    if (!oldSets.has(generation)) oldSets.set(generation, new Set());
+    const old = oldSets.get(generation);
+    for (const selector of selectors) {
+      const key = `${stream}:${selector}`;
+      if (add) old.add(key); else old.delete(key);
+    }
+    audit.sent(url, JSON.stringify({ method: add ? 'subscribe' : 'unsubscribe', params: { stream, selectors } }), generation);
+    for (const gen of [1, 2, 3]) for (const s of streams) for (const instrument of instruments) {
+      const text = JSON.stringify({ s, f: { i: instrument } });
+      const feed = JSON.parse(text).f, value = feed.i ?? feed.instrument;
+      const accepted = [...(oldSets.get(gen) ?? [])].some((key) => key.startsWith(`${s}:${value}@`));
+      if (!accepted) expected.push(`unsubscribed GRVT public data: ${s}:${value}`);
+      audit.received(url, text, gen);
+    }
+    assert.deepEqual(audit.errors(), expected);
+    assert.deepEqual(audit.errors(), expected, 'reading errors must preserve accumulated failure order');
+  }
+  audit.closed(url, 1);
+  audit.received(url, '{"s":"v1.book.s","f":{"i":"BTC"}}', 1);
+  assert.deepEqual(audit.errors().slice(-2), [
+    'GRVT received a frame on a closed socket generation', 'unsubscribed GRVT public data: v1.book.s:BTC',
+  ]);
+});
+
+test('GRVT hostname caching is lazy, generation-local and leaves coercible URLs uncached', () => {
+  const NativeURL = globalThis.URL;
+  let parses = 0;
+  globalThis.URL = class extends NativeURL { constructor(...args) { super(...args); parses++; } };
+  try {
+    const audit = venue.createSocketAudit('rust', { isPrivate: false, books: [] });
+    const url = 'wss://market-data.grvt.io/ws';
+    audit.connected(url, 1); audit.closed(url, 9);
+    audit.received(url, 'ping', 1); audit.received(url, 'pong', 1);
+    assert.equal(parses, 0);
+    audit.sent(url, 'pong', 1);
+    assert.equal(parses, 1);
+    audit.sent(url, '{"method":"subscribe","params":{"stream":"book","selectors":["BTC@500"]}}', 1);
+    for (let i = 0; i < 10; i++) audit.received(url, '{"s":"book","f":{"i":"BTC"}}', 1);
+    audit.errors(); audit.errors();
+    assert.equal(parses, 2, 'only the separately closed generation needs another parse');
+    audit.received(url, '{}', 2);
+    assert.equal(parses, 3);
+    let address = url;
+    const mutable = { toString: () => address };
+    audit.received(mutable, '{}', 3);
+    assert.equal(parses, 5, 'both original receive call sites parse non-string inputs');
+    address = PRIVATE;
+    audit.received(mutable, '{"s":"v1.fill","f":{}}', 3);
+    assert.equal(parses, 7);
+    assert.ok(audit.errors().includes('unsubscribed GRVT private data: v1.fill'));
+  } finally { globalThis.URL = NativeURL; }
+});
+
+test('GRVT lazy URL parsing preserves invalid URL, malformed JSON and heartbeat error ordering', () => {
+  const audit = venue.createSocketAudit('rust', { isPrivate: false, books: [] });
+  const bad = 'not-a-url';
+  assert.doesNotThrow(() => audit.connected(bad, 1));
+  assert.doesNotThrow(() => audit.closed(bad, 2));
+  assert.doesNotThrow(() => audit.received(bad, 'ping', 1));
+  assert.doesNotThrow(() => audit.received(bad, 'pong', 1));
+  assert.throws(() => audit.received(bad, '{', 1), SyntaxError);
+  assert.throws(() => audit.received(bad, '{}', 1), { code: 'ERR_INVALID_URL' });
+  assert.throws(() => audit.sent(bad, '{', 1), { code: 'ERR_INVALID_URL' });
+  assert.throws(() => audit.sent(bad, 'pong', 1), { code: 'ERR_INVALID_URL' });
+  assert.throws(() => audit.errors(), { code: 'ERR_INVALID_URL' });
+  // A failed URL parse in sent must not consume the first-auth message count.
+  let coercions = 0;
+  const mutable = { toString: () => ++coercions === 2 ? bad : PRIVATE };
+  const auth = venue.createSocketAudit('rust', { isPrivate: true, books: [] });
+  assert.throws(() => auth.sent(mutable, '{}'), { code: 'ERR_INVALID_URL' });
+  auth.sent(mutable, '{"type":"auth","session_cookie":"rm=true; gravity=fixture-session-1","account_id":"fixture-account","testnet":false}');
+  assert.equal(auth.ready(), true);
+});

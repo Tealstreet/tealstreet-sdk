@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {readFileSync} from 'node:fs';
+import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {initializeLighterCrypto,createLighterVerifier,decodeLighterTransactions,lighterRequestBody} from './lighter-crypto.mjs';
 import {requestKey,subscriptionKeys} from './requests.mjs';
 import {Tape} from './tape.mjs';
 import {fixLighterFills,fixLighterCommands} from './known-ts-fixes.mjs';
+import {venueOf} from './venues.mjs';
 const corpus=JSON.parse(readFileSync(new URL('../crypto/tests/fixtures/lighter/venue-signing-preimages.json',import.meta.url),'utf8'));
 const options={secret:corpus.secret,applicationId:'42',apiKeyIndex:'3'};
 const oracle=await initializeLighterCrypto();
@@ -162,4 +167,62 @@ test('auth validates canonical integer components and every supplied token',()=>
  assert.equal(v.request({method:'GET',url,headers:{authorization:token},now}),true);
  assert.equal(v.request({method:'GET',url,headers:{authorization:'invalid'},now}),false);
  assert.equal(v.request({method:'GET',url,headers:{Authorization:token,authorization:'invalid'},now}),false);
+});
+
+for (const name of ['lighter', 'lighter-robinhood']) {
+ for (const testnet of [false, true]) {
+  test(`${name} ${testnet ? 'testnet' : 'livenet'} independently validates its signed deployment profile`, async () => {
+   const vector=(kind)=>corpus.cases.find(c=>c.name===`${name}/${testnet?'testnet':'livenet'}/${kind}`);
+   const v=createLighterVerifier({...options,testnet},oracle,name);
+   for (const kind of ['create-complete','create-missing-optionals','cancel-large-index','leverage']) {
+    const body=vector(kind).wire[0].body;
+    assert.equal(v.request({method:'POST',url,body,now}),true,kind);
+    const otherChain=createLighterVerifier({...options,testnet:!testnet},oracle,name);
+    assert.equal(otherChain.request({method:'POST',url,body,now}),false,`${kind} wrong chain`);
+   }
+   const adapter=venueOf(name);
+   assert.equal(adapter.rust,name);
+   assert.equal(adapter.ts.name,name);
+   assert.equal(adapter.ts.className,'LighterExchange');
+   await adapter.initializeReplay('rust',{...options,testnet});
+   assert.equal(adapter.verifyRequest({method:'POST',url,body:vector('create-complete').wire[0].body,now}),true);
+   assert.equal(v.auth(vector('auth').result,now),true);
+  });
+ }
+}
+test('Robinhood production signatures fail the standard production verifier and vice versa',()=>{
+ const standard=createLighterVerifier(options,oracle,'lighter');
+ const robinhood=createLighterVerifier(options,oracle,'lighter-robinhood');
+ const broker=corpus.cases.find(c=>c.name==='lighter-robinhood/livenet/create-complete');
+ assert.equal(standard.request({method:'POST',url,body:broker.wire[0].body,now}),false);
+ assert.equal(robinhood.request({method:'POST',url,body:form(),now}),false);
+});
+
+test('private tape generator preserves all deployment origins and disables absent builder defaults',()=>{
+ const directory=mkdtempSync(join(tmpdir(),'lighter-private-profiles-'));
+ try {
+  for (const [name,testnet,rest,socket] of [
+   ['lighter',false,'https://mainnet.zklighter.elliot.ai','wss://mainnet.zklighter.elliot.ai/stream'],
+   ['lighter',true,'https://testnet-api.lighter.xyz','wss://testnet.zklighter.elliot.ai/stream'],
+   ['lighter-robinhood',false,'https://api.rh.lighter.xyz','wss://api.rh.lighter.xyz/stream'],
+   ['lighter-robinhood',true,'https://api.rh-testnet.lighter.xyz','wss://api.rh-testnet.lighter.xyz/stream'],
+  ]) {
+   const out=join(directory,`${name}-${testnet}.jsonl`);
+   execFileSync('corepack',['yarn','-s','rust:private-tape-lighter','--venue',name,...(testnet?['--testnet']:[]),'--out',out],{cwd:fileURLToPath(new URL('../../',import.meta.url))});
+   const records=readFileSync(out,'utf8').trim().split('\n').map(line=>JSON.parse(line));
+   assert.equal(records.find(r=>r.type==='meta').venue,name);
+   assert.equal(records.find(r=>r.type==='config').options.testnet,testnet);
+   assert.equal(records.filter(r=>r.type==='command').length,8);
+   for (const record of records) {
+    if(record.type==='ws')assert.equal(record.url,socket);
+    if(record.type!=='http')continue;
+    assert.equal(new URL(record.url).origin,rest);
+    if(!record.requestBody)continue;
+    for (const {type,info} of decodeLighterTransactions(record.requestBody)) {
+     if(type!==14)continue;
+     assert.deepEqual(info.L2TxAttributes,name==='lighter'&&!testnet?{'1':158385,'2':250,'3':0}:undefined);
+    }
+   }
+  }
+ } finally { rmSync(directory,{recursive:true,force:true}); }
 });
