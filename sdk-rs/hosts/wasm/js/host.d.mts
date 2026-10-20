@@ -54,7 +54,7 @@ export interface WasmEngineLike {
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
-  wsMessage(socket: number, text: string, now: number): string;
+  wsMessage(socket: number, text: string, now: number): string | undefined;
   /** Optional fast entry: undefined means no actions; legacy engines remain supported. */
   wsMessageActions?(socket: number, text: string, now: number): string | undefined;
   /** Optional UTF-8 entry; invalid bytes are ignored without changing engine state. */
