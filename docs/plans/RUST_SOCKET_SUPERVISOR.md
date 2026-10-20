@@ -128,6 +128,43 @@ KuCoin and Polymarket retain explicit pong requirements even amid other data.
   public-connect suppression or retained ApeX/GRVT private PnL hooks. Workspace,
   artifact and replay verification is being repeated on this integrated source.
 
+## Integrated gate checkpoint
+
+At Rust source `1d8bffe0d6`, the 12,223,951-byte combined artifact
+(`8f04fde9ee1b389e539511b9df8301ef6344e12eca4e111029cebedd9ed88276`)
+completed 72 replay cases: 29 private and 39 public passed. Four public cases
+failed: frozen/fresh Paradex main CPU, and the same Coinbase spot estimate
+rounding difference through its two aliases. All 17 integrated standalone sizes,
+2,857 workspace native tests, native/WASM strict Clippy, full WASM build and ten
+compiled integration stages passed. Root typecheck/lint/licenses passed; two
+initial parallel test timeouts passed with unchanged deadlines on the serial
+27-task rerun. Both initial failure logs remain evidence.
+
+Paradex profiling measured 19.46 MB of startup REST JSON (9,322 catalog rows,
+mostly options); HTTP chunk scanning dominated cold startup. Constructor cost
+was only 1.529 ms. `500cfabdf7` batches ordinary string spans in `ArraySplitter`
+without changing validation, metadata limits or item bytes. All 23 JSON tests,
+strict engine Clippy and independent review pass. The new 12,228,900-byte
+combined artifact (`d1ae98d3f497152280c15f82307069d04374f0e381085d490a5b565546d8f7d8`)
+passes both previously failing Paradex cases with default three-run medians:
+frozen main CPU TS 421.7 / Rust 352.2 ms; fresh TS 238.4 / Rust 232.9 ms.
+Steady CPU and retained memory pass too. The fresh main-CPU margin is narrow;
+this is a measured pass, not a claim of robust timing headroom. The original
+misses (Rust 406.7 vs TS 401.5 ms, and 271.9 vs 254.3 ms) are preserved.
+
+`79df01a475` applies Sam's production-impact rule to Coinbase's cosmetic spot
+quote-volume estimates. Exact native decimal products are 49234.575 (DEEP) and
+3419.645 (WET); the native advertised estimates match Rust's upper cent, while
+TS's binary-product formatting selects the lower cent. Production mapping stays
+unchanged. A pure assertion proves midpoint neighbors from an unambiguous
+native public spot snapshot without rewriting outputs; all other checks remain
+strict. It rejects private/futures sources, ambiguous provenance, nonmidpoints,
+incorrect identities/prices/volumes and other field differences. Review caught
+an unreachable catalog selector bypass, repaired with a fail-closed selector
+check and regression. The 87 pure tests, 15 CLI tests and six saved-output
+checks pass, with independent passing rereview. Broad checks and the remaining
+replays are being repeated after the shared parser change.
+
 ## Public alias discovery and coverage limitation
 
 On 2026-10-20, Bitget USDC's live contracts/tickers returned 49 native symbols,
