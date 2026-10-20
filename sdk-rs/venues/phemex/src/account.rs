@@ -353,6 +353,13 @@ impl PhemexPerpetuals {
         };
         let symbol = row.symbol.to_ascii_uppercase();
         let Some(market) = cx.store.market(&symbol) else {
+            if row.size != 0.0 {
+                request.invalid = true;
+                cx.log(
+                    LogLevel::Warning,
+                    "Phemex owned position market unavailable; preserving previous snapshot",
+                );
+            }
             return;
         };
         if market.quote != CURRENCIES[request.currency]
@@ -702,6 +709,19 @@ impl PhemexPerpetuals {
         }
         if orders.as_ref().is_some_and(|rows| {
             rows.iter().any(|row| {
+                (row.symbol.ends_with("USDT") || row.symbol.ends_with("USDC"))
+                    && row.status() == Some(OrderStatus::Open)
+                    && cx.store.market(&row.symbol.to_ascii_uppercase()).is_none()
+            })
+        }) {
+            cx.log(
+                LogLevel::Warning,
+                "Phemex working order market unavailable; preserving previous orders",
+            );
+            return true;
+        }
+        if orders.as_ref().is_some_and(|rows| {
+            rows.iter().any(|row| {
                 cx.store.market(&row.symbol.to_ascii_uppercase()).is_some()
                     && !row.unrecognized()
                     && row.orders(cx.now).is_none()
@@ -722,6 +742,10 @@ impl PhemexPerpetuals {
             for row in rows {
                 let symbol = row.symbol.to_ascii_uppercase();
                 let Some(market) = cx.store.market(&symbol) else {
+                    if row.size != 0.0 {
+                        cx.log(LogLevel::Warning, "Phemex owned position market unavailable; preserving previous snapshot");
+                        return true;
+                    }
                     continue;
                 };
                 let Some(currency) = CURRENCIES.iter().position(|c| *c == market.quote) else {

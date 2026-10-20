@@ -1,6 +1,7 @@
 //! Futures account snapshots and the listen-key stream.
 use crate::wire::{Number, Text};
 use crate::{Bitrue, Job, Pending};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
     Balance, CurrencyBalance, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
@@ -19,6 +20,14 @@ const LISTEN_URL: &str = "https://fapiws-auth.bitrue.com/user_stream/api/v1/list
 const PRIVATE_URL: &str = "wss://fapiws.bitrue.com/stream";
 const REFRESH_MS: f64 = 30.0 * 60_000.0;
 const HISTORY_LIMIT: usize = 500;
+/// Delay before re-reading a symbol whose open-order read failed `failures` times in a row.
+const ORDER_RETRY: Backoff = Backoff::new(500.0, 16, 30_000.0);
+
+enum OrderRead {
+    Reconciled,
+    Superseded,
+    Failed(String),
+}
 
 fn matches_lookup(order: &Order, symbol: &str, client_order_id: &str) -> bool {
     !matches!(client_order_id, "" | "0" | "undefined")
@@ -76,6 +85,7 @@ pub struct Snapshot {
     positions: Vec<Position>,
     settings: Vec<(String, MarketSetting)>,
     invalid: bool,
+    valuation_pending: bool,
 }
 #[derive(Default)]
 pub struct Account {
@@ -98,6 +108,7 @@ pub struct Account {
     order_active: Option<String>,
     order_timer: Option<TimerId>,
     initial_orders: HashSet<String>,
+    order_backoff: HashMap<String, OrderBackoff>,
     progress: HashMap<String, OrderProgress>,
     quotes: HashMap<String, (f64, f64)>,
     execution_fills: HashMap<String, f64>,
@@ -107,6 +118,12 @@ pub struct Account {
     progress_queue: VecDeque<String>,
     terminal: HashMap<String, OrderStatus>,
     terminal_queue: VecDeque<String>,
+}
+#[derive(Default)]
+struct OrderBackoff {
+    failures: u32,
+    error: String,
+    retry: Option<TimerId>,
 }
 #[derive(Clone, Copy, Default)]
 struct OrderProgress {
@@ -189,8 +206,8 @@ struct Coin<'a> {
     total_cost: Number,
     #[serde(default)]
     sum_maintenance_margin: Option<Number>,
-    #[serde(default)]
-    sum_open_realized_amount: Number,
+    #[serde(default, rename = "sumOpenRealizedAmount")]
+    _sum_open_realized_amount: Number,
     #[serde(borrow)]
     position_vos: Option<Vec<ContractPositions<'a>>>,
 }
@@ -506,6 +523,15 @@ impl Bitrue {
             symbols
         };
         for symbol in symbols {
+            // An explicit refresh replaces a pending backoff retry; failures keep counting.
+            if let Some(timer) = self
+                .account
+                .order_backoff
+                .get_mut(&symbol)
+                .and_then(|b| b.retry.take())
+            {
+                cx.clear_timer(timer);
+            }
             if cx.store.market(&symbol).is_some()
                 && !self.account.order_queue.contains(&symbol)
                 && self.account.order_active.as_ref() != Some(&symbol)
@@ -538,19 +564,55 @@ impl Bitrue {
             }),
         );
     }
-    fn order_finished(&mut self, cx: &mut Cx<'_, Pending>, symbol: String, success: bool) {
+    fn order_finished(&mut self, cx: &mut Cx<'_, Pending>, symbol: String, read: OrderRead) {
         self.account.order_active = None;
         // Loaded means the initial sweep finished, including visibly failed reads.
-        // A failed symbol retains its snapshot and continues retrying independently.
+        // A failed symbol retains its snapshot and retries on its own backoff.
         self.account.initial_orders.remove(&symbol);
-        if !success && !self.account.order_queue.contains(&symbol) {
-            self.account.order_queue.push_back(symbol);
+        let superseded = matches!(read, OrderRead::Superseded);
+        match read {
+            OrderRead::Reconciled => {
+                if let Some(backoff) = self.account.order_backoff.remove(&symbol) {
+                    cx.log(
+                        LogLevel::Info,
+                        format!(
+                            "Bitrue order read for {symbol} recovered after {} failures",
+                            backoff.failures
+                        ),
+                    );
+                }
+            }
+            OrderRead::Superseded => {
+                if !self.account.order_queue.contains(&symbol) {
+                    self.account.order_queue.push_back(symbol.clone());
+                }
+            }
+            OrderRead::Failed(error) => {
+                let backoff = self
+                    .account
+                    .order_backoff
+                    .entry(symbol.clone())
+                    .or_default();
+                backoff.failures += 1;
+                if backoff.error != error {
+                    cx.log(
+                        LogLevel::Error,
+                        format!("Bitrue order read for {symbol} failed: {error}"),
+                    );
+                    backoff.error = error;
+                }
+                if let Some(timer) = backoff.retry.take() {
+                    cx.clear_timer(timer);
+                }
+                backoff.retry =
+                    Some(cx.set_timer(ORDER_RETRY.delay(backoff.failures.saturating_sub(1))));
+            }
         }
         if self.account.initial_orders.is_empty() {
             cx.store.set_orders(cx.store.orders().to_vec());
         }
-        if !self.account.order_queue.is_empty() {
-            self.account.order_timer = Some(cx.set_timer(if success { 200.0 } else { 500.0 }));
+        if !self.account.order_queue.is_empty() && self.account.order_timer.is_none() {
+            self.account.order_timer = Some(cx.set_timer(if superseded { 500.0 } else { 200.0 }));
         }
     }
 
@@ -707,6 +769,16 @@ impl Bitrue {
         } else if self.account.order_timer == Some(timer) {
             self.account.order_timer = None;
             self.next_orders(cx);
+        } else if let Some(symbol) = self
+            .account
+            .order_backoff
+            .iter()
+            .find_map(|(symbol, b)| (b.retry == Some(timer)).then(|| symbol.clone()))
+        {
+            if let Some(backoff) = self.account.order_backoff.get_mut(&symbol) {
+                backoff.retry = None;
+            }
+            self.refresh_orders(cx, vec![symbol]);
         } else {
             return false;
         }
@@ -1020,7 +1092,7 @@ impl Bitrue {
             return Ok(());
         }
         let groups = coin.position_vos.ok_or(())?;
-        let balance = Balance {
+        let mut balance = Balance {
             total: coin.total_equity.0,
             free: coin.account_normal.0,
             used: (coin.total_equity.0 - coin.account_normal.0)
@@ -1029,15 +1101,19 @@ impl Bitrue {
                 .max(coin.total_cost.0)
                 .max(coin.sum_maintenance_margin.map_or(0.0, |n| n.0))
                 .max(0.0),
-            upnl: coin.sum_open_realized_amount.0,
+            upnl: 0.0,
         };
-        data.balances.insert(coin.margin_coin.to_string(), balance);
+        let first_position = data.positions.len();
         for group in groups {
             if group.contract_name.is_empty() {
                 return Err(());
             }
             let Some(market) = cx.store.market(&group.contract_name) else {
-                continue;
+                // Only owned exposure on an uncatalogued contract blocks the snapshot.
+                if group.positions.iter().all(|row| row.volume.0 == 0.0) {
+                    continue;
+                }
+                return Err(());
             };
             for row in group.positions {
                 let side = match &*row.side {
@@ -1084,14 +1160,34 @@ impl Bitrue {
                     .store
                     .positions()
                     .iter()
-                    .find(|p| p.symbol == market.symbol);
+                    .find(|p| p.symbol == market.symbol && p.side == side);
                 let liquidation = [row.force_liquidation_price, row.reduce_price]
                     .into_iter()
                     .flatten()
                     .map(|n| n.0)
                     .find(|n| *n > 0.0)
                     .unwrap_or_else(|| existing.map_or(0.0, |p| p.liquidation_price));
-                let last = cx.store.ticker(&market.symbol).map_or(0.0, |t| t.last);
+                let unrealized_pnl = cx
+                    .store
+                    .ticker(&market.symbol)
+                    .map(|ticker| ticker.last)
+                    .filter(|last| last.is_finite() && *last > 0.0)
+                    .map(|last| {
+                        (if side == PositionSide::Long {
+                            1.0
+                        } else {
+                            -1.0
+                        }) * (last - row.open_price.0)
+                            * row.volume.0
+                    })
+                    .filter(|value| value.is_finite())
+                    .unwrap_or_else(|| {
+                        data.valuation_pending = true;
+                        existing.map_or(0.0, |p| p.unrealized_pnl)
+                    });
+                if !unrealized_pnl.is_finite() {
+                    return Err(());
+                }
                 data.positions.push(Position {
                     id: market.symbol.clone(),
                     symbol: market.symbol.clone(),
@@ -1101,12 +1197,7 @@ impl Bitrue {
                     leverage,
                     margin_type: Some(margin_type),
                     position_mode: Some(PositionMode::Oneway),
-                    unrealized_pnl: (if side == PositionSide::Long {
-                        1.0
-                    } else {
-                        -1.0
-                    }) * (last - row.open_price.0)
-                        * row.volume.0,
+                    unrealized_pnl,
                     realized_pnl: None,
                     contracts: row.volume.0,
                     liquidation_price: liquidation,
@@ -1115,6 +1206,13 @@ impl Bitrue {
                 });
             }
         }
+        balance.upnl = data.positions[first_position..]
+            .iter()
+            .try_fold(0.0, |sum, p| {
+                let value = sum + p.unrealized_pnl;
+                value.is_finite().then_some(value).ok_or(())
+            })?;
+        data.balances.insert(coin.margin_coin.to_string(), balance);
         Ok(())
     }
     fn map_rest_order(
@@ -1522,6 +1620,12 @@ impl Bitrue {
                     );
                     self.finish_leverage(cx, None, "Malformed Bitrue account snapshot");
                 } else if revision == self.account.settings_revision {
+                    if data.valuation_pending {
+                        cx.log(
+                            LogLevel::Warning,
+                            "Bitrue ticker price unavailable; retaining prior position valuation",
+                        );
+                    }
                     let closed: Vec<String> = cx
                         .store
                         .positions()
@@ -1597,7 +1701,8 @@ impl Bitrue {
                     );
                     return;
                 }
-                let success = schema && !invalid && revision == self.account.orders_revision;
+                let complete = schema && !invalid;
+                let success = complete && revision == self.account.orders_revision;
                 if success {
                     let mut retained = cx
                         .store
@@ -1655,17 +1760,18 @@ impl Bitrue {
                     for order in retained {
                         cx.store.upsert_order(order);
                     }
-                } else {
-                    cx.log(
-                        LogLevel::Warning,
-                        "Bitrue order snapshot incomplete or superseded; retaining previous state",
-                    );
                 }
-                let success = self.trade_census(cx, &symbol, revision, success);
-                if success {
+                let read = if self.trade_census(cx, &symbol, revision, success) {
                     cx.orders_reconciled(Some(&symbol));
-                }
-                self.order_finished(cx, symbol, success);
+                    OrderRead::Reconciled
+                } else if complete {
+                    OrderRead::Superseded
+                } else {
+                    OrderRead::Failed(
+                        "incomplete open-order snapshot; retaining previous state".into(),
+                    )
+                };
+                self.order_finished(cx, symbol, read);
             }
         }
     }
@@ -1708,18 +1814,23 @@ impl Bitrue {
                 lookup,
                 ..
             } => {
-                let message = format!("Bitrue order read failed: {error}");
+                let message = format!("Bitrue order read for {symbol} failed: {error}");
                 if let Some((command, client_order_id)) = lookup {
                     cx.command_error(command, message);
                     Self::finish_lookup(cx, command, &symbol, &client_order_id, None);
                 } else {
-                    // A census owned by a placement fails that command, which reports it.
-                    match self.census_owner(&symbol, revision) {
-                        Some(command) => cx.command_error(command, message),
-                        None => cx.log(LogLevel::Error, message),
+                    // A census owned by a placement fails that command, which reports it;
+                    // otherwise order_finished logs the failure once per change.
+                    if let Some(command) = self.census_owner(&symbol, revision) {
+                        cx.command_error(command, message);
+                        self.account
+                            .order_backoff
+                            .entry(symbol.clone())
+                            .or_default()
+                            .error = error.to_owned();
                     }
                     self.trade_census(cx, &symbol, revision, false);
-                    self.order_finished(cx, symbol, false);
+                    self.order_finished(cx, symbol, OrderRead::Failed(error.to_owned()));
                 }
             }
             _ => {}

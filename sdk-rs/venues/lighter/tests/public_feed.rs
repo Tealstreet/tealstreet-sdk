@@ -136,7 +136,7 @@ fn shared_current_reference_matches_direct_position_pnl_without_replacing_privat
 }
 
 #[test]
-fn shared_prices_and_position_pnl_survive_native_rest_seeds_and_private_reconciliation() {
+fn shared_price_estimates_and_native_account_pnl_keep_their_authority_after_reconciliation() {
     let mut rig = Rig::new(PublicFeedPolicy::Shared);
     rig.shared_quote(120., 120., 120.);
     let reads = rig.reads.len();
@@ -154,8 +154,11 @@ fn shared_prices_and_position_pnl_survive_native_rest_seeds_and_private_reconcil
     let ticker = rig.engine.store().ticker("ETH").unwrap();
     assert_eq!((ticker.last, ticker.mark, ticker.index), (120., 120., 120.));
     assert_eq!(rig.engine.store().positions()[0].unrealized_pnl, 40.);
-    assert_eq!(rig.engine.store().balance().upnl, 40.);
-    assert_eq!(rig.engine.store().balance().total, 960.);
+    // The authenticated ACCOUNT reports PnL0/equity1000; shared quotes
+    // estimate displayed position PnL without rewriting native wallet principal.
+    assert_eq!(rig.engine.store().balance().upnl, 0.);
+    assert_eq!(rig.engine.store().balance().total, 1000.);
+    assert_eq!(rig.engine.store().balance().free, 900.);
     // Cumulative shared snapshots use normalized current mark, then last.
     // Index is already folded into mark by the direct ticker mapper when absent.
     rig.shared_quote(125., 130., 128.);
@@ -246,8 +249,10 @@ fn robinhood_non_direct_modes_keep_own_deployment_metadata_private_state_and_sha
                 let ticker = rig.engine.store().ticker("ETH").unwrap();
                 assert_eq!((ticker.last, ticker.mark, ticker.index), (120., 120., 120.));
                 assert_eq!(rig.engine.store().positions()[0].unrealized_pnl, 40.);
-                assert_eq!(rig.engine.store().balance().upnl, 40.);
-                assert_eq!(rig.engine.store().balance().total, 960.);
+                // Native account equity/PnL remains the balance authority.
+                assert_eq!(rig.engine.store().balance().upnl, 0.);
+                assert_eq!(rig.engine.store().balance().total, 1000.);
+                assert_eq!(rig.engine.store().balance().free, 900.);
                 assert_eq!(rig.engine.store().markets(), metadata);
                 assert_eq!(
                     rig.sockets,

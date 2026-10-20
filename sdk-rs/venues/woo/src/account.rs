@@ -23,6 +23,7 @@ pub enum Request {
         revision: u64,
         rows: Vec<Position>,
         skipped: Skipped,
+        bad: bool,
     },
     Orders {
         generation: u64,
@@ -31,6 +32,7 @@ pub enum Request {
         rows: Vec<Order>,
         classifications: Vec<(String, bool)>,
         skipped: Skipped,
+        bad: bool,
     },
     Leverage {
         symbol: String,
@@ -51,6 +53,12 @@ impl Skipped {
             Some(_) => (),
             None => self.anonymous += 1,
         }
+    }
+    pub(crate) fn ids(&self) -> &[String] {
+        &self.ids
+    }
+    pub(crate) fn anonymous(&self) -> bool {
+        self.anonymous > 0
     }
     pub(crate) fn summary(&self, kind: &str) -> Option<String> {
         (!self.ids.is_empty() || self.anonymous > 0).then(|| {
@@ -182,6 +190,9 @@ struct PositionRow<'a> {
     holding: f64,
     #[serde(deserialize_with = "number")]
     average_open_price: f64,
+    // GET /v3/positions: https://docs.woox.io/#get-all-position-info-new
+    #[serde(default, deserialize_with = "optional_number")]
+    mark_price: Option<f64>,
     #[serde(deserialize_with = "number")]
     leverage: f64,
     #[serde(default, deserialize_with = "number")]
@@ -405,6 +416,11 @@ impl Woo {
             }
         }
     }
+    /// Whether exposure on an unlisted native symbol could belong to a skipped catalogue row.
+    fn catalogue_may_list(&self, native: &str) -> bool {
+        native.starts_with("PERP_")
+            && (self.skipped_anonymous || self.skipped_markets.contains(native))
+    }
     // Exposure the store cannot show must be visible once, not every poll.
     fn account_hidden(&mut self, cx: &mut Cx<'_, Pending>, kind: &str, symbol: &str) {
         if self.account.hidden.insert(format!("{kind}:{symbol}")) {
@@ -555,6 +571,7 @@ impl Woo {
             revision: self.account.revision,
             rows: vec![],
             skipped: Skipped::default(),
+            bad: false,
         };
         match self.signed(
             cx,
@@ -590,6 +607,7 @@ impl Woo {
             rows: vec![],
             classifications: vec![],
             skipped: Skipped::default(),
+            bad: false,
         };
         match self.signed(
             cx,
@@ -636,7 +654,7 @@ impl Woo {
         self.account_orders_page(cx, generation, true, 1);
     }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
-        if cx.now < self.account.pause_until {
+        if !self.account.started || cx.now < self.account.pause_until {
             return;
         }
         self.account_info_read(cx);
@@ -886,13 +904,21 @@ impl Woo {
     }
     pub(crate) fn account_item(&mut self, cx: &mut Cx<'_, Pending>, req: &mut Request, item: &str) {
         match req {
-            Request::Positions { rows, skipped, .. } => {
+            Request::Positions {
+                rows, skipped, bad, ..
+            } => {
                 let Ok(r) = serde_json::from_str::<PositionRow<'_>>(item) else {
                     match serde_json::from_str::<RowIds<'_>>(item) {
                         Ok(ids) if !ids.symbol.is_empty() => {
                             let symbol = compact(&ids.symbol);
                             let holding = ids.holding.as_ref().and_then(Lenient::number);
-                            if cx.store.market(&symbol).is_none() || holding == Some(0.0) {
+                            if holding == Some(0.0) {
+                                return;
+                            }
+                            if cx.store.market(&symbol).is_none() {
+                                if self.catalogue_may_list(&ids.symbol) {
+                                    *bad = true;
+                                }
                                 return;
                             }
                             // An unreadable side keeps every stored leg of the symbol.
@@ -911,7 +937,14 @@ impl Woo {
                     return;
                 }
                 if cx.store.market(&symbol).is_none() {
-                    if r.symbol.starts_with("PERP_") {
+                    // Only exposure that may sit on a skipped catalogue row is ambiguous.
+                    if self.catalogue_may_list(&r.symbol) {
+                        *bad = true;
+                        cx.log(
+                            LogLevel::Warning,
+                            "WOO owned position market unavailable; preserving previous snapshot",
+                        );
+                    } else if r.symbol.starts_with("PERP_") {
                         self.account_hidden(cx, "position", &r.symbol);
                     }
                     return;
@@ -922,8 +955,18 @@ impl Woo {
                     skipped.add(Some(&position_id(&symbol, side, hedged)));
                     return;
                 }
-                let Some(ticker) = cx.store.ticker(&symbol) else {
-                    self.account_hidden(cx, "position", &symbol);
+                // The private response publishes its own mark. Public startup may
+                // still be retrying, so no entry-price or zero-price valuation.
+                let mark = r.mark_price.filter(|price| *price > 0.0).or_else(|| {
+                    cx.store.ticker(&symbol).and_then(|ticker| {
+                        [ticker.mark, ticker.last]
+                            .into_iter()
+                            .find(|price| price.is_finite() && *price > 0.0)
+                    })
+                });
+                let Some(mark) = mark else {
+                    *bad = true;
+                    cx.log(LogLevel::Error, "WOO position mark unavailable; preserving previous positions and valuation");
                     return;
                 };
                 let contracts = r.holding.abs();
@@ -932,7 +975,7 @@ impl Woo {
                     symbol,
                     side,
                     entry_price: r.average_open_price,
-                    notional: contracts * ticker.mark,
+                    notional: contracts * mark,
                     leverage: r.leverage,
                     margin_type: Some(if r.margin_mode == "CROSS" {
                         MarginType::Cross
@@ -944,7 +987,7 @@ impl Woo {
                     } else {
                         PositionMode::Oneway
                     }),
-                    unrealized_pnl: rounded((ticker.mark - r.average_open_price) * r.holding),
+                    unrealized_pnl: rounded((mark - r.average_open_price) * r.holding),
                     realized_pnl: None,
                     contracts,
                     liquidation_price: r.est_liq_price,
@@ -956,6 +999,7 @@ impl Woo {
                 rows,
                 classifications,
                 skipped,
+                bad,
                 algo,
                 ..
             } => {
@@ -986,12 +1030,33 @@ impl Woo {
                         compact(&leaf.symbol)
                     };
                     if cx.store.market(&symbol).is_none() {
+                        let supported = !*algo
+                            || matches!(
+                                leaf.algo_type.as_ref(),
+                                "STOP" | "STOP_LOSS" | "TAKE_PROFIT" | "TRAILING_STOP"
+                            );
+                        let terminal = terminal(if *algo {
+                            &leaf.algo_status
+                        } else {
+                            &leaf.status
+                        })
+                        .is_some();
                         let raw = if leaf.symbol.is_empty() {
                             parent.map_or("", |p| &p.symbol)
                         } else {
                             &leaf.symbol
                         };
-                        if raw.starts_with("PERP_") {
+                        if raw.starts_with("PERP_")
+                            && supported
+                            && !terminal
+                            && self.catalogue_may_list(raw)
+                        {
+                            *bad = true;
+                            cx.log(
+                                LogLevel::Warning,
+                                "WOO working order market unavailable; preserving previous orders",
+                            );
+                        } else if raw.starts_with("PERP_") {
                             self.account_hidden(cx, "order", raw);
                         }
                         continue;
@@ -1130,9 +1195,14 @@ impl Woo {
                 revision,
                 mut rows,
                 skipped,
+                bad,
             } => {
                 self.account.positions_pending = false;
                 self.account_skipped(cx, "positions", &skipped);
+                if bad {
+                    cx.log(LogLevel::Error, "Invalid WOO positions page");
+                    return;
+                }
                 // A fill after this read began takes precedence, including fills on newly-opened symbols.
                 if self
                     .account
@@ -1231,6 +1301,7 @@ impl Woo {
                 rows,
                 classifications,
                 skipped,
+                bad,
             } => {
                 if self
                     .account
@@ -1238,6 +1309,11 @@ impl Woo {
                     .as_ref()
                     .is_none_or(|j| j.generation != generation)
                 {
+                    return;
+                }
+                if bad {
+                    self.account.orders = None;
+                    cx.log(LogLevel::Error, "Invalid WOO open-order page");
                     return;
                 }
                 self.account_skipped(

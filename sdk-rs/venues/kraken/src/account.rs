@@ -851,6 +851,8 @@ impl Kraken {
                             } else {
                                 valid = false;
                             }
+                        } else if r.symbol.starts_with("PF_") {
+                            valid = false;
                         }
                     });
                     if result.is_ok() && valid {
@@ -865,6 +867,12 @@ impl Kraken {
                             self.account.orders_revision += 1;
                             self.account_commit_orders(cx, orders, true);
                         }
+                    } else {
+                        cx.log(
+                            LogLevel::Warning,
+                            "Kraken order snapshot contains an unmappable or invalid row",
+                        );
+                        self.account_schedule_heal(cx);
                     }
                 } else if let Some(raw) = msg.order
                     && let Ok(row) = serde_json::from_str::<OrderWire<'_>>(raw.get())
@@ -900,6 +908,8 @@ impl Kraken {
                             } else {
                                 valid = false;
                             }
+                        } else if r.symbol.starts_with("PF_") && r.balance.or(r.size) != Some(0.0) {
+                            valid = false;
                         }
                     });
                     if result.is_ok() && valid {
@@ -920,6 +930,12 @@ impl Kraken {
                         }
                         self.account.snapshot_positions_seen = true;
                         self.account_commit_positions(cx, positions);
+                    } else {
+                        cx.log(
+                            LogLevel::Warning,
+                            "Kraken position snapshot contains an unmappable or invalid row",
+                        );
+                        self.account_schedule_heal(cx);
                     }
                 }
             }
@@ -1162,6 +1178,8 @@ impl Kraken {
                         } else {
                             request.valid = false;
                         }
+                    } else if row.symbol.starts_with("PF_") {
+                        request.valid = false;
                     }
                 }
                 Err(_) => request.valid = false,
@@ -1176,6 +1194,9 @@ impl Kraken {
                         } else {
                             request.valid = false;
                         }
+                    } else if row.symbol.starts_with("PF_") && row.balance.or(row.size) != Some(0.0)
+                    {
+                        request.valid = false;
                     }
                 }
                 Err(_) => request.valid = false,
