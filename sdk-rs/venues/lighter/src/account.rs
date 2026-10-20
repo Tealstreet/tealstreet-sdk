@@ -16,6 +16,9 @@ pub struct Lookup {
     address: bool,
 }
 pub enum Request {
+    Limits {
+        started_at: f64,
+    },
     Lookup {
         candidates: VecDeque<Lookup>,
         index: Option<u64>,
@@ -828,6 +831,7 @@ impl Lighter {
             self.account.sync = Some(cx.set_timer(2_000.0));
             self.refresh_account(cx);
             self.refresh_orders(cx);
+            self.refresh_limits(cx);
             return true;
         }
         if self.account.heal == Some(timer) {
@@ -1249,6 +1253,7 @@ impl Lighter {
         item: &str,
     ) {
         match request {
+            Request::Limits { .. } => {}
             Request::Lookup { index: found, .. } => {
                 if found.is_none()
                     && let Ok(wire) = serde_json::from_str::<AccountWire<'_>>(item)
@@ -1435,6 +1440,7 @@ impl Lighter {
             && (status.as_ref().is_some_and(Status::valid)
                 || response.body.trim_start().starts_with('['));
         match request {
+            Request::Limits { started_at } => self.limits_response(cx, started_at, response),
             Request::Lookup {
                 candidates,
                 index: found,
@@ -1589,6 +1595,7 @@ impl Lighter {
         error: &str,
     ) {
         match request {
+            Request::Limits { started_at } => self.limits_failed(cx, started_at),
             Request::Lookup { candidates, .. } => self.next_lookup(cx, candidates),
             Request::Snapshot { .. } => {
                 self.account.snapshot_inflight = false;

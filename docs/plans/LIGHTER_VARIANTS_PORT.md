@@ -104,3 +104,20 @@ in force, and venue code emits only the deployment's real REST/socket URLs.
   retain the cached tier; unsigned accounts never send the request. Independent
   review found malformed nested payloads could mask a root Standard tier; add
   lazy nested decoding and a regression before final gates.
+
+## Account-tier gate correction
+
+Implemented the missing periodic read using one typed venue-owned limits cache.
+Polling and builder eligibility coalesce the same authenticated request; success
+expires after five minutes and failure after one minute, measured from request
+start as TS does. Failed reads retain the last tier. Awaiting placements resume
+once on response/failure, and Standard continues to block attributed writes.
+Removed the replaced trading-only endpoint/type/handler.
+
+Independent review found eager nested decoding could preserve cached Premium
+when a fresh root Standard payload had irrelevant malformed children. Decode
+root status separately and nested tier fields lazily in TS precedence order.
+Regression coverage warms Premium and proves fresh Standard blocks every write.
+Final independent re-review PASS. Native suite now 100 PASS, including five new
+limits tests for all deployments, auth absence, coalescing, expiry, failure and
+trading coordination. Crate Clippy/fmt/bans PASS; combined WASM checks continuing.

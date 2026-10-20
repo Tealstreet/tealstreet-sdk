@@ -1,6 +1,7 @@
 //! Lighter perpetuals: deterministic public streams and engine-owned recovery.
 mod account;
 mod history;
+mod limits;
 pub mod sign;
 mod trading;
 mod wire;
@@ -117,6 +118,7 @@ pub struct Lighter {
     options: Options,
     account: account::Account,
     trading: trading::Trading,
+    limits: limits::Limits,
     metadata: HashMap<String, MarketMeta>,
     symbols: HashMap<String, String>,
     public: Connection,
@@ -151,6 +153,7 @@ impl Lighter {
             options,
             account: account::Account::default(),
             trading: trading::Trading::default(),
+            limits: limits::Limits::default(),
             metadata: HashMap::new(),
             symbols: HashMap::new(),
             public: Connection::default(),
