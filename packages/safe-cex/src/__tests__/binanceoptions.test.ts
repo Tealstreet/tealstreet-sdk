@@ -434,6 +434,15 @@ describe('BinanceOptionsExchange requests', () => {
     expect(store.orders[0].status).toBe(OrderStatus.Canceled);
   });
 
+  it('refuses an amend it cannot place before cancelling anything', async () => {
+    const { exchange, store, calls } = create();
+    const order = mapBinanceOptionOrder(OPEN_ORDER, 1);
+    store.update({ orders: [order] });
+    await expect(exchange.updateOrder({ order, update: { amount: 250 } })).rejects.toThrow(/above the 200 maximum/);
+    expect(calls).toEqual([]);
+    expect(store.orders[0].status).not.toBe(OrderStatus.Canceled);
+  });
+
   it('cancels a symbol through /eapi/v1/allOpenOrders', async () => {
     const { exchange, calls } = create();
     await exchange.cancelSymbolOrders(BTC);
@@ -452,6 +461,17 @@ describe('BinanceOptionsExchange requests', () => {
     const positions = await exchange.fetchPositions();
     expect(positions.map((p) => p.symbol)).toEqual([BTC]);
     expect(positions[0].option?.greeks?.delta).toBeCloseTo(-0.044767474, 12);
+  });
+
+  it('asks for at most the 1000 candles Binance returns, ending at the requested time', async () => {
+    const { exchange } = create();
+    const to = 1762779600000;
+    (exchange.xhr.get as any).mockResolvedValueOnce({ data: [KLINE] });
+    await exchange.fetchOHLCV({ symbol: BTC, interval: '1m', limit: 1500, to } as any);
+    expect((exchange.xhr.get as any).mock.calls.at(-1)).toEqual([
+      ENDPOINTS.KLINE,
+      { params: { symbol: BTC, interval: '1m', startTime: to - 1000 * 60_000, endTime: to, limit: 1000 } },
+    ]);
   });
 
   it('asks for order history and fills by symbol, and refuses without one', async () => {

@@ -205,7 +205,7 @@ export class BinanceOptionsExchange extends BaseExchange {
   };
 
   fetchOHLCV = async (opts: OHLCVOptions): Promise<Candle[]> => {
-    const limit = Math.min(opts.limit || 500, 1500);
+    const limit = Math.min(opts.limit || 500, 1000);
     const [, amount, unit] = opts.interval.split(/(\d+)/);
     const end = opts.to ? dayjs(opts.to) : dayjs();
     const start =
@@ -300,10 +300,12 @@ export class BinanceOptionsExchange extends BaseExchange {
     );
   };
 
-  /** Binance has no option amend: cancel, then place the rest with a new generated client ID. */
+  /**
+   * Binance has no option amend: check the replacement, cancel, then place it with a new
+   * generated client ID. The check runs first so a refused amend leaves the order open.
+   */
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
-    await this.cancelOrders([order]);
-    return await this.placeOrder({
+    const replacement: PlaceOrderOpts = {
       symbol: order.symbol,
       type: OrderType.Limit,
       side: order.side,
@@ -311,6 +313,9 @@ export class BinanceOptionsExchange extends BaseExchange {
       amount: 'amount' in update ? update.amount : order.remaining || order.amount,
       reduceOnly: order.reduceOnly,
       timeInForce: order.timeInForce,
-    });
+    };
+    this.assertOptionOrderPlaceable(replacement);
+    await this.cancelOrders([order]);
+    return [await this.sendOrder(replacement, undefined)];
   };
 }
