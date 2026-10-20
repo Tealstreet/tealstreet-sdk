@@ -129,3 +129,17 @@ that its sparse arrivals offer less batching opportunity. Overall profiled
 main CPU is 210.227/234.521/171.376 ms respectively. Preserve the earlier valid
 negative profiles; no speedup is established by these three observations.
 The 25 independent public gates and fixed 250 paired comparisons are next.
+
+The official sequence stopped on a valid Bitrue performance failure. The
+first 11 gates pass; Bitrue's output matches with two books and memory 1.53x,
+but main CPU is 0.99x and steady CPU 0.93x. All six raw metric samples, exact
+output hashes, commands and logs are preserved in `RUST_PERF_FIRST25.json.gz`.
+Zero comparison pairs ran. This cohort is aborted, not a successful before/
+after comparison. The earlier negative observations remain unchanged.
+
+Next source phase: review Bitrue's venue-level size optimization and singleton
+bridge costs, then test a focused, evidence-backed correction. Merge the latest
+landing structure and new venues before the next complete source freeze. The
+separately built 24-family aggregate remains an unused preparation checkpoint;
+do not relabel it as the control for a later landing commit. New gates and
+comparisons require a new documented checkpoint and exclusive output paths.
