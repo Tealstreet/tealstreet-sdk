@@ -54,7 +54,11 @@ function nativeInput(publicOnly = false) {
     onMessage(text: string): void;
   }> = [];
   const requests: string[] = [];
-  const sent: Array<{ channel?: string; packet: { type: string; channel: string; product_ids?: string[] } }> = [];
+  const sent: Array<{
+    channel?: string;
+    packet: { type: string; channel: string; product_ids?: string[] };
+    verifiedSubscribe: boolean;
+  }> = [];
   const failures: string[] = [];
   let replacementPrice: number | undefined;
   const transport: Transport = {
@@ -77,7 +81,10 @@ function nativeInput(publicOnly = false) {
       }, 0);
       return {
         send(text) {
-          sent.push({ channel: socket.channel, packet: JSON.parse(text) });
+          const packet = JSON.parse(text);
+          // Verify at the transport boundary with the oracle's fresh clock.
+          // Later worker startup must not age a valid JWT past its strict 5s check.
+          sent.push({ channel: socket.channel, packet, verifiedSubscribe: verifyCoinbaseSubscribe(packet) });
         },
         close() {
           socket.closed = true;
@@ -198,7 +205,7 @@ describe('native public-feed ownership through real private workers', () => {
     expect(account.store.balance.total).toBe(0);
     expect(account.store.balance.currencies?.BTC).toMatchObject({ total: 1.5, free: 1 });
     expect(input.requests.some((request) => request.includes('/products'))).toBe(true);
-    expect(verifyCoinbaseSubscribe(input.sent.find(({ packet }) => packet.channel === 'user')!.packet)).toBe(true);
+    expect(input.sent.find(({ packet }) => packet.channel === 'user')!.verifiedSubscribe).toBe(true);
     expect(input.failures).toEqual([]);
   }, 15_000);
 
@@ -276,7 +283,7 @@ describe('native public-feed ownership through real private workers', () => {
     });
     for (const [index, { worker, input, frames }] of workers.entries()) {
       expect(input.sockets.map((socket) => socket.channel)).toEqual(['private']);
-      expect(verifyCoinbaseSubscribe(input.sent.find(({ packet }) => packet.channel === 'user')!.packet)).toBe(true);
+      expect(input.sent.find(({ packet }) => packet.channel === 'user')!.verifiedSubscribe).toBe(true);
       expect(input.failures).toEqual([]);
       expect({
         balance: worker.store.balance,
