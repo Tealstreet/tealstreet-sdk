@@ -78,7 +78,8 @@ export const positionEnums = (word) => ({
   positionMode: POSITION_MODE[(word >>> 16) & 0xff],
 });
 
-let utf8;
+// Native registries may import before their host supplies text codecs.
+let utf8 = typeof TextDecoder === 'function' ? new TextDecoder() : undefined;
 const align8 = (n) => (n + 7) & ~7;
 
 class Strings {
