@@ -266,3 +266,27 @@ Reference-only TS for deleted families is inspected in
   tree, followed by canonical replays and all 30 size gates. The controlled
   combined Bitget comparison now uses the new landing base `9c34020741` and
   the integrated branch, with identical fixture, toolchain and release flags.
+
+### Controlled combined-binary result
+
+- Both probes pass at the integrated source, with identical 39,457 frames,
+  846 markets, 846 tickers and two books. Base `9c34020741`: TS/Rust main CPU
+  1,600.6/1,182.3 ms, steady CPU 1,081.8/889.7 ms, retained 21.1/5.4 MB.
+  Branch runtime source `4677fc0ba7`: main 717.1/642.6 ms, steady 450.8/430.5 ms,
+  retained 21.1/5.4 MB. Both gate exits are zero.
+- Identical profiles, features, dependencies, compiler flags, bindgen version,
+  committed fixture and TS runtime were independently checked. A duplicate
+  nested Cargo-config flag was caught and corrected before any measurement;
+  both measured builds use one 128 KiB stack flag pair. Ignored Node bindings
+  were swapped between fresh gate processes and branch bindings restored.
+- Base WASM SHA-256:
+  `c37653c0112ec94c9e0595d1fe3a6b41ba246bd290afece4d92e3076fb4ff5d7`.
+  Branch WASM SHA-256:
+  `79887e093dbb2037161900c53c9c15a73c9754db0b3e394eaa36f2dd518f6a27`.
+- Independent interpretation review PASS. The earlier combined failure above
+  remains recorded. Large TS timing drift prevents causal or zero-regression
+  claims; no existing baseline CPU failure is claimed. The integrated branch's
+  measured combined probe passes. No threshold or normalization changed.
+- Later landing documentation (`702a62050c`) merged as `8946d40386`; runtime
+  sources and this comparison are unchanged. Refreshed compiled suites,
+  canonical replays and all 30 sizes are still running before PR creation.
