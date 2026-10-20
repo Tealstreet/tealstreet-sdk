@@ -1,6 +1,6 @@
 {
   "binance": 817152,
-  "bybit": 796672,
+  "bybit": 979968,
   "okx": 782336,
   "cryptocom": 686080,
   "weex": 884736,
@@ -12,5 +12,6 @@
   "hyperliquid": 1043456,
   "bitrue": 761856,
   "lighter": 1021952,
-  "woo": 889856
+  "woo": 889856,
+  "orderly": 843776
 }

@@ -810,3 +810,14 @@ SHA256 2d388bdd68c187aae86931971dbbb1d983a4af53ee551620d42962b71c13941f;
 238originalRustfiles and17protectedhost/buildpaths verify byte-exact. Shared
 helpers/TS/dependencies/19fixtures are pinned consistently; production15
 family build and allworkspace checks still pending before sampling.
+
+
+Fifteen-family release phase verified at ecca: all15builds complete304.71s;
+all30web/Node caps pass,100host tests and78SDKWASM tests pass. Independent
+review rehashes242Rust/config/buildinputs and135production artifacts without
+drift. Bybit951415bytes exceeds its old796672cap afternewvariants; newcap
+ceil(actual*1.03/1024)*1024=979968. NewOrderly818283→843776. Theother13caps
+stayfixed; allbinaries andcaps<1MiB. EveryBybitalias shares onefamilymodule,
+whileconstructor retains actualvariant and validatedHyroendpoints. Bitget
+classic/UTA parity4checks pass. All36privatecorrectness gates and fullRust
+workspace checks are running; optionaltimings and19publiccohort stillpending.
