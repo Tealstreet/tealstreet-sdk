@@ -5,7 +5,7 @@ set -euo pipefail
 build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown)
 if [[ $# -gt 0 ]]; then
   if [[ $# -ne 2 || $1 != --venue ]]; then
-    echo "Usage: $0 [--venue breakoutprop|asterdex|binance|kucoin|bybit|hyperliquid|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|lighter-robinhood|apexomni|kraken|orderly|paradex|coinbase|polymarket]" >&2
+    echo "Usage: $0 [--venue breakoutprop|asterdex|binance|kucoin|bybit|hyperliquid|hyperliquidspot|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|lighter-robinhood|apexomni|kraken|krakenspot|orderly|paradex|coinbase|polymarket]" >&2
     exit 2
   fi
   case "$2" in
@@ -13,9 +13,11 @@ if [[ $# -gt 0 ]]; then
     # Compact this solo bundle's shared-feed dispatch; keep engine hot loops at O3.
     paradex) build_args+=(--no-default-features --features paradex --config 'profile.release.package.safe-cex-wasm.opt-level="z"') ;;
     lighter-robinhood) build_args+=(--no-default-features --features lighter) ;;
+    hyperliquidspot) build_args+=(--no-default-features --features hyperliquid) ;;
+    krakenspot) build_args+=(--no-default-features --features kraken) ;;
     coinbase|coinbasespot) build_args+=(--no-default-features --features coinbase) ;;
     orderly|tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) build_args+=(--no-default-features --features orderly) ;;
-    *) echo "Unsupported venue: $2 (expected breakoutprop, asterdex, binance, kucoin, bybit, hyperliquid, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, phemex, woo, lighter, lighter-robinhood, apexomni, kraken, paradex, coinbase, orderly or polymarket)" >&2; exit 2 ;;
+    *) echo "Unsupported venue: $2 (expected breakoutprop, asterdex, binance, kucoin, bybit, hyperliquid, hyperliquidspot, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, phemex, woo, lighter, lighter-robinhood, apexomni, kraken, krakenspot, paradex, coinbase, orderly or polymarket)" >&2; exit 2 ;;
   esac
 fi
 cd "$(dirname "$0")/.."

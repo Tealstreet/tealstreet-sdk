@@ -13,6 +13,9 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
   private orderBookHandlers: { [symbol: string]: Array<(o: OrderBook) => void> } = {};
   private orderBookCache: { [symbol: string]: { bids: Map<number, number>; asks: Map<number, number> } } = {};
 
+  private wireSymbol = (symbol: string) => this.store.marketsBySymbol[symbol]?.id ?? symbol;
+  private sdkSymbol = (symbol: string) => this.store.marketsById[symbol]?.symbol ?? symbol;
+
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       const url = BASE_WS_URL.public.livenet;
@@ -38,9 +41,9 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
 
   onOpen = () => {
     if (!this.isDisposed) {
-      // Subscribe to tickers for all markets using WS v2 format
-      // Kraken Spot WS v2 uses wsname symbols like "BTC/USD"
-      const symbols = this.parent.store.markets.map((m) => m.symbol);
+      // REST wsname retains XBT; v2 uses normalized asset names such as BTC.
+      this.orderBookCache = {};
+      const symbols = this.parent.store.markets.map((m) => this.wireSymbol(m.symbol));
 
       // Batch in groups of 50
       for (let i = 0; i < symbols.length; i += 50) {
@@ -65,7 +68,7 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
               method: 'subscribe',
               params: {
                 channel: 'book',
-                symbol: [symbol],
+                symbol: [this.wireSymbol(symbol)],
                 depth: 100,
               },
             }),
@@ -83,7 +86,7 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
               method: 'subscribe',
               params: {
                 channel: 'ohlc',
-                symbol: [symbol],
+                symbol: [this.wireSymbol(symbol)],
                 interval: interval,
               },
             }),
@@ -149,7 +152,7 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
     if (!Array.isArray(items)) return;
 
     for (const item of items) {
-      const symbol = item.symbol;
+      const symbol = this.sdkSymbol(item.symbol);
       if (!symbol) continue;
 
       const ticker = this.parent.store.tickersBySymbol[symbol];
@@ -185,7 +188,7 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
     if (!Array.isArray(items)) return;
 
     for (const item of items) {
-      const symbol = item.symbol;
+      const symbol = this.sdkSymbol(item.symbol);
       if (!symbol) continue;
 
       if (msg.type === 'snapshot') {
@@ -269,15 +272,13 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
     const cache = this.orderBookCache[symbol];
     if (!cache) return;
 
-    const bids: OrderBook['bids'] = Array.from(cache.bids.entries())
-      .sort((a, b) => b[0] - a[0])
-      .slice(0, 100)
-      .map(([price, amount]) => ({ price, amount, total: 0 }));
-
-    const asks: OrderBook['asks'] = Array.from(cache.asks.entries())
-      .sort((a, b) => a[0] - b[0])
-      .slice(0, 100)
-      .map(([price, amount]) => ({ price, amount, total: 0 }));
+    // Kraken omits deletions for levels that fall outside subscribed depth.
+    const bidsSorted = [...cache.bids].sort((a, b) => b[0] - a[0]);
+    const asksSorted = [...cache.asks].sort((a, b) => a[0] - b[0]);
+    for (const [price] of bidsSorted.slice(100)) cache.bids.delete(price);
+    for (const [price] of asksSorted.slice(100)) cache.asks.delete(price);
+    const bids: OrderBook['bids'] = bidsSorted.slice(0, 100).map(([price, amount]) => ({ price, amount, total: 0 }));
+    const asks: OrderBook['asks'] = asksSorted.slice(0, 100).map(([price, amount]) => ({ price, amount, total: 0 }));
 
     handlers.forEach((cb) => cb({ bids, asks }));
   };
@@ -295,7 +296,7 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
           method: 'subscribe',
           params: {
             channel: 'ohlc',
-            symbol: [opts.symbol],
+            symbol: [this.wireSymbol(opts.symbol)],
             interval: interval,
           },
         }),
@@ -312,7 +313,7 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
             method: 'unsubscribe',
             params: {
               channel: 'ohlc',
-              symbol: [opts.symbol],
+              symbol: [this.wireSymbol(opts.symbol)],
               interval: interval,
             },
           }),
@@ -327,7 +328,7 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
     if (!Array.isArray(items)) return;
 
     for (const item of items) {
-      const symbol = item.symbol;
+      const symbol = this.sdkSymbol(item.symbol);
       const interval = item.interval;
       if (!symbol || !interval) continue;
 
@@ -385,7 +386,7 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
           method: 'subscribe',
           params: {
             channel: 'book',
-            symbol: [symbol],
+            symbol: [this.wireSymbol(symbol)],
             depth: 100,
           },
         }),
@@ -398,7 +399,7 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
               method: 'subscribe',
               params: {
                 channel: 'book',
-                symbol: [symbol],
+                symbol: [this.wireSymbol(symbol)],
                 depth: 100,
               },
             }),
@@ -420,7 +421,7 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
             method: 'unsubscribe',
             params: {
               channel: 'book',
-              symbol: [symbol],
+              symbol: [this.wireSymbol(symbol)],
               depth: 100,
             },
           }),

@@ -137,6 +137,37 @@ struct Oid {
 }
 impl Hyperliquid {
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if self.spot {
+            match &command {
+                Command::SetLeverage {
+                    command, leverage, ..
+                } => {
+                    cx.done(
+                        *command,
+                        if *leverage == 1.0 {
+                            Ok("[]".into())
+                        } else {
+                            Err("Hyperliquid spot supports 1x leverage only".into())
+                        },
+                    );
+                    return;
+                }
+                Command::SetMarginType {
+                    command, isolated, ..
+                } => {
+                    cx.done(
+                        *command,
+                        if !isolated {
+                            Ok("[]".into())
+                        } else {
+                            Err("Hyperliquid spot supports cross margin only".into())
+                        },
+                    );
+                    return;
+                }
+                _ => {}
+            }
+        }
         let mut replacement = None;
         let mut amend_source = None;
         let (command, steps) = match command {
@@ -336,6 +367,9 @@ impl Hyperliquid {
                     );
                 }
             }
+            if self.spot && !matches!(o.kind, OrderType::Limit | OrderType::Market) {
+                return Err("Hyperliquid spot order type is not supported".into());
+            }
             if !matches!(
                 o.kind,
                 OrderType::Limit | OrderType::Market | OrderType::TakeProfit | OrderType::StopLoss
@@ -354,7 +388,7 @@ impl Hyperliquid {
             if [o.stop_loss, o.take_profit]
                 .into_iter()
                 .flatten()
-                .any(|p| !p.is_finite() || p <= 0.0)
+                .any(|p| !p.is_finite() || p < 0.0 || (!self.spot && p == 0.0))
             {
                 return Err("Invalid bracket trigger price".into());
             }
@@ -366,6 +400,11 @@ impl Hyperliquid {
     }
     fn base_price(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Result<f64, String> {
         let t = cx.store.ticker(symbol).ok_or("Missing ticker price data")?;
+        if self.spot {
+            return (t.last.is_finite() && t.last > 0.0)
+                .then_some(t.last)
+                .ok_or_else(|| "Missing valid ticker price data".into());
+        }
         [t.mark, t.last, t.mid_price.unwrap_or(0.0), t.index]
             .into_iter()
             .find(|p| p.is_finite() && *p > 0.0)
@@ -403,7 +442,7 @@ impl Hyperliquid {
                     0.95
                 }
         };
-        let price = price_wire(p, m.precision.amount)?;
+        let price = price_wire(p, m.precision.amount, self.spot)?;
         let cloid = match &opts.client_order_id {
             Some(c) => c.clone(),
             None => mint_cloid()?,
@@ -412,7 +451,11 @@ impl Hyperliquid {
             WireType::Trigger {
                 trigger: TriggerWire {
                     is_market: true,
-                    trigger_px: price_wire(opts.price.unwrap_or(0.0), m.precision.amount)?,
+                    trigger_px: price_wire(
+                        opts.price.unwrap_or(0.0),
+                        m.precision.amount,
+                        self.spot,
+                    )?,
                     tpsl: if opts.kind == OrderType::TakeProfit {
                         "tp"
                     } else {
@@ -438,24 +481,24 @@ impl Hyperliquid {
             b: opts.side == OrderSide::Buy,
             p: price,
             s: float_wire(if positional { 0.0 } else { size })?,
-            r: opts.reduce_only.unwrap_or(false),
+            r: !self.spot && opts.reduce_only.unwrap_or(false),
             t,
             c: cloid,
         };
         let mut wires = vec![main];
         if opts.kind == OrderType::Limit {
             for (kind, value) in [("sl", opts.stop_loss), ("tp", opts.take_profit)] {
-                if let Some(trigger) = value {
+                if let Some(trigger) = value.filter(|p| !self.spot || *p != 0.0) {
                     wires.push(OrderWire {
                         a: asset,
                         b: opts.side != OrderSide::Buy,
                         p: wires[0].p.clone(),
                         s: float_wire(size)?,
-                        r: true,
+                        r: !self.spot,
                         t: WireType::Trigger {
                             trigger: TriggerWire {
                                 is_market: true,
-                                trigger_px: price_wire(trigger, m.precision.amount)?,
+                                trigger_px: price_wire(trigger, m.precision.amount, self.spot)?,
                                 tpsl: kind,
                             },
                         },
@@ -866,6 +909,9 @@ impl Hyperliquid {
                     self.trading.active.as_mut().unwrap().ids.push(id.clone());
                     if let Some(mut record) = records.get(index).cloned() {
                         record.order.id = id.clone();
+                        if self.spot {
+                            self.apply_spot_ack_fills(&mut record.order);
+                        }
                         if resting {
                             self.acknowledge_order_write(cx, &record.order.symbol);
                             if !record.order.symbol.contains('|') {
@@ -873,6 +919,7 @@ impl Hyperliquid {
                             }
                         }
                         if resting
+                            && (!self.spot || record.order.remaining > 0.0)
                             && cx.store.order(&id).is_none()
                             && !self.account.suppressed.contains_key(&id)
                         {
@@ -922,6 +969,9 @@ impl Hyperliquid {
                     }
                 });
             }
+        }
+        if self.spot {
+            self.refresh_account(cx);
         }
         self.pump_trades(cx);
     }
@@ -1080,13 +1130,13 @@ fn float_wire(value: f64) -> Result<String, String> {
         text.into()
     })
 }
-fn price_wire(price: f64, amount_step: f64) -> Result<String, String> {
+fn price_wire(price: f64, amount_step: f64, spot: bool) -> Result<String, String> {
     if !price.is_finite() || price <= 0.0 {
         return Err("Invalid order price".into());
     }
     let significant_step = 10f64.powi((price.log10().floor() as i32 - 4).min(0));
     let significant = num::adjust(price, significant_step);
-    let decimals = 6 - num::decimals(amount_step) as i32;
+    let decimals = (if spot { 8 } else { 6 }) - num::decimals(amount_step) as i32;
     float_wire(num::adjust(significant, 10f64.powi(-decimals)))
 }
 

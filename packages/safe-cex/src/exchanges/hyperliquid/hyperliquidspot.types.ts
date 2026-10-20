@@ -324,6 +324,7 @@ export interface CandleSnapshot {
 [];
 
 export interface AssetCtx {
+  coin?: string;
   dayNtlVlm: string;
   dayBaseVlm?: string;
   funding: string;

@@ -72,7 +72,7 @@ use safe_cex_venue_grvt::{Grvt, Options as GrvtOptions};
 #[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
 #[cfg(feature = "kraken")]
-use safe_cex_venue_kraken::{Kraken, Options as KrakenOptions};
+use safe_cex_venue_kraken::{Kraken, KrakenSpot, Options as KrakenOptions};
 #[cfg(feature = "kucoin")]
 use safe_cex_venue_kucoin::{Kucoin, Options as KucoinOptions};
 #[cfg(feature = "lighter")]
@@ -602,7 +602,7 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         #[cfg(feature = "kraken")]
-        if venue == "kraken"
+        if matches!(venue, "kraken" | "krakenspot")
             && !options.public_data_only
             && options.key.as_deref().is_some_and(|key| !key.is_empty())
             && let Some(secret) = options.secret.as_deref()
@@ -699,6 +699,13 @@ impl WasmEngine {
             }
             #[cfg(feature = "kraken")]
             "kraken" => Box::new(Engine::new(Kraken::new(KrakenOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
+            #[cfg(feature = "kraken")]
+            "krakenspot" => Box::new(Engine::new(KrakenSpot::new(KrakenOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
@@ -893,13 +900,13 @@ impl WasmEngine {
                 secret: options.secret,
             }))),
             #[cfg(feature = "hyperliquid")]
-            "hyperliquid" => {
-                if options.enable_spot_markets {
+            "hyperliquid" | "hyperliquidspot" => {
+                if venue == "hyperliquid" && options.enable_spot_markets {
                     return Err(JsError::new(
                         "Rust Hyperliquid currently supports perpetual markets only",
                     ));
                 }
-                Box::new(Engine::new(Hyperliquid::new(HyperliquidOptions {
+                let config = HyperliquidOptions {
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
                     key: options.key,
@@ -910,7 +917,12 @@ impl WasmEngine {
                         b: b.address,
                         f: b.fee_tenths_bps,
                     }),
-                })))
+                };
+                Box::new(Engine::new(if venue == "hyperliquidspot" {
+                    Hyperliquid::new_spot(config)
+                } else {
+                    Hyperliquid::new(config)
+                }))
             }
             #[cfg(feature = "okx")]
             "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
