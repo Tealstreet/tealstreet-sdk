@@ -11,7 +11,7 @@ import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
 import { MarginType, OrderSide, OrderType } from '../../types';
 
-it('preserves KuCoin HF caller context, base quantities, lookup certainty and broker signatures through the real wasm host', async () => {
+it.each([false, true])('preserves KuCoin HF context, quantities and exact broker signatures with secondary reads=%s through the real wasm host', async (secondary) => {
   let now = 1_700_000_000_000;
   const requests: Array<Parameters<Transport['request']>[0]> = [];
   const sockets: string[] = [];
@@ -113,6 +113,7 @@ it('preserves KuCoin HF caller context, base quantities, lookup certainty and br
       secret: 'replay-secret',
       passphrase: 'replay-passphrase',
       transport: directTransport,
+      ...(secondary ? { secondary_key: 'read-key', secondary_secret: 'read-secret', secondary_passphrase: 'read-passphrase' } : {}),
       extra: { kucoinBroker: { partner: 'partner-test', brokerKey: 'broker-key', brokerName: 'Broker Test' } },
     },
     store,
@@ -224,6 +225,8 @@ it('preserves KuCoin HF caller context, base quantities, lookup certainty and br
         commissionAsset: 'USDT',
       },
     ]);
+    for (const request of requests.filter((r) => ['/api/v2/symbols', '/api/v1/market/allTickers'].includes(new URL(r.url).pathname)))
+      expect(request.headers['KC-API-KEY']).toBeUndefined();
     const signedRequests = requests.filter((r) => r.headers['KC-API-KEY']);
     expect(signedRequests.length).toBeGreaterThanOrEqual(9);
     for (const request of signedRequests) {
@@ -231,14 +234,18 @@ it('preserves KuCoin HF caller context, base quantities, lookup certainty and br
       const url = new URL(request.url);
       const rawPath =
         url.pathname + (url.search ? '?' + [...url.searchParams].map(([k, v]) => `${k}=${v}`).join('&') : '');
-      expect(request.headers['KC-API-KEY']).toBe('replay-key');
+      const read = secondary && request.method === 'GET';
+      const key = read ? 'read-key' : 'replay-key';
+      const secret = read ? 'read-secret' : 'replay-secret';
+      const passphrase = read ? 'read-passphrase' : 'replay-passphrase';
+      expect(request.headers['KC-API-KEY']).toBe(key);
       expect(request.headers['KC-API-KEY-VERSION']).toBe('2');
       expect(request.headers['KC-API-SIGN']).toBe(
-        hmac('replay-secret', timestamp + request.method + rawPath + (request.body ?? '')),
+        hmac(secret, timestamp + request.method + rawPath + (request.body ?? '')),
       );
-      expect(request.headers['KC-API-PASSPHRASE']).toBe(hmac('replay-secret', 'replay-passphrase'));
+      expect(request.headers['KC-API-PASSPHRASE']).toBe(hmac(secret, passphrase));
       expect(request.headers['KC-API-PARTNER']).toBe('partner-test');
-      expect(request.headers['KC-API-PARTNER-SIGN']).toBe(hmac('broker-key', timestamp + 'partner-testreplay-key'));
+      expect(request.headers['KC-API-PARTNER-SIGN']).toBe(hmac('broker-key', timestamp + 'partner-test' + key));
       expect(request.headers['KC-BROKER-NAME']).toBe('Broker Test');
       expect(request.headers['KC-API-PARTNER-VERIFY']).toBe('true');
     }

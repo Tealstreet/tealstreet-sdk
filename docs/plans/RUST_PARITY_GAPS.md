@@ -742,3 +742,36 @@ shared read-credential/routing support before final verification. Because shared
 routing/decoding and several touched venue read paths changed, refresh full
 integration and all 22 replay gates on the committed merge before publishing.
 The complete ee4a proofs and green a423 CI remain historical checkpoints.
+
+### Spot secondary-read phase
+
+Current TS `KuCoinSpotExchange` constructs `createXhrWithSecondaryKey`, so
+all dynamic-client GETs use secondary credentials/egress; public paths remain
+unsigned. Bullet-token POSTs, placement/amend and cancellation use the primary
+identity. Close the previous Rust rejection by reusing the landed shared
+`ReadCredentials`, KuCoin signer and host routing. Validate configured read keys
+and the optional-passphrase fallback before any startup request. Preserve
+primary-only private socket credentials, order-ID correlation, cache-hit no-I/O
+and failed-read snapshot contracts. No venue URLs name a proxy.
+
+Native phase tests cover exact key/signature/passphrase/broker identity, default
+and inherited passphrases, public-only unsigned behavior, all mutation verbs,
+bullet tokens, invalid startup and non-mutating lookup. Host tests exercise
+forced private HOW, public CORS and direct providers; the merged native golden
+matrix expands from 66 to **69** cases. The actual SDK/WASM fixture runs both
+primary and secondary modes and checks every signed request independently.
+New Spot routing cases fail against the old rejection and pass after enabling
+the shared policy. The incoming generic KuCoin routing test also needed its
+request recorder to observe the factory's forced HOW adapter even when the
+account flag is false; this changes the test oracle, not production routing.
+
+Verify native/Clippy, host routing, SDK/WASM, typecheck/lint and independent
+phase review, then commit before the full frozen-source gate refresh.
+
+Spot secondary phase review passes with no blockers. Native **149** tests pass,
+including **46 Spot**, plus scoped Clippy. Host routing **306** tests, the
+**69-case** native golden assertion, actual SDK/WASM **2** modes, typecheck
+**44** tasks, lint **28** and fmt pass. The merged native test fixtures needed
+`signer_headers: []` on two incoming synthetic requests; production requests
+and the delegated-signing bridge remain unchanged. Full integration and all
+22 replay gates follow on the next frozen runtime commit.

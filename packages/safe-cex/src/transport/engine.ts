@@ -96,6 +96,7 @@ const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
   bitgetusdc: 'ACCESS-KEY',
   bitgetinverse: 'ACCESS-KEY',
   kucoin: 'KC-API-KEY',
+  kucoinspot: 'KC-API-KEY',
   mexc: 'ApiKey',
   bingx: 'X-BX-APIKEY',
   bitrue: 'X-CH-APIKEY',
@@ -127,6 +128,7 @@ export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: 
       'bitgetusdc',
       'bitgetinverse',
       'kucoin',
+      'kucoinspot',
       'blofin',
       'weex',
     ].includes(exchange) &&

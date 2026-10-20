@@ -800,6 +800,7 @@ mod tests {
             timeout_ms: None,
             url: "https://venue.test/catalog".into(),
             headers: vec![],
+            signer_headers: vec![],
             body: None,
         };
         assert_eq!(state.http(&request).unwrap().prefix, "secondary");
@@ -841,6 +842,7 @@ mod tests {
             timeout_ms: None,
             url: "https://venue.test/catalog".into(),
             headers: vec![],
+            signer_headers: vec![],
             body: None,
         };
         assert_eq!(state.http(&request).unwrap().prefix, "read-public");
@@ -1098,7 +1100,7 @@ mod tests {
 
         let examples: Vec<Example<'static>> =
             serde_json::from_str(include_str!("../tests/fixtures/routing-plans.json")).unwrap();
-        assert_eq!(examples.len(), 66);
+        assert_eq!(examples.len(), 69);
         for example in examples {
             let state = state(example.plan);
             for http in example.http {

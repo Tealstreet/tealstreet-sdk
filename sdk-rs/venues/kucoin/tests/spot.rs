@@ -12,13 +12,20 @@ const ORDER: &str = r#"{"id":"order-1","symbol":"BTC-USDT","clientOid":"caller-1
 struct H {
     e: Engine<KucoinSpot>,
     actions: Vec<Action>,
+    requests: Vec<HttpRequest>,
     now: f64,
     public: SocketId,
     private: SocketId,
 }
 impl H {
     fn new(private: bool) -> Self {
-        let options = if private {
+        Self::with_read_credentials(private, None)
+    }
+    fn with_read_credentials(
+        private: bool,
+        read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    ) -> Self {
+        let mut options = if private {
             Options {
                 key: Some("replay-key".into()),
                 secret: Some("replay-secret".into()),
@@ -31,9 +38,11 @@ impl H {
                 ..Default::default()
             }
         };
+        options.read_credentials = read_credentials;
         let mut h = Self {
             e: Engine::new(KucoinSpot::new(options)),
             actions: vec![],
+            requests: vec![],
             now: 1700000000000.0,
             public: SocketId(0),
             private: SocketId(0),
@@ -93,6 +102,9 @@ impl H {
     }
     fn collect(&mut self) {
         for action in self.e.drain_actions() {
+            if let Action::Http(request) = &action {
+                self.requests.push(request.clone());
+            }
             if let Action::ClearTimer { timer } = &action {
                 self.actions
                     .retain(|a| !matches!(a,Action::SetTimer{timer:old,..}if timer==old));
@@ -1097,4 +1109,202 @@ fn current_partial_matches_reject_cached_geometry_before_consuming_identity() {
         h.ws(true, "/spotMarket/tradeOrdersV2", event);
         assert_eq!(h.fill_rows(), vec![(89.5, 0.2)]);
     }
+}
+
+fn secondary_credentials(passphrase: Option<&str>) -> safe_cex_engine::ReadCredentials {
+    safe_cex_engine::ReadCredentials {
+        key: "read-only-key".into(),
+        secret: "read-only-secret".into(),
+        passphrase: passphrase.map(str::to_owned),
+    }
+}
+fn assert_identity(request: &HttpRequest, secondary: bool, passphrase: &str, now: f64) {
+    let credentials = safe_cex_venue_kucoin::sign::Credentials {
+        key: if secondary {
+            "read-only-key"
+        } else {
+            "replay-key"
+        }
+        .into(),
+        secret: if secondary {
+            "read-only-secret"
+        } else {
+            "replay-secret"
+        }
+        .into(),
+        passphrase: passphrase.into(),
+        broker: None,
+    };
+    assert_eq!(
+        request.headers,
+        safe_cex_venue_kucoin::sign::headers(
+            &credentials,
+            request.method,
+            request.url.strip_prefix("https://api.kucoin.com").unwrap(),
+            request.body.as_deref().unwrap_or(""),
+            now,
+        ),
+    );
+}
+#[test]
+fn secondary_reads_preserve_primary_mutations_and_unsigned_public_gets() {
+    for read in [
+        None,
+        Some(secondary_credentials(Some("read-only-pass"))),
+        Some(secondary_credentials(None)),
+    ] {
+        let secondary = read.is_some();
+        let passphrase = read
+            .as_ref()
+            .and_then(|r| r.passphrase.as_deref())
+            .unwrap_or("replay-passphrase");
+        let mut h = H::with_read_credentials(true, read.clone());
+        for request in &h.requests {
+            if request.method == Method::Get
+                && !request.url.contains("/api/v2/symbols")
+                && !request.url.contains("/market/allTickers")
+            {
+                assert_identity(request, secondary, passphrase, h.now);
+            } else if request.url.contains("/bullet-private") {
+                assert_identity(request, false, "replay-passphrase", h.now);
+            } else {
+                assert!(
+                    !request
+                        .headers
+                        .iter()
+                        .any(|(name, _)| name.starts_with("KC-API-"))
+                );
+            }
+            // Host GET routing selects the read client even for unsigned public endpoints.
+            assert_eq!(request.route, None);
+        }
+        h.command(Command::FetchAccount { command: 1 });
+        assert_identity(&h.http("/api/v2/user-info"), secondary, passphrase, h.now);
+        h.command(Command::Query {
+            command: 2,
+            query: Query::Fills {
+                symbol: Some("BTC-USDT".into()),
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit: Some(10),
+            },
+        });
+        assert_identity(&h.http("/hf/fills"), secondary, passphrase, h.now);
+        h.command(Command::FetchCandles {
+            command: 3,
+            symbol: "BTC-USDT".into(),
+            interval: "1m".into(),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(10),
+        });
+        let candles = h.http("/market/candles");
+        assert_eq!(candles.method, Method::Get);
+        assert_eq!(candles.route, None);
+        assert!(
+            !candles
+                .headers
+                .iter()
+                .any(|(name, _)| name.starts_with("KC-API-"))
+        );
+        h.command(Command::PlaceOrders {
+            command: 4,
+            orders: vec![place(Some("primary-write"))],
+        });
+        assert_identity(&h.http("/hf/orders"), false, "replay-passphrase", h.now);
+        h.command(Command::AmendOrderWithSymbol {
+            command: 5,
+            id: "uncached".into(),
+            symbol: "BTC-USDT".into(),
+            price: Some(99.0),
+            amount: None,
+        });
+        assert_identity(&h.http("/orders/alter"), false, "replay-passphrase", h.now);
+        h.command(Command::CancelOrdersWithSymbols {
+            command: 6,
+            orders: vec![safe_cex_engine::model::CancelOrderRef {
+                id: "uncached".into(),
+                symbol: "BTC-USDT".into(),
+            }],
+        });
+        let cancel = h.http("/hf/orders/uncached");
+        assert_eq!(cancel.method, Method::Delete);
+        assert_identity(&cancel, false, "replay-passphrase", h.now);
+    }
+}
+#[test]
+fn invalid_secondary_identity_rejects_before_any_startup_io() {
+    for invalid in ["key", "secret", "passphrase", "missing-passphrase"] {
+        let mut read = secondary_credentials(Some("read-only-pass"));
+        match invalid {
+            "key" => read.key.clear(),
+            "secret" => read.secret.clear(),
+            "passphrase" => read.passphrase = Some(String::new()),
+            "missing-passphrase" => read.passphrase = None,
+            _ => unreachable!(),
+        }
+        let mut e = Engine::new(KucoinSpot::new(Options {
+            key: Some("replay-key".into()),
+            secret: Some("replay-secret".into()),
+            passphrase: (invalid != "missing-passphrase").then(|| "replay-passphrase".into()),
+            read_credentials: Some(read),
+            ..Options::default()
+        }));
+        e.start(1700000000000.0);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Secondary read credentials"))));
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::WsConnect { .. } | Action::WsConnectWithHeaders { .. }
+        )));
+    }
+}
+#[test]
+fn secondary_lookup_retains_cache_identity_and_never_mutates_store() {
+    let mut h = H::with_read_credentials(true, Some(secondary_credentials(Some("read-only-pass"))));
+    let before = h.e.store().orders().to_vec();
+    let requests = h.requests.len();
+    h.command(Command::Query {
+        command: 1,
+        query: Query::OrderByClientId {
+            symbol: "BTC-USDT".into(),
+            client_order_id: "caller-1".into(),
+        },
+    });
+    assert_eq!(h.done(1).unwrap()["order"]["id"], "order-1");
+    assert_eq!(h.requests.len(), requests);
+    h.command(Command::Query {
+        command: 2,
+        query: Query::OrderByClientId {
+            symbol: "ETH-USDT".into(),
+            client_order_id: "caller-1".into(),
+        },
+    });
+    let request = h.http("/active/page");
+    assert_identity(&request, true, "read-only-pass", h.now);
+    h.respond(
+        &request,
+        200,
+        r#"{"code":"200000","data":{"totalPage":1,"items":[]}}"#,
+    );
+    assert_eq!(
+        h.done(2).unwrap(),
+        json!({"found":false,"definitive":false})
+    );
+    assert_eq!(h.e.store().orders(), before);
+}
+#[test]
+fn secondary_config_never_authenticates_public_only_account_commands() {
+    let mut h =
+        H::with_read_credentials(false, Some(secondary_credentials(Some("read-only-pass"))));
+    let before = h.requests.len();
+    h.command(Command::FetchAccount { command: 1 });
+    assert!(h.done(1).unwrap_err().contains("requires credentials"));
+    assert_eq!(h.requests.len(), before);
+    assert!(h.requests.iter().all(|r| {
+        !r.headers
+            .iter()
+            .any(|(name, _)| name.starts_with("KC-API-"))
+    }));
 }

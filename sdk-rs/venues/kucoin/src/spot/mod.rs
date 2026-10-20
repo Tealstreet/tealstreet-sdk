@@ -132,9 +132,27 @@ impl KucoinSpot {
         pending: Pending,
     ) {
         let headers = if private {
-            self.credentials.as_ref().map_or_else(Vec::new, |c| {
-                sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
-            })
+            let read_credentials = self
+                .options
+                .read_credentials
+                .as_ref()
+                .filter(|_| method == Method::Get && self.credentials.is_some())
+                .map(|read| sign::Credentials {
+                    key: read.key.clone(),
+                    secret: read.secret.clone(),
+                    passphrase: read
+                        .passphrase
+                        .clone()
+                        .or_else(|| self.options.passphrase.clone())
+                        .unwrap_or_default(),
+                    broker: self.options.broker.clone(),
+                });
+            read_credentials
+                .as_ref()
+                .or(self.credentials.as_ref())
+                .map_or_else(Vec::new, |c| {
+                    sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
+                })
         } else {
             vec![
                 ("X-CHANNEL-API-CODE", "3zexp".into()),
@@ -625,6 +643,14 @@ impl Venue for KucoinSpot {
         true
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.options.read_credentials
+            && let Err(error) = read
+                .validate()
+                .and_then(|_| read.validate_passphrase(self.options.passphrase.as_deref()))
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         if self.options.testnet || (!self.options.public_data_only && self.credentials.is_none()) {
             cx.log(
                 LogLevel::Error,

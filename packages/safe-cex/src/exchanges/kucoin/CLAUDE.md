@@ -907,7 +907,11 @@ its feature-gated `KucoinSpot` state machine for spot. Spot retains the TS HF
 endpoints, base-unit sizing, supplied depth50 snapshots, native alteration,
 trade-account holdings, open-only non-definitive client-ID lookup, and fixed
 leverage-one/isolated/one-way settings. Its inherited unsupported history
-capabilities stay branded; see `docs/plans/venue-ports/KUCOIN_SPOT.md`. Malformed
+capabilities stay branded; see `docs/plans/venue-ports/KUCOIN_SPOT.md`. Both futures and
+Spot honor secondary GET credentials/egress; public GETs remain unsigned.
+Bullet-token POSTs, writes and socket authentication retain the primary identity.
+Secondary passphrases inherit the primary passphrase only when omitted;
+incomplete configured read identities reject before startup I/O. Malformed
 private quantities/execution prices and incomplete REST trade-account numbers
 preserve last-known-good state. Partial balance notifications trigger a full
 trade-account reconciliation instead of publishing incomplete balances. Placement amounts stay native lots;

@@ -1093,11 +1093,14 @@ describe('Paradex matches the production API factory adapter gate', () => {
 describe('KuCoin matches the production API factories adapter gate', () => {
   const permutations = (['kucoin', 'kucoinspot'] as const).flatMap((exchange) =>
     ([undefined, false, true] as const).flatMap((publicDataOnly) =>
-      ([undefined, false, true] as const).map((tealstreetTunnel) => ({ exchange, publicDataOnly, tealstreetTunnel })),
+      ([undefined, false, true] as const).flatMap((tealstreetTunnel) =>
+        [false, true].map((secondary) => ({ exchange, publicDataOnly, tealstreetTunnel, secondary }))),
     ),
   );
-  it.each(permutations)('$exchange publicOnly=$publicDataOnly tunnel=$tealstreetTunnel', async ({ exchange, ...flags }) => {
-    const opts = options({ ...flags, passphrase: 'passphrase' });
+  it.each(permutations)('$exchange publicOnly=$publicDataOnly tunnel=$tealstreetTunnel secondary=$secondary', async ({ exchange, secondary, ...flags }) => {
+    const opts = options({ ...flags, passphrase: 'passphrase',
+      ...(secondary ? { secondary_key: 'read-key', secondary_secret: 'read-secret' } : {}),
+    });
     const factory = exchange === 'kucoin' ? createKucoinAPI : createKucoinSpotAPI;
     const client = factory(opts, { name: exchange } as BaseExchange);
     const factoryUsesHow = client.defaults.adapter === mocks.adapter;
@@ -1514,6 +1517,7 @@ describe('secondary GET identity egress', () => {
     ['bitgetusdc', 'ACCESS-KEY'],
     ['bitgetinverse', 'ACCESS-KEY'],
     ['kucoin', 'KC-API-KEY'],
+    ['kucoinspot', 'KC-API-KEY'],
     ['mexc', 'ApiKey'],
     ['bingx', 'X-BX-APIKEY'],
     ['bitrue', 'X-CH-APIKEY'],
@@ -1535,26 +1539,31 @@ describe('secondary GET identity egress', () => {
       });
       const raw = makeRaw();
       const routed = createEngineTransport(venue, opts, raw);
+      // Both KuCoin factories install HOW for private clients even with an explicit false flag.
+      const viaHow = venue === 'kucoin' || venue === 'kucoinspot';
+      const delivered = () => viaHow
+        ? { ...mocks.adapter.mock.lastCall![0], headers: mocks.adapter.mock.lastCall![0].headers.toJSON() }
+        : raw.request.mock.lastCall![0];
       const input: Request = {
         method: 'GET',
         url: 'https://venue.example/private?signature=exact',
         headers: { [header.toLowerCase()]: 'venue-key' },
       };
       await routed.request(input);
-      expect(raw.request.mock.lastCall![0].url).toBe(`https://secondary.example/egress/${input.url}`);
-      expect(raw.request.mock.lastCall![0].headers[header.toLowerCase()]).toBe('venue-key');
+      expect(delivered().url).toBe(`https://secondary.example/egress/${input.url}`);
+      expect(delivered().headers[header.toLowerCase()]).toBe('venue-key');
       await routed.request({ ...input, route: 'primary' });
-      const primaryUrl = raw.request.mock.lastCall![0].url;
+      const primaryUrl = delivered().url;
       expect(primaryUrl).not.toContain('secondary.example');
       for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
         await routed.request({ ...input, method });
-        expect(raw.request.mock.lastCall![0].url).toBe(primaryUrl);
+        expect(delivered().url).toBe(primaryUrl);
       }
       await routed.request({ ...input, headers: {} });
       if (['binance', 'binancepm', 'binanceinverse'].includes(venue))
-        expect(raw.request.mock.lastCall![0].url).not.toContain('secondary.example');
-      else expect(raw.request.mock.lastCall![0].url).toBe(`https://secondary.example/egress/${input.url}`);
-      expect(raw.request.mock.lastCall![0].headers[header.toLowerCase()]).toBeUndefined();
+        expect(delivered().url).not.toContain('secondary.example');
+      else expect(delivered().url).toBe(`https://secondary.example/egress/${input.url}`);
+      expect(delivered().headers[header.toLowerCase()]).toBeUndefined();
       const plan = resolveEngineRoutingPlan(venue, opts, 'https://venue.example');
       expect(plan.readHeader).toBe(header);
       expect(plan.readPublic).toBe(!['binance', 'binancepm', 'binanceinverse'].includes(venue));
@@ -1565,7 +1574,7 @@ describe('secondary GET identity egress', () => {
       routed.dispose!();
     },
   );
-  it.each(['phemex', 'weex', 'kucoin', 'okx', 'backpack', 'krakenspot'] as ExchangeName[])(
+  it.each(['phemex', 'weex', 'kucoin', 'kucoinspot', 'okx', 'backpack', 'krakenspot'] as ExchangeName[])(
     '%s rejects partial read identities before any transport effect',
     (venue) => {
       for (const extra of [
@@ -1581,13 +1590,14 @@ describe('secondary GET identity egress', () => {
       }
     },
   );
-  it.each(['bybit', 'phemex', 'kucoin', 'woo'] as ExchangeName[])(
+  it.each(['bybit', 'phemex', 'kucoin', 'kucoinspot', 'woo'] as ExchangeName[])(
     '%s secondary GET retains HOW encapsulation and primary-only request bytes',
     async (venue) => {
       const headers: Partial<Record<ExchangeName, string>> = {
         bybit: 'X-BAPI-API-KEY',
         phemex: 'X-PHEMEX-ACCESS-TOKEN',
         kucoin: 'KC-API-KEY',
+        kucoinspot: 'KC-API-KEY',
         woo: 'x-api-key',
       };
       const opts = options({

@@ -829,7 +829,7 @@ impl WasmEngine {
             }
             #[cfg(feature = "kucoinspot")]
             "kucoinspot" => Box::new(Engine::new(KucoinSpot::new(KucoinOptions {
-                read_credentials: None,
+                read_credentials: options.read_credentials.clone(),
                 broker: options.extra.and_then(|e| e.kucoin_broker),
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,

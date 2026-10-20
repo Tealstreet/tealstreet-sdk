@@ -41,6 +41,18 @@ const cases: Case[] = [
   { name: 'kucoinspot-private-default-how', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com', options: {}, how: true },
   { name: 'kucoinspot-private-explicit-false-how', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com', options: { tealstreetTunnel: false }, how: true },
   { name: 'kucoinspot-public-direct', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com', options: { publicDataOnly: true, tealstreetTunnel: true } },
+  {
+    name: 'kucoinspot-secondary-private-how', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com', how: true,
+    options: { tealstreetTunnel: false, passphrase: 'fixture-primary-pass', secondary_key: 'fixture-read-key', secondary_secret: 'fixture-read-secret', secondary_passphrase: 'fixture-read-pass', secondaryProxyUrl: 'https://secondary.invalid/spot' },
+  },
+  {
+    name: 'kucoinspot-secondary-public-cors', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com',
+    options: { publicDataOnly: true, tealstreetProxy: true, passphrase: 'fixture-primary-pass', secondary_key: 'fixture-read-key', secondary_secret: 'fixture-read-secret', secondary_passphrase: 'fixture-read-pass', secondaryProxyUrl: 'https://secondary.invalid/spot' },
+  },
+  {
+    name: 'kucoinspot-secondary-direct-provider', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com', direct: true,
+    options: { passphrase: 'fixture-primary-pass', secondary_key: 'fixture-read-key', secondary_secret: 'fixture-read-secret', secondary_passphrase: 'fixture-read-pass' },
+  },
   { name: 'breakout-direct-provider', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: {}, direct: true },
   { name: 'breakout-tealstreet-direct', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: {} },
   { name: 'breakout-proxy', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: { tealstreetProxy: true, tealstreetTunnel: false } },
