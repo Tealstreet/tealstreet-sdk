@@ -1,5 +1,7 @@
 # Final parity sweep verification
 
+Historical `96a39` runtime only. Latest merged-source checkpoint: [RUST_PARITY_SWEEP_PRODUCT_UNION.md](RUST_PARITY_SWEEP_PRODUCT_UNION.md); final union gate receipts are in PR #1340.
+
 Frozen runtime: `96a39f04219d1777b3a898808de9823d1b8fbd4e`.
 Replay source fingerprint (1689 files): `a3f0cda5464f5d01605b1d907c66d8eeacc02df83af6cebf688bd7ce128f7d3e`.
 Workflow fingerprint: `fffd4da88eafac670ebf3f8af35cd4d998cc9f130f4c84f895fd9531beeaab08`.

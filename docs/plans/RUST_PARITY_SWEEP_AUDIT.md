@@ -1,3 +1,5 @@
+Latest landing PR #1341 closes the earlier combined Bybit inverse/options and typed-classification gaps. Its OKX product/risk work is integrated with this sweep; older dispositions below remain historical. Separate public-feed/default/TS-retirement work and credentialed validation remain distinct.
+
 # Independent discovery reviews
 
 These are preserved discovery snapshots: line references and merge states below

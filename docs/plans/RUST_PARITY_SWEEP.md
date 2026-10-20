@@ -15,7 +15,7 @@ perpetuals only. Earlier mixed-product work below is historical and superseded;
 the final implementation retains exact cancellation, session and keepalive
 repairs without exposing unrequested product kinds.
 
-Final local receipts and attempt boundaries: [RUST_PARITY_SWEEP_FINAL.md](RUST_PARITY_SWEEP_FINAL.md).
+Latest union checkpoint: [RUST_PARITY_SWEEP_PRODUCT_UNION.md](RUST_PARITY_SWEEP_PRODUCT_UNION.md). Earlier runtime receipts and attempt boundaries: [RUST_PARITY_SWEEP_FINAL.md](RUST_PARITY_SWEEP_FINAL.md).
 
 ## Phases and verification
 
@@ -659,3 +659,11 @@ than treating the original port boundary as a waiver.
   re-review PASS, with source hashes and red/green receipts posted onPR1340.
 - Commit the paired repair, rebuildcombinedbindings and run freshfinalquality/
   gates. Earlier product-union source receipts remain attributed tob00644c7d8.
+
+- Final8f71quality PASS:2684native+3doc,featureoff79,root44/28/27tasks
+  with7670SDKcases pertarget,compiled421+host68+16productcontrols. Combined
+  GRVTprivate and all8OKXreplays PASS. SelectedOKX824320bytes fixedbudget.
+  Commitdocumentationcheckpoint before the64-child serialrun so finalheadCI
+  overlaps execution. Runtime source remains8f71; no source/HEAD changes during
+  the subsequent bindings lease. Actualfinalaggregates will be posted onPR1340
+  with independent reconstruction, preserving older attempts separately.
