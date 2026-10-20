@@ -1,3 +1,4 @@
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeOptions, Market, PlaceOrderOpts, StoreData } from '../../types';
@@ -49,6 +50,7 @@ describe('KuCoin spot Rust SDK boundary', () => {
     const construct = vi.fn(function (_venue: string, _options: string) { return engine; });
     setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
     const store = new DefaultStore();
+    installNativeStartupFrames(engine, store, () => (rails ? { fetchedLeverage: rails } : {}));
     store.update({ markets: [market], loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
     const exchange = new RustEngineExchange('kucoinspot', { key: 'key', secret: 'secret', passphrase: 'passphrase', ...options }, store);
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});

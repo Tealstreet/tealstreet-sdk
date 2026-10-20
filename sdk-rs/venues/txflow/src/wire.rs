@@ -4,6 +4,14 @@ use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision};
 use serde::Deserialize;
 use std::borrow::Cow;
 
+/// Live overlay fields: null or missing leaves the field untouched, blank reads
+/// as 0, malformed rejects the row.
+fn optional_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    struct Zero(#[serde(deserialize_with = "number_or_zero")] f64);
+    Ok(Option::<Zero>::deserialize(d)?.map(|n| n.0))
+}
+
 #[derive(Deserialize)]
 pub struct Header {
     pub success: bool,
@@ -163,20 +171,20 @@ impl Instrument {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Context {
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub funding: f64,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub mark_px: f64,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub oracle_px: f64,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub open_interest: f64,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub mid_px: f64,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub last_price: f64,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub prev_day_px: f64,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub funding: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub mark_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub oracle_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub open_interest: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub mid_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub last_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub prev_day_px: Option<f64>,
     #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub day_ntl_vlm: Option<f64>,
     #[serde(default, deserialize_with = "optional_number_or_blank")]
@@ -200,20 +208,20 @@ pub struct Contexts<'a> {
 pub struct TickerRow {
     #[serde(default)]
     pub instrument_id: u32,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub last_price: f64,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub prev_day_px: f64,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub mark_px: f64,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub oracle_px: f64,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub open_interest: f64,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub day_ntl_vlm: f64,
-    #[serde(default, deserialize_with = "number_or_zero")]
-    pub coin_vlm: f64,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub last_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub prev_day_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub mark_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub oracle_px: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub open_interest: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub day_ntl_vlm: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub coin_vlm: Option<f64>,
     #[serde(default)]
     pub node_ctx: Option<Context>,
 }

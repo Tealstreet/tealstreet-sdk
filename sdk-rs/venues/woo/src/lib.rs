@@ -91,8 +91,9 @@ pub struct Woo {
     candles: HashMap<(String, String), CandleState>,
     generation: u64,
     funding: Option<TimerId>,
-    seed_retry: Option<(TimerId, bool)>,
-    seed_attempts: u32,
+    seed_backoff: safe_cex_engine::startup::Backoff<bool>,
+    skipped_markets: std::collections::HashSet<String>,
+    skipped_anonymous: bool,
     price_ranges: HashMap<String, f64>,
     ticker_indexes: HashMap<String, u32>,
 }
@@ -215,8 +216,9 @@ impl Woo {
             candles: HashMap::new(),
             generation: 0,
             funding: None,
-            seed_retry: None,
-            seed_attempts: 0,
+            seed_backoff: Default::default(),
+            skipped_markets: Default::default(),
+            skipped_anonymous: false,
             price_ranges: HashMap::new(),
             ticker_indexes: HashMap::new(),
         }
@@ -268,6 +270,7 @@ impl Woo {
             if !row.symbol.starts_with("PERP_") {
                 continue;
             }
+            // Like TS, live data only updates rows the REST ticker seed listed.
             let Some(&index) = self.ticker_indexes.get(row.symbol.as_ref()) else {
                 continue;
             };
@@ -752,8 +755,14 @@ impl Venue for Woo {
                     Err(_) => {
                         match serde_json::from_str::<Symbol<'_>>(item) {
                             Ok(s) if !s.symbol.starts_with("PERP_") => (),
-                            Ok(s) => skipped.add(Some(&s.symbol)),
-                            Err(_) => skipped.add(None),
+                            Ok(s) => {
+                                skipped.add(Some(&s.symbol));
+                                safe_cex_engine::startup::skipped_row(cx);
+                            }
+                            Err(_) => {
+                                skipped.add(None);
+                                safe_cex_engine::startup::skipped_row(cx);
+                            }
                         }
                         return;
                     }
@@ -771,6 +780,7 @@ impl Venue for Woo {
                     || raw.base_max < raw.base_min
                 {
                     skipped.add(Some(&raw.symbol));
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 }
                 let symbol = compact(&raw.symbol);
@@ -825,8 +835,14 @@ impl Venue for Woo {
                     Err(_) => {
                         match serde_json::from_str::<Symbol<'_>>(item) {
                             Ok(s) if cx.store.market(&compact(&s.symbol)).is_none() => (),
-                            Ok(s) => skipped.add(Some(&s.symbol)),
-                            Err(_) => skipped.add(None),
+                            Ok(s) => {
+                                skipped.add(Some(&s.symbol));
+                                safe_cex_engine::startup::skipped_row(cx);
+                            }
+                            Err(_) => {
+                                skipped.add(None);
+                                safe_cex_engine::startup::skipped_row(cx);
+                            }
                         }
                         return;
                     }
@@ -837,6 +853,7 @@ impl Venue for Woo {
                 };
                 if raw.close <= 0.0 {
                     skipped.add(Some(&raw.symbol));
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 }
                 indexes.insert(raw.symbol.to_string(), rows.len() as u32);
@@ -926,8 +943,19 @@ impl Venue for Woo {
                     return;
                 }
                 self.price_ranges = ranges;
+                self.skipped_markets = skipped.ids().iter().cloned().collect();
+                self.skipped_anonymous = skipped.anonymous();
                 cx.store.set_markets(rows);
-                self.seed_attempts = 0;
+                self.seed_backoff.succeeded(cx, &false);
+                if self.options.public_data_only
+                    || self.options.key.as_deref().is_none_or(str::is_empty)
+                {
+                    cx.store.set_balance(Default::default());
+                    cx.store.set_positions(Vec::new());
+                    cx.store.set_orders(Vec::new());
+                } else {
+                    self.account_start(cx);
+                }
                 self.seed(cx, true);
             }
             Pending::Tickers {
@@ -952,18 +980,10 @@ impl Venue for Woo {
                 }
                 self.ticker_indexes = indexes;
                 cx.store.set_tickers(rows);
-                self.seed_attempts = 0;
+                self.seed_backoff.succeeded(cx, &true);
+                self.account_refresh(cx);
                 self.connect_public(cx);
                 self.funding = Some(cx.set_timer(60_000.0));
-                if self.options.public_data_only
-                    || self.options.key.as_deref().is_none_or(str::is_empty)
-                {
-                    cx.store.set_balance(Default::default());
-                    cx.store.set_positions(Vec::new());
-                    cx.store.set_orders(Vec::new());
-                } else {
-                    self.account_start(cx);
-                }
             }
             Pending::Funding { rows } => {
                 for (symbol, rate, time) in rows {
@@ -1050,14 +1070,9 @@ impl Venue for Woo {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
-                self.seed_attempts += 1;
-                cx.log(LogLevel::Error, error);
-                if self.seed_attempts <= 3 {
-                    self.seed_retry = Some((
-                        cx.set_timer(1000.0 * self.seed_attempts as f64),
-                        matches!(pending, Pending::Tickers { .. }),
-                    ));
-                }
+                cx.log(LogLevel::Warning, error);
+                self.seed_backoff
+                    .failed(cx, matches!(pending, Pending::Tickers { .. }));
             }
             Pending::Depth { symbol, generation } => {
                 if self
@@ -1079,8 +1094,7 @@ impl Venue for Woo {
         if self.account_timer(cx, timer) {
             return;
         }
-        if self.seed_retry.is_some_and(|(t, _)| t == timer) {
-            let (_, tickers) = self.seed_retry.take().unwrap();
+        if let Some(tickers) = self.seed_backoff.on_timer(timer) {
             self.seed(cx, tickers);
             return;
         }

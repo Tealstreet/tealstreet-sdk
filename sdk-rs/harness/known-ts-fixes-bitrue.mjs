@@ -8,6 +8,7 @@ import { parseRequestJson } from './request-json.mjs';
 
 export const BITRUE_TS_FIXES = [
   'Private fixture fills use each distinct native l/L execution; cumulative gaps are not repriced at L.',
+  'Per-currency UPnL is aggregated position UPnL; sumOpenRealizedAmount is realized money, never UPnL.',
 ];
 
 // Deliberately a closed fixture table, not a second implementation of Rust's
@@ -18,8 +19,46 @@ const orderId = '2334151155877155281';
 const privateUrl = 'wss://fapiws.bitrue.com/stream?listenKey=replay-listen-key';
 const fill = (amount, price) => ({ id: orderId, symbol: 'E-BTC-USDT', side: 'buy', amount, price });
 
-/** Only TS fills can change; the native output is never an input. */
+/** Only TS fills and realized-as-UPnL balances can change; native output is never an input. */
 export function fixBitrue(ts, records) {
+  const commitUpnl = planRealizedAsUpnl(ts, records);
+  fixExecutionFills(ts, records);
+  commitUpnl();
+}
+
+// TS publishes sumOpenRealizedAmount as currency UPnL. Only a collateral account
+// without positions is corrected: its aggregated position UPnL is exactly zero.
+function planRealizedAsUpnl(ts, records) {
+  const snapshots = records.filter((r) => r.type === 'http' && r.method === 'GET'
+    && r.url === 'https://fapi.bitrue.com/fapi/v2/account');
+  if (snapshots.length === 0) return () => {};
+  assert.equal(snapshots.length, 1, 'unknown Bitrue account snapshot sequence');
+  assert.equal(snapshots[0].status, 200, 'failed Bitrue account snapshot');
+  const accounts = parseRequestJson(snapshots[0].body).data?.account;
+  assert.ok(Array.isArray(accounts), 'invalid Bitrue account snapshot');
+  const realized = accounts.filter((a) => ['USDT', 'USDC'].includes(a.marginCoin) && Number(a.sumOpenRealizedAmount) !== 0);
+  if (realized.length === 0) return () => {};
+  const balance = ts.account?.balance;
+  assert.ok(balance?.currencies, 'missing TS Bitrue balance currencies');
+  const primary = accounts.some((a) => a.marginCoin === 'USDT') ? 'USDT' : 'USDC';
+  const corrections = realized.map((account) => {
+    assert.deepEqual(account.positionVos, [], 'Bitrue realized-PnL correction requires a position-free account');
+    const currency = balance.currencies[account.marginCoin];
+    assert.ok(currency, `missing TS Bitrue ${account.marginCoin} balance`);
+    const legacy = Number(account.sumOpenRealizedAmount);
+    assert.ok([legacy, 0].includes(currency.upnl), `unexpected TS Bitrue ${account.marginCoin} UPnL`);
+    if (account.marginCoin === primary) assert.ok([legacy, 0].includes(balance.upnl), 'unexpected TS Bitrue UPnL');
+    return account.marginCoin;
+  });
+  return () => {
+    for (const coin of corrections) {
+      balance.currencies[coin].upnl = 0;
+      if (coin === primary) balance.upnl = 0;
+    }
+  };
+}
+
+function fixExecutionFills(ts, records) {
   const trades = records.filter((r) => r.type === 'ws').flatMap((record) => {
     const event = parseRequestJson(record.text);
     return event.o?.x === 'TRADE' || event.x === 'TRADE' ? [{ record, event }] : [];

@@ -38,6 +38,8 @@ pub enum Pending {
         meta: Option<SpotMeta>,
         markets: Vec<Market>,
         tickers: Vec<Ticker>,
+        /// Well-formed rows TS deliberately hides (null mid price).
+        excluded: Vec<String>,
         valid: bool,
         stage: u8,
     },
@@ -47,9 +49,11 @@ pub enum Pending {
     Meta {
         dex: String,
         offset: u32,
-        instruments: Vec<Instrument>,
+        instruments: Vec<Option<Instrument>>,
         markets: Vec<Market>,
         tickers: Vec<Ticker>,
+        /// Well-formed rows TS deliberately hides (null mid, delisted HIP-3).
+        excluded: Vec<String>,
         valid: bool,
         stage: u8,
         attempt: u8,
@@ -96,7 +100,12 @@ pub struct Hyperliquid {
     coins: HashMap<String, String>,
     dex_queue: std::collections::VecDeque<(String, u32)>,
     dex_names: Vec<String>,
-    meta_retries: HashMap<TimerId, (String, u32, u8)>,
+    advanced_scopes: HashSet<String>,
+    core_discovery_incomplete: bool,
+    /// Lowercase coins of catalogue rows excluded by design: never published,
+    /// and owned exposure on them is hidden rather than freezing the account.
+    excluded: HashSet<String>,
+    startup: safe_cex_engine::startup::Backoff<(String, u32)>,
 }
 impl Hyperliquid {
     pub fn new(options: Options) -> Self {
@@ -114,7 +123,10 @@ impl Hyperliquid {
             coins: HashMap::new(),
             dex_queue: Default::default(),
             dex_names: Vec::new(),
-            meta_retries: HashMap::new(),
+            advanced_scopes: HashSet::new(),
+            core_discovery_incomplete: true,
+            excluded: HashSet::new(),
+            startup: Default::default(),
         }
     }
     pub fn new_spot(mut options: Options) -> Self {
@@ -138,6 +150,7 @@ impl Hyperliquid {
                 meta: None,
                 markets: Vec::new(),
                 tickers: Vec::new(),
+                excluded: Vec::new(),
                 valid: true,
                 stage: 0,
             },
@@ -193,6 +206,7 @@ impl Hyperliquid {
                 instruments: Vec::new(),
                 markets: Vec::new(),
                 tickers: Vec::new(),
+                excluded: Vec::new(),
                 valid: true,
                 stage: 0,
                 attempt,
@@ -213,6 +227,58 @@ impl Hyperliquid {
                 },
             ));
         }
+    }
+    // A context retry must not advance discovery again or open a second session.
+    fn advance_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
+        if !self.advanced_scopes.insert(dex.into()) {
+            return;
+        }
+        if !self.spot && dex.is_empty() {
+            self.info(
+                cx,
+                "{\"type\":\"perpDexs\"}".into(),
+                ArrayAt::Root,
+                Pending::Dexs {
+                    dexs: Vec::new(),
+                    index: 0,
+                },
+            );
+        } else {
+            self.next_dex(cx);
+        }
+    }
+    // Keep table indices and known rails for omitted contexts. Fresh rows use
+    // native identity, so retries neither duplicate peers nor move settings.
+    fn commit_discovery(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        markets: Vec<Market>,
+        tickers: Vec<Ticker>,
+        excluded: Vec<String>,
+    ) {
+        for coin in excluded {
+            self.excluded.insert(coin.to_ascii_lowercase());
+        }
+        for market in &markets {
+            self.excluded.remove(&market.id.to_ascii_lowercase());
+        }
+        let mut all = cx.store.markets().to_vec();
+        for market in markets {
+            if let Some(old) = all.iter_mut().find(|old| old.id == market.id) {
+                *old = market;
+            } else {
+                all.push(market);
+            }
+        }
+        cx.store.set_markets(all);
+        let mut all = cx.store.tickers().to_vec();
+        for ticker in tickers {
+            // Discovery retries hydrate missing contexts, preserving live quotes.
+            if !all.iter().any(|old| old.id == ticker.id) {
+                all.push(ticker);
+            }
+        }
+        cx.store.set_tickers(all);
     }
     fn subscription(
         &self,
@@ -296,6 +362,10 @@ impl Hyperliquid {
     }
     fn coin<'a>(&'a self, cx: &'a Cx<'_, Pending>, symbol: &str) -> Option<&'a str> {
         cx.store.market(symbol).map(|m| m.id.as_str())
+    }
+    /// A coin TS hides by design (delisted or unquoted), as opposed to unknown.
+    pub(crate) fn excluded_coin(&self, coin: &str) -> bool {
+        self.symbol(coin).is_none() && self.excluded.contains(&coin.to_ascii_lowercase())
     }
     fn symbol(&self, coin: &str) -> Option<&str> {
         self.coins
@@ -491,35 +561,51 @@ fn price_decimals(price: f64, size: i32) -> i32 {
     };
     (6 - size).min(significant.max(0))
 }
+fn spot_price_decimals(price: f64, size: i32) -> i32 {
+    let significant = if price > 0.0 {
+        (4 - price.log10().floor() as i32).max(0)
+    } else {
+        5
+    };
+    (8 - size).min(significant)
+}
 fn market_rows(
+    cx: &mut Cx<'_, Pending>,
     dex: &str,
-    instruments: &[Instrument],
+    instruments: &[Option<Instrument>],
     raw: &str,
     markets: &mut Vec<Market>,
     tickers: &mut Vec<Ticker>,
+    excluded: &mut Vec<String>,
 ) -> bool {
     let mut i = 0;
-    json::each::<AssetCtx>(raw, |ctx| {
+    json::each::<&serde_json::value::RawValue>(raw, |row| {
         let index = i;
         i += 1;
-        let Some(meta) = instruments.get(index) else {
+        let Some(meta) = instruments.get(index).and_then(Option::as_ref) else {
             return;
         };
-        let Some(price) = ctx.mid_px.filter(|p| p.is_finite() && *p > 0.0) else {
+        let Ok(ctx) = serde_json::from_str::<AssetCtx>(row.get()) else {
+            safe_cex_engine::startup::skipped_row(cx);
             return;
         };
-        if !dex.is_empty() && meta.is_delisted {
-            return;
-        }
-        let base = meta
-            .name
-            .split_once(':')
-            .map_or(meta.name.as_str(), |(_, b)| b);
         let id = if dex.is_empty() || meta.name.contains(':') {
             meta.name.clone()
         } else {
             format!("{dex}:{}", meta.name)
         };
+        // Like TS: HIP-3 delisted and null-mid rows are hidden, not malformed.
+        let Some(price) = ctx
+            .mid_px
+            .filter(|p| p.is_finite() && *p > 0.0 && (dex.is_empty() || !meta.is_delisted))
+        else {
+            excluded.push(id);
+            return;
+        };
+        let base = meta
+            .name
+            .split_once(':')
+            .map_or(meta.name.as_str(), |(_, b)| b);
         let symbol = if dex.is_empty() {
             format!("{}-PERP", base.to_uppercase())
         } else {
@@ -592,27 +678,48 @@ fn market_rows(
 }
 
 fn spot_rows(
+    cx: &mut Cx<'_, Pending>,
     meta: &SpotMeta,
     raw: &str,
     markets: &mut Vec<Market>,
     tickers: &mut Vec<Ticker>,
+    excluded: &mut Vec<String>,
 ) -> bool {
-    let Ok(contexts) = serde_json::from_str::<Vec<SpotCtx>>(raw) else {
+    let Ok(contexts) = serde_json::from_str::<Vec<safe_cex_engine::startup::Row<SpotCtx>>>(raw)
+    else {
         return false;
     };
-    let positional =
-        contexts.len() == meta.universe.len() && contexts.iter().all(|c| c.coin.is_empty());
+    let positional = contexts.len() == meta.universe.len()
+        && contexts
+            .iter()
+            .filter_map(|row| row.0.as_ref())
+            .all(|c| c.coin.is_empty());
+    for row in &contexts {
+        if row.0.is_none() {
+            safe_cex_engine::startup::skipped_row(cx);
+        }
+    }
     for (position, native) in meta.universe.iter().enumerate() {
+        let Some(native) = &native.0 else {
+            safe_cex_engine::startup::skipped_row(cx);
+            continue;
+        };
         let Some(ctx) = contexts
             .iter()
+            .filter_map(|row| row.0.as_ref())
             .find(|c| c.coin == native.name)
-            .or_else(|| positional.then(|| contexts.get(position)).flatten())
+            .or_else(|| {
+                positional
+                    .then(|| contexts.get(position).and_then(|row| row.0.as_ref()))
+                    .flatten()
+            })
         else {
             continue;
         };
         let Some(token) = meta
             .tokens
             .iter()
+            .filter_map(|row| row.0.as_ref())
             .find(|t| Some(&t.index) == native.tokens.first())
         else {
             continue;
@@ -620,11 +727,13 @@ fn spot_rows(
         let Some(quote) = meta
             .tokens
             .iter()
+            .filter_map(|row| row.0.as_ref())
             .find(|t| Some(&t.index) == native.tokens.get(1))
         else {
             continue;
         };
-        let Some(price) = ctx.context.mid_px.filter(|p| *p > 0.0) else {
+        let Some(price) = ctx.context.mid_px.filter(|p| p.is_finite() && *p > 0.0) else {
+            excluded.push(native.name.clone());
             continue;
         };
         let id = native.name.clone();
@@ -644,9 +753,7 @@ fn spot_rows(
             active: true,
             precision: Precision {
                 amount: step,
-                price: 10f64.powi(
-                    -((8 - token.sz_decimals).min((4 - price.log10().floor() as i32).max(0))),
-                ),
+                price: 10f64.powi(-spot_price_decimals(price, token.sz_decimals)),
             },
             limits: Limits {
                 amount: MinMax {
@@ -738,9 +845,7 @@ impl Venue for Hyperliquid {
     }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         // Public prices cannot establish a private snapshot or mark it loaded.
-        if cx.store.loaded().balance {
-            self.live_balance(cx);
-        }
+        self.account_prices(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.connection.socket != Some(socket) {
@@ -829,6 +934,7 @@ impl Venue for Hyperliquid {
                 meta,
                 markets,
                 tickers,
+                excluded,
                 valid,
                 stage,
                 attempt,
@@ -840,6 +946,7 @@ impl Venue for Hyperliquid {
                             meta,
                             markets,
                             tickers,
+                            excluded,
                             valid,
                             stage,
                             attempt,
@@ -848,15 +955,29 @@ impl Venue for Hyperliquid {
                     );
                     return;
                 }
+                let complete = meta.as_ref().is_some_and(|meta| {
+                    meta.universe.iter().all(|row| {
+                        row.0.as_ref().is_some_and(|native| {
+                            markets.iter().any(|m| m.id == native.name)
+                                || excluded.contains(&native.name)
+                        })
+                    })
+                });
+                self.core_discovery_incomplete = !complete;
                 if let Some(meta) = meta {
-                    for native in meta.universe {
+                    for native in meta.universe.into_iter().filter_map(|row| row.0) {
                         if let Some(m) = markets.iter().find(|m| m.id == native.name) {
                             self.assets.insert(m.symbol.clone(), 10_000 + native.index);
                             if let Some(token) = native.tokens.first() {
                                 let replace = self
                                     .spot_tokens
                                     .get(token)
-                                    .and_then(|s| markets.iter().find(|m| &m.symbol == s))
+                                    .and_then(|s| {
+                                        markets
+                                            .iter()
+                                            .find(|m| &m.symbol == s)
+                                            .or_else(|| cx.store.market(s))
+                                    })
                                     .is_none_or(|existing| {
                                         existing.quote != "USDC" && m.quote == "USDC"
                                     });
@@ -869,9 +990,21 @@ impl Venue for Hyperliquid {
                         }
                     }
                 }
-                cx.store.set_markets(markets);
-                cx.store.set_tickers(tickers);
-                self.next_dex(cx);
+                if complete || !markets.is_empty() {
+                    self.commit_discovery(cx, markets, tickers, excluded);
+                }
+                if complete {
+                    self.startup.succeeded(cx, &(String::new(), 0));
+                } else {
+                    self.startup.failed(cx, (String::new(), 0));
+                }
+                self.account_prices(cx);
+                if self.account.started && !self.options.public_data_only && self.user().is_some() {
+                    self.refresh_account(cx);
+                }
+                if cx.store.loaded().markets {
+                    self.advance_scope(cx, "");
+                }
             }
             Pending::Account(request) => {
                 let builder = matches!(request, account::Request::Builder);
@@ -888,6 +1021,7 @@ impl Venue for Hyperliquid {
                 instruments,
                 markets,
                 tickers,
+                excluded,
                 valid,
                 stage,
                 attempt,
@@ -901,6 +1035,7 @@ impl Venue for Hyperliquid {
                             instruments,
                             markets,
                             tickers,
+                            excluded,
                             valid: false,
                             stage,
                             attempt,
@@ -909,8 +1044,29 @@ impl Venue for Hyperliquid {
                     );
                     return;
                 }
+                let complete = instruments.iter().all(|row| {
+                    row.as_ref().is_some_and(|native| {
+                        let id = if dex.is_empty() || native.name.contains(':') {
+                            native.name.clone()
+                        } else {
+                            format!("{dex}:{}", native.name)
+                        };
+                        markets.iter().any(|market| market.id == id) || excluded.contains(&id)
+                    })
+                });
+                if dex.is_empty() {
+                    self.core_discovery_incomplete = !complete;
+                }
+                if complete {
+                    self.startup.succeeded(cx, &(dex.clone(), offset));
+                } else {
+                    self.startup.failed(cx, (dex.clone(), offset));
+                }
                 if valid {
                     for (index, meta) in instruments.iter().enumerate() {
+                        let Some(meta) = meta else {
+                            continue;
+                        };
                         let id = if dex.is_empty() || meta.name.contains(':') {
                             meta.name.clone()
                         } else {
@@ -925,25 +1081,16 @@ impl Venue for Hyperliquid {
                                 .insert(m.id.to_ascii_lowercase(), m.symbol.clone());
                         }
                     }
-                    let mut all = cx.store.markets().to_vec();
-                    all.extend(markets);
-                    cx.store.set_markets(all);
-                    let mut all = cx.store.tickers().to_vec();
-                    all.extend(tickers);
-                    cx.store.set_tickers(all);
+                    if complete || !markets.is_empty() {
+                        self.commit_discovery(cx, markets, tickers, excluded);
+                    }
                 }
-                if dex.is_empty() {
-                    self.info(
-                        cx,
-                        "{\"type\":\"perpDexs\"}".into(),
-                        ArrayAt::Root,
-                        Pending::Dexs {
-                            dexs: Vec::new(),
-                            index: 0,
-                        },
-                    );
-                } else {
-                    self.next_dex(cx);
+                self.account_prices(cx);
+                if self.account.started && !self.options.public_data_only && self.user().is_some() {
+                    self.refresh_account(cx);
+                }
+                if cx.store.loaded().markets {
+                    self.advance_scope(cx, &dex);
                 }
             }
             Pending::Dexs { dexs, .. } => {
@@ -971,19 +1118,27 @@ impl Venue for Hyperliquid {
                 meta,
                 markets,
                 tickers,
+                excluded,
                 valid,
                 stage,
                 ..
             } => {
                 match *stage {
                     0 => match serde_json::from_str::<SpotMeta>(item) {
-                        Ok(value) => *meta = Some(value),
+                        Ok(value) => {
+                            for token in &value.tokens {
+                                if token.0.is_none() {
+                                    safe_cex_engine::startup::skipped_row(_cx);
+                                }
+                            }
+                            *meta = Some(value);
+                        }
                         Err(_) => *valid = false,
                     },
                     1 => {
-                        *valid &= meta
-                            .as_ref()
-                            .is_some_and(|meta| spot_rows(meta, item, markets, tickers))
+                        *valid &= meta.as_ref().is_some_and(|meta| {
+                            spot_rows(_cx, meta, item, markets, tickers, excluded)
+                        })
                     }
                     _ => *valid = false,
                 }
@@ -997,16 +1152,32 @@ impl Venue for Hyperliquid {
                 instruments,
                 markets,
                 tickers,
+                excluded,
                 valid,
                 stage,
                 ..
             } => {
                 match *stage {
                     0 => match serde_json::from_str::<Meta>(item) {
-                        Ok(meta) => *instruments = meta.universe,
+                        Ok(meta) => {
+                            *instruments = meta
+                                .universe
+                                .into_iter()
+                                .map(|row| {
+                                    let parsed = serde_json::from_str::<Instrument>(row.get()).ok();
+                                    if parsed.is_none() {
+                                        safe_cex_engine::startup::skipped_row(_cx);
+                                    }
+                                    parsed
+                                })
+                                .collect();
+                        }
                         Err(_) => *valid = false,
                     },
-                    1 => *valid &= market_rows(dex, instruments, item, markets, tickers),
+                    1 => {
+                        *valid &=
+                            market_rows(_cx, dex, instruments, item, markets, tickers, excluded)
+                    }
                     _ => *valid = false,
                 }
                 *stage = stage.saturating_add(1);
@@ -1032,12 +1203,7 @@ impl Venue for Hyperliquid {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::SpotMeta { attempt, .. } if attempt < 2 => {
-                let timer = cx.set_timer(500.0 * f64::from(attempt + 1));
-                self.meta_retries
-                    .insert(timer, (String::new(), 0, attempt + 1));
-                cx.log(LogLevel::Warning, error);
-            }
+            Pending::SpotMeta { .. } => self.startup.failed(cx, (String::new(), 0)),
             Pending::Account(request) => {
                 let builder = matches!(request, account::Request::Builder);
                 self.account_failed(cx, request, error);
@@ -1049,32 +1215,25 @@ impl Venue for Hyperliquid {
             Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Dexs { .. } => self.next_dex(cx),
-            Pending::Meta {
-                dex,
-                offset,
-                attempt,
-                ..
-            } if attempt < 2 => {
-                let timer = cx.set_timer(500.0 * f64::from(attempt + 1));
-                self.meta_retries.insert(timer, (dex, offset, attempt + 1));
-                cx.log(LogLevel::Warning, error);
+            Pending::Meta { dex, offset, .. } => {
+                let optional = !dex.is_empty();
+                self.startup.failed(cx, (dex.clone(), offset));
+                if optional {
+                    self.advance_scope(cx, &dex);
+                }
             }
-            Pending::Meta { dex, .. } if !dex.is_empty() => {
-                cx.log(LogLevel::Warning, error);
-                self.next_dex(cx);
-            }
-            _ => cx.log(LogLevel::Error, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
-        if let Some((dex, offset, attempt)) = self.meta_retries.remove(&timer) {
+        if let Some((dex, offset)) = self.startup.on_timer(timer) {
             if self.spot {
-                self.spot_meta_attempt(cx, attempt);
+                self.spot_meta(cx);
             } else {
-                self.meta_attempt(cx, dex, offset, attempt);
+                self.meta(cx, dex, offset);
             }
+            return;
         }
         if self.connection.reconnect == Some(timer) {
             self.connection.reconnect = None;
@@ -1240,3 +1399,6 @@ fn valid_interval(interval: &str) -> bool {
     ]
     .contains(&interval)
 }
+
+#[cfg(test)]
+mod startup_tests;

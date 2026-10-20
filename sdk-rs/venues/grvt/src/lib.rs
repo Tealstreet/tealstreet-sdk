@@ -115,7 +115,7 @@ pub struct Grvt {
     request_id: u32,
     ticker_batch: Option<TimerId>,
     ticker_offset: usize,
-    startup_retry: Option<TimerId>,
+    startup_retry: safe_cex_engine::startup::Backoff<()>,
     refresh: Option<TimerId>,
 }
 #[derive(Serialize)]
@@ -159,7 +159,7 @@ impl Grvt {
             request_id: 0,
             ticker_batch: None,
             ticker_offset: 0,
-            startup_retry: None,
+            startup_retry: Default::default(),
             refresh: None,
         }
     }
@@ -275,9 +275,7 @@ impl Grvt {
             Job::History(request) => self.history_failed(cx, *request, error),
             Job::Markets { .. } => {
                 cx.log(LogLevel::Warning, "GRVT instrument read failed");
-                if self.startup_retry.is_none() {
-                    self.startup_retry = Some(cx.set_timer(5000.));
-                }
+                self.startup_retry.failed(cx, ());
             }
             Job::Candles { command, .. } => cx.done(command, Err("GRVT candle read failed".into())),
         }
@@ -750,17 +748,17 @@ impl Venue for Grvt {
             Job::Markets {
                 rows,
                 metadata,
-                failed,
+                failed: _,
             } => {
                 let Ok(i) = serde_json::from_str::<wire::Instrument<'_>>(item) else {
-                    *failed = true;
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 };
                 if i.kind != "PERPETUAL" {
                     return;
                 }
                 if i.id.is_empty() || i.min.0 <= 0. || i.tick.0 <= 0. {
-                    *failed = true;
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 }
                 metadata.insert(
@@ -859,10 +857,11 @@ impl Venue for Grvt {
                 failed,
             } => {
                 if failed || rows.is_empty() {
-                    cx.log(LogLevel::Warning, "Invalid GRVT instrument catalog");
-                    if self.startup_retry.is_none() {
-                        self.startup_retry = Some(cx.set_timer(5_000.));
-                    }
+                    cx.log(
+                        LogLevel::Warning,
+                        "Invalid or empty GRVT instrument catalog",
+                    );
+                    self.startup_retry.failed(cx, ());
                     return;
                 }
                 // The public instrument catalog has no authenticated leverage
@@ -877,6 +876,7 @@ impl Venue for Grvt {
                         market.limits.leverage = previous.limits.leverage;
                     }
                 }
+                self.startup_retry.succeeded(cx, &());
                 let tickers = rows
                     .iter()
                     .map(|m| {
@@ -959,7 +959,7 @@ impl Venue for Grvt {
             Job::Account(account::Request::Builders { .. }) => false,
             _ => true,
         };
-        if read && pending.attempts < 5 {
+        if read && !matches!(pending.job, Job::Markets { .. }) && pending.attempts < 5 {
             pending.attempts += 1;
             match &mut pending.job {
                 Job::Markets {
@@ -1036,8 +1036,7 @@ impl Venue for Grvt {
         } else if self.ticker_batch == Some(timer) {
             self.ticker_batch = None;
             self.ticker_batch(cx);
-        } else if self.startup_retry == Some(timer) {
-            self.startup_retry = None;
+        } else if self.startup_retry.on_timer(timer).is_some() {
             self.fetch_markets(cx);
         } else if self.refresh == Some(timer) {
             self.refresh = None;
