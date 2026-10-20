@@ -102,3 +102,34 @@ PR must not claim all 26 families have finished that migration.
 
 Independent review reports and test totals remain provisional until the final
 source is committed and all native/Wasm/root/replay gates have passed.
+
+## Reviewed source checkpoints
+
+- `06ec88eb21`: shared live-field overlay, SDK readiness, and twelve-family
+  review repairs. Engine + families: 1,359 native cases / 113 targets passed;
+  subsequent owned-position boundary suites: 760 and 385 cases passed. Strict
+  all-feature/all-target Clippy passed. SDK readiness/loader: 14/14 passed.
+- `6f4bd666d7`: eight-family recovery, numeric narrowing, exact midpoint-batch
+  coverage and account boundary repairs. 858 native cases / 73 targets and
+  strict Clippy passed; final Paradex account follow-up: 24 passed. Independent
+  quote overlay/extra-family source review passed after two Polymarket repairs.
+- `3c82fe2883`: root-family source repairs. OKX full targets: 124 cases passed,
+  then six startup race/settings tests and fifteen account tests passed.
+  Three-family ownership/valuation run: 306 cases / 25 targets passed;
+  subsequent selected account/public targets: 120 cases / seven targets passed.
+  BloFin/Lighter account guards: 44 passed; public retry/overlay regressions
+  passed. Independent root-family/SDK source review passed after repairs.
+- Latest landing documentation merged normally, including owner decisions and
+  `RUST_QUALITY.md`; no source conflict, stash, rebase or force-push.
+
+Root verification completed before the final Rust-only safety follow-ups:
+44/44 typecheck tasks, 28/28 lint tasks, 27/27 test tasks, 590 harness cases.
+These are **checkpoint numbers, not final gate totals**. Final workspace/Wasm,
+all public/private replay gates, posted PR reviews, green CI and merge remain.
+
+The final narrow working-order boundary sweep covers every family: a malformed
+catalogue peer cannot newly turn an owned working/protective order into successful
+absence. KuCoin initial readiness must cover both normal and stop books; unknown
+contract metadata cannot authorize guessed fill quantities. WOO parent completion
+alone cannot prove each protective child terminal. Full rejected-row isolation
+and row-by-row retained-state merges remain the third phase.
