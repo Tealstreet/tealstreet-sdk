@@ -408,6 +408,7 @@ impl Hyperliquid {
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.spot {
             self.refresh_spot(cx, true);
+            self.refresh_orders_scope(cx, "");
             return;
         }
         let mut dexes = vec![String::new()];
@@ -1620,9 +1621,12 @@ impl Hyperliquid {
                     self.record_spot_fill(&fill, &symbol);
                     let id = fill.oid.to_string();
                     self.amend_source_filled(&id);
+                    // An open-order read sent before this fill must not restore the order.
+                    self.acknowledge_order_write(cx, &symbol);
                     if let Some(order) = cx.store.order(&id) {
                         let remaining = (order.remaining - fill.sz).max(0.0);
                         if remaining == 0.0 {
+                            self.account.suppressed.insert(id.clone(), cx.now);
                             cx.store.remove_orders(&[&id]);
                         } else {
                             cx.store.update_order(&id, |o| {

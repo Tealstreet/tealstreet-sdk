@@ -1345,3 +1345,68 @@ fn spot_open_orders_are_loaded_and_externally_canceled_orders_are_removed() {
         "order canceled elsewhere stayed open"
     );
 }
+#[test]
+fn open_order_read_sent_before_a_full_fill_cannot_restore_the_order() {
+    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
+        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+        ..Options::default()
+    }));
+    e.start(1000.0);
+    let r = take_http(&mut e);
+    support::reply(&mut e, &r, 200, META);
+    let rows = r#"[{"coin":"@1","side":"B","limitPx":"0.0009","sz":"5","oid":78,"timestamp":1000,"origSz":"5","orderType":"Limit","tif":"Gtc","reduceOnly":false,"isTrigger":false,"triggerPx":"0","isPositionTpsl":false}]"#;
+    let (mut sync, mut socket) = (None, None);
+    for a in e.drain_actions().collect::<Vec<_>>() {
+        match a {
+            Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => {
+                support::reply(&mut e, &r, 200, rows);
+            }
+            Action::Http(r) => support::reply(&mut e, &r, 200, r#"{"balances":[]}"#),
+            Action::SetTimer {
+                timer,
+                at_ms: 11_000.0,
+            } => sync = Some(timer),
+            Action::WsConnect { socket: s, .. } => socket = Some(s),
+            _ => {}
+        }
+    }
+    let socket = socket.unwrap();
+    e.handle(1000.0, Event::WsOpened { socket });
+    for a in e.drain_actions().collect::<Vec<_>>() {
+        match a {
+            Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => {
+                support::reply(&mut e, &r, 200, rows);
+            }
+            Action::Http(r) => support::reply(&mut e, &r, 200, r#"{"balances":[]}"#),
+            _ => {}
+        }
+    }
+    assert!(e.store().order("78").is_some());
+    e.handle(
+        11_000.0,
+        Event::TimerFired {
+            timer: sync.unwrap(),
+        },
+    );
+    let stale = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) if support::kind(&r) == "frontendOpenOrders" => Some(r),
+            _ => None,
+        })
+        .expect("periodic read in flight");
+    support::message(
+        &mut e,
+        socket,
+        11_001.0,
+        r#"{"channel":"userFills","data":{"isSnapshot":false,"fills":[{"coin":"@1","side":"B","px":"0.0009","sz":"5","time":11001,"tid":31,"oid":78}]}}"#,
+    );
+    assert!(e.store().order("78").is_none());
+    support::reply(&mut e, &stale, 200, rows);
+    assert!(
+        e.store().order("78").is_none(),
+        "stale read restored a filled order"
+    );
+}
