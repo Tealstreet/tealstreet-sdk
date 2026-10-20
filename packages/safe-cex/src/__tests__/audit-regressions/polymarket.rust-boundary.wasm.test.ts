@@ -290,3 +290,20 @@ it('reports immutable one-times prediction-market leverage without any private r
   const discovery = new URL(requests.find((request) => new URL(request.url).pathname === '/markets/keyset')!.url);
   expect(discovery.searchParams.getAll('slug')).toEqual(['cafe-open']);
 });
+
+it('cancels every venue order through native cancel-all even with an empty SDK order cache', async () => {
+  const { exchange, requests, store } = await start({ key: KEY, secret: '', polymarket: API }, (request) => {
+    if (new URL(request.url).pathname !== '/cancel-all') return;
+    expect(request.method).toBe('DELETE');
+    expect(request.body).toBeUndefined();
+    const headers = request.headers!;
+    const signature = createHmac('sha256', Buffer.from(API.apiSecret, 'base64'))
+      .update(`${headers.POLY_TIMESTAMP}DELETE/cancel-all`)
+      .digest('base64').replace(/\+/g, '-').replace(/\//g, '_');
+    expect(headers.POLY_SIGNATURE).toBe(signature);
+    return response({ canceled: ['order-never-seen-in-sdk-cache'], not_canceled: {} });
+  });
+  expect(store.orders).toEqual([]);
+  await expect(exchange.cancelAllOrders()).resolves.toBeUndefined();
+  expect(requests.filter((request) => request.method === 'DELETE').map((request) => new URL(request.url).pathname)).toEqual(['/cancel-all']);
+});

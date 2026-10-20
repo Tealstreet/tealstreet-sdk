@@ -24,6 +24,16 @@ pub struct Replacement {
     filled: f64,
     reads: u8,
 }
+pub enum CancelScope {
+    Ids(Vec<String>),
+    Token {
+        symbol: String,
+        expected: Vec<String>,
+    },
+    All {
+        expected: Vec<String>,
+    },
+}
 pub enum Request {
     Place {
         command: CommandId,
@@ -31,8 +41,7 @@ pub enum Request {
     },
     Cancel {
         command: CommandId,
-        ids: Vec<String>,
-        symbol: Option<String>,
+        scope: CancelScope,
     },
     ReplaceCancel {
         command: CommandId,
@@ -382,7 +391,11 @@ impl Polymarket {
         if self.trading.jobs.contains_key(&command) {
             return Err("Polymarket command is already pending".into());
         }
-        if locks.iter().any(|id| self.trading.locked.contains(id))
+        if self.trading.scopes.contains("")
+            || scope
+                .as_ref()
+                .is_some_and(|s| s.is_empty() && !self.trading.jobs.is_empty())
+            || locks.iter().any(|id| self.trading.locked.contains(id))
             || symbols.iter().any(|s| self.trading.scopes.contains(s))
             || scope.as_ref().is_some_and(|s| {
                 self.trading
@@ -480,29 +493,55 @@ impl Polymarket {
                         Some(body),
                         Pending::Trade(Request::Cancel {
                             command,
-                            ids,
-                            symbol: None,
+                            scope: CancelScope::Ids(ids),
                         }),
                     )?;
                 }
                 Command::CancelSymbolOrders { command, symbol } => {
+                    if symbol.is_empty() {
+                        let expected = cx
+                            .store
+                            .orders()
+                            .iter()
+                            .filter(|order| order.status == OrderStatus::Open)
+                            .map(|order| order.id.clone())
+                            .collect::<Vec<_>>();
+                        self.start_job(
+                            command,
+                            VecDeque::new(),
+                            expected.clone(),
+                            HashSet::new(),
+                            Some(String::new()),
+                        )?;
+                        self.signed_request(
+                            cx,
+                            Method::Delete,
+                            "/cancel-all",
+                            None,
+                            Pending::Trade(Request::Cancel {
+                                command,
+                                scope: CancelScope::All { expected },
+                            }),
+                        )?;
+                        return Ok(());
+                    }
                     let token = cx
                         .store
                         .market(&symbol)
                         .ok_or("Unknown Polymarket symbol")?
                         .id
                         .clone();
-                    let locks = cx
+                    let expected = cx
                         .store
                         .orders()
                         .iter()
                         .filter(|o| o.symbol == symbol)
                         .map(|o| o.id.clone())
-                        .collect();
+                        .collect::<Vec<_>>();
                     self.start_job(
                         command,
                         VecDeque::new(),
-                        locks,
+                        expected.clone(),
                         HashSet::from([symbol.clone()]),
                         Some(symbol.clone()),
                     )?;
@@ -519,8 +558,7 @@ impl Polymarket {
                         Some(body),
                         Pending::Trade(Request::Cancel {
                             command,
-                            ids: vec![],
-                            symbol: Some(symbol),
+                            scope: CancelScope::Token { symbol, expected },
                         }),
                     )?;
                 }
@@ -687,16 +725,20 @@ impl Polymarket {
                         .push(ack.order_id.into());
                     self.trading_next(cx, command);
                 }
-                Request::Cancel { ids, symbol, .. } => {
+                Request::Cancel { scope, .. } => {
                     let ack: CancelAck = serde_json::from_str(response.body).map_err(|e| {
                         format!("Invalid Polymarket cancellation acknowledgement: {e}")
                     })?;
                     for id in &ack.canceled {
-                        if (!ids.is_empty() && !ids.contains(id))
-                            || symbol
-                                .as_ref()
-                                .is_some_and(|s| cx.store.order(id).is_some_and(|o| &o.symbol != s))
-                        {
+                        let outside = match &scope {
+                            CancelScope::Ids(ids) => !ids.contains(id),
+                            CancelScope::Token { symbol, .. } => cx
+                                .store
+                                .order(id)
+                                .is_some_and(|order| &order.symbol != symbol),
+                            CancelScope::All { .. } => false,
+                        };
+                        if id.is_empty() || outside {
                             return Err(
                                 "Polymarket cancellation response has out-of-scope IDs".into()
                             );
@@ -705,8 +747,13 @@ impl Polymarket {
                     for id in &ack.canceled {
                         self.account_terminal(cx, id);
                     }
+                    let expected = match &scope {
+                        CancelScope::Ids(ids)
+                        | CancelScope::All { expected: ids }
+                        | CancelScope::Token { expected: ids, .. } => ids.as_slice(),
+                    };
                     if !ack.not_canceled.is_empty()
-                        || ids.iter().any(|id| !ack.canceled.contains(id))
+                        || expected.iter().any(|id| !ack.canceled.contains(id))
                     {
                         return Err(format!(
                             "Polymarket cancellation incomplete: {:?}",

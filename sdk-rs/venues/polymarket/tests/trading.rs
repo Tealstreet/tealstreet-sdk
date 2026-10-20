@@ -682,3 +682,183 @@ fn fractional_final_fills_floor_replacement_shares_without_exceeding_target() {
         assert!(units as f64 / 1e6 + filled <= 10.0);
     }
 }
+
+#[test]
+fn global_cancel_uses_native_endpoint_even_without_cached_orders_and_accepts_unknown_ids() {
+    for cached in [false, true] {
+        let mut h = H::new();
+        if !cached {
+            h.e.store_mut().set_orders(vec![]);
+        }
+        h.command(Command::CancelSymbolOrders {
+            command: 1,
+            symbol: String::new(),
+        });
+        let request = h.take("/cancel-all");
+        assert_eq!(request.method, Method::Delete);
+        assert!(request.body.is_none());
+        let expected = safe_cex_crypto::hmac_sha256(
+            b"secret",
+            b"1700000000DELETE/cancel-all",
+            safe_cex_crypto::Encoding::Base64,
+        )
+        .replace('+', "-")
+        .replace('/', "_");
+        assert!(request.headers.contains(&("POLY_SIGNATURE", expected)));
+        h.respond(
+            request,
+            200,
+            r#"{"canceled":["o1","uncached-order"],"not_canceled":{}}"#,
+        );
+        assert_eq!(h.done.last().unwrap().1, Ok("[]".into()));
+        assert!(h.e.store().orders().is_empty());
+        let row = detail("uncached-order", "LIVE", 0.0);
+        h.ws(&format!(
+            r#"{{"event_type":"order","type":"UPDATE",{}}}"#,
+            &row[1..row.len() - 1]
+        ));
+        assert!(h.e.store().order("uncached-order").is_none());
+    }
+}
+
+#[test]
+fn global_cancel_partial_and_missing_proofs_fail_without_assuming_cached_order_canceled() {
+    for ack in [
+        r#"{"canceled":["uncached-order"],"not_canceled":{"o1":"cannot cancel"}}"#,
+        r#"{"canceled":[],"not_canceled":{}}"#,
+    ] {
+        let mut h = H::new();
+        h.command(Command::CancelSymbolOrders {
+            command: 1,
+            symbol: String::new(),
+        });
+        h.response("/cancel-all", 200, ack);
+        assert!(h.done.last().unwrap().1.is_err());
+        assert!(h.e.store().order("o1").is_some());
+        assert_eq!(h.writes(), 0);
+    }
+}
+
+#[test]
+fn global_cancel_excludes_all_concurrent_writes_and_releases_lock_after_failure() {
+    let mut h = H::new();
+    h.command(Command::CancelSymbolOrders {
+        command: 1,
+        symbol: String::new(),
+    });
+    let request = h.take("/cancel-all");
+    for command in [
+        Command::PlaceOrders {
+            command: 2,
+            orders: vec![order()],
+        },
+        Command::CancelOrders {
+            command: 3,
+            ids: vec!["uncached-order".into()],
+        },
+        Command::AmendOrder {
+            command: 4,
+            id: "o1".into(),
+            price: Some(0.6),
+            amount: None,
+        },
+        Command::CancelSymbolOrders {
+            command: 5,
+            symbol: "election-No".into(),
+        },
+        Command::CancelSymbolOrders {
+            command: 6,
+            symbol: String::new(),
+        },
+    ] {
+        h.command(command);
+        assert!(h.done.last().unwrap().1.is_err());
+        assert_eq!(h.writes(), 0);
+    }
+    h.event(Event::HttpFailed {
+        request: request.id,
+        error: "lost global cancellation response",
+    });
+    assert!(h.done.last().unwrap().1.is_err());
+    assert_eq!(h.writes(), 0);
+    h.command(Command::PlaceOrders {
+        command: 7,
+        orders: vec![order()],
+    });
+    assert_eq!(h.writes(), 1);
+    h.response("/order", 200, &ack("new-order"));
+    h.command(Command::CancelSymbolOrders {
+        command: 8,
+        symbol: String::new(),
+    });
+    assert_eq!(h.writes(), 1);
+}
+
+#[test]
+fn global_cancel_cannot_begin_while_an_order_write_is_pending() {
+    let mut h = H::new();
+    h.command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![order()],
+    });
+    h.command(Command::CancelSymbolOrders {
+        command: 2,
+        symbol: String::new(),
+    });
+    assert!(h.done.last().unwrap().1.is_err());
+    assert_eq!(h.writes(), 1);
+    assert!(
+        h.http
+            .iter()
+            .all(|request| !request.url.ends_with("/cancel-all"))
+    );
+}
+
+#[test]
+fn token_cancel_empty_ack_cannot_confirm_a_cached_live_order() {
+    let mut h = H::new();
+    h.command(Command::CancelSymbolOrders {
+        command: 1,
+        symbol: "election-Yes".into(),
+    });
+    let request = h.take("/cancel-market-orders");
+    assert_eq!(request.method, Method::Delete);
+    assert_eq!(request.body.as_deref(), Some(r#"{"asset_id":"1"}"#));
+    h.respond(request, 200, r#"{"canceled":[],"not_canceled":{}}"#);
+    assert!(h.done.last().unwrap().1.is_err());
+    assert!(h.e.store().order("o1").is_some());
+    assert_eq!(h.writes(), 0);
+}
+
+#[test]
+fn token_cancel_subset_ack_reports_failure_and_only_removes_proven_ids() {
+    let mut h = H::new();
+    let mut second = h.e.store().order("o1").unwrap().clone();
+    second.id = "second-live-order".into();
+    h.e.store_mut().upsert_order(second);
+    h.command(Command::CancelSymbolOrders {
+        command: 1,
+        symbol: "election-Yes".into(),
+    });
+    h.response(
+        "/cancel-market-orders",
+        200,
+        r#"{"canceled":["o1"],"not_canceled":{}}"#,
+    );
+    assert!(h.done.last().unwrap().1.is_err());
+    assert!(h.e.store().order("o1").is_none());
+    assert!(h.e.store().order("second-live-order").is_some());
+    assert_eq!(h.writes(), 0);
+    // Failed partial cancellation releases its mutation scope for an explicit retry.
+    h.command(Command::CancelSymbolOrders {
+        command: 2,
+        symbol: "election-Yes".into(),
+    });
+    h.response(
+        "/cancel-market-orders",
+        200,
+        r#"{"canceled":["second-live-order"],"not_canceled":{}}"#,
+    );
+    assert_eq!(h.done.last().unwrap().1, Ok("[]".into()));
+    assert!(h.e.store().orders().is_empty());
+}

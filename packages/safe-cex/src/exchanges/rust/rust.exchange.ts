@@ -203,6 +203,9 @@ export class RustEngineExchange extends BaseExchange {
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     if (exchangeName === 'polymarket') {
+      this.cancelAllOrders = async () => {
+        await this.command({ op: 'cancelSymbolOrders', symbol: '' });
+      };
       this.fetchSymbolMaxLeverage = async (symbol: string) => {
         const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
         return Math.max(rails.buyLeverage, rails.sellLeverage);

@@ -220,3 +220,28 @@ A later recheck under simultaneous local verification failed TS backing-buffer
 settling before comparison (11samples/8transitions/1,025ms); the strict
 1second deadline is unchanged. Rechecking unchanged after broad checks.
 Binance public/private, combinedWasm suite and root tests remain before PR.
+
+### Shared gates and final contract audit
+
+The recheck passes unchanged: public TS/RustCPU49.7/39.6ms, steady23.4/16.2,
+retained21.1/0.9MB; private70.7/65.5ms correctnessPASS. Combineddefault
+Wasm build PASS, SDK87 actualWasm tests PASS, host/wire suite PASS. Binance
+public3runs PASS CPU218.8/113.8ms, steady116.2/50.5, retained18.6/3.0MB;
+privatePASS. Root `yarn test`27tasks PASS in addition to44typecheck/28lint.
+
+Final API contract audit found global cancel-all missing: generic SDK fallback
+only canceled cached orders, while TSPolymarket calls DELETE/cancel-all. Added
+venue-wide endpoint even with empty local cache, typed cancellation scopes,
+strict proof for known IDs while accepting additional server IDs, global
+mutation exclusion, and SDK override. Native trading now22tests PASS and
+all-target clippy PASS; new13threalWasm regression awaits rebuiltbinary.
+Private fixture now also exercisesglobal cancellation against an unseenID.
+Next: verify repair, commit, integrate currentlanding (AsterDEX+Kraken),
+repeat affectedchecks, thenPR/adversarialcomments/greenCI/merge/freshbranch.
+
+Cancellation repair verified:13/13actualWasm boundarytests and updatedprivate
+gate33records/12WSframes/8commandsPASS (CPU90.7/66.9ms informational).
+Independent repair review additionally found token-scope emptyACK could falsely
+confirm cancellation. Token scopes now carry their capturedexpectedIDs too;
+empty/subset ACK errors preserve unconfirmedorders.24trading tests and crate
+all-target clippyPASS. Independent global/token repairreviewPASS.

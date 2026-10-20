@@ -40,6 +40,7 @@ ws(7200,{event_type:'order',type:'PLACEMENT',...order('placed-2','3',{original_s
 command(7800,{op:'cancelOrders',ids:['placed-2']});http('DELETE',`${REST}/orders`,{canceled:['placed-2'],not_canceled:{}},['placed-2']);
 ws(8500,{event_type:'order',type:'CANCELLATION',...order('placed-2','3',{original_size:'5',side:'SELL',price:'0.6',status:'CANCELED'})});
 command(9100,{op:'setLeverage',symbol:'fixture-Yes',leverage:20});command(9500,{op:'setMarginType',symbol:'fixture-Yes',isolated:true});command(9900,{op:'setPositionMode',hedged:true});
+command(10050,{op:'cancelSymbolOrders',symbol:''});http('DELETE',`${REST}/cancel-all`,{canceled:['server-only'],not_canceled:{}});
 // Last harmless frame lets periodic authoritative state settle after commands.
 ws(12000,{event_type:'order',type:'CANCELLATION',...order('external','1',{size_matched:'2',status:'CANCELED',timestamp:String(EPOCH+12000)})});
 records.sort((a,b)=>a.t-b.t);mkdirSync(dirname(values.out),{recursive:true});writeFileSync(values.out,records.map(r=>JSON.stringify(r)).join('\n')+'\n');
