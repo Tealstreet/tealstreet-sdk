@@ -34,6 +34,8 @@ const bookSymbols = values.books.split(',').filter(Boolean);
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
 const metadata = records.find((record) => record.type === 'meta');
+const venueOptions = { ...venue.options, ...metadata?.options,
+  ...(typeof metadata?.testnet === 'boolean' ? { testnet: metadata.testnet } : {}) };
 let clockStart = performance.now();
 if (Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
 const isPrivate =
@@ -154,7 +156,8 @@ async function runRust() {
     clearTimeout: (handle) => clearTimeout(handle),
   };
   const options = {
-    ...venue.options,
+    ...venueOptions,
+    ...(!isPrivate ? venue.publicOptions : {}),
     ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }),
   };
   const engine = new WasmEngine(venue.rust, JSON.stringify(options));
@@ -236,6 +239,7 @@ async function runRust() {
   clearInterval(flushTimer);
   host.flush();
   const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
+  const protocolErrors = tape.audit?.errors() ?? [];
   host.dispose();
   clock?.restore();
 
@@ -275,7 +279,7 @@ async function runRust() {
     unserved: tape.unserved,
     missingWrites: tape.missingWrites,
     unusedWrites: tape.missingWrites,
-    protocolErrors: tape.audit?.errors() ?? [],
+    protocolErrors,
     invalidSignatures: tape.invalidSignatures,
     wsRequests: [...tape.sentRequests].sort(),
     subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : [...tape.protocolSubscriptions].sort(),
@@ -442,7 +446,8 @@ async function runTs() {
     if (!values['no-egress'] && state) mainStore.update(structuredClone(worker._prepareStorePayload(state)), true);
   };
   const options = {
-    ...venue.options,
+    ...venueOptions,
+    ...(!isPrivate ? venue.publicOptions : {}),
     ...(isPrivate
       ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE }
       : { key: '', secret: '', publicDataOnly: true }),
@@ -533,6 +538,7 @@ async function runTs() {
         })),
       }
     : undefined;
+  const protocolErrors = tape.audit?.errors() ?? [];
   exchange.dispose();
   clock?.restore();
   return {
@@ -541,7 +547,7 @@ async function runTs() {
     unserved: tape.unserved,
     missingWrites: tape.missingWrites,
     unusedWrites: tape.missingWrites,
-    protocolErrors: tape.audit?.errors() ?? [],
+    protocolErrors,
     invalidSignatures: tape.invalidSignatures,
     wsRequests: [...tape.sentRequests].sort(),
     subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : [...tape.protocolSubscriptions].sort(),

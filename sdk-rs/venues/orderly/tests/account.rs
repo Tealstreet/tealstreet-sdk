@@ -249,3 +249,41 @@ fn root_terminal_before_any_children_blocks_a_held_startup_snapshot() {
     );
     assert!(!e.store().orders().iter().any(|o| o.id == "101"));
 }
+
+#[test]
+fn only_definitive_account_validation_rejection_deactivates() {
+    use safe_cex_engine::Notice;
+    for status in [401, 403, 408, 429, 503] {
+        let mut e = Engine::new(Orderly::new(options()));
+        e.start(1000.0);
+        let mut output = vec![];
+        for _ in 0..4 {
+            let r = requests(&mut e).pop().unwrap();
+            if r.url.ends_with("/v1/public/info") {
+                reply(&mut e, &r, 200, MARKETS);
+            } else if r.url.ends_with("/v1/public/futures") {
+                reply(&mut e, &r, 200, TICKERS);
+            } else {
+                assert!(r.url.ends_with("/v1/client/info"));
+                reply(
+                    &mut e,
+                    &r,
+                    status,
+                    r#"{"success":false,"message":"validation failed"}"#,
+                );
+                output = actions(&mut e);
+                break;
+            }
+        }
+        assert_eq!(
+            output
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::Deactivate))),
+            status == 401 || status == 403
+        );
+        assert_eq!(
+            output.iter().any(|a| matches!(a, Action::SetTimer { .. })),
+            status != 401 && status != 403
+        );
+    }
+}

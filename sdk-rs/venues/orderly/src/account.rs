@@ -645,6 +645,7 @@ impl Orderly {
                 && !matches!(response.status, 408 | 429)
             {
                 cx.log(LogLevel::Error, "Orderly API key expired or rejected");
+                cx.deactivate();
                 return;
             }
             self.account_failed(cx, request, &e);

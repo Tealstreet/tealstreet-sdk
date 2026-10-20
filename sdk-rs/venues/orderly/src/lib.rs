@@ -1,5 +1,6 @@
 //! Orderly perpetuals, shared by its six broker frontends.
 mod account;
+mod funding;
 mod history;
 mod sign;
 mod trading;
@@ -108,6 +109,7 @@ pub struct Orderly {
     account: account::Account,
     trading: trading::Trading,
     history: history::HistoryState,
+    funding: funding::FundingState,
 }
 impl Orderly {
     pub fn new(options: Options) -> Self {
@@ -123,6 +125,7 @@ impl Orderly {
             account: account::Account::default(),
             trading: trading::Trading::default(),
             history: history::HistoryState::default(),
+            funding: funding::FundingState::default(),
         }
     }
     fn rest(&self) -> &'static str {
@@ -427,7 +430,9 @@ impl Orderly {
                 if let Some((native, suffix)) = topic.split_once('@')
                     && let Some(s) = symbol(native)
                 {
-                    if suffix == "orderbookupdate" && self.books.contains_key(&s) {
+                    if suffix == "estfundingrate" {
+                        self.apply_funding(cx, native, data.get())?;
+                    } else if suffix == "orderbookupdate" && self.books.contains_key(&s) {
                         let d: Depth = match serde_json::from_str(data.get()) {
                             Ok(d) => d,
                             Err(e) => {
@@ -448,10 +453,47 @@ impl Orderly {
         }
         Ok(())
     }
+    fn apply_funding(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        native: &str,
+        data: &str,
+    ) -> Result<(), String> {
+        let r: FundingTicker<'_> = serde_json::from_str(data).map_err(|e| e.to_string())?;
+        let symbol = symbol(native).ok_or("Orderly invalid funding topic")?;
+        if r.symbol != native
+            || self.native.get(&symbol).map(String::as_str) != Some(native)
+            || r.funding_time < 0.0
+        {
+            return Err("Orderly funding topic/symbol mismatch or invalid time".into());
+        }
+        cx.store.update_ticker(&symbol, |t| {
+            t.funding_rate = r.funding_rate;
+            t.funding_time = r.funding_time;
+        });
+        Ok(())
+    }
 }
 fn symbol(native: &str) -> Option<String> {
-    let (base, quote) = native.strip_prefix("PERP_")?.rsplit_once('_')?;
-    (!base.is_empty() && !quote.is_empty()).then(|| format!("{base}{quote}"))
+    let (base, settlement) = native_parts(native)?;
+    Some(format!("{base}{settlement}"))
+}
+/// Broker-listed markets share USDC as quote but retain their broker suffix in
+/// settlement identity: PERP_XLM_USDC_mythos -> XLMUSDC_mythos.
+fn native_parts(native: &str) -> Option<(&str, &str)> {
+    let (base, settlement) = native.strip_prefix("PERP_")?.split_once('_')?;
+    let safe = |s: &str| {
+        !s.is_empty()
+            && s.bytes()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'-' | b'_'))
+    };
+    if !safe(base) {
+        return None;
+    }
+    if settlement != "USDC" && !settlement.strip_prefix("USDC_").is_some_and(safe) {
+        return None;
+    }
+    Some((base, settlement))
 }
 fn interval_valid(i: &str) -> bool {
     matches!(
@@ -466,6 +508,9 @@ impl Venue for Orderly {
         self.initialize_account(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        if self.funding_open(cx, socket) {
+            return;
+        }
         if self.account.socket.socket == Some(socket) {
             self.private_open(cx, socket);
             return;
@@ -478,7 +523,7 @@ impl Venue for Orderly {
         self.public.ping_at = cx.now;
         self.public.watchdog = Some(cx.set_timer(10000.0));
         cx.send(socket, "{\"event\":\"ping\"}");
-        for topic in ["tickers", "bbos", "markprices", "estfundingrate"] {
+        for topic in ["tickers", "bbos", "markprices"] {
             self.subscribe(cx, topic, true);
         }
         self.books
@@ -505,6 +550,9 @@ impl Venue for Orderly {
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        if self.funding_message(cx, socket, text) {
+            return;
+        }
         if self.account.socket.socket == Some(socket) {
             if let Err(e) = self.private_message(cx, text) {
                 cx.log(LogLevel::Error, e);
@@ -522,6 +570,9 @@ impl Venue for Orderly {
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
+        if self.funding_close(cx, socket) {
+            return;
+        }
         if self.account.socket.socket == Some(socket) {
             self.private_close(cx, socket);
             return;
@@ -564,15 +615,14 @@ impl Venue for Orderly {
                 Pending::Account(_) | Pending::Trade(_) | Pending::History(_) => unreachable!(),
                 Pending::Markets { rows, .. } => {
                     let r: MarketRow<'_> = serde_json::from_str(item).map_err(|e| e.to_string())?;
-                    let Some(s) = symbol(&r.symbol) else {
-                        return Ok(());
+                    let Some((base, settlement)) = native_parts(&r.symbol) else {
+                        return if r.symbol.starts_with("PERP_") {
+                            Err("Orderly malformed USDC perpetual market symbol".into())
+                        } else {
+                            Ok(())
+                        };
                     };
-                    let (base, quote) = r
-                        .symbol
-                        .strip_prefix("PERP_")
-                        .unwrap()
-                        .rsplit_once('_')
-                        .unwrap();
+                    let s = format!("{base}{settlement}");
                     if r.base_tick <= 0.0
                         || r.quote_tick <= 0.0
                         || r.base_min < 0.0
@@ -589,11 +639,11 @@ impl Venue for Orderly {
                         100.0
                     };
                     rows.push(Market {
-                        id: format!("{base}/{quote}:USDC"),
+                        id: format!("{base}/USDC:{settlement}"),
                         symbol: s,
                         pretty_symbol: None,
                         base: base.into(),
-                        quote: quote.into(),
+                        quote: "USDC".into(),
                         active: true,
                         precision: Precision {
                             amount: r.base_tick,
@@ -696,10 +746,25 @@ impl Venue for Orderly {
                 rows,
                 invalid: false,
             } => {
-                self.native = rows
-                    .iter()
-                    .map(|m| (m.symbol.clone(), format!("PERP_{}_{}", m.base, m.quote)))
-                    .collect();
+                let mut native = HashMap::new();
+                for m in &rows {
+                    let Some(settlement) = m.symbol.strip_prefix(&m.base) else {
+                        self.retry_seed(cx, Seed::Markets, "Orderly invalid market identity");
+                        return;
+                    };
+                    let actual = format!("PERP_{}_{settlement}", m.base);
+                    if native_parts(&actual).is_none()
+                        || native.insert(m.symbol.clone(), actual).is_some()
+                    {
+                        self.retry_seed(
+                            cx,
+                            Seed::Markets,
+                            "Orderly duplicate or invalid market identity",
+                        );
+                        return;
+                    }
+                }
+                self.native = native;
                 cx.store.set_markets(rows);
                 self.seed_attempts = 0;
                 self.seed(cx, Seed::Tickers);
@@ -711,6 +776,7 @@ impl Venue for Orderly {
                 cx.store.set_tickers(rows);
                 self.seed_attempts = 0;
                 self.public.socket = Some(cx.connect(self.public_url()));
+                self.funding_start(cx);
                 self.account_start(cx);
             }
             Pending::Candles {
@@ -736,6 +802,9 @@ impl Venue for Orderly {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.funding_timer(cx, timer) {
+            return;
+        }
         if self.history_timer(cx, timer) {
             return;
         }

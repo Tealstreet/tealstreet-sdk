@@ -205,3 +205,12 @@ test('an asynchronous binary message cannot enter a disposed engine', async () =
   await decoded;
   assert.equal(calls, 0);
 });
+
+test('credential deactivation is an explicit host event', () => {
+  let deactivated = 0;
+  const host = new EngineHost({ start() { return '[{"op":"deactivate"}]'; } }, { now: () => 1 }, {
+    onDeactivate() { deactivated++; },
+  });
+  host.start();
+  assert.equal(deactivated, 1);
+});

@@ -340,7 +340,9 @@ fn startup_subscriptions_are_retained_and_can_be_removed_before_seed() {
             .iter()
             .any(|m| m.contains("PERP_BTC_USDC@kline_1m"))
     );
-    assert!(!messages.iter().any(|m| m.contains("PERP_ETH_USDC")));
+    assert!(!messages.iter().any(|m| {
+        m.contains("PERP_ETH_USDC@orderbookupdate") || m.contains("PERP_ETH_USDC@kline_")
+    }));
     let id = messages
         .iter()
         .find_map(|text| {
@@ -482,4 +484,337 @@ fn predecessor_gap_requires_a_fresh_snapshot() {
     assert!(e.book("BTCUSDC").is_some());
     delta(&mut e, s, 1800, "[[50000,8]]");
     assert!(e.book("BTCUSDC").is_none());
+}
+
+fn ready_sockets(markets: &str, tickers: &str) -> (Driver, Vec<SocketId>) {
+    let mut e = Engine::new(Orderly::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.start(1000.0);
+    for body in [markets, tickers] {
+        let r = requests(&mut e).pop().unwrap();
+        reply(&mut e, &r, body);
+    }
+    let sockets: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .collect();
+    for socket in &sockets {
+        e.handle(1000.0, Event::WsOpened { socket: *socket });
+    }
+    (e, sockets)
+}
+fn custom_ready(markets: &str, tickers: &str) -> (Driver, SocketId) {
+    let (e, sockets) = ready_sockets(markets, tickers);
+    (e, sockets[0])
+}
+fn market_row(native: &str) -> String {
+    format!(
+        r#"{{"symbol":"{native}","base_tick":0.01,"quote_tick":0.001,"base_min":0.01,"base_max":100,"base_imr":0.02}}"#
+    )
+}
+fn ticker_row(native: &str) -> String {
+    format!(r#"{{"symbol":"{native}","24h_open":1,"24h_close":1.1,"mark_price":1.11}}"#)
+}
+fn rows_envelope(rows: &[String]) -> String {
+    format!(
+        r#"{{"success":true,"data":{{"rows":[{}]}}}}"#,
+        rows.join(",")
+    )
+}
+
+#[test]
+fn broker_listed_markets_keep_usdc_quote_unique_identity_and_native_requests() {
+    let natives = [
+        "PERP_XLM_USDC",
+        "PERP_XLM_USDC_mythos",
+        "PERP_XLM_USDC_other",
+    ];
+    let (mut e, socket) = custom_ready(
+        &rows_envelope(&natives.map(market_row)),
+        &rows_envelope(&natives.map(ticker_row)),
+    );
+    assert_eq!(e.store().markets().len(), 3);
+    for (symbol, id) in [
+        ("XLMUSDC", "XLM/USDC:USDC"),
+        ("XLMUSDC_mythos", "XLM/USDC:USDC_mythos"),
+        ("XLMUSDC_other", "XLM/USDC:USDC_other"),
+    ] {
+        let market = e.store().market(symbol).unwrap();
+        assert_eq!(market.base, "XLM");
+        assert_eq!(market.quote, "USDC");
+        assert_eq!(market.id, id);
+    }
+    assert_eq!(e.store().tickers().len(), 3);
+    actions(&mut e);
+    e.handle(
+        2000.0,
+        Event::Command(Command::FetchCandles {
+            command: 90,
+            symbol: "XLMUSDC_mythos".into(),
+            interval: "1m".into(),
+            limit: Some(10),
+            from_ms: None,
+            to_ms: None,
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    assert!(r.url.contains("symbol=PERP_XLM_USDC_mythos&type=1m"));
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "XLMUSDC_mythos".into(),
+        }),
+    );
+    let out = actions(&mut e);
+    assert!(out.iter().any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("PERP_XLM_USDC_mythos@orderbookupdate"))));
+    assert!(out.iter().any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("\"symbol\":\"PERP_XLM_USDC_mythos\""))));
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_XLM_USDC_mythos","close":1.2,"volume":3,"amount":3.6}]}"#,
+    );
+    assert_eq!(e.store().ticker("XLMUSDC_mythos").unwrap().last, 1.2);
+    assert_eq!(e.store().ticker("XLMUSDC").unwrap().last, 1.1);
+}
+
+#[test]
+fn funding_subscribes_per_market_and_parses_documented_single_object() {
+    let natives = ["PERP_XLM_USDC", "PERP_XLM_USDC_mythos"];
+    let (mut e, sockets) = ready_sockets(
+        &rows_envelope(&natives.map(market_row)),
+        &rows_envelope(&natives.map(ticker_row)),
+    );
+    let socket = sockets[1];
+    #[derive(serde::Deserialize)]
+    struct Subscription {
+        event: String,
+        #[serde(default)]
+        topic: String,
+    }
+    let subscriptions: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => serde_json::from_str::<Subscription>(&text)
+                .ok()
+                .filter(|s| s.event == "subscribe")
+                .map(|s| s.topic),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(subscriptions.len(), 5);
+    for topic in [
+        "tickers",
+        "bbos",
+        "markprices",
+        "PERP_XLM_USDC@estfundingrate",
+        "PERP_XLM_USDC_mythos@estfundingrate",
+    ] {
+        assert!(subscriptions.iter().any(|s| s == topic));
+    }
+    assert!(!subscriptions.iter().any(|s| s == "estfundingrate"));
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"PERP_XLM_USDC_mythos@estfundingrate","ts":1682242440000,"data":{"symbol":"PERP_XLM_USDC_mythos","fundingRate":0.00046875,"fundingTs":1682242440000}}"#,
+    );
+    let broker = e.store().ticker("XLMUSDC_mythos").unwrap();
+    assert_eq!(broker.funding_rate, 0.00046875);
+    assert_eq!(broker.funding_time, 1682242440000.0);
+    assert_eq!(e.store().ticker("XLMUSDC").unwrap().funding_rate, 0.0);
+    for data in [
+        r#"{"symbol":"PERP_XLM_USDC","fundingRate":9,"fundingTs":1}"#,
+        r#"{"symbol":"PERP_XLM_USDC_mythos","fundingRate":9,"fundingTs":-1}"#,
+        r#"{"symbol":"PERP_XLM_USDC_mythos","fundingTs":1}"#,
+    ] {
+        ws(
+            &mut e,
+            socket,
+            &format!(r#"{{"topic":"PERP_XLM_USDC_mythos@estfundingrate","data":{data}}}"#),
+        );
+        assert_eq!(
+            e.store().ticker("XLMUSDC_mythos").unwrap().funding_rate,
+            0.00046875
+        );
+        assert_eq!(e.store().ticker("XLMUSDC").unwrap().funding_rate, 0.0);
+    }
+}
+
+#[test]
+fn malformed_quotes_empty_broker_suffixes_and_duplicate_markets_fail_seed() {
+    for natives in [
+        vec!["PERP_XLM_USDT"],
+        vec!["PERP_XLM_USDC_"],
+        vec!["PERP__USDC"],
+        vec!["PERP_XLM_USDC_mythos?other"],
+        vec!["PERP_XLM_USDC", "PERP_XLM_USDC"],
+    ] {
+        let mut e = Engine::new(Orderly::new(Options {
+            public_data_only: true,
+            ..Default::default()
+        }));
+        e.start(1000.0);
+        let r = requests(&mut e).pop().unwrap();
+        let mut rows = vec![market_row("PERP_BTC_USDC")];
+        rows.extend(natives.into_iter().map(market_row));
+        reply(&mut e, &r, &rows_envelope(&rows));
+        assert!(e.store().markets().is_empty());
+        assert!(!e.store().loaded().markets);
+        assert!(!actions(&mut e).iter().any(|a| matches!(a, Action::Http(_))));
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct FundingSubscription {
+    event: String,
+    #[serde(default)]
+    topic: String,
+}
+fn subscription_topics(actions: &[Action], socket: SocketId) -> Vec<String> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsSend { socket: s, text } if *s == socket => {
+                serde_json::from_str::<FundingSubscription>(text)
+                    .ok()
+                    .filter(|s| s.event == "subscribe")
+                    .map(|s| s.topic)
+            }
+            _ => None,
+        })
+        .collect()
+}
+fn many_market_sockets(count: usize) -> (Driver, Vec<SocketId>) {
+    let natives: Vec<_> = (0..count)
+        .map(|n| format!("PERP_ASSET{n:03}_USDC"))
+        .collect();
+    ready_sockets(
+        &rows_envelope(&natives.iter().map(|n| market_row(n)).collect::<Vec<_>>()),
+        &rows_envelope(&natives.iter().map(|n| ticker_row(n)).collect::<Vec<_>>()),
+    )
+}
+
+#[test]
+fn funding_shards_keep_main_socket_capacity_and_route_each_pong_to_its_sender() {
+    let (mut e, sockets) = many_market_sockets(201);
+    assert_eq!(sockets.len(), 4, "one main plus three funding sockets");
+    let out = actions(&mut e);
+    let main_topics = subscription_topics(&out, sockets[0]);
+    assert_eq!(main_topics, ["tickers", "bbos", "markprices"]);
+    let mut all = std::collections::HashSet::new();
+    for (socket, count) in sockets[1..].iter().zip([90, 90, 21]) {
+        let topics = subscription_topics(&out, *socket);
+        assert_eq!(topics.len(), count);
+        assert!(topics.iter().all(|t| t.ends_with("@estfundingrate")));
+        for topic in topics {
+            assert!(all.insert(topic));
+        }
+    }
+    assert_eq!(all.len(), 201);
+    for socket in [sockets[1], sockets[3]] {
+        ws(&mut e, socket, r#"{"event":"ping"}"#);
+        let out = actions(&mut e);
+        assert_eq!(
+            out.iter()
+                .filter(
+                    |a| matches!(a, Action::WsSend { text, .. } if text == "{\"event\":\"pong\"}")
+                )
+                .count(),
+            1
+        );
+        assert!(out.iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text == "{\"event\":\"pong\"}")));
+    }
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "ASSET000USDC".into(),
+        }),
+    );
+    let out = actions(&mut e);
+    assert!(out.iter().any(|a| matches!(a, Action::WsSend { socket, text } if *socket == sockets[0] && text.contains("ASSET000_USDC@orderbookupdate"))));
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::WsSend { socket, .. } if *socket != sockets[0]))
+    );
+}
+
+#[test]
+fn funding_watchdog_reconnects_only_its_shard_and_ignores_late_old_socket_frames() {
+    let (mut e, sockets) = many_market_sockets(201);
+    let out = actions(&mut e);
+    let original_topics = subscription_topics(&out, sockets[1]);
+    let foreign_topic = subscription_topics(&out, sockets[2])[0].clone();
+    let native = original_topics[0].strip_suffix("@estfundingrate").unwrap();
+    let internal = native.strip_prefix("PERP_").unwrap().replace('_', "");
+    let frame = |topic: &str, native: &str, rate| {
+        format!(
+            r#"{{"topic":"{topic}","data":{{"symbol":"{native}","fundingRate":{rate},"fundingTs":12345}}}}"#
+        )
+    };
+    ws(
+        &mut e,
+        sockets[1],
+        &frame(&original_topics[0], native, 0.001),
+    );
+    assert_eq!(e.store().ticker(&internal).unwrap().funding_rate, 0.001);
+    let timers: Vec<_> = out
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(timers.len(), 4);
+    e.handle(31000.0, Event::TimerFired { timer: timers[1] });
+    let out = actions(&mut e);
+    assert_eq!(
+        out.iter()
+            .filter(|a| matches!(a, Action::WsClose { .. }))
+            .count(),
+        1
+    );
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == sockets[1]))
+    );
+    let retry = out
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 32000.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(32000.0, Event::TimerFired { timer: retry });
+    let fresh = actions(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    assert!(!sockets.contains(&fresh));
+    e.handle(32000.0, Event::WsOpened { socket: fresh });
+    let out = actions(&mut e);
+    assert_eq!(subscription_topics(&out, fresh), original_topics);
+    ws(&mut e, sockets[1], &frame(&original_topics[0], native, 0.9));
+    assert_eq!(e.store().ticker(&internal).unwrap().funding_rate, 0.001);
+    ws(&mut e, fresh, &frame(&original_topics[0], native, 0.002));
+    assert_eq!(e.store().ticker(&internal).unwrap().funding_rate, 0.002);
+    let foreign_native = foreign_topic.strip_suffix("@estfundingrate").unwrap();
+    ws(&mut e, fresh, &frame(&foreign_topic, foreign_native, 0.9));
+    let foreign_internal = foreign_native
+        .strip_prefix("PERP_")
+        .unwrap()
+        .replace('_', "");
+    assert_eq!(
+        e.store().ticker(&foreign_internal).unwrap().funding_rate,
+        0.0
+    );
 }

@@ -94,3 +94,9 @@ opt-level = "z"
 
 [profile.release.package.safe-cex-venue-weex]
 opt-level = "z"
+
+[profile.release.package.safe-cex-venue-orderly]
+opt-level = "z"
+
+[profile.release.package.safe-cex-crypto]
+opt-level = "z"

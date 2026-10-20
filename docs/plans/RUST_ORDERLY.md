@@ -192,3 +192,27 @@ Use strict independent ED25519 verification and exact ordered bodies in tapes;
 correlate public snapshot responses by taped semantic request, symbol, socket
 generation and opaque-ID occurrence. Run actual live two-book20s recording,
 all alias/testnet private gates, existing venue regressions, and full checks.
+
+### Integration checkpoint before landing merge
+
+WIP: production six-alias registry cutover, test-only legacy replay reference,
+conditional WASM loader, explicit deactivation event, scoped host routing,
+strict signed private tapes and guarded independent TS-fix oracles are present.
+Broker suffixes now preserve native identity. Funding moved to dedicated
+90-topic sockets after live evidence of the venue's100-topic/socket limit.
+Public shard tests16 and query tests17 pass; harness96 and transport10 pass.
+SDK alias/private/lifecycle WASM tests15 pass; typecheck/lint pass. Full SDK
+suite had6567passes and six expected registry-characterization failures;
+those six snapshots were updated and targeted49tests now pass.
+
+No final gate has passed yet. Remaining: verify new funding topology on a fresh
+20s recording, finish native/main/private handshake watchdog and main-topic
+capacity checks, propagate request abort through the actual host so deferred
+proxy authorization cannot send after disposal, preflight unsupported socket
+routes, rerun private gate with current query build/oracles, fit combined WASM
+within existing3MiB budget, run all gates/regressions/CI and adversarial reviews.
+Current public fixture is an intermediate recording and must be replaced.
+Unused hmac_sha512 helper removed; spec-required P5a signing primitives retained.
+Legacy built-in HOW tunnel cannot preserve signed bytes and currently fails
+explicitly; raw custom transport/proxy routes preserve bytes. Document/review
+this limitation before shipping.

@@ -17,6 +17,7 @@
     "check:licenses": "node scripts/check-licenses.mjs",
     "rust:build-wasm": "bash sdk-rs/harness/build.sh",
     "rust:record": "node sdk-rs/harness/record.mjs",
+    "rust:private-tape-orderly": "node sdk-rs/harness/private-tape-orderly.mjs",
     "rust:private-tape-backpack": "node sdk-rs/harness/private-tape-backpack.mjs",
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
     "rust:private-tape:blofin": "node sdk-rs/harness/private-tape-blofin.mjs",

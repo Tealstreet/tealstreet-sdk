@@ -122,6 +122,16 @@ pub struct LiveTicker<'a> {
 }
 
 #[derive(Deserialize)]
+pub struct FundingTicker<'a> {
+    #[serde(borrow)]
+    pub symbol: Cow<'a, str>,
+    #[serde(rename = "fundingRate", deserialize_with = "number")]
+    pub funding_rate: f64,
+    #[serde(rename = "fundingTs", deserialize_with = "number")]
+    pub funding_time: f64,
+}
+
+#[derive(Deserialize)]
 pub struct Depth {
     #[serde(rename = "prevTs")]
     pub previous: Option<u64>,

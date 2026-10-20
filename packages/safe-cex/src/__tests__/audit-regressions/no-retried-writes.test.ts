@@ -32,7 +32,7 @@ import { ENDPOINTS as KUCOIN } from '../../exchanges/kucoin/kucoin.types';
 import { createKucoinSpotAPI } from '../../exchanges/kucoin/kucoinspot.api';
 import { createAPI as createMexcAPI } from '../../exchanges/mexc/mexc.api';
 import { createAPI as createOkxAPI } from '../../exchanges/okx/okx.api';
-import { createAPI as createOrderlyAPI } from '../../exchanges/orderly/orderly.api';
+import { createAPI as createOrderlyAPI } from '../reference/orderly/orderly.api';
 import { createAPI as createParadexAPI } from '../../exchanges/paradex/paradex.api';
 import { createAPI as createPhemexAPI } from '../../exchanges/phemex/phemex.api';
 import { createPolymarketAPI } from '../../exchanges/polymarket/polymarket.api';

@@ -56,6 +56,7 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
     })
     .sort(([a], [b]) => a.localeCompare(b));
   if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
+  if (body === '') body = undefined;
   let payload = typeof body === 'string' && body ? parseRequestJson(body) : (body ?? {});
   if (options.requestBody) payload = options.requestBody(payload);
   const data =
@@ -90,6 +91,18 @@ export const takeResponse = (queue, method, url, time = 0, commandIndex = Infini
   return record;
 };
 
+export const subscriptionMessage = (message) => {
+  const method = String(message.method ?? message.reqType ?? message.op ?? message.event ?? '').toUpperCase();
+  if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return undefined;
+  const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
+  const topics =
+    message.params?.channels ??
+    message.params ??
+    message.args ??
+    (typeof message.topic === 'string' ? [message.topic] : message.dataType ? [message.dataType] : []);
+  return Array.isArray(topics) ? { op, topics } : undefined;
+};
+
 /** Subscription IDs and batching vary; native channels and operations must match. */
 export const subscriptionKeys = (url, text) => {
   let message;
@@ -98,15 +111,11 @@ export const subscriptionKeys = (url, text) => {
   } catch {
     return [];
   }
-  const method = String(message.method ?? message.reqType ?? message.op ?? '').toUpperCase();
-  if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return [];
-  const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
+  const subscription = subscriptionMessage(message);
+  if (!subscription) return [];
   const parsed = new URL(url);
-  const topics =
-    message.params?.channels ?? message.params ?? message.args ?? (message.dataType ? [message.dataType] : []);
-  if (!Array.isArray(topics)) return [];
-  return topics.map(
+  return subscription.topics.map(
     (topic) =>
-      `${parsed.origin}${parsed.pathname} ${op} ${typeof topic === 'object' ? JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b)))) : topic}`,
+      `${parsed.origin}${parsed.pathname} ${subscription.op} ${typeof topic === 'object' ? JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b)))) : topic}`,
   );
 };

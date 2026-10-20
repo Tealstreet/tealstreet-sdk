@@ -179,6 +179,9 @@ export class EngineHost {
         transport.clearTimeout(this.timers.get(action.timer));
         this.timers.delete(action.timer);
         break;
+      case 'deactivate':
+        this.handlers.onDeactivate?.();
+        break;
       case 'log':
         this.handlers.onLog?.(action.level, action.message);
         break;

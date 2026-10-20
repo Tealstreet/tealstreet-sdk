@@ -30,6 +30,7 @@ export interface Transport {
 }
 
 export interface EngineHandlers {
+  onDeactivate?(): void;
   /** One frame per flush; transfer it, don't copy it. */
   onFrame?(buffer: ArrayBuffer): void;
   onLog?(level: 'info' | 'warning' | 'error', message: string): void;

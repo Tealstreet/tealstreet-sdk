@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
 import { Responses } from './responses.mjs';
-import { isRead, subscriptionKeys, requestKey as typedRequestKey } from './requests.mjs';
+import { isRead, subscriptionKeys, subscriptionMessage, requestKey as typedRequestKey } from './requests.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
 
@@ -231,11 +231,24 @@ export class ReplayClock {
 export class Tape {
   constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = 30000, impl, books = []) {
     this.venue = venue;
+    this.impl = impl;
     this.isPrivate = isPrivate;
     this.timeoutMs = timeoutMs;
     this.commandIndex = 0;
     this.time = 0;
     this.generations = new Map();
+    this.recordedSocketRequests = new Map();
+    this.recordedSocketQueues = new Map();
+    for (const record of records.filter((r) => r.type === 'ws-send')) {
+      const request = venue.socketRequest?.(JSON.parse(record.text));
+      if (!request) continue;
+      const key = `${canonicalUrl(record.url)} ${record.socket ?? 0} ${request.id}`;
+      if (this.recordedSocketRequests.has(key)) throw new Error(`duplicate taped websocket request ${key}`);
+      this.recordedSocketRequests.set(key, request.key);
+      const queueKey = `${canonicalUrl(record.url)} ${record.socket ?? 0} ${request.key}`;
+      if (!this.recordedSocketQueues.has(queueKey)) this.recordedSocketQueues.set(queueKey, []);
+      this.recordedSocketQueues.get(queueKey).push(request.id);
+    }
     this.startupSubscriptions = new Map(
       Array.from(venue.startupSubscriptions?.(records, books) ?? [], (key) => [key, false]),
     );
@@ -303,7 +316,22 @@ export class Tape {
     }
     const now = this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time;
     if (this.responseStore) {
+      const write = this.isWrite(method, url);
+      if (write && this.venue.compareWriteOrder) {
+        const next = this.writeOrder[0];
+        const expectedBody = this.impl === 'ts' ? (next?.tsRequestBody ?? next?.requestBody) : next?.requestBody;
+        if (
+          !next ||
+          this.responseStore.key(method, url, body) !== this.responseStore.key(next.method, next.url, expectedBody)
+        ) {
+          if (this.unserved < 10) console.error('out-of-order write', { actual: this.responseStore.key(method, url, body), expected: next && this.responseStore.key(next.method, next.url, expectedBody) });
+          this.unserved = ++this.responseStore.unserved;
+          return { status: 599, body: '' };
+        }
+      }
+      const before = write ? this.responseStore.unusedWrites() : 0;
       const response = this.responseStore.respond(method, url, body, this.commandIndex, now);
+      if (write && this.responseStore.unusedWrites() < before) this.writeOrder.shift();
       this.unserved = this.responseStore.unserved;
       return response;
     }
@@ -361,14 +389,21 @@ export class Tape {
       ordinal: generation - 1,
       onClose,
       onMessage: (text) => {
-        this.audit?.received(url, text);
-        onMessage(text);
+        const correlated = this.correlateSocketResponse(socket, text);
+        this.audit?.received(url, correlated, generation);
+        onMessage(correlated);
       },
       closed: false,
       subscriptions: new Set(),
       loginVerified: false,
       topics: new Map(),
+      requests: new Map(),
+      requestIds: new Set(),
+      requestCounts: new Map(),
+      mappedRequests: new Map(),
+      responseIds: new Set(),
     };
+    this.audit?.connected?.(url, generation);
     setImmediate(() => {
       if (socket.closed) return;
       const key = canonicalUrl(url, this.callerIds, this.venue);
@@ -389,7 +424,7 @@ export class Tape {
         this.pendingStartupSubscriptions--;
       }
     }
-    this.audit?.sent(socket.url, text);
+    this.audit?.sent(socket.url, text, socket.generation);
     if (this.venue.respondToPing && text === 'ping') {
       setImmediate(() => {
         if (!socket.closed) socket.onMessage('pong');
@@ -398,6 +433,29 @@ export class Tape {
     }
     try {
       const message = JSON.parse(text);
+      const request = this.venue.socketRequest?.(message);
+      if (request) {
+        if (socket.requestIds.has(request.id)) throw new Error(`duplicate websocket request ${request.key}`);
+        if (this.recordedSocketRequests.size || this.venue.requireSocketRequestRecords) {
+          const queueKey = `${canonicalUrl(socket.url)} ${socket.ordinal} ${request.key}`;
+          const count = socket.requestCounts.get(request.key) ?? 0;
+          const recordedId = this.recordedSocketQueues.get(queueKey)?.[count];
+          if (recordedId === undefined) throw new Error(`unrecorded websocket request ${request.key}`);
+          socket.requestCounts.set(request.key, count + 1);
+          socket.mappedRequests.set(recordedId, request.id);
+        }
+        socket.requests.set(request.id, request.key);
+        socket.requestIds.add(request.id);
+        this.sentRequests.add(JSON.stringify(stable({ url: socket.url, request: request.key })));
+      }
+      if (message.event) {
+        const subscription = subscriptionMessage(message);
+        for (const topic of subscription?.topics ?? []) {
+          if (typeof topic !== 'string' || !topic) throw new Error('invalid websocket subscription topic');
+          if (subscription.op === 'subscribe') socket.subscriptions.add(topic);
+          else socket.subscriptions.delete(topic);
+        }
+      }
       if (this.isPrivate && this.venue.verifySubscribe && !this.venue.verifySubscribe(message)) {
         this.invalidSignatures++;
         throw new Error('invalid replay websocket signature');
@@ -498,7 +556,38 @@ export class Tape {
   close(socket, code = 1000) {
     if (socket.closed) return;
     socket.closed = true;
+    this.audit?.closed?.(socket.url, socket.generation);
     socket.onClose?.(code);
+  }
+
+  correlateSocketResponse(socket, text) {
+    if (!this.venue.socketResponse) return text;
+    let message;
+    try {
+      message = JSON.parse(text);
+    } catch {
+      return text;
+    }
+    const response = this.venue.socketResponse(message);
+    if (!response) return text;
+    if (socket.responseIds.has(response.id)) throw new Error('duplicate websocket response');
+    const scope = `${canonicalUrl(socket.url)} ${socket.ordinal}`;
+    const recordedKey = `${scope} ${response.id}`;
+    const recorded = this.recordedSocketRequests.get(recordedKey);
+    if ((this.recordedSocketRequests.size || this.venue.requireSocketRequestRecords) && recorded === undefined)
+      throw new Error('websocket response has no taped request');
+    if (recorded !== undefined && response.key !== undefined && recorded !== response.key)
+      throw new Error('websocket response symbol differs from taped request');
+    const key = recorded ?? response.key;
+    const id = this.recordedSocketRequests.size
+      ? socket.mappedRequests.get(response.id)
+      : [...socket.requests].find(([, requestKey]) => requestKey === key)?.[0];
+    if (id === undefined) throw new Error(`unsolicited websocket response ${key ?? response.id}`);
+    if (socket.requests.get(id) !== key) throw new Error('websocket response differs from pending request');
+    socket.requests.delete(id);
+    socket.mappedRequests.delete(response.id);
+    socket.responseIds.add(response.id);
+    return JSON.stringify({ ...message, id });
   }
 
   async socketFor(url, text, ordinal) {

@@ -102,6 +102,7 @@ export const createEngineObject = ({ loadEngine, flush = { store: 250, books: 60
           transport,
           {
             onFrame: (frame) => this.broadcast(frame),
+            onDeactivate: () => this.broadcast(JSON.stringify({ op: 'deactivate' })),
             onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),
           },
         );

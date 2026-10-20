@@ -15,6 +15,7 @@ use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
+use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions, Orderly};
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -70,11 +71,16 @@ struct EngineOptions {
     passphrase: Option<String>,
     #[serde(default)]
     private_ws_headers: bool,
+    #[serde(default)]
+    application_id: Option<String>,
+    #[serde(default)]
+    tick_interval: Option<f64>,
 }
 
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
+    Deactivate,
     WsConnect {
         socket: u32,
         url: &'a str,
@@ -158,6 +164,7 @@ fn encode(actions: &[Action]) -> String {
                 at: *at_ms,
             },
             Action::ClearTimer { timer } => ActionOut::ClearTimer { timer: timer.0 },
+            Action::Notice(Notice::Deactivate) => ActionOut::Deactivate,
             Action::Notice(Notice::Log { level, message }) => ActionOut::Log {
                 level: match level {
                     LogLevel::Info => "info",
@@ -463,6 +470,24 @@ impl WasmEngine {
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
             }))),
+            "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
+                Box::new(Engine::new(Orderly::new(OrderlyOptions {
+                    broker: match venue {
+                        "kodiakfi" => OrderlyBroker::KodiakFi,
+                        "mode" => OrderlyBroker::Mode,
+                        "salsadex" => OrderlyBroker::SalsaDex,
+                        "what" => OrderlyBroker::What,
+                        "woofi" => OrderlyBroker::WooFi,
+                        _ => OrderlyBroker::Tealstreet,
+                    },
+                    public_data_only: options.public_data_only,
+                    testnet: options.testnet,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    tick_interval: options.tick_interval,
+                })))
+            }
             "backpack" => Box::new(Engine::new(Backpack::new(BackpackOptions {
                 public_data_only: options.public_data_only,
                 key: options.key,

@@ -55,6 +55,8 @@ pub enum LogLevel {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Notice {
+    /// Definitive credential rejection; transient failures never deactivate.
+    Deactivate,
     Log {
         level: LogLevel,
         message: String,
@@ -445,6 +447,10 @@ impl<P> Cx<'_, P> {
             level,
             message: message.into(),
         }));
+    }
+
+    pub fn deactivate(&mut self) {
+        self.io.actions.push(Action::Notice(Notice::Deactivate));
     }
 
     pub fn done(&mut self, command: CommandId, result: Result<String, String>) {

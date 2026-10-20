@@ -3716,6 +3716,7 @@ dependencies = [
  "safe-cex-venue-cryptocom",
  "safe-cex-venue-mexc",
  "safe-cex-venue-okx",
+ "safe-cex-venue-orderly",
  "safe-cex-venue-weex",
  "serde",
  "serde_json",

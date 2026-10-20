@@ -10,7 +10,8 @@ import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { fixWeexConditionals } from './known-ts-fixes.mjs';
-import { venueOf } from './venues.mjs';
+import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
+import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -112,6 +113,8 @@ const records = tapeRecords;
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  // Corrections use documented inputs; native protocol counters stay checked.
+  orderly: (ts) => fixOrderly(ts, tapeRecords),
   blofin: (ts) => {
     const account = ts.account;
     if (!account) return;
@@ -378,6 +381,7 @@ const KNOWN_TS_FIXES = {
     ts.account.fills = fills;
   },
 };
+for (const alias of Object.keys(ORDERLY_BROKERS)) KNOWN_TS_FIXES[alias] = KNOWN_TS_FIXES.orderly;
 const normalizeBingxPublic = (ts) => {
   // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
   // integer step 1. Correct that precision and its synthetic ticker touch only.
@@ -547,6 +551,7 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
+if (venueOf(values.venue).family === 'orderly') console.log(`(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`);
 if (values.venue.startsWith('okx'))
   console.log(
     `(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`,
