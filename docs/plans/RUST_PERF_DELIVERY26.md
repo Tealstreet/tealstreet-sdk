@@ -424,3 +424,26 @@ actual frozen configuration, then run private checks followed by the fixed
 three-run public comparisons with all compilers and other tests quiet. Keep
 all numerical failures and report narrower margins; no directional retries.
 CPU/memory goals and PR landing remain pending.
+
+## Product collection negative checkpoint
+
+Frozen configuration `3578989c2b0f01cd92deee894c28662acbd25f366de834b10dae0e26408a6e22`
+passed independent review. All 63 private gates pass. Twelve public pairs
+completed; the 13th pair stopped at KuCoin candidate because all three retained
+memory totals were invalid negatives (-493,896/-493,976/-518,000 bytes).
+All final endpoint/per-gate hash checks pass. Preserve the entire configuration,
+runner, report, logs and 282 replay outputs in
+`RUST_PERF_DELIVERY26_PRODUCTS_NEGATIVE.json.gz`. No numerical retries occurred.
+
+Memory margins improve in every completed pair, but CPU margins narrow in ten
+of twelve; Bitget and Backpack widen both. Breakout fails the CPU gate (ratio
+2.98 to 0.83), mostly because TS drops 44.376 to 12.745 ms between arms while
+Rust changes 14.890 to 15.374 ms. This is not evidence of a 3.6x Rust slowdown.
+Polymarket is also too close to claim improvement. Do not call these goals met.
+Release optimization profiles are identical between candidate and control.
+
+Next bounded phase: diagnose harness baseline lifetime with a strict invariant
+(no negative allowance/clamping), and audit singleton host delivery against the
+original reusable byte path. No new scored children until a source-backed repair
+plan and independent audit. Preserve all old inputs/results; declare any new
+collection after source changes and checks. Full task and PR remain unfinished.
