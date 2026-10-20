@@ -585,8 +585,9 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   ~~one unknown order status/type drops the whole private frame incl. positions
   and balances (`account_wire.rs:298`, `account.rs:601`)~~ (that row is skipped,
   its executions still emit, the store keeps its copy).
-- Medium: one bad public row stops startup; one bad position row freezes a
-  currency slice (`account.rs:286`); no fallback read when a symbol's mode or
+- Medium: one bad public row stops startup; ~~one bad position row freezes a
+  currency slice (`account.rs:286`)~~ (REST and stream rows skip, keeping the
+  store copy; the slice balance still commits); no fallback read when a symbol's mode or
   leverage context is uncached (`trading.rs:229,713`) — re-verified as low
   impact: `accountPositions` (size-0 rows included) reconciles every 2 s, so the
   gap is the first cycle; TS also refuses a symbol that read omits.

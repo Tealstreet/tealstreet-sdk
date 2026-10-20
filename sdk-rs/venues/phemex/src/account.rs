@@ -313,7 +313,10 @@ impl PhemexPerpetuals {
         }
         // A bad row never blocks the slice's balance; its positions keep the store's copy.
         let Ok(row) = serde_json::from_str::<PositionRow<'_>>(item) else {
-            cx.log(LogLevel::Warning, "Phemex skipped an unreadable position row");
+            cx.log(
+                LogLevel::Warning,
+                "Phemex skipped an unreadable position row",
+            );
             request.unattributed = true;
             return;
         };
@@ -702,19 +705,20 @@ impl PhemexPerpetuals {
                     .get(&symbol)
                     .copied()
                     .or_else(|| self.account.context(&symbol));
+                // A bad row keeps the store's copy; the rest of the frame still applies.
                 let Some((context, position)) = row.map(cx.store, prior) else {
                     cx.log(
                         LogLevel::Warning,
-                        "Phemex invalid position mapping; retaining private frame",
+                        format!("Phemex skipped unmappable {symbol} position row"),
                     );
-                    return true;
+                    continue;
                 };
                 if !row.currency.is_empty() && row.currency != CURRENCIES[currency] {
                     cx.log(
                         LogLevel::Warning,
-                        "Phemex mismatched position settlement; retaining private frame",
+                        format!("Phemex skipped {symbol} position with mismatched settlement"),
                     );
-                    return true;
+                    continue;
                 }
                 let version = if row.transact_time_ns > 0 {
                     row.transact_time_ns
@@ -770,9 +774,8 @@ impl PhemexPerpetuals {
         }) {
             cx.log(
                 LogLevel::Warning,
-                "Phemex invalid account mapping; retaining private frame",
+                "Phemex skipped an invalid account row; applying the rest of the frame",
             );
-            return true;
         }
         if let Some(sequence) = message.sequence {
             self.account.sequence = Some(sequence);
