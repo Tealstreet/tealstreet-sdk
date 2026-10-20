@@ -187,7 +187,7 @@ fn variant_public_testnet_urls_and_candles_use_their_family() {
         assert_eq!(
             request.url,
             format!(
-                "{host}{endpoint}/klines?symbol=BTCUSD_PERP&interval=1m&startTime=-5998000&endTime=2000&limit=100"
+                "{host}{endpoint}/klines?symbol=BTCUSD_PERP&interval=1m&limit=100&startTime=1000&endTime=2000"
             )
         );
         h.reply(

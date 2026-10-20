@@ -1176,5 +1176,14 @@ or stale later-product reads retain the proven whole-account snapshot. Public
 index prices use a catalog-owned fanout table for shared inverse/X-Perp indexes.
 Untraded X-Perps can appear live with empty REST `last` and `open24h` fields;
 unavailable REST seeds start at finite zero. An explicitly empty live last/open
-quote retains the last proven trade/change. Blank bid/ask/volume fields remain
-finite zero; malformed nonempty quotes stay visible to the reference oracle.
+quote retains the last proven trade/change. Blank or malformed bid/ask/volume/last
+seed values start at zero with a warning, so the market keeps a ticker row that
+live updates can patch (they never create one).
+
+Rust startup is fail-open per row and retried per read: a malformed instrument
+row is skipped (warning with the count); a failed, malformed or wholly unusable
+catalog/ticker read restarts that product chain after 1, 2, 4 … 30 s backoff,
+never publishing a partial product union. `fetchLeverage` reads cross
+`leverage-info` for one symbol (flat symbols have no position row to carry it).
+Account config is re-read every 30 s; a posMode or acctLv changed in the OKX app
+updates the hedged flag and reconciles positions instead of rejecting orders.

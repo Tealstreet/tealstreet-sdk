@@ -53,14 +53,9 @@ enum Call {
         fallback: Vec<String>,
     },
     TradingStop,
-    PartialStop,
     Amend,
     Cancel {
         ids: Vec<String>,
-    },
-    CancelPartialStop {
-        id: String,
-        batch: bool,
     },
     CancelAll {
         ids: Vec<String>,
@@ -210,54 +205,6 @@ fn not_modified(message: &str) -> bool {
 fn already_gone(message: &str) -> bool {
     let message = message.to_ascii_lowercase();
     message.contains("order not exists") || message.contains("too late to cancel")
-}
-
-fn partial_stop_cancel_accepted(body: &str, id: &str, batch: bool) -> Result<(), String> {
-    let malformed = || {
-        "Partial stop cancellation was not confirmed: malformed or mismatched acknowledgement"
-            .to_owned()
-    };
-    if batch {
-        #[derive(serde::Deserialize)]
-        struct Reply {
-            #[serde(rename = "retExtInfo")]
-            statuses: Statuses,
-        }
-        #[derive(serde::Deserialize)]
-        struct Statuses {
-            list: Vec<Status>,
-        }
-        #[derive(serde::Deserialize)]
-        struct Status {
-            code: i64,
-            msg: Option<String>,
-        }
-        let reply: Reply = serde_json::from_str(body).map_err(|_| malformed())?;
-        let [status] = reply.statuses.list.as_slice() else {
-            return Err(malformed());
-        };
-        if status.code != 0 && !already_gone(status.msg.as_deref().unwrap_or_default()) {
-            return Err(status
-                .msg
-                .clone()
-                .unwrap_or_else(|| "Partial stop cancellation was rejected".into()));
-        }
-    } else {
-        #[derive(serde::Deserialize)]
-        struct Reply {
-            result: Identity,
-        }
-        #[derive(serde::Deserialize)]
-        struct Identity {
-            #[serde(rename = "orderId")]
-            id: String,
-        }
-        let reply: Reply = serde_json::from_str(body).map_err(|_| malformed())?;
-        if reply.result.id != id {
-            return Err(malformed());
-        }
-    }
-    Ok(())
 }
 
 fn is_virtual(id: &str) -> bool {
@@ -879,10 +826,6 @@ impl BybitLinear {
                 }
             }
             (Call::Amend | Call::TradingStop, Err((_, message))) if not_modified(&message) => {}
-            (Call::PartialStop, Ok(_)) => self.schedule_partial_stop_refresh(cx),
-            (Call::PartialStop, Err((_, message))) if not_modified(&message) => {
-                self.schedule_partial_stop_refresh(cx);
-            }
             (Call::TradingStop, Ok(_)) => {
                 // No order id comes back; the stop's row arrives on the stream.
             }
@@ -918,19 +861,6 @@ impl BybitLinear {
                 // Refused whole: nothing was placed, so each order may go alone.
                 errors.push(format!("Failed to place batch orders: {}", describe(error)));
                 fallback_steps = fallback;
-            }
-            (Call::CancelPartialStop { id, batch }, Ok(body)) => {
-                match partial_stop_cancel_accepted(body, &id, batch) {
-                    Ok(()) => {
-                        self.note_partial_stop_canceled(&id);
-                        mark_canceled(cx, &[id], self.local_order_lifecycle());
-                    }
-                    Err(message) => errors.push(message),
-                }
-            }
-            (Call::CancelPartialStop { id, .. }, Err((_, message))) if already_gone(&message) => {
-                self.note_partial_stop_canceled(&id);
-                mark_canceled(cx, &[id], self.local_order_lifecycle());
             }
             (Call::Cancel { ids: requested }, Ok(body)) => {
                 let statuses = serde_json::from_str::<Batch>(body)
@@ -1593,132 +1523,7 @@ impl BybitLinear {
             .finish())
     }
 
-    fn plan_partial_stop_amend(
-        &self,
-        cx: &Cx<'_, Pending>,
-        order: &Order,
-        price: Option<f64>,
-        amount: Option<f64>,
-    ) -> Result<Job, String> {
-        if order.status != OrderStatus::Open {
-            return Err("Only an open Partial position stop can be amended".into());
-        }
-        if price.is_some_and(|value| !value.is_finite() || value <= 0.0)
-            || amount.is_some_and(|value| !value.is_finite() || value < 0.0)
-        {
-            return Err("Amended stop price must be positive and quantity nonnegative".into());
-        }
-        let mark = cx
-            .store
-            .ticker(&order.symbol)
-            .map(|ticker| ticker.mark)
-            .filter(|mark| mark.is_finite() && *mark > 0.0);
-        let base = || {
-            Body::new()
-                .str("category", self.category_for(&order.symbol).as_str())
-                .str("symbol", &order.symbol)
-        };
-        if let Some(mark) =
-            mark.filter(|_| self.variant != crate::Variant::Inverse || price.is_some())
-        {
-            // Projection and the replacement price deliberately use the raw drag value.
-            let price = price.unwrap_or(order.price);
-            if !price.is_finite() || price <= 0.0 {
-                return Err("A Partial position stop needs a positive replacement price".into());
-            }
-            let kind = match order.side {
-                OrderSide::Sell if price > mark => OrderType::TakeProfit,
-                OrderSide::Buy if price <= mark => OrderType::TakeProfit,
-                _ => OrderType::StopLoss,
-            };
-            let market = cx
-                .store
-                .market(&order.symbol)
-                .ok_or_else(|| format!("Market {} not found", order.symbol))?;
-            let amount = num::adjust(amount.unwrap_or(order.amount), market.precision.amount);
-            if !amount.is_finite() || amount < 0.0 {
-                return Err(
-                    "A Partial position stop needs a nonnegative replacement quantity".into(),
-                );
-            }
-            let partial = amount != 0.0;
-            let trigger = (kind == order.kind).then_some(order.trigger_type).flatten();
-            let (level, by, size, reference) = if kind == OrderType::StopLoss {
-                (
-                    "stopLoss",
-                    "slTriggerBy",
-                    "slSize",
-                    if trigger == Some(StopTriggerType::LastPrice) {
-                        "LastPrice"
-                    } else {
-                        "MarkPrice"
-                    },
-                )
-            } else {
-                (
-                    "takeProfit",
-                    "tpTriggerBy",
-                    "tpSize",
-                    if trigger == Some(StopTriggerType::MarkPrice) {
-                        "MarkPrice"
-                    } else {
-                        "LastPrice"
-                    },
-                )
-            };
-            let body = base()
-                .int(
-                    "positionIdx",
-                    self.stop_position_idx(cx, &order.symbol, order.side),
-                )
-                .str("tpslMode", if partial { "Partial" } else { "Full" })
-                .str(level, &number(price))
-                .str(by, reference)
-                .opt_str(size, partial.then(|| number(amount)).as_deref())
-                .finish();
-            let mut job = self.plan_cancel(std::slice::from_ref(order));
-            for planned in job.steps.iter_mut().flat_map(|step| &mut step.requests) {
-                planned.call = Call::CancelPartialStop {
-                    id: order.id.clone(),
-                    batch: self.paths.batch_orders,
-                };
-            }
-            job.steps.push_back(Step {
-                delay_ms: 0.0,
-                requests: vec![Planned {
-                    path: "/v5/position/trading-stop",
-                    body,
-                    call: Call::PartialStop,
-                }],
-            });
-            return Ok(job);
-        }
-        // Missing mark (or inverse amount-only): TS updates the original leg directly.
-        let level = if order.kind == OrderType::StopLoss {
-            "stopLoss"
-        } else {
-            "takeProfit"
-        };
-        let size = if order.kind == OrderType::StopLoss {
-            "slSize"
-        } else {
-            "tpSize"
-        };
-        let mut body = base().int(
-            "positionIdx",
-            self.position_idx(cx, &order.symbol, order.side, order.reduce_only),
-        );
-        if self.variant != crate::Variant::Inverse {
-            body = body.str("tpslMode", "Partial");
-        }
-        body = body.opt_str(level, price.map(number).as_deref());
-        if self.variant != crate::Variant::Inverse {
-            body = body.str(size, &number(amount.unwrap_or(order.amount)));
-        }
-        Ok(trading_stop_job(body.finish()))
-    }
-
-    /// Partial position stops cancel/recreate; ordinary orders amend in place.
+    /// Bybit amends in place, so the order keeps its id and client id.
     fn plan_amend(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1734,16 +1539,6 @@ impl BybitLinear {
             .store
             .market(&order.symbol)
             .ok_or_else(|| format!("Market {} not found", order.symbol))?;
-        let stop = matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit);
-        if stop
-            && !is_virtual(id)
-            && self.category_for(&order.symbol) != Category::Spot
-            && self.category_for(&order.symbol) != Category::Option
-            && self.account.position_bound.contains(id)
-            && order.amount != 0.0
-        {
-            return self.plan_partial_stop_amend(cx, order, price, amount);
-        }
         let price = price.map(|p| num::adjust(p, market.precision.price));
         let amount = amount.map(|a| {
             if self.category_for(&order.symbol) == Category::Inverse {
@@ -1763,6 +1558,7 @@ impl BybitLinear {
                 .str("symbol", &order.symbol)
         };
         let amend = |body: Body| Ok(single("/v5/order/amend", body.finish(), Call::Amend));
+        let stop = matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit);
         if is_virtual(id) {
             // An attached TP/SL is a field of its parent order.
             let price = price.ok_or("Only the price of an attached TP/SL can change")?;
@@ -1801,7 +1597,7 @@ impl BybitLinear {
             return Ok(trading_stop_job(self.trailing_stop(cx, &opts)?));
         }
         if stop && self.account.position_bound.contains(id) && order.amount == 0.0 {
-            // Full stops keep their existing position update path.
+            // Full stops modify the position; Partial stops amend by order ID.
             if amount.is_some() {
                 return Err("A full-position stop has no adjustable quantity".into());
             }

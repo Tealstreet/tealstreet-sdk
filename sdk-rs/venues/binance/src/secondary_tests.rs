@@ -51,75 +51,52 @@ fn secondary_get_keeps_primary_mutations() {
         Variant::Spot,
         Variant::CoinM,
     ] {
-        for recv_window in [None, Some(4321.0), Some(0.0), Some(4321.125)] {
-            let mut opts = options();
-            opts.variant = variant;
-            opts.recv_window = recv_window;
-            let mut engine = Engine::new(Probe(BinanceFutures::new(opts)));
-            engine.start(1700000000000.0);
-            let requests: Vec<_> = engine
-                .drain_actions()
-                .filter_map(|a| {
-                    if let Action::Http(r) = a {
-                        Some(r)
-                    } else {
-                        None
-                    }
-                })
-                .filter(|r| r.url.contains("secondary-test"))
-                .collect();
-            assert_eq!(requests.len(), 4);
-            for request in requests {
-                let expected = if request.method == Method::Get {
-                    "read-key"
+        let mut opts = options();
+        opts.variant = variant;
+        let mut engine = Engine::new(Probe(BinanceFutures::new(opts)));
+        engine.start(1700000000000.0);
+        let requests: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| {
+                if let Action::Http(r) = a {
+                    Some(r)
                 } else {
-                    "primary-key"
-                };
-                let opts = options();
-                let secret = if request.method == Method::Get {
-                    opts.read_credentials.as_ref().unwrap().secret.as_str()
-                } else {
-                    opts.secret.as_deref().unwrap()
-                };
-                let credentials = sign::Credentials {
-                    key: expected.into(),
-                    secret: secret.into(),
-                };
-                assert!(request.url.ends_with(&sign::Query::new().signed(
-                    &credentials,
-                    1700000000000.0,
-                    recv_window
-                )));
-                let (payload, signature) = request
+                    None
+                }
+            })
+            .filter(|r| r.url.contains("secondary-test"))
+            .collect();
+        assert_eq!(requests.len(), 4);
+        for request in requests {
+            let expected = if request.method == Method::Get {
+                "read-key"
+            } else {
+                "primary-key"
+            };
+            let opts = options();
+            let secret = if request.method == Method::Get {
+                opts.read_credentials.as_ref().unwrap().secret.as_str()
+            } else {
+                opts.secret.as_deref().unwrap()
+            };
+            let credentials = sign::Credentials {
+                key: expected.into(),
+                secret: secret.into(),
+            };
+            assert!(
+                request
                     .url
-                    .split_once('?')
-                    .unwrap()
-                    .1
-                    .rsplit_once("&signature=")
-                    .unwrap();
-                let expected_payload = format!(
-                    "timestamp=1700000000000&recvWindow={}",
-                    recv_window.unwrap_or(20000.0)
-                );
-                assert_eq!(payload, expected_payload);
-                assert_eq!(
-                    signature,
-                    safe_cex_crypto::hmac_sha256(
-                        secret.as_bytes(),
-                        expected_payload.as_bytes(),
-                        safe_cex_crypto::Encoding::Hex
-                    )
-                );
-                assert!(
-                    request
-                        .headers
-                        .iter()
-                        .any(|(name, value)| name.eq_ignore_ascii_case("X-MBX-APIKEY")
-                            && value == expected),
-                    "{:?}",
-                    request
-                );
-            }
+                    .ends_with(&sign::Query::new().signed(&credentials, 1700000000000.0))
+            );
+            assert!(
+                request
+                    .headers
+                    .iter()
+                    .any(|(name, value)| name.eq_ignore_ascii_case("X-MBX-APIKEY")
+                        && value == expected),
+                "{:?}",
+                request
+            );
         }
     }
 }
