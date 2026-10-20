@@ -13,6 +13,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Bybit treats both window bounds as inclusive and refuses wider ones.
 const MAX_WINDOW_MS: f64 = 7.0 * 24.0 * 3_600_000.0 - 1.0;
+/// Windows a range may span; a larger range keeps one window for Bybit to reject.
+const MAX_WINDOWS: usize = 10_000;
 const FILLS_PAGE_LIMIT: u32 = 100;
 const ORDERS_PAGE_LIMIT: u32 = 50;
 const INCOME_PAGE_LIMIT: u32 = 50;
@@ -209,7 +211,7 @@ fn windows(from: Option<f64>, to: Option<f64>) -> VecDeque<(Option<f64>, Option<
         to,
         MAX_WINDOW_MS,
         WindowOrder::NewestFirst,
-        usize::MAX,
+        MAX_WINDOWS,
     )
     .map(|windows| {
         windows
