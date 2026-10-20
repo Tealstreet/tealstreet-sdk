@@ -104,7 +104,7 @@ fn auth_waits_for_signer_then_forwards_exact_answer_and_headers() {
             "opaque signer answer \"quoted\"",
         ),
         ("PARADEX-TIMESTAMP", "1700000000"),
-        ("PARADEX-SIGNATURE-EXPIRATION", "1700086400"),
+        ("PARADEX-SIGNATURE-EXPIRATION", "1700000300"),
         ("Content-Type", "application/json"),
     ] {
         assert!(

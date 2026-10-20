@@ -184,11 +184,12 @@ const placementAck = (id: string, status = 'live') => ({ success: true, orderID:
 
 it('returns partial batch identity through the actual Wasm host SDK Error after an ambiguous second write', async () => {
   let placements = 0;
+  const transportSecret = 'audit-partial-write-secret';
   const { exchange, requests, store } = await start({ key: KEY, secret: '', polymarket: API }, (request) => {
     if (request.method !== 'POST' || new URL(request.url).pathname !== '/order') return;
     placements += 1;
     if (placements === 1) return response(placementAck('first-accepted'));
-    throw new Error('connection lost after sending the second order');
+    throw new Error(`connection lost after sending the second order: ${API.apiKey} ${API.apiSecret} ${API.apiPassphrase} https://clob.polymarket.com/order?signature=${transportSecret}`);
   });
   const failure: unknown = await exchange.placeOrders([limitOrder(), limitOrder()]).then(
     () => { throw new Error('Expected the second order to fail'); },
@@ -196,8 +197,10 @@ it('returns partial batch identity through the actual Wasm host SDK Error after 
   );
   expect(failure).toBeInstanceOf(Error);
   expect(failure).toMatchObject({
-    message: expect.stringContaining('connection lost'), partialOrderIds: ['first-accepted'], partialOrderCount: 1, totalOrderCount: 2, failedOrderIndex: 1,
+    message: 'HTTP transport request failed', partialOrderIds: ['first-accepted'], partialOrderCount: 1, totalOrderCount: 2, failedOrderIndex: 1,
   });
+  const diagnostic = `${String(failure)}\n${JSON.stringify(failure)}`;
+  for (const secret of [...Object.values(API), transportSecret, 'https://']) expect(diagnostic).not.toContain(secret);
   expect(requests.filter((request) => request.method === 'POST' && new URL(request.url).pathname === '/order')).toHaveLength(2);
   // This public SDK read explicitly flushes the worker frame, making the assertion independent of interval timing.
   await exchange.fetchLeverageForSymbol(SYMBOL);

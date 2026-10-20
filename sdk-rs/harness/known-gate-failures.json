@@ -10837,7 +10837,7 @@
     },
     {
       "venue": "coinbase",
-      "tapeSha256": "c5bf9ff3b0b08bd7aabab0154e24dff59910177c0c6659b4a9f9571efa4e9834",
+      "tapeSha256": "b7f05782a0273a8f4b09df65d4ea297c566084e18ce7ed29606e85017346b9a4",
       "tape": "sdk-rs/harness/fixtures/coinbase-public.jsonl.gz",
       "diagnostics": [
         {
@@ -19733,7 +19733,7 @@
     },
     {
       "venue": "kraken",
-      "tapeSha256": "bbf01f5c9dd78885bba282b6099769eaf300126edeb9a319571b1624e5fbc88d",
+      "tapeSha256": "9bf25445884d179b28578b17fe5a2e205f50b603af527beb56f56103e65fe73f",
       "tape": "sdk-rs/harness/fixtures/kraken-public.jsonl.gz",
       "diagnostics": [
         {
@@ -36543,7 +36543,7 @@
     },
     {
       "venue": "kucoin",
-      "tapeSha256": "6830bc02106fb6b4d05db9a3c4e535ea3c6937f39498fc980755facaa44f16b5",
+      "tapeSha256": "2bab19c1b1e616e2ab5005d12d0261ec7f5cb23afc45c0ede8a01d0f0f733c43",
       "tape": "sdk-rs/harness/fixtures/kucoin-public.jsonl.gz",
       "diagnostics": [
         {
