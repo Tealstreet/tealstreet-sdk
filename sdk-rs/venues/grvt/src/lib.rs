@@ -7,6 +7,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
 };
@@ -63,13 +64,25 @@ impl Job {
         }
     }
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
     last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            last_received: 0.,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 20_000.,
+                ping_interval_ms: Some(5_000.),
+                ..Config::default()
+            }),
+        }
+    }
 }
 #[derive(Default)]
 struct Depth {
@@ -135,7 +148,7 @@ impl Grvt {
     pub fn new(options: Options) -> Self {
         Self {
             options,
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
             metadata: HashMap::new(),
             public: Connection::default(),
@@ -277,12 +290,12 @@ impl Grvt {
         );
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.public.socket.is_some() {
+        if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
             return;
         }
         self.public.socket = Some(cx.connect_channel(self.public_url(), SocketChannel::Public));
         self.public.last_received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(5_000.));
+        self.public.supervisor.connecting(cx);
     }
     fn subscribe(&mut self, cx: &mut Cx<'_, Pending>, stream: &str, selector: &str, remove: bool) {
         if !self.public.open {
@@ -350,9 +363,6 @@ impl Grvt {
             cx.close(socket);
         }
         self.public.open = false;
-        if let Some(timer) = self.public.watchdog.take() {
-            cx.clear_timer(timer);
-        }
         if let Some(timer) = self.ticker_batch.take() {
             cx.clear_timer(timer);
         }
@@ -365,14 +375,12 @@ impl Grvt {
             depth.ready = false;
             depth.sequence = None;
         }
-        if self.public.reconnect.is_none() {
-            self.public.reconnect = Some(cx.set_timer(1_000.));
-        }
+        self.public.supervisor.retry(cx);
     }
     fn candle_connect(&mut self, cx: &mut Cx<'_, Pending>, timeframe: &str) {
         let url = self.public_url();
         let c = self.candle_sockets.entry(timeframe.to_owned()).or_default();
-        if c.socket.is_some() {
+        if c.socket.is_some() || c.supervisor.is_waiting() {
             return;
         }
         let feed = match timeframe {
@@ -398,7 +406,7 @@ impl Grvt {
         };
         c.socket = Some(cx.connect_feed(url, SocketChannel::Public, feed, false));
         c.last_received = cx.now;
-        c.watchdog = Some(cx.set_timer(5000.));
+        c.supervisor.connecting(cx);
     }
     fn candle_subscription(
         &mut self,
@@ -638,6 +646,7 @@ impl Venue for Grvt {
                 .get_mut(&interval)
                 .expect("candle socket");
             c.open = true;
+            c.supervisor.opened(cx);
             c.last_received = cx.now;
             let symbols: Vec<_> = self
                 .candles
@@ -654,6 +663,7 @@ impl Venue for Grvt {
             return;
         }
         self.public.open = true;
+        self.public.supervisor.opened(cx);
         self.public.last_received = cx.now;
         self.ticker_offset = 0;
         self.ticker_batch(cx);
@@ -680,6 +690,7 @@ impl Venue for Grvt {
             .find(|c| c.socket == Some(socket))
         {
             connection.last_received = cx.now;
+            connection.supervisor.received(cx.now);
             if text == "ping" {
                 cx.send(socket, "pong");
             } else {
@@ -689,6 +700,7 @@ impl Venue for Grvt {
         }
         if self.public.socket == Some(socket) {
             self.public.last_received = cx.now;
+            self.public.supervisor.received(cx.now);
             self.public_message(cx, text);
         }
     }
@@ -703,10 +715,7 @@ impl Venue for Grvt {
         {
             connection.socket = None;
             connection.open = false;
-            if let Some(timer) = connection.watchdog.take() {
-                cx.clear_timer(timer);
-            }
-            connection.reconnect = Some(cx.set_timer(1000.));
+            connection.supervisor.retry(cx);
             return;
         }
         if self.public.socket == Some(socket) {
@@ -963,54 +972,44 @@ impl Venue for Grvt {
         if let Some(timeframe) = self
             .candle_sockets
             .iter()
-            .find(|(_, c)| c.watchdog == Some(timer) || c.reconnect == Some(timer))
+            .find(|(_, c)| c.supervisor.owns_timer(timer))
             .map(|(i, _)| i.clone())
         {
             let c = self
                 .candle_sockets
                 .get_mut(&timeframe)
                 .expect("candle timer");
-            if c.reconnect == Some(timer) {
-                c.reconnect = None;
-                self.candle_connect(cx, &timeframe);
-                return;
-            }
-            c.watchdog = None;
-            let age = cx.now - c.last_received;
-            if age >= 20_000. {
-                if let Some(s) = c.socket.take() {
-                    cx.close(s);
+            match c.supervisor.on_timer(cx, timer) {
+                SocketTick::Reconnect => self.candle_connect(cx, &timeframe),
+                SocketTick::TimedOut(_) => {
+                    if let Some(socket) = c.socket.take() {
+                        cx.close(socket);
+                    }
+                    c.open = false;
+                    c.supervisor.retry(cx);
                 }
-                c.open = false;
-                c.reconnect = Some(cx.set_timer(1000.));
-            } else {
-                if age >= 6000.
-                    && c.open
-                    && let Some(s) = c.socket
-                {
-                    cx.send(s, "ping");
+                SocketTick::Ping if c.open && cx.now - c.last_received >= 6_000. => {
+                    if let Some(socket) = c.socket {
+                        cx.send(socket, "ping");
+                    }
                 }
-                c.watchdog = Some(cx.set_timer(5000.));
+                _ => {}
             }
             return;
         }
-        if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            let age = cx.now - self.public.last_received;
-            if age >= 20_000. {
-                self.disconnect(cx, true);
-            } else {
-                if age >= 6_000.
-                    && self.public.open
-                    && let Some(s) = self.public.socket
+        if self.public.supervisor.owns_timer(timer) {
+            match self.public.supervisor.on_timer(cx, timer) {
+                SocketTick::Reconnect => self.connect(cx),
+                SocketTick::TimedOut(_) => self.disconnect(cx, true),
+                SocketTick::Ping
+                    if self.public.open && cx.now - self.public.last_received >= 6_000. =>
                 {
-                    cx.send(s, "ping");
+                    if let Some(socket) = self.public.socket {
+                        cx.send(socket, "ping");
+                    }
                 }
-                self.public.watchdog = Some(cx.set_timer(5_000.));
+                _ => {}
             }
-        } else if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect(cx);
         } else if self.ticker_batch == Some(timer) {
             self.ticker_batch = None;
             self.ticker_batch(cx);
@@ -1110,17 +1109,12 @@ impl Venue for Grvt {
                         self.candles.remove(&(symbol.clone(), timeframe.clone()));
                         self.candle_subscription(cx, &symbol, &timeframe, true);
                         if !self.candles.keys().any(|(_, i)| i == &timeframe)
-                            && let Some(c) = self.candle_sockets.remove(&timeframe)
+                            && let Some(mut c) = self.candle_sockets.remove(&timeframe)
                         {
                             if let Some(socket) = c.socket {
                                 cx.close(socket);
                             }
-                            if let Some(timer) = c.watchdog {
-                                cx.clear_timer(timer);
-                            }
-                            if let Some(timer) = c.reconnect {
-                                cx.clear_timer(timer);
-                            }
+                            c.supervisor.cancel(cx);
                         }
                     }
                 }
