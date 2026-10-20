@@ -38,7 +38,11 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
 const bookSymbols = values.books.split(',').filter(Boolean);
 const metadata = records.find((r) => r.type === 'meta');
 // Pin generated timestamps and freshness windows to the tape, across processes.
-let clockStart = performance.now();
+// Keep this wall clock continuous through startup: venue clocks may measure
+// elapsed real Date/dayjs time since their initial sync. Rebasing only Date.now
+// at readiness would move their signatures ahead of the freshness oracle.
+// Tape.play owns a separate readiness-relative clock for record scheduling.
+const clockStart = performance.now();
 if (Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
@@ -257,9 +261,6 @@ async function runRust() {
       return host.command({ op, ...commandArgs(rest) });
     },
     clock,
-    () => {
-      if (isPrivate) clockStart = performance.now();
-    },
   );
   await settle();
   tape.assertWritesConsumed();
@@ -590,9 +591,6 @@ async function runTs() {
     },
     (record) => tsCommand(exchange, store, record),
     clock,
-    () => {
-      if (isPrivate) clockStart = performance.now();
-    },
   );
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
   await settle();

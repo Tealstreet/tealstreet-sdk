@@ -164,3 +164,24 @@ for green CI, merge, and cut a fresh follow-up branch.
   because Node backing-buffer baseline did not settle under shared host load.
   This failed attempt is retained; thresholds remain unchanged. Final V1 private
   correctness passes (14frames, four native writes); remaining gates continue.
+
+### Final Aster gates
+
+- Public fixture gate passes all3 runs:384frames,608markets,631tickers,2books.
+  TS/Rust main CPU200.9/123.9ms, steady94.3/64.3ms, process261.8/220.2ms,
+  retained8.2/2.0MB; Rust linear1.4MB. Selected artifact1008417bytes,
+  below1258291. No output filtering or synthetic markets.
+- V1 and V3 strict private gates pass after continuous-clock correction:
+  14frames each, four writes, no unmatched requests or invalid signatures.
+  Three native integration tests pass including both primary and separate read
+  agents,15command results each (builder, STP, history, account, leverage, depth).
+- Expanded depth fixture initially misclassified public depth as signed; fixed
+  the fixture classification. Independent review confirms native depth is public.
+- Replay now keeps its pinned wall clock continuous across readiness. A real TS
+  Aster clock/signing regression with1.5second startup delay passes and fails
+  strict freshness under the old reset, reproduced in an isolated subprocess.
+  Tape scheduling still starts at readiness; signature windows remain strict.
+  Independent review clear; all213 harness tests pass, existing Binance TS
+  private replay also passes. Full Binance gate and combined build remain.
+- Workspace1262 tests, all-target strict clippy, WASM strict clippy, bans and fmt
+  pass. No shared crypto helper became unused: Aster reuses the existing primitives.
