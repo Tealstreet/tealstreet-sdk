@@ -1968,7 +1968,8 @@ impl Coinbase {
                 if self.account.startup_retry.is_none() && self.account.startup_failures < 3 {
                     self.account.startup_failures += 1;
                     let t = cx.set_timer(
-                        (1000.0 * 2f64.powi(i32::from(self.account.startup_failures)))
+                        Backoff::new(1_000.0, 5, f64::INFINITY)
+                            .delay(u32::from(self.account.startup_failures))
                             .max(self.account.backoff_until - cx.now),
                     );
                     self.account.startup_retry = Some((t, req));

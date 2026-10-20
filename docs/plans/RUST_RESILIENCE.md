@@ -9,7 +9,7 @@ Public discovery retries land separately through the public-startup PR.
 
 ## PRs, in order
 
-1. `engine::backoff::Backoff`: one formula for the remaining 41 inline
+1. `engine::backoff::Backoff`: one formula for the remaining 42 inline
    exponential retry delays and the socket supervisor, constants unchanged
    (identical for every reachable attempt). Unsupervised socket reconnects use
    the supervisor's jitter (75-100% of the delay, seeded from host time) so
