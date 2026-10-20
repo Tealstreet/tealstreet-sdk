@@ -19,6 +19,7 @@ type FixtureOptions = {
   total?: number;
   omitStrings?: boolean;
   settings?: boolean;
+  omitSettings?: boolean;
   leverage?: number;
   buyLeverage?: number;
   sellLeverage?: number;
@@ -36,6 +37,7 @@ const fixture = ({
   total = 42,
   omitStrings = false,
   settings = true,
+  omitSettings = false,
   leverage = 5,
   buyLeverage = leverage,
   sellLeverage = leverage,
@@ -67,7 +69,8 @@ const fixture = ({
   table(SECTION.ORDERS, [1, 3, 0xffffffff, 0xffffffff, 0, 256], [100, 1, 0, 1, 1234, NaN, NaN]);
   table(SECTION.POSITIONS, [1, 0, 2 << 16], [100, 50, 5, 0, 0, 0.5, 80, 10, 1234]);
   table(SECTION.BALANCE, [], [total - 30, 30, total, 0]);
-  table(SECTION.SETTINGS, settings ? [1, 0, 2] : [0], settings ? [leverage, buyLeverage, sellLeverage] : []);
+  if (!omitSettings)
+    table(SECTION.SETTINGS, settings ? [1, 0, 2] : [0], settings ? [leverage, buyLeverage, sellLeverage] : []);
   table(
     SECTION.FILLS,
     [fills, ...Array(fills).fill(3), ...Array(fills).fill(0), ...Array(fills).fill(0)],
@@ -149,6 +152,49 @@ describe('Rust frame recovery callers', () => {
     expect(accountAtFill).toEqual(Array(2).fill({ total: 42, orderId: 'order-1', contracts: 0.5, leverage: 5 }));
     expect(snapshot).toHaveBeenCalledTimes(1);
     expect(store.balance.total).toBe(100);
+    exchange.dispose();
+  });
+
+  it.each([
+    [SECTION.MARKETS, 'MARKETS'],
+    [SECTION.ORDERS, 'ORDERS'],
+    [SECTION.FILLS, 'FILLS'],
+  ] as const)('rejects a required NONE identity in %s %s while retaining BALANCE and requesting recovery', (kind, _sectionName) => {
+    const store = new DefaultStore();
+    const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, store);
+    const bytes = fixture({ fills: 1 });
+    const view = new DataView(bytes);
+    let offset = 16;
+    let corrupted = false;
+    for (let i = 0; i < view.getUint16(6, true); i++) {
+      if (view.getUint16(offset, true) === kind) {
+        view.setUint32(offset + 12, 0xffffffff, true);
+        corrupted = true;
+        break;
+      }
+      offset += 8 + view.getUint32(offset + 4, true);
+    }
+    expect(corrupted).toBe(true);
+    let atRequest: unknown;
+    const snapshot = vi.fn(() => {
+      atRequest = {
+        total: store.balance.total,
+        marketIds: store.markets.map((row) => row.id),
+        orderIds: store.orders.map((row) => row.id),
+      };
+      return fixture({ fills: 0 });
+    });
+    installHost(exchange, snapshot);
+    const fills: OrderFillEvent[] = [];
+    exchange.on('fill', (fill: OrderFillEvent) => fills.push(fill));
+    receive(exchange, bytes);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(atRequest).toEqual({
+      total: 42,
+      marketIds: kind === SECTION.MARKETS ? [] : ['BTCUSDT'],
+      orderIds: kind === SECTION.FILLS ? ['order-1'] : [],
+    });
+    expect(fills.map((fill) => fill.orderId)).toEqual(kind === SECTION.ORDERS ? ['order-1'] : []);
     exchange.dispose();
   });
 
@@ -449,6 +495,45 @@ describe('Rust frame recovery callers', () => {
     expect(rpc).toHaveBeenCalledTimes(2);
     worker.dispose();
     main.dispose();
+  });
+
+  it('retains query-only leverage during worker-local book recovery without replaying original executions', () => {
+    const store = new DefaultStore();
+    const exchange = new RustEngineExchange('polymarket', { key: '', secret: '' }, store);
+    receive(exchange, fixture({ fills: 0, settings: false }));
+    const rails = { buyLeverage: 1, sellLeverage: 1 };
+    (exchange as unknown as { applier: FrameApplier }).applier.applyLeverage('BTCUSDT', rails);
+    const snapshot = vi.fn(() => fixture({ fills: 0, settings: false }));
+    installHost(exchange, snapshot);
+    const fills = vi.fn();
+    exchange.on('fill', fills);
+    receive(exchange, fixture({ brokenBook: true, omitSettings: true }));
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(store.fetchedLeverage).toEqual({ BTCUSDT: rails });
+    expect(fills).toHaveBeenCalledTimes(2);
+    exchange.dispose();
+  });
+
+  it.each([true, false])('flushes pending authoritative SETTINGS before local recovery (settings present: %s)', (settings) => {
+    const store = new DefaultStore();
+    const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, store);
+    receive(exchange, fixture({ fills: 0 }));
+    (exchange as unknown as { applier: FrameApplier }).applier.applyLeverage('DELISTED', {
+      buyLeverage: 9, sellLeverage: 9,
+    });
+    const pending = fixture({ fills: 0, leverage: 12, settings });
+    const flush = vi.fn(() => receive(exchange, pending));
+    const snapshot = vi.fn(() => pending);
+    (exchange as unknown as { host: unknown }).host = { flush, snapshot, dispose: vi.fn() };
+    receive(exchange, new ArrayBuffer(0));
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(flush.mock.invocationCallOrder[0]).toBeLessThan(snapshot.mock.invocationCallOrder[0]);
+    expect(store.fetchedLeverage.DELISTED).toBeUndefined();
+    if (settings) {
+      expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 12, sellLeverage: 12 });
+    } else expect(store.fetchedLeverage).toEqual({});
+    exchange.dispose();
   });
 
   it('restores forwarded query-only leverage from the RPC bundle when engine SETTINGS is empty', async () => {

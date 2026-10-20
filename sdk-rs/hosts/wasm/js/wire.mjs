@@ -91,6 +91,11 @@ const rowCount = (frame, section) => {
   requireEnd(section, section.offset + 4);
   return frame.view.getUint32(section.offset, true);
 };
+const requiredString = (frame, index) => {
+  const value = frame.string(index);
+  if (value === undefined) throw new Error('missing required string reference');
+  return value;
+};
 
 class Strings {
   constructor(buffer, offset, length) {
@@ -195,10 +200,10 @@ export class Frame {
       flags,
       ...(pretty && { prettySymbol: (i) => frame.string(pretty[i]) }),
       ...columns(buffer, data, count, MARKET_COLUMNS),
-      id: (i) => frame.string(refs[i * 4]),
-      symbol: (i) => frame.string(refs[i * 4 + 1]),
-      base: (i) => frame.string(refs[i * 4 + 2]),
-      quote: (i) => frame.string(refs[i * 4 + 3]),
+      id: (i) => requiredString(frame, refs[i * 4]),
+      symbol: (i) => requiredString(frame, refs[i * 4 + 1]),
+      base: (i) => requiredString(frame, refs[i * 4 + 2]),
+      quote: (i) => requiredString(frame, refs[i * 4 + 3]),
     };
   }
 
@@ -229,7 +234,7 @@ export class Frame {
     return { count, market, kind,
       expiry: new Float64Array(this.buffer, data, count),
       strike: new Float64Array(this.buffer, data + count * 8, count),
-      underlying: (i) => this.string(refs[i * 5]),
+      underlying: (i) => requiredString(this, refs[i * 5]),
       settleAsset: (i) => this.string(refs[i * 5 + 1]),
       premiumAsset: (i) => this.string(refs[i * 5 + 2]),
       style: (i) => this.string(refs[i * 5 + 3]),
@@ -245,8 +250,8 @@ export class Frame {
     if (data + count * 32 > section.offset + section.length) throw new Error('Truncated position Greeks');
     const refs = new Uint32Array(this.buffer, section.offset + 4, count * 2);
     return { count, ...columns(this.buffer, data, count, ['delta', 'gamma', 'vega', 'theta']),
-      positionId: (i) => this.string(refs[i * 2]),
-      units: (i) => this.string(refs[i * 2 + 1]),
+      positionId: (i) => requiredString(this, refs[i * 2]),
+      units: (i) => requiredString(this, refs[i * 2 + 1]),
     };
   }
 
@@ -262,12 +267,12 @@ export class Frame {
     const flags = new Uint32Array(buffer, section.offset + 4 + count * 28, count);
     const tickSize = new Float64Array(buffer, align8(section.offset + 4 + count * 32), count);
     return { count, market, flags, tickSize,
-      conditionId: (i) => this.string(refs[i * 6]),
-      outcome: (i) => this.string(refs[i * 6 + 1]),
-      question: (i) => this.string(refs[i * 6 + 2]),
-      description: (i) => this.string(refs[i * 6 + 3]),
-      endDate: (i) => this.string(refs[i * 6 + 4]),
-      slug: (i) => this.string(refs[i * 6 + 5]),
+      conditionId: (i) => requiredString(this, refs[i * 6]),
+      outcome: (i) => requiredString(this, refs[i * 6 + 1]),
+      question: (i) => requiredString(this, refs[i * 6 + 2]),
+      description: (i) => requiredString(this, refs[i * 6 + 3]),
+      endDate: (i) => requiredString(this, refs[i * 6 + 4]),
+      slug: (i) => requiredString(this, refs[i * 6 + 5]),
     };
   }
 
@@ -297,7 +302,7 @@ export class Frame {
     const table = { count, market, ...columns(buffer, at, count, fields) };
     if (section.revision === 1 || (count > 0 && tail + count * 8 <= section.offset + section.length)) {
       const refs = new Uint32Array(buffer, tail, count * 2);
-      table.identity = (i) => ({ symbol: this.string(refs[i]), id: this.string(refs[count + i]) });
+      table.identity = (i) => ({ symbol: requiredString(this, refs[i]), id: requiredString(this, refs[count + i]) });
     }
     return table;
   }
@@ -356,7 +361,7 @@ export class Frame {
     const market = new Uint32Array(buffer, section.offset + 4, count);
     const interval = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
     const rows = new Float64Array(buffer, align8(section.offset + 4 + count * 8), count * 6);
-    return { count, market, interval: (i) => this.string(interval[i]), rows };
+    return { count, market, interval: (i) => requiredString(this, interval[i]), rows };
   }
 
   orders() {
@@ -385,7 +390,7 @@ export class Frame {
         conditionalOrderPrice: new Float64Array(buffer, native + count * 24, count),
         tpTriggerType: (i) => TRIGGER_TYPE[brackets[i] & 0xff],
         slTriggerType: (i) => TRIGGER_TYPE[(brackets[i] >>> 8) & 0xff],
-        symbol: (i) => frame.string(symbols[i]),
+        symbol: (i) => requiredString(frame, symbols[i]),
       }),
       ...(count && native + count * 8 <= section.offset + section.length
         ? { remainingNative: new Float64Array(buffer, native, count) }
@@ -393,7 +398,7 @@ export class Frame {
       ...(count && native + count * 16 <= section.offset + section.length
         ? { filledInPlacementUnits: new Float64Array(buffer, native + count * 8, count) }
         : {}),
-      id: (i) => frame.string(refs[i * 3]),
+      id: (i) => requiredString(frame, refs[i * 3]),
       clientOrderId: (i) => frame.string(refs[i * 3 + 1]),
       parentId: (i) => frame.string(refs[i * 3 + 2]),
     };
@@ -413,8 +418,8 @@ export class Frame {
       ? new Uint32Array(buffer, idsAt, count) : undefined;
     const symbols = section.revision === 1 ? new Uint32Array(buffer, idsAt + count * 4, count) : undefined;
     return { count, market, enums, ...columns(buffer, data, count, POSITION_COLUMNS),
-      ...(symbols && { symbol: (i) => this.string(symbols[i]) }),
-      id: (i) => ids ? this.string(ids[i]) : undefined };
+      ...(symbols && { symbol: (i) => requiredString(this, symbols[i]) }),
+      id: (i) => ids ? requiredString(this, ids[i]) : undefined };
   }
 
   balance() {
@@ -432,7 +437,7 @@ export class Frame {
     const notionals = new Float64Array(this.buffer, at + count * 8, count);
     const coins = {};
     for (let i = 0; i < count; i++) {
-      const base = this.string(refs[i]);
+      const base = requiredString(this, refs[i]);
       Object.defineProperty(coins, base, { value: { base, amount: amounts[i], notional: notionals[i] }, enumerable: true, configurable: true });
     }
     const tail = at + count * 16;
@@ -449,7 +454,7 @@ export class Frame {
     const unrealized = new Float64Array(this.buffer, data + n * 24, n);
     const currencies = {};
     for (let i = 0; i < n; i++) {
-      Object.defineProperty(currencies, this.string(names[i]), {
+      Object.defineProperty(currencies, requiredString(this, names[i]), {
         value: { total: totals[i], free: available[i], used: held[i], upnl: unrealized[i] },
         enumerable: true, configurable: true,
       });
@@ -482,7 +487,7 @@ export class Frame {
     const sellLeverage = data + count * 24 <= end ? new Float64Array(buffer, data + count * 16, count) : leverage;
     const symbols = section.revision === 1 ? new Uint32Array(buffer, data + count * 24, count) : undefined;
     return { count, market, leverage, buyLeverage, sellLeverage,
-      ...(symbols && { symbol: (i) => this.string(symbols[i]) }),
+      ...(symbols && { symbol: (i) => requiredString(this, symbols[i]) }),
       marginType: (i) => MARGIN_TYPE[margin[i]] };
   }
 
@@ -499,8 +504,8 @@ export class Frame {
     const rows = new Float64Array(buffer, align8(section.offset + 4 + count * 12), count * 2);
     const symbols = section.revision === 1 ? new Uint32Array(buffer, data + count * 16, count) : undefined;
     return { count, market, side, rows,
-      ...(symbols && { symbol: (i) => this.string(symbols[i]) }),
-      orderId: (i) => this.string(orderId[i]) };
+      ...(symbols && { symbol: (i) => requiredString(this, symbols[i]) }),
+      orderId: (i) => requiredString(this, orderId[i]) };
   }
 }
 

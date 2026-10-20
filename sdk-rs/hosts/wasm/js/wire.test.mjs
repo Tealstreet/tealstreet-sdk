@@ -506,6 +506,76 @@ const withStrings = (frame, values = ['BTC-USD', 'ETH-USD']) => {
   return frame;
 };
 
+test('writer-required references reject NONE while preserving explicit empty strings', () => {
+  const cases = [];
+  const add = (table, reader, fields) => {
+    for (const [field, offset] of Object.entries(fields)) {
+      cases.push({ make: () => withStrings(numericFrame([table]), ['']), offset,
+        read: (frame) => frame[reader]()[field](0), label: `${reader}.${field}` });
+    }
+  };
+  add(revisedTable(SECTION.MARKETS, 1), 'markets', { id: 4, symbol: 8, base: 12, quote: 16 });
+  add(revisedTable(SECTION.ORDERS, 1), 'orders', { id: 4, symbol: 116 });
+  add(revisedTable(SECTION.POSITIONS, 1), 'positions', { id: 88, symbol: 92 });
+  add(revisedTable(SECTION.SETTINGS, 1), 'settings', { symbol: 40 });
+  add(revisedTable(SECTION.FILLS, 1), 'fills', { orderId: 4, symbol: 32 });
+  const metadata = (kind, length) => ({ kind, length,
+    write(view, offset) { view.setUint32(offset, 1, true); } });
+  add(metadata(SECTION.CANDLES, 64), 'candles', { interval: 8 });
+  add(metadata(SECTION.DERIVATIVE_PRODUCTS, 48), 'derivativeProducts', { underlying: 12 });
+  add(metadata(SECTION.POSITION_GREEKS, 48), 'positionGreeks', { positionId: 4, units: 8 });
+  add(metadata(SECTION.PREDICTION_MARKETS, 48), 'predictionMarkets', {
+    conditionId: 8, outcome: 12, question: 16, description: 20, endDate: 24, slug: 28,
+  });
+  for (const [field, offset] of [['symbol', 104], ['id', 108]]) {
+    cases.push({ make: () => withStrings(numericFrame([revisedTable(SECTION.TICKERS, 1)]), ['']),
+      offset, read: (frame) => frame.tickers().identity(0)[field], label: `ticker.${field}` });
+  }
+  cases.push({ make: () => new Frame(balanceFrame([{ base: '', amount: 1, notional: 2 }])),
+    offset: 36, read: (frame) => frame.balance().coins[''].base, label: 'coin.base' });
+  cases.push({ make: () => new Frame(balanceFrame(undefined, [{ currency: '', used: 1, free: 2, total: 3, upnl: 0 }])),
+    offset: 48, read: (frame) => { frame.balance(); return ''; }, label: 'currency.name' });
+  for (const { make, offset, read, label } of cases) {
+    const frame = make();
+    assert.equal(read(frame), '', `${label}: explicit empty value`);
+    new DataView(frame.buffer).setUint32(24 + offset, NONE, true);
+    assert.throws(() => read(frame), /required string/, `${label}: absent mandatory value`);
+  }
+});
+
+test('optional NONE references remain absent independently of required identities', () => {
+  const marketTable = revisedTable(SECTION.MARKETS, 1);
+  marketTable.length = Math.ceil(marketTable.length / 8) * 8;
+  const frame = withStrings(numericFrame([marketTable, revisedTable(SECTION.ORDERS, 1)]), ['']);
+  const view = new DataView(frame.buffer);
+  view.setUint32(frame.first(SECTION.MARKETS).offset + 104, NONE, true);
+  const ordersAt = frame.first(SECTION.ORDERS).offset;
+  view.setUint32(ordersAt + 8, NONE, true);
+  view.setUint32(ordersAt + 12, NONE, true);
+  assert.equal(frame.markets().prettySymbol(0), undefined);
+  assert.equal(frame.markets().symbol(0), '');
+  assert.equal(frame.orders().id(0), '');
+  assert.equal(frame.orders().clientOrderId(0), undefined);
+  assert.equal(frame.orders().parentId(0), undefined);
+  const metadata = withStrings(numericFrame([
+    { kind: SECTION.INSTRUMENT_CLASSIFICATIONS, length: 24, write(view, offset) {
+      view.setUint32(offset, 1, true);
+      for (const at of [8, 12, 16]) view.setUint32(offset + at, NONE, true);
+    } },
+    { kind: SECTION.DERIVATIVE_PRODUCTS, length: 48, write(view, offset) {
+      view.setUint32(offset, 1, true);
+      for (const at of [16, 20, 24, 28]) view.setUint32(offset + at, NONE, true);
+    } },
+  ]), ['']);
+  const labels = metadata.instrumentClassifications();
+  for (const field of ['symbolType', 'marketRegion', 'underlyingTicker']) assert.equal(labels[field](0), undefined);
+  const products = metadata.derivativeProducts();
+  assert.equal(products.underlying(0), '');
+  for (const field of ['settleAsset', 'premiumAsset', 'style', 'settlement']) assert.equal(products[field](0), undefined);
+  const legacy = positionFrame(false);
+  assert.equal(legacy.positions().id(0), undefined);
+});
+
 test('revision one preserves pretty symbols, independent order fields and orphan symbols', () => {
   const frame = withStrings(numericFrame([SECTION.MARKETS, SECTION.TICKERS, SECTION.ORDERS, SECTION.POSITIONS, SECTION.SETTINGS, SECTION.FILLS].map((kind) => revisedTable(kind))));
   assert.equal(frame.markets().prettySymbol(0), 'BTC-USD');

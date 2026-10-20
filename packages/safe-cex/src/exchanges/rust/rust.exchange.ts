@@ -608,14 +608,16 @@ export class RustEngineExchange extends BaseExchange {
     return this.host?.snapshot();
   };
 
-  fetchEngineSnapshot = async (): Promise<EngineSnapshot> => {
+  fetchEngineSnapshot = async (): Promise<EngineSnapshot> => this.captureEngineSnapshot();
+
+  private captureEngineSnapshot(): EngineSnapshot {
     const frame = this.snapshotFrame();
     if (!frame) throw new Error('Engine has not started');
     const fetchedLeverage: Record<string, FetchedLeverage> = {};
     for (const symbol of Object.keys(this.store.fetchedLeverage))
       fetchedLeverage[symbol] = { ...this.store.fetchedLeverage[symbol] };
     return { frame, fetchedLeverage };
-  };
+  }
 
   updateSymbolMetadata = async (symbol: string) => {
     if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
@@ -689,7 +691,9 @@ export class RustEngineExchange extends BaseExchange {
     if (this.frameRecoveryPending || this.isDisposed || !this.host) return;
     this.frameRecoveryPending = true;
     try {
-      this.applyEngineFrame(this.host.snapshot(), false);
+      const snapshot = this.captureEngineSnapshot();
+      this.applyEngineFrame(snapshot.frame, false);
+      this.dispatchFrameEvent(() => this.applier.applyLeverageSnapshot(snapshot.fetchedLeverage));
     } catch (error) {
       console.error('Engine frame recovery failed', error);
     } finally {

@@ -159,7 +159,13 @@ These are production data-loss/staleness/attribution fixes, not lifecycle parity
 Final phase review passes. Follow-up checks: 54 recovery/worker/contract tests,
 12 book tests (two fail with the baseline invalidation removed), 83 JS host/reader
 tests, 7 actual-writer cross-language tests, typecheck, production lint and bans.
-All requested repairs are ready for the PR adversarial-review and green-CI gates.
+PR #1345 adversarial round 1 found two additional P2 defects: required identity
+references accepted NONE, and local recovery erased query-only leverage. Both
+are repaired and independently re-reviewed: 27 decoder tests and 37 recovery
+tests pass, with three failing-before controls for each defect, plus typecheck
+and production lint. Required references reject NONE while optional values and
+empty strings retain their contracts. Local/RPC snapshots share coherent capture.
+CI integration repairs and final green-CI verification remain in progress.
 
 ## Security
 
