@@ -101,6 +101,8 @@ pub struct KucoinSpot {
     orders_loading: bool,
     balance_loading: bool,
     wallet_valuation_pending: bool,
+    tickers_applied: bool,
+    wallet_unquoted_warned: bool,
     poll: Option<TimerId>,
     heal_orders: Option<TimerId>,
     heal_balance: Option<TimerId>,
@@ -140,6 +142,8 @@ impl KucoinSpot {
             orders_loading: false,
             balance_loading: false,
             wallet_valuation_pending: false,
+            tickers_applied: false,
+            wallet_unquoted_warned: false,
             poll: None,
             heal_orders: None,
             heal_balance: None,
@@ -422,6 +426,7 @@ impl KucoinSpot {
         let mut currencies = vec![];
         let mut coins = vec![];
         let mut unpriced = false;
+        let mut unquoted = false;
         for r in rows {
             if r.currency.is_empty() || r.available.0 < 0.0 || r.holds.0 < 0.0 || r.balance.0 < 0.0
             {
@@ -436,14 +441,19 @@ impl KucoinSpot {
                     .filter_map(|symbol| cx.store.ticker(symbol))
                     .map(|t| t.last)
                     .find(|last| last.is_finite() && *last > 0.0);
-                // A listed USD route without a quote yet is not evidence of zero value.
+                // Before the first ticker snapshot, a tradable USD route without a
+                // quote is not evidence of zero value; afterwards it is valued at 0.
                 if price.is_none()
                     && r.balance.0 > 0.0
                     && symbols
                         .iter()
-                        .any(|symbol| cx.store.market(symbol).is_some())
+                        .any(|symbol| cx.store.market(symbol).is_some_and(|m| m.active))
                 {
-                    unpriced = true;
+                    if self.tickers_applied {
+                        unquoted = true;
+                    } else {
+                        unpriced = true;
+                    }
                 }
                 price.unwrap_or(0.0)
             };
@@ -477,6 +487,13 @@ impl KucoinSpot {
             }
             return Ok(());
         }
+        if unquoted && !self.wallet_unquoted_warned {
+            cx.log(
+                LogLevel::Warning,
+                "KuCoin Spot wallet currency has no USD quote; valued at 0",
+            );
+        }
+        self.wallet_unquoted_warned = unquoted;
         cx.store.set_coin_balances(coins);
         cx.store.set_balance(sum);
         Ok(())
@@ -886,6 +903,7 @@ impl Venue for KucoinSpot {
                 }
                 self.discovery.succeeded(cx, &true);
                 cx.store.set_tickers(rows);
+                self.tickers_applied = true;
                 if self.wallet_valuation_pending {
                     self.balance(cx);
                 }

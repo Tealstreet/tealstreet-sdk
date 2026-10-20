@@ -279,3 +279,119 @@ fn funded_wallet_usd_balance_waits_for_its_quote() {
     assert!(engine.store().loaded().balance);
     assert_eq!(engine.store().balance().total, 105.0);
 }
+
+struct Private {
+    engine: Engine<KucoinSpot>,
+    reads: Vec<safe_cex_engine::HttpRequest>,
+    poll: safe_cex_engine::TimerId,
+}
+fn private_with_catalogue(catalogue: &str) -> Private {
+    let mut engine = Engine::new(KucoinSpot::new(Options {
+        key: Some("scripted-key".into()),
+        secret: Some("scripted-secret".into()),
+        passphrase: Some("scripted-passphrase".into()),
+        ..Default::default()
+    }));
+    engine.start(0.0);
+    let request = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("/api/v2/symbols") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut engine, request, catalogue);
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let poll = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == 5000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    let reads = actions
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    Private {
+        engine,
+        reads,
+        poll,
+    }
+}
+fn take(reads: &mut Vec<safe_cex_engine::HttpRequest>, part: &str) -> safe_cex_engine::HttpRequest {
+    let index = reads.iter().position(|r| r.url.contains(part)).unwrap();
+    reads.remove(index)
+}
+fn wallet_read(actions: &[Action]) -> safe_cex_engine::HttpRequest {
+    actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("/api/v1/accounts") => {
+                Some(request.clone())
+            }
+            _ => None,
+        })
+        .expect("wallet read")
+}
+fn count(actions: &[Action], text: &str) -> usize {
+    actions
+        .iter()
+        .filter(|action| matches!(action, Action::Notice(Notice::Log { message, .. }) if message.contains(text)))
+        .count()
+}
+
+#[test]
+fn funded_wallet_on_inactive_pair_publishes_without_waiting_for_a_quote() {
+    let catalogue = CATALOGUE.replace(
+        "]}",
+        r###",{"symbol":"NEW-USDT","baseCurrency":"NEW","quoteCurrency":"USDT","enableTrading":false,"baseIncrement":"1","priceIncrement":"0.0001","baseMinSize":"1","baseMaxSize":"1000000"}]}"###,
+    );
+    let Private {
+        mut engine,
+        mut reads,
+        ..
+    } = private_with_catalogue(&catalogue);
+    let wallet = r###"{"code":"200000","data":[{"currency":"NEW","available":"50","holds":"0","balance":"50"},{"currency":"USDT","available":"5","holds":"0","balance":"5"}]}"###;
+    reply(&mut engine, take(&mut reads, "/api/v1/accounts"), wallet);
+    assert!(
+        engine.store().loaded().balance,
+        "a pre-listing pair never quotes; it must not hold the USD balance"
+    );
+    assert_eq!(engine.store().balance().total, 5.0);
+    assert_eq!(engine.store().coin_balances().unwrap()[0].notional, 0.0);
+}
+
+#[test]
+fn listed_pair_missing_from_the_ticker_snapshot_is_valued_at_zero_with_one_warning() {
+    let Private {
+        mut engine,
+        mut reads,
+        poll,
+    } = private_with_catalogue(CATALOGUE);
+    let tickers = take(&mut reads, "/market/allTickers");
+    let wallet = r###"{"code":"200000","data":[{"currency":"ETH","available":"2","holds":"0","balance":"2"},{"currency":"USDT","available":"5","holds":"0","balance":"5"}]}"###;
+    reply(&mut engine, take(&mut reads, "/api/v1/accounts"), wallet);
+    assert!(
+        !engine.store().loaded().balance,
+        "held until the first ticker snapshot"
+    );
+    reply(
+        &mut engine,
+        tickers,
+        r###"{"code":"200000","data":{"ticker":[{"symbol":"BTC-USDT","last":"100"}]}}"###,
+    );
+    let balance = wallet_read(&engine.drain_actions().collect::<Vec<_>>());
+    reply(&mut engine, balance, wallet);
+    assert!(engine.store().loaded().balance);
+    assert_eq!(engine.store().balance().total, 5.0);
+    let mut warned = count(&engine.drain_actions().collect::<Vec<_>>(), "valued at 0");
+    engine.handle(5000.0, Event::TimerFired { timer: poll });
+    let balance = wallet_read(&engine.drain_actions().collect::<Vec<_>>());
+    reply(&mut engine, balance, wallet);
+    warned += count(&engine.drain_actions().collect::<Vec<_>>(), "valued at 0");
+    assert_eq!(warned, 1);
+}
