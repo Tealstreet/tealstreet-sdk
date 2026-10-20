@@ -216,16 +216,8 @@ export class Tape {
       ...venue.replayCredentials,
     };
     this.callerIds = callerIdsOf(records);
+    this.socketUrlKeys = new Map();
     this.validateRequest = venue.createRequestValidator?.(this.options, { callerIds: this.callerIds }) ?? venue.validateRequest;
-    // Recorded delivery URLs are fixed. Canonicalize them during setup and
-    // retain the bounded cache throughout delivery and memory collection.
-    this.recordedSocketKeys = new Map();
-    const socketUrls = new Set();
-    for (const record of records) if (['ws', 'open', 'close'].includes(record.type) && typeof record.url === 'string') socketUrls.add(record.url);
-    for (const url of socketUrls) {
-      try { this.recordedSocketKeys.set(url, canonicalUrl(url, this.callerIds, this.venue)); }
-      catch { /* Invalid URLs must still fail at their original delivery call. */ }
-    }
     this.bookSymbols = books;
     this.bitget = venue.rust?.startsWith('bitget') ?? false;
     this.generated = new Set();
@@ -286,7 +278,7 @@ export class Tape {
       const data = frame.binary === undefined ? frame.text : Uint8Array.from(Buffer.from(frame.binary, 'base64'));
       const stream = this.venue.streamOf?.(data);
       if (!stream) continue;
-      const key = `${canonicalUrl(frame.url, this.callerIds, this.venue)} ${frame.socket}`;
+      const key = `${this.socketUrlKey(frame.url)} ${frame.socket}`;
       if (!this.lifecycleStreams.has(key)) this.lifecycleStreams.set(key, new Set());
       this.lifecycleStreams.get(key).add(stream);
     }
@@ -312,14 +304,30 @@ export class Tape {
         try { message = JSON.parse(record.text); } catch { continue; /* Plain-text heartbeat. */ }
         const request = venue.socketRequest?.(message);
         if (!request) continue;
-        const key = `${canonicalUrl(record.url, this.callerIds, this.venue)} ${record.socket ?? 0} ${request.id}`;
+        const key = `${this.socketUrlKey(record.url)} ${record.socket ?? 0} ${request.id}`;
         if (this.recordedSocketRequests.has(key)) throw new Error(`duplicate taped websocket request ${key}`);
         this.recordedSocketRequests.set(key, request.key);
-        const queueKey = `${canonicalUrl(record.url, this.callerIds, this.venue)} ${record.socket ?? 0} ${request.key}`;
+        const queueKey = `${this.socketUrlKey(record.url)} ${record.socket ?? 0} ${request.key}`;
         if (!this.recordedSocketQueues.has(queueKey)) this.recordedSocketQueues.set(queueKey, []);
         this.recordedSocketQueues.get(queueKey).push(request.id);
       }
     }
+  }
+
+  socketUrlKey(url) {
+    // Custom rules can close over mutable state. Only memoize default identities.
+    if (typeof url !== 'string' || this.callerIds.size || this.venue.requestUrl
+      || this.venue.volatileQueryFields || this.venue.generatedQueryId
+      || this.venue.generatedId || this.venue.generatedBodyId || this.venue.ignoreGeneratedBodyId
+      || this.venue.defaultBodyValues || this.venue.volatileBodyFields || this.venue.cacheBustPaths
+      || this.venue.hyperliquidExchange || this.venue.hyperliquidAction)
+      return canonicalUrl(url, this.callerIds, this.venue);
+    let key = this.socketUrlKeys.get(url);
+    if (key === undefined) {
+      key = canonicalUrl(url, this.callerIds, this.venue);
+      this.socketUrlKeys.set(url, key);
+    }
+    return key;
   }
 
   get unserved() {
@@ -518,7 +526,7 @@ export class Tape {
   }
 
   connect(url, onOpen, onMessage, onClose) {
-    const key = canonicalUrl(url, this.callerIds, this.venue);
+    const key = this.socketUrlKey(url);
     const generation = (this.generations.get(key) ?? 0) + 1;
     this.generations.set(key, generation);
     const socket = {
@@ -545,7 +553,7 @@ export class Tape {
       // business frame or close before welcome must keep startup fail-closed.
       if (!socket.closed && !this.playing && this.venue.startupMessage) {
         const frame = this.frames.find((record) => record.type !== 'open' && record.type !== 'command' && record.type !== 'wait' && record.type !== 'http'
-          && !this.startupDelivered.has(record) && canonicalUrl(record.url, this.callerIds, this.venue) === key
+          && !this.startupDelivered.has(record) && this.socketUrlKey(record.url) === key
           && (record.socket === undefined || record.socket === socket.ordinal));
         if (frame?.type === 'ws' && this.venue.startupMessage(frame)) {
           this.startupDelivered.add(frame);
@@ -587,7 +595,7 @@ export class Tape {
       if (request) {
         if (socket.requestIds.has(request.id)) throw new Error(`duplicate websocket request ${request.key}`);
         if (this.recordedSocketRequests.size || this.venue.requireSocketRequestRecords) {
-          const queueKey = `${canonicalUrl(socket.url, this.callerIds, this.venue)} ${socket.ordinal} ${request.key}`;
+          const queueKey = `${this.socketUrlKey(socket.url)} ${socket.ordinal} ${request.key}`;
           const count = socket.requestCounts.get(request.key) ?? 0;
           const recordedId = this.recordedSocketQueues.get(queueKey)?.[count];
           if (recordedId === undefined) throw new Error(`unrecorded websocket request ${request.key}`);
@@ -746,7 +754,7 @@ export class Tape {
   }
 
   sockets(url, ordinal) {
-    return [...(this.open.get(canonicalUrl(url, this.callerIds, this.venue)) ?? [])].filter((socket) =>
+    return [...(this.open.get(this.socketUrlKey(url)) ?? [])].filter((socket) =>
       !socket.closed && (ordinal === undefined || socket.ordinal === ordinal));
   }
 
@@ -761,7 +769,7 @@ export class Tape {
     const response = this.venue.socketResponse(message);
     if (!response) return text;
     if (socket.responseIds.has(response.id)) throw new Error('duplicate websocket response');
-    const scope = `${canonicalUrl(socket.url, this.callerIds, this.venue)} ${socket.ordinal}`;
+    const scope = `${this.socketUrlKey(socket.url)} ${socket.ordinal}`;
     const recordedKey = `${scope} ${response.id}`;
     const recorded = this.recordedSocketRequests.get(recordedKey);
     if ((this.recordedSocketRequests.size || this.venue.requireSocketRequestRecords) && recorded === undefined)
@@ -782,7 +790,7 @@ export class Tape {
 
   async socketFor(url, text, ordinal, openingOnly = false) {
     if (typeof text === 'number') { ordinal = text; text = undefined; }
-    const key = this.recordedSocketKeys.get(url) ?? canonicalUrl(url, this.callerIds, this.venue);
+    const key = this.socketUrlKey(url);
     const stream = !openingOnly && text && this.venue.streamOf?.(text);
     const lifecycleKey = ordinal === undefined ? undefined : `${key} ${ordinal}`;
     const streams = !openingOnly && this.venue.subscriptionRouting && lifecycleKey
@@ -866,7 +874,7 @@ export class Tape {
       }
     }
     const sockets = this.bitget && frame.socket === undefined
-      ? [...(this.open.get(canonicalUrl(frame.url, this.callerIds, this.venue)) ?? [])].filter((socket) => !socket.closed) : [latest];
+      ? [...(this.open.get(this.socketUrlKey(frame.url)) ?? [])].filter((socket) => !socket.closed) : [latest];
     if (frame.type === 'close') {
       for (const socket of sockets) {
         if (socket.url) this.close(socket, frame.code ?? 1006);

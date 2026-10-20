@@ -452,6 +452,126 @@ test('Bybit per-connection requestId is volatile for HTTP and sockets', async ()
   assert.equal(await tape.socketFor('wss://example.test/v5/public/linear?requestId=recorded'), socket);
 });
 
+test('default websocket URL parsing is reused while socket selection stays live', async () => {
+  const OriginalURL = globalThis.URL;
+  let parses = 0;
+  globalThis.URL = class extends OriginalURL {
+    constructor(...args) { super(...args); parses++; }
+  };
+  try {
+    for (const impl of ['ts', 'rust']) {
+      parses = 0;
+      const endpoint = 'wss://example.test/public?token=one';
+      const received = [];
+      const tape = new Tape([], {}, false, 200, impl);
+      const first = tape.connect(endpoint, () => {}, (text) => received.push(`first:${text}`));
+      assert.equal(await tape.socketFor(endpoint), first);
+      assert.deepEqual(tape.sockets(endpoint), [first]);
+      await tape.deliverFrame({ type: 'ws', url: endpoint, text: 'one' });
+      tape.close(first);
+      const replacement = tape.connect(endpoint, () => {}, (text) => received.push(`next:${text}`));
+      assert.equal(await tape.socketFor(endpoint), replacement);
+      assert.equal(replacement.generation, 2);
+      await tape.deliverFrame({ type: 'ws', url: endpoint, text: 'two' });
+      assert.deepEqual(received, ['first:one', 'next:two']);
+      assert.equal(parses, 1);
+      assert.deepEqual(tape.sockets(`${endpoint}&requestId=generated`), [replacement]);
+      assert.deepEqual(tape.sockets('wss://example.test/public?token=two'), []);
+      assert.deepEqual(tape.sockets('wss://example.test/private?token=one'), []);
+      const independent = new Tape([], {}, false, 200, impl);
+      assert.deepEqual(independent.sockets(endpoint), []);
+      assert.equal(parses, 5);
+    }
+  } finally {
+    globalThis.URL = OriginalURL;
+  }
+});
+
+test('websocket URL reuse respects changing callers and custom normalization rules', async () => {
+  const venue = {};
+  const tape = new Tape([], venue, false, 200);
+  const a = 'wss://example.test/a';
+  const b = 'wss://example.test/b';
+  const withField = `${a}?field=one`;
+  const sockets = [a, b, withField].map((endpoint) => tape.connect(endpoint, () => {}, () => {}));
+  await new Promise(setImmediate);
+  assert.deepEqual(tape.sockets(a), [sockets[0]]);
+  assert.deepEqual(tape.sockets(withField), [sockets[2]]);
+
+  const callerUrl = `${a}?clientOrderId=caller`;
+  assert.deepEqual(tape.sockets(callerUrl), [sockets[0]]);
+  tape.callerIds.add('caller');
+  assert.deepEqual(tape.sockets(callerUrl), []);
+  const callerSocket = tape.connect(callerUrl, () => {}, () => {});
+  await new Promise(setImmediate);
+  assert.deepEqual(tape.sockets(callerUrl), [callerSocket]);
+  tape.callerIds.clear();
+  assert.deepEqual(tape.sockets(callerUrl), [sockets[0]]);
+
+  let path = '/a';
+  venue.requestUrl = () => `wss://example.test${path}`;
+  assert.deepEqual(tape.sockets(a), [sockets[0]]);
+  path = '/b';
+  assert.deepEqual(tape.sockets(a), [sockets[1]]);
+  delete venue.requestUrl;
+  assert.deepEqual(tape.sockets(a), [sockets[0]]);
+
+  let generated = false;
+  venue.generatedQueryId = (key) => generated && key === 'field';
+  assert.deepEqual(tape.sockets(withField), [sockets[2]]);
+  generated = true;
+  assert.deepEqual(tape.sockets(withField), [sockets[0]]);
+  delete venue.generatedQueryId;
+  assert.deepEqual(tape.sockets(withField), [sockets[2]]);
+
+  venue.volatileQueryFields = [];
+  assert.deepEqual(tape.sockets(withField), [sockets[2]]);
+  venue.volatileQueryFields.push('field');
+  assert.deepEqual(tape.sockets(withField), [sockets[0]]);
+  venue.volatileQueryFields.splice(0);
+  assert.deepEqual(tape.sockets(withField), [sockets[2]]);
+  delete venue.volatileQueryFields;
+  assert.deepEqual(tape.sockets(withField), [sockets[2]]);
+});
+
+test('custom socket normalization callbacks and configuration stay live after lookup', async () => {
+  const endpoint = 'wss://example.test/public';
+  for (const field of ['generatedId', 'generatedQueryId', 'generatedBodyId', 'ignoreGeneratedBodyId', 'defaultBodyValues', 'cacheBustPaths']) {
+    let volatile = false;
+    const venue = {};
+    const query = field === 'cacheBustPaths' ? 'token=' : ['generatedId', 'generatedQueryId'].includes(field)
+      ? 'token=one' : `data=${encodeURIComponent('{"token":"one","keep":"two"}')}`;
+    if (field === 'defaultBodyValues') venue[field] = {};
+    else if (field === 'cacheBustPaths') venue[field] = [];
+    else venue[field] = (key) => volatile && key === 'token';
+    const url = `${endpoint}?${query}`;
+    const normalized = field === 'generatedBodyId' ? `data=${encodeURIComponent('{"keep":"two","token":"<generated>"}')}`
+      : ['generatedId', 'generatedQueryId', 'cacheBustPaths'].includes(field) ? ''
+        : `data=${encodeURIComponent('{"keep":"two"}')}`;
+    const tape = new Tape([], venue);
+    const original = tape.connect(url, () => {}, () => {});
+    const replacement = tape.connect(`${endpoint}?${normalized}`, () => {}, () => {});
+    await new Promise(setImmediate);
+    assert.equal(await tape.socketFor(url), original, field);
+    volatile = true;
+    if (field === 'defaultBodyValues') venue[field].token = 'one';
+    if (field === 'cacheBustPaths') venue[field].push('/public');
+    assert.equal(await tape.socketFor(url), replacement, field);
+  }
+});
+
+test('websocket normalization handles mutable URL objects and repeated invalid URLs', async () => {
+  const tape = new Tape([], {}, false, 200);
+  const first = tape.connect('wss://example.test/a', () => {}, () => {});
+  const second = tape.connect('wss://example.test/b', () => {}, () => {});
+  await new Promise(setImmediate);
+  const endpoint = new globalThis.URL('wss://example.test/a');
+  assert.deepEqual(tape.sockets(endpoint), [first]);
+  endpoint.pathname = '/b';
+  assert.deepEqual(tape.sockets(endpoint), [second]);
+  for (let i = 0; i < 2; i++) assert.throws(() => tape.sockets('invalid URL'), /Invalid URL/);
+});
+
 test('staged reads advance only after their command and preserve response headers', () => {
   const early = { ...record('GET'), body: 'early' };
   const later = { ...record('GET'), body: 'later', afterCommand: 1, headers: 'x-stage: later' };
@@ -1714,7 +1834,7 @@ test('upgrade validation accepts void success and persists explicit false exactl
   assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
 });
 
-test('recorded socket cache preserves strict query, caller ID and typed JSON routing', async () => {
+test('guarded socket resolver preserves strict query, caller ID and typed JSON routing', async () => {
   const ids = [{ type: 'command', orders: [{ clientOrderId: 'caller' }] }];
   const routes = [
     'wss://EXAMPLE.test:443/private?b=2&a=1&requestId=recorded',
@@ -1733,16 +1853,16 @@ test('recorded socket cache preserves strict query, caller ID and typed JSON rou
     tape.open.set(key, new Set([socket]));
     uncached.open.set(key, new Set([socket]));
   }
-  const cache = tape.recordedSocketKeys;
+  const cache = tape.socketUrlKeys;
   for (const route of routes) assert.equal(await tape.socketFor(route), await uncached.socketFor(route));
-  assert.equal(tape.recordedSocketKeys, cache);
-  assert.equal(cache.size, routes.length);
+  assert.equal(tape.socketUrlKeys, cache);
+  assert.equal(cache.size, 0, 'caller IDs keep normalization live');
   assert.notEqual(await tape.socketFor(routes[1]), await tape.socketFor(routes[2]));
   assert.notEqual(await tape.socketFor(routes[3]), await tape.socketFor(routes[4]));
   assert.notEqual(await tape.socketFor(routes[5]), await tape.socketFor(routes[6]));
 });
 
-test('only unique valid recorded socket strings are cached and live fallbacks never grow it', async () => {
+test('default socket strings share normalization while invalid and mutable URLs remain live', async () => {
   const OriginalURL = globalThis.URL;
   const parsed = [];
   globalThis.URL = class extends OriginalURL {
@@ -1760,8 +1880,11 @@ test('only unique valid recorded socket strings are cached and live fallbacks ne
       { type: 'config', url: ignored }, { type: 'command', url: ignored },
       { type: 'ws', url: { toString: () => ignored } },
     ]);
-    assert.deepEqual(parsed, [first, second, invalid]);
-    const cache = tape.recordedSocketKeys;
+    assert.deepEqual(parsed, []);
+    tape.socketUrlKey(first);
+    tape.socketUrlKey(second);
+    assert.deepEqual(parsed, [first, second]);
+    const cache = tape.socketUrlKeys;
     assert.equal(cache.size, 2);
     const one = { closed: false };
     const two = { closed: false };
@@ -1773,19 +1896,19 @@ test('only unique valid recorded socket strings are cached and live fallbacks ne
     assert.equal(parsed.length, 0, 'known delivery avoids URL parsing entirely');
     const dynamic = 'wss://example.test/private?a=1&b=2&requestId=live';
     for (let i = 0; i < 3; i++) assert.equal(await tape.socketFor(dynamic), one);
-    assert.deepEqual(parsed, [dynamic, dynamic, dynamic]);
+    assert.deepEqual(parsed, [dynamic]);
     let target = first;
     const mutable = { toString: () => target };
     assert.equal(await tape.socketFor(mutable), one);
     target = second;
     assert.equal(await tape.socketFor(mutable), two);
-    assert.equal(parsed.length, 5, 'non-string URL objects retain live coercion');
+    assert.equal(parsed.length, 3, 'non-string URL objects retain live coercion');
     await assert.rejects(tape.socketFor(invalid), TypeError);
     await assert.rejects(tape.socketFor(invalid), TypeError);
     assert.deepEqual(parsed.slice(-2), [invalid, invalid]);
-    assert.equal(tape.recordedSocketKeys, cache);
-    assert.equal(cache.size, 2);
-    assert.equal(cache.has(dynamic), false);
+    assert.equal(tape.socketUrlKeys, cache);
+    assert.equal(cache.size, 3);
+    assert.equal(cache.has(dynamic), true);
     assert.equal(cache.has(invalid), false);
     assert.equal(cache.has(ignored), false);
   } finally { globalThis.URL = OriginalURL; }

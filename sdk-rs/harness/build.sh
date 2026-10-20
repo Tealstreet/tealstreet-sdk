@@ -36,7 +36,7 @@ for family in "${families[@]}"; do
     --no-default-features --features "venue-$family")
   if [[ $family == paradex ]]; then
     # Standalone signing builds trade host/engine optimization for the venue size gate.
-    build_args+=(--config 'profile.release.package.safe-cex-wasm.opt-level=2'
+    build_args+=(--config 'profile.release.package.safe-cex-wasm.opt-level="z"'
       --config 'profile.release.package.safe-cex-engine.opt-level=2')
   elif [[ $family == bitrue ]]; then
     # Keep the landed standalone decoder throughput profile; aggregate defaults differ.

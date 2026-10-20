@@ -97,6 +97,51 @@ fn valid_candle(c: &Candle) -> bool {
         && c.volume >= 0.0
 }
 impl ApexOmni {
+    fn revalue_positions(cx: &mut Cx<'_, Pending>, symbol: &str, reference: f64) {
+        if !cx
+            .store
+            .positions()
+            .iter()
+            .any(|p| p.symbol == symbol && p.contracts != 0.0)
+        {
+            return;
+        }
+        cx.store.update_positions(|p| {
+            if p.symbol == symbol && p.contracts != 0.0 {
+                p.unrealized_pnl = (reference - p.entry_price)
+                    * p.contracts
+                    * if p.side == PositionSide::Long {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+            }
+        });
+    }
+
+    pub(crate) fn revalue_public_positions(&self, cx: &mut Cx<'_, Pending>) {
+        // Shared quotes cannot establish a private snapshot or mark it loaded.
+        if !cx.store.loaded().positions {
+            return;
+        }
+        let references: Vec<_> = cx
+            .store
+            .tickers()
+            .iter()
+            .filter_map(|ticker| {
+                // The direct mapper already folds an absent mark into index.
+                // An explicit zero mark falls back to last, even with a live index.
+                [ticker.mark, ticker.last]
+                    .into_iter()
+                    .find(|price| *price != 0.0)
+                    .map(|price| (ticker.symbol.clone(), price))
+            })
+            .collect();
+        for (symbol, reference) in references {
+            Self::revalue_positions(cx, &symbol, reference);
+        }
+    }
+
     pub(crate) fn start_public(&mut self, cx: &mut Cx<'_, Pending>) {
         let request = Pending::Public(Request::Markets {
             rows: vec![],
@@ -484,25 +529,7 @@ impl ApexOmni {
                         .or(row.p)
                         .filter(|n| *n != 0.0)
                     {
-                        if !cx
-                            .store
-                            .positions()
-                            .iter()
-                            .any(|p| p.symbol == symbol && p.contracts != 0.0)
-                        {
-                            continue;
-                        }
-                        cx.store.update_positions(|p| {
-                            if p.symbol == symbol && p.contracts != 0.0 {
-                                p.unrealized_pnl = (reference - p.entry_price)
-                                    * p.contracts
-                                    * if p.side == PositionSide::Long {
-                                        1.0
-                                    } else {
-                                        -1.0
-                                    };
-                            }
-                        });
+                        Self::revalue_positions(cx, &symbol, reference);
                     }
                 }
             }

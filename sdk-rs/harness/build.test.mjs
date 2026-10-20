@@ -11,7 +11,7 @@ const families = [...manifest.matchAll(/^venue-([a-z0-9-]+) = /gm)].map((match) 
 
 function expectedCargoCommand(family) {
   let command = `cargo build --locked --release -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features venue-${family}`;
-  if (family === 'paradex') command += ' --config profile.release.package.safe-cex-wasm.opt-level=2 --config profile.release.package.safe-cex-engine.opt-level=2';
+  if (family === 'paradex') command += ' --config profile.release.package.safe-cex-wasm.opt-level="z" --config profile.release.package.safe-cex-engine.opt-level=2';
   if (family === 'bitrue') command += ' --config profile.release.package.safe-cex-venue-bitrue.opt-level=3';
   return command;
 }

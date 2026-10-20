@@ -68,15 +68,22 @@ transport. `rust:private-tape-mexc` generates a synthetic MEXC futures account
 tape; `rust:gate --venue mexc --tape <path> --books ''` compares its private
 state and command results with TypeScript.
 
+Socket routing memoizes successful default URL identities per replay, for both
+engines. Caller IDs and custom URL/query rules bypass this cache; socket state,
+subscriptions and reconnect generations are always checked live. HTTP request
+identity, validation and the gate's measurement windows remain independent.
+
 An optional `meta` record sets `private` and an epoch in milliseconds. Socket
 records identify their connection with a zero-based `socket` ordinal per URL,
 including reconnects. This distinguishes MEXC's public and private sockets on
 the same URL. HTTP records may include `requestBody`: object keys are compared
 canonically, preserving large IDs and ignoring generated `externalOid` only.
 Every mutation consumes a recorded response; only reads may reuse their last
-snapshot. MEXC, Bitrue and Orderly public replay advance virtual timers by timestamp groups;
-other venues preserve recorded message bursts. Private replay is paced after
-startup, with the signing epoch continuous through startup. Trimming keeps every HTTP anchor inside the
+snapshot. Public replays advance virtual timers by timestamp groups while
+preserving recorded message bursts. Private replay uses virtual time for polling
+venues and venues declaring `virtualPrivateClock`; other private replays stay
+paced after startup. The signing epoch stays continuous through startup.
+Trimming keeps every HTTP anchor inside the
 selected time window so later depth resynchronizations remain reproducible.
 
 WebSocket batches preserve socket IDs and individual arrival times. JS partitions

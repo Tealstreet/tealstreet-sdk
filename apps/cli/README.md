@@ -28,6 +28,7 @@ yarn workspace; `@tealstreet/*` deps resolve from there).
 
 ```bash
 yarn install                 # from the monorepo root
+corepack yarn -s rust:build-wasm # build Rust venue family assets before source runs/builds
 
 cd apps/cli
 yarn dev                     # run the REPL from source (= bun run src/index.ts)

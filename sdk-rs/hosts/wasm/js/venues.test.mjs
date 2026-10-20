@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
-import { venueFamily } from './venues.mjs';
+import { venueFamily, venueFamilies } from './venues.mjs';
 import { loadEngine } from './engine.node.mjs';
 
 const require = createRequire(import.meta.url);
@@ -34,6 +34,12 @@ const aliases = {
   weex: ['weex'],
   woo: ['woo'],
 };
+
+test('canonical family inventory contains every family once and stays immutable', () => {
+  assert.deepEqual(venueFamilies, Object.keys(aliases));
+  assert(Object.isFrozen(venueFamilies));
+  assert.throws(() => venueFamilies.push('unknown'), TypeError);
+});
 
 for (const [family, names] of Object.entries(aliases)) {
   test(`${family} package accepts its aliases and excludes other venues`, () => {

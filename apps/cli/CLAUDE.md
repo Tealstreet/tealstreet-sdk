@@ -93,6 +93,14 @@ local `build.sh disrupt` of the tagged commit.
 
 ## Runtime
 
+`src/rust-engine.ts` initializes the selected Rust venue family from Bun embedded
+assets. Aliases share initialization; different families have independent memory.
+Standalone binaries need no workspace or extracted WASM file. Build
+`corepack yarn -s rust:build-wasm` from the repository root before source runs
+or CLI compilation. The `*.wasm.test.ts` consumer tests (selected with
+`SAFE_CEX_WASM_TESTS=1`) prove saved-account native state and an isolated
+compiled binary. They do not prove live routing or authenticated connectivity.
+
 **Bun** (not Node.js). Compiled to standalone binaries via `bun build --compile`. Cross-platform: darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64.
 
 **Windows shipped 2026-09-27 and is deliberately partial.** `bun build --compile --target=bun-windows-x64` works off an unmodified tree, so the build was never the obstacle — the POSIX assumptions around it were. Two of them survive:

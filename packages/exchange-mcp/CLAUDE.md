@@ -39,7 +39,41 @@ release from the workflow, with SLSA provenance.
 
 ## The bundle
 
-- **One file, no runtime dependencies.** `tsup` inlines everything, including
+Rust accounts select `dist/wasm/rust/<family>/safe_cex_wasm.cjs` and its sibling
+WASM. The build copies every canonical family; aliases share initialization and
+different families load independently. Missing selected assets fail without a
+workspace or aggregate fallback.
+Build the pinned Rust engine from the repository root with `corepack yarn -s
+rust:build-wasm` before the package build; the existing release job does this.
+The `rust-smoke.mjs` probe copies release-owned assets outside the checkout and
+starts a real native Coinbase catalog, so workspace resolution cannot mask a
+missing artifact. `EXCHANGE_ENGINE=rust` selects the supported native path;
+unset keeps the registry default. Tests selected by `SAFE_CEX_WASM_TESTS=1`
+exercise real protocol tool calls and account state, using documented inputs.
+Failed native startup is retried with a fresh account on the next tool call;
+concurrent calls share the replacement startup. Keep shutdown reading
+`instance.exchange` at call time, since destructuring would retain the failed
+account. Rust accounts reject `EXCHANGE_SIGNER_HEADER` before issuing requests;
+the native signer cannot invoke that JS HMAC callback.
+Rust accounts keep their public feeds active because native ticker tools read
+the current engine store. Do not apply the TS-only public-socket suppression to
+Rust; Binance's REST seed alone would freeze its quote tools. The protocol test
+replays actual recorded Binance socket traffic and requires changed tool quotes.
+The TS on-demand policy also disables TS adapter polling, after the actual
+instance has been selected. Keep native REST timers active as well as sockets:
+BreakoutProp has no stream and its tools depend on periodic reconciliation.
+A real native protocol regression requires changed quotes after its REST poll.
+The license generator includes the pinned engine's non-dev Cargo dependency
+closure and the existing adapted zkLink notice. Run it after building WASM.
+Its `cargo metadata --locked --filter-platform wasm32-unknown-unknown` command
+may fetch missing locked crate sources: workspace/dev manifests can be needed
+for metadata even when the WASM build never downloaded them. A fresh cache
+therefore needs Cargo registry access. Notice selection still excludes dev
+edges and uses the same license allowlist and pinned lockfile. These notices
+retain existing workspace dependencies; changing Rust dependency licensing
+still needs the repository's usual review.
+
+- **Bundled JS and owned WASM, no runtime dependencies.** `tsup` inlines everything, including
   every `@tealstreet/*` workspace. Those are not on npm, and a runtime
   dependency on one is what made `npm install -g @tealstreet/cli` fail with
   E404. The release workflow refuses any `dependencies` field.

@@ -750,3 +750,40 @@ family builds. Prepare a new exact landing control in an isolated target;
 only then freeze the common helpers/Node22 inputs and execute the declared
 40-public/64-private collection once. The draft PR1344 remains unfinished;
 CI must pass before merge into `feat/rust-rewrite`.
+
+## Landing consumer merge verification
+
+Merge `fc809a9d85` preserving received-event ordering, signer wall-clock budgets,
+shared public-feed ownership and compact store indexes. Snapshot/frame capacity
+prepasses now use the same policy-aware books as their writers; ticker revisions
+survive replacement/shrinking. Keep incoming Paradex host-z/engine2 profile in
+both isolated and family-loop builds.
+
+CLI embeds 27 literal family assets and initializes the selected family through
+the shared browser cache. MCP copies/loads canonical family CJS/WASM pairs;
+its isolated probe checks Binance/Coinbase independence and aliases, and missing
+selected assets must fail. React Native receives a canonical family and caches
+initialization independently; new unit tests cover concurrency, retry isolation
+and unsupported names. These packaged proofs still require fresh artifacts.
+
+Independent phase reviews found two P2 issues and verified their source fixes:
+the new host public-feed test referenced stale aggregate bindings (now Phemex's
+family), and URL caching missed mutable custom query/JSON normalization rules.
+A stateful listener-routing regression fails before the resolver repair; full
+Tape/build103 and harness669 pass afterwards. Keep one guarded default URL cache.
+The broader consumer loader review has no remaining P1/P2 source findings.
+
+Merged physical sources pass Rust2840/218groups, formatting, bans, strict native
+all-target Clippy and strict WASM workspace Clippy, with447 inputs unchanged.
+Repository typecheck44, lint28 and test27 tasks pass; mobile cache3 tests pass.
+Preserve the initial formatting failure and initial CLI file-import type error:
+Bun supplies asset paths while generated WASM declarations describe exports;
+keep the narrow cast at the file-read boundary. No thresholds changed.
+
+The new original control is exact `fc809a9d85`:442Rust/config,35 protected
+inputs,29 fresh internal compile paths and9 physical aggregate bindings. Its
+Node/web WASM is identical at12172135bytes; an independent physical audit passes.
+No original-control or candidate performance samples were collected. Next:
+archive the previous243 family files plus9 historical aggregate files, rebuild
+all27 families, run actual SDK/host/consumer/offline integration checks and
+size review, then freeze the40/64 comparison with the declared no-retry policy.

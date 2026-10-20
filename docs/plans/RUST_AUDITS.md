@@ -533,3 +533,30 @@ CLOB V2 signing and amounts match the official client.
   (`polymarket/src/wire.rs:33`, `lib.rs:688,832`).
 - Low: cancel-all reports failure after a successful cancel; one bad position
   row freezes positions; auth failures invisible.
+
+### Registration and options (all RUST_VENUES aliases)
+Alias→product mapping, credentials, testnet, routing and broker/builder
+attribution are correct for all 48 names (BloFin `brokerId` aside).
+- Medium: Coinbase accounts with a saved read-only key fail to start — no
+  `secondaryReadHeaders` entry or `read_credentials` (`transport/engine.ts:76,116`,
+  `hosts/wasm/src/lib.rs:656`); Coinbase is Rust-only.
+- Low/medium: polling controls ignored — `extra.tickInterval` (incl. `Infinity`
+  to stop polling), the server slowdown multiplier and credential-rejection
+  backoff reach only BreakoutProp (and raw tickInterval to Orderly, where
+  `Infinity` becomes `null`) (`rust.exchange.ts:308,512`); every other venue polls
+  a fixed constant, so the rate-limit incident lever does nothing on Rust.
+
+### Backpack
+Signing, order payloads (incl. app stop shapes), amend, cancel and positions match.
+- Medium: spot markets dropped — 88 SPOT pairs vanish and open spot orders
+  can't be seen or cancelled (`backpack/src/lib.rs:543`); owner decision: port
+  spot or retire it before cutover. A mark-price failure or one bad ticker row
+  blocks startup (`lib.rs:211,787`).
+- Low: one bad fill row fails fill history (`history.rs:312`). Verify live:
+  open-order rows with `"quantity": null`.
+
+### BreakoutProp (disabled in production)
+App stop payloads accepted; amend stricter than TS.
+- High if re-enabled: one unexpected portfolio row (XBTUSD lot, terminal-placed
+  order type, multi-leg order) rejects the whole snapshot
+  (`breakoutprop/src/account.rs:159,226,261`, `lib.rs:920`).

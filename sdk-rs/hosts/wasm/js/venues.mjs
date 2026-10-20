@@ -51,6 +51,8 @@ const families = Object.freeze({
   woo: 'woo',
 });
 
+export const venueFamilies = Object.freeze([...new Set(Object.values(families))]);
+
 export function venueFamily(venue) {
   if (!Object.hasOwn(families, venue)) throw new Error(`unsupported Rust venue: ${venue}`);
   return families[venue];

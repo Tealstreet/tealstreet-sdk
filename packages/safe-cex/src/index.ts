@@ -23,6 +23,9 @@ export {
   isExchangeSupportedOnMobile,
 } from './exchangeMetadata';
 
+export { RustPublicFeedProvider } from './exchanges/rust/publicFeed';
+export type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
+
 export { createEngineTransport, resolveEngineRoutingPlan } from './transport/engine';
 export type { EngineRoutingPlan } from './transport/engine';
 

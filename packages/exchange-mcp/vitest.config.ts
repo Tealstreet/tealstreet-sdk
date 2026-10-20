@@ -7,5 +7,6 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    exclude: process.env.SAFE_CEX_WASM_TESTS ? [] : ['**/*.wasm.test.ts'],
   },
 });
