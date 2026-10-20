@@ -4,6 +4,7 @@
 //! cumulative matched size; only uniquely identified trade executions emit fills.
 use crate::wire::Number;
 use crate::{Pending, Polymarket, sign};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::url::encode;
@@ -21,6 +22,7 @@ const MAX_PAGES: usize = 10000;
 // The Data API documents a maximum offset of 10,000; a saturated last
 // page is incomplete, never permission to replace holdings with a prefix.
 const MAX_POSITION_OFFSET: usize = 10000;
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Request {
     Time,
@@ -56,6 +58,7 @@ pub(crate) struct Account {
     busy: usize,
     revision: u64,
     position_revision: u64,
+    positions_guard: StaleGuard,
     dirty: bool,
     versions: HashMap<String, u64>,
     terminal: HashSet<String>,
@@ -842,7 +845,17 @@ impl Polymarket {
                     self.account_finished(cx);
                     return;
                 }
-                if snapshot.revision == self.account.position_revision {
+                let current = snapshot.revision == self.account.position_revision;
+                if self
+                    .account
+                    .positions_guard
+                    .admit(current, STALE_SNAPSHOT_LIMIT)
+                {
+                    // The stream never carries holdings, so only a re-read corrects
+                    // an admitted stale snapshot.
+                    if !current {
+                        self.account.dirty = true;
+                    }
                     if !snapshot.skipped.is_empty() {
                         cx.log(
                             LogLevel::Warning,

@@ -1628,3 +1628,21 @@ fn spot_invalid_negotiated_heartbeat_intervals_reject_before_connecting() {
         }
     }
 }
+#[test]
+fn balance_events_faster_than_the_heal_read_cannot_starve_the_balance() {
+    let mut h = H::new(true);
+    let event = json!({"currency":"USDT","available":"900","hold":"100","total":"1000"});
+    h.ws(true, "/account/balance", event.clone());
+    h.timer(250.0);
+    let mut read = h.http("/accounts?type=trade");
+    for step in 1..=3u32 {
+        h.ws(true, "/account/balance", event.clone());
+        let total = (2000 + step).to_string();
+        let body = json!({"code":"200000","data":[{"currency":"USDT","available":total,"holds":"0","balance":total}]});
+        h.respond(&read, 200, &body.to_string());
+        let expected = if step <= 2 { 1300.0 } else { 2003.0 };
+        assert_eq!(h.e.store().balance().total, expected, "step {step}");
+        h.timer(250.0);
+        read = h.http("/accounts?type=trade");
+    }
+}

@@ -679,8 +679,8 @@ Normal inputs send the same requests as TS; the risk is resilience.
   Bad public and account rows are skipped (stored copies kept, exact hedge ids);
   ticker failure no longer blocks private start; `planType` fallback added.
 - Medium: ~~failed config read backs off all polling to ~60 s (`account.rs:518`);~~
-  balance stops updating during active trading (revision discard,
-  `account.rs:408`) — resilience lane; ~~accepted conditional reported failed if
+  ~~balance stops updating during active trading (revision discard,
+  `account.rs:408`)~~ (balance reads commit; the next cycle corrects a raced read); ~~accepted conditional reported failed if
   the venue echoes `clientAlgoId` (`trading.rs:1303`; verify live); imported limit
   with TP/SL can't be amended (`trading.rs:343`); missing passphrase looks like a
   valid empty account (`lib.rs:148`).~~ Settings-only backoff, algo id echoes
@@ -779,13 +779,17 @@ Mostly matches TS.
   without blocking the usable initial sweep; both collateral balances and
   authenticated native bracket caps are exposed without silent leverage clamps.
 - Low: one bad contract row blocks startup; stream stops misclassified;
-  snapshot starvation under load (revision discard, `account.rs:581,1310`);
+  ~~snapshot starvation under load (revision discard, `account.rs:581,1310`)~~;
   malformed snapshot never sets loaded.
 
 ### Cross-venue: per-coin balances and snapshot starvation
 - Per-coin balances missing on Bybit, Crypto.com, ~~Bitrue~~; check every venue.
-- Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
-  check every venue that fences REST snapshots by stream revision.
+- ~~Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
+  check every venue that fences REST snapshots by stream revision.~~ Fixed with
+  `engine::fence::StaleGuard` (commit after two consecutive discards, then re-read)
+  on Bitrue, Backpack, BingX (balance, position mode), Kraken Spot, KuCoin Spot,
+  Orderly (balance only), Polymarket and WOO; WEEX balance reads no longer fence.
+  Bybit Hyro is fixed by its owning lane.
 
 ### ApeX Omni
 Signing and payloads match; no confirmed highs.

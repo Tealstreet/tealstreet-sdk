@@ -1,6 +1,7 @@
 //! Authenticated account snapshots and monotonic execution reconciliation.
 use crate::wire::{Envelope, Str, id, number, optional_number};
 use crate::{Connection, Pending, Woo, compact, native};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
@@ -13,6 +14,8 @@ use safe_cex_engine::{
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
+
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Request {
     Info {
@@ -139,6 +142,7 @@ pub struct Account {
     pause_until: f64,
     info_pending: bool,
     positions_pending: bool,
+    positions_guard: StaleGuard,
     orders: Option<OrdersJoin>,
     generation: u64,
     revision: u64,
@@ -1132,14 +1136,19 @@ impl Woo {
             } => {
                 self.account.positions_pending = false;
                 self.account_skipped(cx, "positions", &skipped);
-                // A fill after this read began takes precedence, including fills on newly-opened symbols.
-                if self
-                    .account
-                    .versions
-                    .get("$positions")
-                    .is_some_and(|v| *v > revision)
-                    || self.account_revision("$mode") > revision
+                if self.account_revision("$mode") > revision
                     || self.account.writes.contains_key("$mode")
+                {
+                    return;
+                }
+                // A fill after this read began takes precedence, including fills on newly-opened
+                // symbols. One-way fill estimates stay protected by `expected` below; hedged
+                // positions come only from REST, so an admitted stale read is re-read at once.
+                let current = self.account_revision("$positions") <= revision;
+                if !self
+                    .account
+                    .positions_guard
+                    .admit(current, STALE_SNAPSHOT_LIMIT)
                 {
                     return;
                 }
@@ -1221,6 +1230,9 @@ impl Woo {
                 self.account_metadata(cx);
                 if !retry_symbols.is_empty() {
                     self.account_schedule_fill_refresh(cx);
+                }
+                if !current && cx.now >= self.account.pause_until {
+                    self.account_positions_read(cx);
                 }
             }
             Request::Orders {

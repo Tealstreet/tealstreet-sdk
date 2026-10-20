@@ -3,10 +3,13 @@
 use crate::sign::{Credentials, Params};
 use crate::wire::*;
 use crate::{Backpack, Connection, Pending, REST, WS};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
 use std::collections::{HashMap, HashSet, VecDeque};
+
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 #[derive(Clone, Copy)]
 pub enum Next {
@@ -48,6 +51,7 @@ pub struct Account {
     pub orders_revision: u64,
     pub positions_revision: u64,
     pub balance_revision: u64,
+    balance_guard: StaleGuard,
     tick: Option<TimerId>,
     orders_timer: Option<TimerId>,
     fill_timer: Option<TimerId>,
@@ -67,6 +71,7 @@ impl Default for Account {
             orders_revision: 0,
             positions_revision: 0,
             balance_revision: 0,
+            balance_guard: StaleGuard::default(),
             tick: None,
             orders_timer: None,
             fill_timer: None,
@@ -519,7 +524,12 @@ impl Backpack {
                 } => {
                     let r: Collateral =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-                    if revision == self.account.balance_revision {
+                    let current = revision == self.account.balance_revision;
+                    if self
+                        .account
+                        .balance_guard
+                        .admit(current, STALE_SNAPSHOT_LIMIT)
+                    {
                         cx.store.set_balance(Balance {
                             used: r.net_equity_locked,
                             free: r.net_equity_available,
@@ -530,6 +540,9 @@ impl Backpack {
                                 r.pnl_unrealized
                             },
                         });
+                        if !current {
+                            self.balance_read(cx, recalculate, Next::None);
+                        }
                     }
                     self.next_account(cx, next);
                 }
