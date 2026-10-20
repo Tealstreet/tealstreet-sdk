@@ -820,3 +820,23 @@ fn newer_terminal_fills_after_confirmation_abort_the_queued_replacement() {
     h.pace();
     assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 1, result: Err(error) }) if error.contains("newer fills"))));
 }
+
+#[test]
+fn owned_position_outside_partial_catalogue_never_guesses_lot_multiplier() {
+    let mut h = Harness::new();
+    h.reply(
+        "/positions",
+        &format!(
+            r#"{{"code":"200000","data":[{}]}}"#,
+            POSITION.replace("XBTUSDTM", "MISSINGUSDTM")
+        ),
+    );
+    assert!(!h.engine.store().loaded().positions);
+    h.ws(
+        "/contract/position:MISSINGUSDTM",
+        &POSITION.replace("XBTUSDTM", "MISSINGUSDTM"),
+    );
+    assert!(h.engine.store().positions().is_empty());
+    assert!(h.actions.iter().any(|action| matches!(action,
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+}

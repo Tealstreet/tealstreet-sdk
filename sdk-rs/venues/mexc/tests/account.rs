@@ -238,9 +238,18 @@ fn startup_mode_and_metadata_reads_respect_the_rate_limit_pause() {
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, MARKETS);
-    let r = requests(&mut e).remove(0);
-    response(&mut e, &r, TICKERS);
-    let r = requests(&mut e).remove(0);
+    let early = requests(&mut e);
+    let ticker = early
+        .iter()
+        .find(|r| r.url.contains("contract/ticker"))
+        .unwrap();
+    let mode = early
+        .iter()
+        .find(|r| r.url.contains("position_mode"))
+        .unwrap()
+        .clone();
+    response(&mut e, ticker, TICKERS);
+    let r = mode;
     e.handle(
         100.0,
         Event::HttpResponse {
@@ -623,4 +632,24 @@ fn absent_terminal_regular_rows_are_removed_and_tombstones_cannot_be_restored_by
         response(&mut e, &r, &body);
     }
     assert!(e.store().order("739113577038255617").is_none());
+}
+
+#[test]
+fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
+    let (mut e, _, reads, _) = private_started();
+    let request = reads
+        .iter()
+        .find(|r| r.url.contains("open_positions"))
+        .unwrap();
+    response(
+        &mut e,
+        request,
+        &format!(
+            r#"{{"success":true,"code":0,"data":[{}]}}"#,
+            POSITION.replace("BTC_USDT", "MISSING_USDT")
+        ),
+    );
+    assert!(!e.store().loaded().positions);
+    assert!(e.drain_actions().any(|action| matches!(action,
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
 }

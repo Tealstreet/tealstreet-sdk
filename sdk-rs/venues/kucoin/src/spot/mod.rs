@@ -807,12 +807,12 @@ impl Venue for KucoinSpot {
                 }
             }
             Pending::Tickers { mut rows, invalid } => {
-                if invalid {
+                rows.retain(|r| cx.store.market(&r.symbol).is_some());
+                if invalid || rows.is_empty() {
                     self.discovery.failed(cx, true);
                     return;
                 }
                 self.discovery.succeeded(cx, &true);
-                rows.retain(|r| cx.store.market(&r.symbol).is_some());
                 cx.store.set_tickers(rows);
                 self.bullet(cx, 0);
                 if self.credentials.is_some() {
@@ -1071,6 +1071,7 @@ impl Venue for KucoinSpot {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        let discovery = matches!(&pending, Pending::Markets { .. } | Pending::Tickers { .. });
         match pending {
             Pending::Bullet(c) => self.reconnect(cx, c),
             Pending::Balance(_) => self.balance_loading = false,
@@ -1090,7 +1091,14 @@ impl Venue for KucoinSpot {
             Pending::Markets { .. } => self.discovery.failed(cx, false),
             Pending::Tickers { .. } => self.discovery.failed(cx, true),
         }
-        cx.log(LogLevel::Error, error);
+        cx.log(
+            if discovery {
+                LogLevel::Warning
+            } else {
+                LogLevel::Error
+            },
+            error,
+        );
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(tickers) = self.discovery.on_timer(timer) {

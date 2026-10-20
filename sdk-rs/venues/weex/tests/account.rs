@@ -65,6 +65,7 @@ fn started(ws: bool) -> (Engine<WeexFutures>, Vec<Action>) {
         r#"[{"symbol":"BTCUSDT","bidPrice":"89999","askPrice":"90001"}]"#,
     );
     actions.extend(e.drain_actions());
+    actions.retain(|action| !matches!(action, Action::Http(r) if r.url.contains("24hr") || r.url.contains("bookTicker")));
     (e, actions)
 }
 fn complete(e: &mut Engine<WeexFutures>, actions: &[Action], normal: &str, algo: &str) {
@@ -252,13 +253,17 @@ fn private_watchdog_reconnect_regenerates_header_timestamp() {
     let (mut e, actions) = started(true);
     let socket = private_socket(&actions);
     let timer = actions
-        .iter()
-        .rev()
-        .find_map(|action| match action {
-            Action::SetTimer { timer, .. } => Some(*timer),
+        .windows(2)
+        .find_map(|pair| match (&pair[0], &pair[1]) {
+            (
+                Action::WsConnectWithHeaders {
+                    socket: private, ..
+                },
+                Action::SetTimer { timer, at_ms },
+            ) if *private == socket && *at_ms == NOW + 5000.0 => Some(*timer),
             _ => None,
         })
-        .unwrap();
+        .expect("private socket watchdog");
     e.handle(NOW + 31_000.0, Event::TimerFired { timer });
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(

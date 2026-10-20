@@ -22,7 +22,7 @@ function http(method, path, params, body, requestBody, extra = {}) {
 const ws = (t, url, body) => records.push({ t, type: 'ws', url, text: JSON.stringify(body) });
 const command = (t, op, args = {}) => records.push({ t, type: 'command', op, ...args });
 const info = (positionMode = 'ONE_WAY') => ok({ applicationId: 'undefined', accountMode: 'FUTURES', positionMode, freeCollateral: '900', totalCollateral: '1000', totalAccountValue: '1000' });
-const pos = (holding = 0.02, leverage = 10) => ok({ positions: holding ? [{ symbol: 'PERP_BTC_USDT', holding, averageOpenPrice: 60000, leverage, marginMode: 'CROSS', estLiqPrice: 50000 }] : [] });
+const pos = (holding = 0.02, leverage = 10) => ok({ positions: holding ? [{ symbol: 'PERP_BTC_USDT', holding, averageOpenPrice: 60000, markPrice: 60000, leverage, marginMode: 'CROSS', estLiqPrice: 50000 }] : [] });
 const leverage = (value = 10) => ok({ symbol: 'PERP_BTC_USDT', margin_mode: 'CROSS', position_mode: 'ONE_WAY', details: [{ position_side: 'BOTH', leverage: String(value) }] });
 const regular = (orderId, quantity = 0.003, price = 59000, executed = 0, status = 'NEW', extra = {}) => ({ symbol: 'PERP_BTC_USDT', order_id: orderId, orderId, quantity, order_quantity: quantity, price, order_price: price, executed, status, side: 'BUY', type: 'LIMIT', order_type: 'LIMIT', reduce_only: false, ...extra });
 const leaf = (algoOrderId, rootAlgoOrderId, algoType, price, quantity = 0, extra = {}) => ({ symbol: 'PERP_BTC_USDT', algoOrderId, rootAlgoOrderId, algoType, algoStatus: 'NEW', side: 'SELL', quantity, triggerPrice: price, triggerPriceType: 'MARK_PRICE', totalExecutedQuantity: 0, reduceOnly: true, ...extra });

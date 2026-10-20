@@ -409,7 +409,10 @@ impl Backpack {
         let result = match pending {
             Request::Positions { rows, invalid, .. } => {
                 let result = serde_json::from_str::<PositionRow<'_>>(item).map(|r| {
-                    if r.net_quantity != 0.0 && cx.store.market(&r.symbol).is_some() {
+                    if r.net_quantity != 0.0 && cx.store.market(&r.symbol).is_none() {
+                        *invalid = true;
+                        cx.log(LogLevel::Warning, "Backpack owned position market unavailable; preserving previous snapshot");
+                    } else if r.net_quantity != 0.0 {
                         rows.push(position(
                             r.symbol.into_owned(),
                             r.net_quantity,

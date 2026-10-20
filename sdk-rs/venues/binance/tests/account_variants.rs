@@ -251,6 +251,9 @@ fn spot_reconnect_ignores_old_auth_and_subscription_and_repairs_after_ack() {
 }
 
 fn inverse() -> Harness {
+    inverse_with_position_symbol("BTCUSD_PERP")
+}
+fn inverse_with_position_symbol(position_symbol: &str) -> Harness {
     let mut h = Harness::started(Options {
         variant: Variant::CoinM,
         key: Some("api-key".into()),
@@ -276,7 +279,7 @@ fn inverse() -> Harness {
         200,
         r#"{"dualSidePosition":false}"#,
     );
-    h.respond("/dapi/v1/positionRisk",200,r#"[{"symbol":"BTCUSD_PERP","positionSide":"BOTH","positionAmt":"2","entryPrice":"9000","markPrice":"10000","unRealizedProfit":"0.001","liquidationPrice":"7000","leverage":"20","marginType":"isolated","isolatedMargin":"0.003"}]"#);
+    h.respond("/dapi/v1/positionRisk",200,&r#"[{"symbol":"BTCUSD_PERP","positionSide":"BOTH","positionAmt":"2","entryPrice":"9000","markPrice":"10000","unRealizedProfit":"0.001","liquidationPrice":"7000","leverage":"20","marginType":"isolated","isolatedMargin":"0.003"}]"#.replace("BTCUSD_PERP", position_symbol));
     h.respond("/dapi/v1/account",200,r#"{"assets":[{"asset":"BTC","walletBalance":"1","availableBalance":"0.8","initialMargin":"0.1","unrealizedProfit":"0.01"}]}"#);
     h.respond("/dapi/v1/openOrders",200,r#"[{"symbol":"BTCUSD_PERP","orderId":12,"clientOrderId":"native","price":"9000","origQty":"5","executedQty":"2","type":"LIMIT","side":"BUY"}]"#);
     let private = h.socket("/ws/coin-key").unwrap();
@@ -620,4 +623,17 @@ fn inverse_unpriced_collateral_keeps_its_native_amount_without_inventing_usd() {
         .find(|coin| coin.base == "XYZ")
         .unwrap();
     assert_eq!((xyz.amount, xyz.notional), (42.0, 0.0));
+}
+
+#[test]
+fn inverse_owned_position_outside_partial_catalogue_never_guesses_contract_size() {
+    let mut h = inverse_with_position_symbol("MISSINGUSD_PERP");
+    assert!(!h.engine.store().loaded().positions);
+    h.message("/ws/coin-key", r#"{"e":"ACCOUNT_UPDATE","E":1564745798939,"T":1564745798938,"a":{"m":"ORDER","B":[],"P":[{"s":"MISSINGUSD_PERP","pa":"2","ep":"9000","cr":"0","up":"0.001","mt":"cross","iw":"0","ps":"BOTH"}]}}"#);
+    assert!(h.engine.store().positions().is_empty());
+    assert!(
+        h.logs
+            .iter()
+            .any(|log| log.contains("owned position market unavailable"))
+    );
 }

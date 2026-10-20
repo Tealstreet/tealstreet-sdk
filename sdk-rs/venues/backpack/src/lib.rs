@@ -92,6 +92,7 @@ struct Seed {
     daily: Option<Vec<Ticker>>,
     marks: Option<Vec<(String, [f64; 4])>>,
     backoff: safe_cex_engine::startup::Backoff<SeedRead>,
+    live: safe_cex_engine::startup::LiveTickers,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -113,7 +114,16 @@ pub struct Backpack {
 }
 
 impl Backpack {
-    fn seed_read(&self, cx: &mut Cx<'_, Pending>, kind: SeedRead) {
+    fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.public.socket.is_none() {
+            self.public.socket =
+                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
+        }
+    }
+    fn seed_read(&mut self, cx: &mut Cx<'_, Pending>, kind: SeedRead) {
+        if !matches!(kind, SeedRead::Markets) {
+            self.seed.live.begin();
+        }
         let (path, pending) = match kind {
             SeedRead::Markets => (
                 "/api/v1/markets",
@@ -215,8 +225,9 @@ impl Backpack {
                 t.funding_time = m[3];
             }
         }
+        self.seed.live.finish(cx.store, &mut tickers);
         cx.store.set_tickers(tickers);
-        self.public.socket = Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
+        self.connect_public(cx);
     }
 
     fn snapshot(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -359,6 +370,7 @@ impl Backpack {
             "depth" => self.depth(cx, serde_json::from_str(text).map_err(|e| e.to_string())?),
             "ticker" => {
                 let d: TickerEvent<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
+                let mut mask = (1 << 2) | (1 << 9) | (1 << 10);
                 cx.store.update_ticker(&d.s, |t| {
                     t.last = d.c;
                     if let Some(change) = d
@@ -367,14 +379,17 @@ impl Backpack {
                         .or_else(|| d.o.filter(|n| n.0 > 0.0).map(|n| (d.c - n.0) / n.0))
                     {
                         t.percentage = change * 100.0;
+                        mask |= 1 << 5;
                     }
                     t.volume = d.v;
                     t.quote_volume = d.q;
                 });
+                self.seed.live.record(cx.store, &d.s, mask);
             }
             "trade" => {
                 let d: TradeEvent<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
                 cx.store.update_ticker(&d.s, |t| t.last = d.p);
+                self.seed.live.record(cx.store, &d.s, 1 << 2);
             }
             "bookTicker" => {
                 let d: BookEvent<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
@@ -382,6 +397,7 @@ impl Backpack {
                     t.bid = d.b;
                     t.ask = d.a;
                 });
+                self.seed.live.record(cx.store, &d.s, 3);
             }
             "kline" => {
                 let d: KlineEvent<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
@@ -673,8 +689,8 @@ impl Venue for Backpack {
                 }
                 self.seed.backoff.succeeded(cx, &SeedRead::Markets);
                 cx.store.set_markets(rows);
-                self.public.socket =
-                    Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
+                self.seed.live.begin();
+                self.connect_public(cx);
                 self.account_start(cx);
                 if self.options.public_data_only
                     || self.options.key.as_ref().is_none_or(String::is_empty)
@@ -709,6 +725,14 @@ impl Venue for Backpack {
                 rows,
                 invalid: false,
             } => {
+                if rows.is_empty() {
+                    self.retry_seed(
+                        cx,
+                        SeedRead::Daily,
+                        "Backpack ticker list has no usable rows",
+                    );
+                    return;
+                }
                 self.seed.backoff.succeeded(cx, &SeedRead::Daily);
                 self.seed.daily = Some(rows);
                 self.finish_seed(cx);
@@ -717,6 +741,13 @@ impl Venue for Backpack {
                 rows,
                 invalid: false,
             } => {
+                if rows.is_empty()
+                    && !serde_json::from_str::<Vec<serde::de::IgnoredAny>>(response.body)
+                        .is_ok_and(|rows| rows.is_empty())
+                {
+                    self.retry_seed(cx, SeedRead::Marks, "Backpack mark list has no usable rows");
+                    return;
+                }
                 self.seed.backoff.succeeded(cx, &SeedRead::Marks);
                 self.seed.marks = Some(rows);
                 self.finish_seed(cx);

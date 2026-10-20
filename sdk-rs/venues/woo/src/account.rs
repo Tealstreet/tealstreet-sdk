@@ -97,6 +97,9 @@ struct PositionRow<'a> {
     holding: f64,
     #[serde(deserialize_with = "number")]
     average_open_price: f64,
+    // GET /v3/positions: https://docs.woox.io/#get-all-position-info-new
+    #[serde(default, deserialize_with = "optional_number")]
+    mark_price: Option<f64>,
     #[serde(deserialize_with = "number")]
     leverage: f64,
     #[serde(default, deserialize_with = "number")]
@@ -463,7 +466,7 @@ impl Woo {
         self.account_orders_page(cx, generation, true, 1);
     }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
-        if cx.now < self.account.pause_until {
+        if !self.account.started || cx.now < self.account.pause_until {
             return;
         }
         self.account_info_read(cx);
@@ -740,9 +743,16 @@ impl Woo {
                     return;
                 };
                 let symbol = compact(&r.symbol);
-                let Some(ticker) = cx.store.ticker(&symbol) else {
+                if cx.store.market(&symbol).is_none() {
+                    if r.holding != 0.0 {
+                        *bad = true;
+                        cx.log(
+                            LogLevel::Warning,
+                            "WOO owned position market unavailable; preserving previous snapshot",
+                        );
+                    }
                     return;
-                };
+                }
                 if r.holding == 0.0 {
                     return;
                 }
@@ -750,6 +760,20 @@ impl Woo {
                     *bad = true;
                     return;
                 }
+                // The private response publishes its own mark. Public startup may
+                // still be retrying, so no entry-price or zero-price valuation.
+                let mark = r.mark_price.filter(|price| *price > 0.0).or_else(|| {
+                    cx.store.ticker(&symbol).and_then(|ticker| {
+                        [ticker.mark, ticker.last]
+                            .into_iter()
+                            .find(|price| price.is_finite() && *price > 0.0)
+                    })
+                });
+                let Some(mark) = mark else {
+                    *bad = true;
+                    cx.log(LogLevel::Error, "WOO position mark unavailable; preserving previous positions and valuation");
+                    return;
+                };
                 let side = if r.holding > 0.0 {
                     PositionSide::Long
                 } else {
@@ -762,7 +786,7 @@ impl Woo {
                     symbol,
                     side,
                     entry_price: r.average_open_price,
-                    notional: contracts * ticker.mark,
+                    notional: contracts * mark,
                     leverage: r.leverage,
                     margin_type: Some(if r.margin_mode == "CROSS" {
                         MarginType::Cross
@@ -774,7 +798,7 @@ impl Woo {
                     } else {
                         PositionMode::Oneway
                     }),
-                    unrealized_pnl: rounded((ticker.mark - r.average_open_price) * r.holding),
+                    unrealized_pnl: rounded((mark - r.average_open_price) * r.holding),
                     realized_pnl: None,
                     contracts,
                     liquidation_price: r.est_liq_price,

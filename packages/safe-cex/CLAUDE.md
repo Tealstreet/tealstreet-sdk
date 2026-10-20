@@ -55,6 +55,14 @@ fixed before startup. Native suppression covers Public-role sockets and retries;
 Private/Business roles remain independent even on the same URL. Metadata REST
 and account reconciliation remain native to each account.
 
+Rust private startup resolves once the native catalogue, balance, orders and
+positions have loaded, so a retrying public ticker seed cannot time out and
+dispose a healthy account. Public-only startup still requires native tickers.
+Shared accounts additionally wait for compatible provider metadata and a real
+matching ticker seed; private readiness never bypasses that validation. Venue
+account mappers own any price prerequisites for authoritative valuation, and
+`loaded.tickers` remains false until the native ticker seed actually succeeds.
+
 Start a public-only `RustEngineExchange`, then construct `RustPublicFeedProvider`
 (exported by the SDK). Call `provider.attach(channel.port1)` once per account,
 and explicitly transfer `channel.port2` with its shared-policy options to that

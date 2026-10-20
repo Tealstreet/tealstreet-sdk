@@ -831,17 +831,22 @@ impl MexcFutures {
                 }
                 Err(_) => snapshot.bad = true,
             },
-            Scope::Positions => match serde_json::from_str::<PositionRow<'_>>(item) {
-                Ok(r) => {
-                    if let Some(p) = Self::map_position(cx, &r) {
-                        snapshot
-                            .native_ids
-                            .push((p.id.clone(), r.position_id.to_string()));
-                        snapshot.positions.push(p);
+            Scope::Positions => {
+                match serde_json::from_str::<PositionRow<'_>>(item) {
+                    Ok(r) => {
+                        if r.hold_vol != 0.0 && cx.store.market(&compact(&r.symbol)).is_none() {
+                            snapshot.bad = true;
+                            cx.log(LogLevel::Warning, "MEXC owned position market unavailable; preserving previous snapshot");
+                        } else if let Some(p) = Self::map_position(cx, &r) {
+                            snapshot
+                                .native_ids
+                                .push((p.id.clone(), r.position_id.to_string()));
+                            snapshot.positions.push(p);
+                        }
                     }
+                    Err(_) => snapshot.bad = true,
                 }
-                Err(_) => snapshot.bad = true,
-            },
+            }
             scope => match serde_json::from_str::<OrderRow<'_>>(item) {
                 Ok(r) => {
                     if let Some(o) = self.map_order(cx, &r, scope) {

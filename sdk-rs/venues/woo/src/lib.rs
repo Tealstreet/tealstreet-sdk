@@ -266,12 +266,18 @@ impl Woo {
                 Some(index) => index,
                 None => {
                     let supplied = match kind {
-                        Kind::Tickers => row.close.is_some() || row.volume.is_some() || row.amount.is_some(),
+                        Kind::Tickers => {
+                            row.close.is_some() || row.volume.is_some() || row.amount.is_some()
+                        }
                         Kind::Bbos => row.bid.is_some() || row.ask.is_some(),
                         Kind::Marks => row.price.is_some(),
                     };
-                    if !supplied { continue; }
-                    let Some(index) = cx.store.ensure_ticker(&compact(&row.symbol)) else { continue; };
+                    if !supplied {
+                        continue;
+                    }
+                    let Some(index) = cx.store.ensure_ticker(&compact(&row.symbol)) else {
+                        continue;
+                    };
                     self.ticker_indexes.insert(row.symbol.to_string(), index);
                     index
                 }
@@ -940,6 +946,7 @@ impl Venue for Woo {
                 self.ticker_indexes = indexes;
                 cx.store.set_tickers(rows);
                 self.seed_backoff.succeeded(cx, &true);
+                self.account_refresh(cx);
                 self.connect_public(cx);
                 self.funding = Some(cx.set_timer(60_000.0));
             }
@@ -1021,7 +1028,7 @@ impl Venue for Woo {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
-                cx.log(LogLevel::Error, error);
+                cx.log(LogLevel::Warning, error);
                 self.seed_backoff
                     .failed(cx, matches!(pending, Pending::Tickers { .. }));
             }

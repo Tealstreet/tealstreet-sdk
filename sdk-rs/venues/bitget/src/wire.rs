@@ -136,7 +136,18 @@ pub enum TickerField {
 }
 
 impl TickerRow<'_> {
-    pub fn has_values(&self) -> bool { self.present != 0 }
+    pub fn has_values(&self) -> bool {
+        self.present != 0
+    }
+    pub fn update_mask(&self) -> u16 {
+        // ChangeUtc24h shares the percentage slot; engine bit6 is open interest.
+        (self.present & !(1 << 6))
+            | if self.present & (1 << 6) != 0 {
+                1 << 5
+            } else {
+                0
+            }
+    }
     pub fn value(&self, field: TickerField) -> Option<f64> {
         let index = field as usize;
         (self.present & (1 << index) != 0).then(|| self.values[index])

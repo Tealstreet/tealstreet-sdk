@@ -36,8 +36,16 @@ fn seed() -> (Driver, SocketId) {
         &r,
         r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","visible":true,"quantityIncrement":"0.01","priceIncrement":"0.01","minQuantity":"0.01","imfFunction":{"base":"0.02"}},{"symbol":"SOL_USDC","marketType":"SPOT","quantityIncrement":"0.01","priceIncrement":"0.01"}]"#,
     );
-    let requests: Vec<_> = e
-        .drain_actions()
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let socket = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let requests: Vec<_> = actions
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -61,16 +69,6 @@ fn seed() -> (Driver, SocketId) {
             );
         }
     }
-    let socket = e
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::WsConnect { socket, .. } = a {
-                Some(socket)
-            } else {
-                None
-            }
-        })
-        .unwrap();
     e.handle(0.0, Event::WsOpened { socket });
     e.drain_actions().for_each(drop);
     (e, socket)
@@ -371,7 +369,7 @@ fn documented_ticker_uses_open_price_and_uppercase_quote_volume_and_empty_quotes
 }
 
 #[test]
-fn failed_seed_reads_retry_independently_and_start_the_socket_after_recovery() {
+fn failed_seed_reads_retry_independently_without_reopening_the_early_socket() {
     let mut e = Engine::new(Backpack::new(Options {
         public_data_only: true,
         ..Default::default()
@@ -441,10 +439,14 @@ fn failed_seed_reads_retry_independently_and_start_the_socket_after_recovery() {
         .unwrap();
     e.handle(2000.0, Event::TimerFired { timer });
     let marks = http(&mut e, "markPrices");
-    reply(&mut e, &marks, "[]");
+    reply(
+        &mut e,
+        &marks,
+        r#"[{"symbol":"SOL_USDC_PERP","markPrice":"140","indexPrice":"139","fundingRate":"0.001","nextFundingTimestamp":1000}]"#,
+    );
     assert_eq!(e.store().tickers()[0].last, 141.0);
     assert!(
-        e.drain_actions()
+        !e.drain_actions()
             .any(|a| matches!(a, Action::WsConnect { .. }))
     );
 }

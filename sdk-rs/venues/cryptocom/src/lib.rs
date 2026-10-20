@@ -533,7 +533,7 @@ impl Venue for Cryptocom {
                 invalid,
             } => {
                 if invalid || rows.is_empty() {
-                    cx.log(LogLevel::Error, "invalid instrument row");
+                    cx.log(LogLevel::Warning, "invalid instrument row");
                     self.discovery.failed(cx, false);
                     return;
                 }
@@ -550,7 +550,7 @@ impl Venue for Cryptocom {
                 }
             }
             Pending::Tickers { rows, invalid } => {
-                if invalid {
+                if invalid || rows.is_empty() {
                     self.discovery.failed(cx, true);
                     return;
                 }

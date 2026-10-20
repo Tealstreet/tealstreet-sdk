@@ -683,12 +683,21 @@ impl BinanceFutures {
         response: Result<Response<'_>, &str>,
     ) {
         let failure = match response {
-            Ok(response) if response.status == 200 => None,
+            Ok(response) if response.status == 200 => (!self
+                .ticker_seed
+                .reported
+                .iter()
+                .any(|mask| mask & from != 0))
+            .then(|| "Ticker source has no usable rows".to_string()),
             Ok(response) => Some(format!("HTTP {}: {}", response.status, response.body)),
             Err(error) => Some(error.to_owned()),
         };
         if let Some(failure) = failure {
-            cx.log(LogLevel::Error, format!("Binance tickers: {failure}"));
+            cx.log(LogLevel::Warning, format!("Binance tickers: {failure}"));
+            for reported in &mut self.ticker_seed.reported {
+                *reported &= !from;
+            }
+            self.ticker_seed.finished &= !from;
             self.discovery.failed(cx, from);
             return;
         }

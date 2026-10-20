@@ -666,7 +666,12 @@ fn malformed_quotes_empty_broker_suffixes_and_duplicates_preserve_valid_peers() 
         reply(&mut e, &r, &rows_envelope(&rows));
         assert!(e.store().loaded().markets);
         assert!(e.store().market("BTCUSDC").is_some());
-        let identities = e.store().markets().iter().map(|m| &m.symbol).collect::<std::collections::HashSet<_>>();
+        let identities = e
+            .store()
+            .markets()
+            .iter()
+            .map(|m| &m.symbol)
+            .collect::<std::collections::HashSet<_>>();
         assert_eq!(identities.len(), e.store().markets().len());
         assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Http(_))));
     }

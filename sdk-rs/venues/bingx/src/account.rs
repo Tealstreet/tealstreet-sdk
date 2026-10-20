@@ -494,6 +494,13 @@ impl Account {
                 };
                 let symbol = row.symbol.replace('-', "");
                 if cx.store.market(&symbol).is_none() {
+                    if row.position_amt != 0.0 {
+                        *failed = true;
+                        cx.log(
+                            LogLevel::Warning,
+                            "BingX owned position market unavailable; preserving previous snapshot",
+                        );
+                    }
                     return;
                 }
                 if row.leverage <= 0.0 {

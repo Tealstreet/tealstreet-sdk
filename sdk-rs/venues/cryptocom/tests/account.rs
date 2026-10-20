@@ -324,3 +324,12 @@ fn cached_rest_after_reopen_keeps_newer_live_exposure() {
     );
     assert_eq!(h.engine.store().positions()[0].last_update, Some(11.0));
 }
+
+#[test]
+fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
+    let mut h = Harness::new();
+    h.reply("get-positions", r#"{"code":0,"result":{"data":[{"instrument_name":"MISSINGUSD-PERP","quantity":"1","cost":"100"}]}}"#);
+    assert!(!h.engine.store().loaded().positions);
+    assert!(h.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+}

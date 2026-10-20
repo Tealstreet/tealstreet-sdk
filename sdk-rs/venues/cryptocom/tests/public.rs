@@ -84,7 +84,10 @@ fn automatic_seed_budget_ignores_early_books_and_counts_unique_channels() {
             &mut engine,
             &format!(r#"{{"code":0,"result":{{"data":[{instruments}]}}}}"#),
         );
-        answer(&mut engine, r#"{"code":0,"result":{"data":[]}}"#);
+        answer(
+            &mut engine,
+            r#"{"code":0,"result":{"data":[{"i":"M000USD-PERP","a":"100"}]}}"#,
+        );
         let socket = engine
             .drain_actions()
             .find_map(|a| match a {

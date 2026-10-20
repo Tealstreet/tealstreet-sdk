@@ -648,7 +648,16 @@ impl Kucoin {
     ) {
         match request.read {
             Read::Positions => match serde_json::from_str::<PositionRow>(item) {
-                Ok(row) => request.positions.push(row.position(cx.store)),
+                Ok(row) => {
+                    if row.current_qty.get() != 0.0
+                        && cx.store.market(&symbol(cx.store, row.symbol)).is_none()
+                    {
+                        request.invalid = true;
+                        cx.log(LogLevel::Warning, "KuCoin owned position market unavailable; preserving previous snapshot");
+                    } else {
+                        request.positions.push(row.position(cx.store));
+                    }
+                }
                 Err(_) => request.invalid = true,
             },
             Read::Orders(_) => match serde_json::from_str::<&RawValue>(item)
@@ -1159,6 +1168,15 @@ impl Kucoin {
         if topic.starts_with("/contract/position")
             && let Ok(row) = serde_json::from_str::<PositionRow>(data.get())
         {
+            if row.current_qty.get() != 0.0
+                && cx.store.market(&symbol(cx.store, row.symbol)).is_none()
+            {
+                cx.log(
+                    LogLevel::Warning,
+                    "KuCoin owned position market unavailable; preserving previous snapshot",
+                );
+                return;
+            }
             if cx.store.hedged() && row.position_side.is_empty() {
                 if let Some(timer) = self.account.refresh.take() {
                     cx.clear_timer(timer);

@@ -604,6 +604,8 @@ pub fn map_position(
         && !p.symbol.ends_with("USDT")
         && store.market(&p.symbol).is_some_and(|m| m.quote == "USDC")
         && let Some(ticker) = store.ticker(&p.symbol)
+        && ticker.mark.is_finite()
+        && ticker.mark > 0.0
     {
         let direction = if side == PositionSide::Long {
             1.0
@@ -2070,5 +2072,60 @@ mod tests {
         assert!(!is_inverse_symbol("BTC-26DEC25"));
         assert!(!is_inverse_symbol("BTCUSD中"));
         assert_eq!(subtract(1000.1, 0.2), 999.9);
+    }
+    #[test]
+    fn usdc_without_a_positive_public_mark_retains_native_unrealised_pnl() {
+        use safe_cex_engine::model::{Limits, Market, MinMax, Precision, Ticker};
+        let market = Market {
+            id: "ETHUSDC".into(),
+            symbol: "ETHUSDC".into(),
+            pretty_symbol: None,
+            base: "ETH".into(),
+            quote: "USDC".into(),
+            active: true,
+            precision: Precision {
+                amount: 0.01,
+                price: 0.01,
+            },
+            limits: Limits {
+                amount: MinMax {
+                    min: 0.01,
+                    max: 1000.0,
+                },
+                leverage: MinMax {
+                    min: 1.0,
+                    max: 100.0,
+                },
+                price: None,
+            },
+            contract_size: Some(1.0),
+            is_expiring: Some(false),
+            is_inverse: Some(false),
+            is_spot: Some(false),
+            is_perpetual: Some(true),
+            is_read_only: None,
+            taker_fee: None,
+            maker_fee: None,
+        };
+        let native: PositionRow<'_> = serde_json::from_str(r#"{"symbol":"ETHUSDC","size":"2","avgPrice":"100","markPrice":"110","positionValue":"220","unrealisedPnl":"7","positionIdx":0,"side":"Buy","leverage":"10"}"#).unwrap();
+        for mark in [None, Some(0.0), Some(115.0)] {
+            let mut store = Store::default();
+            store.set_markets(vec![market.clone()]);
+            if let Some(mark) = mark {
+                store.set_tickers(vec![Ticker {
+                    id: "ETHUSDC".into(),
+                    symbol: "ETHUSDC".into(),
+                    mark,
+                    ..Default::default()
+                }]);
+            }
+            let mapped = map_position(&native, &store, MarginType::Cross, 1000.0).position;
+            assert_eq!(mapped.contracts, 2.0);
+            assert_eq!(
+                mapped.unrealized_pnl,
+                if mark == Some(115.0) { 30.0 } else { 7.0 }
+            );
+            assert!(mapped.notional > 0.0);
+        }
     }
 }

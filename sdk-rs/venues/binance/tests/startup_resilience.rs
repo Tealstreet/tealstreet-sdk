@@ -127,17 +127,123 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
 fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine.drain_actions().find_map(|a| match a { Action::Http(r) => Some(r), _ => None }).unwrap();
-    engine.handle(0.0, Event::HttpResponse { request: catalogue.id, response: Response { status: 200, headers: "", body: CATALOGUE }});
-    let ticker = engine.drain_actions().find_map(|a| match a { Action::Http(r) => Some(r), _ => None }).unwrap();
-    engine.handle(0.0, Event::HttpResponse { request: ticker.id, response: Response { status: 503, headers: "", body: "{}" }});
-    let timer = engine.drain_actions().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms: 1000.0 } => Some(timer), _ => None,
-    }).expect("failed public ticker read uses shared retry backoff");
+    let catalogue = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: catalogue.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: CATALOGUE,
+            },
+        },
+    );
+    let ticker = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: ticker.id,
+            response: Response {
+                status: 503,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    let timer = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1000.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .expect("failed public ticker read uses shared retry backoff");
     assert!(engine.store().loaded().markets);
     engine.handle(1000.0, Event::TimerFired { timer });
-    let retry = engine.drain_actions().find_map(|a| match a {
-        Action::Http(r) if r.url == ticker.url => Some(r), _ => None,
-    }).expect("ticker source retried independently");
+    let retry = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url == ticker.url => Some(r),
+            _ => None,
+        })
+        .expect("ticker source retried independently");
+    assert_ne!(retry.id, ticker.id);
+}
+
+#[test]
+fn entirely_malformed_ticker_source_retries_without_publishing_an_empty_seed() {
+    let mut engine = public_engine();
+    engine.start(0.0);
+    let catalogue = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: catalogue.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: CATALOGUE,
+            },
+        },
+    );
+    let ticker = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: ticker.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r###"[{"broken":true}]"###,
+            },
+        },
+    );
+    let timer = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1000.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .expect("failed public ticker read uses shared retry backoff");
+    assert!(engine.store().loaded().markets);
+    assert!(!engine.store().loaded().tickers);
+    engine.handle(1000.0, Event::TimerFired { timer });
+    let retry = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url == ticker.url => Some(r),
+            _ => None,
+        })
+        .expect("ticker source retried independently");
     assert_ne!(retry.id, ticker.id);
 }

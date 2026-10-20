@@ -128,18 +128,61 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
 fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine.drain_actions().find_map(|a| match a { Action::Http(r) => Some(r), _ => None }).unwrap();
-    engine.handle(0.0, Event::HttpResponse { request: catalogue.id, response: Response { status: 200, headers: "", body: CATALOGUE }});
-    let ticker = engine.drain_actions().find_map(|a| match a { Action::Http(r) => Some(r), _ => None }).unwrap();
-    engine.handle(0.0, Event::HttpResponse { request: ticker.id, response: Response { status: 503, headers: "", body: "{}" }});
-    let timer = engine.drain_actions().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms: 1000.0 } => Some(timer), _ => None,
-    }).expect("failed public ticker read uses shared retry backoff");
+    let catalogue = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: catalogue.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: CATALOGUE,
+            },
+        },
+    );
+    let ticker = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: ticker.id,
+            response: Response {
+                status: 503,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    let timer = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1000.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .expect("failed public ticker read uses shared retry backoff");
     assert!(engine.store().loaded().markets);
     engine.handle(1000.0, Event::TimerFired { timer });
-    let retry = engine.drain_actions().find_map(|a| match a {
-        Action::Http(r) if r.url == ticker.url => Some(r), _ => None,
-    }).expect("ticker source retried independently");
+    let retry = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url == ticker.url => Some(r),
+            _ => None,
+        })
+        .expect("ticker source retried independently");
     assert_ne!(retry.id, ticker.id);
 }
 
@@ -147,21 +190,135 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
 fn valid_live_ticker_recovers_a_catalogue_market_missing_from_the_rest_seed() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine.drain_actions().find_map(|a| match a { Action::Http(r) => Some(r), _ => None }).unwrap();
+    let catalogue = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
     engine.handle(0.0, Event::HttpResponse { request: catalogue.id, response: Response { status: 200, headers: "", body: r###"{"success":true,"rows":[{"broken":true},{"symbol":"SPOT_BTC_USDT"},{"symbol":"PERP_BTC_USDT","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":100,"base_imr":0.02,"price_range":0.01},{"symbol":"PERP_ETH_USDT","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":100,"base_imr":0.02,"price_range":0.01}]}"### }});
     let mut actions = engine.drain_actions().collect::<Vec<_>>();
-    let ticker = actions.iter().find_map(|a| match a { Action::Http(r) => Some(r.clone()), _ => None }).unwrap();
+    let ticker = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap();
     engine.handle(0.0, Event::HttpResponse { request: ticker.id, response: Response { status: 200, headers: "", body: r###"{"success":true,"rows":[{"symbol":"PERP_UNKNOWN_USDT"},{"symbol":"PERP_BTC_USDT","24h_open":50000,"24h_close":60000,"24h_volume":4,"24h_amount":240000,"index_price":59999,"mark_price":60001,"last_funding_rate":0.0001,"next_funding_time":1700028800000,"open_interest":10000}]}"### }});
     actions.extend(engine.drain_actions());
-    
+
     assert!(engine.store().market("ETHUSDT").is_some());
     assert!(engine.store().ticker("ETHUSDT").is_none());
-    let socket = actions.into_iter().find_map(|a| match a { Action::WsConnect { socket, .. } => Some(socket), _ => None }).unwrap();
+    let socket = actions
+        .into_iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
     engine.handle(0.0, Event::WsOpened { socket });
     engine.drain_actions().for_each(drop);
     engine.handle(1.0, Event::WsMessage { socket, text: r###"{"topic":"tickers","data":[{"symbol":"PERP_ETH_USDT","close":201},{"symbol":"PERP_UNKNOWN_USDT","close":999}]}"### });
     assert_eq!(engine.store().ticker("ETHUSDT").unwrap().last, 201.0);
     assert!(engine.store().ticker("UNKNOWN").is_none());
     engine.handle(2.0, Event::WsMessage { socket, text: r###"{"topic":"tickers","data":[{"symbol":"PERP_ETH_USDT","close":201},{"symbol":"PERP_UNKNOWN_USDT","close":999}]}"### });
-    assert_eq!(engine.store().tickers().iter().filter(|t| t.symbol == "ETHUSDT").count(), 1);
+    assert_eq!(
+        engine
+            .store()
+            .tickers()
+            .iter()
+            .filter(|t| t.symbol == "ETHUSDT")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers() {
+    for body in [
+        r###"{"success":true,"rows":[{"broken":true}]}"###,
+        r###"{"success":true,"rows":[]}"###,
+    ] {
+        for cached in [false, true] {
+            let mut engine = public_engine();
+            engine.start(0.0);
+            let catalogue = engine
+                .drain_actions()
+                .find_map(|action| match action {
+                    Action::Http(request) => Some(request),
+                    _ => None,
+                })
+                .unwrap();
+            engine.handle(
+                0.0,
+                Event::HttpResponse {
+                    request: catalogue.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: CATALOGUE,
+                    },
+                },
+            );
+            let ticker = engine
+                .drain_actions()
+                .find_map(|action| match action {
+                    Action::Http(request) if request.url.contains("/public/futures") => {
+                        Some(request)
+                    }
+                    _ => None,
+                })
+                .expect("public ticker seed");
+            let market = engine.store().markets()[0].clone();
+            if cached {
+                engine
+                    .store_mut()
+                    .set_tickers(vec![safe_cex_engine::model::Ticker {
+                        id: market.id.clone(),
+                        symbol: market.symbol.clone(),
+                        last: 321.0,
+                        ..Default::default()
+                    }]);
+            }
+            let before = engine.store().tickers().to_vec();
+            engine.handle(
+                0.0,
+                Event::HttpResponse {
+                    request: ticker.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            assert_eq!(engine.store().tickers(), before);
+            assert_eq!(engine.store().loaded().tickers, cached);
+            let timer = engine
+                .drain_actions()
+                .find_map(|action| match action {
+                    Action::SetTimer {
+                        timer,
+                        at_ms: 1000.0,
+                    } => Some(timer),
+                    _ => None,
+                })
+                .expect("unusable successful HTTP body must back off");
+            engine.handle(1000.0, Event::TimerFired { timer });
+            let retry = engine
+                .drain_actions()
+                .find_map(|action| match action {
+                    Action::Http(request) if request.url == ticker.url => Some(request),
+                    _ => None,
+                })
+                .expect("fresh ticker-only retry");
+            engine.handle(1000.0, Event::HttpResponse { request: retry.id,
+                response: Response { status: 200, headers: "", body: r###"{"success":true,"rows":[{"broken":true},{"symbol":"PERP_BTC_USDT","24h_open":90,"24h_close":100,"24h_volume":1,"24h_amount":100,"index_price":100,"mark_price":100,"last_funding_rate":0,"next_funding_time":0,"open_interest":1}]}"### } });
+            assert!(engine.store().loaded().tickers);
+            assert_eq!(engine.store().tickers().len(), 1);
+            assert_eq!(engine.store().tickers()[0].last, 100.0);
+        }
+    }
 }

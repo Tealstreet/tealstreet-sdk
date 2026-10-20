@@ -821,6 +821,10 @@ impl Venue for Orderly {
                 rows,
                 invalid: false,
             } => {
+                if rows.is_empty() {
+                    self.retry_seed(cx, Seed::Tickers, "Orderly ticker list has no usable rows");
+                    return;
+                }
                 cx.store.set_tickers(rows);
                 self.seed_backoff.succeeded(cx, &Seed::Tickers);
                 self.connect_public(cx);

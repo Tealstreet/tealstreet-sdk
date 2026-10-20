@@ -587,3 +587,37 @@ fn partial_bracket_entry_fill_and_triggerless_leaf_do_not_finalize_live_root_sib
         "live child was blocked by an incorrect root tombstone"
     );
 }
+
+#[test]
+fn private_native_mark_works_without_public_tickers_and_missing_marks_preserve_state() {
+    let (mut e, socket) = ready();
+    e.drain_actions().for_each(drop);
+    e.store_mut().set_tickers(vec![]);
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"position","ts":3000,"data":{"positions":[{"symbol":"PERP_BTC_USDC","positionQty":2,"averageOpenPrice":50000,"markPrice":52000,"marginMode":"CROSS","leverage":10,"seq":9007199254740993}]}}"#,
+    );
+    let native = e.store().position("BTCUSDC").unwrap();
+    assert_eq!(
+        (native.contracts, native.notional, native.unrealized_pnl),
+        (2.0, 104000.0, 4000.0)
+    );
+    let before = e.store().positions().to_vec();
+    e.drain_actions().for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        r#"{"topic":"position","ts":4000,"data":{"positions":[{"symbol":"PERP_BTC_USDC","positionQty":3,"averageOpenPrice":50000,"marginMode":"CROSS","leverage":10,"seq":9007199254740994}]}}"#,
+    );
+    assert_eq!(e.store().positions(), before);
+    assert!(e.drain_actions().any(|action| matches!(action,
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("position mark unavailable"))));
+}
+
+#[test]
+fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
+    let body = POSITIONS.replace("PERP_BTC_USDC", "PERP_MISSING_USDC");
+    let (e, _) = ready_with(ORDER, "[]", &body);
+    assert!(!e.store().loaded().positions);
+}

@@ -281,3 +281,10 @@ fn auth_window_clamps_before_signing_private_requests() {
         ready_window(200, POSITIONS, Some((input, expected)));
     }
 }
+
+#[test]
+fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
+    let body = POSITIONS.replace("SOL_USDC_PERP", "MISSING_USDC_PERP");
+    let (e, _) = ready_position(200, &body);
+    assert!(!e.store().loaded().positions);
+}

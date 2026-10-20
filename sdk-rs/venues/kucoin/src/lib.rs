@@ -990,7 +990,7 @@ impl Venue for Kucoin {
                 }
             }
             Pending::Tickers { rows, invalid } => {
-                if success(status, body).is_err() || invalid {
+                if success(status, body).is_err() || invalid || rows.is_empty() {
                     self.discovery.failed(cx, true);
                 } else {
                     self.discovery.succeeded(cx, &true);

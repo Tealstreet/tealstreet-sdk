@@ -355,6 +355,9 @@ impl Cryptocom {
             Rows::Positions(rows) => serde_json::from_str::<PositionRow>(item).map(|row| {
                 if cx.store.market(row.instrument_name).is_some() {
                     rows.push(row.position(cx.now));
+                } else if num::parse(row.quantity) != 0.0 {
+                    request.invalid = true;
+                    cx.log(LogLevel::Warning, "Crypto.com owned position market unavailable; preserving previous snapshot");
                 }
             }),
             Rows::Orders(rows) => serde_json::from_str::<OrderRow>(item).map(|row| {

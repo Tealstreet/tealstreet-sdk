@@ -482,7 +482,20 @@ fn deadline_revokes_late_generation_and_starts_fresh_reads() {
 fn dead_private_socket_reconnects_and_auth_uses_fresh_expiry() {
     let (mut e, a, s) = started();
     e.handle(NOW, Event::WsOpened { socket: s });
-    let mut next = timer(&a, NOW + 5000.);
+    let mut next = a
+        .windows(2)
+        .find_map(|pair| match (&pair[0], &pair[1]) {
+            (
+                Action::WsConnect {
+                    socket,
+                    channel: Some(safe_cex_engine::SocketChannel::Private),
+                    ..
+                },
+                Action::SetTimer { timer, at_ms },
+            ) if *socket == s && *at_ms == NOW + 5000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("private socket watchdog");
     for delta in [5000., 10000., 15000.] {
         e.handle(NOW + delta, Event::TimerFired { timer: next });
         let a: Vec<_> = e.drain_actions().collect();
@@ -1038,4 +1051,45 @@ fn rest_balance_accepts_new_native_version_behind_client_clock_and_fences_replay
         r#"{"timestamp":1700000001500000000,"accounts_p":[{"currency":"USDT","accountBalanceRv":"4000","totalUsedBalanceRv":"30"}]}"# });
     assert_eq!(e.store().balance().used, 49.);
     assert_eq!(e.store().balance().total, 4090.);
+}
+
+#[test]
+fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
+    let (mut e, actions, _) = started();
+    response(
+        &mut e,
+        NOW,
+        request(&actions, "currency=USDT").id,
+        200,
+        &envelope("USDT", 1000., 69., &BTC.replace("BTCUSDT", "MISSINGUSDT")),
+    );
+    assert!(!e.store().loaded().positions);
+    assert!(e.drain_actions().any(|action| matches!(action,
+        Action::Notice(Notice::Log { message, .. }) if message.contains("owned position market unavailable"))));
+}
+
+#[test]
+fn unknown_owned_live_position_cannot_grant_snapshot_authority_or_consume_sequence() {
+    let (mut e, actions, socket) = started();
+    seed(&mut e, &actions);
+    authenticate(&mut e, socket);
+    let before = e.store().positions().to_vec();
+    let balance = e.store().balance().clone();
+    ws(
+        &mut e,
+        socket,
+        &format!(
+            r#"{{"type":"snapshot","sequence":1,"orders_p":[],"positions_p":[{}]}}"#,
+            BTC.replace("BTCUSDT", "MISSINGUSDT")
+        ),
+    );
+    assert_eq!(e.store().positions(), before);
+    assert_eq!(*e.store().balance(), balance);
+    assert!(!e.store().loaded().orders);
+    ws(
+        &mut e,
+        socket,
+        &format!(r#"{{"type":"snapshot","sequence":1,"orders_p":[],"positions_p":[{BTC}]}}"#),
+    );
+    assert!(e.store().loaded().orders);
 }

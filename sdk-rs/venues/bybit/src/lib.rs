@@ -107,6 +107,7 @@ pub enum Then {
     Markets {
         prelaunch: bool,
         markets: Vec<Market>,
+        rejected: bool,
     },
     Fees(HashMap<String, (f64, f64)>),
     Tickers(Vec<Ticker>),
@@ -188,6 +189,7 @@ struct Startup {
     prelaunch: Option<Vec<Market>>,
     /// Pages of a list whose later pages are still in flight.
     trading_pages: Vec<Market>,
+    trading_rejected: bool,
     prelaunch_pages: Vec<Market>,
     fees: Option<HashMap<String, (f64, f64)>>,
     tickers: Option<Vec<Ticker>>,
@@ -674,7 +676,11 @@ impl BybitLinear {
         self.send(
             cx,
             Rest::get("/v5/market/instruments-info", query).streamed(),
-            Then::Markets { prelaunch, markets },
+            Then::Markets {
+                prelaunch,
+                markets,
+                rejected: false,
+            },
         );
     }
 
@@ -727,7 +733,7 @@ impl BybitLinear {
     /// A required startup list failed: try the missing ones again, backing off.
     fn retry_startup(&mut self, cx: &mut Cx<'_, Pending>, what: &str, error: &str) {
         cx.log(
-            LogLevel::Error,
+            LogLevel::Warning,
             format!("Failed to fetch Bybit {what}: {error}"),
         );
         self.startup.backoff.failed(cx, ());
@@ -738,6 +744,7 @@ impl BybitLinear {
         cx: &mut Cx<'_, Pending>,
         prelaunch: bool,
         mut markets: Vec<Market>,
+        rejected: bool,
         response: Result<Response<'_>, &str>,
     ) {
         if prelaunch && (self.startup.markets_loaded || self.startup.prelaunch.is_some()) {
@@ -754,6 +761,9 @@ impl BybitLinear {
             .and_then(|result| result.next_page_cursor)
             .filter(|cursor| !cursor.is_empty())
             .map(|cursor| cursor.into_owned());
+        if !prelaunch {
+            self.startup.trading_rejected |= rejected;
+        }
         let pages = if prelaunch {
             &mut self.startup.prelaunch_pages
         } else {
@@ -765,6 +775,10 @@ impl BybitLinear {
             return;
         }
         let list = std::mem::take(pages);
+        if !prelaunch && list.is_empty() && self.startup.trading_rejected {
+            self.markets_failed(cx, false, "Trading catalogue has no usable markets");
+            return;
+        }
         if prelaunch {
             if let Some(timer) = self.startup.prelaunch_grace.take() {
                 cx.clear_timer(timer);
@@ -803,6 +817,7 @@ impl BybitLinear {
         } else {
             self.startup.trading_in_flight = false;
             self.startup.trading_pages.clear();
+            self.startup.trading_rejected = false;
             self.retry_startup(cx, "Trading markets", error);
         }
     }
@@ -1216,8 +1231,11 @@ fn on_item_public(
 ) {
     {
         match then {
-            Then::Markets { markets, .. } => {
+            Then::Markets {
+                markets, rejected, ..
+            } => {
                 let Ok(m) = serde_json::from_str::<Instrument>(item) else {
+                    *rejected = true;
                     safe_cex_engine::startup::skipped_row(cx);
                     return;
                 };
@@ -1281,9 +1299,11 @@ impl BybitLinear {
             Err(error) => Some((*error).to_owned()),
         };
         match then {
-            Then::Markets { prelaunch, markets } => {
-                self.on_markets(cx, prelaunch, markets, response)
-            }
+            Then::Markets {
+                prelaunch,
+                markets,
+                rejected,
+            } => self.on_markets(cx, prelaunch, markets, rejected, response),
             Then::Fees(fees) => {
                 self.startup.fees_in_flight = false;
                 if let Some(error) = failure {
@@ -1296,6 +1316,9 @@ impl BybitLinear {
                 self.startup.tickers_in_flight = false;
                 match failure {
                     Some(error) => self.retry_startup(cx, "tickers", &error),
+                    None if tickers.is_empty() => {
+                        self.retry_startup(cx, "tickers", "No usable ticker rows")
+                    }
                     None => {
                         self.startup.tickers = Some(tickers);
                         self.try_load_tickers(cx);

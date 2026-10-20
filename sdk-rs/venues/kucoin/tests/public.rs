@@ -818,9 +818,19 @@ fn private_snapshot_starts_before_ticker_and_private_welcome_and_is_not_duplicat
         &format!(r#"{{"code":"200000","data":[{MARKET}]}}"#),
     );
     let early = requests(&mut e);
-    assert!(early.iter().any(|r| r.url.contains("/positions")), "REST account snapshot must start before any ticker reply or private welcome");
-    let r = early.iter().find(|r| r.url.contains("/allTickers")).unwrap();
-    answer(&mut e, r, r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100"}]}"#);
+    assert!(
+        early.iter().any(|r| r.url.contains("/positions")),
+        "REST account snapshot must start before any ticker reply or private welcome"
+    );
+    let r = early
+        .iter()
+        .find(|r| r.url.contains("/allTickers"))
+        .unwrap();
+    answer(
+        &mut e,
+        r,
+        r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100"}]}"#,
+    );
     let tokens = requests(&mut e);
     assert_eq!(tokens.len(), 3);
     assert!(tokens.iter().all(|r| r.url.contains("/bullet-")));
@@ -844,7 +854,12 @@ fn private_snapshot_starts_before_ticker_and_private_welcome_and_is_not_duplicat
     assert!(!e.has_actions());
     welcome(&mut e, socket);
     let actions = e.drain_actions().collect::<Vec<_>>();
-    assert!(!actions.iter().any(|a| matches!(a, Action::Http(r) if r.url.contains("/positions"))), "welcome must not duplicate in-flight REST snapshots");
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/positions"))),
+        "welcome must not duplicate in-flight REST snapshots"
+    );
     assert_eq!(
         actions
             .iter()

@@ -224,7 +224,7 @@ fn spot_shards_every_symbol_and_reconnects_only_the_closed_shard() {
         200,
         &format!(r#"{{"symbols":[{symbols}]}}"#),
     );
-    h.respond("/api/v3/ticker/24hr", 200, "[]");
+    h.respond("/api/v3/ticker/24hr", 200, r#"[{"symbol":"COIN0USDT","lastPrice":"100","priceChangePercent":"0","volume":"1","quoteVolume":"100"}]"#);
     assert_eq!(h.sockets.len(), 4); // books and three independent ticker shards
     for socket in h
         .sockets
@@ -416,7 +416,7 @@ fn spot_control_frame_bound_counts_utf8_bytes() {
         200,
         &format!(r#"{{"symbols":[{symbols}]}}"#),
     );
-    h.respond("/api/v3/ticker/24hr", 200, "[]");
+    h.respond("/api/v3/ticker/24hr", 200, &format!(r#"[{{"symbol":"{name}0USDT","lastPrice":"100","priceChangePercent":"0","volume":"1","quoteVolume":"100"}}]"#));
     let socket = h.sockets[1].0;
     h.event(Event::WsOpened { socket });
     h.advance(4800.0);

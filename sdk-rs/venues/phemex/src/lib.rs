@@ -579,6 +579,10 @@ impl Venue for PhemexPerpetuals {
                 self.discovery_tickers(cx);
             }
             Pending::Tickers(rows, false) => {
+                if rows.is_empty() {
+                    self.discovery.failed(cx, true);
+                    return;
+                }
                 self.discovery.succeeded(cx, &true);
                 cx.store.set_tickers(rows);
                 self.connect_public(cx);

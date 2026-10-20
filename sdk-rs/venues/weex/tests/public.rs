@@ -196,7 +196,11 @@ fn silent_socket_is_closed_and_scheduled_for_reconnect() {
     let id = request(e.drain_actions().collect(), "exchangeInfo");
     response(&mut e, id, INFO);
     let reqs: Vec<_> = e.drain_actions().collect();
-    response(&mut e, request(reqs.clone(), "24hr"), "[]");
+    response(
+        &mut e,
+        request(reqs.clone(), "24hr"),
+        r#"[{"symbol":"BTCUSDT","lastPrice":"100"}]"#,
+    );
     response(&mut e, request(reqs, "bookTicker"), "[]");
     let actions: Vec<_> = e.drain_actions().collect();
     let (socket, timer): (SocketId, TimerId) = (

@@ -30,7 +30,13 @@ fn start() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
     let mut early = e.drain_actions().collect::<Vec<_>>();
-    let ticker = early.iter().find_map(|a| match a { Action::Http(r) if r.url.contains("/public/futures") => Some(r.clone()), _ => None }).unwrap();
+    let ticker = early
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains("/public/futures") => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap();
     response(&mut e, &ticker, 20.0, TICKERS);
     early.extend(e.drain_actions());
     let actions = early;

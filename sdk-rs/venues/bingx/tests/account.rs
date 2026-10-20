@@ -640,3 +640,20 @@ fn terminal_tombstones_suppress_unidentified_and_rest_covered_late_executions() 
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().filled, 0.2);
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().remaining, 0.0);
 }
+
+#[test]
+fn owned_position_outside_partial_catalogue_is_not_an_empty_success() {
+    let mut h = Harness::new();
+    h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+    h.respond(
+        POSITIONS,
+        200,
+        &POSITION.replace("BTC-USDT", "MISSING-USDT"),
+    );
+    assert!(!h.engine.store().loaded().positions);
+    assert!(
+        h.logs
+            .iter()
+            .any(|log| log.contains("owned position market unavailable"))
+    );
+}

@@ -78,6 +78,7 @@ pub struct BitgetFutures {
     history: history::History,
     sockets: [Connection; 4],
     ticker_index: Vec<Option<u32>>,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, String), usize>,
 }
@@ -92,12 +93,16 @@ impl BitgetFutures {
             history: history::History::default(),
             sockets: Default::default(),
             ticker_index: Vec::new(),
+            live_tickers: Default::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
         }
     }
 
-    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+    fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+        if tickers {
+            self.live_tickers.begin();
+        }
         self.get(
             cx,
             format!(
@@ -319,8 +324,12 @@ impl BitgetFutures {
                     let index = match self.ticker_index.get(market as usize).copied().flatten() {
                         Some(index) => index,
                         None => {
-                            if !row.has_values() { continue; }
-                            let Some(index) = cx.store.ensure_ticker(symbol) else { continue; };
+                            if !row.has_values() {
+                                continue;
+                            }
+                            let Some(index) = cx.store.ensure_ticker(symbol) else {
+                                continue;
+                            };
                             self.ticker_index.resize(cx.store.markets().len(), None);
                             self.ticker_index[market as usize] = Some(index);
                             index
@@ -328,6 +337,8 @@ impl BitgetFutures {
                     };
                     cx.store
                         .update_ticker_at(index, |ticker| update_ticker(ticker, &row));
+                    self.live_tickers
+                        .record(cx.store, symbol, row.update_mask());
                 }
             }
             PublicData::Books(rows) => {
@@ -614,7 +625,7 @@ impl Venue for BitgetFutures {
             },
             Pending::Tickers { rows, invalid: _ } => {
                 match serde_json::from_str::<TickerRow>(item) {
-                    Ok(row) => {
+                    Ok(row) if row.has_values() => {
                         if let Some(m) = cx.store.market_by_id(&row.symbol) {
                             let mut ticker = Ticker {
                                 id: m.id.clone(),
@@ -631,7 +642,7 @@ impl Venue for BitgetFutures {
                             rows.push(ticker);
                         }
                     }
-                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                    Ok(_) | Err(_) => safe_cex_engine::startup::skipped_row(cx),
                 }
             }
             Pending::Candles { rows, invalid, .. } => match serde_json::from_str::<CandleRow>(item)
@@ -694,9 +705,14 @@ impl Venue for BitgetFutures {
                 self.start_private(cx);
             }
             Pending::Tickers {
-                rows,
+                mut rows,
                 invalid: false,
             } => {
+                if rows.is_empty() {
+                    self.discovery.failed(cx, true);
+                    return;
+                }
+                self.live_tickers.finish(cx.store, &mut rows);
                 cx.store.set_tickers(rows);
                 self.ticker_index = ticker_index(cx.store);
                 self.discovery.succeeded(cx, &true);

@@ -59,3 +59,31 @@ fn catalogue_failure_uses_shared_exponential_backoff() {
     h.respond("/v5/market/instruments-info", 200, INSTRUMENTS);
     assert!(h.engine.store().loaded().markets);
 }
+
+#[test]
+fn wholly_malformed_required_trading_catalogue_retries_and_never_replaces_prior_markets() {
+    for cached in [false, true] {
+        let prior = if cached {
+            Harness::new().engine.store().markets().to_vec()
+        } else {
+            vec![]
+        };
+        let mut h = Harness::started(Options {
+            public_data_only: true,
+            ..Default::default()
+        });
+        if cached {
+            h.engine.store_mut().set_markets(prior.clone());
+        }
+        h.respond("status=PreLaunch", 200, PRELAUNCH);
+        h.respond("/v5/market/instruments-info", 200,
+            r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[{"broken":true}],"nextPageCursor":""}}"#);
+        assert_eq!(h.engine.store().markets(), prior);
+        assert_eq!(h.engine.store().loaded().markets, cached);
+        h.advance(1000.0);
+        assert!(h.has_request("/v5/market/instruments-info"));
+        h.respond("/v5/market/instruments-info", 200, INSTRUMENTS);
+        assert!(h.engine.store().loaded().markets);
+        assert!(h.engine.store().market("BTCUSDT").is_some());
+    }
+}

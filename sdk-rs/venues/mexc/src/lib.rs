@@ -387,7 +387,7 @@ impl MexcFutures {
             Pending::Trade(request) => self.trade_failed(cx, request.command, error),
             Pending::History(request) => self.query_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
-                cx.log(LogLevel::Error, error);
+                cx.log(LogLevel::Warning, error);
                 self.discovery
                     .failed(cx, matches!(pending, Pending::Tickers { .. }));
             }
@@ -577,7 +577,7 @@ impl Venue for MexcFutures {
             Pending::History(request) => self.query_response(cx, request, response),
             Pending::Markets { rows, failed } => {
                 if failed || rows.is_empty() {
-                    cx.log(LogLevel::Error, "Malformed MEXC market list");
+                    cx.log(LogLevel::Warning, "Malformed MEXC market list");
                     self.discovery.failed(cx, false);
                     return;
                 }
@@ -594,8 +594,8 @@ impl Venue for MexcFutures {
                 );
             }
             Pending::Tickers { mut rows, failed } => {
-                if failed {
-                    cx.log(LogLevel::Error, "Malformed MEXC ticker list");
+                if failed || rows.is_empty() {
+                    cx.log(LogLevel::Warning, "Malformed MEXC ticker list");
                     self.discovery.failed(cx, true);
                     return;
                 }

@@ -560,6 +560,18 @@ impl BinanceFutures {
                     _cx.log(LogLevel::Error, "Binance positionRisk row malformed");
                     return;
                 };
+                if self.is_inverse()
+                    && num::parse(&p.position_amt) != 0.0
+                    && _cx.store.market(&p.symbol).is_none()
+                {
+                    if let Some(join) = &mut self.account.positions
+                        && join.generation == *generation
+                    {
+                        join.failed = true;
+                    }
+                    _cx.log(LogLevel::Warning, "Binance inverse owned position market unavailable; preserving previous snapshot");
+                    return;
+                }
                 if let (Some(leverage), Some(join)) = (p.leverage, &mut self.account.positions)
                     && join.generation == *generation
                     && let Some(configs) = &mut join.configs
@@ -1380,6 +1392,17 @@ impl BinanceFutures {
     /// price come from the REST repair this schedules.
     fn on_account_update(&mut self, cx: &mut Cx<'_, Pending>, update: AccountUpdate<'_>) {
         if update.positions.is_empty() {
+            return;
+        }
+        if self.is_inverse()
+            && update.positions.iter().any(|position| {
+                num::parse(&position.pa) != 0.0 && cx.store.market(&position.s).is_none()
+            })
+        {
+            cx.log(
+                LogLevel::Warning,
+                "Binance inverse owned position market unavailable; preserving previous snapshot",
+            );
             return;
         }
         self.account.position_version += 1;

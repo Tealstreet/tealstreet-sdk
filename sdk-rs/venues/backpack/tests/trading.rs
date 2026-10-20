@@ -401,8 +401,15 @@ fn delayed_account_info_cannot_restore_the_previous_leverage_after_patch() {
         r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"}]"#,
     );
     let pending = requests(&mut e);
-    let info = pending.iter().find(|r| r.url.ends_with("/account")).unwrap().clone();
-    for r in pending.iter().filter(|r| r.url.contains("/tickers") || r.url.contains("/markPrices")) {
+    let info = pending
+        .iter()
+        .find(|r| r.url.ends_with("/account"))
+        .unwrap()
+        .clone();
+    for r in pending
+        .iter()
+        .filter(|r| r.url.contains("/tickers") || r.url.contains("/markPrices"))
+    {
         reply(&mut e, r, 200, "[]");
     }
     assert!(info.url.ends_with("/account"));

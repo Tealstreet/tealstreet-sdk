@@ -743,6 +743,10 @@ impl Venue for WeexFutures {
             task @ (Task::Daily | Task::BookTickers) => {
                 self.seed.finished |= if matches!(task, Task::Daily) { 1 } else { 2 };
                 if self.seed.finished == 3 && !self.seed.failed {
+                    if !self.seed.reported.iter().any(|mask| *mask != 0) {
+                        self.discovery.failed(cx, true);
+                        return;
+                    }
                     let rows = std::mem::take(&mut self.seed.rows)
                         .into_iter()
                         .zip(&self.seed.reported)

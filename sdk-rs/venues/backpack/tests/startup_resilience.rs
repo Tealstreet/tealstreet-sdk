@@ -127,17 +127,199 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
 fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine.drain_actions().find_map(|a| match a { Action::Http(r) => Some(r), _ => None }).unwrap();
-    engine.handle(0.0, Event::HttpResponse { request: catalogue.id, response: Response { status: 200, headers: "", body: CATALOGUE }});
-    let ticker = engine.drain_actions().find_map(|a| match a { Action::Http(r) => Some(r), _ => None }).unwrap();
-    engine.handle(0.0, Event::HttpResponse { request: ticker.id, response: Response { status: 503, headers: "", body: "{}" }});
-    let timer = engine.drain_actions().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms: 1000.0 } => Some(timer), _ => None,
-    }).expect("failed public ticker read uses shared retry backoff");
+    let catalogue = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: catalogue.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: CATALOGUE,
+            },
+        },
+    );
+    let ticker = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: ticker.id,
+            response: Response {
+                status: 503,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    let timer = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1000.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .expect("failed public ticker read uses shared retry backoff");
     assert!(engine.store().loaded().markets);
     engine.handle(1000.0, Event::TimerFired { timer });
-    let retry = engine.drain_actions().find_map(|a| match a {
-        Action::Http(r) if r.url == ticker.url => Some(r), _ => None,
-    }).expect("ticker source retried independently");
+    let retry = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url == ticker.url => Some(r),
+            _ => None,
+        })
+        .expect("ticker source retried independently");
     assert_ne!(retry.id, ticker.id);
+}
+
+#[test]
+fn entirely_malformed_ticker_source_retries_without_publishing_an_empty_seed() {
+    let mut engine = public_engine();
+    engine.start(0.0);
+    let catalogue = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: catalogue.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: CATALOGUE,
+            },
+        },
+    );
+    let ticker = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: ticker.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r###"[{"broken":true}]"###,
+            },
+        },
+    );
+    let timer = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1000.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .expect("failed public ticker read uses shared retry backoff");
+    assert!(engine.store().loaded().markets);
+    assert!(!engine.store().loaded().tickers);
+    engine.handle(1000.0, Event::TimerFired { timer });
+    let retry = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url == ticker.url => Some(r),
+            _ => None,
+        })
+        .expect("ticker source retried independently");
+    assert_ne!(retry.id, ticker.id);
+}
+
+#[test]
+fn late_ticker_seed_preserves_supplied_live_fields_and_uses_one_public_session() {
+    for live_trade in [false, true] {
+        let mut engine = public_engine();
+        engine.start(0.0);
+        let catalogue = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(
+            0.0,
+            Event::HttpResponse {
+                request: catalogue.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: CATALOGUE,
+                },
+            },
+        );
+        let early = engine.drain_actions().collect::<Vec<_>>();
+        assert_eq!(
+            early
+                .iter()
+                .filter(|a| matches!(a, Action::WsConnect { .. }))
+                .count(),
+            1
+        );
+        let socket = early
+            .iter()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, .. } => Some(*socket),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(0.0, Event::WsOpened { socket });
+        engine.handle(1.0, Event::WsMessage { socket, text: r#"{"stream":"bookTicker.SOL_USDC_PERP","data":{"s":"SOL_USDC_PERP","b":"120","a":"121"}}"# });
+        if live_trade {
+            engine.handle(1.0, Event::WsMessage { socket, text: r#"{"stream":"trade.SOL_USDC_PERP","data":{"s":"SOL_USDC_PERP","p":"200"}}"# });
+        }
+        assert!(!engine.store().loaded().tickers);
+        for action in early {
+            if let Action::Http(request) = action {
+                let body = if request.url.contains("/tickers") {
+                    r#"[{"symbol":"SOL_USDC_PERP","lastPrice":"100","priceChangePercent":"0.05","volume":"10","quoteVolume":"1000"}]"#
+                } else {
+                    r#"[{"symbol":"SOL_USDC_PERP","markPrice":"99","indexPrice":"98","fundingRate":"0.001","nextFundingTimestamp":1000}]"#
+                };
+                engine.handle(
+                    2.0,
+                    Event::HttpResponse {
+                        request: request.id,
+                        response: Response {
+                            status: 200,
+                            headers: "",
+                            body,
+                        },
+                    },
+                );
+            }
+        }
+        let ticker = engine.store().ticker("SOL_USDC_PERP").unwrap();
+        assert_eq!((ticker.bid, ticker.ask, ticker.mark), (120.0, 121.0, 99.0));
+        assert_eq!(ticker.last, if live_trade { 200.0 } else { 100.0 });
+        assert!(engine.store().loaded().tickers);
+        assert!(
+            !engine
+                .drain_actions()
+                .any(|a| matches!(a, Action::WsConnect { .. }))
+        );
+    }
 }

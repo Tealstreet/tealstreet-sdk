@@ -87,9 +87,16 @@ fn ready_snapshot(
             match a {
                 Action::Http(r) => {
                     if r.url.contains("/tickers") || r.url.contains("/markPrices") {
-                        reply(&mut e, &r, 200, if r.url.contains("/tickers") {
-                            r#"[{"symbol":"SOL_USDC_PERP","lastPrice":"141","priceChangePercent":"0.01","volume":"10","quoteVolume":"1410"}]"#
-                        } else { "[]" });
+                        reply(
+                            &mut e,
+                            &r,
+                            200,
+                            if r.url.contains("/tickers") {
+                                r#"[{"symbol":"SOL_USDC_PERP","lastPrice":"141","priceChangePercent":"0.01","volume":"10","quoteVolume":"1410"}]"#
+                            } else {
+                                "[]"
+                            },
+                        );
                         continue;
                     }
                     let body = if r.url.ends_with("/account") {
@@ -119,7 +126,11 @@ fn ready_snapshot(
                         body,
                     );
                 }
-                Action::WsConnect { socket, channel: Some(safe_cex_engine::SocketChannel::Private), .. } => private = Some(socket),
+                Action::WsConnect {
+                    socket,
+                    channel: Some(safe_cex_engine::SocketChannel::Private),
+                    ..
+                } => private = Some(socket),
                 _ => {}
             }
         }

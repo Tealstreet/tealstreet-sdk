@@ -83,6 +83,8 @@ pub struct Bingx {
     candles: HashMap<(String, String), u32>,
     seed: Vec<Ticker>,
     seed_index: Vec<Option<usize>>,
+    seed_rows_index: Vec<Option<usize>>,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
     seed_reported: Vec<bool>,
     sequence: u64,
     retries: safe_cex_engine::startup::Backoff<List>,
@@ -118,6 +120,8 @@ impl Bingx {
             candles: HashMap::new(),
             seed: Vec::new(),
             seed_index: Vec::new(),
+            seed_rows_index: Vec::new(),
+            live_tickers: Default::default(),
             seed_reported: Vec::new(),
             sequence: 0,
             retries: Default::default(),
@@ -133,10 +137,16 @@ impl Bingx {
     }
 
     fn retry_list(&mut self, cx: &mut Cx<'_, Pending>, kind: List) {
+        if matches!(kind, List::Premium) {
+            self.seed_reported.fill(false);
+        }
         self.retries.failed(cx, kind);
     }
 
-    fn read(&self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
+    fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
+        if matches!(&pending, Pending::Daily { .. } | Pending::Premium { .. }) {
+            self.live_tickers.begin();
+        }
         let (url, headers, _) =
             Params::new().into_request(Method::Get, path, self.credentials.as_ref(), cx.now);
         cx.request_streamed(
@@ -248,13 +258,28 @@ impl Bingx {
                         Some(ticker) => ticker,
                         None => {
                             let symbol = cx.store.markets()[market as usize].symbol.clone();
-                            let Some(ticker) = cx.store.ensure_ticker(&symbol) else { return; };
+                            let Some(ticker) = cx.store.ensure_ticker(&symbol) else {
+                                return;
+                            };
                             self.seed_index.resize(cx.store.markets().len(), None);
                             self.seed_index[market as usize] = Some(ticker as usize);
                             ticker as usize
                         }
                     };
                     let step = cx.store.markets()[market as usize].precision.price;
+                    let mut mask = (1 << 3) | (1 << 4) | (1 << 7);
+                    if row.trade_price > 0.0 {
+                        mask |= 7;
+                    }
+                    if row.change_percentage.is_some() {
+                        mask |= 1 << 5;
+                    }
+                    if row.volume.is_some() {
+                        mask |= 1 << 9;
+                    }
+                    if row.value.is_some() {
+                        mask |= 1 << 10;
+                    }
                     cx.store.update_ticker_at(ticker as u32, |t| {
                         if row.trade_price > 0. {
                             t.last = row.trade_price;
@@ -268,6 +293,8 @@ impl Bingx {
                         t.quote_volume = row.value.unwrap_or_default();
                         t.funding_time = 0.;
                     });
+                    let symbol = &cx.store.markets()[market as usize].symbol;
+                    self.live_tickers.record(cx.store, symbol, mask);
                 },
             );
             if result.is_err() {
@@ -551,7 +578,7 @@ impl Venue for Bingx {
                         .store
                         .market_by_id(&p.symbol)
                         .and_then(|m| cx.store.market_index(&m.symbol));
-                    if let Some(i) = index.and_then(|index| self.seed_index[index as usize]) {
+                    if let Some(i) = index.and_then(|index| self.seed_rows_index[index as usize]) {
                         let t = &mut self.seed[i];
                         t.mark = p.mark_price;
                         t.index = p.index_price;
@@ -631,11 +658,15 @@ impl Venue for Bingx {
                 )
             }
             Pending::Daily { rows, valid: true } => {
+                if rows.is_empty() {
+                    self.retry_list(cx, List::Daily);
+                    return;
+                }
                 self.retries.succeeded(cx, &List::Daily);
-                self.seed_index = vec![None; cx.store.markets().len()];
+                self.seed_rows_index = vec![None; cx.store.markets().len()];
                 for (i, ticker) in rows.iter().enumerate() {
                     if let Some(index) = cx.store.market_index(&ticker.symbol) {
-                        self.seed_index[index as usize] = Some(i)
+                        self.seed_rows_index[index as usize] = Some(i)
                     }
                 }
                 self.seed_reported = vec![false; rows.len()];
@@ -643,6 +674,10 @@ impl Venue for Bingx {
                 self.read(cx, paths::PREMIUM, Pending::Premium { valid: true })
             }
             Pending::Premium { valid: true } => {
+                if !self.seed_reported.iter().any(|reported| *reported) {
+                    self.retry_list(cx, List::Premium);
+                    return;
+                }
                 self.retries.succeeded(cx, &List::Premium);
                 let reported = std::mem::take(&mut self.seed_reported);
                 let mut index = 0;
@@ -651,7 +686,9 @@ impl Venue for Bingx {
                     index += 1;
                     keep
                 });
-                let rows = std::mem::take(&mut self.seed);
+                let mut rows = std::mem::take(&mut self.seed);
+                self.live_tickers.finish(cx.store, &mut rows);
+                self.seed_index.resize(cx.store.markets().len(), None);
                 self.seed_index.fill(None);
                 for (i, ticker) in rows.iter().enumerate() {
                     if let Some(market) = cx.store.market_index(&ticker.symbol) {
@@ -675,6 +712,10 @@ impl Venue for Bingx {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        let discovery = matches!(
+            &pending,
+            Pending::Markets { .. } | Pending::Daily { .. } | Pending::Premium { .. }
+        );
         match pending {
             Pending::History(request) => {
                 self.history.on_failed(cx, request, error);
@@ -696,7 +737,14 @@ impl Venue for Bingx {
             Pending::Daily { .. } => self.retry_list(cx, List::Daily),
             Pending::Premium { .. } => self.retry_list(cx, List::Premium),
         }
-        cx.log(LogLevel::Error, error);
+        cx.log(
+            if discovery {
+                LogLevel::Warning
+            } else {
+                LogLevel::Error
+            },
+            error,
+        );
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.history.on_timer(cx, self.credentials.as_ref(), timer);

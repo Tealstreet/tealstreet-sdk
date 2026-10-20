@@ -77,3 +77,38 @@ Crypto.com, KuCoin futures/spot, MEXC, Orderly, Phemex, WEEX and WOO:
   Spot adds `tests/startup_spot.rs` under the `spot` feature. The fixture drivers
   retain the early private requests rather than discarding them while awaiting
   public ticker responses.
+
+Public recovery account boundary (owned subset): starting private reads from a
+usable partial catalogue must not turn an unmappable nonzero native holding
+into an authoritative empty snapshot. WOO, Orderly, BingX, Backpack, MEXC,
+Phemex and Crypto.com now reject that snapshot and retain prior positions;
+KuCoin also rejects unknown owned lots before using contract multipliers.
+Binance COIN-M rejects missing owned contract metadata rather than assuming a
+one-dollar contract. Each boundary has a scripted regression. KuCoin and
+Binance inverse live positions have the same sizing guard; Phemex rejects an
+unknown owned live row before granting snapshot authority or consuming its
+sequence. This is a safety boundary, not the future tolerant private peer merge.
+
+Bybit maps native positions independently of catalogue membership (including
+native inverse dollar quantities and private mark fallback); Binance linear
+preserves native quantities/notional without requiring contract metadata.
+Bitget's position mapper already rejects missing markets; WEEX already marks
+its snapshot invalid when `StagedPosition::new` cannot map a position. Their
+snapshot error paths retain previous positions, so no additional skip guard is
+needed. Incremental private frames that ignore unknown symbols without granting
+snapshot authority do not clear the previous snapshot.
+
+Early public sockets now retain only fields actually supplied by valid live
+frames across slower REST discovery/retries. Shared `startup::LiveTickers`
+overlays those fields and appends known live peers omitted by REST, preserving
+REST values for fields the stream did not supply. Backpack reuses its one early
+public socket; BingX separates temporary REST row indexes from live store
+indexes. Regression fixtures cover intervening BBO/trade updates, reordered
+seeds, repeated retries, and no duplicate Backpack connection.
+
+The Rust SDK waits for catalogue plus the private balance/orders/positions for
+credentialed accounts, while public-only clients still require real tickers.
+Shared public-feed compatibility and seed readiness remain prerequisites.
+Fake-Wasm tests use real host frame application, worker frame forwarding and a
+shared-feed handshake; public discovery warnings do not invalidate funded
+account validation, while private authentication errors still do.

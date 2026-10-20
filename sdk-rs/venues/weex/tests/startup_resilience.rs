@@ -204,17 +204,136 @@ fn blank_public_values_keep_ts_zero_and_fallback_semantics_in_either_response_or
 fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine.drain_actions().find_map(|a| match a { Action::Http(r) => Some(r), _ => None }).unwrap();
-    engine.handle(0.0, Event::HttpResponse { request: catalogue.id, response: Response { status: 200, headers: "", body: CATALOGUE }});
-    let ticker = engine.drain_actions().find_map(|a| match a { Action::Http(r) => Some(r), _ => None }).unwrap();
-    engine.handle(0.0, Event::HttpResponse { request: ticker.id, response: Response { status: 503, headers: "", body: "{}" }});
-    let timer = engine.drain_actions().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms: 1000.0 } => Some(timer), _ => None,
-    }).expect("failed public ticker read uses shared retry backoff");
+    let catalogue = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: catalogue.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: CATALOGUE,
+            },
+        },
+    );
+    let ticker = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: ticker.id,
+            response: Response {
+                status: 503,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    let timer = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1000.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .expect("failed public ticker read uses shared retry backoff");
     assert!(engine.store().loaded().markets);
     engine.handle(1000.0, Event::TimerFired { timer });
-    let retry = engine.drain_actions().find_map(|a| match a {
-        Action::Http(r) if r.url == ticker.url => Some(r), _ => None,
-    }).expect("ticker source retried independently");
+    let retry = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url == ticker.url => Some(r),
+            _ => None,
+        })
+        .expect("ticker source retried independently");
     assert_ne!(retry.id, ticker.id);
+}
+
+#[test]
+fn entirely_unusable_daily_and_book_sources_retry_without_replacing_prior_quotes() {
+    for cached in [false, true] {
+        let mut engine = public_engine();
+        engine.start(0.0);
+        let catalogue = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(
+            0.0,
+            Event::HttpResponse {
+                request: catalogue.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: CATALOGUE,
+                },
+            },
+        );
+        let reads = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let market = engine.store().markets()[0].clone();
+        if cached {
+            engine
+                .store_mut()
+                .set_tickers(vec![safe_cex_engine::model::Ticker {
+                    id: market.id,
+                    symbol: market.symbol,
+                    last: 321.0,
+                    ..Default::default()
+                }]);
+        }
+        let before = engine.store().tickers().to_vec();
+        for read in reads {
+            engine.handle(
+                0.0,
+                Event::HttpResponse {
+                    request: read.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: r#"[{"broken":true}]"#,
+                    },
+                },
+            );
+        }
+        assert_eq!(engine.store().tickers(), before);
+        assert_eq!(engine.store().loaded().tickers, cached);
+        let timer = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer {
+                    timer,
+                    at_ms: 1000.0,
+                } => Some(timer),
+                _ => None,
+            })
+            .expect("empty seed retries");
+        engine.handle(1000.0, Event::TimerFired { timer });
+        assert!(
+            engine
+                .drain_actions()
+                .any(|a| matches!(a, Action::Http(r) if r.url.contains("24hr")))
+        );
+    }
 }

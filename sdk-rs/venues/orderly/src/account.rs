@@ -417,13 +417,32 @@ impl Orderly {
         r: &PositionRow<'_>,
     ) -> Result<Option<Position>, String> {
         let Some(symbol) = symbol(&r.symbol).filter(|s| cx.store.market(s).is_some()) else {
-            return Ok(None);
+            return if r.position_qty == 0.0 {
+                Ok(None)
+            } else {
+                Err(
+                    "Orderly owned position market unavailable; preserving previous snapshot"
+                        .into(),
+                )
+            };
         };
         let mode = margin(&r.margin_mode)?;
-        let mark = if r.mark_price > 0.0 {
-            r.mark_price
+        let mark = if r.position_qty == 0.0 {
+            0.0
         } else {
-            cx.store.ticker(&symbol).map_or(0.0, |t| t.mark)
+            Some(r.mark_price)
+                .filter(|price| price.is_finite() && *price > 0.0)
+                .or_else(|| {
+                    cx.store.ticker(&symbol).and_then(|ticker| {
+                        [ticker.mark, ticker.last]
+                            .into_iter()
+                            .find(|price| price.is_finite() && *price > 0.0)
+                    })
+                })
+                .ok_or_else(|| {
+                    "Orderly position mark unavailable; preserving previous positions and valuation"
+                        .to_string()
+                })?
         };
         let leverage = if r.leverage > 0.0 {
             r.leverage

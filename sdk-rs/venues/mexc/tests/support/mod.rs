@@ -82,19 +82,32 @@ pub fn private_started_with_markets(
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, markets);
     let mut actions: Vec<_> = e.drain_actions().collect();
-    let ticker = actions.iter().find_map(|a| match a {
-        Action::Http(r) if r.url.contains("contract/ticker") => Some(r.clone()), _ => None,
-    }).unwrap();
+    let ticker = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains("contract/ticker") => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap();
     response(&mut e, &ticker, TICKERS);
     actions.extend(e.drain_actions());
-    let private_socket = actions.iter().find_map(|a| match a {
-        Action::WsConnect { socket, channel: Some(safe_cex_engine::SocketChannel::Private), .. } => Some(*socket), _ => None,
-    }).unwrap();
+    let private_socket = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
     let mode = actions
         .iter()
         .find_map(|a| {
             if let Action::Http(r) = a
-                && r.url.contains("position_mode") {
+                && r.url.contains("position_mode")
+            {
                 Some(r)
             } else {
                 None
@@ -123,6 +136,11 @@ pub fn private_started_with_markets(
             }
         })
         .collect();
-    e.handle(100.0, Event::WsOpened { socket: private_socket });
+    e.handle(
+        100.0,
+        Event::WsOpened {
+            socket: private_socket,
+        },
+    );
     (e, private_socket, reads, timer)
 }

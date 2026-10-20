@@ -288,6 +288,13 @@ impl PhemexPerpetuals {
             return;
         };
         let Some(market) = cx.store.market(&row.symbol.to_ascii_uppercase()) else {
+            if row.size != 0.0 {
+                request.invalid = true;
+                cx.log(
+                    LogLevel::Warning,
+                    "Phemex owned position market unavailable; preserving previous snapshot",
+                );
+            }
             return;
         };
         if market.quote != CURRENCIES[request.currency]
@@ -619,6 +626,10 @@ impl PhemexPerpetuals {
             for row in rows {
                 let symbol = row.symbol.to_ascii_uppercase();
                 let Some(market) = cx.store.market(&symbol) else {
+                    if row.size != 0.0 {
+                        cx.log(LogLevel::Warning, "Phemex owned position market unavailable; preserving previous snapshot");
+                        return true;
+                    }
                     continue;
                 };
                 let Some(currency) = CURRENCIES.iter().position(|c| *c == market.quote) else {

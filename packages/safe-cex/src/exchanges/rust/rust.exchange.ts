@@ -783,13 +783,14 @@ export class RustEngineExchange extends BaseExchange {
     else this.log(message, level === 'warning' ? LogSeverity.Warning : LogSeverity.Info);
   };
 
-  /** Resolves once markets and tickers, and the account unless public-only, have loaded. */
+  /** Private accounts need markets and account state; public-only sessions also need tickers. */
   private untilLoaded = () =>
     new Promise<void>((resolve, reject) => {
       const ready = () => {
         const loaded = this.store.loaded;
         const account = this.isPublicDataOnly || (loaded.balance && loaded.orders && loaded.positions);
-        return loaded.markets && loaded.tickers && account && (!this.sharedPublicFeed || this.sharedPublicReady);
+        const publicReady = !this.isPublicDataOnly || loaded.tickers;
+        return loaded.markets && publicReady && account && (!this.sharedPublicFeed || this.sharedPublicReady);
       };
       let unsubscribe = () => {};
       const wake = () => {
