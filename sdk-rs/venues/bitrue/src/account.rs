@@ -1,6 +1,7 @@
 //! Futures account snapshots and the listen-key stream.
 use crate::wire::{Number, Text};
 use crate::{Bitrue, Job, Pending};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
     Balance, CurrencyBalance, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
@@ -96,7 +97,7 @@ pub struct Account {
     fast: Option<TimerId>,
     snapshot_pending: bool,
     snapshot_again: bool,
-    snapshot_discards: u8,
+    snapshot_guard: StaleGuard,
     order_queue: VecDeque<String>,
     order_active: Option<String>,
     order_timer: Option<TimerId>,
@@ -1508,19 +1509,24 @@ impl Bitrue {
                 }
                 let schema = serde_json::from_str::<SnapshotEnvelope>(response.body)
                     .is_ok_and(|v| v.data.account.is_empty());
-                if !schema || data.invalid || data.balances.is_empty() {
+                let malformed = !schema || data.invalid || data.balances.is_empty();
+                let current = revision == self.account.settings_revision;
+                // A leverage command waits for a snapshot issued after its write.
+                let admit = !malformed
+                    && if self.account.leverage_queries.is_empty() {
+                        self.account
+                            .snapshot_guard
+                            .admit(current, STALE_SNAPSHOT_LIMIT)
+                    } else {
+                        current
+                    };
+                if malformed {
                     self.finish_leverage(cx, None, "Malformed Bitrue account snapshot");
                     cx.log(
                         LogLevel::Error,
                         "Malformed Bitrue account snapshot; retaining previous state",
                     );
-                } else if revision == self.account.settings_revision
-                    // Steady private events would otherwise discard every snapshot; a
-                    // committed stale one is re-read at once (snapshot_again).
-                    || (self.account.snapshot_discards >= STALE_SNAPSHOT_LIMIT
-                        && self.account.leverage_queries.is_empty())
-                {
-                    self.account.snapshot_discards = 0;
+                } else if admit {
                     let closed: Vec<String> = cx
                         .store
                         .positions()
@@ -1558,8 +1564,6 @@ impl Bitrue {
                         self.refresh_orders(cx, closed);
                     }
                 } else {
-                    self.account.snapshot_discards =
-                        self.account.snapshot_discards.saturating_add(1);
                     self.account.snapshot_again = true;
                 }
                 if std::mem::take(&mut self.account.snapshot_again) {

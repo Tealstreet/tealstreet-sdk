@@ -5,6 +5,7 @@ pub mod credentials;
 pub mod de;
 pub mod engine;
 pub mod error;
+pub mod fence;
 pub mod json;
 pub mod model;
 pub mod num;
