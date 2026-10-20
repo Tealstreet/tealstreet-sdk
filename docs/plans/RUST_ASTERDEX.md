@@ -267,3 +267,11 @@ process312.5/173.8ms, retained17.2/2.7MB, Rust linear1.6MB.
 All three independent phase/integration reviews are clear after fixes. Next:
 push branch, PR into feat/rust-rewrite, post independent code-correctness reviews,
 address/re-review, wait for green exact-head CI, merge, cut fresh branch.
+
+### PR checkpoint
+
+Opened [PR1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322) into
+feat/rust-rewrite from passing checkpointedcf9cf5e9. Three fresh read-only
+code-correctness reviewers cover auth/private state, public/trading/history,
+and shared engine/hosts/wrapper/harness boundaries. Their findings will be posted
+on the PR, fixed and reviewed again; merge remains conditional on green CI.
