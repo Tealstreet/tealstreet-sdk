@@ -1174,3 +1174,52 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     assert!(h.logs.iter().any(|log| log.contains("stops re-reading")));
     assert!(h.engine.store().market("BTCUSDT").is_some());
 }
+
+#[test]
+fn balance_updates_faster_than_the_balance_read_cannot_starve_the_balance() {
+    let mut h = Harness::ready();
+    let update = r#"{"e":"ACCOUNT_UPDATE","a":{"B":[{"a":"USDT","wb":"1"}]}}"#;
+    h.message(update);
+    let mut read = h.take(BALANCE);
+    for step in 1..=3u32 {
+        h.message(update);
+        let body = BALANCES.replace(r#""1000""#, &format!(r#""{}""#, 2000 + step));
+        h.reply(read.id, 200, &body);
+        let expected = if step <= 2 { 1000.0 } else { 2003.0 };
+        assert_eq!(h.engine.store().balance().total, expected, "step {step}");
+        read = h.take(BALANCE);
+    }
+}
+
+#[test]
+fn position_events_faster_than_the_mode_read_cannot_starve_mode_and_positions() {
+    let mut h = Harness::new();
+    h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
+    h.event(Event::WsOpened {
+        socket: h.private(),
+    });
+    let mut read = h.take(MODE);
+    for step in 1..=3 {
+        h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":10}}"#);
+        h.reply(
+            read.id,
+            200,
+            r#"{"code":0,"data":{"dualSidePosition":true}}"#,
+        );
+        let positions = h.requests.iter().any(|r| r.url.contains(POSITIONS));
+        assert_eq!(h.engine.store().hedged(), step == 3, "step {step}");
+        assert_eq!(positions, step == 3, "step {step}");
+        read = h.take(MODE);
+    }
+    // Once known (for example just set by a command), only a current read may change the mode.
+    for step in 1..=3 {
+        h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":10}}"#);
+        h.reply(
+            read.id,
+            200,
+            r#"{"code":0,"data":{"dualSidePosition":false}}"#,
+        );
+        assert!(h.engine.store().hedged(), "stale step {step}");
+        read = h.take(MODE);
+    }
+}

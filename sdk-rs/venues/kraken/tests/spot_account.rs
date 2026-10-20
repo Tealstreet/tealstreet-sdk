@@ -60,15 +60,17 @@ fn token_refreshed_per_socket_and_stale_token_never_subscribes_new_socket() {
         },
     );
     let reconnect = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == NOW + 1000. => Some(timer),
+            Action::SetTimer { timer, at_ms } if (NOW + 750.0..=NOW + 1000.).contains(&at_ms) => {
+                Some(timer)
+            }
             _ => None,
         })
         .unwrap();
     e.handle(NOW + 1000., Event::TimerFired { timer: reconnect });
     let new = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| match a {
             Action::WsConnect { socket, .. } => Some(socket),
             _ => None,
@@ -83,10 +85,7 @@ fn token_refreshed_per_socket_and_stale_token_never_subscribes_new_socket() {
         &request,
         r#"{"error":[],"result":{"token":"stale"}}"#,
     );
-    assert!(
-        !e.drain_actions()
-            .any(|a| matches!(a, Action::WsSend { .. }))
-    );
+    assert!(!e.drain_plain().any(|a| matches!(a, Action::WsSend { .. })));
     reply_at(
         &mut e,
         NOW + 1000.,
@@ -94,7 +93,7 @@ fn token_refreshed_per_socket_and_stale_token_never_subscribes_new_socket() {
         r#"{"error":[],"result":{"token":"fresh"}}"#,
     );
     let messages = e
-        .drain_actions()
+        .drain_plain()
         .filter_map(|a| match a {
             Action::WsSend { socket, text } => Some((socket, text)),
             _ => None,
@@ -196,7 +195,7 @@ fn balance_read_signature_rejection_resigns_once_and_network_retry_is_bounded() 
         &second,
         r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
     );
-    assert!(e.drain_actions().any(|a| matches!(
+    assert!(e.drain_plain().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone {
             command: 10,
@@ -213,7 +212,7 @@ fn balance_read_signature_rejection_resigns_once_and_network_retry_is_bounded() 
         },
     );
     let t = e
-        .drain_actions()
+        .drain_plain()
         .find_map(|a| match a {
             Action::SetTimer { timer, .. } => Some(timer),
             _ => None,
@@ -231,7 +230,7 @@ fn parallel_balance_reads_cannot_rollback_newer_response() {
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 21 }));
     let new = requests(&mut e).pop().unwrap();
     reply(&mut e, &new, r#"{"error":[],"result":{"ZUSD":"2222"}}"#);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     reply(&mut e, &old, r#"{"error":[],"result":{"ZUSD":"1111"}}"#);
     assert_eq!(e.store().balance().total, 2222.);
 }
@@ -260,7 +259,7 @@ fn posted_read_network_retry_stops_after_three_resends() {
                 error: "connection reset",
             },
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         if attempt < 3 {
             let timer = actions
                 .into_iter()
@@ -319,7 +318,7 @@ fn externally_placed_iceberg_does_not_poison_mixed_order_snapshot() {
     );
     assert_eq!(e.store().orders().len(), 2);
     assert_eq!(e.store().order("ICEBERG").unwrap().price, 49.);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     e.handle(
         NOW,
         Event::Command(Command::AmendOrder {
@@ -329,7 +328,7 @@ fn externally_placed_iceberg_does_not_poison_mixed_order_snapshot() {
             amount: None,
         }),
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,
@@ -426,7 +425,7 @@ fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
         &first,
         r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(
         !actions
             .iter()
@@ -445,7 +444,7 @@ fn exhausted_signature_rejection_emits_terminal_auth_error_after_one_resend() {
         &retry,
         r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(
         actions
             .iter()
@@ -467,7 +466,7 @@ fn malformed_nonempty_private_secret_fails_locally_before_io() {
     opts.secret = Some("invalid base64!".into());
     let mut e = safe_cex_engine::Engine::new(safe_cex_venue_kraken::KrakenSpot::new(opts));
     e.start(NOW);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(
         actions
             .iter()
@@ -510,4 +509,23 @@ fn filled_lifecycle_without_trade_does_not_invent_an_execution() {
         OrderStatus::Closed
     );
     assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 0);
+}
+#[test]
+fn balance_frames_faster_than_the_balance_read_cannot_starve_the_balance() {
+    let (mut e, _, private) = ready(false);
+    let s = private.unwrap();
+    let frame = r#"{"channel":"balances","type":"update","data":[]}"#;
+    message(&mut e, s, frame);
+    let mut read = requests(&mut e).pop().unwrap();
+    for step in 1..=3u32 {
+        message(&mut e, s, frame);
+        let body = format!(r#"{{"error":[],"result":{{"ZUSD":"{}"}}}}"#, 2000 + step);
+        reply(&mut e, &read, &body);
+        let expected = if step <= 2 { 1355. } else { 2003. };
+        assert_eq!(e.store().balance().total, expected, "step {step}");
+        read = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.ends_with("/Balance"))
+            .expect("a stale read is re-read");
+    }
 }

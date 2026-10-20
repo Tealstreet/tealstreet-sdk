@@ -9,6 +9,7 @@ import { ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE } from '../../exchanges/asterdex/
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const USER = '0x1111111111111111111111111111111111111111';
@@ -21,6 +22,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'a
   const nativeSettings = { isHedged: false };
   const noActions = () => '[]';
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities(name),
     start: noActions,
     command(json) {
       const command = JSON.parse(json);
@@ -285,21 +287,22 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
     expect(commands.filter((command) => command.op === 'unsubscribeOrderBook')).toHaveLength(1);
   });
 
-  it('uses Aster timeframe fallback for reads and the entire candle subscription lifecycle', async () => {
+  // The bridge no longer substitutes 1h: the engine rejects what Aster cannot serve.
+  it('forwards Aster candle intervals unchanged for reads and the subscription lifecycle', async () => {
     const { exchange, commands } = fixture();
     await exchange.start();
-    const invalid = { symbol: 'BTCUSDT', interval: '1s' as OHLCVOptions['interval'] };
-    await exchange.fetchOHLCV(invalid);
-    const unsubscribe = exchange.listenOHLCV(invalid, () => undefined);
+    const request = { symbol: 'BTCUSDT', interval: '1s' as OHLCVOptions['interval'] };
+    await exchange.fetchOHLCV(request);
+    const unsubscribe = exchange.listenOHLCV(request, () => undefined);
     unsubscribe();
     expect(
       commands
         .filter((command) => ['fetchCandles', 'subscribeCandles', 'unsubscribeCandles'].includes(String(command.op)))
         .map(({ op, interval }) => ({ op, interval })),
     ).toEqual([
-      { op: 'fetchCandles', interval: '1h' },
-      { op: 'subscribeCandles', interval: '1h' },
-      { op: 'unsubscribeCandles', interval: '1h' },
+      { op: 'fetchCandles', interval: '1s' },
+      { op: 'subscribeCandles', interval: '1s' },
+      { op: 'unsubscribeCandles', interval: '1s' },
     ]);
   });
 });

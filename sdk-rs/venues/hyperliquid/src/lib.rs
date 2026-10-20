@@ -9,6 +9,7 @@ use base64::Engine as _;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
@@ -68,14 +69,25 @@ pub enum Pending {
         valid: bool,
     },
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    ping: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 45_000.0,
+                ping_interval_ms: Some(15_000.0),
+                backoff_base_ms: 1_000.0,
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 #[derive(Default)]
 struct Ladder {
@@ -94,7 +106,7 @@ pub struct Hyperliquid {
     trading: trading::Trading,
     connection: Connection,
     books: HashMap<String, Ladder>,
-    candles: HashMap<(String, String), usize>,
+    candles: HashMap<(String, Interval), usize>,
     assets: HashMap<String, u32>,
     isolated_only: HashSet<String>,
     coins: HashMap<String, String>,
@@ -218,15 +230,22 @@ impl Hyperliquid {
             self.meta(cx, dex, offset);
         } else if self.connection.socket.is_none() {
             self.account_start(cx);
-            self.connection.socket = Some(cx.connect_channel(
-                self.ws(),
-                if self.options.public_data_only {
-                    safe_cex_engine::SocketChannel::Public
-                } else {
-                    safe_cex_engine::SocketChannel::Private
-                },
-            ));
+            self.connect(cx);
         }
+    }
+    fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        let channel = if self.options.public_data_only {
+            safe_cex_engine::SocketChannel::Public
+        } else {
+            safe_cex_engine::SocketChannel::Private
+        };
+        // A suppressed public feed gets placeholder socket zero, which never opens.
+        if channel == safe_cex_engine::SocketChannel::Private
+            || cx.public_feed_policy() == PublicFeedPolicy::Direct
+        {
+            self.connection.supervisor.connecting(cx);
+        }
+        self.connection.socket = Some(cx.connect_channel(self.ws(), channel));
     }
     // A context retry must not advance discovery again or open a second session.
     fn advance_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
@@ -488,11 +507,10 @@ impl Hyperliquid {
             "candle" => {
                 let mut apply = |row: CandleRow<'_>| {
                     if let Some(symbol) = self.symbol(&row.s)
-                        && self
-                            .candles
-                            .contains_key(&(symbol.to_owned(), row.i.to_string()))
+                        && let Some(interval) = Interval::parse(&row.i)
+                        && self.candles.contains_key(&(symbol.to_owned(), interval))
                     {
-                        cx.candle(symbol, &row.i, row.candle());
+                        cx.candle(symbol, interval, row.candle());
                     }
                 };
                 if raw.starts_with('[') {
@@ -685,8 +703,7 @@ fn spot_rows(
     tickers: &mut Vec<Ticker>,
     excluded: &mut Vec<String>,
 ) -> bool {
-    let Ok(contexts) = serde_json::from_str::<Vec<safe_cex_engine::startup::Row<SpotCtx>>>(raw)
-    else {
+    let Ok(contexts) = safe_cex_engine::startup::rows::<SpotCtx>(raw) else {
         return false;
     };
     let positional = contexts.len() == meta.universe.len()
@@ -807,6 +824,16 @@ impl Venue for Hyperliquid {
     }
 
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        if self.spot {
+            safe_cex_engine::Capabilities::NO_HISTORY
+        } else {
+            safe_cex_engine::Capabilities {
+                client_order_lookup: true,
+                ..safe_cex_engine::Capabilities::BASE
+            }
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.spot && !self.options.public_data_only {
             let matches_wallet = self
@@ -842,9 +869,7 @@ impl Venue for Hyperliquid {
             return;
         }
         self.connection.open = true;
-        self.connection.attempts = 0;
-        self.connection.last_received = cx.now;
-        self.connection.ping = Some(cx.set_timer(15_000.0));
+        self.connection.supervisor.opened(cx);
         self.private_subscribe(cx);
         if self.account.started && self.user().is_some() && !self.options.public_data_only {
             self.refresh_account(cx);
@@ -876,7 +901,14 @@ impl Venue for Hyperliquid {
         }
         for (symbol, interval) in self.candles.keys() {
             if let Some(coin) = self.coin(cx, symbol).map(str::to_owned) {
-                self.subscription(cx, "subscribe", "candle", Some(&coin), Some(interval), None);
+                self.subscription(
+                    cx,
+                    "subscribe",
+                    "candle",
+                    Some(&coin),
+                    Some(interval.as_str()),
+                    None,
+                );
             }
         }
     }
@@ -884,7 +916,7 @@ impl Venue for Hyperliquid {
         if self.connection.socket != Some(socket) {
             return;
         }
-        self.connection.last_received = cx.now;
+        self.connection.supervisor.received(cx.now);
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public_frame(cx, text);
         }
@@ -897,18 +929,12 @@ impl Venue for Hyperliquid {
         }
         self.connection.open = false;
         self.connection.socket = None;
-        if let Some(timer) = self.connection.ping.take() {
-            cx.clear_timer(timer);
-        }
         for ladder in self.books.values_mut() {
             ladder.spot_depth = Default::default();
             ladder.depth_time = None;
             ladder.book.clear();
         }
-        self.connection.attempts = self.connection.attempts.saturating_add(1);
-        self.connection.reconnect = Some(cx.set_timer(
-            (1000.0 * 2f64.powi(self.connection.attempts.min(5) as i32 - 1)).min(30_000.0),
-        ));
+        self.connection.supervisor.retry(cx);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if !(200..300).contains(&response.status) {
@@ -1114,7 +1140,7 @@ impl Venue for Hyperliquid {
                 ..
             } => {
                 match *stage {
-                    0 => match serde_json::from_str::<SpotMeta>(item) {
+                    0 => match SpotMeta::parse(item) {
                         Ok(value) => {
                             for token in &value.tokens {
                                 if token.0.is_none() {
@@ -1225,28 +1251,20 @@ impl Venue for Hyperliquid {
             }
             return;
         }
-        if self.connection.reconnect == Some(timer) {
-            self.connection.reconnect = None;
-            self.connection.socket = Some(cx.connect_channel(
-                self.ws(),
-                if self.options.public_data_only {
-                    safe_cex_engine::SocketChannel::Public
-                } else {
-                    safe_cex_engine::SocketChannel::Private
-                },
-            ));
-        }
-        if self.connection.ping == Some(timer) {
-            self.connection.ping = None;
-            if let Some(socket) = self.connection.socket {
-                if cx.now - self.connection.last_received >= 45_000.0 {
-                    cx.close(socket);
-                    self.on_close(cx, socket, 1006);
-                } else {
+        match self.connection.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => self.connect(cx),
+            Tick::Ping => {
+                if let Some(socket) = self.connection.socket {
                     cx.send(socket, "{\"method\":\"ping\"}");
-                    self.connection.ping = Some(cx.set_timer(15_000.0));
                 }
             }
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.connection.socket {
+                    cx.close(socket);
+                    self.on_close(cx, socket, 1006);
+                }
+            }
+            Tick::Handled | Tick::Unhandled => (),
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -1254,10 +1272,11 @@ impl Venue for Hyperliquid {
             Command::SubscribeOrderBook { symbol } => self.book_sub(cx, symbol, true),
             Command::UnsubscribeOrderBook { symbol } => self.book_sub(cx, symbol, false),
             Command::SubscribeCandles { symbol, interval } => {
-                let count = self
-                    .candles
-                    .entry((symbol.clone(), interval.clone()))
-                    .or_default();
+                if !supported(interval) {
+                    cx.log(LogLevel::Error, interval.unsupported("Hyperliquid"));
+                    return;
+                }
+                let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
                 if *count == 1
                     && let Some(coin) = self.coin(cx, &symbol).map(str::to_owned)
@@ -1267,26 +1286,26 @@ impl Venue for Hyperliquid {
                         "subscribe",
                         "candle",
                         Some(&coin),
-                        Some(&interval),
+                        Some(interval.as_str()),
                         None,
                     );
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                if let Some(count) = self.candles.get_mut(&(symbol.clone(), interval.clone())) {
+                if let Some(count) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     *count -= 1;
                     if *count > 0 {
                         return;
                     }
                 }
-                self.candles.remove(&(symbol.clone(), interval.clone()));
+                self.candles.remove(&(symbol.clone(), interval));
                 if let Some(coin) = self.coin(cx, &symbol).map(str::to_owned) {
                     self.subscription(
                         cx,
                         "unsubscribe",
                         "candle",
                         Some(&coin),
-                        Some(&interval),
+                        Some(interval.as_str()),
                         None,
                     );
                 }
@@ -1299,8 +1318,8 @@ impl Venue for Hyperliquid {
                 from_ms,
                 to_ms,
             } => {
-                if !valid_interval(&interval) {
-                    cx.done(command, Err("Unsupported candle interval".into()));
+                if !supported(interval) {
+                    cx.done(command, Err(interval.unsupported("Hyperliquid")));
                     return;
                 }
                 let Some(coin) = self.coin(cx, &symbol) else {
@@ -1323,7 +1342,7 @@ impl Venue for Hyperliquid {
                 let end = to_ms.unwrap_or(cx.now).floor();
                 let start = match (limit, from_ms) {
                     (None, Some(from)) => from,
-                    _ => end - interval_ms(&interval) * f64::from(limit.unwrap_or(500).min(1500)),
+                    _ => end - interval.ms() * f64::from(limit.unwrap_or(500).min(1500)),
                 };
                 if !start.is_finite()
                     || !end.is_finite()
@@ -1339,7 +1358,7 @@ impl Venue for Hyperliquid {
                     r#type: "candleSnapshot",
                     req: Req {
                         coin,
-                        interval: &interval,
+                        interval: interval.as_str(),
                         start_time: start.max(0.0).floor() as u64,
                         end_time: end as u64,
                     },
@@ -1370,24 +1389,13 @@ impl Venue for Hyperliquid {
         Box::new(self.books.iter().map(|(s, l)| (s.as_str(), &l.book)))
     }
 }
-fn interval_ms(interval: &str) -> f64 {
-    let (n, unit) = interval.split_at(interval.char_indices().last().map_or(0, |(i, _)| i));
-    n.parse::<f64>().unwrap_or(1.0)
-        * match unit {
-            "s" => 1000.0,
-            "h" => 3_600_000.0,
-            "d" => 86_400_000.0,
-            "w" => 604_800_000.0,
-            "M" => 2_592_000_000.0,
-            _ => 60_000.0,
-        }
-}
-
-fn valid_interval(interval: &str) -> bool {
-    [
-        "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M",
-    ]
-    .contains(&interval)
+// Hyperliquid's candle codes are the TS spellings.
+fn supported(interval: Interval) -> bool {
+    use Interval::*;
+    matches!(
+        interval,
+        M1 | M3 | M5 | M15 | M30 | H1 | H2 | H4 | H8 | H12 | D1 | D3 | W1 | Mo1
+    )
 }
 
 #[cfg(test)]

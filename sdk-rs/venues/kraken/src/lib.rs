@@ -8,9 +8,11 @@ mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue,
 };
 use std::collections::{HashMap, HashSet};
 use wire::*;
@@ -38,7 +40,7 @@ pub enum Pending {
     Candles {
         command: Option<CommandId>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         generation: Option<u64>,
         rows: Vec<Candle>,
         failed: bool,
@@ -54,14 +56,25 @@ pub struct CandlePage {
     pages: u8,
 }
 const MAX_CANDLE_PAGES: u8 = 10;
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 45_000.0,
+                idle_timeout_ms: 45_000.0,
+                ping_interval_ms: Some(15_000.0),
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 #[derive(Default)]
 struct DepthState {
@@ -89,7 +102,7 @@ pub struct Kraken {
     trading: trading::Trading,
     public: Connection,
     books: HashMap<String, DepthState>,
-    candles: HashMap<(String, String), CandleState>,
+    candles: HashMap<(String, Interval), CandleState>,
     generation: u64,
     ticker_symbols: Vec<String>,
     ticker_revision: u64,
@@ -123,7 +136,7 @@ impl Kraken {
             live_tickers: Default::default(),
             read_signer,
             signer,
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
             public: Connection::default(),
             books: HashMap::new(),
@@ -190,10 +203,12 @@ impl Kraken {
         );
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_channel(self.ws_url(), SocketChannel::Public));
         self.public.open = false;
-        self.public.last_received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(15_000.0));
     }
     fn subscribe(&self, cx: &mut Cx<'_, Pending>, event: &str, feed: &str, products: &[&str]) {
         if let Some(s) = self.public.socket.filter(|_| self.public.open) {
@@ -324,7 +339,7 @@ impl Kraken {
         cx: &mut Cx<'_, Pending>,
         command: Option<CommandId>,
         symbol: String,
-        interval: String,
+        interval: Interval,
         limit: Option<u32>,
         from_ms: Option<f64>,
         to_ms: Option<f64>,
@@ -335,7 +350,13 @@ impl Kraken {
             }
             return;
         }
-        let (_, step) = interval_spec(&interval);
+        if resolution(interval).is_none() {
+            if let Some(c) = command {
+                cx.done(c, Err(interval.unsupported("Kraken")));
+            }
+            return;
+        }
+        let step = interval.ms();
         let to = to_ms.unwrap_or(cx.now);
         let from = from_ms.unwrap_or(to - step * f64::from(limit.unwrap_or(500).clamp(1, 5000)));
         if !from.is_finite() || !to.is_finite() || from < 0.0 || from > to {
@@ -345,7 +366,7 @@ impl Kraken {
             return;
         }
         let generation = if command.is_none() {
-            let Some(s) = self.candles.get_mut(&(symbol.clone(), interval.clone())) else {
+            let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) else {
                 return;
             };
             if s.in_flight {
@@ -385,7 +406,7 @@ impl Kraken {
         else {
             return;
         };
-        let (resolution, _) = interval_spec(interval);
+        let resolution = interval.as_str();
         cx.request_streamed(
             Method::Get,
             format!(
@@ -451,18 +472,10 @@ fn malformed_perpetual(item: &str) -> Option<String> {
     (row.symbol.starts_with("PF_") && !matches!(row.tradeable, Some(Flag::Bool(false))))
         .then(|| row.symbol.into_owned())
 }
-fn interval_spec(interval: &str) -> (&str, f64) {
-    match interval {
-        "1m" => ("1m", 60_000.0),
-        "5m" => ("5m", 300_000.0),
-        "15m" => ("15m", 900_000.0),
-        "30m" => ("30m", 1_800_000.0),
-        "4h" => ("4h", 14_400_000.0),
-        "12h" => ("12h", 43_200_000.0),
-        "1d" => ("1d", 86_400_000.0),
-        "1w" => ("1w", 604_800_000.0),
-        _ => ("1h", 3_600_000.0),
-    }
+// Kraken Futures chart resolutions are the TS spellings.
+fn resolution(interval: Interval) -> Option<&'static str> {
+    use Interval::*;
+    matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1).then(|| interval.as_str())
 }
 impl Venue for Kraken {
     fn guard_order_mutations(&self) -> bool {
@@ -470,6 +483,12 @@ impl Venue for Kraken {
     }
 
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
@@ -509,8 +528,7 @@ impl Venue for Kraken {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.last_received = cx.now;
+        self.public.supervisor.opened(cx);
         self.subscribe_tickers(cx, "subscribe");
         let symbols: Vec<_> = self.books.keys().cloned().collect();
         for s in symbols {
@@ -527,7 +545,7 @@ impl Venue for Kraken {
         let Ok(msg) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
-        self.public.last_received = cx.now;
+        self.public.supervisor.received(cx.now);
         if !msg.event.is_empty() {
             if msg.event == "error" {
                 cx.log(LogLevel::Warning, "Kraken public subscription error");
@@ -610,15 +628,8 @@ impl Venue for Kraken {
         }
         self.public.socket = None;
         self.public.open = false;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
         self.invalidate_books(cx);
-        self.public.attempts = self.public.attempts.saturating_add(1);
-        self.public.reconnect =
-            Some(cx.set_timer(
-                (1000.0 * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30_000.0),
-            ));
+        self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
@@ -874,7 +885,7 @@ impl Venue for Kraken {
                 if command.is_none()
                     && !self
                         .candles
-                        .get(&(symbol.clone(), interval.clone()))
+                        .get(&(symbol.clone(), interval))
                         .is_some_and(|s| Some(s.generation) == generation)
                 {
                     return;
@@ -938,14 +949,14 @@ impl Venue for Kraken {
                 rows.dedup_by(|a, b| a.timestamp == b.timestamp);
                 if let Some(c) = command {
                     cx.done(c, serde_json::to_string(&rows).map_err(|e| e.to_string()));
-                } else if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval.clone())) {
+                } else if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) {
                     s.in_flight = false;
                     s.next_poll = cx.now + 5_000.0;
                     if let Some(latest) = rows.last().copied()
                         && s.last
                             .is_none_or(|old| latest.timestamp >= old.timestamp && latest != old)
                     {
-                        cx.candle(&symbol, &interval, latest);
+                        cx.candle(&symbol, interval, latest);
                         s.last = Some(latest);
                     }
                 }
@@ -973,25 +984,23 @@ impl Venue for Kraken {
             }
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect(cx);
-            return;
-        }
-        if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.last_received >= 45_000.0 {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => (),
+            Tick::Reconnect => return self.connect(cx),
+            Tick::Ping => {
+                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
+                    cx.send(s, "{\"event\":\"ping\"}");
+                }
+                return;
+            }
+            Tick::TimedOut(_) => {
                 if let Some(s) = self.public.socket {
                     cx.close(s);
                     self.on_close(cx, s, 1006);
                 }
-            } else {
-                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
-                    cx.send(s, "{\"event\":\"ping\"}");
-                }
-                self.public.watchdog = Some(cx.set_timer(15_000.0));
+                return;
             }
-            return;
+            Tick::Handled => return,
         }
         if self.poll == Some(timer) {
             self.poll = None;
@@ -1056,6 +1065,10 @@ impl Venue for Kraken {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
+                if resolution(interval).is_none() {
+                    cx.log(LogLevel::Error, interval.unsupported("Kraken"));
+                    return;
+                }
                 if cx.store.market(&symbol).is_none() {
                     return;
                 }
@@ -1063,7 +1076,7 @@ impl Venue for Kraken {
                 let generation = self.generation;
                 let s = self
                     .candles
-                    .entry((symbol.clone(), interval.clone()))
+                    .entry((symbol.clone(), interval))
                     .or_insert_with(|| CandleState {
                         generation,
                         ..Default::default()

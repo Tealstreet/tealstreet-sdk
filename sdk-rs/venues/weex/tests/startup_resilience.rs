@@ -1,5 +1,5 @@
 //! Scripted discovery regressions; no network or account credentials.
-use safe_cex_engine::{Action, Engine, Event, Notice, Response};
+use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice, Response};
 use safe_cex_venue_weex::{Options, WeexFutures};
 const CATALOGUE: &str = r###"{"symbols":[{"broken":true},{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":1e-06,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"###;
 fn public_engine() -> Engine<WeexFutures> {
@@ -70,7 +70,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 }
 
 #[test]
-fn private_snapshot_starts_while_ticker_response_is_still_pending() {
+fn private_snapshot_starts_when_a_pending_ticker_read_fails() {
     let mut engine = Engine::new(WeexFutures::new(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
@@ -98,6 +98,29 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
     );
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().tickers);
+    let private = |request: &HttpRequest| {
+        ["account", "position", "order"]
+            .iter()
+            .any(|part| request.url.to_ascii_lowercase().contains(part))
+    };
+    let seed = engine
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    // Account rows map against seeded prices, so a pending seed is awaited...
+    assert!(!seed.iter().any(private));
+    let daily = seed.iter().find(|r| r.url.contains("24hr")).unwrap();
+    engine.handle(
+        1.0,
+        Event::HttpFailed {
+            request: daily.id,
+            error: "timed out",
+        },
+    );
+    // ...but its first failure starts the account; retrying public reads never gate it.
     let reads = engine
         .drain_actions()
         .filter_map(|action| match action {
@@ -106,20 +129,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
         })
         .collect::<Vec<_>>();
     assert!(
-        reads.iter().any(|request| [
-            "account",
-            "position",
-            "private/",
-            "user/",
-            "listenKey",
-            "collateral"
-        ]
-        .iter()
-        .any(|part| request
-            .url
-            .to_ascii_lowercase()
-            .contains(&part.to_ascii_lowercase()))),
-        "private REST reads must not wait for ticker success or a socket welcome: {:?}",
+        reads.iter().any(private),
+        "private REST reads must start on the first ticker failure: {:?}",
         reads.iter().map(|r| &r.url).collect::<Vec<_>>()
     );
 }

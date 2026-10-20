@@ -516,7 +516,7 @@ fn spot_candles_use_native_at_coin_and_documented_rest_shape() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "HFUN/USDC".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(5),
             from_ms: None,
             to_ms: Some(10_000.0),
@@ -896,7 +896,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
             2000.0,
             Event::Command(Command::SubscribeCandles {
                 symbol: symbol.clone(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             }),
         );
         assert!(e.drain_actions().any(|a|matches!(a,Action::WsSend{text,..}if serde_json::from_str::<serde_json::Value>(&text).unwrap()["subscription"]["coin"]==coin)));
@@ -905,7 +905,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
             Event::Command(Command::FetchCandles {
                 command: 1,
                 symbol: symbol.clone(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
                 limit: Some(1),
                 from_ms: None,
                 to_ms: None,
@@ -1203,28 +1203,34 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
             );
         };
         assert_topics(&actions);
-        let ping = actions
+        let mut timers: Vec<_> = actions
             .iter()
-            .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == 16000. => Some(*timer),
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
                 _ => None,
             })
-            .unwrap();
+            .collect();
         for command in [
             Command::SubscribeOrderBook {
                 symbol: "PURR/USDC".into(),
             },
             Command::SubscribeCandles {
                 symbol: "PURR/USDC".into(),
-                interval: "1m".into(),
+                interval: safe_cex_engine::model::Interval::M1,
             },
         ] {
             e.handle(2000., Event::Command(command));
         }
+        let actions: Vec<_> = e.drain_actions().collect();
         assert!(
-            !e.drain_actions()
+            !actions
+                .iter()
                 .any(|a| matches!(a, Action::WsSend { .. } | Action::WsConnect { .. }))
         );
+        timers.extend(actions.iter().filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        }));
         let ticker = e.store().ticker("PURR/USDC").unwrap().clone();
         support::message(
             &mut e,
@@ -1233,24 +1239,37 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
             r#"{"channel":"allMids","data":{"mids":{"PURR/USDC":"999"}}}"#,
         );
         assert_eq!(e.store().ticker("PURR/USDC").unwrap(), &ticker);
-        e.handle(16000., Event::TimerFired { timer: ping });
-        assert!(
-            e.drain_actions().any(
-                |a| matches!(a, Action::WsSend { text, .. } if text == r#"{"method":"ping"}"#)
-            )
-        );
+        let mut pinged = false;
+        while let Some(index) = timers
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, at))| *at <= 16000.)
+            .min_by(|a, b| a.1.1.total_cmp(&b.1.1))
+            .map(|(index, _)| index)
+        {
+            let (timer, at) = timers.swap_remove(index);
+            e.handle(at, Event::TimerFired { timer });
+            for a in e.drain_actions() {
+                match a {
+                    Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                    Action::ClearTimer { timer } => timers.retain(|(t, _)| *t != timer),
+                    Action::WsSend { text, .. } => pinged |= text == r#"{"method":"ping"}"#,
+                    _ => {}
+                }
+            }
+        }
+        assert!(pinged);
         e.handle(17000., Event::WsClosed { socket, code: 1006 });
-        let reconnect = e
+        let (reconnect, at) = e
             .drain_actions()
             .find_map(|a| match a {
-                Action::SetTimer {
-                    timer,
-                    at_ms: 18000.,
-                } => Some(timer),
+                Action::SetTimer { timer, at_ms } if (17750. ..=18000.).contains(&at_ms) => {
+                    Some((timer, at_ms))
+                }
                 _ => None,
             })
             .unwrap();
-        e.handle(18000., Event::TimerFired { timer: reconnect });
+        e.handle(at, Event::TimerFired { timer: reconnect });
         let next = e
             .drain_actions()
             .find_map(|a| match a {
@@ -1263,7 +1282,7 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
                 _ => None,
             })
             .unwrap();
-        e.handle(18000., Event::WsOpened { socket: next });
+        e.handle(at, Event::WsOpened { socket: next });
         assert_topics(&e.drain_actions().collect::<Vec<_>>());
     }
 }

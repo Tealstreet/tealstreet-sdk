@@ -36,7 +36,7 @@ fn seconds_and_three_minute_streams_use_trades_and_roll_over() {
             1000.,
             Event::Command(Command::SubscribeCandles {
                 symbol: SYMBOL.into(),
-                interval: interval.into(),
+                interval: safe_cex_engine::model::Interval::parse(interval).unwrap(),
             }),
         );
         let subscriptions: Vec<_> = e
@@ -95,7 +95,7 @@ fn four_hour_stream_forwards_five_minute_candles_and_trade_prices() {
         1000.,
         Event::Command(Command::SubscribeCandles {
             symbol: SYMBOL.into(),
-            interval: "4h".into(),
+            interval: safe_cex_engine::model::Interval::H4,
         }),
     );
     assert!(e.drain_actions().any(|action| matches!(action,
@@ -126,7 +126,7 @@ fn streaming_intervals_do_not_expand_the_rest_granularity_whitelist() {
             Event::Command(Command::FetchCandles {
                 command: 42,
                 symbol: SYMBOL.into(),
-                interval: interval.into(),
+                interval: safe_cex_engine::model::Interval::parse(interval).unwrap(),
                 limit: Some(2),
                 from_ms: None,
                 to_ms: None,
@@ -140,7 +140,7 @@ fn streaming_intervals_do_not_expand_the_rest_granularity_whitelist() {
         );
         assert!(actions.iter().any(|action| matches!(action,
             Action::Notice(Notice::CommandDone { command: 42, result: Err(error) })
-                if error == "Unsupported Coinbase candle interval")));
+                if error.starts_with("Coinbase does not support"))));
     }
 }
 #[test]
@@ -254,7 +254,7 @@ fn candle_fetch_uses_public_route_and_orders_chronologically() {
         Event::Command(Command::FetchCandles {
             command: 31,
             symbol: SYMBOL.into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
             from_ms: None,
             to_ms: None,
@@ -391,7 +391,7 @@ fn daily_candle_seed_retains_earlier_day_and_counts_bucket_volume_once() {
         90500000.,
         Event::Command(Command::SubscribeCandles {
             symbol: SYMBOL.into(),
-            interval: "1d".into(),
+            interval: safe_cex_engine::model::Interval::D1,
         }),
     );
     message(
@@ -464,7 +464,7 @@ fn daily_candles_backfill_reconnect_gaps_and_reject_old_seed_generations() {
         86500000.,
         Event::Command(Command::SubscribeCandles {
             symbol: SYMBOL.into(),
-            interval: "1d".into(),
+            interval: safe_cex_engine::model::Interval::D1,
         }),
     );
     let initial = requests(&mut e).pop().unwrap();
@@ -562,7 +562,7 @@ fn daily_subscriptions_before_first_open_or_during_reconnect_seed_at_open() {
             86699000.,
             Event::Command(Command::SubscribeCandles {
                 symbol: SYMBOL.into(),
-                interval: "1d".into(),
+                interval: safe_cex_engine::model::Interval::D1,
             }),
         );
         assert!(requests(&mut e).is_empty());
@@ -591,7 +591,7 @@ fn delayed_websocket_bucket_cannot_regress_a_newer_rest_daily_seed() {
         86500000.,
         Event::Command(Command::SubscribeCandles {
             symbol: SYMBOL.into(),
-            interval: "1d".into(),
+            interval: safe_cex_engine::model::Interval::D1,
         }),
     );
     let seed = requests(&mut e).pop().unwrap();
@@ -1170,4 +1170,54 @@ mod socket_checks;
 fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
     let (e, socket) = ready();
     socket_checks::flaps(e, socket, 1100.);
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut e = Engine::new(
+        Coinbase::new(Options {
+            public_data_only: true,
+            ..Options::default()
+        })
+        .unwrap(),
+    );
+    e.set_public_feed_policy(safe_cex_engine::PublicFeedPolicy::Shared)
+        .unwrap();
+    e.start(1000.);
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, 200, INSTRUMENTS);
+    let mut timers = std::collections::HashMap::new();
+    let mut fired = 0;
+    let mut now = 1000.;
+    loop {
+        let actions: Vec<_> = e.drain_actions().collect();
+        for action in actions {
+            match action {
+                Action::SetTimer { timer, at_ms } => {
+                    timers.insert(timer, at_ms);
+                }
+                Action::ClearTimer { timer } => {
+                    timers.remove(&timer);
+                }
+                Action::Http(r) => reply(&mut e, &r, 200, INSTRUMENTS),
+                Action::WsConnect { .. } | Action::WsClose { .. } => {
+                    panic!("suppressed public feed reached the host")
+                }
+                _ => {}
+            }
+        }
+        let Some((&timer, &at)) = timers
+            .iter()
+            .filter(|(_, at)| **at <= 601_000.)
+            .min_by(|a, b| a.1.total_cmp(b.1))
+        else {
+            break;
+        };
+        timers.remove(&timer);
+        now = at.max(now);
+        fired += 1;
+        e.handle(now, Event::TimerFired { timer });
+    }
+    // One startup timer is venue-owned; an unopened supervised feed fires >100.
+    assert!(fired <= 1, "suppressed feed fired {fired} timers");
 }

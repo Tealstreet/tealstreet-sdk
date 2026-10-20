@@ -3,10 +3,14 @@
 use crate::sign::{Credentials, Params};
 use crate::wire::*;
 use crate::{Backpack, Connection, Pending, REST, WS};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::Tick;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
 use std::collections::{HashMap, HashSet, VecDeque};
+
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 #[derive(Clone, Copy)]
 pub enum Next {
@@ -48,6 +52,7 @@ pub struct Account {
     pub orders_revision: u64,
     pub positions_revision: u64,
     pub balance_revision: u64,
+    balance_guard: StaleGuard,
     tick: Option<TimerId>,
     orders_timer: Option<TimerId>,
     fill_timer: Option<TimerId>,
@@ -67,6 +72,7 @@ impl Default for Account {
             orders_revision: 0,
             positions_revision: 0,
             balance_revision: 0,
+            balance_guard: StaleGuard::default(),
             tick: None,
             orders_timer: None,
             fill_timer: None,
@@ -378,9 +384,10 @@ impl Backpack {
             Next::Balance => self.balance_read(cx, true, Next::Orders),
             Next::Orders => self.orders_read(cx, Next::Finish),
             Next::Finish => {
-                if self.account.socket.socket.is_none() && self.account.socket.reconnect.is_none() {
-                    self.account.socket.socket =
-                        Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
+                if self.account.socket.socket.is_none()
+                    && !self.account.socket.supervisor.is_waiting()
+                {
+                    self.private_connect(cx);
                 }
                 if let Some(t) = self.account.tick.take() {
                     cx.clear_timer(t);
@@ -529,7 +536,12 @@ impl Backpack {
                 } => {
                     let r: Collateral =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-                    if revision == self.account.balance_revision {
+                    let current = revision == self.account.balance_revision;
+                    if self.account.balance_guard.admit_issued(
+                        current,
+                        revision,
+                        STALE_SNAPSHOT_LIMIT,
+                    ) {
                         cx.store.set_balance(Balance {
                             used: r.net_equity_locked,
                             free: r.net_equity_available,
@@ -540,6 +552,9 @@ impl Backpack {
                                 r.pnl_unrealized
                             },
                         });
+                        if !current {
+                            self.balance_read(cx, recalculate, Next::None);
+                        }
                     }
                     self.next_account(cx, next);
                 }
@@ -608,9 +623,8 @@ impl Backpack {
             .unwrap(),
         );
         self.account.socket.open = true;
-        self.account.socket.received = cx.now;
         self.account.socket.ping_at = cx.now;
-        self.account.socket.watchdog = Some(cx.set_timer(5000.0));
+        self.account.socket.supervisor.opened(cx);
         cx.send(socket, "{\"method\":\"PING\"}");
         if cx.store.loaded().orders {
             self.orders_read(cx, Next::None);
@@ -623,7 +637,7 @@ impl Backpack {
         cx: &mut Cx<'_, Pending>,
         text: &str,
     ) -> Result<(), String> {
-        self.account.socket.received = cx.now;
+        self.account.socket.supervisor.received(cx.now);
         let envelope: Envelope<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
         if let Some(error) = envelope.error {
             if error.code == 4002 {
@@ -641,7 +655,6 @@ impl Backpack {
         let Some(raw) = envelope.data else {
             return Ok(());
         };
-        self.account.socket.attempts = 0;
         if envelope.stream.starts_with("account.orderUpdate") {
             let d: OrderEvent<'_> = serde_json::from_str(raw.get()).map_err(|e| e.to_string())?;
             if cx.store.market(&d.s).is_none() {
@@ -791,26 +804,31 @@ impl Backpack {
         } else if self.account.fill_timer == Some(timer) {
             self.account.fill_timer = None;
             self.fill_refresh(cx);
-        } else if self.account.socket.reconnect == Some(timer) {
-            self.account.socket.reconnect = None;
-            self.account.socket.socket =
-                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
-        } else if self.account.socket.watchdog == Some(timer) {
-            self.account.socket.watchdog = None;
-            if let Some(socket) = self.account.socket.socket {
-                if cx.now - self.account.socket.received >= 20000.0 {
-                    cx.close(socket);
-                    self.private_close(cx, socket);
-                } else {
-                    self.account.socket.ping_at = cx.now;
-                    cx.send(socket, "{\"method\":\"PING\"}");
-                    self.account.socket.watchdog = Some(cx.set_timer(5000.0));
-                }
-            }
         } else {
-            return false;
+            match self.account.socket.supervisor.on_timer(cx, timer) {
+                Tick::Unhandled => return false,
+                Tick::Reconnect => self.private_connect(cx),
+                Tick::Ping => {
+                    if let Some(socket) = self.account.socket.socket {
+                        self.account.socket.ping_at = cx.now;
+                        cx.send(socket, "{\"method\":\"PING\"}");
+                    }
+                }
+                Tick::TimedOut(_) => {
+                    if let Some(socket) = self.account.socket.socket {
+                        cx.close(socket);
+                        self.private_close(cx, socket);
+                    }
+                }
+                Tick::Handled => {}
+            }
         }
         true
+    }
+    fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.socket.supervisor.connecting(cx);
+        self.account.socket.socket =
+            Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
     }
     pub(crate) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.socket.socket != Some(socket) {
@@ -818,13 +836,7 @@ impl Backpack {
         }
         self.account.socket.socket = None;
         self.account.socket.open = false;
-        if let Some(t) = self.account.socket.watchdog.take() {
-            cx.clear_timer(t);
-        }
-        self.account.socket.attempts += 1;
-        self.account.socket.reconnect = Some(cx.set_timer(
-            (1000.0 * 2f64.powi(self.account.socket.attempts.min(5) as i32 - 1)).min(30000.0),
-        ));
+        self.account.socket.supervisor.retry(cx);
     }
 }
 

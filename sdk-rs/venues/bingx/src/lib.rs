@@ -9,7 +9,7 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
@@ -177,7 +177,7 @@ pub struct Bingx {
     credentials: Option<Credentials>,
     public: Connection,
     books: HashMap<String, BookState>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     seed: Vec<Ticker>,
     seed_index: Vec<Option<usize>>,
     seed_rows_index: Vec<Option<usize>>,
@@ -404,7 +404,12 @@ impl Bingx {
             self.symbol_id(cx, symbol)?
         ))
     }
-    fn topic_candle(&self, cx: &Cx<'_, Pending>, symbol: &str, interval: &str) -> Option<String> {
+    fn topic_candle(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        interval: Interval,
+    ) -> Option<String> {
         Some(format!(
             "market.kline.{}.{}.trade.utc+8",
             self.symbol_id(cx, symbol)?,
@@ -548,7 +553,7 @@ impl Bingx {
             let matches: Vec<_> = self
                 .candles
                 .keys()
-                .filter(|(s, i)| s == &symbol && stream_interval(i) == Some(native_interval))
+                .filter(|(s, i)| s == &symbol && stream_interval(*i) == Some(native_interval))
                 .cloned()
                 .collect();
             let Ok(data) = serde_json::from_str::<CandleData>(data.get()) else {
@@ -557,7 +562,7 @@ impl Bingx {
             if let Some(row) = data.kline_infos_vo.into_iter().next() {
                 let candle = Candle::from(row);
                 for (symbol, interval) in matches {
-                    cx.candle(&symbol, &interval, candle)
+                    cx.candle(&symbol, interval, candle)
                 }
             }
         }
@@ -582,44 +587,29 @@ fn touch(last: f64, step: f64) -> (f64, f64) {
     )
 }
 
-fn stream_interval(interval: &str) -> Option<&'static str> {
+fn stream_interval(interval: Interval) -> Option<&'static str> {
+    use Interval::*;
     Some(match interval {
-        "1m" => "1min",
-        "3m" => "3min",
-        "5m" => "5min",
-        "15m" => "15min",
-        "30m" => "30min",
-        "1h" => "1hour",
-        "2h" => "2hour",
-        "3h" => "3hour",
-        "4h" => "4hour",
-        "6h" => "6hour",
-        "12h" => "12hour",
-        "1d" => "1day",
-        "1w" => "1week",
-        "1M" => "1month",
-        "3M" => "3month",
-        "1Y" => "1year",
+        M1 => "1min",
+        M3 => "3min",
+        M5 => "5min",
+        M15 => "15min",
+        M30 => "30min",
+        H1 => "1hour",
+        H2 => "2hour",
+        H3 => "3hour",
+        H4 => "4hour",
+        H6 => "6hour",
+        H12 => "12hour",
+        D1 => "1day",
+        W1 => "1week",
+        Mo1 => "1month",
         _ => return None,
     })
 }
 
-fn interval_ms(interval: &str) -> Option<f64> {
-    stream_interval(interval)?;
-    let unit = interval.chars().last()?;
-    let count: f64 = interval[..interval.len() - 1].parse().ok()?;
-    Some(
-        count
-            * match unit {
-                'm' => 60_000.,
-                'h' => 3_600_000.,
-                'd' => 86_400_000.,
-                'w' => 604_800_000.,
-                'M' => 2_592_000_000.,
-                'Y' => 31_536_000_000.,
-                _ => return None,
-            },
-    )
+fn interval_ms(interval: Interval) -> Option<f64> {
+    stream_interval(interval).map(|_| interval.ms())
 }
 
 pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
@@ -686,7 +676,7 @@ impl Venue for Bingx {
             .chain(
                 self.candles
                     .keys()
-                    .filter_map(|(s, i)| self.topic_candle(cx, s, i)),
+                    .filter_map(|(s, i)| self.topic_candle(cx, s, *i)),
             )
             .collect();
         for topic in topics {
@@ -1141,28 +1131,25 @@ impl Venue for Bingx {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                if stream_interval(&interval).is_none() {
-                    cx.log(LogLevel::Error, "unsupported BingX candle interval");
+                if stream_interval(interval).is_none() {
+                    cx.log(LogLevel::Error, interval.unsupported("BingX"));
                     return;
                 }
-                let count = self
-                    .candles
-                    .entry((symbol.clone(), interval.clone()))
-                    .or_default();
+                let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
                 if *count == 1
-                    && let Some(topic) = self.topic_candle(cx, &symbol, &interval)
+                    && let Some(topic) = self.topic_candle(cx, &symbol, interval)
                 {
                     self.send_topic(cx, &topic, true)
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                let key = (symbol.clone(), interval.clone());
+                let key = (symbol.clone(), interval);
                 if let Some(count) = self.candles.get_mut(&key) {
                     *count = count.saturating_sub(1);
                     if *count == 0 {
                         self.candles.remove(&key);
-                        if let Some(topic) = self.topic_candle(cx, &symbol, &interval) {
+                        if let Some(topic) = self.topic_candle(cx, &symbol, interval) {
                             self.send_topic(cx, &topic, false)
                         }
                     }
@@ -1180,8 +1167,8 @@ impl Venue for Bingx {
                     cx.done(command, Err(format!("unknown market {symbol}")));
                     return;
                 };
-                let Some(step) = interval_ms(&interval) else {
-                    cx.done(command, Err("invalid interval".into()));
+                let Some(step) = interval_ms(interval) else {
+                    cx.done(command, Err(interval.unsupported("BingX")));
                     return;
                 };
                 let end = to_ms.unwrap_or(cx.now);
@@ -1196,7 +1183,7 @@ impl Venue for Bingx {
                 }
                 let params = Params::new()
                     .str("symbol", &market.id)
-                    .str("interval", &interval)
+                    .str("interval", interval.as_str())
                     .num("startTime", start)
                     .num("endTime", end);
                 issue(

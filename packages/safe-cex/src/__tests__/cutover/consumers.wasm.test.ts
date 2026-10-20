@@ -37,6 +37,7 @@ import { DisplayedPositionsPostprocessor } from '../../webworker/postProcessors/
 import { independentPostprocessors } from '../../webworker/postProcessors/registry';
 import { TwapInstance } from '../../webworker/twap/TwapInstance';
 import { twapManager } from '../../webworker/twap/TwapManager';
+import { engineCapabilities, quantityUnitsCode } from '../fixtures/engineCapabilities';
 import { consumerFrame } from './consumerFrame';
 
 const hyroEnvironment = vi.hoisted(() => {
@@ -49,7 +50,7 @@ afterAll(() => {
   else process.env.NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL = hyroEnvironment;
 });
 
-const venues = Object.keys(RUST_VENUES) as ExchangeName[];
+const venues = [...RUST_VENUES];
 const native = ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot', 'okx', 'okxeu', 'okxdemo', 'okxeudemo'];
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
@@ -147,6 +148,7 @@ class FrameSource implements WasmEngineLike {
     this.current = state(venue as ExchangeName);
     sources.push(this);
   }
+  capabilities = () => engineCapabilities(this.venue);
   start = () => '[]';
   command = () => '[]';
   wsOpen = this.start;
@@ -160,9 +162,10 @@ class FrameSource implements WasmEngineLike {
   takeFrame = (_now: number, marketOnly: boolean) => {
     if (!this.pending || marketOnly) return undefined;
     this.pending = false;
-    return new Uint8Array(consumerFrame(this.current));
+    return new Uint8Array(this.frame());
   };
-  snapshotFrame = () => new Uint8Array(consumerFrame(this.current));
+  snapshotFrame = () => new Uint8Array(this.frame());
+  private frame = () => consumerFrame(this.current, undefined, false, undefined, quantityUnitsCode(this.venue));
 }
 const sources: FrameSource[] = [];
 const workers: ExchangeWorker[] = [];
@@ -232,7 +235,7 @@ async function consumer(name: ExchangeName) {
     // Exercise the same callback EngineHost invokes, with an independently
     // encoded lifecycle frame; no store mutation is substituted for decoding.
     (exchange as unknown as { receiveFrame(buffer: ArrayBuffer): void }).receiveFrame(
-      consumerFrame(data, delta, events),
+      consumerFrame(data, delta, events, undefined, quantityUnitsCode(name)),
     );
   };
   return { main, worker, exchange, messages, ctx, deliver };

@@ -5,9 +5,11 @@ mod trading;
 mod wire;
 use crate::{Options, sign};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue,
     book::{Book, BookSide},
     model::*,
+    socket::{Config, Supervisor, Tick},
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -28,14 +30,25 @@ pub enum Pending {
         retries: u8,
     },
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 45_000.,
+                idle_timeout_ms: 45_000.,
+                ping_interval_ms: Some(15_000.),
+                backoff_cap_ms: 16_000.,
+                ..Config::default()
+            }),
+        }
+    }
 }
 #[derive(Default)]
 struct DepthState {
@@ -57,7 +70,7 @@ pub struct KrakenSpot {
     ws_symbols: HashMap<String, String>,
     ws_canonical: HashMap<String, String>,
     books: HashMap<String, DepthState>,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     ticker_symbols: Vec<String>,
     poll: Option<TimerId>,
     markets_in_flight: bool,
@@ -143,11 +156,13 @@ impl KrakenSpot {
         }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket =
             Some(cx.connect_channel("wss://ws.kraken.com/v2", SocketChannel::Public));
         self.public.open = false;
-        self.public.received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(15_000.));
     }
     fn subscribe(
         &self,
@@ -407,6 +422,9 @@ impl KrakenSpot {
 }
 impl Venue for KrakenSpot {
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities::NO_HISTORY
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.options.public_data_only && self.signer.is_none() {
             self.reject_auth(cx, "Kraken Spot invalid secret: expected nonempty base64");
@@ -426,15 +444,14 @@ impl Venue for KrakenSpot {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.received = cx.now;
+        self.public.supervisor.opened(cx);
         self.ticker_subscribe(cx, "subscribe");
         for symbol in self.books.keys() {
             self.subscribe(cx, "subscribe", "book", std::slice::from_ref(symbol), None)
         }
         let mut sent = HashSet::new();
         for (symbol, tf) in self.candles.keys() {
-            if let Some(i) = interval(tf)
+            if let Some(i) = interval(*tf)
                 && sent.insert((symbol, i))
             {
                 self.subscribe(
@@ -454,7 +471,7 @@ impl Venue for KrakenSpot {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.received = cx.now;
+        self.public.supervisor.received(cx.now);
         let Ok(msg) = serde_json::from_str::<Ws<'_>>(text) else {
             return;
         };
@@ -582,9 +599,9 @@ impl Venue for KrakenSpot {
                                 .ws_canonical
                                 .get(&*o.symbol)
                                 .map_or(&*o.symbol, String::as_str)
-                            && interval(tf) == Some(o.interval)
+                            && interval(*tf) == Some(o.interval)
                         {
-                            cx.candle(symbol, tf, candle);
+                            cx.candle(symbol, *tf, candle);
                         }
                     }
                 });
@@ -601,19 +618,13 @@ impl Venue for KrakenSpot {
         }
         self.public.socket = None;
         self.public.open = false;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t)
-        }
         for (symbol, s) in &mut self.books {
             s.book.clear();
             s.checksum.clear();
             s.synced = false;
             cx.book_changed(symbol);
         }
-        self.public.attempts = self.public.attempts.saturating_add(1);
-        self.public.reconnect = Some(
-            cx.set_timer((1000. * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30_000.)),
-        );
+        self.public.supervisor.retry(cx);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if let Pending::Private(request) = pending {
@@ -733,23 +744,25 @@ impl Venue for KrakenSpot {
         if self.private_timer(cx, timer) {
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect(cx)
-        } else if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.received >= 45_000. {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => (),
+            Tick::Reconnect => return self.connect(cx),
+            Tick::Ping => {
+                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
+                    cx.send(s, "{\"method\":\"ping\"}");
+                }
+                return;
+            }
+            Tick::TimedOut(_) => {
                 if let Some(s) = self.public.socket {
                     cx.close(s);
                     self.on_close(cx, s, 1006)
                 }
-            } else {
-                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
-                    cx.send(s, "{\"method\":\"ping\"}");
-                }
-                self.public.watchdog = Some(cx.set_timer(15_000.));
+                return;
             }
-        } else if self.poll == Some(timer) {
+            Tick::Handled => return,
+        }
+        if self.poll == Some(timer) {
             self.poll = None;
             self.poll = Some(cx.set_timer(5_000.));
         }
@@ -784,28 +797,30 @@ impl Venue for KrakenSpot {
                 symbol,
                 interval: tf,
             } => {
-                if let Some(i) = interval(&tf) {
-                    let count = self.candles.entry((symbol.clone(), tf)).or_default();
-                    *count += 1;
-                    if *count == 1 {
-                        self.subscribe(cx, "subscribe", "ohlc", &[symbol], Some(i));
-                    }
+                let Some(i) = interval(tf) else {
+                    cx.log(LogLevel::Error, tf.unsupported("Kraken Spot"));
+                    return;
+                };
+                let count = self.candles.entry((symbol.clone(), tf)).or_default();
+                *count += 1;
+                if *count == 1 {
+                    self.subscribe(cx, "subscribe", "ohlc", &[symbol], Some(i));
                 }
             }
             Command::UnsubscribeCandles {
                 symbol,
                 interval: tf,
             } => {
-                let k = (symbol.clone(), tf.clone());
+                let k = (symbol.clone(), tf);
                 if let Some(count) = self.candles.get_mut(&k) {
                     *count = count.saturating_sub(1);
                     if *count == 0 {
                         self.candles.remove(&k);
-                        if let Some(i) = interval(&tf)
+                        if let Some(i) = interval(tf)
                             && !self
                                 .candles
                                 .keys()
-                                .any(|(s, t)| s == &symbol && interval(t) == Some(i))
+                                .any(|(s, t)| s == &symbol && interval(*t) == Some(i))
                         {
                             self.subscribe(cx, "unsubscribe", "ohlc", &[symbol], Some(i));
                         }
@@ -819,7 +834,7 @@ impl Venue for KrakenSpot {
                 from_ms,
                 ..
             } => {
-                if let Some(i) = interval(&tf) {
+                if let Some(i) = interval(tf) {
                     let pair = self
                         .pairs
                         .get(&symbol)
@@ -842,7 +857,7 @@ impl Venue for KrakenSpot {
                         },
                     );
                 } else {
-                    cx.done(command, Err("Kraken Spot unsupported interval".into()))
+                    cx.done(command, Err(tf.unsupported("Kraken Spot")))
                 }
             }
             _ => {}
