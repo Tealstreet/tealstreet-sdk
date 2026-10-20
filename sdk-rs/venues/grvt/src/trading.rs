@@ -606,6 +606,7 @@ impl Grvt {
                                 tp_trigger_type: trigger_type,
                                 sl_trigger_type: trigger_type,
                                 client_order_id: None,
+                                max_slippage_pct: None,
                                 close: Some(false),
                             };
                             plan.steps.push_back(self.placement(
@@ -1019,6 +1020,7 @@ impl Grvt {
                         tp_trigger_type: source.trigger_type,
                         sl_trigger_type: source.trigger_type,
                         client_order_id: None,
+                                max_slippage_pct: None,
                         close: source.close,
                     };
                     let replacement = self.placement(

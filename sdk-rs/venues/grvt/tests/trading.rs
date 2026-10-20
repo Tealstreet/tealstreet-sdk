@@ -89,6 +89,7 @@ fn opts() -> PlaceOrderOpts {
         tp_trigger_type: None,
         sl_trigger_type: None,
         client_order_id: Some("9223372036854775807".into()),
+        max_slippage_pct: None,
         close: None,
     }
 }
