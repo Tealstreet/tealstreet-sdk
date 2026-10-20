@@ -1960,3 +1960,41 @@ unserved0/unusedWrites0/protocolErrors[]/socketErrors[] closes both original
 ordering failures. Final combinedbuild PASS21.97s; full compiled SDK rerun
 PASS415/12files on this exact artifact/fixture (56.15s). Performance gates
 next; all owned build/test/review jobs complete and CPU quiet.
+
+9f05 isolated gates: TxFlow public/private PASS (531/35frames); Breakout
+public/private/four compiled controls PASS; Bitunix public28694/697markets/
+2books and private42frames PASS. Bitunix TS/Rust main372.8/295.8ms,
+steady207.9/157.0ms, retained3.7/2.5MB, peak12.1/5.0MB, module800232bytes.
+BinanceUSD-M public/private and Spot public/private PASS. Batch then stops
+Binanceinverse private functionalFAIL: Rust economic amounts/PnL agree, but
+raw harness rustAccount omits SDK native-count metadata (remainingNative and
+contractsNative) that normalizeAccount already requires on both sides.
+Failure/tmp/bitunix-final-02-binanceinverse-private.log retained; no retries.
+Plan expose raw native remaining and position notional/declared market
+contractSize from Rust's OWN frame for coinNativeAmounts, matching actual
+SDK bridge semantics; retain existing inverseNativeAmounts branch. Prove
+wrong Rust notional/remaining/multiplier still fails comparisons; no TS/tape
+answer copying, rounding waivers or dropping fields. This is a boundary
+projection correction, not an economic-output normalization.
+
+Own fetch pins NEW landingf4ea9e06ab11321c0509bd75d05c0486c7820e0f,
+PR1339 Hyperliquid/Kraken spot support. Brief Process unchanged. Merge after
+stopped batch checkpoint; retain current strict core and every local fix.
+Incoming59files, no engine/crypto/Bitunix/native host production change;
+existing crates add67tests (HL32/Kraken35) for expected2646 native cases.
+27venuecrates/31workspace/27WASMfeatures remain,48SDKaliases/30replayrows,
+37public/64private profiles and40CIcontexts. Native branches integrate
+additively; SDK keeps all typed flags, Bitunix secrets, rawbytes/BCM1/bookdelta
+guards and adds two alias factories plus actual worker cutover cases.
+
+Harness merge plan audited: preserve our KNOWN_TS_FIXES function, add spot
+notes as comments/metadata without oracle repair; route both new profiles
+through strict typed SharedTape responses/sends (legacy allowlists otherwise
+bypass incoming hooks). Keep caller IDs/unknown fields and authenticate raw
+requests before scoped transport projection. Correct incoming Kraken nonce
+state mutation before HMAC validation, exact generated32hex/AddOrder-only
+projection and actual delivered token activation; retain current per-socket
+auth/subscription/closed proof on new profiles. Bounded negative controls
+must reject forged/duplicate/unknown fields without consuming ACKs. Independent
+review each scope; full root/native/compiled union checks, new spot+parent
+gates and rebuilt Bitunix/Binance controls before push/exact40-check CI.
