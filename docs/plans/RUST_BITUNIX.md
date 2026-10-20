@@ -3353,20 +3353,3 @@ MERGE HOLD (overseer): doNOTmergePR1309 oranyPR into feat/rust-rewrite until
 securityPR1351lands andoverseer explicitlylifts hold. Keepfixing/pushing/CI.
 No mergewatcher isactive; all41green andactualheadreviews remainnecessary
 but do not override thishold. Finalwinddown stillrequiredafterauthorizedmerge.
-
-MEXCtest-first checkpoint:2newnativecontrols FAILasexpected (10existingPASS);
-2newTScontrols FAILasexpected (19existingPASS). Theyprove ordinarysame-socket
-lagginganchor recovery and genuinegap staysunpublished beforecompletechain.
-Production edit nowauthorized underreviewed boundedatomic plan.
-Gate failureonly rawper-runmetric diagnostics addedafterallmeasurements/
-comparisons for actionableCIbytes;20focusedCLIcasesPASS, independentauditPASS.
-No sampling/threshold/acceptance/outputsemantic change.
-
-REVERT GUARD (overseer mandatory): latestfetched3a6737115e knownsilentlyreverted
-PR1354 viaPR1361; restorelane isfixing. DoNOTapplythatknownbadlandingstateyet.
-Keep current1354proofs, finishMEXCcausalrepair, thenfetch/mergerestoredlanding.
-BeforeeveryPRmerge, withlandingmerged, run exact `git diff --stat
-origin/feat/rust-rewrite HEAD` and auditeveryfileagainstintendedPRscope; any
-unexpecteddeletion/revert blocksmerge. Neverresolvewholelandingconflicttoours
-or droplanding-addedfiles. Premerge532diff290files includesunmergednewlanding
-changes and CANNOTpassfinalguard; notclaimedreviewed/final. MERGEHOLDcontinues.
