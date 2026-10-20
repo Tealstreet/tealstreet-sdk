@@ -728,6 +728,7 @@ export class Tape {
         this.pendingStartupSubscriptions--;
       }
     }
+    this.venue.onSocketSend?.(socket, text);
     this.audit?.sent(socket.rawUrl ?? socket.url, text, socket);
     if (typeof parsed?.params?.channel === 'string') {
       if (parsed.method === 'subscribe') socket.subscriptions.add(parsed.params.channel);
@@ -737,6 +738,8 @@ export class Tape {
       setImmediate(() => { if (!socket.closed) socket.onMessage(reply); });
     }
     for (const waiter of [...this.waiters]) waiter();
+    const pingReply = this.venue.pingReply?.(text);
+    if (pingReply) setImmediate(() => { if (!socket.closed) socket.onMessage(pingReply); });
     if (this.venue.respondToJsonPing && parsed?.type === 'ping') {
       setImmediate(() => {
         if (!socket.closed) socket.onMessage(JSON.stringify({ type: 'pong', id: parsed.id }));
@@ -903,6 +906,12 @@ export class Tape {
       if (stream) return candidates.find((socket) => socket.opened && [...socket.subscriptions].some((topic) => stream === topic || stream.startsWith(`${topic}.`)));
       if ((this.bitget || this.hyperliquid) && !frame.text && frame.connection === undefined)
         return (frame.type === 'open' && candidates.find((socket) => !socket.opened)) || candidates[0];
+      if (this.venue.socketMatches && frame.text !== undefined && frame.connection === undefined) {
+        const matched = candidates.filter((socket) => this.venue.socketMatches(socket, frame.text));
+        if (matched.length > 1) throw new Error(`ambiguous shared endpoint frame ${frame.url}`);
+        return matched[0];
+      }
+      if (this.venue.socketMatches && frame.type === 'close' && frame.connection === undefined && candidates.length > 1) throw new Error('Ambiguous close on a shared public/private endpoint');
       if (frame.connection !== undefined || candidates.length === 1) return candidates[0];
       if (this.legacyLatest) return candidates.at(-1);
       if (candidates.length > 1 && frame.topic) {
@@ -996,6 +1005,12 @@ export class Tape {
     let initialized;
     let startupReady = false;
     const ensureReady = () => initialized ??= withTimeout((async () => {
+      if (this.venue.bootstrapFrame) for (const frame of this.frames.filter((record) => this.venue.bootstrapFrame(record))) {
+        if (frame.type !== 'ws') throw new Error('Invalid bootstrap record');
+        await this.deliver(frame, true);
+        this.startupDelivered.add(frame);
+        await new Promise(setImmediate);
+      }
       await ready(!this.venue.bootstrapPrivateFromTape);
       while (this.audit && !this.audit.ready()) await new Promise((r) => realTimeout(r, 5));
       while (this.pendingStartupSubscriptions) await new Promise((resolve) => realTimeout(resolve, 1));

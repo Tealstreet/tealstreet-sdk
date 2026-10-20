@@ -569,3 +569,72 @@ test('production Paradex rejects case-insensitive duplicate auth headers without
   assert.equal(tape.missingWrites,0);
   assert.equal(tape.respond('DELETE',url,undefined,{Authorization:'Bearer replay-paradex-jwt'}).status,599);
 });
+
+test('production Phemex validates exact decoded query HMAC before route-scoped generated IDs and single-use ACKs', () => {
+  const root='https://api.phemex.com';
+  const path='/g-orders/create';
+  const expected=new URLSearchParams({clOrdID:'Tealstreet_recorded',symbol:'BTCUSDT',orderQtyRq:'0.002',priceRp:'69300'});
+  const tape=productionTapeFor('phemex',[{type:'http',method:'PUT',url:root+path+'?'+expected,status:200,body:'{}'}]);
+  assert(tape.responseStore);
+  const send=(clOrdID,extra={},valid=true)=>{
+    const query=new URLSearchParams({clOrdID,symbol:'BTCUSDT',orderQtyRq:'0.002',priceRp:'69300',...extra});
+    const expiry=String(Math.floor(Date.now()/1000+60));
+    const signature=createHmac('sha256','replay-secret').update(path+decodeURIComponent(query.toString().replace(/\+/g,'%20'))+expiry).digest('hex');
+    return tape.respond('PUT',root+path+'?'+query,undefined,{'X-PHEMEX-ACCESS-TOKEN':'replay-key','X-PHEMEX-REQUEST-EXPIRY':expiry,'X-PHEMEX-REQUEST-SIGNATURE':valid?signature:'invalid'});
+  };
+  assert.throws(()=>send('Tealstreet_runtime',{},false),/invalid Phemex request/);assert.equal(tape.missingWrites,1);
+  for(const id of ['Tealstreet_','Tealstreet_bad\n','Tealstreet_'+ 'a'.repeat(22),'caller-undeclared']) {
+    assert.equal(send(id).status,599);assert.equal(tape.missingWrites,1,'invalid/generated-looking identities remain exact');
+  }
+  for(const extra of [{orderQtyRq:'0.003'},{priceRp:'69301'},{unknownEconomicField:'extra'}]) {
+    assert.equal(send('Tealstreet_runtime',extra).status,599);assert.equal(tape.missingWrites,1);
+  }
+  assert.equal(send('Tealstreet_runtime').status,200);assert.equal(tape.missingWrites,0);
+  assert.equal(send('Tealstreet_another').status,599);
+  const venue=venueOf('phemex');
+  const key=(method,path,id,ids=new Set())=>requestKey(method,root+path+'?'+new URLSearchParams({clOrdID:id}),undefined,ids,venue);
+  assert.notEqual(key('DELETE','/g-orders/cancel','Tealstreet_one'),key('DELETE','/g-orders/cancel','Tealstreet_two'));
+  assert.notEqual(key('PUT',path,'Tealstreet_one',new Set(['Tealstreet_one'])),key('PUT',path,'Tealstreet_two',new Set(['Tealstreet_one'])));
+});
+
+test('production Phemex per-socket topics, auth ACKs and private business frames cannot borrow sibling state', () => {
+  const tape=productionTapeFor('phemex',[]),url='wss://ws.phemex.com';
+  const connect=()=>tape.connect(url,()=>{},()=>{});
+  const send=(socket,method,params=[],id=1)=>tape.send(socket,JSON.stringify({method,params,id}));
+  const authenticate=(socket)=>{
+    const expiry=Math.floor(Date.now()/1000+60);
+    const signature=createHmac('sha256','replay-secret').update('replay-key'+expiry).digest('hex');
+    send(socket,'user.auth',['API','replay-key',signature,expiry],999);
+    socket.onMessage('{"id":999,"error":null,"result":{"status":"success"}}');
+    send(socket,'aop_p.subscribe');
+  };
+  const pub=connect(),first=connect();send(pub,'perp_market24h_pack_p.subscribe');authenticate(first);
+  assert.equal(tape.audit.ready(),true);
+  const sibling=connect();sibling.onMessage('{"orders_p":[]}');
+  assert(tape.audit.errors().some(error=>error.includes('private data preceded authenticated subscription')));
+  send(sibling,'aop_p.subscribe');assert(tape.audit.errors().some(error=>error.includes('preceded auth acknowledgement')));
+  authenticate(sibling);tape.close(first,1000,true);assert.equal(tape.audit.ready(),true);
+  tape.close(pub,1000,true);assert.equal(tape.audit.ready(),false,'closed public topics are not a live subscription');
+  const replacement=connect();send(replacement,'perp_market24h_pack_p.subscribe');assert.equal(tape.audit.ready(),true);
+  send(replacement,'perp_market24h_pack_p.unsubscribe');assert.equal(tape.audit.ready(),false);
+  replacement.onMessage('{"method":"perp_market24h_pack_p.update","data":[]}');
+  assert(tape.audit.errors().some(error=>error.includes('ticker data arrived without subscription')));
+});
+
+test('production Phemex refuses a signed out-of-order mutation before consuming its ACK', () => {
+  const root='https://api.phemex.com';
+  const create='/g-orders/create?clOrdID=Tealstreet_recorded&symbol=BTCUSDT';
+  const cancel='/g-orders/cancel?symbol=BTCUSDT&orderID=exact-order';
+  const tape=productionTapeFor('phemex',[
+    {type:'http',method:'PUT',url:root+create,status:200,body:'{}'},
+    {type:'http',method:'DELETE',url:root+cancel,status:200,body:'{}'},
+  ]);
+  const send=(method,path)=>{
+    const url=new URL(root+path),expiry=String(Math.floor(Date.now()/1000+60));
+    const signature=createHmac('sha256','replay-secret').update(url.pathname+decodeURIComponent(url.search.slice(1).replace(/\+/g,'%20'))+expiry).digest('hex');
+    return tape.respond(method,url.href,undefined,{'X-PHEMEX-ACCESS-TOKEN':'replay-key','X-PHEMEX-REQUEST-EXPIRY':expiry,'X-PHEMEX-REQUEST-SIGNATURE':signature});
+  };
+  assert.equal(send('DELETE',cancel).status,599);assert.equal(tape.missingWrites,2);
+  assert.equal(send('PUT',create.replace('Tealstreet_recorded','Tealstreet_runtime')).status,200);assert.equal(tape.missingWrites,1);
+  assert.equal(send('DELETE',cancel).status,200);assert.equal(tape.missingWrites,0);
+});

@@ -143,6 +143,132 @@ test('disposing during binary decoding suppresses queued messages and closure', 
 import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
 
+for (const entry of ['legacy', 'actions', 'bytes']) {
+  test(`WebSocket actions preserve ordering and empty results with ${entry}`, () => {
+    const calls = [];
+    const effects = [];
+    const engine = {
+      wsClose() { return ''; },
+      wsMessage(socket, text, now) {
+        assert.equal(this, engine);
+        calls.push(['legacy', socket, text, now]);
+        return text === 'quiet' ? '' : actions;
+      },
+    };
+    const actions = JSON.stringify([
+      { op: 'wsSend', socket: 7, text: 'first' },
+      { op: 'log', level: 'info', message: 'between' },
+      { op: 'wsSend', socket: 7, text: 'second' },
+    ]);
+    if (entry !== 'legacy') engine.wsMessageActions = function (socket, text, now) {
+      assert.equal(this, engine);
+      calls.push(['actions', socket, text, now]);
+      return text === 'quiet' ? undefined : actions;
+    };
+    if (entry === 'bytes') engine.wsMessageBytes = function (socket, bytes, now) {
+      assert.equal(this, engine);
+      assert.ok(bytes instanceof Uint8Array);
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      calls.push(['bytes', socket, text, now]);
+      return text === 'quiet' ? undefined : actions;
+    };
+    let receive;
+    let remoteClose;
+    const host = new EngineHost(engine, {
+      now: () => 123,
+      connect: (_url, handlers) => {
+        receive = handlers.onMessage;
+        remoteClose = handlers.onClose;
+        return { send: (text) => effects.push(text), close() {} };
+      },
+    }, { onLog: (_level, message) => effects.push(message) });
+    host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
+    receive('quiet');
+    assert.deepEqual(effects, []);
+    receive('payload');
+    assert.deepEqual(effects, ['first', 'between', 'second']);
+    assert.deepEqual(calls, [
+      [entry, 7, 'quiet', 123],
+      [entry, 7, 'payload', 123],
+    ]);
+    remoteClose(1001);
+    receive('stale after remote close');
+    assert.equal(calls.length, 2);
+    host.dispose();
+    receive('late');
+    assert.equal(calls.length, 2);
+  });
+}
+
+test('byte entry encodes complete Unicode messages with bounded reusable scratch and reentrant ownership', () => {
+  const encoder = new TextEncoder();
+  const received = [];
+  let receive;
+  const engine = {
+    wsMessage() { assert.fail('byte entry must take precedence'); },
+    wsMessageBytes(socket, bytes, now) {
+      assert.equal(this, engine);
+      assert.equal(socket, 7);
+      assert.equal(now, 123);
+      const before = Uint8Array.from(bytes);
+      received.push({ bytes: before, buffer: bytes.buffer });
+      if (new TextDecoder().decode(bytes) === 'outer') {
+        receive('nested é🦀');
+        assert.deepEqual(bytes, before, 'nested message must not overwrite borrowed outer bytes');
+      }
+      return undefined;
+    },
+  };
+  const host = new EngineHost(engine, {
+    now: () => 123,
+    connect: (_url, handlers) => { receive = handlers.onMessage; return { close() {} }; },
+  });
+  host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
+  // Exact 1365-unit boundary, lone surrogates, paired surrogates, and large frames.
+  const messages = ['', 'ASCII', 'é漢🦀', '\ud800', '\udc00', '\ud800x\udc00', '漢'.repeat(1365), '\ud800'.repeat(1365), 'a'.repeat(1364) + '\ud800', '🦀'.repeat(683), '漢'.repeat(1366), 'small again'];
+  for (const text of messages) {
+    receive(text);
+    assert.deepEqual(received.at(-1).bytes, encoder.encode(text));
+  }
+  const scratch = received[0].buffer;
+  assert.equal(scratch.byteLength, 4096);
+  for (let i = 1; i < 9; i++) assert.equal(received[i].buffer, scratch);
+  assert.notEqual(received[9].buffer, scratch);
+  assert.notEqual(received[10].buffer, scratch);
+  assert.equal(received[11].buffer, scratch);
+  receive('outer');
+  assert.notEqual(received.at(-1).buffer, scratch);
+  assert.equal(host.wsScratchBusy, false);
+  // Minimal TextEncoder implementations may expose only encode().
+  host.wsEncoder = { encode: (text) => encoder.encode(text) };
+  receive('encode-only \ud800🦀');
+  assert.deepEqual(received.at(-1).bytes, encoder.encode('encode-only \ud800🦀'));
+  host.wsEncoder = { encode: (text) => encoder.encode(text), encodeInto: () => ({ read: 0, written: 0 }) };
+  receive('complete fallback 漢');
+  assert.deepEqual(received.at(-1).bytes, encoder.encode('complete fallback 漢'));
+  host.dispose();
+  const count = received.length;
+  receive('late');
+  assert.equal(received.length, count);
+});
+
+test('byte scratch is released when a custom synchronous engine throws', () => {
+  let receive;
+  let calls = 0;
+  const host = new EngineHost({
+    wsMessageBytes() { if (calls++ === 0) throw new Error('test engine failure'); },
+  }, {
+    now: () => 123,
+    connect: (_url, handlers) => { receive = handlers.onMessage; return { close() {} }; },
+  });
+  host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
+  assert.throws(() => receive('first'), /test engine failure/);
+  assert.equal(host.wsScratchBusy, false);
+  receive('second');
+  assert.equal(calls, 2);
+  host.dispose();
+});
+
 test('the ESM native raw constructor carries HOW and relay upgrade headers', { timeout: 3000 }, async () => {
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await once(server, 'listening');

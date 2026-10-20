@@ -1226,3 +1226,26 @@ Nativecompatibility/unusedcrypto audit, fullchecks+targetedSDK/host/helpers,
 independentadversarialreview andunchangedpublic/privateartifactgates precede
 readiness. Expected22venues/26public/44private+priorparitycases, all32CIchecks
 exactheadgreen beforemerge. Checkpoint priorcompletedphase beforemerge.
+
+Phemexsource checkpoint: mergedJSONdriver preservesours selectors/objectparent
+paths/AnyFieldEnvelope/fullboundederror_envelope, addsPathOmitLists and
+ignoredlist validation;83engine testsPASS. Nativecompatibility reviewclear,
+Bitgetindex reload/duplicates semantics andallpriorengine/venueguards kept.
+22factory host+SDK released:76hostchecks,255SDK/9suites, packagetypecheck/
+scopedlint PASS. Byteactionsfastpath retainsclosed/reentrant/UTF8/bounded
+behavior. Root44typecheck/28lint PASS. Phemexreleaseartifact729,158bytes
+(<1,258,291); actualWASM optionalstrings/bytes/actions/authsubscription
+regressionPASS. Fullnativechecks+harnessintegration/replayprobes pending;
+no performancegate launched while checksrun.
+
+Phemexharness source released:441helpersPASS,3independent realconstructor/
+socket/request and2bootstrap immediate/delayed-auth probesPASS. Strictglobal
+writeorder nowenabled afterreviewfoundeligiblecancelcouldskipcreate; signed
+wrongorder599 preservesbothACKs, correctcreate/cancel consumeeachonce. Raw
+HMACbeforeconsume, typedroute/caller/economicidentity, actualsocketclosed/
+unsubscribe/privateauth andoriginalbootstrap100/200/300ticks/count3 exact.
+Memoryhelper+tests remainHEADverbatim; no5sdeadline/policy/peakchange.
+ActualTSprivate16frames/2commands andpublic534frames/2books/126events pass
+withzerotransport/autherrors. Initialrootinvocation usedwronghyphenscript
+name andexitedbeforetapegeneration; correctedcolon script beforeanyreplay.
+ActualbuiltprivategatePASS16frames; publicawaitsfullnativequiet.

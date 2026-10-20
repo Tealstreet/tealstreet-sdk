@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 import { memoryMetricErrors } from './memory.mjs';
-import { fixWeexConditionals, fixLighterFills, fixLighterCommands, fixKrakenOutput } from './known-ts-fixes.mjs';
+import { fixWeexConditionals, fixLighterFills, fixLighterCommands, fixKrakenOutput, fixPhemexAccount } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
@@ -330,6 +330,9 @@ KNOWN_TS_FIXES.woo = [];
 // Paradex fixes are paired in production TS: full depth/sequence recovery,
 // mandatory SBE1:2, signed payload/auth headers, exact execution identity,
 // candle ordering, margin settings and safe order amendments. No output rewrite.
+// Phemex execution IDs, cumulative exposure and flat settings derive only
+// from recorded native rows; full-depth production TS books stay unmodified.
+KNOWN_TS_FIXES.phemex = [];
 KNOWN_TS_FIXES.paradex = [];
 KNOWN_TS_FIXES.apexomni = [];
 KNOWN_TS_FIXES.kraken = {
@@ -522,6 +525,10 @@ for (let run = 0; run < runs; run++) {
   const result = { ts: results.ts[run], rust: results.rust[run] };
   const { ts, rust } = result;
   if (values.venue === 'kraken') fixKrakenOutput(ts, tape);
+  if (values.venue === 'phemex') {
+    if (ts.account) fixPhemexAccount(ts.account, tape);
+    for (const ticker of ts.tickers) if (ticker.percentage === null) ticker.percentage = 0;
+  }
   if (ts.frames !== rust.frames) differences.push(`run ${run} frames: ts=${ts.frames} rust=${rust.frames}`);
   if (values.venue === 'backpack') fixBackpack(ts);
   if (venue.family === 'orderly') fixOrderly(ts, tape);

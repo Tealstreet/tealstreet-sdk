@@ -75,6 +75,7 @@ pub struct BitgetFutures {
     trading: trading::Trading,
     history: history::History,
     sockets: [Connection; 4],
+    ticker_index: Vec<Option<u32>>,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, String), usize>,
 }
@@ -87,6 +88,7 @@ impl BitgetFutures {
             trading: trading::Trading::default(),
             history: history::History::default(),
             sockets: Default::default(),
+            ticker_index: Vec::new(),
             books: HashMap::new(),
             candles: HashMap::new(),
         }
@@ -283,8 +285,15 @@ impl BitgetFutures {
                     } else {
                         &row.inst_id
                     };
+                    let Some(market) = cx.store.market_index(symbol) else {
+                        continue;
+                    };
+                    let Some(index) = self.ticker_index.get(market as usize).copied().flatten()
+                    else {
+                        continue;
+                    };
                     cx.store
-                        .update_ticker(symbol, |ticker| update_ticker(ticker, &row));
+                        .update_ticker_at(index, |ticker| update_ticker(ticker, &row));
                 }
             }
             PublicData::Books(rows) => {
@@ -328,6 +337,17 @@ impl BitgetFutures {
             PublicData::None => {}
         }
     }
+}
+
+fn ticker_index(store: &safe_cex_engine::Store) -> Vec<Option<u32>> {
+    let mut indexes = vec![None; store.markets().len()];
+    // Store's symbol lookup selects the last duplicate ticker row.
+    for (index, ticker) in store.tickers().iter().enumerate() {
+        if let Some(market) = store.market_index(&ticker.symbol) {
+            indexes[market as usize] = Some(index as u32);
+        }
+    }
+    indexes
 }
 
 fn update_ticker(t: &mut Ticker, row: &TickerRow<'_>) {
@@ -626,6 +646,7 @@ impl Venue for BitgetFutures {
                 invalid: false,
             } => {
                 cx.store.set_markets(rows);
+                self.ticker_index = ticker_index(cx.store);
                 self.connect(cx, 0);
                 self.get(
                     cx,
@@ -641,6 +662,7 @@ impl Venue for BitgetFutures {
                 invalid: false,
             } => {
                 cx.store.set_tickers(rows);
+                self.ticker_index = ticker_index(cx.store);
                 self.connect(cx, 1);
                 self.connect(cx, 2);
                 self.start_private(cx);

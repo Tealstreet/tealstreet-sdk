@@ -520,6 +520,91 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  phemex: {
+    rust: 'phemex',
+    requestKey: typedRequest,
+    phemexProtocol: true,
+    compareWriteOrder: true,
+    tsReplaySettled: (exchange, count) => Object.values(exchange.publicWebsocket.orderBookInnerState).filter((s) => s.isSnapshotLoaded).length >= count,
+    ts: { module: `${root}/phemex/phemex.exchange.ts`, className: 'PhemexExchange', name: 'phemex' },
+    matchRequestBody: true,
+    compareFillPrices: true,
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.topics).filter((t) => t.startsWith('orderbook_p.subscribe')).length >= count,
+    isPrivateRecord: (r) => r.type === 'ws' && /"(accounts_p|positions_p|orders_p)"/.test(r.text),
+    requestOptions: (method, url) => ({ generatedQueryId: (name, value) => method === 'PUT' && url.pathname === '/g-orders/create'
+      && name === 'clOrdID' && typeof value === 'string' && value.startsWith('Tealstreet_') && value.length > 11 && value.length <= 32
+      && !/[^A-Za-z0-9]/.test(value.slice(11)) }),
+    bootstrapFrame: (r) => r.bootstrap === true,
+    onSocketSend(socket, text) { if (JSON.parse(text).method === 'user.auth') socket.private = true; },
+    socketMatches: (socket, text) => { const m = JSON.parse(text); return Boolean(socket.private) === (m.id === 999 || ['accounts_p','positions_p','orders_p'].some((field) => Object.hasOwn(m, field))); },
+    pingReply(text) { const m = JSON.parse(text); return m.method === 'server.ping' ? JSON.stringify({ id: m.id, result: 'pong', error: null }) : null; },
+    validateRequest({ url, body = '', headers = {} }) {
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'https:' || !['api.phemex.com','testnet-api.phemex.com'].includes(parsed.hostname)) throw new Error('invalid Phemex upstream URL');
+      const entries = (Array.isArray(headers) ? headers : headers instanceof Headers ? [...headers.entries()] : Object.entries(headers))
+        .map(([key,value]) => [key.toLowerCase(), String(value)]);
+      if (new Set(entries.map(([key]) => key)).size !== entries.length) throw new Error('duplicate Phemex request header');
+      const h = Object.fromEntries(entries), expiry = h['x-phemex-request-expiry'];
+      if (!expiry && !parsed.pathname.startsWith('/g-') && !parsed.pathname.startsWith('/api-data/g-futures/')) return;
+      if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
+      if (typeof body !== 'string') throw new Error('invalid Phemex request body');
+      const query = decodeURIComponent(parsed.search.slice(1).replace(/\+/g, '%20'));
+      const expected = createHmac('sha256', 'replay-secret').update(parsed.pathname + query + expiry + body).digest('hex');
+      if (h['x-phemex-access-token'] !== 'replay-key' || h['x-phemex-request-signature'] !== expected || !/^[0-9]+$/.test(expiry ?? '')
+        || !Number.isSafeInteger(Number(expiry)) || Math.abs(Number(expiry) - Date.now() / 1000 - 60) > 5) throw new Error(`invalid Phemex request: ${parsed.pathname}`);
+    },
+    createSocketAudit(_impl, { isPrivate, books }) {
+      const failures = [], sockets = new Map();
+      const socket = (url, generation = 1) => {
+        const key = generation && typeof generation === 'object' ? generation : `${url} ${generation}`;
+        if (!sockets.has(key)) sockets.set(key, { topics: new Set(), private: false, auth: false, acknowledged: false, subscribed: false, closed: false });
+        return sockets.get(key);
+      };
+      return {
+        connected(url, generation) { socket(url, generation); },
+        closed(url, generation) { socket(url, generation).closed = true; },
+        sent(url, text, generation) {
+          const m = JSON.parse(text), state = socket(url, generation);
+          if (m.method === 'user.auth') {
+            state.private = true;
+            state.acknowledged = false;
+            state.subscribed = false;
+            const [kind, key, sig, expiry] = m.params ?? [];
+            state.auth = !state.closed && m.id === 999 && kind === 'API' && key === 'replay-key' && Number.isSafeInteger(expiry) && Math.abs(expiry - Date.now() / 1000 - 60) < 5 && sig === createHmac('sha256', 'replay-secret').update(key + expiry).digest('hex');
+            if (!state.auth) failures.push('invalid Phemex WS auth');
+          }
+          if (m.method === 'orderbook_p.subscribe' && (m.params?.length !== 3 || m.params[1] !== false || m.params[2] !== 0)) failures.push('Phemex books require full depth0 at20ms');
+          if (m.method === 'aop_p.subscribe') {
+            state.private = true;
+            if (state.closed || !state.acknowledged) failures.push('Phemex private subscribe preceded auth acknowledgement');
+            else state.subscribed = true;
+          }
+          if (m.method?.endsWith('.subscribe')) state.topics.add(m.method + ':' + (m.params?.[0] ?? ''));
+          if (m.method?.endsWith('.unsubscribe')) { state.topics.delete(m.method.replace(/\.unsubscribe$/, '.subscribe') + ':' + (m.params?.[0] ?? '')); if (m.method === 'aop_p.unsubscribe') state.subscribed = false; }
+        },
+        received(url, text, generation) {
+          const m = JSON.parse(text), state = socket(url, generation);
+          if (['accounts_p','positions_p','orders_p'].some((field) => Object.hasOwn(m, field)) && (state.closed || !state.acknowledged || !state.subscribed)) failures.push('Phemex private data preceded authenticated subscription');
+          if (m.orderbook_p && !state.topics.has('orderbook_p.subscribe:' + m.symbol)) failures.push('Phemex book data arrived without subscription');
+          if (m.method?.startsWith('perp_market24h_pack_p') && !state.topics.has('perp_market24h_pack_p.subscribe:')) failures.push('Phemex ticker data arrived without subscription');
+          if (m.id !== 999 || state.closed) return;
+          state.acknowledged = false;
+          if (!state.auth) failures.push('Phemex auth ACK without request');
+          else if (m.error != null || m.result?.status !== 'success') failures.push('Phemex auth ACK did not confirm success');
+          else state.acknowledged = true;
+        },
+        ready() {
+          const privateSockets = [...sockets.values()].filter((state) => state.private && !state.closed);
+          const publicSockets = [...sockets.values()].filter((state) => !state.private && !state.closed);
+          const hasTopic = (topic) => publicSockets.some((state) => state.topics.has(topic));
+          return hasTopic('perp_market24h_pack_p.subscribe:') && books.every((s) => hasTopic('orderbook_p.subscribe:' + s)) && (!isPrivate || privateSockets.length > 0 && privateSockets.every((state) => state.acknowledged && state.subscribed));
+        },
+        errors() { return failures; },
+      };
+    },
+  },
+
+
   paradex: {
     ...paradexProtocol,
     rust: 'paradex',

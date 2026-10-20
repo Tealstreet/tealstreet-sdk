@@ -275,3 +275,94 @@ test('Bybit variant startup topics keep native categories, depths and configured
     );
   }
 });
+
+
+const phemexUrl = 'wss://ws.phemex.com';
+const phemexAuth = () => {
+  const expiry = Math.round(Date.now() / 1000 + 60);
+  return JSON.stringify({ id: 999, method: 'user.auth', params: [
+    'API', 'replay-key', createHmac('sha256', 'replay-secret').update('replay-key' + expiry).digest('hex'), expiry,
+  ] });
+};
+const phemexAck = JSON.stringify({ id: 999, error: null, result: { status: 'success' } });
+const phemexSubscribe = JSON.stringify({ method: 'aop_p.subscribe', params: [] });
+const phemexAudit = () => {
+  const audit = venueOf('phemex').createSocketAudit('rust', { isPrivate: true, books: ['BTCUSDT'] });
+  audit.connected?.(phemexUrl, 1);
+  audit.sent(phemexUrl, JSON.stringify({ method: 'perp_market24h_pack_p.subscribe', params: [] }), 1);
+  audit.sent(phemexUrl, JSON.stringify({ method: 'orderbook_p.subscribe', params: ['BTCUSDT', false, 0] }), 1);
+  audit.connected?.(phemexUrl, 2);
+  return audit;
+};
+
+test('Phemex valid bootstrap authenticates and subscribes the private physical socket', () => {
+  const audit = phemexAudit();
+  audit.sent(phemexUrl, phemexAuth(), 2);
+  assert.equal(audit.ready(), false);
+  audit.received(phemexUrl, phemexAck, 2);
+  assert.equal(audit.ready(), false, 'authentication does not imply account subscription');
+  audit.sent(phemexUrl, phemexSubscribe, 2);
+  assert.equal(audit.ready(), true);
+  assert.deepEqual(audit.errors(), []);
+});
+
+test('Phemex a new auth attempt clears the prior ACK and subscription', () => {
+  const audit = phemexAudit();
+  audit.sent(phemexUrl, phemexAuth(), 2);
+  audit.received(phemexUrl, phemexAck, 2);
+  audit.sent(phemexUrl, phemexSubscribe, 2);
+  assert.equal(audit.ready(), true);
+  audit.sent(phemexUrl, phemexAuth(), 2);
+  assert.equal(audit.ready(), false);
+  audit.sent(phemexUrl, phemexSubscribe, 2);
+  assert.match(audit.errors().join(), /preceded auth acknowledgement/);
+  audit.received(phemexUrl, phemexAck, 2);
+  assert.equal(audit.ready(), false, 'a premature subscription cannot satisfy the new attempt');
+  audit.sent(phemexUrl, phemexSubscribe, 2);
+  assert.equal(audit.ready(), true);
+});
+
+test('Phemex reconnect cannot reuse the old generation ACK on the shared public/private URL', () => {
+  const audit = phemexAudit();
+  audit.sent(phemexUrl, phemexAuth(), 2);
+  audit.received(phemexUrl, phemexAck, 2);
+  audit.sent(phemexUrl, phemexSubscribe, 2);
+  audit.closed?.(phemexUrl, 2);
+  assert.equal(audit.ready(), false);
+  audit.connected?.(phemexUrl, 3);
+  audit.sent(phemexUrl, phemexAuth(), 3);
+  audit.received(phemexUrl, phemexAck, 2);
+  audit.sent(phemexUrl, phemexSubscribe, 3);
+  assert.equal(audit.ready(), false);
+  assert.match(audit.errors().join(), /preceded auth acknowledgement/);
+  audit.received(phemexUrl, phemexAck, 3);
+  assert.equal(audit.ready(), false);
+  audit.sent(phemexUrl, phemexSubscribe, 3);
+  assert.equal(audit.ready(), true);
+});
+
+for (const ack of [
+  { id: 999, error: null },
+  { id: 999, error: null, result: {} },
+  { id: 999, error: null, result: { status: 'failed' } },
+  { id: 999, error: { code: 401 }, result: { status: 'success' } },
+  { id: 998, error: null, result: { status: 'success' } },
+]) {
+  test(`Phemex unconfirmed auth ACK cannot authorize private subscriptions: ${JSON.stringify(ack)}`, () => {
+    const audit = phemexAudit();
+    audit.sent(phemexUrl, phemexAuth(), 2);
+    audit.received(phemexUrl, JSON.stringify(ack), 2);
+    audit.sent(phemexUrl, phemexSubscribe, 2);
+    assert.equal(audit.ready(), false);
+    assert.match(audit.errors().join(), /auth/);
+  });
+}
+
+test('Phemex successful-looking ACK on a socket without auth cannot authorize another generation', () => {
+  const audit = phemexAudit();
+  audit.sent(phemexUrl, phemexAuth(), 2);
+  audit.received(phemexUrl, phemexAck, 1);
+  audit.sent(phemexUrl, phemexSubscribe, 2);
+  assert.equal(audit.ready(), false);
+  assert.match(audit.errors().join(), /ACK without request/);
+});

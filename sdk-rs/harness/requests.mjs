@@ -47,6 +47,7 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
     .filter(
       ([name, value]) =>
         stable(callerIds, options)([name, value]) && !options.volatileQueryFields?.includes(name) &&
+        (callerIds.has(value) || !options.generatedQueryId?.(name, value)) &&
         !(value === '' && options.cacheBustPaths?.includes(parsed.pathname)),
     )
     .map(([name, value]) => {
@@ -253,12 +254,15 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   }
   if (options.bingxProtocol && (message?.ping !== undefined || message?.pong !== undefined)) return undefined;
   if (options.cryptoProtocol && method === 'public/respond-heartbeat') return undefined;
+  if (options.phemexProtocol && ['server.ping','server.pong'].includes(method)) return undefined;
   if (['ping', 'pong', 'heartbeat'].includes(method)) return undefined;
   if (message && typeof message === 'object') {
     message = { ...message };
     delete message.id;
     delete message.req_id;
     if (options.rust === 'kucoin') delete message.response;
+    if (options.phemexProtocol && method === 'user.auth' && Array.isArray(message.params) && message.params.length === 4)
+      message.params = [message.params[0], message.params[1], '<signature>', '<expiry>'];
     if (options.orderlyProtocol && method === 'auth' && message.params) {
       message.params = { ...message.params, timestamp: '<timestamp>', sign: '<signature>' };
     }

@@ -297,7 +297,12 @@ fn subscriptions_before_markets_are_retained() {
     let socket = e
         .drain_actions()
         .find_map(|a| {
-            if let Action::WsConnect { socket, .. } = a {
+            if let Action::WsConnect {
+                socket,
+                channel: Some(SocketChannel::Public),
+                ..
+            } = a
+            {
                 Some(socket)
             } else {
                 None

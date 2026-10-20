@@ -152,6 +152,9 @@ jobs:
           - venue: weex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape:weex
+          - venue: phemex
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape:phemex
           - venue: kraken
             books: PF_XBTUSD,PF_ETHUSD
             private_script: rust:private-tape-kraken
