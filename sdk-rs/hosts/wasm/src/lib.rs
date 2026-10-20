@@ -105,6 +105,7 @@ trait AnyEngine {
     ) -> Result<(), &'static str>;
     fn apply_public_feed(
         &mut self,
+        now: f64,
         update: safe_cex_engine::PublicFeedUpdate,
     ) -> Result<(), &'static str>;
     fn start(&mut self, now: f64);
@@ -126,9 +127,10 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
     fn apply_public_feed(
         &mut self,
+        now: f64,
         update: safe_cex_engine::PublicFeedUpdate,
     ) -> Result<(), &'static str> {
-        Engine::apply_public_feed(self, update)
+        Engine::apply_public_feed(self, now, update)
     }
     fn start(&mut self, now: f64) {
         Engine::start(self, now);
@@ -1008,7 +1010,9 @@ impl WasmEngine {
     pub fn command(&mut self, command_json: &str, now: f64) -> Result<String, JsError> {
         let event = match safe_cex_engine::command::decode_host_input(command_json)? {
             safe_cex_engine::command::HostInput::PublicFeedUpdate(update) => {
-                self.inner.apply_public_feed(update).map_err(JsError::new)?;
+                self.inner
+                    .apply_public_feed(now, update)
+                    .map_err(JsError::new)?;
                 return Ok(self.flush());
             }
             safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
@@ -1127,6 +1131,19 @@ mod tests {
             None
         }
 
+        fn set_public_feed_policy(
+            &mut self,
+            _policy: safe_cex_engine::PublicFeedPolicy,
+        ) -> Result<(), &'static str> {
+            Err("message-only test engine")
+        }
+        fn apply_public_feed(
+            &mut self,
+            _now: f64,
+            _update: safe_cex_engine::PublicFeedUpdate,
+        ) -> Result<(), &'static str> {
+            Err("message-only test engine")
+        }
         fn start(&mut self, _now: f64) {}
         fn handle(&mut self, _now: f64, event: Event<'_>) {
             if let Event::WsMessage { socket, text } = event

@@ -408,6 +408,10 @@ impl<P> Io<P> {
 }
 
 impl<P> Cx<'_, P> {
+    pub fn public_feed_policy(&self) -> PublicFeedPolicy {
+        self.io.public_feed_policy
+    }
+
     pub fn connect(&mut self, url: impl Into<String>) -> SocketId {
         self.connect_with_channel(url, None)
     }
@@ -517,7 +521,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
-        if socket.0 == 0 {
+        if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
         self.io.actions.push(Action::WsSend {
@@ -527,7 +531,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn close(&mut self, socket: SocketId) {
-        if socket.0 == 0 {
+        if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return;
         }
         self.io.actions.push(Action::WsClose { socket });
@@ -744,6 +748,8 @@ pub trait Venue {
         error: &str,
     );
     fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, _interval_ms: f64) {}
+    /// Revalue account-derived state after host-owned public prices change.
+    fn on_public_feed(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
     fn book(&self, symbol: &str) -> Option<&Book>;
@@ -811,7 +817,11 @@ impl<V: Venue> Engine<V> {
     }
 
     /// Apply an explicitly shared public feed without admitting any account fields.
-    pub fn apply_public_feed(&mut self, update: PublicFeedUpdate) -> Result<(), &'static str> {
+    pub fn apply_public_feed(
+        &mut self,
+        now: f64,
+        update: PublicFeedUpdate,
+    ) -> Result<(), &'static str> {
         if self.public_feed_policy() != PublicFeedPolicy::Shared {
             return Err("publicFeedUpdate requires shared public feed policy");
         }
@@ -830,9 +840,9 @@ impl<V: Venue> Engine<V> {
                 }
             }
         }
-        self.restore_shared_tickers(true);
+        self.restore_shared_tickers(true, now);
         let mut cx = Cx {
-            now: 0.0,
+            now,
             store: &mut self.store,
             io: &mut self.io,
         };
@@ -857,7 +867,7 @@ impl<V: Venue> Engine<V> {
         Ok(())
     }
 
-    fn restore_shared_tickers(&mut self, force: bool) {
+    fn restore_shared_tickers(&mut self, force: bool, now: f64) {
         if self.public_feed_policy() != PublicFeedPolicy::Shared
             || (!force && self.shared_ticker_revision == self.store.ticker_revision())
         {
@@ -887,6 +897,13 @@ impl<V: Venue> Engine<V> {
                     .update_ticker(&ticker.symbol, |target| ticker.apply(target));
             }
         }
+        // A venue may have revalued its account using REST prices before restoration.
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        self.venue.on_public_feed(&mut cx);
         self.shared_ticker_revision = self.store.ticker_revision();
     }
 
@@ -970,11 +987,12 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         self.venue.start(&mut cx);
-        self.restore_shared_tickers(false);
+        self.restore_shared_tickers(false, now);
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
-        if matches!(&event, Event::WsOpened { socket } | Event::WsBinary { socket, .. }
+        if self.public_feed_policy() != PublicFeedPolicy::Direct
+            && matches!(&event, Event::WsOpened { socket } | Event::WsBinary { socket, .. }
             | Event::WsMessage { socket, .. } | Event::WsClosed { socket, .. } if socket.0 == 0)
         {
             return;
@@ -993,7 +1011,7 @@ impl<V: Venue> Engine<V> {
             }
             _ => {}
         }
-        if self.public_feed_policy() == PublicFeedPolicy::Shared {
+        if self.public_feed_policy() != PublicFeedPolicy::Direct {
             match &event {
                 Event::Command(Command::UnsubscribeOrderBook { symbol }) => {
                     self.shared_books.remove(symbol);
@@ -1048,7 +1066,7 @@ impl<V: Venue> Engine<V> {
             }
             Event::Command(command) => self.venue.on_command(&mut cx, command),
         }
-        self.restore_shared_tickers(false);
+        self.restore_shared_tickers(false, now);
     }
 
     fn http_start(&mut self, _now: f64, request: RequestId, status: u16, headers: &str) {

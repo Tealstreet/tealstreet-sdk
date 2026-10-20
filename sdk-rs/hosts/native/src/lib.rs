@@ -132,7 +132,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
         let engine = &mut self.engine;
         match event {
             HostEvent::PublicFeedUpdate(update) => {
-                if let Err(error) = engine.apply_public_feed(update) {
+                if let Err(error) = engine.apply_public_feed(now, update) {
                     // A configuration error is observable through the normal notice path.
                     engine.report_public_feed_error(error);
                 }

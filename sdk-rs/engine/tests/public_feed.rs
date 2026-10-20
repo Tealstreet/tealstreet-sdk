@@ -10,6 +10,8 @@ use safe_cex_engine::{
 #[derive(Default)]
 struct Feeds {
     public_commands: usize,
+    derived_bid: f64,
+    derived_at: f64,
 }
 impl Feeds {
     fn connect(cx: &mut Cx<'_, ()>) {
@@ -43,6 +45,10 @@ impl Venue for Feeds {
             None,
             (),
         );
+    }
+    fn on_public_feed(&mut self, cx: &mut Cx<'_, ()>) {
+        self.derived_bid = cx.store.ticker("A").map_or(0., |ticker| ticker.bid);
+        self.derived_at = cx.now;
     }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
@@ -237,7 +243,7 @@ fn typed_ingest_uses_native_symbols_ids_metadata_settings_and_private_state() {
     let mut engine = shared();
     let private_loaded = engine.store().loaded();
     engine.take_frame(0.);
-    engine.apply_public_feed(update(r#"{"op":"publicFeedUpdate","tickers":[
+    engine.apply_public_feed(1000., update(r#"{"op":"publicFeedUpdate","tickers":[
         {"symbol":"UNKNOWN","bid":1},{"symbol":"A","bid":99,"ask":101,"last":100,"mark":100.5,
          "index":100.2,"percentage":-1,"openInterest":2,"fundingRate":-0.01,"fundingTime":12345,"volume":7,"quoteVolume":700}],
         "books":[{"symbol":"UNKNOWN","bids":[[1,2]],"asks":[]},
@@ -288,9 +294,10 @@ fn typed_ingest_uses_native_symbols_ids_metadata_settings_and_private_state() {
         1
     );
     engine
-        .apply_public_feed(update(
-            r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","bid":100,"ask":null}]}"#,
-        ))
+        .apply_public_feed(
+            1000.,
+            update(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","bid":100,"ask":null}]}"#),
+        )
         .unwrap();
     assert_eq!(engine.store().ticker("A").unwrap().ask, 101.);
     assert_eq!(engine.store().ticker("A").unwrap().bid, 100.);
@@ -324,12 +331,12 @@ fn ingress_rejects_private_metadata_payloads_invalid_books_and_unshared_engines(
         engine.set_public_feed_policy(policy).unwrap();
         assert!(
             engine
-                .apply_public_feed(PublicFeedUpdate::default())
+                .apply_public_feed(1000., PublicFeedUpdate::default())
                 .is_err()
         );
     }
     let mut engine = shared();
-    assert!(engine.apply_public_feed(update(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","bid":1}],"books":[{"symbol":"A","bids":[[-1,2]],"asks":[]}]}"#)).is_err());
+    assert!(engine.apply_public_feed(1000., update(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","bid":1}],"books":[{"symbol":"A","bids":[[-1,2]],"asks":[]}]}"#)).is_err());
     assert!(
         engine.store().tickers().is_empty(),
         "rejected payload is atomic"
@@ -339,21 +346,21 @@ fn ingress_rejects_private_metadata_payloads_invalid_books_and_unshared_engines(
         .set_public_feed_policy(PublicFeedPolicy::Shared)
         .unwrap();
     empty
-        .apply_public_feed(PublicFeedUpdate::default())
+        .apply_public_feed(1000., PublicFeedUpdate::default())
         .unwrap();
     assert!(
         !empty.store().loaded().tickers,
         "a feed cannot mark a cold catalog ready"
     );
     engine
-        .apply_public_feed(PublicFeedUpdate::default())
+        .apply_public_feed(1000., PublicFeedUpdate::default())
         .unwrap();
     assert!(
         !engine.store().loaded().tickers,
         "empty input cannot claim a provider ticker seed"
     );
     engine
-        .apply_public_feed(update(
+        .apply_public_feed(1000., update(
             r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"UNKNOWN","bid":1},{"symbol":"A"}]}"#,
         ))
         .unwrap();
@@ -364,42 +371,47 @@ fn ingress_rejects_private_metadata_payloads_invalid_books_and_unshared_engines(
 }
 
 #[test]
-fn shared_subscriptions_bypass_venue_public_requests_but_keep_private_commands() {
-    let mut engine = shared();
-    for command in [
-        Command::SetTickerSymbols {
-            symbols: vec!["A".into()],
-        },
-        Command::SubscribeOrderBook { symbol: "A".into() },
-        Command::UnsubscribeOrderBook { symbol: "A".into() },
-        Command::SubscribeCandles {
-            symbol: "A".into(),
-            interval: "1m".into(),
-        },
-        Command::UnsubscribeCandles {
-            symbol: "A".into(),
-            interval: "1m".into(),
-        },
-    ] {
-        engine.handle(0., Event::Command(command));
+fn non_direct_subscriptions_bypass_venue_public_requests_but_keep_private_commands() {
+    for policy in [PublicFeedPolicy::Disabled, PublicFeedPolicy::Shared] {
+        let mut engine = shared();
+        engine.set_public_feed_policy(policy).unwrap();
+        for command in [
+            Command::SetTickerSymbols {
+                symbols: vec!["A".into()],
+            },
+            Command::SubscribeOrderBook { symbol: "A".into() },
+            Command::UnsubscribeOrderBook { symbol: "A".into() },
+            Command::SubscribeCandles {
+                symbol: "A".into(),
+                interval: "1m".into(),
+            },
+            Command::UnsubscribeCandles {
+                symbol: "A".into(),
+                interval: "1m".into(),
+            },
+        ] {
+            engine.handle(0., Event::Command(command));
+        }
+        assert_eq!(engine.venue().public_commands, 0);
+        engine.handle(0., Event::Command(Command::FetchAccount { command: 1 }));
+        assert_eq!(engine.venue().public_commands, 1);
     }
-    assert_eq!(engine.venue().public_commands, 0);
-    engine.handle(0., Event::Command(Command::FetchAccount { command: 1 }));
-    assert_eq!(engine.venue().public_commands, 1);
 }
 
 #[test]
 fn provider_fields_stay_authoritative_after_venue_polls_and_partial_updates() {
     let mut engine = shared();
     engine
-        .apply_public_feed(update(
-            r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","bid":123,"ask":125}]}"#,
-        ))
+        .apply_public_feed(
+            1000.,
+            update(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","bid":123,"ask":125}]}"#),
+        )
         .unwrap();
     engine
-        .apply_public_feed(update(
-            r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","bid":124}]}"#,
-        ))
+        .apply_public_feed(
+            1000.,
+            update(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","bid":124}]}"#),
+        )
         .unwrap();
     engine.handle(
         1.,
@@ -414,6 +426,16 @@ fn provider_fields_stay_authoritative_after_venue_polls_and_partial_updates() {
         engine.store().balance().total,
         999.,
         "native private state still reconciles"
+    );
+    assert_eq!(
+        engine.venue().derived_bid,
+        124.,
+        "derived state follows restored provider prices"
+    );
+    assert_eq!(
+        engine.venue().derived_at,
+        1.,
+        "restoration hook uses the venue event clock"
     );
     engine.handle(
         2.,

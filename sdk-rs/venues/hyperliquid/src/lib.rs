@@ -10,7 +10,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -484,6 +484,12 @@ impl Venue for Hyperliquid {
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.meta(cx, String::new(), 0);
     }
+    fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Public prices cannot establish a private snapshot or mark it loaded.
+        if cx.store.loaded().balance {
+            self.live_balance(cx);
+        }
+    }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.connection.socket != Some(socket) {
             return;
@@ -495,6 +501,10 @@ impl Venue for Hyperliquid {
         self.private_subscribe(cx);
         if self.account.started && self.user().is_some() && !self.options.public_data_only {
             self.refresh_account(cx);
+        }
+        // The account socket multiplexes public feeds; transport roles cannot split them.
+        if cx.public_feed_policy() != PublicFeedPolicy::Direct {
+            return;
         }
         self.subscription(cx, "subscribe", "allMids", None, None, None);
         self.subscription(cx, "subscribe", "fastAssetCtxs", None, None, None);
@@ -527,7 +537,9 @@ impl Venue for Hyperliquid {
             return;
         }
         self.connection.last_received = cx.now;
-        self.public_frame(cx, text);
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public_frame(cx, text);
+        }
         self.account_frame(cx, text);
         self.live_balance(cx);
     }
