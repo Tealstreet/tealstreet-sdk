@@ -260,6 +260,8 @@ fn live_frames_publish_no_book_before_first_snapshot_but_clear_stale_ones() {
             symbol: "BTC-USDC".into(),
         }),
     );
+    // With book-deltas (feature-unified builds) subscribing alone forces a BOOK; drain it.
+    has_book(&mut e, 2050.0);
     // The node opening resets every ladder; none has been published yet.
     e.handle(2100.0, Event::WsOpened { socket: node });
     assert!(!has_book(&mut e, 2300.0));
