@@ -8,6 +8,28 @@ use std::collections::{HashMap, HashSet};
 pub const PRIVATE: usize = 1;
 const ORDER_KINDS: [&str; 5] = ["", "oco", "conditional", "trigger", "move_order_stop"];
 
+// Match the SDK's decimal arithmetic without reducing native coin precision.
+fn decimal_result(a: f64, b: f64, result: f64) -> f64 {
+    let factor = 10f64.powi(num::decimals(a).max(num::decimals(b)) as i32);
+    let scaled = result * factor;
+    let floor = scaled.floor();
+    // Adding 0.5 first can change an already-integral f64 above 2^52.
+    let rounded = if scaled - floor < 0.5 {
+        floor
+    } else {
+        floor + 1.0
+    };
+    rounded / factor
+}
+
+fn add(a: f64, b: f64) -> f64 {
+    decimal_result(a, b, a + b)
+}
+
+fn subtract(a: f64, b: f64) -> f64 {
+    decimal_result(a, b, a - b)
+}
+
 pub enum Request {
     Config,
     Balance {
@@ -711,14 +733,15 @@ impl Okx {
                 .iter()
                 .map(|(currency, equity)| {
                     let risks = || {
-                        self.account
-                            .risk
-                            .values()
+                        cx.store
+                            .positions()
+                            .iter()
+                            .filter_map(|p| self.account.risk.get(&p.id))
                             .filter(|p| &p.currency == currency)
                     };
-                    let mut native_used: f64 = risks().map(|p| p.native_imr).sum();
-                    let native_upnl: f64 = risks().map(|p| p.native_upl).sum();
-                    native_used += cx
+                    let native_used = risks().map(|p| p.native_imr).fold(0.0, add);
+                    let native_upnl = risks().map(|p| p.native_upl).fold(0.0, add);
+                    let native_used = cx
                         .store
                         .orders()
                         .iter()
@@ -741,13 +764,13 @@ impl Okx {
                             }
                             Some(used)
                         })
-                        .sum::<f64>();
+                        .fold(native_used, add);
                     CurrencyBalance {
                         currency: currency.clone(),
                         balance: Balance {
                             used: native_used,
-                            free: equity - native_used,
-                            total: equity - native_upnl,
+                            free: subtract(*equity, native_used),
+                            total: subtract(*equity, native_upnl),
                             upnl: native_upnl,
                         },
                     }

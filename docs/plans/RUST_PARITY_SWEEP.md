@@ -136,3 +136,22 @@ with evidence, plus each gate's counts and CPU/memory/artifact measurements.
 - The account review independently removed each tick/startup guard and proved
   its intended assertion fails, then restored and re-ran all7 account tests.
   Fixtures reject unexpected network requests; there are no live-key test calls.
+
+### Final artifact regressions repaired
+
+- First combined artifact passes host64/64. Its actual SDK-WASM run found
+  obsolete tests: OKX fixture omitted required native `instType`, EEA reused
+  SWAP rows across FUTURES requests, and secondary keys were still expected
+  to reject. Updated deterministic contracts now57/57 PASS, including actual
+  HMAC/read-proxy vs primary write/definitive-lookup identity and three
+  incomplete-pair preflight cases. SDK typecheck/lint and independent review
+  PASS; no skip, timeout increase or product fallback introduced.
+- Global/demo private gates PASS, but strict EEA currency tables caught a
+  binary-noise reserve difference (7.5200000000000005 vs7.52). Native arithmetic
+  now follows per-row decimal precision for reserve/PnL additions and balance
+  subtraction, preserving coin precision. Independent review caught/fixed a
+  scaled-integral rounding edge above2^52; exact tiny-coin/negative-PnL and
+  cancellation regressions cover it. OKX89/89 and strict Clippy/re-review PASS.
+- Full root test27/27 tasks PASS, including safe-cex7298/7298 in both configured
+  runs. Native pre-precision checkpoint2149 tests+3doctests PASS, workspace
+  native/wasm32 Clippy PASS. Rebuild/final native totals and replay suite next.

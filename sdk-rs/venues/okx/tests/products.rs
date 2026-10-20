@@ -628,3 +628,128 @@ fn malformed_account_details_are_atomic_and_scalar_only_push_keeps_currency_deta
     assert_eq!(e.store().balance().total, 45220.0);
     assert_eq!(e.store().currency_balances().unwrap(), coins);
 }
+
+#[test]
+fn native_usd_margin_uses_decimal_addition_and_subtraction_for_every_row() {
+    let (mut e, private, out) = private_catalog();
+    complete(out, &mut e);
+    e.handle(7.0, Event::WsOpened { socket: private });
+    actions(&mut e);
+    ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
+    actions(&mut e);
+    // Two independent positions accumulate exactly four USD of native IMR.
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"positions"},"data":[{"instId":"BTC-USDT-SWAP","pos":"1","avgPx":"40000","ccy":"USD","imr":"1.2","upl":"-0.1"},{"instId":"BTC-USDT-261225","pos":"1","avgPx":"40000","ccy":"USD","imr":"2.8","upl":"-0.2"}]}"#,
+    );
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT-261225","ordId":"usd-order-one","ordType":"limit","state":"live","side":"buy","sz":"1","accFillSz":"0","px":"40000","ccy":"USD","lever":"125","reduceOnly":"false"}]}"#,
+    );
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"account"},"data":[{"totalEq":"45010.1","details":[{"ccy":"USD","eq":"10.1"}]}]}"#,
+    );
+    let usd = || {
+        e.store()
+            .currency_balances()
+            .unwrap()
+            .iter()
+            .find(|c| c.currency == "USD")
+            .unwrap()
+            .balance
+            .clone()
+    };
+    assert_eq!(usd().used, 7.52, "four position IMR plus 3.52 order IMR");
+    assert_eq!(usd().free, 2.58);
+    assert_eq!(usd().upnl, -0.3);
+    assert_eq!(usd().total, 10.4);
+    // A second order must be folded through decimal addition individually too.
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT-SWAP","ordId":"usd-order-two","ordType":"limit","state":"live","side":"buy","sz":"1","accFillSz":"0","px":"40000","ccy":"USD","lever":"400","reduceOnly":"false"}]}"#,
+    );
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"account"},"data":[{"totalEq":"45010.1"}]}"#,
+    );
+    let usd = &e
+        .store()
+        .currency_balances()
+        .unwrap()
+        .iter()
+        .find(|c| c.currency == "USD")
+        .unwrap()
+        .balance;
+    assert_eq!(usd.used, 8.62);
+    assert_eq!(usd.free, 1.48);
+    assert_eq!(usd.upnl, -0.3);
+    assert_eq!(usd.total, 10.4);
+}
+
+#[test]
+fn native_coin_margin_keeps_subcent_precision_and_negative_pnl() {
+    let (mut e, private, out) = private_catalog();
+    complete(out, &mut e);
+    e.handle(7.0, Event::WsOpened { socket: private });
+    actions(&mut e);
+    ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
+    actions(&mut e);
+    // Distinct products and live orders share BTC collateral; no USD-cent trim.
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"positions"},"data":[{"instId":"BTC-USD-SWAP","pos":"1","avgPx":"40000","ccy":"BTC","imr":"0.0000000012","upl":"-0.0000000011"},{"instId":"BTC-USD-261225","pos":"1","avgPx":"40000","ccy":"BTC","imr":"0.0000000023","upl":"-0.0000000022"}]}"#,
+    );
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"account"},"data":[{"totalEq":"45000","details":[{"ccy":"BTC","eq":"1.00000001"}]}]}"#,
+    );
+    let btc = &e
+        .store()
+        .currency_balances()
+        .unwrap()
+        .iter()
+        .find(|c| c.currency == "BTC")
+        .unwrap()
+        .balance;
+    assert_eq!(btc.used, 0.0016500035);
+    assert_eq!(btc.free, 0.9983500065);
+    assert_eq!(btc.upnl, -0.0000000033);
+    assert_eq!(btc.total, 1.0000000133);
+    // At 16 decimals, the scaled sum is an odd integer above 2^52.
+    // Math.round leaves that integer unchanged; adding 0.5 before floor does not.
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USD-SWAP","ordId":"swap-order","ordType":"limit","state":"canceled","side":"buy","sz":"4","accFillSz":"1"},{"instId":"BTC-USD-261225","ordId":"future-order","ordType":"limit","state":"canceled","side":"buy","sz":"4","accFillSz":"1"}]}"#,
+    );
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"positions"},"data":[{"instId":"BTC-USD-SWAP","pos":"1","avgPx":"40000","ccy":"BTC","imr":"0.5","upl":"-0.0000000011"},{"instId":"BTC-USD-261225","pos":"1","avgPx":"40000","ccy":"BTC","imr":"0.0000000000000001","upl":"-0.0000000022"}]}"#,
+    );
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"account"},"data":[{"totalEq":"45000","details":[{"ccy":"BTC","eq":"1"}]}]}"#,
+    );
+    let btc = &e
+        .store()
+        .currency_balances()
+        .unwrap()
+        .iter()
+        .find(|c| c.currency == "BTC")
+        .unwrap()
+        .balance;
+    assert_eq!(btc.used, 0.5000000000000001);
+    assert_eq!(btc.free, 0.4999999999999999);
+    assert_eq!(btc.upnl, -0.0000000033);
+    assert_eq!(btc.total, 1.0000000033);
+}
