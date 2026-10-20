@@ -298,3 +298,30 @@ and staging initial/reconnect roles. Host34 and harness159 PASS. Full combined
 build found Bitrue's newly landed explicit PlaceOrderOpts initializer missing
 WOO's shared optional max_slippage_pct; initialized it to None without changing
 Bitrue trading behavior. Rerun all combined/native gates after this compile fix.
+
+## Final post-transport gate evidence
+
+All venue brief gates pass on 32bc472d0d. Independent phase, adversarial and
+integration re-reviews PASS; original findings and follow-ups are resolved.
+
+- WOO110 / complete native workspace930 tests PASS; bans, all fmt, workspace
+  all-target clippy and wasm clippy PASS.
+- Harness159, combined WASM SDK31 and host34 tests PASS. Root typecheck44 and
+  lint28 tasks PASS. Full safe-cex test-ci6889 PASS. The duplicate local
+  test-unit invocation hit one unrelated Hyro5s timeout under shared load;
+  its complete10-test suite passes isolated on Node22. Require complete fresh
+  PR CI to be green before merge.
+- WOO public77 frames,222 markets/tickers,two books PASS: CPU65.2 ->54.9 ms,
+  steady30.2 ->25.1 ms, retained1.6 ->1.0 MB, WASM linear0.7 MB.
+- WOO private60 frames /20 commands /144 records PASS: exact bodies/signatures,
+  socket roles/generations/heartbeats, account/fills/queries and write/request
+  consumption. Informational CPU119.0 ->84.9 ms, retained4.1 ->0.7 MB.
+- WOO single-feature WASM835126 <1258291 bytes.
+- Binance public873 frames,917 markets,783 tickers,three books PASS: CPU260.1
+  ->124.6 ms, steady149.6 ->48.7 ms, retained4.2 ->2.2 MB. Private14 frames PASS.
+- Memory investigation found no constructor timers/network: exact baseline
+  settled in410ms with unchanged1s deadline. Node22 unchanged gate rerun PASS;
+  no measurement, normalization or performance thresholds changed.
+
+Push the feature branch, refresh PR#1316 evidence/re-review comments, wait for
+all CI on that exact head, merge into feat/rust-rewrite, and cut a fresh branch.
