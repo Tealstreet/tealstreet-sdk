@@ -945,3 +945,24 @@ fn market_entry_with_tpsl_names_the_unsupported_legs() {
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 41, result: Err(m) }) if m.contains("take-profit/stop-loss legs on a market entry"))));
 }
+#[test]
+fn zero_bracket_legs_are_absent_like_ts() {
+    let (mut e, _) = ready();
+    let mut o = limit();
+    o.stop_loss = Some(0.0);
+    o.take_profit = Some(0.0);
+    place(&mut e, vec![o]);
+    let entry = http(&mut e, "sendorder");
+    ack(&mut e, &entry, "entry", "placed");
+    let out = e.drain_actions().collect::<Vec<_>>();
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(ids), .. }) if ids == r#"["entry"]"#)));
+    let mut market = limit();
+    market.kind = OrderType::Market;
+    market.price = None;
+    market.stop_loss = Some(0.0);
+    place(&mut e, vec![market]);
+    let entry = http(&mut e, "sendorder");
+    ack(&mut e, &entry, "market", "placed");
+    assert_eq!(done(&mut e).unwrap(), r#"["market"]"#);
+}
