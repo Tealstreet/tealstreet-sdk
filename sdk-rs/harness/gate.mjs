@@ -329,6 +329,10 @@ const KNOWN_TS_FIXES = {
   // Rust also fences lagging order-repair rows with native timestamps/exact fill
   // quanta and retains exact accepted/ambiguous amendment targets after ACKs;
   // adversarial native tests cover this without rewriting TS replay output.
+  // Rust preserves accepted IDs from partial native/sequential placement batches,
+  // continues independent orders after rejection, surfaces failed protection at
+  // Error level, retains structured rejection reasons and sends integer leverage.
+  // These TS defects have native regressions; no replay normalization is applied.
   paradex() {},
   // ApeX repairs are in the TS reference; output is compared without rewriting:
   // continuous book sequences and atomic invalid depth updates; top-level ping

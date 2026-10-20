@@ -1,7 +1,7 @@
 //! Trading contracts against documented request/response wire shapes.
 mod support;
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
-use safe_cex_engine::{Command, Event, Method};
+use safe_cex_engine::{Action, Command, Event, LogLevel, Method, Notice};
 use safe_cex_venue_paradex::Options;
 use serde::Deserialize;
 use support::*;
@@ -213,6 +213,156 @@ fn partial_bracket_failure_returns_the_accepted_entry_and_does_not_replay_it() {
     h.respond(tp, 400, r#"{"error":"REJECTED"}"#);
     assert!(h.pending.is_empty());
     assert_eq!(h.result(10), Ok("[\"entry\"]"));
+    assert!(h.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Log { level: LogLevel::Error, message })
+        if message.contains("TP/SL") && message.contains("REJECTED"))));
+}
+
+#[test]
+fn placement_continues_after_a_rejection_and_retains_earlier_and_later_ids() {
+    let mut h = private();
+    let orders = ["first", "second", "third"].map(|id| {
+        let mut order = opts(OrderType::Market);
+        order.client_order_id = Some(id.into());
+        order
+    });
+    place(&mut h, 70, orders.into());
+    h.reply("/orders", r#"{"id":"one","client_id":"first"}"#);
+    let rejected = h.take("/orders");
+    h.respond(
+        rejected,
+        400,
+        r#"{"error":"INSUFFICIENT_MARGIN","message":"Not enough collateral"}"#,
+    );
+    h.reply("/orders", r#"{"id":"three","client_id":"third"}"#);
+    assert_eq!(h.result(70), Ok("[\"one\",\"three\"]"));
+    assert!(h.pending.is_empty());
+    assert!(h.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Log { level: LogLevel::Error, message })
+        if message.contains("second") && message.contains("Not enough collateral"))));
+}
+
+#[test]
+fn a_failed_entry_skips_only_its_children_then_attempts_the_next_entry() {
+    for ambiguous in [false, true] {
+        let mut h = private();
+        let mut bracket = opts(OrderType::Market);
+        bracket.client_order_id = None;
+        bracket.take_profit = Some(110.);
+        bracket.stop_loss = Some(90.);
+        let mut next = opts(OrderType::Market);
+        next.client_order_id = Some("next".into());
+        place(&mut h, 71, vec![bracket, next]);
+        let first = h.take("/orders");
+        if ambiguous {
+            h.e.handle(
+                h.now,
+                Event::HttpFailed {
+                    request: first.id,
+                    error: "response lost after possible acceptance",
+                },
+            );
+            h.collect();
+        } else {
+            h.respond(
+                first,
+                400,
+                r#"{"error":"REJECTED","message":"entry refused"}"#,
+            );
+        }
+        let next = h.take("/orders");
+        let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.kind, "MARKET");
+        assert_eq!(payload.client_id.as_deref(), Some("next"));
+        h.respond(next, 200, r#"{"id":"accepted-next","client_id":"next"}"#);
+        assert_eq!(h.result(71), Ok("[\"accepted-next\"]"));
+        assert!(h.pending.is_empty());
+    }
+}
+
+#[test]
+fn a_mixed_native_batch_returns_correlated_successes_and_reports_missing_clients() {
+    let mut h = private();
+    let orders = ["first", "second", "third"].map(|id| {
+        let mut order = opts(OrderType::Limit);
+        order.client_order_id = Some(id.into());
+        order
+    });
+    place(&mut h, 72, orders.into());
+    h.reply("/orders/batch", r#"{"orders":[{"id":"three","client_id":"third"},{"id":"one","client_id":"first"}],"errors":[{"error":"INVALID_PRICE","message":"outside price bands"}]}"#);
+    assert_eq!(h.result(72), Ok("[\"one\",\"three\"]"));
+    assert!(h.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Log { level: LogLevel::Error, message })
+        if message.contains("second") && message.contains("outside price bands"))));
+}
+
+#[test]
+fn all_failed_placements_still_attempt_every_independent_order_and_return_an_error() {
+    let mut h = private();
+    let mut second = opts(OrderType::Market);
+    second.client_order_id = Some("second".into());
+    place(&mut h, 73, vec![opts(OrderType::Market), second]);
+    let first = h.take("/orders");
+    h.respond(
+        first,
+        200,
+        r#"{"error":"FIRST_REJECTED","message":"first reason"}"#,
+    );
+    let second = h.take("/orders");
+    h.respond(
+        second,
+        400,
+        r#"{"error":"SECOND_REJECTED","message":"second reason"}"#,
+    );
+    let error = h.result(73).unwrap_err();
+    assert!(error.contains("first reason") && error.contains("second reason"));
+    assert!(h.pending.is_empty());
+}
+
+#[test]
+fn leverage_is_serialized_as_a_json_integer_after_flooring_and_clamping() {
+    #[derive(Deserialize)]
+    struct IntegerLeverage {
+        leverage: u32,
+    }
+    for (input, expected) in [(20., 20), (20.9, 20), (100., 50), (0., 1)] {
+        let mut h = private();
+        h.command(Command::SetLeverage {
+            command: 74,
+            symbol: "BTC-USD-PERP".into(),
+            leverage: input,
+            side: None,
+        });
+        let request = h.take("/account/margin/");
+        let body: IntegerLeverage = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body.leverage, expected);
+        h.respond(request, 200, "{}");
+        assert_eq!(
+            h.e.store().setting("BTC-USD-PERP").unwrap().leverage,
+            f64::from(expected)
+        );
+    }
+}
+
+#[test]
+fn a_rejected_leverage_write_with_mistyped_message_never_commits_requested_settings() {
+    let mut h = private();
+    let before = h.e.store().setting("BTC-USD-PERP").unwrap().leverage;
+    h.command(Command::SetLeverage {
+        command: 75,
+        symbol: "BTC-USD-PERP".into(),
+        leverage: 20.,
+        side: None,
+    });
+    h.reply(
+        "/account/margin/",
+        r#"{"error":"REJECTED","message":{"detail":"denied"}}"#,
+    );
+    assert!(h.result(75).unwrap_err().contains("REJECTED"));
+    assert_eq!(
+        h.e.store().setting("BTC-USD-PERP").unwrap().leverage,
+        before
+    );
 }
 #[test]
 fn fetch_leverage_returns_two_fetched_leverage_rails_and_updates_settings() {
