@@ -1368,3 +1368,12 @@ arrays/errors0; latestBitunixTSexplicitlifecycle28,694frames/150events/
 beforeconstructorCPU/memory baselines andgateformula/thresholds/peak unchanged.
 Three-runPhemexpublicgate nowrunning afteralllocalchecksquiet. Checkpoint
 reviewedclockcorrection separatelybeforegateoutcome.
+
+Phemexunchangedpublic3rungatePASS onreviewedclockhead d7667362c5:
+534frames/891markets/324tickers/2books/all126bookevents. TS/Rust main
+539.7/284.1ms, steady386.2/155.7ms, retained6.2/4.5MB, peak37.6/9.8MB;
+module730,910/1,258,291bytes. Private16frames/2commands andactionsPASS.
+CrossvenueBitunix+Binance rebuiltcontrols follow before nextlanding merge.
+Fetched5d7589f296 nowincludesCoinbase5c0e437faf,PolymarketPR1327 andGRVTPR1321.
+Threeownedread-onlyplan audits running; nextmergewillcombineallthreeafter
+controls, retaininglogicalstartup451backbone andallpriornativeguards.
