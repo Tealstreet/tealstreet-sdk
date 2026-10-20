@@ -626,3 +626,23 @@ utility CV; this remains a variance-only experiment. Reject existing output
 destinations, persist failed attempts before aborting, and verify complete
 harness/host/WEEX binary fingerprints before and after every run. Record the
 exact launch commands and source pin. No CPU direction is used for selection.
+
+Actual one-shot V8 samples confirm repeated URL parsing in `Tape.socketFor` is
+a harness artifact:14–17% of active samples. Sampling gaps are large (median
+~6.6ms despite requested1ms), so wall weights are not exact CPU milliseconds.
+The QoS pilot is inconclusive and rejected as a usable context, without any
+performance-direction decision: the first background launcher stayed in
+`/usr/bin/env` with0CPU for over120s before Node executed. Stop that owned child
+(SIGTERM), retain the utility sample and failed background attempt, and do not
+adopt the clamp or mix contexts.
+
+Next implementation phase: cache only unique recorded ws/open/close string URLs
+and their strict canonical socket keys in Tape construction before baseline.
+The cache remains bounded by recorded URLs; unknown/live/nonstring URLs use the
+existing canonicalization. Invalid priming is omitted so fallback still throws
+at the original delivery point. Preserve all caller-ID/query semantics, socket
+ordinal/generation/stream precedence and protocol/signature validation. Validate
+parity and no repeated parsing with counterexample tests and independent review,
+then refresh identical helpers for both original/current runtimes. This removes
+fixture-routing work absent from production receive callbacks; it is not a
+claim of engine speedup. Retain all initial regressions and diagnostics.
