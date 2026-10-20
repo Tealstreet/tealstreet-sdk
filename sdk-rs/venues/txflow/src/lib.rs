@@ -134,7 +134,7 @@ impl TxFlow {
         self.assets.get(symbol).copied()
     }
     pub(crate) fn symbol(&self, asset: u32) -> Option<&str> {
-        self.coins.get(&asset.to_string()).map(String::as_str)
+        self.instruments.get(&asset).map(|row| row.name.as_str())
     }
     pub(crate) fn coin_symbol(&self, coin: &str) -> Option<&str> {
         self.coins
@@ -338,51 +338,29 @@ impl TxFlow {
             .update_ticker(symbol, |t| Self::ticker_update(t, row, seed));
     }
     fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
-        let Ok(frame) = serde_json::from_str::<Envelope>(text) else {
+        let Ok(frame) = PublicFrame::decode(text) else {
             return false;
         };
-        if frame.channel == "error" {
-            #[derive(serde::Deserialize)]
-            struct ErrorCode<'a> {
-                #[serde(borrow, default)]
-                code: Option<&'a str>,
-            }
-            let limited = |raw: &str| {
-                serde_json::from_str::<ErrorCode<'_>>(raw)
-                    .is_ok_and(|error| error.code == Some("RISK_RATE_LIMITED"))
-            };
-            return limited(text) || frame.data.is_some_and(|data| limited(data.get()));
-        }
-        let Some(data) = frame.data else {
-            return false;
-        };
-        match frame.channel.as_ref() {
-            "allAssetCtxs" => {
-                if let Ok(rows) = serde_json::from_str::<Contexts>(data.get()) {
-                    for row in rows.ctxs {
-                        if let Some(symbol) = self.coin_symbol(&row.coin) {
-                            Self::context(cx, symbol, row.ctx);
-                        }
+        match frame {
+            PublicFrame::Contexts(rows) => {
+                for row in rows.ctxs {
+                    if let Some(symbol) = self.coin_symbol(&row.coin) {
+                        Self::context(cx, symbol, row.ctx);
                     }
                 }
             }
-            "activeAssetCtx" => {
-                if let Ok(row) = serde_json::from_str::<ContextFrame>(data.get())
-                    && let Some(symbol) = self.coin_symbol(&row.coin)
-                {
+            PublicFrame::Context(row) => {
+                if let Some(symbol) = self.coin_symbol(&row.coin) {
                     Self::context(cx, symbol, row.ctx);
                 }
             }
-            "ticker" => {
-                if let Ok(row) = serde_json::from_str::<TickerRow>(data.get())
-                    && let Some(symbol) = self.symbol(row.instrument_id)
-                {
+            PublicFrame::Ticker(row) => {
+                if let Some(symbol) = self.symbol(row.instrument_id) {
                     Self::apply_ticker(cx, symbol, row, false);
                 }
             }
-            "l2Book" => {
-                if let Ok(row) = serde_json::from_str::<Depth>(data.get())
-                    && let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned)
+            PublicFrame::Depth(row) => {
+                if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned)
                     && let Some(ladder) = self.books.get_mut(&symbol)
                     && ladder.time.is_none_or(|t| row.time >= t)
                 {
@@ -407,7 +385,7 @@ impl TxFlow {
                     cx.book_changed(&symbol);
                 }
             }
-            "candle" => {
+            PublicFrame::Candle(data) => {
                 let mut apply = |row: CandleRow<'_>| {
                     if let Some(symbol) = self.coin_symbol(&row.s)
                         && self
@@ -424,7 +402,12 @@ impl TxFlow {
                     apply(row);
                 }
             }
-            _ => {}
+            PublicFrame::Error(error) => {
+                return error.code.as_deref() == Some("RISK_RATE_LIMITED")
+                    || serde_json::from_str::<ErrorCode<'_>>(text)
+                        .is_ok_and(|error| error.code.as_deref() == Some("RISK_RATE_LIMITED"));
+            }
+            PublicFrame::Acknowledgement(_) | PublicFrame::Other => {}
         }
         false
     }

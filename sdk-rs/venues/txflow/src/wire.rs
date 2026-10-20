@@ -65,6 +65,71 @@ pub struct Envelope<'a> {
     #[serde(borrow, default)]
     pub data: Option<&'a serde_json::value::RawValue>,
 }
+
+#[derive(Deserialize)]
+#[serde(tag = "channel", content = "data")]
+pub enum PublicFrame<'a> {
+    #[serde(rename = "allAssetCtxs", borrow)]
+    Contexts(Contexts<'a>),
+    #[serde(rename = "activeAssetCtx", borrow)]
+    Context(ContextFrame<'a>),
+    #[serde(rename = "ticker")]
+    Ticker(TickerRow),
+    #[serde(rename = "l2Book", borrow)]
+    Depth(Depth<'a>),
+    #[serde(rename = "candle", borrow)]
+    Candle(&'a serde_json::value::RawValue),
+    #[serde(rename = "error", borrow)]
+    Error(ErrorCode<'a>),
+    #[serde(rename = "subscriptionResponse")]
+    Acknowledgement(serde::de::IgnoredAny),
+    #[serde(other)]
+    Other,
+}
+#[derive(Deserialize)]
+pub struct ErrorCode<'a> {
+    #[serde(borrow, default)]
+    pub code: Option<Cow<'a, str>>,
+}
+impl<'a> PublicFrame<'a> {
+    pub fn decode(text: &'a str) -> Result<Self, serde_json::Error> {
+        // Channel-first market frames decode their payload without scanning it twice.
+        serde_json::from_str(text).or_else(|_| {
+            let frame: Envelope<'_> = serde_json::from_str(text)?;
+            let raw = || {
+                frame
+                    .data
+                    .map(serde_json::value::RawValue::get)
+                    .ok_or_else(|| {
+                        <serde_json::Error as serde::de::Error>::custom("missing public payload")
+                    })
+            };
+            match frame.channel.as_ref() {
+                "allAssetCtxs" => serde_json::from_str(raw()?).map(Self::Contexts),
+                "activeAssetCtx" => serde_json::from_str(raw()?).map(Self::Context),
+                "ticker" => serde_json::from_str(raw()?).map(Self::Ticker),
+                "l2Book" => serde_json::from_str(raw()?).map(Self::Depth),
+                "candle" => frame.data.map(Self::Candle).ok_or_else(|| {
+                    <serde_json::Error as serde::de::Error>::custom("missing candle payload")
+                }),
+                "error" => {
+                    let top = serde_json::from_str::<ErrorCode<'_>>(text);
+                    if top
+                        .as_ref()
+                        .is_ok_and(|error| error.code.as_deref() == Some("RISK_RATE_LIMITED"))
+                    {
+                        top.map(Self::Error)
+                    } else if let Some(data) = frame.data {
+                        serde_json::from_str(data.get()).map(Self::Error)
+                    } else {
+                        top.map(Self::Error)
+                    }
+                }
+                _ => Ok(Self::Other),
+            }
+        })
+    }
+}
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Instrument {
@@ -256,6 +321,34 @@ mod tests {
         }
         for json in [r#""NaN""#, r#""inf""#, r#""invalid""#, "true", "[]", "{}"] {
             assert!(serde_json::from_str::<Decimal>(json).is_err(), "{json}");
+        }
+    }
+
+    #[test]
+    fn raw_candle_and_error_payloads_survive_reordered_envelopes() {
+        for text in [
+            r#"{"channel":"candle","data":{"s":"1","i":"1m","t":0,"o":1,"h":2,"l":1,"c":2,"v":3}}"#,
+            r#"{"data":{"s":"1","i":"1m","t":0,"o":1,"h":2,"l":1,"c":2,"v":3},"channel":"candle"}"#,
+        ] {
+            let PublicFrame::Candle(raw) = PublicFrame::decode(text).unwrap() else {
+                panic!("candle")
+            };
+            assert_eq!(
+                serde_json::from_str::<CandleRow<'_>>(raw.get()).unwrap().c,
+                2.0
+            );
+        }
+        for text in [
+            r#"{"channel":"error","data":{"code":"RISK_RATE_LIMITED"}}"#,
+            r#"{"data":{"code":"RISK_RATE_LIMITED"},"channel":"error"}"#,
+            r#"{"type":"error","code":"RISK_RATE_LIMITED"}"#,
+            r#"{"type":"error","code":"RISK_RATE_LIMITED","data":{}}"#,
+            r#"{"type":"error","code":"RISK_RATE_LIMITED","data":{"code":123}}"#,
+        ] {
+            let PublicFrame::Error(error) = PublicFrame::decode(text).unwrap() else {
+                panic!("error")
+            };
+            assert_eq!(error.code.as_deref(), Some("RISK_RATE_LIMITED"));
         }
     }
 }

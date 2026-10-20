@@ -534,3 +534,26 @@ formatting and bans pass. TxFlow-only Wasm is 893,268 bytes. Root tests are bein
 rerun after the merge so modules and newly added polling tests share one settled
 source snapshot. Refreshed combined TxFlow public/private and fixed Phemex
 private gates pass; merged harness/build/replay checks remain before landing.
+
+### Final public decoder optimization
+
+CI's only remaining replay failure missed steady CPU by 0.1 ms despite passing
+parity, total CPU and memory. Decode channel-first public frames and typed
+payloads in one pass, instead of validating a RawValue envelope and parsing the
+same payload again. Numeric instrument lookup now uses active-only metadata
+without allocating a decimal string; subscription acknowledgements skip their
+ignored content directly. Cold fallback preserves reordered RawValue candles,
+control/unknown envelopes and both outer/nested gateway error codes. Contexts
+and books still validate completely before any state update. Independent
+correctness review found and closed an outer-code rate-error edge case.
+
+All 73 native tests, strict Clippy, formatting and diff checks pass. Isolated
+release public gate, three runs: PASS, 527 replay frames; TS/Rust CPU
+137.4/86.3 ms (1.59x), steady CPU 46.0/26.1 ms (1.76x), retained memory
+17.1/1.3 MB (12.73x), linear Wasm 0.5 MB. Private 35-frame gate passes.
+Single-venue Wasm is 943,476 bytes (budget 1,258,291). A second Cargo input check
+is up-to-date and produces the identical artifact hash, proving the final ACK
+variant was included. No fixture, threshold or reference change in this phase.
+Root tests on the merged source pass 7,388 tests in each safe-cex run; typecheck,
+lint, harness 437, host 65 and real-Wasm wrapper 105 pass. Final combined artifact
+regressions and green exact-head CI remain before merge.

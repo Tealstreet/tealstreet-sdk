@@ -229,6 +229,102 @@ fn documented_funding_and_api_last_are_independent() {
     assert_eq!(t.last, 65020.0);
     assert_eq!(t.open_interest, 260040.0);
 }
+
+#[test]
+fn public_payload_field_order_and_escaped_aliases_preserve_atomic_updates() {
+    for data_first in [false, true] {
+        let (mut e, node, api) = ready();
+        e.handle(
+            2500.0,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: "BTC-USDC".into(),
+            }),
+        );
+        let frame = |channel: &str, data: &str| {
+            if data_first {
+                format!(r#"{{"data":{data},"ignored":{{"nested":[1,2]}},"channel":"{channel}"}}"#)
+            } else {
+                format!(r#"{{"channel":"{channel}","ignored":{{"nested":[1,2]}},"data":{data}}}"#)
+            }
+        };
+        message(
+            &mut e,
+            api,
+            3000.0,
+            &frame(
+                "ticker",
+                r#"{"instrumentId":1,"lastPrice":"100","prevDayPx":"80","coinVlm":"4","dayNtlVlm":"400"}"#,
+            ),
+        );
+        let ticker = e.store().ticker("BTC-USDC").unwrap();
+        assert_eq!(
+            (ticker.last, ticker.percentage, ticker.volume),
+            (100.0, 25.0, 4.0)
+        );
+        message(
+            &mut e,
+            node,
+            3100.0,
+            &frame(
+                "allAssetCtxs",
+                r#"{"ctxs":[{"coin":"\u0031","ctx":{"markPx":"101","oraclePx":"99","funding":"0.01","openInterest":"2"}}]}"#,
+            ),
+        );
+        let ticker = e.store().ticker("BTC-USDC").unwrap();
+        assert_eq!(
+            (ticker.mark, ticker.open_interest, ticker.volume),
+            (101.0, 202.0, 4.0)
+        );
+        message(
+            &mut e,
+            node,
+            3200.0,
+            &frame(
+                "allAssetCtxs",
+                r#"{"ctxs":[{"coin":"1","ctx":{"markPx":"102"}},{"coin":"1","ctx":{"markPx":"NaN"}}]}"#,
+            ),
+        );
+        assert_eq!(e.store().ticker("BTC-USDC").unwrap().mark, 101.0);
+        message(
+            &mut e,
+            node,
+            3300.0,
+            &frame(
+                "l2Book",
+                r#"{"coin":"\u0042TC","time":3300,"levels":[[{"px":"99","sz":"2"}],[{"px":"101","sz":"3"}]]}"#,
+            ),
+        );
+        assert_eq!(e.book("BTC-USDC").unwrap().best_bid(), Some(99.0));
+        message(
+            &mut e,
+            node,
+            3400.0,
+            &frame(
+                "l2Book",
+                r#"{"coin":"1","time":3400,"levels":[[{"px":"100","sz":"2"}],[{"px":"NaN","sz":"3"}]]}"#,
+            ),
+        );
+        assert_eq!(e.book("BTC-USDC").unwrap().best_bid(), Some(99.0));
+        for channel in ["subscriptionResponse", "unrecognized-channel"] {
+            message(
+                &mut e,
+                api,
+                3500.0,
+                &frame(channel, r#"{"arbitrary":[true,null,{"coin":"1"}]}"#),
+            );
+        }
+        message(&mut e, node, 3501.0, r#"{"method":"PONG"}"#);
+        message(&mut e, api, 3502.0, r#"{"channel":"pong"}"#);
+        message(
+            &mut e,
+            api,
+            3600.0,
+            &frame("ticker", r#"{"instrumentId":9,"lastPrice":"999"}"#),
+        );
+        assert_eq!(e.store().tickers().len(), 1);
+        assert_eq!(e.store().ticker("BTC-USDC").unwrap().last, 100.0);
+    }
+}
 #[test]
 fn failed_envelope_never_commits_markets() {
     let mut e = Engine::new(TxFlow::new(Options {
@@ -680,7 +776,20 @@ fn subscription_backlog_is_bounded_and_never_holds_up_heartbeat() {
 
 #[test]
 fn socket_rate_limit_discards_old_queue_and_restores_current_intents_on_reconnect() {
-    for api in [false, true] {
+    for (api, error) in [
+        (
+            false,
+            r#"{"type":"error","code":"RISK_RATE_LIMITED","message":"rate limit exceeded"}"#,
+        ),
+        (
+            true,
+            r#"{"channel":"error","data":{"code":"RISK_RATE_LIMITED","message":"rate limit exceeded"}}"#,
+        ),
+        (
+            true,
+            r#"{"channel":"error","code":"RISK_RATE_LIMITED","data":{}}"#,
+        ),
+    ] {
         let (mut e, node_socket, api_socket) = ready();
         let socket = if api { api_socket } else { node_socket };
         e.handle(
@@ -705,11 +814,6 @@ fn socket_rate_limit_discards_old_queue_and_restores_current_intents_on_reconnec
                 _ => None,
             })
             .collect::<Vec<_>>();
-        let error = if api {
-            r#"{"channel":"error","data":{"code":"RISK_RATE_LIMITED","message":"rate limit exceeded"}}"#
-        } else {
-            r#"{"type":"error","code":"RISK_RATE_LIMITED","message":"rate limit exceeded"}"#
-        };
         message(&mut e, socket, 3001.0, error);
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(
