@@ -56,6 +56,8 @@ struct TestVenue {
     pending: Vec<u32>,
     received: Rc<RefCell<Vec<String>>>,
     started: Rc<Cell<usize>>,
+    tick_intervals: Rc<RefCell<Vec<f64>>>,
+    poll_timer: Option<TimerId>,
 }
 impl Venue for TestVenue {
     type Pending = ();
@@ -91,6 +93,15 @@ impl Venue for TestVenue {
         }]);
         cx.connect("test");
         cx.book_changed("BTCUSDT");
+    }
+    fn on_tick_interval(&mut self, cx: &mut Cx<'_, ()>, interval_ms: f64) {
+        self.tick_intervals.borrow_mut().push(interval_ms);
+        if let Some(timer) = self.poll_timer.take() {
+            cx.clear_timer(timer);
+        }
+        if interval_ms.is_finite() {
+            self.poll_timer = Some(cx.set_timer(interval_ms));
+        }
     }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
@@ -144,6 +155,7 @@ struct Fixture {
     a: Tape,
     observed: Rc<RefCell<Vec<Command>>>,
     received: Rc<RefCell<Vec<String>>>,
+    tick_intervals: Rc<RefCell<Vec<f64>>>,
     shutdown: oneshot::Sender<()>,
     task: JoinHandle<std::io::Result<()>>,
 }
@@ -153,6 +165,7 @@ impl Fixture {
         let a = Tape::default();
         let observed = Rc::new(RefCell::new(Vec::new()));
         let received = Rc::new(RefCell::new(Vec::new()));
+        let tick_intervals = Rc::new(RefCell::new(Vec::new()));
         for (label, tape, commands) in [
             ("a", a.clone(), observed.clone()),
             ("b", Tape::default(), Rc::new(RefCell::new(Vec::new()))),
@@ -172,6 +185,8 @@ impl Fixture {
                             pending: Vec::new(),
                             received: received.clone(),
                             started: Rc::default(),
+                            tick_intervals: tick_intervals.clone(),
+                            poll_timer: None,
                         }),
                         tape,
                     ),
@@ -189,6 +204,7 @@ impl Fixture {
             a,
             observed,
             received,
+            tick_intervals,
             shutdown,
             task,
         }
@@ -632,6 +648,8 @@ async fn registration_rejects_preissued_jobs_before_startup_or_transport_executi
                 pending: Vec::new(),
                 received: Rc::default(),
                 started: started.clone(),
+                tick_intervals: Rc::default(),
+                poll_timer: None,
             };
             let transport_calls = Rc::new(Cell::new(0));
             let mut engine = Engine::new(venue());
@@ -677,6 +695,87 @@ async fn registration_rejects_preissued_jobs_before_startup_or_transport_executi
                 1,
                 "only fresh startup socket executes"
             );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn websocket_polling_control_updates_and_pauses_without_using_command_ids() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Fixture::new(config()).await;
+            let mut socket = fixture.connect("a").await;
+            frame(&mut socket).await;
+            send(&mut socket, r#"{"op":"setTickInterval","interval":2500}"#).await;
+            send(&mut socket, r#"{"op":"setTickInterval","interval":null}"#).await;
+            // The account command is an ordered barrier after both configuration events.
+            send(&mut socket, r#"{"op":"fetchAccount","command":1}"#).await;
+            assert!(matches!(
+                reply(&mut socket).await,
+                Reply::Done { command: 1, .. }
+            ));
+            assert_eq!(*fixture.tick_intervals.borrow(), [2500., f64::INFINITY]);
+            assert_eq!(
+                fixture.observed.borrow().len(),
+                1,
+                "configuration is not a Command"
+            );
+            fixture.stop().await;
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn invalid_websocket_polling_controls_have_no_venue_effects() {
+    LocalSet::new().run_until(async {
+        let fixture = Fixture::new(config()).await;
+        let mut socket = fixture.connect("a").await;
+        frame(&mut socket).await;
+        for json in [
+            r#"{"op":"setTickInterval","interval":0}"#,
+            r#"{"op":"setTickInterval","interval":-1}"#,
+            r#"{"op":"setTickInterval"}"#,
+            r#"{"op":"setTickInterval","interval":"1000"}"#,
+        ] {
+            send(&mut socket, json).await;
+            assert!(matches!(reply(&mut socket).await, Reply::Error { error } if error == "invalid command"));
+        }
+        send(&mut socket, r#"{"op":"fetchAccount","command":1}"#).await;
+        assert!(matches!(reply(&mut socket).await, Reply::Done { command: 1, .. }));
+        assert!(fixture.tick_intervals.borrow().is_empty());
+        assert_eq!(fixture.observed.borrow().len(), 1);
+        fixture.stop().await;
+    }).await;
+}
+
+#[tokio::test]
+async fn huge_positive_polling_deadlines_park_and_remain_cancelable() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Fixture::new(config()).await;
+            let mut socket = fixture.connect("a").await;
+            frame(&mut socket).await;
+            send(&mut socket, r#"{"op":"setTickInterval","interval":1e308}"#).await;
+            send(&mut socket, r#"{"op":"fetchAccount","command":1}"#).await;
+            assert!(
+                matches!(reply(&mut socket).await, Reply::Done { command: 1, .. }),
+                "host must continue serving commands around a huge deadline"
+            );
+            assert_eq!(*fixture.tick_intervals.borrow(), [1e308]);
+            // Null emits ClearTimer for the parked deadline, then a normal future
+            // timer must still work. Account shutdown cancels that timer as usual.
+            send(&mut socket, r#"{"op":"setTickInterval","interval":null}"#).await;
+            send(&mut socket, r#"{"op":"setTickInterval","interval":2500}"#).await;
+            send(&mut socket, r#"{"op":"fetchAccount","command":2}"#).await;
+            assert!(matches!(
+                reply(&mut socket).await,
+                Reply::Done { command: 2, .. }
+            ));
+            assert_eq!(
+                *fixture.tick_intervals.borrow(),
+                [1e308, f64::INFINITY, 2500.]
+            );
+            fixture.stop().await;
         })
         .await;
 }

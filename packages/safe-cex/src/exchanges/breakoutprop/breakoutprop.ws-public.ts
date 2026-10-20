@@ -48,18 +48,8 @@ export class BreakoutpropPublicWebsocket extends BaseWebSocket<BreakoutpropExcha
           amount: 1,
           total: 1,
         },
-        {
-          price: ticker.bid,
-          amount: 1,
-          total: 1,
-        },
       ];
       orderBook.asks = [
-        {
-          price: ticker.ask,
-          amount: 1,
-          total: 1,
-        },
         {
           price: ticker.ask,
           amount: 1,

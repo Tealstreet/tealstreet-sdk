@@ -2,6 +2,7 @@
 //! embedding application; clients can neither create accounts nor set credentials.
 use crate::{Host, Transport};
 use futures_util::{SinkExt, StreamExt};
+use safe_cex_engine::command::HostInput;
 use safe_cex_engine::{Command, Event, LogLevel, Notice, Venue};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -226,6 +227,10 @@ enum Control {
         client: u64,
         command: Command,
     },
+    TickIntervalChanged {
+        client: u64,
+        interval_ms: f64,
+    },
     Leave(u64),
 }
 
@@ -294,6 +299,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         let _ = ready.send(Ok(()));
                     }
                     Some(Control::Command { client, command }) => self.command(client, command),
+                    Some(Control::TickIntervalChanged { client, interval_ms }) => {
+                        if self.peers.contains_key(&client) {
+                            self.host.engine.handle((self.host.clock)(), Event::TickIntervalChanged { interval_ms });
+                        }
+                    }
                     Some(Control::Leave(client)) => self.leave(client),
                     None => break,
                 },
@@ -775,9 +785,13 @@ async fn connection(
                 _ = canceled.changed() => break,
                 message = frames.recv() => match message { Some(message) => message.message(), None => break },
                 incoming = socket.next() => match incoming {
-                    Some(Ok(Message::Text(text))) => match safe_cex_engine::command::decode_command(&text) {
-                        Ok(command) => {
-                            if account.commands.try_send(Control::Command { client, command }).is_err() { break; }
+                    Some(Ok(Message::Text(text))) => match safe_cex_engine::command::decode_host_input(&text) {
+                        Ok(input) => {
+                            let control = match input {
+                                HostInput::Command(command) => Control::Command { client, command },
+                                HostInput::TickIntervalChanged { interval_ms } => Control::TickIntervalChanged { client, interval_ms },
+                            };
+                            if account.commands.try_send(control).is_err() { break; }
                             continue;
                         }
                         Err(_) => Message::text(encode_notice(ServerNotice::Error { command: None, error: "invalid command" }).to_string()),

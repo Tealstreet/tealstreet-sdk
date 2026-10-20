@@ -331,3 +331,38 @@ pre-registration command IDs. No TS venue bug fix is introduced by this PR;
 the existing GRVT base gap remains documented above. Private cases are synthetic
 and network tests use loopback, without funded/live private account access.
 PR correctness reviews and full green CI remain the landing gates.
+
+### PR integration — polling controls
+
+PR #1333 targets feat/rust-rewrite. The base advanced to 13e391377f while the
+PR opened, adding BreakoutProp and GRVT performance work. Merge preserves the
+landing structure and venue changes. One WASM command-boundary conflict needs
+an explicit integration: retain setTickInterval (positive milliseconds or null
+for pause) alongside the shared command decoder. Native must accept that same
+host control, since its documented command protocol matches WASM.
+
+Plan: introduce a typed HostInput decoder that separates ordinary Command from
+TickIntervalChanged, preserving the existing forced-inline decoder boundaries.
+Both hosts route the control as an Event rather than Command, so it neither
+allocates requester IDs nor closes the pre-registration command boundary. Native
+uses the existing bounded account queue and authorization. Reject invalid or
+missing intervals before effects; null maps to infinity as on the landing.
+Add typed decoder and actual WebSocket positive/pause/invalid regressions.
+Independent agents audit and implement disjoint engine/WASM and native scopes;
+root will inspect the integration, recheck affected gates and actual isolated
+WASM sizes, then push for CI and final PR correctness reviews.
+
+Polling-control implementation and independent source reviews pass. Native now
+accepts the shared typed control through its bounded authenticated actor queue.
+Review found that a huge positive interval could panic a spawned timer task;
+checked Duration/Instant conversion now keeps that future cancellably parked.
+A paused-clock regression detects the lost-task bug directly, verifies clear
+cancellation, and then observes a normal timer firing. Three real WebSocket
+cases verify positive/null, invalid values without effects, and huge deadlines.
+The engine boundary regression also covers host configuration explicitly.
+
+Affected checks pass: engine profiles 71/72/75 tests; native host 58, including
+16 real loopback/lifecycle cases; full-default WASM clippy; root typecheck44 and
+lint28. Actual isolated Paradex web/Node release size is 1,251,335 bytes against
+1,258,291 (no budget change). Binance variants landed as e391337054 during this
+integration and are the next merge before final CI/replay evidence.

@@ -27,6 +27,7 @@ use tokio::task::AbortHandle;
 /// What transports and timers report back to the loop.
 #[derive(Debug)]
 pub enum HostEvent {
+    TickIntervalChanged(f64),
     WsOpened(SocketId),
     WsMessage(SocketId, String),
     WsBinary(SocketId, Vec<u8>),
@@ -73,6 +74,11 @@ impl<V: Venue, T: Transport> Host<V, T> {
             timers: HashMap::new(),
             clock: now_ms,
         }
+    }
+
+    /// Feed live configuration alongside transport completions.
+    pub fn event_sender(&self) -> Events {
+        self.events.clone()
     }
 
     /// Run until `commands` closes, handing each flush frame to `on_frame`
@@ -123,6 +129,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
         let now = (self.clock)();
         let engine = &mut self.engine;
         match event {
+            HostEvent::TickIntervalChanged(interval_ms) => {
+                engine.handle(now, Event::TickIntervalChanged { interval_ms })
+            }
             HostEvent::WsOpened(socket) => engine.handle(now, Event::WsOpened { socket }),
             HostEvent::WsBinary(socket, data) => engine.handle(
                 now,
@@ -227,9 +236,17 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 Action::Http(request) => self.transport.request(request, self.events.clone()),
                 Action::SetTimer { timer, at_ms } => {
                     let delay = (at_ms - (self.clock)()).max(0.0);
+                    let deadline = Duration::try_from_secs_f64(delay / 1000.0)
+                        .ok()
+                        .and_then(|duration| tokio::time::Instant::now().checked_add(duration));
                     let events = self.events.clone();
                     let handle = tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs_f64(delay / 1000.0)).await;
+                        if let Some(deadline) = deadline {
+                            tokio::time::sleep_until(deadline).await;
+                        } else {
+                            // A valid positive venue interval may exceed the OS clock.
+                            std::future::pending::<()>().await;
+                        }
                         let _ = events.send(HostEvent::Timer(timer));
                     });
                     if let Some(previous) = self.timers.insert(timer, handle.abort_handle()) {
@@ -244,5 +261,92 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 Action::Notice(notice) => on_notice(notice),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod timer_tests {
+    use super::*;
+    use safe_cex_engine::{Cx, HttpRequest, Response, book::Book};
+
+    #[derive(Default)]
+    struct TimerVenue {
+        timer: Option<TimerId>,
+        fired: Vec<TimerId>,
+    }
+    impl Venue for TimerVenue {
+        type Pending = ();
+        fn start(&mut self, _: &mut Cx<'_, ()>) {}
+        fn on_tick_interval(&mut self, cx: &mut Cx<'_, ()>, interval_ms: f64) {
+            if let Some(timer) = self.timer.take() {
+                cx.clear_timer(timer);
+            }
+            if interval_ms.is_finite() {
+                self.timer = Some(cx.set_timer(interval_ms));
+            }
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, ()>, timer: TimerId) {
+            self.fired.push(timer);
+        }
+        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    struct NoNetwork;
+    impl Transport for NoNetwork {
+        fn connect(&self, _: SocketId, _: String, _: Events) -> mpsc::UnboundedSender<String> {
+            panic!("timer venue never opens a socket")
+        }
+        fn request(&self, _: HttpRequest, _: Events) {
+            panic!("timer venue never requests HTTP")
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn huge_future_timer_stays_alive_until_cleared_then_normal_timers_fire() {
+        let mut host = Host::new(Engine::new(TimerVenue::default()), NoNetwork);
+        host.clock = || 0.;
+        host.engine
+            .handle(0., Event::TickIntervalChanged { interval_ms: 1e308 });
+        host.execute(&mut |_| {});
+        let parked = host.timers.values().next().unwrap().clone();
+        // Let the spawned task run: a conversion panic would finish it while
+        // leaving the host alive and silently losing this venue timer.
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert!(!parked.is_finished(), "huge timer must remain parked");
+        assert!(host.inbox.try_recv().is_err());
+
+        host.engine.handle(
+            0.,
+            Event::TickIntervalChanged {
+                interval_ms: f64::INFINITY,
+            },
+        );
+        host.execute(&mut |_| {});
+        assert!(host.timers.is_empty(), "ClearTimer removes the handle");
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert!(parked.is_finished(), "ClearTimer aborts the parked task");
+
+        host.engine
+            .handle(0., Event::TickIntervalChanged { interval_ms: 5. });
+        host.execute(&mut |_| {});
+        let normal = *host.timers.keys().next().unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(1), host.inbox.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(event, HostEvent::Timer(timer) if timer == normal));
+        host.dispatch(event);
+        assert_eq!(host.engine.venue().fired, [normal]);
+        assert!(host.timers.is_empty());
     }
 }

@@ -115,6 +115,13 @@ Send the exact same JSON command objects as `WasmEngine.command`, for example:
 {"op":"fetchCandles","command":1,"symbol":"BTCUSDT","interval":"1m","limit":100}
 ```
 
+Polling configuration uses the same host-input decoder as WASM:
+`{"op":"setTickInterval","interval":2500}` updates the account's venue polling,
+and `interval: null` pauses optional polling. Zero, negative, missing or wrongly
+typed intervals are rejected. Configuration has no command ID or result and
+applies to the account, including other connected clients. Very long future
+timers remain cancelable even when their deadline exceeds the system clock.
+
 All trading, account and query variants use the shared typed decoder; individual
 venues still reject operations they do not implement. Text
 responses have `type: "done"`, the caller's `command`, and either `result` (a
