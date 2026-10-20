@@ -886,7 +886,37 @@ impl MexcFutures {
                             snapshot.orders.push(o);
                         }
                     } else {
-                        snapshot.bad = true;
+                        let id = if scope == Scope::Regular {
+                            if r.order_id.is_empty() {
+                                &r.id
+                            } else {
+                                &r.order_id
+                            }
+                        } else if r.id.is_empty() {
+                            &r.order_id
+                        } else {
+                            &r.id
+                        };
+                        if id.is_empty() {
+                            // Without an identity, this could be any missing
+                            // known order: the snapshot cannot prove absence.
+                            snapshot.bad = true;
+                            return;
+                        }
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("Skipping unmappable MEXC order {id} on {}", r.symbol),
+                        );
+                        // A typed but unmappable row is not proof that a known
+                        // order vanished. Keep that id while committing good rows.
+                        if let Some(previous) = cx.store.order(id)
+                            && snapshot
+                                .symbol
+                                .as_ref()
+                                .is_none_or(|symbol| *symbol == previous.symbol)
+                        {
+                            snapshot.orders.push(previous.clone());
+                        }
                     }
                 }
                 Err(_) => snapshot.bad = true,

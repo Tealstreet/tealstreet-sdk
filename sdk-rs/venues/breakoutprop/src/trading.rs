@@ -1,6 +1,6 @@
 //! DXtrade writes have no transport retry. A placement batch is sequential;
 //! cancellation waits for every result in each bounded group of ten.
-use crate::{BreakoutProp, Operation, Pending, wire};
+use crate::{BreakoutProp, Operation, Pending};
 use safe_cex_engine::model::{
     Market, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, StopTriggerType,
 };
@@ -637,7 +637,7 @@ impl BreakoutProp {
                 self.on_trade_failed_step(cx, id, "DXtrade account is not initialized".into());
                 continue;
             };
-            let base = format!("/accounts/{}/orders", wire::path_segment(account));
+            let base = format!("/accounts/{}/orders", safe_cex_engine::url::encode(account));
             let request = match &step {
                 Step::Place { order, code } => match order.body(code) {
                     Ok(body) => Request {
@@ -655,7 +655,7 @@ impl BreakoutProp {
                 Step::Cancel { code, .. } => Request {
                     command: id,
                     method: Method::Delete,
-                    path: format!("{base}/{}", wire::path_segment(code)),
+                    path: format!("{base}/{}", safe_cex_engine::url::encode(code)),
                     body: None,
                     step,
                 },
@@ -664,7 +664,7 @@ impl BreakoutProp {
                     method: Method::Get,
                     path: format!(
                         "{base}/history?with-order-id={}&limit=2",
-                        wire::path_segment(native_id)
+                        safe_cex_engine::url::encode(native_id)
                     ),
                     body: None,
                     step,
@@ -681,6 +681,7 @@ impl BreakoutProp {
         body: &str,
     ) {
         let command = request.command;
+        let was_place = matches!(request.step, Step::Place { .. });
         let outcome = match request.step {
             Step::Place { code, order } => serde_json::from_str::<PlaceAck>(body)
                 .map_err(|_| "Invalid DXtrade placement acknowledgement".to_owned())
@@ -775,6 +776,9 @@ impl BreakoutProp {
                 &expected,
             ),
         };
+        if was_place && outcome.is_err() {
+            self.order_revision = self.order_revision.wrapping_add(1);
+        }
         if let Some(job) = self.trading.jobs.get_mut(&command) {
             job.in_flight = job.in_flight.saturating_sub(1);
             if let Err(error) = outcome {
@@ -790,6 +794,9 @@ impl BreakoutProp {
         request: Request,
         error: String,
     ) {
+        if matches!(request.step, Step::Place { .. }) {
+            self.order_revision = self.order_revision.wrapping_add(1);
+        }
         self.on_trade_failed_step(cx, request.command, error);
     }
     fn on_trade_failed_step(

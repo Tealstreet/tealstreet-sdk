@@ -185,3 +185,24 @@ Rust `setLeverage(symbol, leverage, side)` changes only the selected Long or
 Short rail, using its native `positionId` when open and `positionType` when
 flat. Omitting side changes both rails. A confirmed write updates that leg's
 position and fetched leverage; a failed write preserves its previous setting.
+
+Rust also subscribes to the documented all-contract `sub.tickers` stream so
+last/mark/index prices and 24-hour fields stay live beyond the first 100 detailed
+subscriptions. Its sparse rows preserve omitted or null values; zero last/mark/index
+prices mean unavailable and preserve the previous quote while other valid fields
+still update. Unknown or inactive symbols outside the market catalog are ignored
+before field validation.
+`SetTickerSymbols` reconciles all requested known detailed subscriptions without
+duplicates, preserves caller priority, and survives reconnects. With no selection,
+the first 100 markets keep the detailed feed. See the [official futures WS contract](https://mexcdevelop.github.io/apidocs/contract_v1_en/#tickers).
+
+Typed open-order rows whose market is unavailable are logged and skipped,
+while any existing copy of their id survives reconciliation. Other valid rows
+still load; a genuinely empty full snapshot remains authoritative. Malformed
+wire rows and rows without a usable native order id still fail the snapshot
+rather than silently clearing known orders.
+
+Full-position TP/SL snaps the position's native volume to `volUnit` before
+signing. A singleton Rust placement uses `/order/submit` with the regular
+450 ms FIFO pacing; multi-order batches retain the batch entitlement fallback
+and 1.5 s scaled pacing, including the existing throttle cooldown.

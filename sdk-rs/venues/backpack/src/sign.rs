@@ -1,26 +1,14 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use safe_cex_crypto::ed25519;
+use safe_cex_engine::url;
 use std::collections::BTreeMap;
 
 pub type Params = BTreeMap<String, String>;
 
-pub fn encode(value: &str) -> String {
-    let mut out = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&byte) {
-            out.push(byte as char);
-        } else {
-            use std::fmt::Write;
-            let _ = write!(out, "%{byte:02X}");
-        }
-    }
-    out
-}
-
 pub fn query(params: &Params) -> String {
     params
         .iter()
-        .map(|(k, v)| format!("{k}={}", encode(v)))
+        .map(|(k, v)| format!("{k}={}", url::encode_component(v)))
         .collect::<Vec<_>>()
         .join("&")
 }

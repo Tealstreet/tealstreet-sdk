@@ -233,6 +233,10 @@ impl ApexOmni {
 }
 
 impl Venue for ApexOmni {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.start_public(cx);

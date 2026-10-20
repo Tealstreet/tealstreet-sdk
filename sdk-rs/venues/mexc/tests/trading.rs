@@ -31,12 +31,10 @@ fn ready() -> TestEngine {
 }
 fn results(e: &mut TestEngine) -> Vec<Result<String, String>> {
     e.drain_actions()
-        .filter_map(|a| {
-            if let Action::Notice(Notice::CommandDone { result, .. }) = a {
-                Some(result)
-            } else {
-                None
-            }
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(Err(error.legacy_text())),
+            _ => None,
         })
         .collect()
 }
@@ -268,10 +266,20 @@ fn partial_batch_success_and_cancel_failures_preserve_known_venue_state() {
         300.0,
         r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0},{"errorCode":600,"errorMsg":"bad volume"}]}"#,
     );
+    let failure = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("partial batch failure");
+    let partial = failure.partial.as_deref().expect("accepted ids");
+    assert_eq!(partial.order_ids, ["one"]);
+    assert_eq!((partial.total, partial.failed_index), (2, 1));
+    assert!(failure.message.contains("bad volume"), "{failure:?}");
     assert!(
-        results(&mut e)[0]
-            .as_ref()
-            .unwrap_err()
+        failure
+            .legacy_text()
             .contains("\"partialOrderIds\":[\"one\"]")
     );
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
@@ -1146,4 +1154,104 @@ fn targeted_open_mexc_leg_uses_its_native_position_id_and_preserves_other_positi
         (setting.buy_leverage, setting.sell_leverage),
         (Some(10.), Some(37.))
     );
+}
+
+#[test]
+fn singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown() {
+    let mut e = ready();
+    for command in [1, 2] {
+        e.handle(
+            200.0,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![order()],
+            }),
+        );
+    }
+    let first = requests(&mut e).remove(0);
+    assert!(first.url.ends_with("/order/submit"));
+    let body: serde_json::Value = serde_json::from_str(first.body.as_ref().unwrap()).unwrap();
+    assert!(body.is_object());
+    assert!(body.get("stpMode").is_none());
+    reply(
+        &mut e,
+        &first,
+        250.0,
+        r#"{"success":true,"code":0,"data":"first"}"#,
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, at_ms } = a {
+                assert_eq!(at_ms, 650.0);
+                Some(timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(650.0, Event::TimerFired { timer });
+    let second = requests(&mut e).remove(0);
+    assert!(second.url.ends_with("/order/submit"));
+    reply(
+        &mut e,
+        &second,
+        700.0,
+        r#"{"success":false,"code":510,"message":"Requests are too frequent"}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        750.0,
+        Event::Command(Command::PlaceOrders {
+            command: 3,
+            orders: vec![order()],
+        }),
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, at_ms } = a {
+                assert_eq!(at_ms, 2200.0);
+                Some(timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(2200.0, Event::TimerFired { timer });
+    assert!(requests(&mut e).remove(0).url.ends_with("/order/submit"));
+}
+
+#[test]
+fn full_position_stops_snap_native_volume_to_contract_step() {
+    use safe_cex_engine::model::{OrderSide, OrderType};
+    let markets = MARKETS.replace("\"volUnit\":1", "\"volUnit\":0.1");
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let (mut e, _, reads, _) = private_started_with_markets(&markets);
+        for request in reads {
+            let body = if request.url.contains("open_positions") {
+                r#"{"success":true,"code":0,"data":[{"positionId":"pos","symbol":"BTC_USDT","positionType":1,"holdVol":59.99999999999999,"holdAvgPrice":60000,"leverage":10,"openType":1,"positionMode":2}]}"#
+            } else {
+                r#"{"success":true,"code":0,"data":[]}"#
+            };
+            response(&mut e, &request, body);
+        }
+        e.drain_actions().for_each(drop);
+        let mut opts = order();
+        opts.kind = kind;
+        opts.side = OrderSide::Sell;
+        opts.amount = 0.0;
+        e.handle(
+            200.0,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![opts],
+            }),
+        );
+        let request = requests(&mut e).remove(0);
+        assert!(request.url.ends_with("/stoporder/place"));
+        let body: serde_json::Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+        assert_eq!(body["vol"], 60.0);
+        assert_eq!(body["volType"], 2);
+    }
 }

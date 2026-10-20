@@ -78,6 +78,8 @@ struct Job {
     ids: Vec<String>,
     error: Option<String>,
     continue_on_error: bool,
+    // A trigger move cancels before placing; a failed placement must say so.
+    replaces_cancelled: bool,
 }
 struct Observation {
     order: Order,
@@ -362,14 +364,13 @@ impl Trading {
             job.steps.clear();
         }
         if let Some(step) = job.steps.pop_front() {
-            let (url, headers, body) =
-                step.params
-                    .into_request(step.method, step.path, credentials, cx.now);
-            cx.request(
+            crate::issue(
+                cx,
+                credentials,
                 step.method,
-                url,
-                headers,
-                body,
+                step.path,
+                step.params,
+                None,
                 Pending::Trade(Request {
                     command,
                     call: step.call,
@@ -394,7 +395,8 @@ impl Trading {
         request: Request,
         error: &str,
     ) {
-        self.finish(cx, credentials, request.command, Err(error.into()));
+        let places = request.places_order();
+        self.finish(cx, credentials, request.command, places, Err(error.into()));
     }
 
     pub fn on_response(
@@ -404,6 +406,7 @@ impl Trading {
         request: Request,
         response: Response<'_>,
     ) {
+        let places = request.places_order();
         let result = (|| {
             let absent_ok = matches!(
                 &request.call,
@@ -532,7 +535,7 @@ impl Trading {
                 }
             }
         })();
-        self.finish(cx, credentials, request.command, result);
+        self.finish(cx, credentials, request.command, places, result);
     }
 
     fn finish(
@@ -540,6 +543,7 @@ impl Trading {
         cx: &mut Cx<'_, Pending>,
         credentials: Option<&Credentials>,
         command: CommandId,
+        places: bool,
         result: Result<Vec<String>, String>,
     ) {
         let Some(job) = self.jobs.get_mut(&command) else {
@@ -548,6 +552,11 @@ impl Trading {
         match result {
             Ok(ids) => job.ids.extend(ids),
             Err(error) => {
+                let error = if places && job.replaces_cancelled {
+                    format!("original bracket cancelled; replacement failed: {error}")
+                } else {
+                    error
+                };
                 cx.log(LogLevel::Error, error.clone());
                 job.error.get_or_insert(error);
             }
@@ -862,7 +871,7 @@ impl Trading {
             if amount.is_some()
                 || !matches!(
                     meta.native_kind.as_str(),
-                    "STOP_MARKET" | "TAKE_PROFIT_MARKET"
+                    "STOP_MARKET" | "TAKE_PROFIT_MARKET" | "TRIGGER_MARKET"
                 )
             {
                 return Err(
@@ -873,10 +882,12 @@ impl Trading {
             if !next.is_finite() || next <= 0.0 || next == o.price {
                 return Err("Trigger price must change after rounding".into());
             }
-            let kind = if meta.native_kind == "STOP_MARKET" {
-                OrderType::StopLoss
-            } else {
-                OrderType::TakeProfit
+            // TRIGGER_MARKET (attached brackets) has no native direction; the
+            // mapped kind is its SL/TP side relative to mark.
+            let kind = match meta.native_kind.as_str() {
+                "STOP_MARKET" => OrderType::StopLoss,
+                "TAKE_PROFIT_MARKET" => OrderType::TakeProfit,
+                _ => o.kind,
             };
             let source = o
                 .trigger_type
@@ -928,12 +939,23 @@ impl Trading {
             };
             let mut replacement = self.format(cx, &opts)?;
             for step in &mut replacement {
-                step.params = std::mem::take(&mut step.params)
-                    .str("positionSide", &meta.position_side)
-                    .str("type", &meta.native_kind);
+                let params =
+                    std::mem::take(&mut step.params).str("positionSide", &meta.position_side);
+                // Like TS, a moved bracket takes the type placement picks today,
+                // but a reduce-only bracket stays reduce-only whatever that type.
+                step.params = if meta.native_kind == "TRIGGER_MARKET" {
+                    if o.reduce_only && !cx.store.hedged() && o.close != Some(true) {
+                        params.boolean("reduceOnly", true)
+                    } else {
+                        params
+                    }
+                } else {
+                    params.str("type", &meta.native_kind)
+                };
             }
             let mut job = self.cancel(cx, &[id.into()])?;
             job.continue_on_error = false;
+            job.replaces_cancelled = true;
             if let Some(Step {
                 call: Call::Cancel { absent_ok, .. },
                 ..

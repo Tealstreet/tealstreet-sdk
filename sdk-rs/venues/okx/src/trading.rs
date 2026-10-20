@@ -19,6 +19,13 @@ struct Step {
 #[derive(Default)]
 pub struct TradingState {
     jobs: HashMap<CommandId, Job>,
+    pub acknowledged: HashMap<String, Acknowledged>,
+}
+pub struct Acknowledged {
+    symbol: String,
+    inst_id: String,
+    algo: bool,
+    pub version: u64,
 }
 struct Job {
     steps: VecDeque<Step>,
@@ -111,7 +118,7 @@ impl Okx {
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, orders)),
             Command::CancelOrders { command, ids } => (command, self.plan_cancel(cx, ids)),
             Command::CancelSymbolOrders { command, symbol } => {
-                let ids = cx
+                let mut ids: Vec<_> = cx
                     .store
                     .orders()
                     .iter()
@@ -124,6 +131,13 @@ impl Okx {
                     })
                     .map(|o| o.id.clone())
                     .collect();
+                ids.extend(
+                    self.trading
+                        .acknowledged
+                        .iter()
+                        .filter(|(_, order)| order.symbol == symbol)
+                        .map(|(id, _)| id.clone()),
+                );
                 (command, self.plan_cancel(cx, ids))
             }
             Command::AmendOrder {
@@ -132,6 +146,10 @@ impl Okx {
                 price,
                 amount,
             } => (command, self.plan_amend(cx, &id, price, amount)),
+            Command::FetchLeverage { command, symbol } => {
+                self.fetch_leverage(cx, command, symbol);
+                return;
+            }
             Command::SetMarginType { command, .. } => {
                 cx.done(command, Err("Only cross mode is supported".into()));
                 return;
@@ -494,27 +512,32 @@ impl Okx {
         let mut seen = HashSet::new();
         let mut optimistic = Vec::new();
         for id in &ids {
-            let o = cx.store.order(id).ok_or_else(|| {
-                format!("Order {id} not found; cancellation requires a reconciled order")
-            })?;
-            let m = cx
-                .store
-                .market(&o.symbol)
-                .ok_or_else(|| "unknown market".to_owned())?;
-            let native = native_id(id);
-            optimistic.push((id.clone(), o.status));
-            if !seen.insert((m.id.as_str(), native)) {
+            let (inst_id, native, algo) = if let Some(o) = cx.store.order(id) {
+                let m = cx
+                    .store
+                    .market(&o.symbol)
+                    .ok_or_else(|| "unknown market".to_owned())?;
+                optimistic.push((id.clone(), o.status));
+                (m.id.as_str(), native_id(id), is_algo(o.kind))
+            } else if let Some(order) = self.trading.acknowledged.get(id) {
+                (order.inst_id.as_str(), id.as_str(), order.algo)
+            } else {
+                return Err(format!(
+                    "Order {id} not found; cancellation requires a reconciled order"
+                ));
+            };
+            if !seen.insert((inst_id, native)) {
                 continue;
             }
-            if is_algo(o.kind) {
+            if algo {
                 algos.push(Cancel {
-                    inst_id: &m.id,
+                    inst_id,
                     ord_id: None,
                     algo_id: Some(native),
                 });
             } else {
                 regular.push(Cancel {
-                    inst_id: &m.id,
+                    inst_id,
                     ord_id: Some(id),
                     algo_id: None,
                 });
@@ -764,6 +787,11 @@ impl Okx {
         }
         match job.finish {
             Finish::Leverage(symbol, leverage) => {
+                *self
+                    .account
+                    .leverage_versions
+                    .entry(symbol.clone())
+                    .or_default() += 1;
                 cx.store.update_setting(&symbol, |s| {
                     s.leverage = leverage;
                     s.margin_type = Some(MarginType::Cross);
@@ -772,6 +800,7 @@ impl Okx {
                 cx.done(command, Ok("[]".into()));
             }
             Finish::Mode(hedged) => {
+                self.account.mode_version += 1;
                 cx.store.set_hedged(hedged);
                 self.account_after_settings(cx);
                 cx.done(command, Ok("[]".into()));
@@ -798,6 +827,19 @@ impl Okx {
             return;
         };
         let step = job.steps.front().expect("inflight step");
+        // OKX 50004 explicitly leaves execution unknown, including HTTP 200/400 replies.
+        let parsed = serde_json::from_str::<wire::Envelope<'_>>(response.body);
+        if response.status == 408
+            || (500..600).contains(&response.status)
+            || parsed.as_ref().is_ok_and(|reply| reply.code == "50004")
+        {
+            self.trade_lost(
+                cx,
+                request,
+                &format!("OKX HTTP {}: {}", response.status, response.body),
+            );
+            return;
+        }
         if !(200..300).contains(&response.status) {
             self.trade_failed(
                 cx,
@@ -806,10 +848,10 @@ impl Okx {
             );
             return;
         }
-        let envelope = match serde_json::from_str::<wire::Envelope<'_>>(response.body) {
+        let envelope = match parsed {
             Ok(envelope) => envelope,
             Err(e) => {
-                self.trade_failed(cx, request, &e.to_string());
+                self.trade_lost(cx, request, &e.to_string());
                 return;
             }
         };
@@ -819,10 +861,96 @@ impl Okx {
         {
             Some(acks) => acks,
             None => {
-                self.trade_failed(cx, request, "Malformed OKX write response");
+                if matches!(envelope.code, "0" | "2") {
+                    self.trade_lost(cx, request, "Malformed OKX write response");
+                } else {
+                    self.trade_failed(
+                        cx,
+                        request,
+                        &format!("OKX {}: {}", envelope.code, envelope.msg),
+                    );
+                }
                 return;
             }
         };
+        if step.collect_ids && matches!(envelope.code, "0" | "2") {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Identity {
+                inst_id: String,
+            }
+            let identities = if step.path == "/api/v5/trade/batch-orders" {
+                serde_json::from_str::<Vec<Identity>>(&step.body)
+            } else {
+                serde_json::from_str::<Identity>(&step.body).map(|row| vec![row])
+            };
+            let identities = match identities {
+                Ok(rows) if rows.len() == acks.len() => rows,
+                _ => {
+                    self.trade_lost(cx, request, "OKX accepted order identity is unavailable");
+                    return;
+                }
+            };
+            self.account.revision += 1;
+            for (ack, identity) in acks.iter().zip(identities) {
+                if (!ack.s_code.is_empty() && ack.s_code != "0") || !ack.s_msg.is_empty() {
+                    continue;
+                }
+                let id = if ack.algo_id.is_empty() {
+                    ack.ord_id
+                } else {
+                    ack.algo_id
+                };
+                if id.is_empty() {
+                    self.trade_lost(cx, request, "OKX placement response missing order ID");
+                    return;
+                }
+                if !self.account.order_final(id)
+                    && let Some(market) = cx.store.market_by_id(&identity.inst_id)
+                {
+                    self.trading.acknowledged.insert(
+                        id.into(),
+                        Acknowledged {
+                            symbol: market.symbol.clone(),
+                            inst_id: identity.inst_id,
+                            algo: !ack.algo_id.is_empty(),
+                            version: self.account.revision,
+                        },
+                    );
+                }
+                job.ids.push(id.into());
+            }
+        }
+        if acks.iter().any(|ack| ack.s_code == "50004") {
+            self.trade_lost(cx, request, "OKX 50004: write execution status is unknown");
+            return;
+        }
+        if step.expected > 0
+            && acks.iter().any(|ack| {
+                matches!(ack.s_code, "" | "0") && ack.ord_id.is_empty() && ack.algo_id.is_empty()
+            })
+        {
+            self.trade_lost(
+                cx,
+                request,
+                "OKX success acknowledgement omitted native order identity",
+            );
+            return;
+        }
+        if step.collect_ids
+            && acks.len() == step.expected
+            && acks.iter().all(|ack| {
+                if ack.s_code.is_empty() || ack.s_code == "0" {
+                    (!ack.ord_id.is_empty() || !ack.algo_id.is_empty()) && ack.s_msg.is_empty()
+                } else {
+                    // 51xxx are explicit trading-rule rejections; transport/server
+                    // timeout codes do not prove that the venue rejected a write.
+                    ack.s_code.starts_with("51")
+                }
+            })
+        {
+            cx.placement_resolved(request.command);
+        }
         let errors: Vec<_> = acks
             .iter()
             .filter(|a| (!a.s_code.is_empty() && a.s_code != "0") || !a.s_msg.is_empty())
@@ -849,33 +977,36 @@ impl Okx {
             }
         }
         if step.expected > 0 && acks.len() != step.expected {
-            self.trade_failed(cx, request, "OKX write response row count mismatch");
+            self.trade_lost(cx, request, "OKX write response row count mismatch");
             return;
-        }
-        if step.collect_ids {
-            for ack in acks {
-                let id = if ack.algo_id.is_empty() {
-                    ack.ord_id
-                } else {
-                    ack.algo_id
-                };
-                if id.is_empty() {
-                    self.trade_failed(cx, request, "OKX placement response missing order ID");
-                    return;
-                }
-                job.ids.push(id.into());
-            }
         }
         job.steps.pop_front();
         self.next_write(cx, request.command);
     }
 
     pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        self.finish_failed_trade(cx, request, error, false);
+    }
+
+    pub(crate) fn trade_lost(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        self.finish_failed_trade(cx, request, error, true);
+        self.account_after_uncertain_write(cx);
+    }
+
+    fn finish_failed_trade(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+        uncertain: bool,
+    ) {
         if let Some(job) = self.trading.jobs.remove(&request.command) {
             for (id, status) in job.optimistic {
-                if cx.store.order(&id).is_some_and(|o| {
-                    matches!(o.status, OrderStatus::Updating | OrderStatus::Canceling)
-                }) {
+                if !uncertain
+                    && cx.store.order(&id).is_some_and(|o| {
+                        matches!(o.status, OrderStatus::Updating | OrderStatus::Canceling)
+                    })
+                {
                     cx.store.set_order_status(&id, status);
                 }
             }

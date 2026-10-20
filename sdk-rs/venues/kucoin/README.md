@@ -10,7 +10,8 @@ The bullet response still selects the endpoint and heartbeat timings. Native
 welcome and mandatory-pong deadlines remain independent of general data traffic:
 an early pong cannot replace welcome, and ordinary data cannot satisfy an
 outstanding ping. The Supervisor supplies the negotiated ping cadence; only
-welcome marks a session authenticated and starts subscriptions/reconciliation.
+welcome marks a session authenticated and starts subscriptions. Futures REST
+account reconciliation starts at launch and does not wait for the private socket.
 
 KuCoin Spot HF uses the same supervision policy for its public and private
 feeds. Each retry POSTs a fresh role-specific bullet token under a single-flight

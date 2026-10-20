@@ -623,12 +623,61 @@ The Rust lane streams `/fapi/v2/account.data.account` and per-symbol
 `/fapi/v2/openOrders.data` into atomic typed snapshots. Missing or malformed data
 retains the previous snapshot. New stream activity or acknowledged settings writes
 invalidates older reads. Open-order reads are paced at the authenticated client
-limit; startup orders become loaded only after every symbol has a valid snapshot.
+limit. Startup orders become loaded after every symbol's first attempt finishes;
+failed symbols emit an error, retain their existing orders, and retry independently
+without blocking the usable symbols indefinitely.
+
+Protective placement ACK IDs are not native cancellation identities, and conditional
+client IDs may be rewritten to server IDs or `0`. Accepted standalone or attached
+protection keeps trading admission until a complete post-write open-order census
+commits both normal and conditional native orders. The command then preserves the
+TS `[]` result, and a waiting cancel-all uses that authoritative open set. A
+complete empty census means no protection remains open; it does not prove whether
+the protection triggered or closed. This uses the same causal, complete-read
+authority assumption as ordinary order reconciliation, rather than assuming that
+conditional client IDs echo verbatim. Stale, failed, malformed or incomplete reads
+cannot authorize cancellation or report an empty success; they surface uncertainty
+and schedule another read. The supported native API has only single-order cancel:
+[Bitrue deprecated bulk cancellation in May 2025](https://www.bitrue.com/api_docs_includes_file/futures/index.html).
+
+Native execution `l`/`L` owns only its last-quantity interval within cumulative
+`z`, after contract-size conversion. Independent delivered intervals prevent REST
+progress from consuming delayed executions, deduplicate overlapping/replayed
+events, and allow missing middle executions to arrive out of order. Tracking keeps
+500 orders and at most 500 disjoint intervals per order; older retired intervals
+cannot be recovered. Without native last quantity, only proven cumulative quote
+prefixes may supply an interval VWAP; a last trade price never prices an entire
+blind cumulative gap.
 
 REST account positions and `origQty` / `executedQty` retain the existing base-unit
 contract. Only private WebSocket `z` / `l` and public contract volumes scale by the
-multiplier. Metadata lookups read account leverage and position type; unknown flat
-metadata fails rather than probing with a write.
+multiplier. Metadata lookups read account leverage and position type. Unknown flat leverage
+fails rather than probing with a write or guessing the market maximum. An explicit
+successful `setLeverage` acknowledgement supplies the selected leverage for a fresh
+symbol and survives empty account position snapshots; absent margin metadata defaults
+to Cross. A flat account row may omit leverage or report zero without invalidating
+balances; a positive known leverage is retained for that row, while an open position
+still requires a positive leverage. Known account margin mode remains authoritative.
+
+Rust cancellation-only batches attempt every reconciled target even when another
+ID is missing or a cancellation fails. Failed IDs remain live in the store until
+reconciliation proves otherwise; acknowledged cancellations become canceled. A partial
+failure returns a JSON error with `message`, `canceledOrderIds`, and
+`failedOrders: [{ id, error }]`. Cancel-and-replace amendments remain fail-fast.
+
+Both supported collateral coins publish full `CurrencyBalance` entries alongside
+the existing primary balance (USDT preferred, USDC fallback). Invalid snapshots retain
+both the aggregate and the per-currency state; a valid snapshot replaces the coin map.
+
+For Rust private accounts, `fetchSymbolMaxLeverage` and `updateSymbolMetadata` read
+`GET /fapi/v2/leverageBracket?contractName=...` on demand. Typed object or array responses
+must identify exactly the requested native contract and contain valid leverage tiers.
+Failed or malformed reads preserve the known market bound and report an error.
+`setLeverage` validates an authoritative bracket when one is known, otherwise sends the
+exact requested positive integer up to the venue ceiling of 125; the conservative
+startup value of 100 never silently clamps a user's request. A native maximum-leverage
+rejection updates the bound while retaining the previous account leverage. Public-only
+accounts keep their public catalog limit without attempting an authenticated read.
 
 `conditionOrder` plus `triggerType` takes precedence over the execution `type`
 (`MARKET` or `LIMIT`) when classifying conditional orders. Documented `childOrders`

@@ -73,12 +73,16 @@ fn order(extra: serde_json::Value) -> PlaceOrderOpts {
     serde_json::from_value(base).unwrap()
 }
 fn place(e: &mut TestEngine, orders: Vec<PlaceOrderOpts>) -> Vec<Action> {
+    place_with_id(e, 42, orders)
+}
+fn place_with_id(
+    e: &mut TestEngine,
+    command: safe_cex_engine::CommandId,
+    orders: Vec<PlaceOrderOpts>,
+) -> Vec<Action> {
     e.handle(
         NOW + 10.0,
-        Event::Command(Command::PlaceOrders {
-            command: 42,
-            orders,
-        }),
+        Event::Command(Command::PlaceOrders { command, orders }),
     );
     e.drain_actions().collect()
 }
@@ -281,8 +285,9 @@ fn network_failure_does_not_retry_an_order_and_releases_fifo() {
     ))
     .remove(0);
     assert!(
-        http(place(
+        http(place_with_id(
             &mut e,
+            43,
             vec![order(serde_json::json!({"clientOrderId":"second"}))]
         ))
         .is_empty()

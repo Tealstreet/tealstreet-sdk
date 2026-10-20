@@ -120,7 +120,18 @@ enum CommandIn {
         command: u32,
         mode: StpMode,
     },
+    FetchAccountTier {
+        command: u32,
+    },
+    SetAccountTier {
+        command: u32,
+        tier: String,
+    },
     FetchLeverage {
+        command: u32,
+        symbol: String,
+    },
+    FetchMaxLeverage {
         command: u32,
         symbol: String,
     },
@@ -294,7 +305,18 @@ impl From<CommandIn> for Command {
             },
             #[cfg(feature = "command-asterdex")]
             CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
+            CommandIn::FetchAccountTier { command } => Self::Venue {
+                command,
+                action: crate::VenueAction::FetchAccountTier,
+            },
+            CommandIn::SetAccountTier { command, tier } => Self::Venue {
+                command,
+                action: crate::VenueAction::SetAccountTier { tier },
+            },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
+            CommandIn::FetchMaxLeverage { command, symbol } => {
+                Self::FetchMaxLeverage { command, symbol }
+            }
             CommandIn::FetchFills {
                 command,
                 symbol,
@@ -503,6 +525,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn account_tier_ops_decode_to_venue_actions() {
+        assert_eq!(
+            decode_command(r#"{"op":"setAccountTier","command":5,"tier":"plus"}"#).unwrap(),
+            Command::Venue {
+                command: 5,
+                action: crate::VenueAction::SetAccountTier {
+                    tier: "plus".into()
+                },
+            }
+        );
+        assert_eq!(
+            decode_command(r#"{"op":"fetchAccountTier","command":6}"#).unwrap(),
+            Command::Venue {
+                command: 6,
+                action: crate::VenueAction::FetchAccountTier,
+            }
+        );
+    }
+    #[test]
     fn symbol_context_commands_follow_the_compiled_parser_features() {
         let account = decode_command(r#"{"op":"getAccount","command":77}"#);
         assert_eq!(
@@ -613,6 +654,21 @@ mod tests {
             assert!(decode_host_input(json).is_err());
             assert!(decode_command(json).is_err());
         }
+    }
+
+    #[test]
+    fn maximum_leverage_read_is_distinct_from_current_account_leverage() {
+        let json = r#"{"op":"fetchMaxLeverage","command":82,"symbol":"E-BTC-USDT"}"#;
+        let expected = Command::FetchMaxLeverage {
+            command: 82,
+            symbol: "E-BTC-USDT".into(),
+        };
+        assert_eq!(decode_command(json).unwrap(), expected);
+        assert_eq!(
+            decode_host_input(json).unwrap(),
+            HostInput::Command(expected)
+        );
+        assert!(decode_command(r#"{"op":"fetchMaxLeverage","command":82}"#).is_err());
     }
 
     fn assert_subscription_decoders_match(json: &str) {

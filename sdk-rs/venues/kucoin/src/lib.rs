@@ -12,6 +12,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Balance, Candle, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
+pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, Store, TimerId,
     Venue,
@@ -145,17 +146,6 @@ pub(crate) fn api_symbol(store: &Store, symbol: &str) -> String {
     store
         .market(symbol)
         .map_or_else(|| symbol.into(), |m| m.id.clone())
-}
-pub(crate) fn encode(value: &str) -> String {
-    let mut out = String::new();
-    for b in value.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
 }
 // Callers supply raw query values for signing; only their wire representation is escaped.
 fn encoded_path(path: &str) -> String {
@@ -361,6 +351,8 @@ impl Kucoin {
         }
         if self.credentials.is_some() {
             self.connections.push(Connection::new(Role::Private));
+            // REST reconciliation must not depend on the private socket connecting.
+            self.account_start(cx);
         } else {
             cx.store.set_balance(Balance::default());
             cx.store.set_positions(vec![]);
@@ -741,6 +733,10 @@ impl Kucoin {
 }
 
 impl Venue for Kucoin {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -1237,12 +1233,7 @@ impl Venue for Kucoin {
         self.books.get(symbol).filter(|b| b.synced).map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, b)| b.synced)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
 

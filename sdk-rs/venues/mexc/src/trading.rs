@@ -5,7 +5,9 @@ use crate::{
     wire::*,
 };
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, TimerId, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, LogLevel, Method, Response, TimerId, VenueError, num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
@@ -339,9 +341,16 @@ impl MexcFutures {
                 stop_loss_type: Option<u8>,
             }
             let take = opts.kind == OrderType::TakeProfit;
+            let vol = num::adjust(
+                p.contracts / m.contract_size.unwrap_or(1.0),
+                self.volume_units.get(&opts.symbol).copied().unwrap_or(1.0),
+            );
+            if !vol.is_finite() || vol <= 0.0 {
+                return Err("MEXC full-position stop requires a positive native volume".into());
+            }
             let body = json(&Stop {
                 position_id,
-                vol: p.contracts / m.contract_size.unwrap_or(1.0),
+                vol,
                 loss_trend: if take {
                     1
                 } else {
@@ -634,8 +643,9 @@ impl MexcFutures {
         };
         let (command, steps, gap) = match command {
             Command::PlaceOrders { command, orders } => {
-                let result = self.place_steps(cx, orders, true);
-                (command, result, 1500.0)
+                let multiple = orders.len() > 1;
+                let result = self.place_steps(cx, orders, multiple);
+                (command, result, if multiple { 1500.0 } else { 450.0 })
             }
             Command::CancelOrders { command, ids } => (command, self.cancel_steps(cx, &ids), 0.0),
             Command::AmendOrder {
@@ -941,28 +951,15 @@ impl MexcFutures {
     pub fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, error: &str) {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
-            #[derive(Serialize)]
-            #[serde(rename_all = "camelCase")]
-            struct Partial<'a> {
-                message: &'a str,
-                partial_order_ids: &'a [String],
-                partial_order_count: usize,
-                total_order_count: usize,
-                failed_order_index: usize,
-            }
-            let message = if job.ids.is_empty() {
-                error.to_owned()
+            // Whole failures still use the plain path until MEXC migrates to `fail`.
+            if job.ids.is_empty() {
+                cx.done(command, Err(error.to_owned()));
             } else {
-                json(&Partial {
-                    message: error,
-                    partial_order_ids: &job.ids,
-                    partial_order_count: job.ids.len(),
-                    total_order_count: job.total_orders,
-                    failed_order_index: job.failed_index.unwrap_or(job.ids.len()),
-                })
-                .unwrap()
-            };
-            cx.done(command, Err(message));
+                let failed_index = job.failed_index.unwrap_or(job.ids.len());
+                let error =
+                    VenueError::new(error).partial(&job.ids, job.total_orders, failed_index);
+                cx.fail(command, error);
+            }
         }
         self.advance_trade(cx);
     }

@@ -928,3 +928,52 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
         assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
     }
 }
+#[test]
+fn market_entry_with_tpsl_names_the_unsupported_legs() {
+    let (mut e, _) = ready();
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 41,
+            orders: vec![serde_json::from_str(
+                r#"{"symbol":"PF_XBTUSD","type":"market","side":"buy","amount":1,"stopLoss":90}"#,
+            )
+            .unwrap()],
+        }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 41, result: Err(m) }) if m.contains("take-profit/stop-loss legs on a market entry"))));
+}
+#[test]
+fn zero_bracket_prices_mean_no_leg_on_market_and_limit_entries() {
+    for (command, kind) in [
+        (42, r#""type":"market""#),
+        (43, r#""type":"limit","price":100"#),
+    ] {
+        let (mut e, _) = ready();
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![serde_json::from_str(&format!(
+                    r#"{{"symbol":"PF_XBTUSD",{kind},"side":"buy","amount":1,"stopLoss":0,"takeProfit":0}}"#
+                ))
+                .unwrap()],
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let writes = actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+            .count();
+        assert_eq!(writes, 1, "{kind}: only the entry is sent");
+        assert!(
+            !actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            )),
+            "{kind}"
+        );
+    }
+}

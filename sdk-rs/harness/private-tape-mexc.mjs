@@ -193,7 +193,9 @@ command(550, 'placeOrders', { orders: [
 ] });
 command(600, 'fetchLeverage', { symbol: 'BTCUSDT' });
 command(700, 'placeOrders', { orders: [{ symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 20, price: 59000 }] });
-// The reference may attempt the market-maker batch API before its fallback.
+// The TS batch API attempts the market-maker route even for a singleton.
+// Rust uses the paced single-submit path directly; TS's rejected attempt is
+// independently required and checked, while the accepted submit is shared.
 http(
   'POST',
   '/api/v1/private/order/submit_batch',
@@ -212,6 +214,7 @@ http(
       stpMode: 0,
     },
   ],
+  { impl: 'ts' },
 );
 http('POST', '/api/v1/private/order/submit', null, envelope(`@${ids.placed}`), {
   symbol: 'BTC_USDT',

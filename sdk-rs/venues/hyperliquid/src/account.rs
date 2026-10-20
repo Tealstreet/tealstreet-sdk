@@ -297,14 +297,24 @@ impl Hyperliquid {
             .markets()
             .iter()
             .enumerate()
-            .map(|(i, _)| {
+            .map(|(i, m)| {
+                // HIP-3 assets get no activeAssetData, so this seed is what writes start from.
+                let isolated = self.isolated_only.contains(&m.symbol);
                 (
                     i as u32,
                     MarketSetting {
-                        leverage: if self.spot { 1.0 } else { 20.0 },
+                        leverage: if self.spot {
+                            1.0
+                        } else {
+                            20f64.min(m.limits.leverage.max)
+                        },
                         buy_leverage: None,
                         sell_leverage: None,
-                        margin_type: Some(MarginType::Cross),
+                        margin_type: Some(if isolated {
+                            MarginType::Isolated
+                        } else {
+                            MarginType::Cross
+                        }),
                     },
                 )
             })
@@ -315,6 +325,7 @@ impl Hyperliquid {
             self.account.builder_approved = Some(false);
             if !self.options.public_data_only && self.user().is_some() {
                 self.refresh_spot(cx, true);
+                self.refresh_orders_scope(cx, "");
                 self.account.sync_timer = Some(cx.set_timer(10_000.0));
             }
             return;
@@ -397,6 +408,7 @@ impl Hyperliquid {
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.spot {
             self.refresh_spot(cx, true);
+            self.refresh_orders_scope(cx, "");
             return;
         }
         let mut dexes = vec![String::new()];
@@ -426,6 +438,7 @@ impl Hyperliquid {
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.spot {
             self.refresh_spot(cx, true);
+            self.refresh_orders_scope(cx, "");
             return;
         }
         let mut dexes = vec![String::new()];
@@ -455,7 +468,9 @@ impl Hyperliquid {
     }
     pub(crate) fn schedule_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.spot {
+            // Spot ignores orderUpdates, so open orders are only proven by this read.
             self.refresh_spot(cx, true);
+            self.refresh_orders_scope(cx, "");
             return;
         }
         if self.account.refresh_timer.is_none() && self.user().is_some() {
@@ -886,6 +901,7 @@ impl Hyperliquid {
         }
         if self.account.sync_timer == Some(timer) && self.spot {
             self.refresh_spot(cx, false);
+            self.refresh_orders_scope(cx, "");
             self.account.sync_timer = Some(cx.set_timer(10_000.0));
             return;
         }
@@ -1605,9 +1621,12 @@ impl Hyperliquid {
                     self.record_spot_fill(&fill, &symbol);
                     let id = fill.oid.to_string();
                     self.amend_source_filled(&id);
+                    // An open-order read sent before this fill must not restore the order.
+                    self.acknowledge_order_write(cx, &symbol);
                     if let Some(order) = cx.store.order(&id) {
                         let remaining = (order.remaining - fill.sz).max(0.0);
                         if remaining == 0.0 {
+                            self.account.suppressed.insert(id.clone(), cx.now);
                             cx.store.remove_orders(&[&id]);
                         } else {
                             cx.store.update_order(&id, |o| {

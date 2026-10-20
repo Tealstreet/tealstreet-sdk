@@ -112,6 +112,7 @@ impl Polymarket {
             Command::FetchLeverage { command, .. } => {
                 cx.done(command, Ok(r#"{"buyLeverage":1,"sellLeverage":1}"#.into()))
             }
+            Command::FetchMaxLeverage { command, .. } => cx.done(command, Ok("1".into())),
             Command::SetLeverage { command, .. }
             | Command::SetMarginType { command, .. }
             | Command::SetPositionMode { command, .. } => cx.done(command, Ok("[]".into())),

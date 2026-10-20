@@ -11,9 +11,24 @@ pub struct Harness {
 }
 impl Harness {
     pub fn new() -> Self {
-        Self::with_broker_attribution(false)
+        Self::new_at(0.0)
     }
+    pub fn new_at(now: f64) -> Self {
+        Self::with_instruments_and_broker_at(INSTRUMENT, false, now)
+    }
+    #[allow(dead_code)] // Used by the trading suite; other suites share this module.
     pub fn with_broker_attribution(broker_attribution: bool) -> Self {
+        Self::with_instruments_and_broker_at(INSTRUMENT, broker_attribution, 0.0)
+    }
+    #[allow(dead_code)]
+    pub fn with_instruments(instruments: &str) -> Self {
+        Self::with_instruments_and_broker_at(instruments, false, 0.0)
+    }
+    fn with_instruments_and_broker_at(
+        instruments: &str,
+        broker_attribution: bool,
+        now: f64,
+    ) -> Self {
         let mut e = Engine::new(Blofin::new(Options {
             broker_attribution,
             key: Some("key".into()),
@@ -21,7 +36,7 @@ impl Harness {
             passphrase: Some("pass".into()),
             ..Options::default()
         }));
-        e.start(0.0);
+        e.start(now);
         let mut h = Self {
             e,
             pending: vec![],
@@ -30,8 +45,10 @@ impl Harness {
             tick: TimerId(0),
         };
         h.collect();
-        h.reply("instruments", INSTRUMENT);
-        h.reply("tickers",r#"{"code":"0","data":[{"instId":"BTC-USDT","last":"60000","open24h":"59000","bidPrice":"59999","askPrice":"60001","volCurrency24h":"1","vol24h":"60000"}]}"#);
+        let instrument_request = h.take("instruments");
+        h.respond_at(instrument_request, instruments, now);
+        let tickers = h.take("tickers");
+        h.respond_at(tickers,r#"{"code":"0","data":[{"instId":"BTC-USDT","last":"60000","open24h":"59000","bidPrice":"59999","askPrice":"60001","volCurrency24h":"1","vol24h":"60000"}]}"#,now);
         h.private = h
             .actions
             .iter()
@@ -44,7 +61,7 @@ impl Harness {
             .actions
             .iter()
             .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == 10_000.0 => Some(*timer),
+                Action::SetTimer { timer, at_ms } if *at_ms == now + 10_000.0 => Some(*timer),
                 _ => None,
             })
             .unwrap();
@@ -72,8 +89,11 @@ impl Harness {
         self.respond(r, body);
     }
     pub fn respond(&mut self, r: HttpRequest, body: &str) {
+        self.respond_at(r, body, 0.0);
+    }
+    fn respond_at(&mut self, r: HttpRequest, body: &str, now: f64) {
         self.e.handle(
-            0.0,
+            now,
             Event::HttpResponse {
                 request: r.id,
                 response: Response {

@@ -19,6 +19,8 @@ struct Session {
     private: Option<SocketId>,
     urls: Vec<String>,
     kind: &'static str,
+    positions: Option<String>,
+    logs: Vec<String>,
 }
 impl Session {
     fn new(kind: &'static str, spot: bool) -> Self {
@@ -39,6 +41,8 @@ impl Session {
             private: None,
             urls: vec![],
             kind,
+            positions: None,
+            logs: vec![],
         }
     }
     fn reply(&mut self, r: HttpRequest, status: u16, body: &str) {
@@ -67,6 +71,9 @@ impl Session {
                 Action::WsConnect { socket, url, .. } if url.contains("ws-user") => {
                     self.private = Some(socket)
                 }
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
+                    self.logs.push(message.to_string())
+                }
                 _ => {}
             }
         }
@@ -92,9 +99,13 @@ impl Session {
         } else if url.contains("/intx/portfolio/") {
             INTX_BALANCE.into()
         } else if url.contains("/intx/positions/") {
-            INTX_POSITIONS.into()
+            self.positions
+                .clone()
+                .unwrap_or_else(|| INTX_POSITIONS.into())
         } else if url.contains("/cfm/positions") {
-            CFM_POSITIONS.into()
+            self.positions
+                .clone()
+                .unwrap_or_else(|| CFM_POSITIONS.into())
         } else if url.contains("/orders/historical/batch") {
             r#"{"orders":[],"has_next":false}"#.into()
         } else if url.contains("/products") {
@@ -142,6 +153,17 @@ impl Session {
                 text: &text,
             },
         );
+    }
+}
+impl Session {
+    fn next_request(&mut self) -> HttpRequest {
+        for _ in 0..10 {
+            if let Some(r) = self.collect().pop() {
+                return r;
+            }
+            self.fire();
+        }
+        panic!("no request");
     }
 }
 fn user_order(id: &str, product: &str, status: &str, filled: &str, left: &str) -> String {
@@ -855,4 +877,157 @@ fn stale_sizing_failure_cannot_deactivate_a_replacement_socket() {
         !s.e.drain_actions()
             .any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Deactivate)))
     );
+}
+
+#[test]
+fn unmappable_cfm_position_row_neither_blocks_startup_nor_invents_a_flat_position() {
+    let mut s = Session::new("DEFAULT", false);
+    s.positions = Some(
+        r#"{"positions":[{"product_id":"BTC-CDE","side":"UNKNOWN","number_of_contracts":"2","avg_entry_price":"100","current_price":"90","unrealized_pnl":"0.2"}]}"#.into(),
+    );
+    let s = s.ready();
+    assert!(s.e.store().loaded().positions);
+    assert!(s.e.store().position("BTC-CDE").is_none());
+    assert!(
+        s.logs
+            .iter()
+            .any(|l| l.contains("skipped unmappable position BTC-CDE"))
+    );
+}
+#[test]
+fn unmappable_cfm_position_row_keeps_the_known_position() {
+    let mut s = Session::new("DEFAULT", false).ready();
+    s.positions = Some(
+        r#"{"positions":[{"product_id":"BTC-CDE","side":"UNKNOWN","number_of_contracts":"5","avg_entry_price":"100","current_price":"90","unrealized_pnl":"0.2"}]}"#.into(),
+    );
+    let before = s.urls.len();
+    while !s.urls[before..]
+        .iter()
+        .any(|u| u.contains("/cfm/positions"))
+    {
+        for r in s.collect() {
+            s.answer(r);
+        }
+        s.fire();
+    }
+    for r in s.collect() {
+        s.answer(r);
+    }
+    assert_eq!(s.e.store().position("BTC-CDE").unwrap().contracts, 0.02);
+}
+#[test]
+fn portfolio_probe_advances_past_a_missing_portfolio() {
+    let mut s = Session::new("INTX", false);
+    let r = s.collect().pop().unwrap();
+    assert!(r.url.ends_with("/portfolios"));
+    s.reply(
+        r,
+        200,
+        r#"{"portfolios":[{"uuid":"gone","type":"DEFAULT"},{"uuid":"portfolio-one","type":"INTX"}]}"#,
+    );
+    let r = s.next_request();
+    assert!(r.url.ends_with("/portfolios/gone"));
+    s.reply(r, 404, r#"{"error":"NOT_FOUND"}"#);
+    let r = s.next_request();
+    assert!(r.url.ends_with("/portfolios/portfolio-one"), "{}", r.url);
+}
+#[test]
+fn portfolio_probe_retries_the_same_portfolio_on_server_failure() {
+    let mut s = Session::new("INTX", false);
+    let r = s.collect().pop().unwrap();
+    s.reply(
+        r,
+        200,
+        r#"{"portfolios":[{"uuid":"busy","type":"DEFAULT"},{"uuid":"portfolio-one","type":"INTX"}]}"#,
+    );
+    let r = s.next_request();
+    s.reply(r, 503, "unavailable");
+    let r = s.next_request();
+    assert!(r.url.ends_with("/portfolios/busy"), "{}", r.url);
+}
+#[test]
+fn flat_intx_row_without_a_side_clears_the_position() {
+    let mut s = Session::new("INTX", false).ready();
+    assert_eq!(
+        s.e.store().position("BTC-PERP-INTX").unwrap().contracts,
+        2.0
+    );
+    s.positions = Some(
+        r#"{"positions":[{"symbol":"BTC-PERP-INTX","position_side":"POSITION_SIDE_UNKNOWN","net_size":"0","entry_vwap":{"value":"0"},"mark_price":{"value":"110"},"liquidation_price":{"value":"0"},"leverage":"10"}]}"#.into(),
+    );
+    for _ in 0..20 {
+        for r in s.collect() {
+            s.answer(r);
+        }
+        if s.e.store().position("BTC-PERP-INTX").unwrap().contracts == 0.0 {
+            return;
+        }
+        s.fire();
+    }
+    panic!("flat position row was not applied");
+}
+#[test]
+fn unmappable_update_for_an_unknown_order_does_not_spoil_the_user_snapshot() {
+    let mut s = Session::new("INTX", false).ready();
+    let site = r#"{"order_id":"twap-1","client_order_id":"","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"SELL","order_type":"Twap","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"120","stop_price":"0","avg_price":"0"}"#;
+    s.message(0, "update", &format!("[{site}]"));
+    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    s.message(1, "snapshot", &format!("[{row}]"));
+    assert!(s.e.store().order("order-a").is_some());
+}
+#[test]
+fn snapshot_holding_only_a_site_order_still_removes_ended_orders() {
+    let mut s = Session::new("INTX", false).ready();
+    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    s.message(0, "snapshot", &format!("[{row}]"));
+    assert!(s.e.store().order("order-a").is_some());
+    let site = r#"{"order_id":"twap-1","client_order_id":"","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"SELL","order_type":"Twap","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"120","stop_price":"0","avg_price":"0"}"#;
+    s.message(1, "snapshot", &format!("[{site}]"));
+    assert!(s.e.store().order("order-a").is_none());
+}
+#[test]
+fn snapshot_holding_only_an_order_on_an_unloaded_market_still_removes_ended_orders() {
+    let mut s = Session::new("INTX", false).ready();
+    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    s.message(0, "snapshot", &format!("[{row}]"));
+    assert!(s.e.store().order("order-a").is_some());
+    let other = user_order("spot-1", "ETH-USD", "OPEN", "0", "1");
+    s.message(1, "snapshot", &format!("[{other}]"));
+    assert!(s.e.store().order("order-a").is_none());
+}
+#[test]
+fn unmappable_update_for_a_staged_order_spoils_the_snapshot() {
+    let mut s = Session::new("INTX", false).ready();
+    let rows = (0..50)
+        .map(|i| user_order(&format!("ours-{i}"), "BTC-PERP-INTX", "OPEN", "0", "1"))
+        .collect::<Vec<_>>()
+        .join(",");
+    s.message(0, "snapshot", &format!("[{rows}]"));
+    let update = r#"{"order_id":"ours-0","client_order_id":"","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"BUY","order_type":"Twap","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"100","stop_price":"0","avg_price":"0"}"#;
+    s.message(1, "update", &format!("[{update}]"));
+    s.message(2, "snapshot", "[]");
+    assert!(s.e.store().order("ours-0").is_none());
+}
+#[test]
+fn skipped_position_row_beside_a_mapped_row_does_not_duplicate_the_position() {
+    let mut s = Session::new("INTX", false).ready();
+    s.positions = Some(
+        r#"{"positions":[{"symbol":"BTC-PERP-INTX","position_side":"POSITION_SIDE_LONG","net_size":"3","entry_vwap":{"value":"100"},"mark_price":{"value":"110"},"liquidation_price":{"value":"50"},"leverage":"10"},{"symbol":"BTC-PERP-INTX","position_side":"BOGUS","net_size":"1","entry_vwap":{"value":"100"},"mark_price":{"value":"110"},"liquidation_price":{"value":"50"},"leverage":"10"}]}"#.into(),
+    );
+    for _ in 0..20 {
+        for r in s.collect() {
+            s.answer(r);
+        }
+        if s.e.store().position("BTC-PERP-INTX").unwrap().contracts == 3.0 {
+            break;
+        }
+        s.fire();
+    }
+    let held =
+        s.e.store()
+            .positions()
+            .iter()
+            .filter(|p| p.symbol == "BTC-PERP-INTX")
+            .count();
+    assert_eq!(held, 1);
 }

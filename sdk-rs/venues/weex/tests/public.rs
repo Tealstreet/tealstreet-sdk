@@ -429,3 +429,69 @@ fn public_candle_reads_wait_for_the_shared_ip_ban() {
     e.handle(2011.0, Event::TimerFired { timer });
     request(e.drain_actions().collect(), "/market/klines");
 }
+#[test]
+fn null_or_malformed_public_rows_are_skipped_without_stopping_startup() {
+    let mut e = engine();
+    e.start(0.0);
+    let id = request(e.drain_actions().collect(), "exchangeInfo");
+    let info = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"makerFeeRate":null,"takerFeeRate":"0.0006"},{"symbol":"ETHUSDT","baseAsset":"ETH","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":2,"quantityPrecision":3},{"symbol":"BADUSDT","baseAsset":null,"quoteAsset":"USDT","marginAsset":"USDT"}]}"#;
+    response(&mut e, id, info);
+    assert!(e.store().loaded().markets);
+    assert_eq!(e.store().markets().len(), 2);
+    assert_eq!(e.store().market("BTCUSDT").unwrap().maker_fee, Some(0.0));
+    let actions: Vec<_> = e.drain_actions().collect();
+    let warnings: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        warnings.iter().any(|w| w.contains("BADUSDT")),
+        "{warnings:?}"
+    );
+    let daily = request(actions.clone(), "24hr");
+    let book = request(actions, "bookTicker");
+    response(
+        &mut e,
+        daily,
+        r#"[{"symbol":"BTCUSDT","lastPrice":"102623.90","openInterest":null,"volume":null,"quoteVolume":"1"},{"symbol":"ETHUSDT","lastPrice":null}]"#,
+    );
+    response(
+        &mut e,
+        book,
+        r#"[{"symbol":"BTCUSDT","bidPrice":null,"askPrice":"102623.9"},{"symbol":"ETHUSDT","bidPrice":"2999","askPrice":"3000"}]"#,
+    );
+    assert!(e.store().loaded().tickers);
+    let btc = e.store().ticker("BTCUSDT").unwrap();
+    // BTC's book row was skipped, so its bid falls back to the last price.
+    assert_eq!((btc.last, btc.bid, btc.volume), (102623.9, 102623.9, 0.0));
+    // ETH has only a book row: no last/mark/index, so no ticker.
+    assert!(e.store().ticker("ETHUSDT").is_none());
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+}
+#[test]
+fn exchange_info_with_only_malformed_rows_retries_startup() {
+    let mut e = engine();
+    e.start(0.0);
+    let id = request(e.drain_actions().collect(), "exchangeInfo");
+    response(
+        &mut e,
+        id,
+        r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":null,"quoteAsset":"USDT","marginAsset":"USDT"}]}"#,
+    );
+    assert!(!e.store().loaded().markets);
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .expect("startup retry");
+    e.handle(1_773_295_710_000.0, Event::TimerFired { timer });
+    request(e.drain_actions().collect(), "exchangeInfo");
+}

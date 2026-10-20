@@ -8,9 +8,10 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
-    num,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue, num,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -32,12 +33,12 @@ pub enum Pending {
     Markets {
         rows: Vec<Market>,
         ranges: HashMap<String, f64>,
-        bad: bool,
+        skipped: account::Skipped,
     },
     Tickers {
         rows: Vec<Ticker>,
         indexes: HashMap<String, u32>,
-        bad: bool,
+        skipped: account::Skipped,
     },
     Funding {
         rows: Vec<(String, f64, f64)>,
@@ -56,11 +57,7 @@ pub enum Pending {
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    received: f64,
     ping_at: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
 }
 struct Buffered {
     time: f64,
@@ -89,6 +86,7 @@ pub struct Woo {
     options: Options,
     rest: &'static str,
     public: Connection,
+    public_supervisor: Supervisor,
     depth: HashMap<String, Depth>,
     candles: HashMap<(String, String), CandleState>,
     generation: u64,
@@ -207,6 +205,12 @@ impl Woo {
             },
             options,
             public: Connection::default(),
+            public_supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(6_000.0),
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
             depth: HashMap::new(),
             candles: HashMap::new(),
             generation: 0,
@@ -227,7 +231,7 @@ impl Woo {
                 Pending::Tickers {
                     indexes: HashMap::new(),
                     rows: Vec::new(),
-                    bad: false,
+                    skipped: Default::default(),
                 },
             )
         } else {
@@ -236,7 +240,7 @@ impl Woo {
                 Pending::Markets {
                     rows: Vec::new(),
                     ranges: HashMap::new(),
-                    bad: false,
+                    skipped: Default::default(),
                 },
             )
         };
@@ -330,6 +334,10 @@ impl Woo {
         } else {
             "wss://wss.woox.io/ws/stream/"
         };
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public_supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_channel(
             format!("{host}{}", self.options.application_id.as_deref().unwrap_or("undefined")),
             SocketChannel::Public,
@@ -383,6 +391,7 @@ impl Woo {
         state.generation = self.generation;
         state.book.clear();
         state.sync = Sync::Retry(cx.set_timer(1000.0));
+        cx.book_changed(symbol);
     }
     fn apply(book: &mut Book, delta: Delta) {
         for (side, rows) in [(BookSide::Bids, delta.bids), (BookSide::Asks, delta.asks)] {
@@ -407,7 +416,11 @@ impl Woo {
             Sync::Buffer(rows) if rows.len() < 2000 => rows.push(Buffered { time, delta }),
             Sync::Buffer(_) => self.book_retry(cx, symbol),
             Sync::Live(previous) => {
-                if time < *previous {
+                if time <= *previous {
+                    return;
+                }
+                if delta.previous.is_some_and(|p| p != *previous) {
+                    self.book_retry(cx, symbol);
                     return;
                 }
                 *previous = time;
@@ -595,6 +608,10 @@ impl Woo {
 }
 
 impl Venue for Woo {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -613,14 +630,12 @@ impl Venue for Woo {
             return;
         }
         self.public.open = true;
-        self.public.received = cx.now;
-        self.public.attempts = 0;
         self.public.ping_at = cx.now;
+        self.public_supervisor.opened(cx);
         cx.send(socket, r#"{"event":"ping"}"#);
         for topic in ["tickers", "bbos", "markprices"] {
             self.topic(cx, topic, true);
         }
-        self.public.watchdog = Some(cx.set_timer(6000.0));
         let symbols: Vec<_> = self.depth.keys().cloned().collect();
         for symbol in symbols {
             if let Some(m) = cx.store.market(&symbol) {
@@ -651,7 +666,7 @@ impl Venue for Woo {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.received = cx.now;
+        self.public_supervisor.received(cx.now);
         if let Ok(msg) = serde_json::from_str::<TickerMessage<'_>>(text)
             && msg.event.is_empty()
             && matches!(msg.topic.as_ref(), "tickers" | "bbos" | "markprices")
@@ -706,15 +721,9 @@ impl Venue for Woo {
         }
         self.public.socket = None;
         self.public.open = false;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
-        self.public.attempts += 1;
-        self.public.reconnect =
-            Some(cx.set_timer(
-                (1000.0 * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30_000.0),
-            ));
-        for state in self.depth.values_mut() {
+        self.public_supervisor.retry(cx);
+        for (symbol, state) in &mut self.depth {
+            cx.book_changed(symbol);
             self.generation += 1;
             state.generation = self.generation;
             state.book.clear();
@@ -726,16 +735,19 @@ impl Venue for Woo {
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Trade(_) => (),
             Pending::Account(request) => self.account_item(cx, request, item),
-            Pending::Markets { rows, ranges, bad } => {
+            Pending::Markets {
+                rows,
+                ranges,
+                skipped,
+            } => {
                 let raw = match serde_json::from_str::<Instrument<'_>>(item) {
                     Ok(raw) => raw,
                     Err(_) => {
-                        if serde_json::from_str::<Symbol<'_>>(item)
-                            .is_ok_and(|s| !s.symbol.starts_with("PERP_"))
-                        {
-                            return;
+                        match serde_json::from_str::<Symbol<'_>>(item) {
+                            Ok(s) if !s.symbol.starts_with("PERP_") => (),
+                            Ok(s) => skipped.add(Some(&s.symbol)),
+                            Err(_) => skipped.add(None),
                         }
-                        *bad = true;
                         return;
                     }
                 };
@@ -751,7 +763,7 @@ impl Venue for Woo {
                     || raw.base_min <= 0.0
                     || raw.base_max < raw.base_min
                 {
-                    *bad = true;
+                    skipped.add(Some(&raw.symbol));
                     return;
                 }
                 let symbol = compact(&raw.symbol);
@@ -796,16 +808,19 @@ impl Venue for Woo {
                     maker_fee: None,
                 });
             }
-            Pending::Tickers { rows, indexes, bad } => {
+            Pending::Tickers {
+                rows,
+                indexes,
+                skipped,
+            } => {
                 let raw = match serde_json::from_str::<Statistics<'_>>(item) {
                     Ok(raw) => raw,
                     Err(_) => {
-                        if serde_json::from_str::<Symbol<'_>>(item)
-                            .is_ok_and(|s| cx.store.market(&compact(&s.symbol)).is_none())
-                        {
-                            return;
+                        match serde_json::from_str::<Symbol<'_>>(item) {
+                            Ok(s) if cx.store.market(&compact(&s.symbol)).is_none() => (),
+                            Ok(s) => skipped.add(Some(&s.symbol)),
+                            Err(_) => skipped.add(None),
                         }
-                        *bad = true;
                         return;
                     }
                 };
@@ -813,8 +828,8 @@ impl Venue for Woo {
                 let Some(m) = cx.store.market(&symbol) else {
                     return;
                 };
-                if raw.open <= 0.0 || raw.close <= 0.0 {
-                    *bad = true;
+                if raw.close <= 0.0 {
+                    skipped.add(Some(&raw.symbol));
                     return;
                 }
                 indexes.insert(raw.symbol.to_string(), rows.len() as u32);
@@ -826,8 +841,11 @@ impl Venue for Woo {
                     last: raw.close,
                     mark: raw.mark_price,
                     index: raw.index_price.unwrap_or(f64::NAN),
-                    percentage: num::round_half_up((raw.close - raw.open) / raw.open * 10000.0)
-                        / 100.0,
+                    percentage: if raw.open > 0.0 {
+                        num::round_half_up((raw.close - raw.open) / raw.open * 10000.0) / 100.0
+                    } else {
+                        0.0
+                    },
                     open_interest: raw.open_interest,
                     funding_rate: raw.last_funding_rate,
                     funding_time: raw.next_funding_time,
@@ -880,14 +898,21 @@ impl Venue for Woo {
         match pending {
             Pending::History(_) | Pending::Trade(_) => unreachable!(),
             Pending::Account(_) => unreachable!(),
-            Pending::Markets { rows, ranges, bad } => {
-                if bad || rows.is_empty() {
+            Pending::Markets {
+                rows,
+                ranges,
+                skipped,
+            } => {
+                if let Some(text) = skipped.summary("markets") {
+                    cx.log(LogLevel::Warning, text);
+                }
+                if rows.is_empty() {
                     self.on_request_failed(
                         cx,
                         Pending::Markets {
                             rows: vec![],
                             ranges: HashMap::new(),
-                            bad: false,
+                            skipped: Default::default(),
                         },
                         "Invalid WOO markets",
                     );
@@ -898,14 +923,21 @@ impl Venue for Woo {
                 self.seed_attempts = 0;
                 self.seed(cx, true);
             }
-            Pending::Tickers { rows, indexes, bad } => {
-                if bad || rows.is_empty() {
+            Pending::Tickers {
+                rows,
+                indexes,
+                skipped,
+            } => {
+                if let Some(text) = skipped.summary("tickers") {
+                    cx.log(LogLevel::Warning, text);
+                }
+                if rows.is_empty() {
                     self.on_request_failed(
                         cx,
                         Pending::Tickers {
                             indexes: HashMap::new(),
                             rows: vec![],
-                            bad: false,
+                            skipped: Default::default(),
                         },
                         "Invalid WOO tickers",
                     );
@@ -988,7 +1020,14 @@ impl Venue for Woo {
                 }
                 let mut last = raw.timestamp;
                 for b in buffer {
-                    if b.time > raw.timestamp && b.time >= last {
+                    if b.time > last {
+                        // The first delta may overlap a REST snapshot between WS ticks.
+                        if b.delta.previous.is_some_and(|previous| {
+                            previous > last || (last > raw.timestamp && previous != last)
+                        }) {
+                            self.book_retry(cx, &symbol);
+                            return;
+                        }
                         last = b.time;
                         Self::apply(&mut state.book, b.delta);
                     }
@@ -1043,25 +1082,24 @@ impl Venue for Woo {
             self.funding = Some(cx.set_timer(60_000.0));
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect_public(cx);
-            return;
-        }
-        if self.public.watchdog == Some(timer) {
-            if cx.now - self.public.received >= 20_000.0 {
-                if let Some(s) = self.public.socket {
-                    cx.close(s);
-                    self.on_close(cx, s, 1006);
-                }
-            } else {
+        match self.public_supervisor.on_timer(cx, timer) {
+            SocketTick::Unhandled => (),
+            SocketTick::Reconnect => return self.connect_public(cx),
+            SocketTick::Ping => {
                 if let Some(s) = self.public.socket {
                     self.public.ping_at = cx.now;
                     cx.send(s, r#"{"event":"ping"}"#);
                 }
-                self.public.watchdog = Some(cx.set_timer(6000.0));
+                return;
             }
-            return;
+            SocketTick::TimedOut(_) => {
+                if let Some(s) = self.public.socket {
+                    cx.close(s);
+                    self.on_close(cx, s, 1006);
+                }
+                return;
+            }
+            SocketTick::Handled => return,
         }
         let retry = self.depth.iter().find_map(|(s, d)| {
             if matches!(d.sync,Sync::Retry(t) if t==timer) {
@@ -1150,12 +1188,7 @@ impl Venue for Woo {
             .map(|s| &s.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.depth
-                .iter()
-                .filter(|(_, s)| matches!(s.sync, Sync::Live(_)))
-                .map(|(s, d)| (s.as_str(), &d.book)),
-        )
+        Box::new(self.depth.iter().map(|(s, d)| (s.as_str(), &d.book)))
     }
 }
 
