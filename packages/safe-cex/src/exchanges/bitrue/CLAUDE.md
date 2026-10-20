@@ -625,6 +625,28 @@ retains the previous snapshot. New stream activity or acknowledged settings writ
 invalidates older reads. Open-order reads are paced at the authenticated client
 limit; startup orders become loaded only after every symbol has a valid snapshot.
 
+Protective placement ACK IDs are not native cancellation identities, and conditional
+client IDs may be rewritten to server IDs or `0`. Accepted standalone or attached
+protection keeps trading admission until a complete post-write open-order census
+commits both normal and conditional native orders. The command then preserves the
+TS `[]` result, and a waiting cancel-all uses that authoritative open set. A
+complete empty census means no protection remains open; it does not prove whether
+the protection triggered or closed. This uses the same causal, complete-read
+authority assumption as ordinary order reconciliation, rather than assuming that
+conditional client IDs echo verbatim. Stale, failed, malformed or incomplete reads
+cannot authorize cancellation or report an empty success; they surface uncertainty
+and schedule another read. The supported native API has only single-order cancel:
+[Bitrue deprecated bulk cancellation in May 2025](https://www.bitrue.com/api_docs_includes_file/futures/index.html).
+
+Native execution `l`/`L` owns only its last-quantity interval within cumulative
+`z`, after contract-size conversion. Independent delivered intervals prevent REST
+progress from consuming delayed executions, deduplicate overlapping/replayed
+events, and allow missing middle executions to arrive out of order. Tracking keeps
+500 orders and at most 500 disjoint intervals per order; older retired intervals
+cannot be recovered. Without native last quantity, only proven cumulative quote
+prefixes may supply an interval VWAP; a last trade price never prices an entire
+blind cumulative gap.
+
 REST account positions and `origQty` / `executedQty` retain the existing base-unit
 contract. Only private WebSocket `z` / `l` and public contract volumes scale by the
 multiplier. Metadata lookups read account leverage and position type; unknown flat

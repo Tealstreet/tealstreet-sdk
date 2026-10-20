@@ -99,6 +99,7 @@ pub struct Account {
     quotes: HashMap<String, (f64, f64)>,
     execution_fills: HashMap<String, f64>,
     execution_quotes: HashMap<String, (f64, f64)>,
+    execution_intervals: HashMap<String, Executions>,
     leverage_queries: Vec<(CommandId, String)>,
     progress_queue: VecDeque<String>,
     terminal: HashMap<String, OrderStatus>,
@@ -109,6 +110,40 @@ struct OrderProgress {
     filled: f64,
     amount: f64,
     time: f64,
+}
+#[derive(Default)]
+struct Executions {
+    floor: f64,
+    intervals: Vec<(f64, f64)>,
+}
+impl Executions {
+    fn take(&mut self, start: f64, end: f64) -> f64 {
+        let start = start.max(self.floor);
+        if end <= start {
+            return 0.0;
+        }
+        let mut amount = end - start;
+        for &(from, to) in &self.intervals {
+            amount -= (end.min(to) - start.max(from)).max(0.0);
+        }
+        self.intervals.push((start, end));
+        self.intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut merged = 0;
+        for index in 0..self.intervals.len() {
+            let interval = self.intervals[index];
+            if merged > 0 && interval.0 <= self.intervals[merged - 1].1 {
+                self.intervals[merged - 1].1 = self.intervals[merged - 1].1.max(interval.1);
+            } else {
+                self.intervals[merged] = interval;
+                merged += 1;
+            }
+        }
+        self.intervals.truncate(merged);
+        if self.intervals.len() > HISTORY_LIMIT {
+            self.floor = self.intervals.remove(0).1;
+        }
+        decimal(amount.max(0.0))
+    }
 }
 
 #[derive(Deserialize)]
@@ -263,6 +298,8 @@ struct OrderEvent<'a> {
     #[serde(default, alias = "executedQty")]
     z: Number,
     #[serde(default)]
+    l: Option<Number>,
+    #[serde(default)]
     p: Number,
     #[serde(default)]
     ap: Number,
@@ -319,6 +356,16 @@ fn trigger(value: f64) -> Option<StopTriggerType> {
     }
 }
 impl Account {
+    fn execution_amount(&mut self, id: &str, start: f64, end: f64) -> f64 {
+        let baseline = self.execution_fills.get(id).copied().unwrap_or(0.0);
+        self.execution_intervals
+            .entry(id.to_owned())
+            .or_insert_with(|| Executions {
+                floor: baseline,
+                intervals: vec![],
+            })
+            .take(start, end)
+    }
     fn progress(&mut self, id: &str, filled: f64, amount: f64, time: f64) {
         if !self.progress.contains_key(id) {
             self.progress_queue.push_back(id.to_owned());
@@ -341,6 +388,7 @@ impl Account {
                 self.quotes.remove(&old);
                 self.execution_fills.remove(&old);
                 self.execution_quotes.remove(&old);
+                self.execution_intervals.remove(&old);
             }
         }
     }
@@ -793,15 +841,19 @@ impl Bitrue {
             .get(&id)
             .filter(|(qty, _)| *qty == execution_previous)
             .map(|(_, value)| *value);
+        let last_quantity = row.l.map(|quantity| decimal(quantity.0 * scale));
         let quote = (row.ap.0 > 0.0).then_some(filled * row.ap.0).or_else(|| {
             (row.execution_price.0 > 0.0
                 && filled > execution_previous
+                && last_quantity.is_some_and(|last| {
+                    last > 0.0 && last <= filled && last >= filled - execution_previous
+                })
                 && (execution_previous == 0.0 || prior_quote.is_some()))
             .then_some(
                 prior_quote.unwrap_or(0.0) + (filled - execution_previous) * row.execution_price.0,
             )
         });
-        let execution_price = if row.execution_price.0 > 0.0 {
+        let execution_price = if row.execution_price.0 > 0.0 && last_quantity.is_some() {
             row.execution_price.0
         } else if filled > execution_previous
             && (execution_previous == 0.0
@@ -816,20 +868,41 @@ impl Bitrue {
         } else {
             0.0
         };
-        if row.x == "TRADE"
-            && filled > execution_previous
-            && execution_price.is_finite()
-            && execution_price > 0.0
-        {
-            cx.fill(Fill {
-                order_id: id.clone(),
-                symbol: market.symbol.clone(),
-                side,
-                price: decimal(execution_price),
-                amount: decimal(filled - execution_previous),
-            });
+        let mut delivery_known = false;
+        if row.x == "TRADE" && execution_price.is_finite() && execution_price > 0.0 {
+            let start = match last_quantity {
+                // L prices only this execution, never a blind cumulative gap.
+                Some(last) if last > 0.0 && last <= filled && row.execution_price.0 > 0.0 => {
+                    Some(decimal(filled - last))
+                }
+                Some(last)
+                    if row.execution_price.0 <= 0.0
+                        && last > 0.0
+                        && last <= filled
+                        && last >= filled - execution_previous
+                        && filled > execution_previous =>
+                {
+                    Some(execution_previous)
+                }
+                None if filled > execution_previous => Some(execution_previous),
+                _ => None,
+            };
+            if let Some(start) = start {
+                delivery_known = true;
+                let amount = self.account.execution_amount(&id, start, filled);
+                if amount > 0.0 {
+                    cx.fill(Fill {
+                        order_id: id.clone(),
+                        symbol: market.symbol.clone(),
+                        side,
+                        price: decimal(execution_price),
+                        amount,
+                    });
+                }
+            }
         }
         if row.x == "TRADE"
+            && delivery_known
             && execution_price > 0.0
             && filled >= execution_previous
             && let Some(quote) = quote.filter(|v| v.is_finite())
@@ -838,7 +911,7 @@ impl Bitrue {
                 .execution_quotes
                 .insert(id.clone(), (filled, quote));
         }
-        if row.x == "TRADE" && execution_price > 0.0 {
+        if row.x == "TRADE" && delivery_known {
             self.account
                 .execution_fills
                 .insert(id.clone(), filled.max(execution_previous));
@@ -1463,12 +1536,15 @@ impl Bitrue {
                     for order in retained {
                         cx.store.upsert_order(order);
                     }
-                    cx.orders_reconciled(Some(&symbol));
                 } else {
                     cx.log(
                         LogLevel::Warning,
                         "Bitrue order snapshot incomplete or superseded; retaining previous state",
                     );
+                }
+                let success = self.trade_census(cx, &symbol, revision, success);
+                if success {
+                    cx.orders_reconciled(Some(&symbol));
                 }
                 self.order_finished(cx, symbol, success);
             }
@@ -1515,7 +1591,12 @@ impl Bitrue {
                     self.refresh_account(cx);
                 }
             }
-            Request::Orders { symbol, lookup, .. } => {
+            Request::Orders {
+                symbol,
+                revision,
+                lookup,
+                ..
+            } => {
                 cx.log(
                     LogLevel::Error,
                     format!("Bitrue order read failed: {error}"),
@@ -1523,6 +1604,7 @@ impl Bitrue {
                 if let Some((command, client_order_id)) = lookup {
                     Self::finish_lookup(cx, command, &symbol, &client_order_id, None);
                 } else {
+                    self.trade_census(cx, &symbol, revision, false);
                     self.order_finished(cx, symbol, false);
                 }
             }

@@ -11,10 +11,18 @@ pub(crate) struct Trading {
     acknowledged: HashMap<String, Target>,
     queue: VecDeque<Command>,
     busy: bool,
+    census: Option<(Plan, u64)>,
+    unresolved_protection: HashMap<String, u64>,
 }
 pub struct Request {
     plan: Box<Plan>,
     step: Step,
+    protection: Option<ProtectionFence>,
+}
+struct ProtectionFence {
+    symbol: String,
+    revision: u64,
+    previous: Option<u64>,
 }
 struct Plan {
     command: CommandId,
@@ -25,6 +33,7 @@ struct Plan {
     affected: Vec<String>,
     guard: Option<Target>,
     refresh_result: bool,
+    protections: Vec<String>,
 }
 struct Step {
     method: Method,
@@ -33,11 +42,18 @@ struct Step {
     effect: Effect,
 }
 enum Effect {
-    Place { conditional: bool, target: Target },
+    Place {
+        conditional: bool,
+        protective: bool,
+        target: Target,
+    },
     Cancel(Target),
     Inspect(Box<Amend>),
     Verify(Target),
-    Leverage { symbol: String, leverage: f64 },
+    Leverage {
+        symbol: String,
+        leverage: f64,
+    },
 }
 #[derive(Clone)]
 struct Target {
@@ -268,6 +284,7 @@ impl Plan {
             affected: vec![],
             guard: None,
             refresh_result: false,
+            protections: vec![],
         }
     }
     fn symbol(&mut self, symbol: &str) {
@@ -280,6 +297,12 @@ impl Plan {
             self.refresh_result |= payload.condition_order.unwrap_or(false)
                 || !payload.trigger_order_create_params.is_empty();
             self.symbol(&order.symbol);
+            if (payload.condition_order == Some(true)
+                || !payload.trigger_order_create_params.is_empty())
+                && !self.protections.contains(&order.symbol)
+            {
+                self.protections.push(order.symbol.clone());
+            }
             let target = Target {
                 id: String::new(),
                 contract: payload.contract_name.clone(),
@@ -295,6 +318,8 @@ impl Plan {
                 body: Some(serde_json::to_string(&payload).expect("placement")),
                 effect: Effect::Place {
                     conditional: payload.condition_order.unwrap_or(false),
+                    protective: payload.condition_order.unwrap_or(false)
+                        || !payload.trigger_order_create_params.is_empty(),
                     target,
                 },
             });
@@ -671,6 +696,9 @@ impl Bitrue {
                 }
             }
             Command::CancelSymbolOrders { symbol, .. } => {
+                if self.trading.unresolved_protection.contains_key(&symbol) {
+                    return Err("Bitrue protective placement outcome is uncertain; reconcile before cancel-all".into());
+                }
                 let orders = cx
                     .store
                     .orders()
@@ -842,11 +870,38 @@ impl Bitrue {
                 Request {
                     plan: Box::new(plan),
                     step,
+                    protection: None,
                 },
                 "Bitrue replacement aborted after execution progress",
             );
             return;
         }
+        // An amend is not an engine placement scope. Fence its replacement before
+        // dispatch, since a lost create ACK may still leave native protection live.
+        let protection = if let Effect::Place {
+            protective: true,
+            target,
+            ..
+        } = &step.effect
+        {
+            let symbol = cx
+                .store
+                .market_by_id(&target.contract)
+                .map_or_else(|| target.contract.clone(), |market| market.symbol.clone());
+            self.account.orders_revision += 1;
+            let revision = self.account.orders_revision;
+            let previous = self
+                .trading
+                .unresolved_protection
+                .insert(symbol.clone(), revision);
+            Some(ProtectionFence {
+                symbol,
+                revision,
+                previous,
+            })
+        } else {
+            None
+        };
         let path = step.path.clone();
         let body = step.body.clone();
         self.send(
@@ -858,6 +913,7 @@ impl Bitrue {
             Job::Trade(Request {
                 plan: Box::new(plan),
                 step,
+                protection,
             }),
         );
     }
@@ -872,6 +928,21 @@ impl Bitrue {
             {
                 cx.store.set_order_status(id, OrderStatus::Open);
             }
+        }
+        if error.is_none() && !plan.protections.is_empty() {
+            // Protective ACK IDs and echoed client IDs are unreliable. A complete
+            // post-write census, including conditionals, owns the native open set.
+            self.account.orders_revision += 1;
+            for symbol in &plan.protections {
+                self.trading
+                    .unresolved_protection
+                    .insert(symbol.clone(), self.account.orders_revision);
+            }
+            let symbols = plan.symbols.clone();
+            self.trading.census = Some((plan, self.account.orders_revision));
+            self.refresh_orders(cx, symbols);
+            self.refresh_account(cx);
+            return;
         }
         self.trading.busy = false;
         cx.done(
@@ -893,6 +964,46 @@ impl Bitrue {
         }
         self.trade_next(cx);
     }
+    pub(crate) fn trade_census(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        revision: u64,
+        success: bool,
+    ) -> bool {
+        let Some((mut plan, minimum)) = self.trading.census.take() else {
+            if success
+                && self
+                    .trading
+                    .unresolved_protection
+                    .get(symbol)
+                    .is_some_and(|minimum| revision >= *minimum)
+            {
+                self.trading.unresolved_protection.remove(symbol);
+            }
+            return success;
+        };
+        if revision < minimum || !plan.protections.iter().any(|s| s == symbol) {
+            self.trading.census = Some((plan, minimum));
+            return success;
+        }
+        if !success {
+            self.trade_finish(
+                cx,
+                plan,
+                Some("Bitrue protective placement outcome is uncertain; complete fresh order census is required".into()),
+            );
+            return false;
+        }
+        self.trading.unresolved_protection.remove(symbol);
+        plan.protections.retain(|s| s != symbol);
+        if plan.protections.is_empty() {
+            self.trade_finish(cx, plan, None);
+        } else {
+            self.trading.census = Some((plan, minimum));
+        }
+        true
+    }
     pub(crate) fn trade_item(
         &mut self,
         _cx: &mut Cx<'_, Pending>,
@@ -913,12 +1024,41 @@ impl Bitrue {
         response: Response<'_>,
     ) {
         if let Err(error) = check(&response) {
+            // Only documented, unambiguous pre-execution rejections undo this
+            // write's fence. Unknown/server outcomes require a fresh census.
+            #[derive(Deserialize)]
+            struct Rejected<'a> {
+                #[serde(borrow)]
+                code: Text<'a>,
+                #[serde(borrow)]
+                data: Option<&'a serde_json::value::RawValue>,
+            }
+            let rejected = (200..500).contains(&response.status)
+                && response.status != 408
+                && serde_json::from_str::<Rejected<'_>>(response.body).is_ok_and(|reply| {
+                    // Futures error list: signature, mandatory parameter, contract, balance.
+                    matches!(&*reply.code, "-1022" | "-1102" | "-1121" | "-2017")
+                        && reply.data.is_none_or(|data| data.get() == "null")
+                });
+            if rejected
+                && let Some(fence) = &request.protection
+                && self.trading.unresolved_protection.get(&fence.symbol) == Some(&fence.revision)
+            {
+                if let Some(previous) = fence.previous {
+                    self.trading
+                        .unresolved_protection
+                        .insert(fence.symbol.clone(), previous);
+                } else {
+                    self.trading.unresolved_protection.remove(&fence.symbol);
+                }
+            }
             self.trade_failed(cx, request, &error);
             return;
         }
         let result = match &request.step.effect {
             Effect::Place {
                 conditional,
+                protective,
                 target,
             } => {
                 let reply = serde_json::from_str::<Reply<Identity<'_>>>(response.body)
@@ -926,7 +1066,7 @@ impl Bitrue {
                 match reply {
                     Ok(reply) if !reply.data.order_id.is_empty() => {
                         let id = reply.data.order_id.to_string();
-                        if cx.store.order(&id).is_none() {
+                        if !protective && cx.store.order(&id).is_none() {
                             let mut target = target.clone();
                             target.id = id.clone();
                             self.trading.acknowledged.insert(id, target);

@@ -14,6 +14,7 @@ struct Harness {
     actions: Vec<Action>,
     private: SocketId,
     now: f64,
+    order_z: u32,
 }
 impl Harness {
     fn new() -> Self {
@@ -29,6 +30,7 @@ impl Harness {
             actions: vec![],
             private: SocketId(0),
             now: 0.0,
+            order_z: 0,
         };
         h.collect();
         h.reply("/contracts", MARKET);
@@ -106,7 +108,9 @@ impl Harness {
         self.collect();
     }
     fn order(&mut self, z: u32, status: &str, kind: &str, price: u32) {
-        self.ws(&format!(r#"{{"e":"ORDER_TRADE_UPDATE","E":{},"o":{{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"{kind}","x":"TRADE","X":"{status}","q":"100","z":"{z}","l":"999","p":"100","ap":"101","L":"{price}"}}}}"#,self.now+1.0));
+        let last = z.saturating_sub(self.order_z).max(1).min(z);
+        self.order_z = self.order_z.max(z);
+        self.ws(&format!(r#"{{"e":"ORDER_TRADE_UPDATE","E":{},"o":{{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"{kind}","x":"TRADE","X":"{status}","q":"100","z":"{z}","l":"{last}","p":"100","ap":"101","L":"{price}"}}}}"#,self.now+1.0));
     }
     fn fire_at(&mut self, at: f64) {
         let i = self
@@ -297,7 +301,7 @@ fn progress_time_and_amount_survive_an_empty_authoritative_snapshot() {
     h.seed();
     let event = |time, amount| {
         format!(
-            r#"{{"e":"ORDER_TRADE_UPDATE","E":{time},"o":{{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"{amount}","z":"4","L":"111"}}}}"#
+            r#"{{"e":"ORDER_TRADE_UPDATE","E":{time},"o":{{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"{amount}","z":"4","l":"4","L":"111"}}}}"#
         )
     };
     h.ws(&event(100, 100));
@@ -357,7 +361,7 @@ fn fetch_leverage_reads_account_metadata_without_any_order_or_leverage_probe() {
 
 #[test]
 fn cumulative_average_fallback_recovers_execution_price_without_replaying() {
-    for first in [r#""ap":"100""#, r#""ap":"0","L":"100""#] {
+    for first in [r#""ap":"100""#, r#""ap":"0","l":"1","L":"100""#] {
         let mut h = Harness::new();
         h.seed();
         for (z, average) in [(1, 100), (3, 120), (3, 120)] {
@@ -420,4 +424,67 @@ fn rest_ahead_of_delayed_stream_execution_does_not_consume_the_fill() {
     h.order(2, "PART_FILLED", "LIMIT", 112);
     assert_eq!(h.fills(), [(112.0, 10.0)]);
     assert_eq!(h.e.store().orders()[0].filled, 20.0);
+}
+
+#[test]
+fn native_last_execution_quantity_never_reprices_a_rest_gap_and_late_intervals_deliver_once() {
+    let mut h = Harness::new();
+    h.seed();
+    let event = |z, last, price| {
+        let average = 95 + z * 5;
+        format!(
+            r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"{z}","l":"{last}","L":"{price}","ap":"{average}"}}}}"#
+        )
+    };
+    h.ws(&event(1, 1, 100));
+    assert_eq!(h.fills(), [(100.0, 10.0)]);
+    h.reply("/openOrders", r#"{"code":"0","data":[{"orderId":2334151155877155281,"type":"LIMIT","side":"BUY","status":"PART_FILLED","action":"OPEN","price":100,"origQty":100,"executedQty":30,"avgPrice":110}]}"#);
+    h.ws(&event(3, 1, 120));
+    h.ws(&event(3, 1, 120));
+    assert_eq!(
+        h.fills(),
+        [(120.0, 10.0)],
+        "L cannot price the missing middle execution"
+    );
+    h.ws(&event(2, 1, 110));
+    h.ws(&event(2, 1, 110));
+    h.ws(&event(1, 1, 100));
+    assert_eq!(
+        h.fills(),
+        [(110.0, 10.0)],
+        "a late execution owns its unreported interval exactly once"
+    );
+    assert_eq!(h.e.store().orders()[0].filled, 30.0);
+    h.ws(&event(4, 1, 130));
+    assert_eq!(h.fills(), [(130.0, 10.0)]);
+}
+#[test]
+fn invalid_last_execution_quantity_cannot_consume_a_later_valid_execution() {
+    let mut h = Harness::new();
+    h.seed();
+    for last in ["0", "-1", "999"] {
+        h.ws(&format!(r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"1","l":"{last}","L":"100"}}}}"#));
+        assert!(h.fills().is_empty());
+    }
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"1","l":"1","L":"100"}}"#);
+    assert_eq!(h.fills(), [(100.0, 10.0)]);
+}
+
+#[test]
+fn missing_last_quantity_uses_only_proven_interval_vwap_and_never_the_last_price_for_a_gap() {
+    let mut h = Harness::new();
+    h.seed();
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"1","l":"1","L":"100","ap":"100"}}"#);
+    assert_eq!(h.fills(), [(100.0, 10.0)]);
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"3","L":"120"}}"#);
+    assert!(
+        h.fills().is_empty(),
+        "the last price does not price two missing executions"
+    );
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"3","ap":"110","L":"120"}}"#);
+    assert_eq!(
+        h.fills(),
+        [(115.0, 20.0)],
+        "two cumulative quotes prove the interval VWAP"
+    );
 }
