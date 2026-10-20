@@ -66,9 +66,23 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
     expect(construct).not.toHaveBeenCalled();
   });
   it('settles account selection startup failures without waiting forever', async () => {
-    const { exchange } = fixture({}, [{ op: 'log', level: 'error', message: 'DXtrade startup failed: Multiple accounts found' }], false);
+    const message = 'DXtrade startup failed: Multiple accounts found';
+    const { exchange } = fixture({}, [{ op: 'log', level: 'error', message }, { op: 'startupFailed', detail: { message } }], false);
     await expect(exchange.start()).rejects.toThrow('Multiple accounts found');
     expect(exchange.isDisposed).toBe(true);
+  });
+  it('treats an error log alone as a toast, not a startup failure', async () => {
+    const { exchange } = fixture({}, [{ op: 'log', level: 'error', message: 'DXtrade startup failed: Multiple accounts found' }], false);
+    const outcome = await Promise.race([exchange.start().then(() => 'started', () => 'rejected'), new Promise((resolve) => setTimeout(() => resolve('pending'), 20))]);
+    expect(outcome).toBe('pending');
+  });
+  it('keeps the venue reason when a startup failure precedes deactivation', async () => {
+    const message = 'Bybit rejected the API key (10003): API key is invalid.';
+    const { exchange } = fixture({}, [{ op: 'startupFailed', detail: { message, kind: 'authInvalid', venueCode: '10003' } }, { op: 'deactivate' }], false);
+    const deactivated = vi.fn();
+    exchange.emitter.on('deactivate', deactivated);
+    await expect(exchange.start()).rejects.toThrow(message);
+    expect(deactivated).toHaveBeenCalledOnce();
   });
   it('settles definitive login rejection through the shared deactivation contract', async () => {
     const { exchange } = fixture({}, [{ op: 'deactivate' }], false);

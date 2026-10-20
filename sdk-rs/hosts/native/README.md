@@ -155,12 +155,14 @@ timers remain cancelable even when their deadline exceeds the system clock.
 All trading, account and query variants use the shared typed decoder; individual
 venues still reject operations they do not implement. Text
 responses have `type: "done"`, the caller's `command`, and either `result` (a
-JSON string, as in the WASM host) or `error`. IDs need only be unique among that
+JSON string, as in the WASM host) or `error`; a structured failure adds
+`detail` (`engine/src/error.rs`) beside the unchanged `error` text. IDs need only be unique among that
 client's pending commands; the server allocates separate internal IDs. Duplicate
 pending IDs and resource-limit failures produce `type: "error"` (with `command`
 where known). Malformed JSON and binary commands produce an error without venue
-side effects. Logs (`type: "log"`, `level`, `message`) and `type: "deactivate"`
-notices go to all clients of the account. Results go only to their requester.
+side effects. Logs (`type: "log"`, `level`, `message`), `type: "deactivate"`
+and `type: "startupFailed"` (with `detail`) notices go to all clients of the
+account. Results go only to their requester.
 
 Repeated book/candle subscriptions are idempotent per client, and the venue sees
 only first-subscribe/last-unsubscribe transitions. Another subscription to a live

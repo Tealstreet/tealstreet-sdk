@@ -1749,6 +1749,26 @@ impl Venue for BybitLinear {
         self.on_public_response(cx, then, Ok(response));
     }
 
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        // A rejected fee read carries `result: {}`; its retCode decides startup.
+        if matches!(pending.then, Then::Fees(_)) {
+            return self.on_response(cx, pending, response);
+        }
+        self.on_request_failed(
+            cx,
+            pending,
+            &format!(
+                "response did not contain the expected list: {}",
+                response.body
+            ),
+        );
+    }
+
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         self.select_category(pending.category);
         match &mut pending.then {
