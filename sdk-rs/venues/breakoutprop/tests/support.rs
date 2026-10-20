@@ -19,6 +19,7 @@ pub struct Rig {
     pub requests: VecDeque<HttpRequest>,
     pub timers: HashMap<TimerId, f64>,
     pub notices: Vec<Notice>,
+    pub failures: Vec<safe_cex_engine::VenueError>,
     pub receipt_trace: Vec<ReceiptTrace>,
     pub dispatch_times: Vec<f64>,
 }
@@ -30,6 +31,7 @@ impl Rig {
             requests: VecDeque::new(),
             timers: HashMap::new(),
             notices: Vec::new(),
+            failures: Vec::new(),
             receipt_trace: Vec::new(),
             dispatch_times: Vec::new(),
         };
@@ -64,6 +66,14 @@ impl Rig {
                 }
                 Action::ClearTimer { timer } => {
                     self.timers.remove(&timer);
+                }
+                // Failures as the plain text the host renders.
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.notices.push(Notice::CommandDone {
+                        command,
+                        result: Err(error.legacy_text()),
+                    });
+                    self.failures.push(error);
                 }
                 Action::Notice(notice) => self.notices.push(notice),
                 action => panic!("REST-only venue emitted socket action: {action:?}"),
