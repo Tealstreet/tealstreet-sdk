@@ -40,7 +40,7 @@ coverage requires the venue's documented `t`. Execution delivery is independent
 of lifecycle terminal state: a genuine stop fill after `EXPIRED` still emits,
 while an old native generation cannot close a new PM order reusing its client
 ID. Accepted cancellations invalidate in-flight order snapshots. Generated-ID
-entropy failures reject before order writes instead of sharing a broker-only ID.
+entropy failures return an error instead of sharing a broker-only ID.
 
 TypeScript USD-M/PM cancel acknowledgements preserve rows already `Closed` or
 `Canceled`, including fills received while cancellation was in flight. Accepted

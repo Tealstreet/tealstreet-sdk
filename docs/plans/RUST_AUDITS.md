@@ -86,7 +86,7 @@ Medium:
 
 Low: no reconnect backoff (asterdex, bitrue, bingx, kucoin, cryptocom, phemex,
 coinbase public, grvt, paradex, polymarket); KuCoin client-id collisions;
-~~`uuid().unwrap_or_default()` in Binance~~ (fixed: fail before writes on entropy failure); Backpack empty positions on any 404;
+~~`uuid().unwrap_or_default()` in Binance~~ (fixed: propagate entropy failure instead of producing a broker-only ID); Backpack empty positions on any 404;
 OKX `partially_effective` final; Lighter late-fill drop; ~~Bybit unused `exec_id`~~ (fixed: bounded native execution-ID dedupe retained across reconnects).
 
 Scenario tests, independent phase reviews and acceptance evidence for these Binance/Bybit
