@@ -1,5 +1,5 @@
 // Engine-supported environments, not a catalogue of every venue's offerings.
-// Keep this allowlist aligned with venues/* and hosts/wasm/src/lib.rs. Never
+// Keep this allowlist aligned with venues/* and registry/src/lib.rs. Never
 // accept an endpoint from an environment variable or an API response unchecked.
 import { VENUES } from './venues.mjs';
 

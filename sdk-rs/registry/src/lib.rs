@@ -1,0 +1,900 @@
+//! Every Rust venue, constructed by name from one options shape. Hosts (wasm,
+//! native) parse the account options once and receive the venue's engine
+//! through a [`Visit`]or; each venue's construction rules live here.
+#[cfg(not(any(
+    feature = "grvt",
+    feature = "paradex",
+    feature = "bitrue",
+    feature = "coinbase",
+    feature = "binance",
+    feature = "apexomni",
+    feature = "asterdex",
+    feature = "breakoutprop",
+    feature = "kucoin",
+    feature = "kucoinspot",
+    feature = "polymarket",
+    feature = "blofin",
+    feature = "bybit",
+    feature = "woo",
+    feature = "cryptocom",
+    feature = "bingx",
+    feature = "mexc",
+    feature = "bitget",
+    feature = "backpack",
+    feature = "phemex",
+    feature = "weex",
+    feature = "hyperliquid",
+    feature = "kraken",
+    feature = "txflow",
+    feature = "orderly",
+    feature = "lighter",
+    feature = "okx"
+)))]
+compile_error!(
+    "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+);
+
+use safe_cex_engine::{Engine, ErrorKind, PublicFeedPolicy, Venue, VenueError};
+#[cfg(feature = "apexomni")]
+use safe_cex_venue_apexomni::{ApexOmni, Options as ApexOmniOptions};
+#[cfg(feature = "asterdex")]
+use safe_cex_venue_asterdex::{AsterDex, Options as AsterOptions};
+#[cfg(feature = "backpack")]
+use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
+#[cfg(feature = "binance")]
+use safe_cex_venue_binance::{
+    BinanceFutures, Options as BinanceOptions, Variant as BinanceVariant,
+};
+#[cfg(feature = "bingx")]
+use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
+#[cfg(feature = "bitget")]
+use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
+#[cfg(feature = "bitrue")]
+use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
+#[cfg(feature = "blofin")]
+use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
+#[cfg(feature = "breakoutprop")]
+use safe_cex_venue_breakoutprop::{BreakoutProp, Options as BreakoutOptions};
+#[cfg(feature = "bybit")]
+use safe_cex_venue_bybit::{
+    BybitLinear, Endpoints as BybitEndpoints, Options as BybitOptions, Variant as BybitVariant,
+};
+#[cfg(feature = "coinbase")]
+use safe_cex_venue_coinbase::{Coinbase, Options as CoinbaseOptions};
+#[cfg(feature = "cryptocom")]
+use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
+#[cfg(feature = "grvt")]
+use safe_cex_venue_grvt::{Grvt, Options as GrvtOptions};
+#[cfg(feature = "hyperliquid")]
+use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
+#[cfg(feature = "kraken")]
+use safe_cex_venue_kraken::{Kraken, KrakenSpot, Options as KrakenOptions};
+#[cfg(feature = "kucoin")]
+use safe_cex_venue_kucoin::Kucoin;
+#[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+use safe_cex_venue_kucoin::Options as KucoinOptions;
+#[cfg(feature = "kucoinspot")]
+use safe_cex_venue_kucoin::spot::KucoinSpot;
+#[cfg(feature = "lighter")]
+use safe_cex_venue_lighter::{Lighter, Options as LighterOptions};
+#[cfg(feature = "mexc")]
+use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
+#[cfg(feature = "okx")]
+use safe_cex_venue_okx::{Okx, Options as OkxOptions};
+#[cfg(feature = "orderly")]
+use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions, Orderly};
+#[cfg(feature = "paradex")]
+use safe_cex_venue_paradex::{Options as ParadexOptions, Paradex};
+#[cfg(feature = "phemex")]
+use safe_cex_venue_phemex::{Options as PhemexOptions, PhemexPerpetuals};
+#[cfg(feature = "polymarket")]
+use safe_cex_venue_polymarket::{
+    Options as PolymarketOptions, Polymarket, PolymarketOptions as PolymarketAccountOptions,
+};
+#[cfg(feature = "weex")]
+use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
+#[cfg(feature = "woo")]
+use safe_cex_venue_woo::{Options as WooOptions, Woo};
+use serde::Deserialize;
+
+/// Receives the constructed engine; the host decides how to own it.
+pub trait Visit {
+    type Output;
+    fn visit<V: Venue + 'static>(self, engine: Engine<V>) -> Self::Output;
+}
+
+fn invalid(message: impl std::fmt::Display) -> VenueError {
+    VenueError::new(message.to_string()).kind(ErrorKind::InvalidInput)
+}
+
+fn finish<T: Visit, V: Venue + 'static>(
+    visitor: T,
+    policy: PublicFeedPolicy,
+    mut engine: Engine<V>,
+) -> Result<T::Output, VenueError> {
+    engine.set_public_feed_policy(policy).map_err(invalid)?;
+    Ok(visitor.visit(engine))
+}
+
+/// Constructs `venue`'s engine from `options`, enforcing its construction rules.
+pub fn build<T: Visit>(
+    venue: &str,
+    options: EngineOptions,
+    visitor: T,
+) -> Result<T::Output, VenueError> {
+    if let Some(read) = &options.read_credentials {
+        read.validate().map_err(invalid)?;
+    }
+    #[cfg(feature = "weex")]
+    if venue == "weex"
+        && !options.public_data_only
+        && options.passphrase.as_deref().is_none_or(str::is_empty)
+    {
+        return Err(invalid("WEEX requires a passphrase"));
+    }
+    #[cfg(feature = "kraken")]
+    if matches!(venue, "kraken" | "krakenspot")
+        && !options.public_data_only
+        && options.key.as_deref().is_some_and(|key| !key.is_empty())
+        && let Some(secret) = options.secret.as_deref()
+    {
+        safe_cex_venue_kraken::sign::Signer::new(secret).map_err(invalid)?;
+    }
+    let policy = options
+        .public_feed
+        .as_ref()
+        .map(|feed| feed.mode)
+        .unwrap_or(if options.private_only {
+            PublicFeedPolicy::Disabled
+        } else {
+            PublicFeedPolicy::Direct
+        });
+    if options.private_only && policy == PublicFeedPolicy::Direct {
+        return Err(invalid("privateOnly cannot use direct public feeds"));
+    }
+    match venue {
+        #[cfg(feature = "breakoutprop")]
+        "breakoutprop" => finish(
+            visitor,
+            policy,
+            Engine::new(BreakoutProp::new(BreakoutOptions {
+                key: options.key.unwrap_or_default(),
+                secret: options.secret.unwrap_or_default(),
+                subaccount: options.subaccount,
+                public_data_only: options.public_data_only,
+                tick_interval: if options.polling_enabled == Some(false) {
+                    f64::INFINITY
+                } else {
+                    options.tick_interval.unwrap_or(2_000.0)
+                },
+                timeout_ms: options
+                    .recv_window
+                    .unwrap_or(20_000.0)
+                    .clamp(1.0, u32::MAX as f64) as u32,
+            })),
+        ),
+        #[cfg(feature = "grvt")]
+        "grvt" => finish(
+            visitor,
+            policy,
+            Engine::new(Grvt::new(GrvtOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                trading_account_id: options.grvt_trading_account_id,
+                signer_address: options.grvt_signer_address,
+                session_proxy: options.grvt_session_proxy,
+            })),
+        ),
+        #[cfg(feature = "coinbase")]
+        "coinbase" | "coinbasespot" => finish(
+            visitor,
+            policy,
+            Engine::new(
+                Coinbase::new(CoinbaseOptions {
+                    key: options.key.unwrap_or_default(),
+                    secret: options.secret.unwrap_or_default(),
+                    public_data_only: options.public_data_only,
+                    spot_only: venue == "coinbasespot" || options.spot_only,
+                    testnet: options.testnet,
+                    read_credentials: options.read_credentials.clone(),
+                })
+                .map_err(invalid)?,
+            ),
+        ),
+        #[cfg(feature = "polymarket")]
+        "polymarket" => finish(
+            visitor,
+            policy,
+            Engine::new(Polymarket::new(PolymarketOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                polymarket: options.polymarket,
+            })),
+        ),
+        #[cfg(feature = "paradex")]
+        "paradex" => finish(
+            visitor,
+            policy,
+            Engine::new(Paradex::new(ParadexOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                paradex_address: options.paradex_address,
+                subkey_address: options.subkey_address,
+                payload_signer: options.payload_signer,
+            })),
+        ),
+        #[cfg(feature = "apexomni")]
+        "apexomni" => finish(
+            visitor,
+            policy,
+            Engine::new(ApexOmni::new(ApexOmniOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
+                omni_key_seed: options.omni_key_seed,
+                tick_interval_ms: None,
+            })),
+        ),
+        #[cfg(feature = "txflow")]
+        "txflow" => {
+            let options = safe_cex_venue_txflow::Options {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+                vault: options.vault,
+            };
+            options.validate().map_err(invalid)?;
+            finish(
+                visitor,
+                policy,
+                Engine::new(safe_cex_venue_txflow::TxFlow::new(options)),
+            )
+        }
+        #[cfg(feature = "kraken")]
+        "kraken" => finish(
+            visitor,
+            policy,
+            Engine::new(Kraken::new(KrakenOptions {
+                read_credentials: options.read_credentials.clone(),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            })),
+        ),
+        #[cfg(feature = "kraken")]
+        "krakenspot" => finish(
+            visitor,
+            policy,
+            Engine::new(KrakenSpot::new(KrakenOptions {
+                // Spot private reads are POSTs and retain primary credentials.
+                read_credentials: None,
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            })),
+        ),
+        #[cfg(feature = "asterdex")]
+        "asterdex" => finish(
+            visitor,
+            policy,
+            Engine::new(AsterDex::new(AsterOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+                auth_user_address: options.asterdex.user_address,
+                auth_signer_address: options.asterdex.signer_address,
+                auth_private_key: options.asterdex.private_key,
+                api_version: options.asterdex.api_version,
+                builder_address: options.asterdex.builder_address,
+                builder_fee_rate_maker: options.asterdex.builder_fee_rate_maker,
+                builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker,
+                read_key: options.asterdex.read_key,
+                read_secret: options.asterdex.read_secret,
+            })),
+        ),
+        #[cfg(feature = "orderly")]
+        "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
+            finish(
+                visitor,
+                policy,
+                Engine::new(Orderly::new(OrderlyOptions {
+                    broker: match venue {
+                        "kodiakfi" => OrderlyBroker::KodiakFi,
+                        "mode" => OrderlyBroker::Mode,
+                        "salsadex" => OrderlyBroker::SalsaDex,
+                        "what" => OrderlyBroker::What,
+                        "woofi" => OrderlyBroker::WooFi,
+                        _ => OrderlyBroker::Tealstreet,
+                    },
+                    public_data_only: options.public_data_only,
+                    testnet: options.testnet,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    tick_interval: options.tick_interval,
+                })),
+            )
+        }
+        #[cfg(feature = "lighter")]
+        "lighter" | "lighter-robinhood" => finish(
+            visitor,
+            policy,
+            Engine::new(Lighter::new(LighterOptions {
+                robinhood: venue == "lighter-robinhood",
+                remote_signer: options.lighter_remote_signer,
+                signer_provider: options.lighter_signer_provider,
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+                api_key_index: options.api_key_index,
+                integrator_account_index: options.lighter_integrator_account_index,
+                stop_slippage_pct: options.lighter_stop_slippage_pct.unwrap_or(1.0),
+            })),
+        ),
+        #[cfg(feature = "bitrue")]
+        "bitrue" => finish(
+            visitor,
+            policy,
+            Engine::new(Bitrue::new(BitrueOptions {
+                read_credentials: options.read_credentials.clone(),
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                recv_window: options.recv_window.unwrap_or(20_000.0).clamp(1.0, 60_000.0) as u32,
+            })),
+        ),
+        #[cfg(feature = "backpack")]
+        "backpack" => finish(
+            visitor,
+            policy,
+            Engine::new(Backpack::new(BackpackOptions {
+                read_credentials: options.read_credentials.clone(),
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                recv_window: options.recv_window,
+            })),
+        ),
+        #[cfg(feature = "blofin")]
+        "blofin" => finish(
+            visitor,
+            policy,
+            Engine::new(Blofin::new(BlofinOptions {
+                broker_attribution: options.broker_attribution,
+                read_credentials: options.read_credentials.clone(),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
+            })),
+        ),
+        #[cfg(feature = "mexc")]
+        "mexc" => finish(
+            visitor,
+            policy,
+            Engine::new(MexcFutures::new(MexcOptions {
+                read_credentials: options.read_credentials.clone(),
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            })),
+        ),
+        #[cfg(feature = "phemex")]
+        "phemex" => finish(
+            visitor,
+            policy,
+            Engine::new(PhemexPerpetuals::new(PhemexOptions {
+                read_credentials: options.read_credentials.clone(),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            })),
+        ),
+        #[cfg(feature = "binance")]
+        "binance" | "binancepm" | "binancespot" | "binanceinverse" => finish(
+            visitor,
+            policy,
+            Engine::new(BinanceFutures::new(BinanceOptions {
+                recv_window: options.recv_window,
+                read_credentials: options.read_credentials.clone(),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                portfolio_margin: venue == "binancepm",
+                variant: match venue {
+                    "binancepm" => BinanceVariant::PortfolioMargin,
+                    "binancespot" => BinanceVariant::Spot,
+                    "binanceinverse" => BinanceVariant::CoinM,
+                    _ => BinanceVariant::UsdM,
+                },
+            })),
+        ),
+        #[cfg(feature = "kucoinspot")]
+        "kucoinspot" => finish(
+            visitor,
+            policy,
+            Engine::new(KucoinSpot::new(KucoinOptions {
+                read_credentials: options.read_credentials.clone(),
+                broker: options.extra.and_then(|e| e.kucoin_broker),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
+            })),
+        ),
+        #[cfg(feature = "kucoin")]
+        "kucoin" => finish(
+            visitor,
+            policy,
+            Engine::new(Kucoin::new(KucoinOptions {
+                read_credentials: options.read_credentials.clone(),
+                broker: options.extra.and_then(|e| e.kucoin_broker),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
+            })),
+        ),
+        #[cfg(feature = "bingx")]
+        "bingx" => finish(
+            visitor,
+            policy,
+            Engine::new(Bingx::new(BingxOptions {
+                read_credentials: options.read_credentials.clone(),
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            })),
+        ),
+        #[cfg(feature = "weex")]
+        "weex" => finish(
+            visitor,
+            policy,
+            Engine::new(WeexFutures::new(WeexOptions {
+                read_credentials: options.read_credentials.clone(),
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
+                private_ws_headers: options.private_ws_headers,
+            })),
+        ),
+        #[cfg(feature = "woo")]
+        "woo" => finish(
+            visitor,
+            policy,
+            Engine::new(Woo::new(WooOptions {
+                read_credentials: options.read_credentials.clone(),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+            })),
+        ),
+        #[cfg(feature = "bybit")]
+        "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
+            let options = BybitOptions {
+                read_credentials: options.read_credentials.clone(),
+                enable_inverse_markets: options.enable_inverse_markets,
+                enable_option_markets: options.enable_option_markets,
+                variant: match venue {
+                    "bybitinverse" => BybitVariant::Inverse,
+                    "bybitspot" => BybitVariant::Spot,
+                    "bybitdemo" => BybitVariant::Demo,
+                    "hyrotrader" => BybitVariant::Hyrotrader,
+                    _ => BybitVariant::Linear,
+                },
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                endpoints: options.endpoints.map(|e| BybitEndpoints {
+                    rest: e.rest,
+                    public_ws: e.public_ws,
+                    private_ws: e.private_ws,
+                }),
+            };
+            options.validate().map_err(invalid)?;
+            finish(visitor, policy, Engine::new(BybitLinear::new(options)))
+        }
+        #[cfg(feature = "bitget")]
+        "bitget" | "bitgetusdc" | "bitgetinverse" => {
+            if !options.public_data_only
+                && options.key.as_ref().is_some_and(|s| !s.is_empty())
+                && options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                && options.passphrase.as_ref().is_none_or(|s| s.is_empty())
+            {
+                return Err(invalid("Bitget requires a passphrase"));
+            }
+            finish(
+                visitor,
+                policy,
+                Engine::new(BitgetFutures::new(BitgetOptions {
+                    read_credentials: options.read_credentials.clone(),
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    passphrase: options.passphrase,
+                    product: if venue == "bitgetinverse" {
+                        Product::Inverse
+                    } else if venue == "bitgetusdc" {
+                        Product::Usdc
+                    } else {
+                        Product::Usdt
+                    },
+                })),
+            )
+        }
+        #[cfg(feature = "cryptocom")]
+        "cryptocom" => finish(
+            visitor,
+            policy,
+            Engine::new(Cryptocom::new(CryptocomOptions {
+                read_credentials: options.read_credentials.clone(),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            })),
+        ),
+        #[cfg(feature = "hyperliquid")]
+        "hyperliquid" | "hyperliquidspot" => {
+            if venue == "hyperliquid" && options.enable_spot_markets {
+                return Err(invalid(
+                    "Rust Hyperliquid currently supports perpetual markets only",
+                ));
+            }
+            let config = HyperliquidOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+                vault: options.vault,
+                builder: options.hyperliquid_builder.map(|b| Builder {
+                    b: b.address,
+                    f: b.fee_tenths_bps,
+                }),
+            };
+            finish(
+                visitor,
+                policy,
+                Engine::new(if venue == "hyperliquidspot" {
+                    Hyperliquid::new_spot(config)
+                } else {
+                    Hyperliquid::new(config)
+                }),
+            )
+        }
+        #[cfg(feature = "okx")]
+        "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
+            if !options.public_data_only
+                && options.key.as_ref().is_some_and(|s| !s.is_empty())
+                && options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                && options.passphrase.as_ref().is_none_or(|s| s.is_empty())
+            {
+                return Err(invalid("OKX requires a passphrase"));
+            }
+            finish(
+                visitor,
+                policy,
+                Engine::new(Okx::new(OkxOptions {
+                    read_credentials: options.read_credentials.clone(),
+                    testnet: options.testnet || venue.ends_with("demo"),
+                    eea: venue.starts_with("okxeu"),
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    passphrase: options.passphrase,
+                })),
+            )
+        }
+        other => Err(invalid(format!("unsupported venue: {other}"))),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicFeedOptions {
+    pub mode: safe_cex_engine::PublicFeedPolicy,
+}
+
+#[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KucoinExtra {
+    #[serde(default)]
+    pub kucoin_broker: Option<safe_cex_venue_kucoin::sign::BrokerOptions>,
+}
+
+#[cfg(any(
+    feature = "coinbase",
+    feature = "paradex",
+    feature = "binance",
+    feature = "apexomni",
+    feature = "asterdex",
+    feature = "breakoutprop",
+    feature = "kucoin",
+    feature = "kucoinspot",
+    feature = "polymarket",
+    feature = "blofin",
+    feature = "bybit",
+    feature = "woo",
+    feature = "cryptocom",
+    feature = "bingx",
+    feature = "mexc",
+    feature = "bitget",
+    feature = "grvt",
+    feature = "bitrue",
+    feature = "backpack",
+    feature = "phemex",
+    feature = "weex",
+    feature = "hyperliquid",
+    feature = "kraken",
+    feature = "txflow",
+    feature = "orderly",
+    feature = "lighter",
+    feature = "okx"
+))]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineOptions {
+    #[serde(default)]
+    pub private_only: bool,
+    #[serde(default)]
+    pub public_feed: Option<PublicFeedOptions>,
+    #[serde(default)]
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    #[cfg(feature = "blofin")]
+    #[serde(default)]
+    pub broker_attribution: bool,
+    #[cfg(feature = "bybit")]
+    #[serde(default)]
+    pub enable_inverse_markets: bool,
+    #[cfg(feature = "bybit")]
+    #[serde(default)]
+    pub enable_option_markets: bool,
+    #[cfg(feature = "coinbase")]
+    #[serde(default)]
+    pub spot_only: bool,
+    #[cfg(feature = "polymarket")]
+    #[serde(default)]
+    pub polymarket: Option<PolymarketAccountOptions>,
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    pub api_key_index: Option<String>,
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    #[serde(deserialize_with = "optional_lighter_index")]
+    pub lighter_integrator_account_index: Option<u64>,
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    pub lighter_stop_slippage_pct: Option<f64>,
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    pub lighter_remote_signer: bool,
+    #[cfg(feature = "lighter")]
+    pub lighter_signer_provider: Option<String>,
+    #[cfg(any(
+        feature = "grvt",
+        feature = "coinbase",
+        feature = "paradex",
+        feature = "binance",
+        feature = "apexomni",
+        feature = "asterdex",
+        feature = "kucoin",
+        feature = "kucoinspot",
+        feature = "blofin",
+        feature = "bybit",
+        feature = "woo",
+        feature = "cryptocom",
+        feature = "hyperliquid",
+        feature = "kraken",
+        feature = "txflow",
+        feature = "phemex",
+        feature = "orderly",
+        feature = "lighter",
+        feature = "bitget",
+        feature = "okx"
+    ))]
+    #[serde(default)]
+    pub testnet: bool,
+    #[serde(default)]
+    pub public_data_only: bool,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[cfg(any(
+        feature = "grvt",
+        feature = "coinbase",
+        feature = "binance",
+        feature = "apexomni",
+        feature = "asterdex",
+        feature = "breakoutprop",
+        feature = "kucoin",
+        feature = "kucoinspot",
+        feature = "blofin",
+        feature = "bybit",
+        feature = "cryptocom",
+        feature = "bingx",
+        feature = "mexc",
+        feature = "bitget",
+        feature = "bitrue",
+        feature = "backpack",
+        feature = "phemex",
+        feature = "weex",
+        feature = "hyperliquid",
+        feature = "txflow",
+        feature = "kraken",
+        feature = "lighter",
+        feature = "woo",
+        feature = "orderly",
+        feature = "okx"
+    ))]
+    #[serde(default)]
+    pub secret: Option<String>,
+    #[cfg(feature = "paradex")]
+    #[serde(default)]
+    pub paradex_address: Option<String>,
+    #[cfg(feature = "paradex")]
+    #[serde(default)]
+    pub subkey_address: Option<String>,
+    #[cfg(feature = "paradex")]
+    #[serde(default)]
+    pub payload_signer: bool,
+    #[cfg(any(
+        feature = "backpack",
+        feature = "bitrue",
+        feature = "breakoutprop",
+        feature = "binance"
+    ))]
+    #[serde(default)]
+    pub recv_window: Option<f64>,
+    #[cfg(any(
+        feature = "kucoin",
+        feature = "kucoinspot",
+        feature = "okx",
+        feature = "weex",
+        feature = "blofin",
+        feature = "bitget",
+        feature = "apexomni"
+    ))]
+    #[serde(default)]
+    pub passphrase: Option<String>,
+    #[cfg(feature = "apexomni")]
+    #[serde(default)]
+    pub omni_key_seed: Option<String>,
+    #[cfg(any(
+        feature = "hyperliquid",
+        feature = "txflow",
+        feature = "asterdex",
+        feature = "orderly",
+        feature = "lighter",
+        feature = "woo"
+    ))]
+    #[serde(default)]
+    pub application_id: Option<String>,
+    #[cfg(any(feature = "hyperliquid", feature = "txflow"))]
+    #[serde(default)]
+    pub vault: Option<String>,
+    #[cfg(feature = "hyperliquid")]
+    #[serde(default)]
+    pub hyperliquid_builder: Option<HyperliquidBuilder>,
+    #[cfg(feature = "hyperliquid")]
+    #[serde(default)]
+    pub enable_spot_markets: bool,
+    #[cfg(feature = "asterdex")]
+    #[serde(default)]
+    pub asterdex: AsterConfig,
+
+    #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+    #[serde(default)]
+    pub extra: Option<KucoinExtra>,
+    #[cfg(feature = "weex")]
+    #[serde(default)]
+    pub private_ws_headers: bool,
+    #[cfg(feature = "grvt")]
+    #[serde(default)]
+    pub grvt_trading_account_id: Option<String>,
+    #[cfg(feature = "grvt")]
+    #[serde(default)]
+    pub grvt_signer_address: Option<String>,
+    #[cfg(feature = "grvt")]
+    #[serde(default)]
+    pub grvt_session_proxy: bool,
+    #[cfg(feature = "bybit")]
+    #[serde(default)]
+    pub endpoints: Option<EndpointOptions>,
+    #[cfg(any(feature = "orderly", feature = "breakoutprop"))]
+    #[serde(default)]
+    pub tick_interval: Option<f64>,
+    #[cfg(feature = "breakoutprop")]
+    #[serde(default)]
+    pub subaccount: Option<String>,
+    #[cfg(feature = "breakoutprop")]
+    #[serde(default)]
+    pub polling_enabled: Option<bool>,
+}
+#[cfg(feature = "asterdex")]
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AsterConfig {
+    pub api_version: Option<safe_cex_venue_asterdex::sign::Version>,
+    pub user_address: Option<String>,
+    pub signer_address: Option<String>,
+    pub private_key: Option<String>,
+    pub builder_address: Option<String>,
+    pub builder_fee_rate_maker: Option<String>,
+    pub builder_fee_rate_taker: Option<String>,
+    pub read_key: Option<String>,
+    pub read_secret: Option<String>,
+}
+
+#[cfg(feature = "bybit")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointOptions {
+    pub rest: String,
+    pub public_ws: String,
+    pub private_ws: String,
+}
+#[cfg(feature = "hyperliquid")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HyperliquidBuilder {
+    pub address: String,
+    pub fee_tenths_bps: u32,
+}
+
+#[cfg(feature = "lighter")]
+fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Index {
+        Number(u64),
+        Text(String),
+    }
+    Option::<Index>::deserialize(d)?
+        .map(|index| match index {
+            Index::Number(n) => Ok(n),
+            Index::Text(s) => s.parse::<u64>().map_err(serde::de::Error::custom),
+        })
+        .transpose()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secondary_read_options_decode_without_changing_primary_identity() {
+        let options: EngineOptions = serde_json::from_str(r#"{"key":"primary","secret":"primary-secret","readCredentials":{"key":"read","secret":"read-secret","passphrase":"read-pass"}}"#).unwrap();
+        assert_eq!(options.key.as_deref(), Some("primary"));
+        let read = options.read_credentials.unwrap();
+        assert_eq!(read.key, "read");
+        assert_eq!(read.secret, "read-secret");
+        assert_eq!(read.passphrase.as_deref(), Some("read-pass"));
+        assert!(
+            serde_json::from_str::<EngineOptions>(r#"{"readCredentials":{"key":"read"}}"#).is_err()
+        );
+    }
+}
