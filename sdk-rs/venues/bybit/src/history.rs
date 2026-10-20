@@ -17,6 +17,8 @@ const ORDERS_PAGE_LIMIT: u32 = 50;
 const INCOME_PAGE_LIMIT: u32 = 50;
 const TRADES_LIMIT: u32 = 1000;
 const MAX_PAGES_PER_WINDOW: u32 = 10;
+/// TS walks up to 20 order-history pages of 50.
+const MAX_ORDER_PAGES_PER_WINDOW: u32 = 20;
 
 pub struct Request {
     command: CommandId,
@@ -75,6 +77,9 @@ struct Income {
     #[serde(skip_serializing_if = "Option::is_none")]
     trade_id: Option<String>,
     category: &'static str,
+    /// Native row identity: equal for page repeats, distinct for real legs.
+    #[serde(skip)]
+    source: String,
 }
 
 #[derive(Serialize)]
@@ -128,10 +133,30 @@ impl Rows {
             }
             Self::Income(rows) => {
                 rows.sort_by(|left, right| right.timestamp.total_cmp(&left.timestamp));
+                // Exact page repeats collapse; distinct native rows sharing an id
+                // (same-instant hedge funding legs) get their leg appended instead.
                 let mut seen = HashSet::new();
                 rows.retain(|row| {
-                    seen.insert((row.symbol.clone(), row.tran_id.clone(), row.income_type))
+                    seen.insert((
+                        row.symbol.clone(),
+                        row.tran_id.clone(),
+                        row.income_type,
+                        row.source.clone(),
+                    ))
                 });
+                let mut sources: HashMap<&str, HashSet<&str>> = HashMap::new();
+                for row in rows.iter() {
+                    sources.entry(&row.tran_id).or_default().insert(&row.source);
+                }
+                let shared: HashSet<String> = sources
+                    .into_iter()
+                    .filter(|(_, legs)| legs.len() > 1)
+                    .map(|(id, _)| id.to_owned())
+                    .collect();
+                for row in rows.iter_mut().filter(|row| shared.contains(&row.tran_id)) {
+                    let (id, suffix) = row.tran_id.rsplit_once(':').unwrap_or((&row.tran_id, ""));
+                    row.tran_id = format!("{id}-{}:{suffix}", row.source.replace('|', "-"));
+                }
                 if cap > 0 {
                     rows.truncate(cap);
                 }
@@ -191,6 +216,18 @@ fn windows(from: Option<f64>, to: Option<f64>) -> VecDeque<(Option<f64>, Option<
     windows
 }
 
+fn nontrade_execution(kind: &str) -> bool {
+    [
+        "funding",
+        "settle",
+        "settlement",
+        "delivery",
+        "sessionsettlepnl",
+    ]
+    .iter()
+    .any(|name| kind.trim().eq_ignore_ascii_case(name))
+}
+
 fn nonzero(value: &Option<Str<'_>>) -> Option<f64> {
     Some(float_of(value)).filter(|v| v.is_finite() && *v != 0.0)
 }
@@ -231,6 +268,8 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
     let symbol = present(&row.symbol).unwrap_or_default();
     let asset = present(&row.currency).unwrap_or("USDT");
     let trade_id = present(&row.trade_id);
+    // TS's id shape, kept so stored records stay matched; `source` separates
+    // hedge legs that share it (see `Rows::json`).
     let base: Vec<&str> = [
         trade_id.or(present(&row.order_id)).unwrap_or_default(),
         symbol,
@@ -241,6 +280,12 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
     .filter(|part| !part.is_empty())
     .collect();
     let base = base.join("-");
+    let source = [
+        present(&row.id).unwrap_or_default(),
+        present(&row.side).unwrap_or_default(),
+        present(&row.size).unwrap_or_default(),
+    ]
+    .join("|");
     let mut push = |income: f64, category: &'static str, suffix: &str| {
         out.push(Income {
             symbol: symbol.to_owned(),
@@ -251,6 +296,7 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
             tran_id: format!("{base}:{suffix}"),
             trade_id: trade_id.map(str::to_owned),
             category,
+            source: source.clone(),
         });
     };
     let (flow, funding, fee) = (
@@ -347,7 +393,8 @@ impl BybitLinear {
                 to_ms,
                 limit,
             } => {
-                let cap = limit.unwrap_or(50) as usize;
+                // An omitted limit reads the whole window (bounded by the page guard), as TS does.
+                let cap = limit.unwrap_or(0) as usize;
                 let mut params = vec![("category", self.paths.category.to_owned())];
                 params.extend(symbol.map(|s| ("symbol", s)));
                 Walk {
@@ -358,7 +405,11 @@ impl BybitLinear {
                     path: "/v5/order/history",
                     signed: true,
                     params,
-                    limit: (cap as u32).clamp(1, ORDERS_PAGE_LIMIT),
+                    limit: if cap == 0 {
+                        ORDERS_PAGE_LIMIT
+                    } else {
+                        (cap as u32).clamp(1, ORDERS_PAGE_LIMIT)
+                    },
                     windows: windows(from_ms, to_ms),
                     window: (None, None),
                     cursor: None,
@@ -523,9 +574,31 @@ impl BybitLinear {
         };
         walk.pages += 1;
         let full = walk.cap > 0 && walk.rows.len() - walk.category_rows_start >= walk.cap;
+        // TS stops an unbounded order read at its page cap with a warning and keeps the rows.
+        let capped_orders = matches!(walk.rows, Rows::Orders(_))
+            && walk.cap == 0
+            && walk.pages >= MAX_ORDER_PAGES_PER_WINDOW
+            && cursor
+                .as_ref()
+                .is_some_and(|c| walk.cursor.as_ref() != Some(c));
+        if capped_orders {
+            cx.log(
+                LogLevel::Warning,
+                "Bybit order history reached its page limit; older orders in this window are omitted",
+            );
+            walk.pages = 0;
+            self.next_window(cx, command);
+            return;
+        }
         if !full
             && cursor.as_ref().is_some_and(|cursor| {
-                walk.cursor.as_ref() == Some(cursor) || walk.pages >= MAX_PAGES_PER_WINDOW
+                walk.cursor.as_ref() == Some(cursor)
+                    || walk.pages
+                        >= if matches!(walk.rows, Rows::Orders(_)) {
+                            MAX_ORDER_PAGES_PER_WINDOW
+                        } else {
+                            MAX_PAGES_PER_WINDOW
+                        }
             })
         {
             self.history.reads.remove(&command);
@@ -565,6 +638,17 @@ fn page(walk: &mut Walk, body: &str) -> serde_json::Result<Option<String>> {
             let (list, cursor) = listed::<ExecutionRow>(body)?;
             for e in list {
                 let time = or_zero(&e.exec_time);
+                let (price, qty) = (or_zero(&e.exec_price), or_zero(&e.exec_qty));
+                let side = order_side(e.side.as_deref());
+                // Funding and settlement rows share this endpoint but are not trades.
+                if present(&e.exec_type).is_some_and(nontrade_execution)
+                    || side.is_none()
+                    || !(price.is_finite() && price > 0.0)
+                    || !(qty.is_finite() && qty > 0.0)
+                    || !(time.is_finite() && time > 0.0)
+                {
+                    continue;
+                }
                 rows.push(Execution {
                     id: e.exec_id.as_deref().unwrap_or_default().to_owned(),
                     timestamp: if time > 100_000_000_000.0 {
@@ -574,9 +658,9 @@ fn page(walk: &mut Walk, body: &str) -> serde_json::Result<Option<String>> {
                     },
                     symbol: e.symbol.into_owned(),
                     order_id: e.order_id.into_owned(),
-                    price: or_zero(&e.exec_price),
-                    qty: or_zero(&e.exec_qty),
-                    side: side_name(order_side(e.side.as_deref())),
+                    price,
+                    qty,
+                    side: side_name(side),
                     commission: or_zero(&e.exec_fee).abs(),
                     commission_asset: present(&e.fee_currency).map(str::to_owned),
                     maker: e.is_maker,

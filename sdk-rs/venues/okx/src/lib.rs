@@ -1363,31 +1363,7 @@ fn subtract_bars(end: f64, interval: &str, count: u32) -> Option<f64> {
         "12h" => 43_200_000.0,
         "1d" => 86_400_000.0,
         "1w" => 604_800_000.0,
-        "1M" => {
-            let ms = end.floor() as i64;
-            let (year, month, day) = sign::civil_date(ms.div_euclid(86_400_000));
-            let months = year * 12 + month - 1 - i64::from(count);
-            let year = months.div_euclid(12);
-            let month = months.rem_euclid(12) + 1;
-            let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-            let days = match month {
-                2 => {
-                    if leap {
-                        29
-                    } else {
-                        28
-                    }
-                }
-                4 | 6 | 9 | 11 => 30,
-                _ => 31,
-            };
-            let year = year - i64::from(month <= 2);
-            let era = year.div_euclid(400);
-            let yoe = year - era * 400;
-            let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day.min(days) - 1;
-            let day = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
-            return Some((day * 86_400_000 + ms.rem_euclid(86_400_000)) as f64);
-        }
+        "1M" => return Some(safe_cex_engine::time::sub_months(end.floor() as i64, count) as f64),
         _ => return None,
     };
     Some(end - duration * f64::from(count))

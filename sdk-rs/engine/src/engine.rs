@@ -1,7 +1,8 @@
 //! The sans-I/O driver. Hosts feed [`Event`]s in and execute the [`Action`]s
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
-use crate::json::{ArrayAt, ArraySplitter};
+use crate::error::VenueError;
+use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
 use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts, PositionSide};
 use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 use crate::store::Store;
@@ -112,6 +113,12 @@ pub enum Notice {
         command: CommandId,
         result: Result<String, String>,
     },
+    /// Completes a command with a structured failure; hosts report it like a
+    /// `CommandDone` error, plus the detail.
+    CommandFailed {
+        command: CommandId,
+        error: VenueError,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -176,6 +183,23 @@ pub enum Action {
         timer: TimerId,
     },
     Notice(Notice),
+}
+
+/// Venue-specific actions outside the shared trading surface.
+#[derive(Clone, Debug, PartialEq)]
+pub enum VenueAction {
+    /// Lighter: the cached account tier as a JSON string, or `null`.
+    FetchAccountTier,
+    /// Lighter: switch the account tier (`standard`, `premium` or `plus`).
+    SetAccountTier { tier: String },
+}
+
+/// The shared rejection for a venue action the venue does not implement.
+pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
+    cx.done(
+        command,
+        Err("This action is not supported on this venue".into()),
+    );
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -269,6 +293,12 @@ pub enum Command {
     SetStpMode {
         command: CommandId,
         mode: crate::model::StpMode,
+    },
+    /// A venue-specific action; the engine rejects it unless the venue implements
+    /// `Venue::on_venue_action`, so venue `on_command` matches never see it.
+    Venue {
+        command: CommandId,
+        action: VenueAction,
     },
     /// Refresh account-specific leverage rails and margin mode for a symbol.
     FetchLeverage {
@@ -471,7 +501,7 @@ struct Io<P> {
     public_feed_policy: PublicFeedPolicy,
     pending: HashMap<RequestId, P>,
     signatures: Vec<(RequestId, PendingSignature)>,
-    streams: HashMap<RequestId, ArrayAt>,
+    streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
     incoming: HashMap<RequestId, Incoming>,
     timers: HashMap<TimerId, ()>,
     next_id: u32,
@@ -761,13 +791,22 @@ impl<P> Cx<'_, P> {
         pending: P,
     ) -> RequestId {
         let id = self.request(method, url, headers, body, pending);
-        self.io.streams.insert(id, at);
+        self.io.streams.insert(id, (at, ItemCheck::Splitter));
         id
     }
 
     /// Stream the response of an already-issued request, including signed POST reads.
     pub fn stream_response(&mut self, request: RequestId, at: ArrayAt) {
-        self.io.streams.insert(request, at);
+        self.io.streams.insert(request, (at, ItemCheck::Splitter));
+    }
+
+    /// Skip the splitter's per-element syntax pass for a streamed request
+    /// whose venue deserializes every element with serde_json and fails the
+    /// request on any error.
+    pub fn venue_parses_items(&mut self, request: RequestId) {
+        if let Some((_, check)) = self.io.streams.get_mut(&request) {
+            *check = ItemCheck::Venue;
+        }
     }
 
     /// Set host policy on an outbound action before the host drains it.
@@ -851,6 +890,18 @@ impl<P> Cx<'_, P> {
         self.io
             .actions
             .push(Action::Notice(Notice::CommandDone { command, result }));
+    }
+
+    pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
+        #[cfg(feature = "order-locks")]
+        {
+            self.io.order_locks.finish(command, true);
+            self.io.active_commands.remove(&command);
+        }
+        self.io.actions.push(Action::Notice(Notice::CommandFailed {
+            command,
+            error: error.into(),
+        }));
     }
 
     /// Every placement in this response is proven accepted or explicitly rejected.
@@ -978,6 +1029,15 @@ pub trait Venue {
         false
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
+    /// Venue-specific actions; the engine never passes `Command::Venue` to `on_command`.
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        command: CommandId,
+        _action: VenueAction,
+    ) {
+        unsupported_venue_action(cx, command);
+    }
     fn book(&self, symbol: &str) -> Option<&Book>;
     /// Every subscribed book, including unsynchronized subscriptions.
     /// Snapshot frames clear subscriptions for which `book` returns `None`.
@@ -1358,6 +1418,9 @@ impl<V: Venue> Engine<V> {
                     self.venue.on_timer(&mut cx, timer);
                 }
             }
+            Event::Command(Command::Venue { command, action }) => {
+                self.venue.on_venue_action(&mut cx, command, action);
+            }
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
                 if !self.venue.supports_amend_order_with_symbol() =>
             {
@@ -1455,10 +1518,10 @@ impl<V: Venue> Engine<V> {
         if !self.io.pending.contains_key(&request) {
             return;
         }
-        let at = self.io.streams.remove(&request);
-        let splitter = at
+        let stream = self.io.streams.remove(&request);
+        let splitter = stream
             .filter(|_| (200..300).contains(&status))
-            .map(ArraySplitter::new);
+            .map(|(at, check)| ArraySplitter::with_item_check(at, check));
         self.io.incoming.insert(
             request,
             Incoming {
@@ -2491,6 +2554,26 @@ mod streaming_tests {
             symbol_amend: false,
             commands: Vec::new(),
         })
+    }
+
+    #[test]
+    fn venue_actions_default_to_one_shared_rejection() {
+        let mut engine = frame_engine();
+        engine.handle(
+            0.0,
+            Event::Command(Command::Venue {
+                command: 9,
+                action: VenueAction::FetchAccountTier,
+            }),
+        );
+        let result = engine.drain_actions().find_map(|action| match action {
+            Action::Notice(Notice::CommandDone { command: 9, result }) => Some(result),
+            _ => None,
+        });
+        assert_eq!(
+            result,
+            Some(Err("This action is not supported on this venue".into()))
+        );
     }
 
     #[test]

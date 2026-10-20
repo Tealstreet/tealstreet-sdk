@@ -20,6 +20,9 @@ pub enum Request {
     Limits {
         started_at: f64,
     },
+    ChangeTier {
+        command: safe_cex_engine::CommandId,
+    },
     Lookup {
         candidates: VecDeque<Lookup>,
         index: Option<u64>,
@@ -1299,7 +1302,7 @@ impl Lighter {
         item: &str,
     ) {
         match request {
-            Request::Limits { .. } => {}
+            Request::Limits { .. } | Request::ChangeTier { .. } => {}
             Request::Lookup { index: found, .. } => {
                 if found.is_none()
                     && let Ok(wire) = serde_json::from_str::<AccountWire<'_>>(item)
@@ -1487,6 +1490,7 @@ impl Lighter {
                 || response.body.trim_start().starts_with('['));
         match request {
             Request::Limits { started_at } => self.limits_response(cx, started_at, response),
+            Request::ChangeTier { command } => self.tier_changed(cx, command, response),
             Request::Lookup {
                 candidates,
                 index: found,
@@ -1642,6 +1646,12 @@ impl Lighter {
     ) {
         match request {
             Request::Limits { started_at } => self.limits_failed(cx, started_at),
+            Request::ChangeTier { command } => cx.done(
+                command,
+                Err(format!(
+                    "Lighter account tier change outcome is unknown: {error}"
+                )),
+            ),
             Request::Lookup { candidates, .. } => self.next_lookup(cx, candidates),
             Request::Snapshot { .. } => {
                 self.account.snapshot_inflight = false;

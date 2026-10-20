@@ -14,7 +14,7 @@ use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wire::*;
 
 #[derive(Clone, Debug, Default)]
@@ -93,6 +93,7 @@ pub struct Hyperliquid {
     books: HashMap<String, Ladder>,
     candles: HashMap<(String, String), usize>,
     assets: HashMap<String, u32>,
+    isolated_only: HashSet<String>,
     coins: HashMap<String, String>,
     dex_queue: std::collections::VecDeque<(String, u32)>,
     dex_names: Vec<String>,
@@ -110,6 +111,7 @@ impl Hyperliquid {
             books: HashMap::new(),
             candles: HashMap::new(),
             assets: HashMap::new(),
+            isolated_only: HashSet::new(),
             coins: HashMap::new(),
             dex_queue: Default::default(),
             dex_names: Vec::new(),
@@ -910,6 +912,9 @@ impl Venue for Hyperliquid {
                         };
                         if let Some(m) = markets.iter().find(|m| m.id == id) {
                             self.assets.insert(m.symbol.clone(), offset + index as u32);
+                            if meta.isolated_only() {
+                                self.isolated_only.insert(m.symbol.clone());
+                            }
                             self.coins
                                 .insert(m.id.to_ascii_lowercase(), m.symbol.clone());
                         }

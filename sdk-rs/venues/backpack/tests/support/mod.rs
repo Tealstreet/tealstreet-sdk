@@ -51,17 +51,29 @@ pub fn ready_window(
     position_body: &str,
     auth_window: Option<(f64, u32)>,
 ) -> (Driver, SocketId) {
-    ready_snapshot(position_status, position_body, auth_window, "[]")
+    let (e, socket, _) = ready_snapshot(MARKETS, position_status, position_body, auth_window, "[]");
+    (e, socket)
 }
 pub fn ready_orders(orders: &str) -> (Driver, SocketId) {
-    ready_snapshot(200, POSITIONS, None, orders)
+    let (e, socket, _) = ready_snapshot(MARKETS, 200, POSITIONS, None, orders);
+    (e, socket)
 }
+/// Startup against a custom market catalogue; also returns the startup logs.
+pub fn ready_catalogue(
+    markets: &str,
+    positions: &str,
+    orders: &str,
+) -> (Driver, SocketId, Vec<String>) {
+    ready_snapshot(markets, 200, positions, None, orders)
+}
+pub const MARKETS: &str = r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"},{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"0.001","priceIncrement":"0.1"}]"#;
 fn ready_snapshot(
+    markets: &str,
     position_status: u16,
     position_body: &str,
     auth_window: Option<(f64, u32)>,
     orders: &str,
-) -> (Driver, SocketId) {
+) -> (Driver, SocketId, Vec<String>) {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     // Public deterministic test seed; never a real exchange account.
     let secret = STANDARD.encode([7u8; 32]);
@@ -74,12 +86,8 @@ fn ready_snapshot(
     }));
     e.start(1000.0);
     let r = requests(&mut e).pop().unwrap();
-    reply(
-        &mut e,
-        &r,
-        200,
-        r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"},{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"0.001","priceIncrement":"0.1"}]"#,
-    );
+    reply(&mut e, &r, 200, markets);
+    let mut logs = vec![];
     for r in requests(&mut e) {
         reply(
             &mut e,
@@ -126,9 +134,10 @@ fn ready_snapshot(
                     );
                 }
                 Action::WsConnect { socket, .. } => private = Some(socket),
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
                 _ => {}
             }
         }
     }
-    (e, private.expect("private socket"))
+    (e, private.expect("private socket"), logs)
 }

@@ -1,6 +1,6 @@
 //! Account-tier reads share TS's five-minute cache and one-minute retry cooldown.
 use crate::{Lighter, Pending, account};
-use safe_cex_engine::{Cx, Method, Response};
+use safe_cex_engine::{CommandId, Cx, Method, Response, VenueAction, unsupported_venue_action};
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
@@ -12,6 +12,15 @@ enum Tier {
     Standard,
     Premium,
     Plus,
+}
+impl Tier {
+    fn label(self) -> &'static str {
+        match self {
+            Tier::Standard => "standard",
+            Tier::Premium => "premium",
+            Tier::Plus => "plus",
+        }
+    }
 }
 struct TierLabel(Option<Tier>);
 impl<'de> Deserialize<'de> for TierLabel {
@@ -59,6 +68,8 @@ pub(crate) struct Limits {
 #[derive(Deserialize)]
 struct Envelope {
     code: Option<u16>,
+    #[serde(default)]
+    message: Option<String>,
 }
 #[derive(Default, Deserialize)]
 struct Payload<'a> {
@@ -147,6 +158,79 @@ impl Lighter {
             Pending::Account(account::Request::Limits { started_at: cx.now }),
         );
         false
+    }
+    pub(crate) fn tier_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        action: VenueAction,
+    ) {
+        match action {
+            VenueAction::FetchAccountTier => {
+                self.refresh_limits(cx);
+                let tier = self
+                    .limits
+                    .tier
+                    .map_or_else(|| "null".into(), |t| format!("\"{}\"", t.label()));
+                cx.done(command, Ok(tier));
+            }
+            VenueAction::SetAccountTier { tier } => {
+                let result = (|| {
+                    if !matches!(tier.as_str(), "standard" | "premium" | "plus") {
+                        return Err("Lighter account tier must be standard, premium or plus".into());
+                    }
+                    let account = self
+                        .account
+                        .account_index
+                        .ok_or("Lighter account is not loaded yet")?;
+                    let auth = self.account_auth(cx.now)?;
+                    Ok::<_, String>((account, auth))
+                })();
+                match result {
+                    Ok((account, auth)) => {
+                        cx.request(
+                            Method::Post,
+                            format!("{}/api/v1/changeAccountTier", self.host()),
+                            vec![
+                                ("Content-Type", "application/x-www-form-urlencoded".into()),
+                                ("authorization", auth),
+                            ],
+                            Some(format!("account_index={account}&new_tier={tier}")),
+                            Pending::Account(account::Request::ChangeTier { command }),
+                        );
+                    }
+                    Err(error) => cx.done(command, Err(error)),
+                }
+            }
+            #[allow(unreachable_patterns)]
+            _ => unsupported_venue_action(cx, command),
+        }
+    }
+    pub(crate) fn tier_changed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        response: Response<'_>,
+    ) {
+        let envelope = serde_json::from_str::<Envelope>(response.body).ok();
+        if (200..300).contains(&response.status)
+            && envelope.as_ref().is_some_and(|e| e.code == Some(200))
+        {
+            // The next read reflects the new tier and its rate limits.
+            self.limits.tier = None;
+            self.limits.next_fetch_at = 0.0;
+            self.refresh_limits(cx);
+            cx.done(command, Ok("null".into()));
+        } else {
+            let message = envelope
+                .and_then(|e| e.message)
+                .filter(|m| !m.is_empty())
+                .unwrap_or_else(|| format!("HTTP {}", response.status));
+            cx.done(
+                command,
+                Err(format!("Lighter account tier change failed: {message}")),
+            );
+        }
     }
     pub(crate) fn limits_standard(&self) -> bool {
         self.limits.tier == Some(Tier::Standard)
