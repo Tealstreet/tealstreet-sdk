@@ -29,11 +29,11 @@ export const memoryMetricErrors = (metrics) => {
   return errors;
 };
 
-// Async major GC runs at a clean task boundary; synchronous GC can retain dead
-// loader objects through conservative stack roots. Backing stores still need
-// the same quiet window after collection completes.
+// Full async GC clears reclaimable initialization/code state at a clean task
+// boundary. Let backing stores settle before collecting, then sample without
+// another event turn admitting uncollected loader allocations.
 export const settledMemory = async ({
-  collect = () => globalThis.gc?.({ type: 'major', execution: 'async' }),
+  collect = () => globalThis.gc?.({ type: 'major', execution: 'async', flavor: 'last-resort' }),
   sample = () => process.memoryUsage(),
   pause = () => new Promise((resolve) => realTimeout(resolve, 10)),
   now = () => performance.now(),
@@ -52,9 +52,9 @@ export const settledMemory = async ({
   });
   const run = async () => {
     while (!stopped && now() <= deadline) {
-      await collect();
-      if (stopped || now() > deadline) break;
       await pause();
+      if (stopped || now() > deadline) break;
+      await collect();
       if (stopped || now() > deadline) break;
       const memory = sample();
       const time = now();

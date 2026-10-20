@@ -115,7 +115,7 @@ test('settled samples use real time when replay replaces global timers', async (
 });
 }
 
-test('pending collection completes before any pause, sample or published result', async () => {
+test('pending collection completes before sampling with no intervening pause', async () => {
   let release;
   const pending = new Promise((resolve) => { release = resolve; });
   const events = [];
@@ -127,11 +127,11 @@ test('pending collection completes before any pause, sample or published result'
     now: () => time, quietMs: 0,
   }).then((memory) => { published = true; return memory; });
   await new Promise(setImmediate);
-  assert.deepEqual(events, ['collect']);
+  assert.deepEqual(events, ['pause', 'collect']);
   assert.equal(published, false);
   release();
   assert.deepEqual(await result, { arrayBuffers: 42, heapUsed: 1000 });
-  assert.deepEqual(events, ['collect', 'pause', 'sample', 'collect', 'pause', 'sample', 'collect', 'pause', 'sample']);
+  assert.deepEqual(events, ['pause', 'collect', 'sample', 'pause', 'collect', 'sample', 'pause', 'collect', 'sample']);
 });
 
 test('default major collector is awaited across its asynchronous task boundary', async () => {
@@ -139,7 +139,7 @@ test('default major collector is awaited across its asynchronous task boundary',
   let pending = false, completed = 0;
   let time = 0;
   globalThis.gc = async (options) => {
-    assert.deepEqual(options, { type: 'major', execution: 'async' });
+    assert.deepEqual(options, { type: 'major', execution: 'async', flavor: 'last-resort' });
     pending = true;
     await new Promise(setImmediate);
     completed++;
@@ -147,8 +147,8 @@ test('default major collector is awaited across its asynchronous task boundary',
   };
   try {
     await settledMemory({
-      pause: async () => { assert.equal(pending, false); assert(completed > 0); time += 10; },
-      sample: () => { assert.equal(pending, false); return { arrayBuffers: 42, heapUsed: 1000 }; },
+      pause: async () => { assert.equal(pending, false); time += 10; },
+      sample: () => { assert.equal(pending, false); assert(completed > 0); return { arrayBuffers: 42, heapUsed: 1000 }; },
       now: () => time, quietMs: 0,
     });
     assert.equal(completed, 3);
@@ -197,7 +197,33 @@ test('collection duration consumes the existing budget instead of restarting it'
     sample: () => { sampled++; return { arrayBuffers: 42 }; },
     now: () => time, timeoutMs: 100,
   }), /Backing-buffer memory did not settle/);
-  assert.equal(time, 140);
-  assert.equal(pauses, 2);
+  assert.equal(time, 110);
+  assert.equal(pauses, 3);
   assert.equal(sampled, 2);
+});
+
+test('allocations during settlement are collected before the retained sample', async () => {
+  let time = 0, uncollected = 0;
+  const memory = await settledMemory({
+    pause: async () => { time += 10; uncollected = 4_000_000; },
+    collect: async () => { await new Promise(setImmediate); uncollected = 0; },
+    sample: () => ({ arrayBuffers: 42, heapUsed: 1000 + uncollected }),
+    now: () => time, quietMs: 0,
+  });
+  assert.deepEqual(memory, { arrayBuffers: 42, heapUsed: 1000 });
+});
+
+test('a hung settlement pause shares the deadline and cannot start late collection', async () => {
+  let release, collections = 0, sampled = 0;
+  const pending = new Promise((resolve) => { release = resolve; });
+  await assert.rejects(settledMemory({
+    pause: () => pending,
+    collect: () => { collections++; },
+    sample: () => { sampled++; return { arrayBuffers: 0 }; },
+    timeoutMs: 30,
+  }), /Backing-buffer memory did not settle/);
+  release();
+  await new Promise(setImmediate);
+  assert.equal(collections, 0);
+  assert.equal(sampled, 0);
 });

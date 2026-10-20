@@ -1655,3 +1655,38 @@ Independent shared harness review67+2PASS, no new source findings. Root SDK
 test-ci7349/507files PASS; duplicate test-unit/remaining repository tasks still
 running. Native frame-wire1/1 and mock live-smoke9/9 PASS. Memory diagnosis
 continues separately; this checkpoint does not claim final replay gates PASS.
+
+Actual producer diagnostics distinguish collection from lifetime variance.
+Exact ESBUILD_WORKER_THREADS=0 preconstructor samples: regular asyncmajor
+25,965,576→23,022,472 after heap snapshot, reclaiming2,943,104 (young1.59MB,
+old640KB/trusted672KB; bytecode1,786,400→1,227,768). Asyncmajor last-resort
+21,161,888→20,911,904, reclaiming249,984 almost entirely young heap allocated
+during the pause AFTER collection. Full last-resort plus pause BEFORE awaited
+collection/immediate sample20,884,888→20,893,688 after snapshot (+8,800 from
+diagnostic allocations, no residual reclaim; young2,352→1,440). Logs/snapshots
+/tmp/bitunix-006-{regular,last-resort,last-resort-immediate}-residual.* retained.
+
+Official Node24.21/22.23 V8 gc-extension.cc regular major uses
+PreciseCollectAllGarbage(kNoFlags), while last-resort uses
+CollectAllAvailableGarbage. The latter clears serializer/compilation-cache
+roots and performs bounded root-stable collections; heap snapshots use the
+same path. Snapshot's old/trusted drop is cache/root cleanup, not proof of
+bytecode aging. Thus asyncmajor alone was insufficient; full collection plus
+immediate postcollection sampling removes the proven initialization residue.
+Implement only those sampler corrections symmetrically before construction
+and after replay. Preserve all signed deltas/nonnegative-total validation,
+100ms backing-buffer quiet/1s total real deadline, CPU/peak callsites, module
+budgets and equality rules. Independent source audit and actual failing-profile
+verification still required before restarting gate batch.
+
+Sampler correction staged/reviewed:17focused and739aggregate helpers PASS;
+pause-created-allocation regression fails prior source and passes correction.
+Independent exactdiff audit PASS. No remaining sampler source finding. Cache
+eviction at BOTH endpoints may affect subsequent compilation cost; fresh CPU
+gates remain mandatory. Sources: Node24.21 gc-extension.cc169–194 and
+heap.cc1239–1287; Node22.23 heap.cc1470–1513; V8 snapshot-generator3032–3044.
+Root quality COMPLETE:44typecheck/28lint/27test tasks PASS, SDK7349tests in
+507files twice. Compiled bundle385cases covered: prior384pass plus repaired
+realVenue44/44 rerun; host89 and native2473 PASS. Coinbase single-venue build
+PASS11.32s. Begin new final gate batch on frozen CoinbaseSpot ES256 failing
+tape first, then rebuilt public/private controls. Historical failures retained.
