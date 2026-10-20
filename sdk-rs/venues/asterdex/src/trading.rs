@@ -1042,6 +1042,33 @@ fn working_type(opts: &PlaceOrderOpts) -> &'static str {
     }
 }
 
+/// A trading failure classified by its Aster code; code 0 is a transport
+/// failure, a non-JSON HTTP error or an unproven acknowledgement.
+fn failure(code: i64, message: String) -> VenueError {
+    let (kind, outcome) = match code {
+        0 | -1000 => (None, Outcome::Unknown),
+        -1007 => (Some(ErrorKind::Timeout), Outcome::Unknown),
+        -1001 | -1006 => (Some(ErrorKind::VenueUnavailable), Outcome::Unknown),
+        -1008 => (Some(ErrorKind::VenueUnavailable), Outcome::Rejected),
+        -1003 | -1015 => (Some(ErrorKind::RateLimited), Outcome::Rejected),
+        -1022 | -2014 | -2015 => (Some(ErrorKind::AuthInvalid), Outcome::Rejected),
+        -1002 | -5025 => (Some(ErrorKind::AuthPermission), Outcome::Rejected),
+        -1199..=-1100 | -4999..=-4000 => (Some(ErrorKind::InvalidInput), Outcome::Rejected),
+        _ => (Some(ErrorKind::Rejected), Outcome::Rejected),
+    };
+    let mut error = VenueError::new(message.clone()).outcome(outcome);
+    error.kind = kind;
+    if code != 0 {
+        error = error.venue_code(code.to_string()).venue_message(message);
+    }
+    error
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
 #[cfg(test)]
 mod tests {
     use super::fee_rate;
@@ -1068,31 +1095,4 @@ mod tests {
             assert!(fee_rate(input).is_err(), "{input}");
         }
     }
-}
-
-/// A trading failure classified by its Aster code; code 0 is a transport
-/// failure, a non-JSON HTTP error or an unproven acknowledgement.
-fn failure(code: i64, message: String) -> VenueError {
-    let (kind, outcome) = match code {
-        0 | -1000 => (None, Outcome::Unknown),
-        -1007 => (Some(ErrorKind::Timeout), Outcome::Unknown),
-        -1001 | -1006 => (Some(ErrorKind::VenueUnavailable), Outcome::Unknown),
-        -1008 => (Some(ErrorKind::VenueUnavailable), Outcome::Rejected),
-        -1003 | -1015 => (Some(ErrorKind::RateLimited), Outcome::Rejected),
-        -1022 | -2014 | -2015 => (Some(ErrorKind::AuthInvalid), Outcome::Rejected),
-        -1002 | -5025 => (Some(ErrorKind::AuthPermission), Outcome::Rejected),
-        -1199..=-1100 | -4999..=-4000 => (Some(ErrorKind::InvalidInput), Outcome::Rejected),
-        _ => (Some(ErrorKind::Rejected), Outcome::Rejected),
-    };
-    let mut error = VenueError::new(message.clone()).outcome(outcome);
-    error.kind = kind;
-    if code != 0 {
-        error = error.venue_code(code.to_string()).venue_message(message);
-    }
-    error
-}
-
-/// Refused before any request was sent.
-fn not_sent(message: impl Into<String>) -> VenueError {
-    VenueError::new(message).outcome(Outcome::NotSent)
 }
