@@ -183,10 +183,10 @@ const recordedOkxTransport = () => {
                   instId: xperp.instId,
                   last: '',
                   open24h: '',
-                  bidPx: '',
-                  askPx: '',
-                  volCcy24h: '',
-                  vol24h: '',
+                  bidPx: '0',
+                  askPx: '0',
+                  volCcy24h: '0',
+                  vol24h: '0',
                 },
               ]
             : ['positions', 'orders-pending', 'orders-algo-pending'].includes(name)
@@ -790,6 +790,13 @@ describe('RustEngineExchange', () => {
           .filter((r) => new URL(r.url).pathname.endsWith('/instruments'))
           .map((r) => new URL(r.url).searchParams.get('instType')),
       ).toEqual(eea ? ['SWAP', 'FUTURES'] : ['SWAP']);
+      for (const endpoint of ['positions', 'orders-pending']) {
+        // Socket authentication can refresh the snapshot more than once.
+        const scopes = tape.requests
+          .filter((r) => new URL(r.url).pathname.endsWith(`/${endpoint}`))
+          .map((r) => new URL(r.url).searchParams.get('instType'));
+        expect([...new Set(scopes)]).toEqual(eea ? ['SWAP', 'FUTURES'] : ['SWAP']);
+      }
       if (eea) {
         expect(store.tickersBySymbol.BTCUSD_UM_XPERP310822).toMatchObject({ last: 0, bid: 0, ask: 0, percentage: 0 });
       }

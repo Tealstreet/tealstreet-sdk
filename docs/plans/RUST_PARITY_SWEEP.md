@@ -619,7 +619,7 @@ than treating the original port boundary as a waiver.
   REST reference drives real revision-fenced read rather than assuming a new
   array is fresh; explicit-empty ticker quotes retain proven values and
   malformed supplied quotes remain visible.
-- First merged native119-case target had one incoming placement setup failure:
+- First merged native118-case target had one incoming placement setup failure:
   it omitted completed account reconciliation. Complete the test setup and
   preserve readiness preflight/economic assertions. Independent native review
   found missing order currency reserve attribution; fallback to proven settle
@@ -631,3 +631,13 @@ than treating the original port boundary as a waiver.
   selected local replays plus separate combinedGRVT=73proofs on the new union.
   Child manifest remains136steps/64replays/28builds; combined product-control
   group adds16cases. No old scores are attributed to this new runtime.
+
+- Merged combinedSDK run reproduced two EEA startup timeouts. Synthetic
+  FUTURES ticker book/volume fields were empty despite native required numeric
+  fields; change only those fixture values to explicit0, retain blanklast/open,
+  readiness/parserchecks,callerIDs and5s timeout. All57compiledSDK-file cases
+  PASS. Full root44/28/27tasks,7666SDKcases pertarget,2683native+3doc,
+  isolatedengine79 and strictquality PASS;16combinedproductcontrols PASS.
+- CIalsoexposed existingPhemexREST/WS normalization inconsistency; paired
+  productionfix/regressions are being completed and separately reviewed. No
+  gatefinancialnormalization or failedread/revision guard is changed.
