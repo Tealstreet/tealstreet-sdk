@@ -261,6 +261,7 @@ fn replacement(
         stp_mode: None,
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,
+        implied_volatility: None,
     };
     if let Some(price) = price {
         if target.parent_id.is_some() || id != base_id {

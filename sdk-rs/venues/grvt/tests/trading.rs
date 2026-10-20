@@ -155,6 +155,7 @@ fn opts() -> PlaceOrderOpts {
         max_slippage_pct: None,
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,
+        implied_volatility: None,
         close: None,
         stp_mode: None,
     }

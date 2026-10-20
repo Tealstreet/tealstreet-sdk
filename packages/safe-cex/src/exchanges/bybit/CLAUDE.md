@@ -1935,8 +1935,27 @@ position stops. Hyro keeps its order/position-only private subscription and
 emits incremental fills from cumulative order executions; ordinary Bybit variants
 use individual execution events.
 
+Linear Rust accounts now honor `enableInverseMarkets` and
+`enableOptionMarkets` together. Other variants keep their TS product eligibility
+and do not enable these combined modes. Independent category startup, public
+feeds and snapshot generations join one catalog/account; a shared private
+subscription acknowledgment heals every enabled category, and category position
+updates preserve sibling leverage/margin settings. Failed or malformed snapshots
+retain prior state. Account-wide history joins categories before newest-first
+global limiting.
+
+Typed option terms survive frames as `Market.option`, and position Greeks keep
+their documented native units keyed by position ID. Option-chain/expiry/account
+Greek queries use the native endpoints. Plain limit/market option orders retain
+base quantity and required client identity; IV-priced limit orders send
+`orderIv` without a competing price. Unsupported derivative controls and IV on
+non-options reject the whole batch before writes. Options do not support the
+derivative candle/leverage/position-mode paths. Typed instrument classification
+preserves absent/empty/unknown `symbolType`, region and underlying through both
+frame consumers, restoring the actual CLI TradFi preflight.
+
 The TS implementations remain the replay oracle and support existing TS-engine
-callers and opt-in linear options/inverse combinations outside this port. No
-proven-unused helper or alternate Rust venue crate is retained. Verification,
+callers. No proven-unused helper or alternate Rust venue crate is retained. Verification,
 known TS defects and live-connectivity limits are recorded in
-`docs/plans/BYBIT_VARIANTS_PORT.md`.
+`docs/plans/BYBIT_VARIANTS_PORT.md` and
+`docs/plans/RUST_PRODUCT_SEMANTICS.md`.

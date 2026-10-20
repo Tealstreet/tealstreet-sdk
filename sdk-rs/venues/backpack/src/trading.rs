@@ -451,6 +451,7 @@ impl Backpack {
                         max_slippage_pct: None,
                         bybit_bbo: None,
                         bybit_slippage_tolerance_ticks: None,
+                        implied_volatility: None,
                     };
                     let mut steps = self.placement_steps(cx, &o)?;
                     steps.insert(
