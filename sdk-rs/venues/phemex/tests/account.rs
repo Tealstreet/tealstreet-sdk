@@ -241,6 +241,39 @@ fn rest_and_ws_balance_conventions_match_across_currencies_and_pnl_signs() {
 }
 
 #[test]
+fn rest_and_account_push_publish_per_currency_balances() {
+    use safe_cex_engine::model::{Balance, CurrencyBalance};
+    let currency = |currency: &str, total: f64, used: f64, free: f64, upnl: f64| CurrencyBalance {
+        currency: currency.into(),
+        balance: Balance {
+            total,
+            used,
+            free,
+            upnl,
+        },
+    };
+    let (mut e, a, socket) = started();
+    seed(&mut e, &a);
+    let usdc = currency("USDC", 100., 19., 181., 100.);
+    assert_eq!(
+        e.store().currency_balances().unwrap(),
+        &[usdc.clone(), currency("USDT", 990., 69., 931., 10.)]
+    );
+    authenticate(&mut e, socket);
+    // The negative-used USDC row is rejected; only USDT moves.
+    ws(
+        &mut e,
+        socket,
+        r#"{"timestamp":1700000001000000000,"accounts_p":[{"currency":"USDT","accountBalanceRv":"1100","totalUsedBalanceRv":"70"},{"currency":"USDC","accountBalanceRv":"5","totalUsedBalanceRv":"-1"}]}"#,
+    );
+    assert_eq!(
+        e.store().currency_balances().unwrap(),
+        &[usdc, currency("USDT", 1090., 70., 1030., 10.)]
+    );
+    assert_eq!(e.store().balance().total, 1190.);
+}
+
+#[test]
 fn independent_currency_failure_keeps_prior_slice_and_flat_settings() {
     let (mut e, a, _) = started();
     seed(&mut e, &a);
@@ -1092,7 +1125,7 @@ fn unsupported_order_type_or_status_skips_only_that_row() {
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
     assert!(e.store().order("site").is_none());
     assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.02);
-    let filled = order("Expired", 200)
+    let filled = order("Mystery", 200)
         .replace("\"cumQty\":\"0\"", r#""cumQty":"0.1","execID":"exec-x","execQty":"0.1","execPriceRp":"69000","tradeType":"Trade""#);
     ws(
         &mut e,
@@ -1108,6 +1141,60 @@ fn unsupported_order_type_or_status_skips_only_that_row() {
     let frame = e.take_frame(NOW).unwrap();
     let data = execution_rows(frame, 1);
     assert_eq!(f64::from_le_bytes(data[8..16].try_into().unwrap()), 0.1);
+}
+#[test]
+fn deactivated_or_expired_row_cancels_the_open_order_and_a_later_snapshot_cannot_revive_it() {
+    for status in ["Deactivated", "Expired"] {
+        let (mut e, a, s) = started();
+        seed(&mut e, &a);
+        authenticate(&mut e, s);
+        push_orders(&mut e, s, "snapshot", 1, &order("New", 100));
+        assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
+        push_orders(&mut e, s, "incremental", 2, &order(status, 200));
+        assert_eq!(
+            e.store().order("one").unwrap().status,
+            OrderStatus::Canceled,
+            "{status} left the order open"
+        );
+        e.drain_actions().for_each(drop);
+        e.handle(
+            NOW + 200.,
+            Event::WsClosed {
+                socket: s,
+                code: 1006,
+            },
+        );
+        let (retry, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .expect("reconnect timer");
+        e.handle(at, Event::TimerFired { timer: retry });
+        let fresh = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect {
+                    socket,
+                    channel: Some(safe_cex_engine::SocketChannel::Private),
+                    ..
+                } => Some(socket),
+                _ => None,
+            })
+            .expect("private reconnect");
+        authenticate(&mut e, fresh);
+        let other = order("New", 300).replace("\"one\"", "\"two\"");
+        let rows = format!("{},{other}", order("New", 100));
+        push_orders(&mut e, fresh, "snapshot", 1, &rows);
+        assert!(e.store().order("two").is_some(), "snapshot did not apply");
+        assert!(
+            e.store()
+                .order("one")
+                .is_none_or(|o| o.status != OrderStatus::Open),
+            "stale snapshot revived a {status} order"
+        );
+    }
 }
 #[test]
 fn bad_stream_position_row_still_applies_the_frame_balance() {

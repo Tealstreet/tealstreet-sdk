@@ -10,6 +10,15 @@ use serde::{Deserialize, Serialize};
 /// Fills pages before the read falls back to order history or stops.
 const FILL_PAGES: u32 = 5;
 
+/// Whether a read with an optional output limit has kept enough rows, and
+/// whether it is bounded at all.
+fn limit_reached(limit: Option<u32>, kept: usize) -> (bool, bool) {
+    match limit.filter(|limit| *limit > 0) {
+        Some(limit) => (kept >= limit as usize, true),
+        None => (false, false),
+    }
+}
+
 /// Pages a read may walk before it stops with a cursor pending.
 fn page_cap(query: &Query) -> u32 {
     match query {
@@ -692,12 +701,20 @@ impl History {
             self.issue(cx, account, request);
             return;
         }
-        // Counts kept fills: order-id and time filters run after the page arrives.
-        let filled_limit = match (&request.query, &request.rows) {
-            (Query::Fills { limit, .. }, Rows::Fills(rows)) => {
-                rows.len() >= limit.unwrap_or(100).clamp(1, 500) as usize
+        // A bounded read stops once it keeps enough rows (filters run after the
+        // page arrives): Paradex pages newest first, so those are the rows a
+        // full walk would keep. Only an unbounded read can exhaust its pages.
+        let (enough, bounded) = match (&request.query, &request.rows) {
+            (Query::Fills { limit, .. }, Rows::Fills(rows)) => (
+                rows.len() >= limit.unwrap_or(100).clamp(1, 500) as usize,
+                true,
+            ),
+            (Query::OrderHistory { limit, .. }, Rows::Orders(rows)) => {
+                limit_reached(*limit, rows.len())
             }
-            _ => false,
+            (Query::Income { limit, .. }, Rows::Income(rows)) => limit_reached(*limit, rows.len()),
+            (Query::OrderByClientId { .. }, Rows::Lookup(rows)) => (!rows.is_empty(), true),
+            _ => (false, false),
         };
         request.lookup_complete = request.open_complete && request.lookup_history && next.is_none();
         // The orders fallback and public trades are single pages.
@@ -706,13 +723,19 @@ impl History {
             next: if single { None } else { next },
             rows: request.raw_rows,
             fresh: request.raw_rows,
-            want_more: !filled_limit,
+            want_more: !enough,
         };
         match request.walk.advance(page) {
             CursorStep::More(_) => {
                 self.issue(cx, account, request);
                 return;
             }
+            // A bounded read keeps what its pages found, as before: a lookup
+            // reports a non-definitive miss. An unbounded read is incomplete.
+            CursorStep::Stalled(Stall::PageBudget) if bounded => cx.log(
+                safe_cex_engine::LogLevel::Warning,
+                "Paradex history reached page cap",
+            ),
             CursorStep::Stalled(Stall::PageBudget) => {
                 self.on_failed(cx, request, "INCOMPLETE: Paradex history page cap reached");
                 return;

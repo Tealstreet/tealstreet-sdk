@@ -76,6 +76,15 @@ A source may forward frames: provider-owned book/candle listeners still run
 before the buffer is transferred, while ordinary worker callbacks stay silent.
 Matching shared ticker seeds wake startup even when identical REST data means
 the native engine emits no changed frame.
+Book/candle listeners registered before startup retain current demand and replay
+after native metadata is ready, including when the JS store was restored from
+cache. Callbacks register before the first subscription, and forwarded catalog
+frames precede any synchronous subscription data. Public `fetchMarkets` and
+`fetchTickers` start an unstarted Rust engine and wait up to 30 seconds for their
+native readiness flags, independently of private balance/order reconciliation.
+Running reads return native snapshots; they do not force a metadata refresh.
+The caller still owns the exchange after successful `validateAccount`, including
+disposal; validation does not invalidate an instance intended for reuse.
 Venue/network/product identity and native instrument IDs/flags/contract sizes
 must match before account readiness; account-local metadata may be a subset.
 Catalog changes require restarting provider/accounts. Heartbeats release dead
@@ -90,6 +99,46 @@ their configuration. The policy controls live feed ownership, not routing,
 credentials, supported venue products, or whether explicit public REST queries
 are allowed. `fetchBalance` reads current native reconciled state, as do the
 Rust adapter's other store-backed account reads.
+
+## Rust engine failure
+
+A native WASM trap makes that exchange instance terminal (`isEngineDead`),
+settles its pending commands and emits `engine-dead` after one visible error.
+The host stops its I/O and ignores late callbacks. Ordinary venue validation,
+transport and consumer-callback errors do not mark the engine dead. Interrupted
+writes report an unknown outcome with supplied client order IDs; never replay
+them automatically or interpret failure as proof that no order exists.
+
+A running ExchangeWorker makes at most one delayed reconstruction attempt with
+a fresh exchange and native state, retaining only public subscription demand.
+The new stream starts with a full native empty snapshot to discard old book and
+catalog baselines. Chasers/TWAPs stop and commands arriving during recovery fail.
+Shared-feed accounts require a fresh provider attachment and account init;
+their closed transferred port cannot be reused. Module-wide WASM initialization
+and sibling accounts remain independent of one account's terminal state.
+
+Rust command waits default to 120 seconds. `extra.rustCommandTimeoutMs` sets a
+positive integer deadline up to 2147482647 ms; long paginated queries may need
+a larger value. The Rust worker RPC allows one additional second for delivery;
+TS worker RPCs retain their five-second wait. Expiry does not cancel the venue
+action, dispose the engine or retry a write. `COMMAND_TIMEOUT` and
+`ENGINE_DISPOSED` preserve unknown outcomes for interrupted writes and currently
+known caller client IDs. Native-generated identity receipts are tracked by the
+bridge-fixes plan; caller IDs alone do not establish complete attribution.
+Native rejections retain known partial-order results. SDK worker and outer CLI
+executor error boundaries copy an explicit allowlist of command fields, including IDs and
+partial counts, instead of flattening them or copying arbitrary error objects.
+Cancellation commands retain the caller's id, symbol and type alongside legacy
+ID dispatch; venue unknown-ID behavior is a separate native contract.
+
+Rust command rejections report once at the SDK command boundary. Explicitly
+correlated native diagnostics remain warning logs while pending or late; a
+known partial success still emits its first associated error. Background logs
+retain their normal visibility. Reporting preserves the original rejection and
+all outcome/receipt fields even when listeners throw. The shared command-error
+allowlist carries `errorReported`; frozen errors use weak object metadata rather
+than message matching or a retained operation ledger. Subscription commands own
+their rejected promises without reporting the same failure a second time.
 
 ## Client order ID contract
 

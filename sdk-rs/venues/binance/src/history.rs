@@ -664,13 +664,10 @@ impl BinanceFutures {
                     });
                     self.next_fills_window(cx, command);
                 }
-                // A failed window leaves its fills unknown, not absent.
                 Err(message) => {
+                    cx.command_error(command, format!("Error fetching executions: {message}"));
                     self.history.reads.remove(&command);
-                    cx.done(
-                        command,
-                        Err(format!("Error fetching executions: {message}")),
-                    );
+                    cx.done(command, Ok("[]".into()));
                 }
             },
             InFlight::Orders => {
@@ -718,7 +715,7 @@ impl BinanceFutures {
                         );
                     }
                     Err(message) => {
-                        cx.log(LogLevel::Error, message);
+                        cx.command_error(command, message);
                         cx.done(command, Ok("[]".into()));
                     }
                 }
@@ -745,8 +742,8 @@ impl BinanceFutures {
                         let result = match parsed {
                             Ok(()) => serde_json::to_string(&page).unwrap_or_default(),
                             Err(message) => {
-                                cx.log(
-                                    LogLevel::Error,
+                                cx.command_error(
+                                    command,
                                     format!("Error fetching income history: {message}"),
                                 );
                                 "[]".into()

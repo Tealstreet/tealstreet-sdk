@@ -7,7 +7,7 @@ use safe_cex_engine::model::{
     CancelOrderRef, MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts,
     PositionSide, StopTriggerType, StpMode, TimeInForce,
 };
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
+use safe_cex_engine::{Command, CommandId, Cx, Method, Response, num};
 use serde::Deserialize;
 use std::collections::{HashMap, VecDeque};
 
@@ -353,7 +353,7 @@ impl AsterDex {
                         .ok_or_else(|| "Missing required Aster credentials".to_owned())
                         .and_then(|credentials| credentials.validate());
                     if let Err(error) = valid {
-                        cx.log(LogLevel::Error, error.clone());
+                        cx.command_error(id, error.clone());
                         cx.done(id, Err(error));
                         return;
                     }
@@ -377,18 +377,18 @@ impl AsterDex {
                         > MAX_ACKNOWLEDGED_ORDERS
                 {
                     let error = "Aster placement routing capacity reached; wait for order reconciliation or cancel existing acknowledged orders".to_owned();
-                    cx.log(LogLevel::Error, error.clone());
+                    cx.command_error(id, error.clone());
                     cx.done(id, Err(error));
                     return;
                 }
                 if let Some(error) = &job.error {
-                    cx.log(LogLevel::Error, error.clone());
+                    cx.command_error(id, error.clone());
                 }
                 self.trading.jobs.insert(id, job);
                 self.advance_trade(cx, id);
             }
             Err(error) => {
-                cx.log(LogLevel::Error, error.clone());
+                cx.command_error(id, error.clone());
                 cx.done(id, Err(error));
             }
         }
@@ -587,7 +587,7 @@ impl AsterDex {
             match outcome {
                 Ok(()) => job.successes += 1,
                 Err((_, message)) => {
-                    cx.log(LogLevel::Error, message.clone());
+                    cx.command_error(command, message.clone());
                     job.error = Some(message);
                 }
             }

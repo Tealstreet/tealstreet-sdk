@@ -2,6 +2,22 @@
 //! shapes `packages/safe-cex/src/types.ts` gives the main thread.
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OrderIdentityKind {
+    ClientOrderId,
+    ClientOrderIndex,
+    OrderCode,
+}
+
+/// Native identity selected for a write; this is not a venue acknowledgement.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct OrderIdentityReceipt {
+    pub symbol: String,
+    pub kind: OrderIdentityKind,
+    pub identity: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OrderSide {

@@ -49,8 +49,13 @@ hand-roll windows, cursors and pages in their `history.rs`. History reads only.
     order-id filter, so a lookup could end on a page of other orders' fills;
   - fills never sent `start_at`, so a sparse window paged through older fills
     it then discarded (Rust-only tape record; TS still sends only `end_at`);
-  - a page cap with a cursor pending returned partial history with a warning;
-    it now fails as INCOMPLETE.
+  - order history and income kept paging past their limit; a bounded read
+    (limit given, or a client-id lookup that found its order) now stops once
+    it has enough rows, and only an unbounded read that exhausts its page cap
+    with a cursor pending fails as INCOMPLETE. A bounded read at its cap keeps
+    what it found, as before (a lookup reports a non-definitive miss).
+    Because a bounded read no longer fetches pages after its limit, a
+    malformed later page can no longer fail it.
 - Batch 2: `paging::windows` (disjoint inclusive windows of a maximum width,
   newest or oldest first, with a window budget). Bybit, Bitget, MEXC and
   KuCoin futures use it, each with a request-sequence pin written and passing

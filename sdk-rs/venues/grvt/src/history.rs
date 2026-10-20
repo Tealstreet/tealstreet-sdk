@@ -831,7 +831,11 @@ impl Grvt {
                 return;
             }
             CursorStep::Stalled(_) => {
-                self.history_failed(cx, r, "INCOMPLETE: GRVT history cursor stalled");
+                self.history_failed(
+                    cx,
+                    r,
+                    "INCOMPLETE: GRVT history cursor stalled or page cap reached",
+                );
                 return;
             }
         };

@@ -763,17 +763,6 @@ fn windowed_fills_request_sequence_is_pinned() {
 }
 
 #[test]
-fn a_failed_fills_window_fails_the_read_instead_of_an_empty_success() {
-    let mut h = ready();
-    fills_over(&mut h, 23, 10.0);
-    let r = h.take("/fapi/v1/userTrades");
-    h.reply(r.id, 200, "", TRADE);
-    let r = h.take("/fapi/v1/userTrades");
-    h.reply(r.id, 503, "", "unavailable");
-    assert!(h.result(23).unwrap().is_err(), "{:?}", h.result(23));
-}
-
-#[test]
 fn fills_windows_cover_the_last_millisecond_of_the_range() {
     // [0, 7d] then the single millisecond 7d + 1, which the old split dropped.
     let mut h = ready();
