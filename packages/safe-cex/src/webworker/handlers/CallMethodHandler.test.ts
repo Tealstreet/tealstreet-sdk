@@ -424,4 +424,37 @@ describe('CallMethodHandler', () => {
       expect(workerCallClientOrderIds('placeOrders', undefined)).toBeUndefined();
     });
   });
+  describe('optional engine methods', () => {
+    it('runs one the worker exchange defines', async () => {
+      (mockExchange as unknown as Record<string, unknown>).changeAccountTier = vi.fn().mockResolvedValue(undefined);
+      handler.handle({
+        op: 'callMethod',
+        data: { requestId: 'tier-1', method: 'changeAccountTier', args: ['premium'] },
+      });
+      await vi.waitFor(() =>
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: { requestId: 'tier-1', result: undefined, success: true },
+        }),
+      );
+      expect(
+        (mockExchange as unknown as Record<string, ReturnType<typeof vi.fn>>).changeAccountTier,
+      ).toHaveBeenCalledWith('premium');
+    });
+
+    it('rejects one the worker exchange lacks, with the reason', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      handler.handle({ op: 'callMethod', data: { requestId: 'tier-2', method: 'fetchAccountTier', args: [] } });
+      await vi.waitFor(() =>
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: {
+            requestId: 'tier-2',
+            success: false,
+            result: expect.objectContaining({ message: 'bybit does not support fetchAccountTier' }),
+          },
+        }),
+      );
+    });
+  });
 });

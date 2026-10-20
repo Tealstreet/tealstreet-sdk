@@ -1,5 +1,5 @@
 import { serializeCommandError } from '../../commandOutcome';
-import { CallableMethodsInWorker, WORKER_TRADING_METHODS, WorkerTradingMethod } from '../../exchanges/base';
+import { CallableMethodsInWorker, WORKER_FORWARDED_METHODS, WORKER_OPTIONAL_METHODS } from '../../exchanges/base';
 import { encodeWorkerOrderIds } from '../../exchanges/clientOrderId';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
@@ -26,9 +26,10 @@ export class CallMethodHandler extends BaseHandler {
       console.log('Calling method', method);
     }
     try {
-      if ((WORKER_TRADING_METHODS as readonly string[]).includes(method)) {
-        const call = this._exchange[method as WorkerTradingMethod] as (...callArgs: unknown[]) => Promise<unknown>;
-        result = await call(...args);
+      if ([...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].includes(method as never)) {
+        const call = (this._exchange as unknown as Record<string, unknown>)[method];
+        if (typeof call !== 'function') throw new Error(`${this._exchange.name} does not support ${method}`);
+        result = await (call as (...callArgs: unknown[]) => Promise<unknown>)(...args);
         if (method === 'updateOrder') result = encodeWorkerOrderIds(result as string[]);
         this._ctx.postMessage({ op: 'callMethod:done', data: { requestId, result, success: true } });
         return;

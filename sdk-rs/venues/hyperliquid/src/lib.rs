@@ -951,7 +951,8 @@ impl Venue for Hyperliquid {
         self.connection.supervisor.retry(cx);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        if !(200..300).contains(&response.status) {
+        // Trade answers keep their status so a refusal can be told from a lost write.
+        if !(200..300).contains(&response.status) && !matches!(pending, Pending::Trade(_)) {
             self.on_request_failed(
                 cx,
                 pending,
