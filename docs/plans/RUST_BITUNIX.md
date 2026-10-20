@@ -1249,3 +1249,16 @@ ActualTSprivate16frames/2commands andpublic534frames/2books/126events pass
 withzerotransport/autherrors. Initialrootinvocation usedwronghyphenscript
 name andexitedbeforetapegeneration; correctedcolon script beforeanyreplay.
 ActualbuiltprivategatePASS16frames; publicawaitsfullnativequiet.
+
+Phemexnative fullchecks complete:1,968tests/165groups PASS; engine83,crypto27,
+Bitunix60/Bitrue61/KuCoin102/WOO113/Aster104/Paradex107/Phemex86/Bitget149,
+native39/WASM7. Bans/fmt/strictnative+WASMClippy PASS; sourceclean. Public
+three-rungate nowrunningwithlocalCPUchecksquiet.
+
+FirstunchangedPhemex public3rungate FAIL3identicalbookEvents comparisons:
+TS127vsRust128, firstdifference1TS[784,BTCUSDT,424ff...] vsRust
+[472,ETHUSDT,ffb...]. Finalbooks/CPU/memory PASS: TS/Rust main605.9/353.1ms,
+steady433.2/187.8ms, retained6.2/4.8MB, peak35.4/10.7MB. Coinbaseorigin
+5c0e437faf read-onlyaudited (balancecurrencyheaderreservationoddN needs+8);
+HOLDnextmerge untilPhemexearlypublication causality proven/fixed/reviewed.
+Nohashrewrite, timing/threshold/sample changes orrerun-to-green.
