@@ -56,6 +56,10 @@ Rust accounts keep their public feeds active because native ticker tools read
 the current engine store. Do not apply the TS-only public-socket suppression to
 Rust; Binance's REST seed alone would freeze its quote tools. The protocol test
 replays actual recorded Binance socket traffic and requires changed tool quotes.
+The TS on-demand policy also disables TS adapter polling, after the actual
+instance has been selected. Keep native REST timers active as well as sockets:
+BreakoutProp has no stream and its tools depend on periodic reconciliation.
+A real native protocol regression requires changed quotes after its REST poll.
 The license generator includes the pinned engine's non-dev Cargo dependency
 closure and the existing adapted zkLink notice. Run it after building WASM so
 the offline Cargo source cache contains the crate license files. These notices

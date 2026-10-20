@@ -75,9 +75,6 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
       enableOptionMarkets: options,
       enableInverseMarkets: inverse,
       payloadSigner: header && placeholder ? proxySigner(header, placeholder) : undefined,
-      // TS tools fetch on demand. Native current-state reads retain the venue's
-      // reconciliation and liveness timers instead of TS adapter polling.
-      extra: { tickInterval: Number.POSITIVE_INFINITY },
       tuning: { consoleLogging: false },
     },
   };

@@ -50,10 +50,6 @@ describe('readConfig', () => {
     expect(readConfig(signerEnv).options.enableInverseMarkets).toBe(false);
   });
 
-  it('turns polling off', () => {
-    expect(readConfig(signerEnv).options.extra?.tickInterval).toBe(Number.POSITIVE_INFINITY);
-  });
-
   it('opts into Rust explicitly without changing the default when unset', () => {
     expect(readConfig({ ...signerEnv, EXCHANGE_ENGINE: 'rust' }).options.engine).toBe('rust');
     expect(readConfig(signerEnv).options.engine).toBeUndefined();

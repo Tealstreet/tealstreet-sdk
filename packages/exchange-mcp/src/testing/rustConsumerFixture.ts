@@ -17,6 +17,7 @@ export const fixtureAccountTransport = {
 // own inputs. No production network or store mutation participates in this proof.
 const require = createRequire(import.meta.url);
 const { coinbasePrivateTape } = require('../../../../sdk-rs/harness/private-tape-coinbase.mjs');
+const { buildBreakoutTape } = require('../../../../sdk-rs/harness/private-tape-breakoutprop.mjs');
 const { Tape, canonicalUrl } = require('../../../../sdk-rs/harness/tape.mjs');
 const { venueOf } = require('../../../../sdk-rs/harness/venues.mjs');
 
@@ -27,7 +28,8 @@ type RecordRow = {
   options?: { key: string; secret: string };
   [key: string]: unknown;
 };
-const consumerFixture = (records: RecordRow[], name: string, privateAccount: boolean) => {
+const consumerFixture = (records: RecordRow[], name: string, privateAccount: boolean, advanceResponses = false) => {
+  const startedAt = Date.now();
   const venue = venueOf(name);
   const tape = new Tape(records, venue, privateAccount);
   const requests: string[] = [];
@@ -46,6 +48,8 @@ const consumerFixture = (records: RecordRow[], name: string, privateAccount: boo
     async request({ method, url, body, headers, signal }) {
       signal?.throwIfAborted();
       requests.push(`${method} ${url}`);
+      // Time-gated REST examples follow the real native polling clock.
+      if (advanceResponses) tape.time = Date.now() - startedAt;
       const response = tape.respond(method, url, body, headers);
       if (response.status === 599) failures.push(`${method} ${url}`);
       return { status: response.status, headers: response.headers, body: new TextEncoder().encode(response.body) };
@@ -89,3 +93,5 @@ export const rustBinancePublicFixture = () => {
     .map((line) => JSON.parse(line));
   return consumerFixture(records, 'binance', false);
 };
+
+export const rustBreakoutFixture = () => consumerFixture(buildBreakoutTape(), 'breakoutprop', true, true);

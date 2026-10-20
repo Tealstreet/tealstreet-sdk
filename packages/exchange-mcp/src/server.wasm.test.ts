@@ -12,7 +12,7 @@ import { virtualClock } from '@tealstreet/safe-cex/src/utils/virtualClock';
 
 import { readConfig } from './config';
 import { createServer } from './server';
-import { rustBinancePublicFixture, rustConsumerFixture } from './testing/rustConsumerFixture';
+import { rustBinancePublicFixture, rustBreakoutFixture, rustConsumerFixture } from './testing/rustConsumerFixture';
 
 it('rejects the HMAC proxy signer before starting a default Rust account', async () => {
   const fixture = rustConsumerFixture();
@@ -129,3 +129,45 @@ it('keeps native Binance ticker tools fresh through recorded public socket input
   );
   expect(fixture.failures).toEqual([]);
 }, 15000);
+
+it('retains native REST polling for BreakoutProp MCP ticker reads', async () => {
+  const fixture = rustBreakoutFixture();
+  setWasmEngineLoader(loadNodeEngine);
+  setRustEngineTransport(() => fixture.transport);
+  instance = await createServer(
+    readConfig({
+      EXCHANGE: 'breakoutprop',
+      EXCHANGE_ENGINE: 'rust',
+      EXCHANGE_API_KEY: 'replay-key',
+      EXCHANGE_API_SECRET: 'replay-secret',
+    }),
+    'test',
+  );
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  await instance.server.connect(serverTransport);
+  client = new Client({ name: 'native-poll-consumer', version: '1' });
+  await client.connect(clientTransport);
+  const readTickers = async (): Promise<Array<{ symbol: string; bid: number }>> => {
+    const result = await client!.callTool({ name: 'get_tickers', arguments: {} });
+    expect(result.isError).not.toBe(true);
+    return JSON.parse((result.content as Array<{ text: string }>)[0].text);
+  };
+  const initial = new Map((await readTickers()).map((ticker) => [ticker.symbol, ticker.bid]));
+  const initialRequests = fixture.requests.length;
+  expect(initial.size).toBe(5);
+  expect(fixture.sockets).toEqual([]);
+  await vi.waitFor(
+    async () => {
+      expect((await readTickers()).some((ticker) => initial.get(ticker.symbol) !== ticker.bid)).toBe(true);
+    },
+    { timeout: 6000 },
+  );
+  expect(fixture.requests.length).toBeGreaterThan(initialRequests);
+  expect(fixture.failures).toEqual([]);
+}, 15000);
+
+it('keeps TypeScript MCP accounts on demand with polling disabled', async () => {
+  instance = await createServer(readConfig({ EXCHANGE: 'bybit' }), 'test');
+  expect(instance.exchange).not.toBeInstanceOf(RustEngineExchange);
+  expect(instance.exchange.options.extra?.tickInterval).toBe(Number.POSITIVE_INFINITY);
+});
