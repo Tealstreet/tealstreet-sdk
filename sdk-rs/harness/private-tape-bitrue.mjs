@@ -85,6 +85,9 @@ http('GET', '/fapi/v2/myTrades?contractName=E-BTC-USDT&limit=10&startTime=170000
   { tradeId: '9000', bidId: fillId, askId: '400', side: 'BUY', price: 60000, qty: 3, amount: 180,
     contractName: 'E-BTC-USDT', fee: '-0.1', isMaker: true, ctime: 1699999999000 },
 ]));
+// The inherited TS lookup only sees open orders; absence is never definitive.
+command({ op: 'findOrderByClientOrderId', symbol: 'E-BTC-USDT', clientOrderId: 'missing-caller' });
+command({ op: 'findOrderByClientOrderId', symbol: 'E-ETH-USDT', clientOrderId: 'missing-caller' });
 ws(PRIVATE, { event: 'ACCOUNT_UPDATE' });
 ws(PRIVATE, { event: 'ping', ts: '1700000005000' });
 mkdirSync(dirname(values.out), { recursive: true });

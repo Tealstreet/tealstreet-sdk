@@ -20,6 +20,14 @@ const REFRESH_MS: f64 = 30.0 * 60_000.0;
 const HEALTH_MS: f64 = 20_000.0;
 const HISTORY_LIMIT: usize = 500;
 
+fn matches_lookup(order: &Order, symbol: &str, client_order_id: &str) -> bool {
+    !matches!(client_order_id, "" | "0" | "undefined")
+        && order.symbol == symbol
+        && (order.client_order_id.as_deref() == Some(client_order_id)
+            || order.id == client_order_id
+            || order.parent_id.as_deref() == Some(client_order_id))
+}
+
 pub enum Request {
     Listen {
         generation: u64,
@@ -34,6 +42,7 @@ pub enum Request {
     Orders {
         symbol: String,
         revision: u64,
+        lookup: Option<(CommandId, String)>,
         rows: Vec<Order>,
         quotes: HashMap<String, f64>,
         invalid: bool,
@@ -468,6 +477,7 @@ impl Bitrue {
             Job::Account(Request::Orders {
                 symbol,
                 revision: self.account.orders_revision,
+                lookup: None,
                 rows: vec![],
                 quotes: HashMap::new(),
                 invalid: false,
@@ -487,6 +497,78 @@ impl Bitrue {
         if !self.account.order_queue.is_empty() {
             self.account.order_timer = Some(cx.set_timer(if success { 200.0 } else { 500.0 }));
         }
+    }
+
+    pub(crate) fn lookup_order(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: String,
+        client_order_id: String,
+    ) {
+        if cx
+            .store
+            .orders()
+            .iter()
+            .any(|order| matches_lookup(order, &symbol, &client_order_id))
+            || !self.authenticated()
+        {
+            Self::finish_lookup(cx, command, &symbol, &client_order_id, None);
+            return;
+        }
+        self.send(
+            cx,
+            Method::Get,
+            &format!(
+                "/fapi/v2/openOrders?contractName={}",
+                crate::history::query_component(&symbol)
+            ),
+            None,
+            Some(ArrayAt::Field("data")),
+            Job::Account(Request::Orders {
+                symbol,
+                revision: self.account.orders_revision,
+                lookup: Some((command, client_order_id)),
+                rows: vec![],
+                quotes: HashMap::new(),
+                invalid: false,
+            }),
+        );
+    }
+
+    fn finish_lookup(
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: &str,
+        client_order_id: &str,
+        rows: Option<&[Order]>,
+    ) {
+        #[derive(Serialize)]
+        struct Lookup {
+            found: bool,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            order: Option<Order>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            definitive: Option<bool>,
+        }
+        let mut order = rows
+            .unwrap_or_else(|| cx.store.orders())
+            .iter()
+            .find(|order| matches_lookup(order, symbol, client_order_id))
+            .cloned();
+        if let Some(order) = &mut order {
+            order
+                .time_in_force
+                .get_or_insert(TimeInForce::GoodTillCancel);
+        }
+        let definitive = order.is_none().then_some(false);
+        let result = serde_json::to_string(&Lookup {
+            found: order.is_some(),
+            order,
+            definitive,
+        })
+        .expect("client order lookup");
+        cx.done(command, Ok(result));
     }
     fn fast_refresh(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<String>) {
         self.account.settings_revision += 1;
@@ -1101,6 +1183,7 @@ impl Bitrue {
                 rows,
                 quotes,
                 invalid,
+                lookup,
                 ..
             } => {
                 let mapped = serde_json::from_str::<OrderRow<'_>>(item)
@@ -1121,7 +1204,8 @@ impl Bitrue {
                     Ok(mapped)
                         if mapped
                             .iter()
-                            .all(|row| !rows.iter().any(|o| o.id == row.id)) =>
+                            .all(|row| !rows.iter().any(|o| o.id == row.id))
+                            && (lookup.is_none() || rows.len() + mapped.len() <= 20_000) =>
                     {
                         rows.extend(mapped)
                     }
@@ -1255,6 +1339,7 @@ impl Bitrue {
             Request::Orders {
                 symbol,
                 revision,
+                lookup,
                 rows,
                 quotes,
                 invalid,
@@ -1265,6 +1350,24 @@ impl Bitrue {
                 }
                 let schema = serde_json::from_str::<OrdersEnvelope>(response.body)
                     .is_ok_and(|v| v.data.is_empty());
+                if let Some((command, client_order_id)) = lookup {
+                    // BaseExchange only checks open orders. A failed read falls
+                    // back to the cache, and every miss remains non-definitive.
+                    if !schema || invalid {
+                        cx.log(
+                            LogLevel::Warning,
+                            "Malformed Bitrue open-order lookup; using cache",
+                        );
+                    }
+                    Self::finish_lookup(
+                        cx,
+                        command,
+                        &symbol,
+                        &client_order_id,
+                        (schema && !invalid).then_some(rows.as_slice()),
+                    );
+                    return;
+                }
                 let success = schema && !invalid && revision == self.account.orders_revision;
                 if success {
                     let mut retained = cx
@@ -1362,12 +1465,16 @@ impl Bitrue {
                     self.refresh_account(cx);
                 }
             }
-            Request::Orders { symbol, .. } => {
+            Request::Orders { symbol, lookup, .. } => {
                 cx.log(
                     LogLevel::Error,
                     format!("Bitrue order read failed: {error}"),
                 );
-                self.order_finished(cx, symbol, false);
+                if let Some((command, client_order_id)) = lookup {
+                    Self::finish_lookup(cx, command, &symbol, &client_order_id, None);
+                } else {
+                    self.order_finished(cx, symbol, false);
+                }
             }
             _ => {}
         }
