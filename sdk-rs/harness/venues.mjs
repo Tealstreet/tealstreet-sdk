@@ -20,6 +20,7 @@ import { createRequire } from 'node:module';
 import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
+import { breakoutprop } from './breakoutprop-requests.mjs';
 import { polymarket } from './polymarket.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import {
@@ -581,6 +582,7 @@ const coinbase = (name) => ({
 });
 
 export const VENUES = {
+  breakoutprop,
   grvt: (() => {
     // Public deterministic replay key. Never use this well-known key for funds.
     const secret = '0x' + '01'.repeat(32);

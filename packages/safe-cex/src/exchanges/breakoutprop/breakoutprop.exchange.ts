@@ -170,7 +170,7 @@ export class BreakoutpropExchange extends BaseExchange {
           throw new Error('Multiple accounts found. Please specify subaccount number ');
         }
         // account ==== default:{subaccount}
-        const subaccount = validAccounts.find((account) => account.account.includes(this.options.subaccount!));
+        const subaccount = validAccounts.find((account) => account.account === this.options.subaccount || account.account.replace(/^default:/, '') === this.options.subaccount);
         if (!subaccount) {
           throw new Error('Subaccount for number not found');
         }
@@ -418,7 +418,7 @@ export class BreakoutpropExchange extends BaseExchange {
           contracts: position.quantity,
           liquidationPrice: 0,
           marginSize: notional * position.marginRate,
-          id: createPositionId(position.symbol),
+          id: position.positionCode,
           positionMode: PositionMode.OneWay,
           marginType: MarginType.Cross,
           lastUpdate: new Date(position.lastUpdateTime).getTime(),
@@ -510,7 +510,7 @@ export class BreakoutpropExchange extends BaseExchange {
         symbol: order.instrument,
         type: ORDER_TYPE[order.type],
         side: ORDER_SIDE[order.legs[0].side],
-        price: order.legs[0].price,
+        price: (order.type === 'STOP' ? order.stopPrice : order.type === 'LIMIT' ? order.limitPrice : undefined) ?? order.legs[0].price ?? 0,
         amount: order.legs[0].quantity,
         filled: order.legs[0].filledQuantity,
         remaining: order.legs[0].remainingQuantity,
@@ -531,6 +531,7 @@ export class BreakoutpropExchange extends BaseExchange {
       await this.getSessionToken();
       const accountCode = await this.getAccountCode();
       await this.xhr.delete(ENDPOINTS.CANCEL_ORDER, {
+        headers: { 'If-Match': '*' },
         params: {
           accountCode,
           orderCode,
@@ -645,7 +646,7 @@ export class BreakoutpropExchange extends BaseExchange {
       if (!data.orderId) {
         throw new Error('No order ID received');
       }
-      return data.orderId;
+      return [String(data.orderId)];
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;
@@ -673,6 +674,7 @@ export class BreakoutpropExchange extends BaseExchange {
       this.store.update({
         loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
       });
+      loop(() => this.tick(), this.getTickInterval());
       return;
     }
 
@@ -797,10 +799,8 @@ export class BreakoutpropExchange extends BaseExchange {
 
   tick = async () => {
     if (!this.isDisposed) {
-      if (this.isPublicDataOnly) return;
-
       try {
-        const portfolioRaw = await this.fetchPortfolioRaw();
+        const portfolioRaw = this.isPublicDataOnly ? null : await this.fetchPortfolioRaw();
         if (this.isDisposed) return;
         if (portfolioRaw) {
           const balance = this.formatBalance(portfolioRaw);

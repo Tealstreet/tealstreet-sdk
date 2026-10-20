@@ -60,7 +60,8 @@ no Bitrue-style `error sign!` response contract.
 
 `getAccountCode` fetches `/users/{username}`, retains `FULL_TRADING` accounts,
 and requires `options.subaccount` when more than one is available. Account
-codes use the `default:<account>` form and are inserted through
+selection matches the exact account code or suffix, preventing a request for
+`2` from selecting `12`. Account codes use the `default:<account>` form and are inserted through
 `replaceUrlParams`.
 
 ## Active REST surface
@@ -96,7 +97,8 @@ Historical candle timestamps are normalized from RFC 3339 milliseconds to
 safe-cex seconds. The polling listener creates synthetic zero-volume candles
 from ticker `last`, bucketed to the subscribed interval start. The order book
 is likewise synthetic and contains the REST quote's bid/ask with placeholder
-size. These are legacy limitations, not real WebSocket market depth/bars.
+size, with one level on each side. Public-only sessions continue quote polling
+for their listeners while skipping portfolio reads. These are legacy limitations, not real WebSocket market depth/bars.
 
 ## Portfolio reconciliation
 
@@ -106,6 +108,8 @@ come from the same `PORTFOLIO` response. `fetchOrders` delegates to
 `formatOrders(await fetchPortfolioRaw())`, so a failed portfolio read preserves
 the current store instead of wiping orders.
 
+Native LIMIT/STOP prices come from documented top-level `limitPrice`/`stopPrice`,
+with legacy `legs[0].price` retained as a fallback. MARKET rows may omit price.
 Order `lastUpdate` comes from RFC 3339 `transactionTime`, and a first-leg
 `positionEffect: "CLOSE"` maps to `reduceOnly: true`.
 
@@ -120,7 +124,9 @@ metrics. The adapter derives:
 - balance `free = total - used`
 
 These are explicit client-side estimates for the disabled legacy adapter.
-Position mode is always one-way and margin type is always cross. Missing
+Native `positionCode` remains the position ID so distinct lots on one symbol
+survive Store reconciliation. Position mode is always one-way and margin type is
+always cross. Missing
 symbols receive zero-sized placeholder positions.
 
 ## Order contract
@@ -143,8 +149,11 @@ orders therefore send `CLOSE`; all others send `OPEN`. The first-party single
 order schema does not require `positionCode`, so the adapter does not guess a
 legacy-host extension.
 
-Orders use GTC and a `tealstreet-<uuid>` client code. Amount and price are
-adjusted to market steps. Bulk cancellation runs batches of ten, awaits every
+Orders use GTC and a `tealstreet-<uuid>` client code. Placement returns the
+SDK string-array order-ID shape, normalizing the native numeric ACK. Amount and price are
+adjusted to market steps. Cancellation includes the standard `If-Match: *` precondition required by DX
+REST; errors, including 412, propagate without a replacement. Bulk cancellation
+runs batches of ten, awaits every
 cancel in the current batch, and propagates rejection. `updateOrder` awaits the
 cancel before placing its replacement, preventing double exposure.
 
@@ -166,3 +175,31 @@ targeted Breakout audit suite, and the complete deterministic test suite.
 ## Client order ID
 
 This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.
+
+
+## Rust engine
+
+The `sdk-rs/venues/breakoutprop` port uses the same DXtrade API and account
+model. Native session authentication stays in `Authorization: DXAPI …`;
+Tealstreet proxy JWT authorization uses the separate `Tealstreet-Authorization`
+policy, including the native serialized routing plan. There is no signing or
+exchange socket. Initial session/market reads may use the five-request burst
+budget; subsequent attempts stay within five per rolling second.
+
+Native position codes distinguish multiple lots on one symbol. Account snapshots
+validate nested identities and commit atomically. Confirmed cancellation protects
+against stale snapshots for 60 seconds; reads launched before successful writes
+are revision-fenced. An amendment verifies the canceled order's final, zero-fill
+history before creating its replacement. Failed or ambiguous proof sends no
+replacement. Unrepresentable attached protections, trigger sources, close flags
+and slippage controls fail before any batch write.
+
+Explicit zero-quantity CLOSE orders retain their native quantity through
+reconciliation and price amendments; filled and remaining must also be exactly
+zero. Empty optional client IDs are treated as absent so native order codes
+remain distinct during cancellation, locking and history confirmation.
+
+Polling intervals honor initial and live slowdown multipliers. An explicit
+infinite interval pauses polling; native queries still work. Repeated unchanged
+configuration updates preserve the existing poll deadline. History axes without
+a TS implementation keep their branded, empty, no-I/O fallbacks.

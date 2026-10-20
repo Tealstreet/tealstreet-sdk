@@ -32,6 +32,7 @@ import { FrameApplier } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
+import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { virtualClock } from '../../utils/virtualClock';
 import {
   ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE,
@@ -61,6 +62,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   coinbasespot: 'coinbasespot',
   apexomni: 'apexomni',
   asterdex: 'asterdex',
+  breakoutprop: 'breakoutprop',
   binance: 'binance',
   binancespot: 'binancespot',
   binanceinverse: 'binanceinverse',
@@ -236,6 +238,7 @@ export class RustEngineExchange extends BaseExchange {
    * listeners here stay silent: main decodes those from the frame itself.
    */
   onFrame?: (frame: ArrayBuffer) => void;
+  private stopPollingConfig?: () => void;
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
@@ -284,6 +287,18 @@ export class RustEngineExchange extends BaseExchange {
       this.name === 'binanceinverse',
     );
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
+    if (this.name === 'breakoutprop') {
+      this.stopPollingConfig = subscribeTickIntervalMultipliers(() => {
+        if (this.host && !this.isDisposed) void this.host.command({ op: 'setTickInterval', interval: this.getTickInterval() });
+      });
+      this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
+      this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
+      this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
+      this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
+      this.cancelAllOrders = async () => {
+        await this.command({ op: 'cancelSymbolOrders', symbol: '' });
+      };
+    }
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
     }
@@ -350,6 +365,9 @@ export class RustEngineExchange extends BaseExchange {
 
   private createHost = async () => {
     assertEngineAccountRouting(this.options, this.name);
+    if (this.name === 'breakoutprop' && (!this.options.key || !this.options.secret)) {
+      throw new Error('BreakoutProp market data requires a legacy DXtrade username and password');
+    }
     if (this.name === 'paradex') {
       if (this.options.payloadSigner || this.options.remoteSigner) {
         throw new Error('Rust Paradex remote signing is unsupported');
@@ -452,9 +470,10 @@ export class RustEngineExchange extends BaseExchange {
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: this.name === 'kucoin' ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
-        ...(['backpack', 'bitrue'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
+        ...(['backpack', 'bitrue', 'breakoutprop'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,
-        ...(orderlyNames.has(this.name) ? { tickInterval: this.options.extra?.tickInterval } : {}),
+        ...((orderlyNames.has(this.name) || this.name === 'breakoutprop') ? { tickInterval: this.options.extra?.tickInterval } : {}),
+        ...(this.name === 'breakoutprop' ? { subaccount: this.options.subaccount, tickInterval: this.getTickInterval(), pollingEnabled: this.getTickInterval() !== Number.POSITIVE_INFINITY } : {}),
         ...(this.name === 'lighter'
           ? {
               apiKeyIndex: this.options.apiKeyIndex,
@@ -577,6 +596,10 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private receiveLog = (level: 'info' | 'warning' | 'error', message: string) => {
+    if (this.name === 'breakoutprop' && level === 'error' && message.startsWith('DXtrade startup failed:')) {
+      this.startupFailure = new Error(message);
+      for (const wake of this.startupWaiters) wake();
+    }
     if (level === 'error') this.emitAndLogError(message);
     else this.log(message, level === 'warning' ? LogSeverity.Warning : LogSeverity.Info);
   };
@@ -618,7 +641,7 @@ export class RustEngineExchange extends BaseExchange {
       const onError = (message: unknown) =>
         finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
       const loaded = () => {
-        if (this.store.loaded.balance) finish({ error: '', balance: this.store.balance });
+        if (this.store.loaded.balance || (this.name === 'breakoutprop' && this.isPublicDataOnly && this.store.loaded.markets && this.store.loaded.tickers)) finish({ error: '', balance: this.store.balance });
       };
       this.emitter.on('error', onError);
       const unsubscribe = this.store.subscribe(loaded);
@@ -787,6 +810,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchPositionMode = async () => Boolean(this.store.options.isHedged);
 
   fetchSymbolMaxLeverage = async (symbol: string): Promise<number> => {
+    if (this.name === 'breakoutprop') throw new Error('Not implemented');
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market not found for symbol: ${symbol}`);
     return market.limits.leverage.max;
@@ -922,6 +946,8 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    this.stopPollingConfig?.();
+    this.stopPollingConfig = undefined;
     this.flushTimers.forEach(clearInterval);
     this.flushTimers = [];
     this.host?.dispose();

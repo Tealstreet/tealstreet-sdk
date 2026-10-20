@@ -10,7 +10,9 @@ import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
 import { configuredOptions, venueOf } from './venues.mjs';
 import { canonicalUrl } from './requests.mjs';
-import { Frame, LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
+import { Frame } from '../hosts/wasm/js/wire.mjs';
+import { createRecordingPolicy, createRecordingTimeline, recordingReady } from './polling.mjs';
+import { replayStoreReady } from './tape.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -18,15 +20,37 @@ const { values } = parseArgs({
     seconds: { type: 'string', default: '60' },
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     out: { type: 'string' },
+    'options-env': { type: 'string' },
   },
 });
 const out = values.out ?? `sdk-rs/harness/tapes/${values.venue}.jsonl`;
 const venue = venueOf(values.venue);
+let suppliedOptions = {};
+if (values['options-env']) {
+  try {
+    suppliedOptions = JSON.parse(process.env[values['options-env']]);
+    if (!suppliedOptions || typeof suppliedOptions !== 'object' || Array.isArray(suppliedOptions)) throw new Error();
+  } catch { throw new Error('Recording options environment variable must contain a JSON object'); }
+}
+if (venue.recordSession === true && !values['options-env'])
+  throw new Error('Session-only recording requires explicit credentials through --options-env');
+const options = { ...configuredOptions(values.venue), ...venue.publicOptions, ...venue.recordOptions, ...suppliedOptions, publicDataOnly: true };
+if (venue.recordSession === true && (!suppliedOptions.key || !suppliedOptions.secret))
+  throw new Error('Session-only recording requires explicit username and password in the options environment variable');
+const policy = createRecordingPolicy(venue, options, Boolean(values['options-env']));
 mkdirSync(dirname(out), { recursive: true });
 const tape = createWriteStream(out);
 const started = Date.now();
-const write = (record) => tape.write(`${JSON.stringify({ t: Date.now() - started, ...record })}\n`);
-write({ type: 'meta', epoch: started, private: false });
+const timeline = createRecordingTimeline(venue);
+let recordingFailed = false;
+let loaded = false;
+const write = (record) => {
+  try { return tape.write(`${JSON.stringify(timeline(policy.sanitize({ t: Date.now() - started, ...record }), loaded))}\n`); }
+  catch { recordingFailed = true; throw new Error('Recording refused a protocol record that was not replay-safe'); }
+};
+write({ type: 'meta', epoch: started, private: false, source: 'live' });
+if (policy.replayOptions) write({ type: 'config', options: policy.replayOptions });
+else if (options.endpoints) write({ type: 'config', options });
 
 const live = nativeTransport();
 const ordinals = new Map();
@@ -76,7 +100,7 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const recorded = (body) =>
+    const recorded = (body) => {
       write({
         type: 'http',
         method: request.method,
@@ -86,6 +110,8 @@ const recording = {
         headers: response.headers ?? '',
         body,
       });
+      if (response.status >= 200 && response.status < 300) httpResponses++;
+    };
     if (response.body instanceof Uint8Array) {
       recorded(new TextDecoder().decode(response.body));
       return response;
@@ -105,10 +131,9 @@ const recording = {
   },
 };
 
-const options = { ...configuredOptions(values.venue), ...venue.publicOptions, ...venue.recordOptions, publicDataOnly: true };
-if (options.endpoints) write({ type: 'config', options });
 const { WasmEngine } = await loadEngine(venue.rust, options);
 let frames = 0;
+let httpResponses = 0;
 let updates = 0;
 let recordingTimer;
 let startupTimer;
@@ -129,12 +154,13 @@ const host = new EngineHost(
   {
     onFrame: (buffer) => {
       updates++;
-      const frame=new Frame(buffer);
+      const frame = new Frame(buffer);
       for (const book of frame.books()) seenBooks.add(book.market);
-      const loaded=frame.status()?.loaded??0;
-      if (venue.recordAfterReady && (loaded & (LOADED_FLAG.MARKETS|LOADED_FLAG.TICKERS)) === (LOADED_FLAG.MARKETS|LOADED_FLAG.TICKERS)) beginWindow();
+      const status = frame.status();
+      if (status) loaded = replayStoreReady(status.loaded, false);
+      if (venue.recordAfterReady && loaded) beginWindow();
     },
-    onLog: (level, message) => console.error(`[${level}] ${message}`),
+    onLog: (level, message) => policy.log(level, message),
   },
 );
 host.start();
@@ -150,11 +176,13 @@ function finish() {
   host.dispose();
   tape.end(() => {
     console.log(
-      JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, books: seenBooks.size, ...(venue.recordTickerSymbols ? { tickerSymbols: tickerSymbols.size } : {}) }),
+      JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, httpResponses, books: seenBooks.size, ...(venue.recordTickerSymbols ? { tickerSymbols: tickerSymbols.size } : {}) }),
     );
     const requested = values.books.split(',').filter(Boolean);
     const tickersReady = !venue.recordTickerSymbols || requested.every((symbol) => tickerSymbols.has(symbol));
-    process.exit(frames > 0 && seenBooks.size >= requested.length && tickersReady ? 0 : 1);
+    process.exit(!recordingFailed && tickersReady && recordingReady(venue, {
+      frames, httpResponses, loaded, books: seenBooks.size, requestedBooks: requested.length,
+    }) ? 0 : 1);
   });
 }
 if (venue.recordAfterReady) startupTimer = setTimeout(finish, 120_000);
