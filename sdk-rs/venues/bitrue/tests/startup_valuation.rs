@@ -5,7 +5,7 @@ use safe_cex_venue_bitrue::{Bitrue, Options};
 const MARKETS: &str = r#"[{"symbol":"E-BTC-USDT","pricePrecision":1,"multiplier":1,"minOrderVolume":1,"maxMarketVolume":10000,"status":1}]"#;
 fn account(side: &str, size: f64) -> String {
     format!(
-        r#"{{"code":"0","data":{{"account":[{{"marginCoin":"USDT","totalEquity":1000,"accountNormal":800,"accountLock":5,"sumOpenRealizedAmount":999999,"positionVos":[{{"contractName":"E-BTC-USDT","positions":[{{"side":"{side}","volume":{size},"openPrice":100,"leverageLevel":25,"positionType":2,"positionBalance":200,"forceLiquidationPrice":50}}]}}]}}]}}}}"#
+        r#"{{"code":"0","data":{{"account":[{{"marginCoin":"USDT","totalEquity":1000,"accountNormal":800,"accountLock":5,"sumOpenRealizedAmount":-0.5,"positionVos":[{{"contractName":"E-BTC-USDT","positions":[{{"side":"{side}","volume":{size},"openPrice":100,"leverageLevel":25,"positionType":2,"positionBalance":200,"forceLiquidationPrice":50}}]}}]}}]}}}}"#
     )
 }
 struct Harness {
@@ -91,21 +91,20 @@ fn funded_snapshot_retains_native_exposure_without_fabricating_an_entry_loss() {
         let b = h.engine.store().balance();
         assert_eq!(
             (b.total, b.free, b.used, b.upnl),
-            (1000.0, 800.0, 200.0, 0.0)
+            (1000.0, 800.0, 200.0, -0.5)
         );
         assert!(
             h.logs
                 .iter()
                 .any(|s| s.contains("ticker price unavailable"))
         );
-        assert!(h.logs.iter().all(|s| !s.contains("999999")));
         h.engine
             .store_mut()
             .update_ticker("E-BTC-USDT", |t| t.last = 110.0);
         h.poll();
         h.reply("/account", &account("BUY", 2.0));
         assert_eq!(h.engine.store().positions()[0].unrealized_pnl, 20.0);
-        assert_eq!(h.engine.store().balance().upnl, 20.0);
+        assert_eq!(h.engine.store().balance().upnl, -0.5);
         h.engine
             .store_mut()
             .update_ticker("E-BTC-USDT", |t| t.last = price);
@@ -113,11 +112,11 @@ fn funded_snapshot_retains_native_exposure_without_fabricating_an_entry_loss() {
         h.reply("/account", &account("BUY", 3.0));
         assert_eq!(h.engine.store().positions()[0].contracts, 3.0);
         assert_eq!(h.engine.store().positions()[0].unrealized_pnl, 20.0);
-        assert_eq!(h.engine.store().balance().upnl, 20.0);
+        assert_eq!(h.engine.store().balance().upnl, -0.5);
     }
 }
 #[test]
-fn an_unmappable_position_cannot_publish_a_partial_account_upnl_sum() {
+fn an_unmappable_position_retains_the_prior_account_snapshot() {
     let mut h = Harness::new();
     h.engine
         .store_mut()
@@ -146,7 +145,7 @@ fn a_new_opposite_side_does_not_inherit_the_previous_positions_valuation() {
     h.poll();
     h.reply("/account", &account("SELL", 3.0));
     assert_eq!(h.engine.store().positions()[0].unrealized_pnl, 0.0);
-    assert_eq!(h.engine.store().balance().upnl, 0.0);
+    assert_eq!(h.engine.store().balance().upnl, -0.5);
 }
 #[test]
 fn empty_groups_for_uncatalogued_contracts_do_not_block_the_snapshot() {
@@ -165,4 +164,18 @@ fn empty_groups_for_uncatalogued_contracts_do_not_block_the_snapshot() {
         assert_eq!(h.engine.store().positions()[0].unrealized_pnl, 20.0);
         assert_eq!(h.engine.store().balance().total, 1000.0);
     }
+}
+#[test]
+fn private_tape_startup_keeps_realized_currency_upnl_before_the_first_quote() {
+    let mut h = Harness::new();
+    let usdc = r#"{"marginCoin":"USDC","totalEquity":40,"accountNormal":35,"accountLock":2,"sumOpenRealizedAmount":-0.5,"positionVos":[]}"#;
+    h.reply(
+        "/account",
+        &account("BUY", 2.0).replace("}]}]}]}}", &format!("}}]}}]}},{usdc}]}}}}")),
+    );
+    // No quote yet: entry 100 against a zero placeholder is not a 200 loss.
+    assert_eq!(h.engine.store().positions()[0].unrealized_pnl, 0.0);
+    let coins = h.engine.store().currency_balances().unwrap();
+    let upnl = |c: &str| coins.iter().find(|b| b.currency == c).unwrap().balance.upnl;
+    assert_eq!((upnl("USDC"), upnl("USDT")), (-0.5, -0.5));
 }

@@ -5,7 +5,7 @@ use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Response};
+use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -59,6 +59,8 @@ struct Plan {
     guard: Option<Target>,
     scope: Option<CancelScope>,
     cancel_attempts: Vec<String>,
+    /// A write step took effect, so a later refusal cannot mean nothing happened.
+    effective: bool,
 }
 impl Plan {
     fn new(command: CommandId) -> Self {
@@ -70,6 +72,7 @@ impl Plan {
             guard: None,
             scope: None,
             cancel_attempts: vec![],
+            effective: false,
         }
     }
 }
@@ -1217,15 +1220,14 @@ impl Grvt {
         };
         match &command {
             Command::SetMarginType { .. } => {
-                cx.done(
-                    id,
-                    Err("GRVT margin mode cannot be changed through this integration".into()),
-                );
+                let error = not_sent("GRVT margin mode cannot be changed through this integration");
+                cx.fail(id, error.kind(ErrorKind::Unsupported));
                 return true;
             }
             Command::SetPositionMode { hedged, .. } => {
                 if *hedged {
-                    cx.done(id, Err("GRVT supports one-way positions only".into()));
+                    let error = not_sent("GRVT supports one-way positions only");
+                    cx.fail(id, error.kind(ErrorKind::Unsupported));
                 } else {
                     cx.store.set_hedged(false);
                     cx.done(id, Ok("[]".into()));
@@ -1237,7 +1239,7 @@ impl Grvt {
         if !self.awaits_builder(&command)
             && let Err(error) = self.trade_plan(cx, command.clone())
         {
-            cx.done(id, Err(error));
+            cx.fail(id, not_sent(error).kind(ErrorKind::InvalidInput));
             return true;
         }
         self.trading.queue.push_back(command);
@@ -1280,7 +1282,7 @@ impl Grvt {
                 self.trade_step(cx, plan);
             }
             Err(error) => {
-                cx.done(id, Err(error));
+                cx.fail(id, not_sent(error).kind(ErrorKind::InvalidInput));
                 self.trade_next(cx);
             }
         }
@@ -1294,13 +1296,13 @@ impl Grvt {
             && let Some(target) = plan.guard.as_ref()
             && let Err(error) = self.guard_amend(cx, target)
         {
-            self.trade_finish(cx, plan, Some(error));
+            self.trade_finish(cx, plan, Some(not_sent(error)));
             return;
         }
         if let Effect::CancelExact(target) = &step.effect
             && let Err(error) = self.guard_exact_cancel(cx, &plan, target)
         {
-            self.trade_finish(cx, plan, Some(error));
+            self.trade_finish(cx, plan, Some(not_sent(error)));
             return;
         }
         if let Effect::ReadSymbol(read) = &mut step.effect {
@@ -1356,7 +1358,7 @@ impl Grvt {
             }),
         );
     }
-    fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, plan: Plan, error: Option<String>) {
+    fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, plan: Plan, error: Option<VenueError>) {
         for id in &plan.affected {
             if error.is_some()
                 && plan.scope.is_none()
@@ -1370,35 +1372,48 @@ impl Grvt {
         }
         self.account.orders_revision += 1;
         self.trading.busy = false;
-        cx.done(
-            plan.command,
-            match error {
-                Some(error) if !plan.created.is_empty() => Err(format!(
-                    "{error}; already created GRVT order IDs: {}",
-                    plan.created.join(",")
-                )),
-                Some(error) if !plan.cancel_attempts.is_empty() => Err(format!(
-                    "{error}; reconcile GRVT cancellation identities: {}",
-                    plan.cancel_attempts.join(",")
-                )),
-                Some(error) => Err(error),
-                None => Ok(serde_json::to_string(&plan.created).expect("GRVT result IDs")),
-            },
-        );
+        match error {
+            Some(mut error) => {
+                if !plan.created.is_empty() {
+                    let created = plan.created.join(",");
+                    error.message = format!(
+                        "{}; already created GRVT order IDs: {created}",
+                        error.message
+                    );
+                } else if !plan.cancel_attempts.is_empty() {
+                    let attempts = plan.cancel_attempts.join(",");
+                    error.message = format!(
+                        "{}; reconcile GRVT cancellation identities: {attempts}",
+                        error.message
+                    );
+                }
+                // A later refusal after a write took effect cannot mean nothing happened.
+                let affected =
+                    plan.effective || !plan.created.is_empty() || !plan.cancel_attempts.is_empty();
+                if affected && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent)) {
+                    error.outcome = None;
+                }
+                cx.fail(plan.command, error);
+            }
+            None => cx.done(
+                plan.command,
+                Ok(serde_json::to_string(&plan.created).expect("GRVT result IDs")),
+            ),
+        }
         self.refresh_orders(cx);
         self.refresh_positions(cx);
         self.trade_next(cx);
     }
-    /// `unknown_outcome` is false only when the write definitively did not reach the book.
+    /// `outcome` is `Unknown` unless the write definitively did not reach the book.
     pub(crate) fn trade_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
         error: &str,
-        unknown_outcome: bool,
+        outcome: Outcome,
     ) {
-        let error = if let Effect::Place(order) = &request.step.effect
-            && unknown_outcome
+        let message = if let Effect::Place(order) = &request.step.effect
+            && outcome == Outcome::Unknown
         {
             format!(
                 "{error}; reconcile GRVT client order ID {} before retrying",
@@ -1407,6 +1422,7 @@ impl Grvt {
         } else {
             error.to_owned()
         };
+        let error = VenueError::new(message).outcome(outcome);
         self.trade_finish(cx, *request.plan, Some(error));
     }
     pub(crate) fn trade_response(
@@ -1416,8 +1432,8 @@ impl Grvt {
         response: Response<'_>,
     ) {
         if let Err(error) = crate::wire::check(&response) {
-            let unknown = !crate::wire::venue_rejected(&response);
-            self.trade_failed(cx, request, &error, unknown);
+            let outcome = crate::wire::write_outcome(&response);
+            self.trade_failed(cx, request, &error, outcome);
             return;
         }
         let result = (|| -> Result<(), String> {
@@ -1651,10 +1667,11 @@ impl Grvt {
             Ok(()) => {
                 if !request.is_read() {
                     self.account.orders_revision += 1;
+                    request.plan.effective = true;
                 }
                 self.trade_step(cx, *request.plan);
             }
-            Err(error) => self.trade_failed(cx, request, &error, true),
+            Err(error) => self.trade_failed(cx, request, &error, Outcome::Unknown),
         }
     }
 }
@@ -1701,4 +1718,9 @@ fn ensure_identity(
         return Err("GRVT lookup returned a different order identity".into());
     }
     Ok(())
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
 }
