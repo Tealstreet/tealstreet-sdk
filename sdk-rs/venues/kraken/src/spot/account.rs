@@ -421,7 +421,7 @@ impl KrakenSpot {
         if self
             .account
             .balance_guard
-            .admit(current, STALE_SNAPSHOT_LIMIT)
+            .admit_issued(current, revision, STALE_SNAPSHOT_LIMIT)
         {
             cx.store.set_balance(Balance {
                 total,

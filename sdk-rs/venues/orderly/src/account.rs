@@ -19,6 +19,7 @@ pub enum Request {
         rows: Vec<Position>,
         invalid: bool,
         revision: u64,
+        issued: u64,
         stamps: HashMap<String, (Option<u64>, u64)>,
     },
     Orders {
@@ -133,6 +134,7 @@ pub struct Account {
     terminal: HashSet<String>,
     terminal_order: VecDeque<String>,
     positions_guard: StaleGuard,
+    positions_issued: u64,
 }
 impl Default for Account {
     fn default() -> Self {
@@ -163,6 +165,7 @@ impl Default for Account {
             terminal: HashSet::new(),
             terminal_order: VecDeque::new(),
             positions_guard: StaleGuard::default(),
+            positions_issued: 0,
         }
     }
 }
@@ -363,12 +366,14 @@ impl Orderly {
     pub(crate) fn account_poll(&mut self, cx: &mut Cx<'_, Pending>, orders: bool) {
         if !self.account.inflight[1] {
             self.account.inflight[1] = true;
+            self.account.positions_issued += 1;
             self.account_read(
                 cx,
                 Request::Positions {
                     rows: vec![],
                     invalid: false,
                     revision: self.account.positions_revision,
+                    issued: self.account.positions_issued,
                     stamps: HashMap::new(),
                 },
             );
@@ -887,6 +892,7 @@ impl Orderly {
                 rows,
                 invalid,
                 revision,
+                issued,
                 stamps,
             } => {
                 self.account.inflight[1] = false;
@@ -897,7 +903,7 @@ impl Orderly {
                 if !self
                     .account
                     .positions_guard
-                    .admit(current, STALE_SNAPSHOT_LIMIT)
+                    .admit_issued(current, issued, STALE_SNAPSHOT_LIMIT)
                 {
                     return;
                 }

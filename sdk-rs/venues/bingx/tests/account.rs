@@ -1038,4 +1038,15 @@ fn position_events_faster_than_the_mode_read_cannot_starve_mode_and_positions() 
         assert_eq!(positions, step == 3, "step {step}");
         read = h.take(MODE);
     }
+    // Once known (for example just set by a command), only a current read may change the mode.
+    for step in 1..=3 {
+        h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":10}}"#);
+        h.reply(
+            read.id,
+            200,
+            r#"{"code":0,"data":{"dualSidePosition":false}}"#,
+        );
+        assert!(h.engine.store().hedged(), "stale step {step}");
+        read = h.take(MODE);
+    }
 }

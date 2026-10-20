@@ -734,7 +734,14 @@ impl Account {
             Request::PositionMode { revision } => {
                 self.mode_in_flight = false;
                 let current = revision == self.positions_revision;
-                if !self.mode_guard.admit(current, STALE_SNAPSHOT_LIMIT) {
+                // Only discovery may commit a stale read; a known mode, possibly
+                // just set by a command, waits for a current one.
+                let admit = if self.mode_known {
+                    current
+                } else {
+                    self.mode_guard.admit(current, STALE_SNAPSHOT_LIMIT)
+                };
+                if !admit {
                     self.fetch_mode(cx, credentials);
                     return;
                 }

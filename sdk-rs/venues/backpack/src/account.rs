@@ -525,11 +525,11 @@ impl Backpack {
                     let r: Collateral =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
                     let current = revision == self.account.balance_revision;
-                    if self
-                        .account
-                        .balance_guard
-                        .admit(current, STALE_SNAPSHOT_LIMIT)
-                    {
+                    if self.account.balance_guard.admit_issued(
+                        current,
+                        revision,
+                        STALE_SNAPSHOT_LIMIT,
+                    ) {
                         cx.store.set_balance(Balance {
                             used: r.net_equity_locked,
                             free: r.net_equity_available,
