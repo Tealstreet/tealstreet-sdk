@@ -227,6 +227,8 @@ pub struct SpotState<'a> {
 pub struct Num(#[serde(deserialize_with = "number")] pub f64);
 #[derive(Deserialize)]
 pub struct SpotBalance<'a> {
+    #[serde(default)]
+    pub token: Option<u32>,
     #[serde(borrow)]
     pub coin: Cow<'a, str>,
     #[serde(deserialize_with = "number")]
@@ -334,4 +336,30 @@ pub struct UserEvents<'a> {
     pub orders: Vec<OrderUpdate<'a>>,
     #[serde(default)]
     pub is_snapshot: bool,
+}
+
+#[derive(Deserialize)]
+pub struct SpotMeta {
+    pub universe: Vec<SpotMarket>,
+    pub tokens: Vec<SpotToken>,
+}
+#[derive(Deserialize)]
+pub struct SpotMarket {
+    pub name: String,
+    pub tokens: Vec<u32>,
+    pub index: u32,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotToken {
+    pub name: String,
+    pub index: u32,
+    pub sz_decimals: i32,
+}
+#[derive(Deserialize)]
+pub struct SpotCtx {
+    #[serde(default)]
+    pub coin: String,
+    #[serde(flatten)]
+    pub context: AssetCtx,
 }

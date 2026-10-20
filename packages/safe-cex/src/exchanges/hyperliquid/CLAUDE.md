@@ -53,6 +53,11 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 | `hyperliquidspot.ws-public.ts`   | Spot public WebSocket.                                                                 |
 | `hyperliquidspot.ws-private.ts`  | Spot private WebSocket.                                                                |
 
+Spot private subscriptions use current `spotState`, `userFills`, notifications
+and non-funding ledger updates. `activeAssetData` supports perpetuals only;
+legacy balance response parsing remains for compatibility. Spot fill callbacks
+preserve execution `tid` as `id` and native `oid` as `orderId` for chasers.
+
 ### Other
 
 | File                                   | Description                                                                                           |
@@ -803,7 +808,28 @@ The alias lands on **`base` and `prettySymbol`**; `symbol` and `id` keep the ven
 
 **The quote is NOT always USDC — read `universe[].tokens[1]`.** `tokens` is `[baseIndex, quoteIndex]` into the top-level `tokens` table. A live probe on 2026-07-27 found 299 USDC pairs but also **11 USDH, 5 USDT0, and 1 USDE**. Hardcoding `USDC` in the display symbol produced **five duplicate symbols** (`HYPE/USDC` three times — the real one plus `HYPE/USDH` and `HYPE/USDT0`), and because `store.marketsBySymbol` is symbol-keyed, the duplicates silently clobbered each other and made markets unreachable. Reading the real quote token yields 284 live pairs with **zero** collisions. Skip any pair whose base or quote token is missing from the table.
 
-**The asset-context join is by `coin`, NOT positional.** This is the single most dangerous difference from the perp path. `metaAndAssetCtxs` returns `assetCtxs[i]` aligned with `universe[i]`, so the perp code indexes positionally. `spotMetaAndAssetCtxs` does **not**: a live probe on 2026-07-27 returned **316 universe entries against 707 asset contexts**, out of universe order. A positional join mismatched **245 of 316 pairs** — i.e. it silently prices most spot markets off an unrelated asset, with no error. Join on `SpotAssetCtx.coin`. Locked by `__tests__/audit-regressions/hyperliquid.spot-markets-merge.test.ts`.
+**The asset-context join is by `coin`, NOT positional.** This is the single most dangerous difference from the perp path. `metaAndAssetCtxs` returns `assetCtxs[i]` aligned with `universe[i]`, so the perp code indexes positionally. `spotMetaAndAssetCtxs` does **not**: a live probe on 2026-07-27 returned **316 universe entries against 707 asset contexts**, out of universe order. A positional join mismatched **245 of 316 pairs** — i.e. it silently prices most spot markets off an unrelated asset, with no error. Join on `SpotAssetCtx.coin`. Locked by `__tests__/audit-regressions/hyperliquid.spot-markets-merge.test.ts`. The standalone spot adapter also accepts the official documented coinless format, strictly when the entire contexts array omits `coin` and its length equals the universe. Mixed named/unnamed or differently sized arrays never use positional fallback.
+
+### Rust standalone spot product
+
+`hyperliquidspot` selects `Hyperliquid::new_spot` in the existing Rust crate;
+it does not enable combined spot/perpetual accounts in `hyperliquid`.
+Native spot asset IDs are `10000 + universe.index`, with eight-minus-size
+price decimals and fixed 1x/cross settings. Both token indices determine the
+display symbol and actual quote: `HYPE/USDC` and `HYPE/USDH` must stay distinct.
+USD valuation prefers direct USDC prices, otherwise converting through at most
+three market hops; unpriced holdings retain raw amounts with zero notional.
+Raw token currencies and USD coin
+valuation travel in the balance frame; zero derivative positions are represented
+by settings. Private tapes are documented inputs, not live funded-account proof.
+
+Spot book subscriptions use full precision plus documented `nSigFigs` 2–5;
+the old 1/6 subscriptions could close the upstream connection. Both TS and
+Rust retain finest-to-coarsest book aggregation. Placement returns string IDs
+for resting and immediately filled acknowledgements; `waitingForTrigger`
+contributes no invented ID. Native cancel/amend race and stale-balance guards
+are independently tested. Inherited empty history capabilities remain branded.
+See `docs/plans/RUST_SPOT_PRODUCTS.md` for review and gate evidence.
 
 Other spot invariants worth keeping:
 

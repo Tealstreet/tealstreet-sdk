@@ -169,6 +169,46 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  hyperliquidspot: {
+    // Paired reference fixes retain native spot IDs for coinless contexts and
+    // return string IDs for both resting and filled placement ACKs. Native
+    // tests additionally pin spot-only safety paths without rewriting economics.
+    notes: [
+      'Join coinless spot contexts positionally only when the entire context array is coinless and exactly matches universe length.',
+      'Resolve both metadata token indices so native pairs with a shared base retain distinct quote symbols and action/book identities.',
+      'Convert non-USD quote prices before wallet valuation, prefer direct USDC and reject canonical-token cycles while retaining unpriced raw holdings.',
+      'Use the spot native websocket endpoint and supported book precision subscriptions (null and 2 through 5).',
+      'Return the SDK string-array contract for resting and immediately filled orders.',
+      'Keep execution tid as the TS fill id and expose native oid as orderId for chaser tracking and native fill parity.',
+      'Subscribe to documented spotState balance updates and remove ignored feeds and perpetual-only activeAssetData subscriptions.',
+      'Keep absent spot oracle/funding fields finite instead of emitting NaN.',
+      'Use spot asset indices and 8-minus-size-decimals price precision with no perp builder or reduce-only flags.',
+      'Keep accepted orders available for immediate cancel/amend despite the TS spot fetchOrders stub.',
+      'Apply live full/partial executions before a delayed resting acknowledgement without resurrecting the filled native order.',
+      'Reject unsupported spot leverage, margin transitions and standalone trigger placement before a write.',
+      'Deduplicate native live executions and suppress historical fill snapshots.',
+      'Retry failed bootstrap reads without replacing a valid market table with an empty snapshot.',
+    ],
+  },
+  krakenspot: {
+    // Public fixes are paired in TS; independent native tests cover stricter
+    // execution, retry and amendment paths. Replay output stays unmodified.
+    notes: [
+      'Translate AssetPairs XBT and XDG/XXDG identities to accepted WS v2 BTC/DOGE wire symbols while preserving canonical store symbols.',
+      'Value normalized BTC holdings through the market identity even when the SDK ticker uses XBT/USD.',
+      'Parse documented decimal tick and lot steps canonically instead of exposing Math.pow ULP artifacts as extra precision.',
+      'Trim subscribed book depth after each update and clear reconnect book caches.',
+      'Fan supported native OHLC updates out to every requested fallback timeframe.',
+      'Read current native triggers.actual_price/static triggers.price and map BTC/USD execution identity back to XBT/USD.',
+      'Keep documented iceberg orders as limit orders with native amend provenance.',
+      'Derive trailing quote distances from the raw chart input before precision rounding.',
+      'Sign exact form bytes and enforce monotonic nonce, including retries and reconnect token reads.',
+      'Refresh the authenticated WS token for each socket generation.',
+      'Emit exact per-execution last_qty/last_price once per native execution identity.',
+      'Treat filled lifecycle rows as status transitions rather than extra executions, including trade/filled rows batched in either order.',
+      'Preserve native order txid across atomic amendments and reject ambiguous edits before a write.',
+    ],
+  },
   // TxFlow previously rejected start as a scaffold. Its new TS reference and
   // Rust implementation both fence stale reads, deduplicate executions, reject
   // uncertain write acknowledgements and revalidate queued amendments.
