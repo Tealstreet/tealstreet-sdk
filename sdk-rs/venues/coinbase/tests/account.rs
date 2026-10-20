@@ -985,3 +985,49 @@ fn snapshot_holding_only_a_site_order_still_removes_ended_orders() {
     s.message(1, "snapshot", &format!("[{site}]"));
     assert!(s.e.store().order("order-a").is_none());
 }
+#[test]
+fn snapshot_holding_only_an_order_on_an_unloaded_market_still_removes_ended_orders() {
+    let mut s = Session::new("INTX", false).ready();
+    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    s.message(0, "snapshot", &format!("[{row}]"));
+    assert!(s.e.store().order("order-a").is_some());
+    let other = user_order("spot-1", "ETH-USD", "OPEN", "0", "1");
+    s.message(1, "snapshot", &format!("[{other}]"));
+    assert!(s.e.store().order("order-a").is_none());
+}
+#[test]
+fn unmappable_update_for_a_staged_order_spoils_the_snapshot() {
+    let mut s = Session::new("INTX", false).ready();
+    let rows = (0..50)
+        .map(|i| user_order(&format!("ours-{i}"), "BTC-PERP-INTX", "OPEN", "0", "1"))
+        .collect::<Vec<_>>()
+        .join(",");
+    s.message(0, "snapshot", &format!("[{rows}]"));
+    let update = r#"{"order_id":"ours-0","client_order_id":"","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"BUY","order_type":"Twap","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"100","stop_price":"0","avg_price":"0"}"#;
+    s.message(1, "update", &format!("[{update}]"));
+    s.message(2, "snapshot", "[]");
+    assert!(s.e.store().order("ours-0").is_none());
+}
+#[test]
+fn skipped_position_row_beside_a_mapped_row_does_not_duplicate_the_position() {
+    let mut s = Session::new("INTX", false).ready();
+    s.positions = Some(
+        r#"{"positions":[{"symbol":"BTC-PERP-INTX","position_side":"POSITION_SIDE_LONG","net_size":"3","entry_vwap":{"value":"100"},"mark_price":{"value":"110"},"liquidation_price":{"value":"50"},"leverage":"10"},{"symbol":"BTC-PERP-INTX","position_side":"BOGUS","net_size":"1","entry_vwap":{"value":"100"},"mark_price":{"value":"110"},"liquidation_price":{"value":"50"},"leverage":"10"}]}"#.into(),
+    );
+    for _ in 0..20 {
+        for r in s.collect() {
+            s.answer(r);
+        }
+        if s.e.store().position("BTC-PERP-INTX").unwrap().contracts == 3.0 {
+            break;
+        }
+        s.fire();
+    }
+    let held =
+        s.e.store()
+            .positions()
+            .iter()
+            .filter(|p| p.symbol == "BTC-PERP-INTX")
+            .count();
+    assert_eq!(held, 1);
+}

@@ -1476,6 +1476,7 @@ impl Coinbase {
                 let mut errors = vec![];
                 for result in result.results {
                     if result.success {
+                        self.account.forget_foreign(&result.order_id);
                         self.private_order_changed(&result.order_id);
                         if cx.store.order(&result.order_id).is_some_and(live) {
                             cx.store

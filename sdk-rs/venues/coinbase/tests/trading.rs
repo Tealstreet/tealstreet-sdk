@@ -27,6 +27,8 @@ struct Session {
     requests: Vec<HttpRequest>,
     read_portfolio: &'static str,
     failing_positions: bool,
+    reject_read_key: bool,
+    key_permission_failures: u32,
 }
 impl Session {
     fn new(kind: &'static str, spot: bool) -> Self {
@@ -56,6 +58,8 @@ impl Session {
             requests: vec![],
             read_portfolio: "portfolio-one",
             failing_positions: false,
+            reject_read_key: false,
+            key_permission_failures: 0,
         }
     }
     fn reply(&mut self, r: HttpRequest, status: u16, body: &str) {
@@ -103,6 +107,19 @@ impl Session {
         let url = &r.url;
         if self.failing_positions && url.contains("/positions") {
             return self.reply(r, 503, "unavailable");
+        }
+        if url.ends_with("/key_permissions") && self.key_permission_failures > 0 {
+            self.key_permission_failures -= 1;
+            return self.reply(r, 503, "unavailable");
+        }
+        if self.reject_read_key
+            && !url.ends_with("/key_permissions")
+            && r.headers
+                .iter()
+                .any(|(n, _)| n.eq_ignore_ascii_case("authorization"))
+            && jwt_subject(&r).ends_with("/read")
+        {
+            return self.reply(r, 401, r#"{"error":"UNAUTHENTICATED"}"#);
         }
         let body = if url.ends_with("/key_permissions") {
             let portfolio = if jwt_subject(&r).ends_with("/read") {
@@ -1746,6 +1763,12 @@ fn saved_read_only_key_signs_reads_while_writes_keep_the_trading_key() {
 }
 
 fn read_key_session(read_portfolio: &'static str) -> Session {
+    read_key_session_with(read_portfolio, |_| {})
+}
+fn read_key_session_with(
+    read_portfolio: &'static str,
+    setup: impl FnOnce(&mut Session),
+) -> Session {
     let read: safe_cex_engine::ReadCredentials = serde_json::from_str(&format!(
         r#"{{"key":"organizations/test/apiKeys/read","secret":"{}"}}"#,
         STANDARD.encode([9; 32])
@@ -1762,6 +1785,7 @@ fn read_key_session(read_portfolio: &'static str) -> Session {
         },
     );
     s.read_portfolio = read_portfolio;
+    setup(&mut s);
     s.ready()
 }
 
@@ -1816,4 +1840,65 @@ fn unresolved_derivative_placement_waits_for_a_later_position_read() {
         symbol: "BTC-PERP-INTX".into(),
     });
     assert!(s.done(322).is_ok());
+}
+
+#[test]
+fn rejected_read_only_key_falls_back_without_deactivating_trading() {
+    let mut s = read_key_session("portfolio-one");
+    s.reject_read_key = true;
+    let before = s.requests.len();
+    s.advance(12_000.0);
+    s.reject_read_key = false;
+    let r = s.place(323, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"after-401"}}"#,
+    );
+    assert!(s.done(323).is_ok());
+    let later = s.requests[before..]
+        .iter()
+        .filter(|r| {
+            r.method == safe_cex_engine::Method::Get
+                && r.url.contains("/brokerage/")
+                && !r.url.contains("/market/")
+        })
+        .collect::<Vec<_>>();
+    assert!(later.iter().any(|r| jwt_subject(r).ends_with("/test")
+        && r.route == Some(safe_cex_engine::RequestRoute::Primary)));
+}
+
+#[test]
+fn transient_key_permission_failure_retries_before_refusing_the_read_key() {
+    let s = read_key_session_with("portfolio-one", |s| s.key_permission_failures = 1);
+    let last = s
+        .requests
+        .iter()
+        .rev()
+        .find(|r| r.method == safe_cex_engine::Method::Get && r.url.contains("/portfolios/"))
+        .unwrap();
+    assert!(jwt_subject(last).ends_with("/read"));
+}
+
+#[test]
+fn cancelled_foreign_orders_are_not_cancelled_again() {
+    let mut s = Session::new("INTX", false);
+    s.open_orders = BRACKET_REST.into();
+    let mut s = s.ready();
+    s.command(Command::CancelSymbolOrders {
+        command: 324,
+        symbol: "BTC-PERP-INTX".into(),
+    });
+    let cancel = s.write();
+    s.reply(
+        cancel,
+        200,
+        r#"{"results":[{"order_id":"bracket-1","success":true}]}"#,
+    );
+    assert!(s.done(324).is_ok());
+    s.command(Command::CancelSymbolOrders {
+        command: 325,
+        symbol: "BTC-PERP-INTX".into(),
+    });
+    assert!(s.done(325).is_ok());
 }

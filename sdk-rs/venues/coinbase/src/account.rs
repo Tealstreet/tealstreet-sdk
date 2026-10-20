@@ -31,7 +31,7 @@ pub struct Orders {
     rows: HashMap<String, Order>,
     proofs: HashMap<String, Editable>,
     fill_values: HashMap<String, f64>,
-    skipped: HashMap<String, String>,
+    skipped: HashMap<String, Option<String>>,
     invalid: bool,
     revision: u64,
     kind: ProductKind,
@@ -74,7 +74,7 @@ struct Snapshot {
     rows: HashMap<String, Order>,
     proofs: HashMap<String, Editable>,
     fill_values: HashMap<String, f64>,
-    skipped: HashMap<String, String>,
+    skipped: HashMap<String, Option<String>>,
     raw_count: usize,
     invalid: bool,
     complete: bool,
@@ -134,6 +134,9 @@ impl Account {
     /// Account revision at which the last committed order snapshot started.
     pub(crate) fn committed_orders_revision(&self) -> u64 {
         self.committed_orders_revision
+    }
+    pub(crate) fn forget_foreign(&mut self, id: &str) {
+        self.foreign.remove(id);
     }
     pub(crate) fn foreign_orders<'a>(&'a self, symbol: &'a str) -> impl Iterator<Item = &'a str> {
         self.foreign
@@ -233,17 +236,20 @@ struct RowIdentity<'a> {
     status: std::borrow::Cow<'a, str>,
 }
 /// Identity of a row that failed to map, so one row cannot discard a snapshot.
-/// Yields the order ID and, for a live order on a known market, its symbol.
-fn skipped_row(store: &safe_cex_engine::Store, text: &str) -> Option<(String, String)> {
+/// The symbol is `None` without product or status, empty for an order that is
+/// not live or not on a loaded market, else the live order's symbol.
+fn skipped_row(store: &safe_cex_engine::Store, text: &str) -> Option<(String, Option<String>)> {
     let row: RowIdentity<'_> = serde_json::from_str(text).ok()?;
     if !safe_id(&row.order_id) {
         return None;
     }
-    let symbol = STATUSES
-        .contains(&row.status.as_ref())
-        .then(|| market(store, &row.product_id).map(|m| m.symbol.clone()))
-        .flatten()
-        .unwrap_or_default();
+    let symbol = (!row.product_id.is_empty() && !row.status.is_empty()).then(|| {
+        STATUSES
+            .contains(&row.status.as_ref())
+            .then(|| market(store, &row.product_id).map(|m| m.symbol.clone()))
+            .flatten()
+            .unwrap_or_default()
+    });
     Some((row.order_id.into_owned(), symbol))
 }
 fn multiplier(m: &Market) -> Result<f64, String> {
@@ -817,12 +823,15 @@ impl Coinbase {
         }
     }
     fn read_key_unverified(&mut self, cx: &mut Cx<'_, Pending>, reason: &str) {
+        self.drop_read_key(cx, reason);
+        self.account_read(cx, Request::Portfolios);
+    }
+    fn drop_read_key(&mut self, cx: &mut Cx<'_, Pending>, reason: &str) {
         cx.log(
             LogLevel::Error,
             format!("Coinbase read-only key {reason}; reads use the trading key"),
         );
         self.read_credentials = None;
-        self.account_read(cx, Request::Portfolios);
     }
     fn account_read(&mut self, cx: &mut Cx<'_, Pending>, req: Request) {
         let id = self.account.portfolio_id.as_deref().unwrap_or("");
@@ -1417,6 +1426,14 @@ impl Coinbase {
             return;
         }
         if let Request::KeyPermissions { trading_portfolio } = req {
+            if matches!(response.status, 408 | 429) || response.status >= 500 {
+                if response.status == 429 {
+                    self.account.backoff_until = cx.now + 60_000.0;
+                }
+                let error = format!("Coinbase key permissions HTTP {}", response.status);
+                self.private_failed(cx, Request::KeyPermissions { trading_portfolio }, &error);
+                return;
+            }
             let portfolio = (200..300)
                 .contains(&response.status)
                 .then(|| serde_json::from_str::<wire::KeyPermissions>(response.body).ok())
@@ -1457,6 +1474,12 @@ impl Coinbase {
                 self.account.backoff_until = cx.now + delay;
             }
             if response.status == 401 {
+                // Reads were signed by the read-only key; keep trading on the trading key.
+                if self.read_credentials.is_some() {
+                    self.drop_read_key(cx, "was rejected (HTTP 401)");
+                    self.private_failed(cx, req, "Coinbase read-only key rejected");
+                    return;
+                }
                 cx.log(LogLevel::Error, "Coinbase credentials rejected");
                 cx.deactivate();
                 return;
@@ -1544,8 +1567,7 @@ impl Coinbase {
                                 {
                                     s.pending -= 1;
                                     let symbol = skipped_row(cx.store, &pending.text)
-                                        .map(|(_, symbol)| symbol)
-                                        .unwrap_or_default();
+                                        .and_then(|(_, symbol)| symbol);
                                     s.skipped.insert(id.clone(), symbol);
                                 }
                             }
@@ -1593,8 +1615,7 @@ impl Coinbase {
                                 if let Some(s) = &mut self.account.snapshot {
                                     if pending.snapshot {
                                         let symbol = skipped_row(cx.store, &pending.text)
-                                            .map(|(_, symbol)| symbol)
-                                            .unwrap_or_default();
+                                            .and_then(|(_, symbol)| symbol);
                                         s.skipped.insert(id.clone(), symbol);
                                     } else {
                                         s.invalid = true;
@@ -1721,8 +1742,12 @@ impl Coinbase {
                         cx.store
                             .positions()
                             .iter()
-                            .filter(|p| skipped.contains(&p.symbol))
-                            .cloned(),
+                            .filter(|p| {
+                                skipped.contains(&p.symbol)
+                                    && !rows.iter().any(|r| r.symbol == p.symbol)
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>(),
                     );
                     #[derive(serde::Deserialize)]
                     struct Meta {
@@ -1865,8 +1890,8 @@ impl Coinbase {
                 }
             }
         }
-        // A snapshot whose only rows lack a live identity says nothing about other orders.
-        let unmapped = s.rows.is_empty() && s.skipped.values().any(String::is_empty);
+        // A snapshot whose only rows lack any identity says nothing about other orders.
+        let unmapped = s.rows.is_empty() && s.skipped.values().any(Option::is_none);
         for o in cx.store.orders() {
             if (unmapped || s.skipped.contains_key(&o.id)) && !s.rows.contains_key(&o.id) {
                 s.rows.insert(o.id.clone(), o.clone());
@@ -1877,7 +1902,8 @@ impl Coinbase {
         self.account.foreign = s
             .skipped
             .into_iter()
-            .filter(|(id, symbol)| !symbol.is_empty() && !s.rows.contains_key(id))
+            .filter_map(|(id, symbol)| symbol.filter(|s| !s.is_empty()).map(|s| (id, s)))
+            .filter(|(id, _)| !s.rows.contains_key(id))
             .collect();
         for o in s.rows.values() {
             self.trading_observed_order(cx, o);
@@ -1921,7 +1947,17 @@ impl Coinbase {
             Request::Orders(_) => self.account.inflight[3] = false,
             Request::OrderDetails { id, socket } => self.fail_details(cx, &id, socket),
             Request::KeyPermissions { .. } => {
-                self.read_key_unverified(cx, &format!("could not be verified ({error})"))
+                if self.account.startup_retry.is_none() && self.account.startup_failures < 3 {
+                    self.account.startup_failures += 1;
+                    let t = cx.set_timer(
+                        (1000.0 * 2f64.powi(i32::from(self.account.startup_failures)))
+                            .max(self.account.backoff_until - cx.now),
+                    );
+                    self.account.startup_retry = Some((t, req));
+                } else if self.account.startup_retry.is_none() {
+                    self.account.startup_failures = 0;
+                    self.read_key_unverified(cx, &format!("could not be verified ({error})"));
+                }
             }
         }
     }
@@ -2030,6 +2066,11 @@ impl Coinbase {
                         if !snapshot
                             && let Some((id, _)) = &skipped
                             && cx.store.order(id).is_none()
+                            && !self
+                                .account
+                                .snapshot
+                                .as_ref()
+                                .is_some_and(|s| s.rows.contains_key(id))
                         {
                             cx.log(
                                 LogLevel::Warning,
