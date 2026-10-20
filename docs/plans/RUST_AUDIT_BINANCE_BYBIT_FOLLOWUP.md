@@ -204,6 +204,41 @@ No new error architecture or unrelated engine helper migration belongs here.
   now expects BaseExchange's existing 'Exchange Error:' event prefix. Combined
   SDK/host suites and final replay gates remain to run with unchanged policy.
 
+## Integrated replay evidence
+
+All 23 venue replay gates pass: 11 documented/scripted private replays and 12
+public replays (three runs each), including two fresh anonymous 20-second
+captures. No executable oracle, threshold or committed fixture changed.
+Combined SDK/host/harness verification is still pending at this checkpoint.
+
+Public medians below are TS / Rust; CPU is ms and retained memory is MB.
+
+| Replay | Frames | Main CPU | Steady CPU | Retained memory |
+| --- | ---: | ---: | ---: | ---: |
+| Binance USD-M | 873 | 190.4 / 85.7 | 102.2 / 33.1 | 18.2 / 4.1 |
+| Binance COIN-M | 202 | 172.8 / 68.8 | 113.5 / 38.1 | 14.0 / 1.9 |
+| Binance Spot | 7,045 | 637.4 / 423.7 | 280.1 / 142.4 | 27.6 / 11.2 |
+| Binance PM | 873 | 227.9 / 94.6 | 110.9 / 37.5 | 18.0 / 4.1 |
+| AsterDEX | 384 | 228.9 / 119.6 | 98.6 / 57.0 | 28.5 / 6.3 |
+| Bybit linear | 4,295 | 264.8 / 170.3 | 127.8 / 48.3 | 22.3 / 5.1 |
+| Bybit inverse | 708 | 120.4 / 40.6 | 74.7 / 16.5 | 14.5 / 1.7 |
+| Bybit Spot | 4,339 | 252.1 / 146.9 | 159.7 / 67.5 | 16.5 / 3.2 |
+| Bybit Demo | 5,833 | 452.4 / 305.4 | 268.0 / 150.5 | 22.0 / 5.2 |
+| HyroTrader (scripted public) | 160 | 34.9 / 30.9 | 11.3 / 8.7 | 13.6 / 0.9 |
+| Fresh Binance capture | 213 | 499.9 / 179.8 | 364.1 / 98.4 | 19.1 / 5.0 |
+| Fresh Bybit capture | 46,956 | 2070.1 / 849.7 | 1410.2 / 474.6 | 23.2 / 5.9 |
+
+Selected WASM bytes (fixed budget 1,258,291): Binance 1,014,611; AsterDEX
+1,099,765; Bybit 1,196,557. SHA256 respectively:
+
+- Binance: `5dc0f3ec39d28603aab62d85ff42746e0f9061154b03dd8d0555f600e72aedf9`.
+- AsterDEX: `4fdb57a1390afaf71c2ea907fc525c56cb09cfcc567f11390ff7654ce0bf957b`.
+- Bybit: `977a812d30670e180d0bc9358215d9ffd5e0212a91e1dfe2eaf15546abe5155c`.
+
+This evidence certifies the integrated runtime; later changes at this checkpoint
+are documentation/test expectations only. Earlier pre-integration failures above
+remain recorded and do not substitute for these final-source passes.
+
 ## Authorized next task after this PR merges
 
 Owner confirmed the Partial cancel/recreate decision against TS, including
