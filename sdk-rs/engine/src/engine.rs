@@ -450,6 +450,10 @@ pub enum Event<'a> {
     PollScaleChanged {
         scale: f64,
     },
+    /// Host's absolute bound on slowed polls (its resolved tick); `None` lifts it.
+    PollCeilingChanged {
+        ceiling_ms: Option<f64>,
+    },
     WsOpened {
         socket: SocketId,
     },
@@ -546,6 +550,7 @@ struct Io<P> {
     incoming: HashMap<RequestId, Incoming>,
     timers: HashMap<TimerId, ()>,
     poll_scale: Option<f64>,
+    poll_ceiling_ms: Option<f64>,
     poll_timers: HashMap<TimerId, PollTimer>,
     poll_physical: HashMap<TimerId, TimerId>,
     next_id: u32,
@@ -577,6 +582,7 @@ impl<P> Default for Io<P> {
             incoming: HashMap::new(),
             timers: HashMap::new(),
             poll_scale: None,
+            poll_ceiling_ms: None,
             poll_timers: HashMap::new(),
             poll_physical: HashMap::new(),
             next_id: 1,
@@ -603,7 +609,7 @@ impl<P> Io<P> {
 
     fn arm_poll(&mut self, now: f64, logical: TimerId) {
         let poll = &self.poll_timers[&logical];
-        let interval = poll.default_interval_ms * self.poll_scale.unwrap_or(1.);
+        let interval = self.poll_interval(poll.default_interval_ms);
         // Never hand an infinite/invalid deadline to a host. Infinity policy
         // retains the registration so a finite update can resume it.
         if !interval.is_finite()
@@ -635,18 +641,36 @@ impl<P> Io<P> {
         }
     }
 
-    fn set_poll_scale(&mut self, now: f64, scale: f64) {
-        if self.poll_scale == Some(scale) {
+    /// A poll's own cadence times the host scale. A slowdown never exceeds the
+    /// host's absolute ceiling unless the native cadence is already slower.
+    fn poll_interval(&self, default_ms: f64) -> f64 {
+        Self::interval_for(default_ms, self.poll_scale, self.poll_ceiling_ms)
+    }
+
+    fn interval_for(default_ms: f64, scale: Option<f64>, ceiling_ms: Option<f64>) -> f64 {
+        let interval = default_ms * scale.unwrap_or(1.);
+        match ceiling_ms {
+            Some(ceiling) if interval.is_finite() && ceiling.is_finite() => {
+                interval.min(default_ms.max(ceiling))
+            }
+            _ => interval,
+        }
+    }
+
+    fn set_poll_policy(&mut self, now: f64, scale: Option<f64>, ceiling_ms: Option<f64>) {
+        let (old_scale, old_ceiling) = (self.poll_scale, self.poll_ceiling_ms);
+        if (old_scale, old_ceiling) == (scale, ceiling_ms) {
             return;
         }
-        let previous = self.poll_scale.replace(scale).unwrap_or(1.);
+        self.poll_scale = scale;
+        self.poll_ceiling_ms = ceiling_ms;
         // Sort logical IDs so action ordering is independent of HashMap seeds.
         let mut logicals: Vec<_> = self.poll_timers.keys().copied().collect();
         logicals.sort_unstable_by_key(|timer| timer.0);
         for logical in logicals {
             let poll = &self.poll_timers[&logical];
-            let old_interval = poll.default_interval_ms * previous;
-            let new_interval = poll.default_interval_ms * scale;
+            let old_interval = Self::interval_for(poll.default_interval_ms, old_scale, old_ceiling);
+            let new_interval = Self::interval_for(poll.default_interval_ms, scale, ceiling_ms);
             if old_interval.is_finite()
                 && old_interval > 0.
                 && new_interval.is_finite()
@@ -1521,8 +1545,14 @@ impl<V: Venue> Engine<V> {
                 if scale.is_nan() || scale <= 0. {
                     return;
                 }
-                cx.io.set_poll_scale(now, scale);
+                let ceiling = cx.io.poll_ceiling_ms;
+                cx.io.set_poll_policy(now, Some(scale), ceiling);
                 self.venue.on_poll_scale(&mut cx, scale)
+            }
+            Event::PollCeilingChanged { ceiling_ms } => {
+                let ceiling_ms = ceiling_ms.filter(|ms| ms.is_finite() && *ms > 0.);
+                let scale = cx.io.poll_scale;
+                cx.io.set_poll_policy(now, scale, ceiling_ms);
             }
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),

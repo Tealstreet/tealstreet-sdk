@@ -1236,7 +1236,9 @@ impl WasmEngine {
                     return Ok(self.flush());
                 }
                 safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
-                safe_cex_engine::command::HostInput::PollScaleChanged { scale } => {
+                safe_cex_engine::command::HostInput::PollScaleChanged { scale, ceiling_ms } => {
+                    self.inner
+                        .handle(now, Event::PollCeilingChanged { ceiling_ms });
                     Event::PollScaleChanged { scale }
                 }
             };
@@ -1258,7 +1260,9 @@ impl WasmEngine {
                 return Ok(self.flush());
             }
             safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
-            safe_cex_engine::command::HostInput::PollScaleChanged { scale } => {
+            safe_cex_engine::command::HostInput::PollScaleChanged { scale, ceiling_ms } => {
+                self.inner
+                    .handle(now, Event::PollCeilingChanged { ceiling_ms });
                 Event::PollScaleChanged { scale }
             }
         };
@@ -1374,12 +1378,16 @@ mod tests {
 
         assert_eq!(
             decode_host_input(r#"{"op":"setPollScale","scale":2.5}"#).unwrap(),
-            HostInput::PollScaleChanged { scale: 2.5 }
+            HostInput::PollScaleChanged {
+                scale: 2.5,
+                ceiling_ms: None
+            }
         );
         assert_eq!(
             decode_host_input(r#"{"op":"setPollScale","scale":null}"#).unwrap(),
             HostInput::PollScaleChanged {
-                scale: f64::INFINITY
+                scale: f64::INFINITY,
+                ceiling_ms: None,
             }
         );
     }
@@ -1419,7 +1427,11 @@ mod tests {
             fn handle(&mut self, now: f64, event: Event<'_>) {
                 let input = match event {
                     Event::Command(command) => HostInput::Command(command),
-                    Event::PollScaleChanged { scale } => HostInput::PollScaleChanged { scale },
+                    Event::PollScaleChanged { scale } => HostInput::PollScaleChanged {
+                        scale,
+                        ceiling_ms: None,
+                    },
+                    Event::PollCeilingChanged { .. } => return,
                     _ => panic!("command boundary"),
                 };
                 self.events.borrow_mut().push((now, input));

@@ -420,9 +420,11 @@ pub fn decode_command(json: &str) -> Result<Command, serde_json::Error> {
 pub enum HostInput {
     Command(Command),
     PublicFeedUpdate(crate::PublicFeedUpdate),
-    /// Factor on each venue poll's own cadence; infinity pauses polling.
+    /// Factor on each venue poll's own cadence; infinity pauses polling. The
+    /// optional ceiling is the host's absolute bound on slowed polls.
     PollScaleChanged {
         scale: f64,
+        ceiling_ms: Option<f64>,
     },
 }
 
@@ -507,6 +509,8 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
         #[derive(Deserialize)]
         struct Control {
             scale: Scale,
+            #[serde(default)]
+            ceiling: Option<f64>,
         }
         let control: Control = serde_json::from_str(json)?;
         let scale = match control.scale {
@@ -518,7 +522,18 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
                 "Polling scale must be positive or null to pause",
             ));
         }
-        return Ok(HostInput::PollScaleChanged { scale });
+        if control
+            .ceiling
+            .is_some_and(|ms| !ms.is_finite() || ms <= 0.0)
+        {
+            return Err(serde::de::Error::custom(
+                "Polling ceiling must be a positive number of milliseconds",
+            ));
+        }
+        return Ok(HostInput::PollScaleChanged {
+            scale,
+            ceiling_ms: control.ceiling,
+        });
     }
     decode_command(json).map(HostInput::Command)
 }
@@ -742,14 +757,37 @@ mod tests {
     fn host_configuration_accepts_a_positive_scale_and_explicit_pause() {
         assert_eq!(
             decode_host_input(r#"{"op":"setPollScale","scale":1.5}"#).unwrap(),
-            HostInput::PollScaleChanged { scale: 1.5 }
+            HostInput::PollScaleChanged {
+                scale: 1.5,
+                ceiling_ms: None
+            }
         );
         assert_eq!(
             decode_host_input(r#"{"op":"setPoll\u0053cale","scale":null}"#).unwrap(),
             HostInput::PollScaleChanged {
-                scale: f64::INFINITY
+                scale: f64::INFINITY,
+                ceiling_ms: None,
             }
         );
+    }
+
+    #[test]
+    #[cfg(feature = "polling-control")]
+    fn host_configuration_carries_an_optional_positive_ceiling() {
+        assert_eq!(
+            decode_host_input(r#"{"op":"setPollScale","scale":60,"ceiling":30000}"#).unwrap(),
+            HostInput::PollScaleChanged {
+                scale: 60.,
+                ceiling_ms: Some(30_000.)
+            }
+        );
+        for json in [
+            r#"{"op":"setPollScale","scale":2,"ceiling":0}"#,
+            r#"{"op":"setPollScale","scale":2,"ceiling":-5}"#,
+            r#"{"op":"setPollScale","scale":2,"ceiling":"1000"}"#,
+        ] {
+            assert!(decode_host_input(json).is_err(), "must reject {json}");
+        }
     }
 
     #[test]

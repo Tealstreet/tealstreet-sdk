@@ -146,9 +146,10 @@ Send the exact same JSON command objects as `WasmEngine.command`, for example:
 ```
 
 Polling configuration uses the same host-input decoder as WASM:
-`{"op":"setTickInterval","interval":2500}` updates the account's venue polling,
-and `interval: null` pauses optional polling. Zero, negative, missing or wrongly
-typed intervals are rejected. Configuration has no command ID or result and
+`{"op":"setPollScale","scale":2,"ceiling":10000}` scales each venue poll's own
+cadence (2x slower here) and bounds slowed polls at the optional `ceiling`
+milliseconds unless a native cadence is already slower; `scale: null` pauses
+optional polling. Zero, negative, missing or wrongly typed values are rejected. Configuration has no command ID or result and
 applies to the account, including other connected clients. Very long future
 timers remain cancelable even when their deadline exceeds the system clock.
 

@@ -370,3 +370,34 @@ fn scale_multiplies_each_native_cadence_instead_of_replacing_it() {
         [530., 5_030.]
     );
 }
+
+#[test]
+fn host_ceiling_bounds_slowed_polls_without_slowing_native_cadences() {
+    let mut engine = Engine::new(Polls::new(&[500., 5_000., 60_000.]));
+    engine.start(0.);
+    take(&mut engine);
+    engine.handle(
+        10.,
+        Event::PollCeilingChanged {
+            ceiling_ms: Some(30_000.),
+        },
+    );
+    assert!(
+        take(&mut engine).is_empty(),
+        "ceiling alone keeps native cadences"
+    );
+    // A 60x server slowdown would turn the 5s poll into 5min; the host's
+    // resolved 30s tick bounds it, and the slower native 60s poll stays native.
+    let slowed = timers(&policy(&mut engine, 20., 60.));
+    assert_eq!(
+        slowed.iter().map(|(_, at)| *at).collect::<Vec<_>>(),
+        [30_020., 30_020.]
+    );
+    engine.handle(30., Event::PollCeilingChanged { ceiling_ms: None });
+    // The 500ms poll's 30s cadence is unchanged, so only the others re-arm.
+    let unbounded = timers(&take(&mut engine));
+    assert_eq!(
+        unbounded.iter().map(|(_, at)| *at).collect::<Vec<_>>(),
+        [300_030., 3_600_030.]
+    );
+}

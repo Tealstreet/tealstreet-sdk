@@ -47,18 +47,18 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
     await exchange.start();
     expect(construct.mock.calls[0][0]).toBe('breakoutprop');
     expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ key: 'username', secret: 'password', subaccount: '00002', recvWindow: 9000 });
-    expect(commands[0]).toEqual({ op: 'setPollScale', scale: 2.5 });
+    expect(commands[0]).toEqual({ op: 'setPollScale', scale: 2.5, ceiling: 5000 });
     expect(commands).toContainEqual({ op: 'setTickerSymbols', symbols: [] });
   });
   it('forwards initial and live incident slowdowns and unsubscribes on disposal', async () => {
     setTickIntervalMultipliers({ '*': 4 });
     const { exchange, commands } = fixture({ extra: { tickInterval: 5000 } });
     await exchange.start();
-    expect(commands[0]).toEqual({ op: 'setPollScale', scale: 10 });
+    expect(commands[0]).toEqual({ op: 'setPollScale', scale: 10, ceiling: 20_000 });
     setTickIntervalMultipliers({ '*': 4, breakoutprop: 2 });
-    expect(commands.at(-1)).toEqual({ op: 'setPollScale', scale: 5 });
+    expect(commands.at(-1)).toEqual({ op: 'setPollScale', scale: 5, ceiling: 10_000 });
     setTickIntervalMultipliers(undefined);
-    expect(commands.at(-1)).toEqual({ op: 'setPollScale', scale: 2.5 });
+    expect(commands.at(-1)).toEqual({ op: 'setPollScale', scale: 2.5, ceiling: 5000 });
     exchange.dispose();
     const count = commands.length;
     setTickIntervalMultipliers({ '*': 3 });

@@ -297,7 +297,7 @@ export class RustEngineExchange extends BaseExchange {
    */
   onFrame?: (frame: ArrayBuffer) => void;
   private stopPollingConfig?: () => void;
-  private pollingPolicy?: { scale: number | null; promise?: Promise<void> };
+  private pollingPolicy?: { scale: number | null; ceiling?: number; promise?: Promise<void> };
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
   /** Lighter: switch the account tier; the engine re-reads limits afterwards. */
   changeAccountTier?: (tier: LighterAccountTier) => Promise<void>;
@@ -486,11 +486,14 @@ export class RustEngineExchange extends BaseExchange {
     // server multiplier, auth backoff) scales them relative to the metadata tick.
     const reference = getExchangeMetadata(this._exchangeName).tickInterval;
     const scale = resolved === Number.POSITIVE_INFINITY ? null : reference ? resolved / reference : 1;
-    if (this.pollingPolicy?.scale === scale) return this.pollingPolicy.promise;
+    // The resolved tick still bounds a slowdown (auth backoff and server multiplier
+    // caps), unless a venue's native cadence is already slower.
+    const ceiling = scale === null ? undefined : resolved;
+    if (this.pollingPolicy?.scale === scale && this.pollingPolicy.ceiling === ceiling) return this.pollingPolicy.promise;
     // Install before dispatch: native actions can synchronously change policy again.
-    const policy: NonNullable<RustEngineExchange['pollingPolicy']> = { scale };
+    const policy: NonNullable<RustEngineExchange['pollingPolicy']> = { scale, ceiling };
     this.pollingPolicy = policy;
-    policy.promise = this.command<void>({ op: 'setPollScale', scale }).catch((error) => {
+    policy.promise = this.command<void>({ op: 'setPollScale', scale, ...(ceiling !== undefined && { ceiling }) }).catch((error) => {
       if (this.pollingPolicy === policy) this.pollingPolicy = undefined;
       throw error;
     });

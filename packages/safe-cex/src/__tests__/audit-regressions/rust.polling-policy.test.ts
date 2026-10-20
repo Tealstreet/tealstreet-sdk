@@ -4,6 +4,7 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getExchangeMetadata } from '../../exchangeMetadata';
 import { RUST_VENUES, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { setTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
@@ -19,7 +20,7 @@ vi.mock('../../exchanges/bybit/bybit.types', async (original) => ({
 }));
 
 // Scales are the resolved tick over the metadata tick (binance 500ms, tealstreet-dex 2s).
-type Control = { op: string; scale?: number | null };
+type Control = { op: string; scale?: number | null; ceiling?: number };
 const accounts: RustEngineExchange[] = [];
 
 beforeEach(() => vi.useFakeTimers());
@@ -118,7 +119,7 @@ describe('Rust periodic polling policy propagation', () => {
       const r = fixture(name);
       await r.start();
       expect(r.events.slice(0, 2)).toEqual(['setPollScale', 'start']);
-      expect(r.controls()).toEqual([{ op: 'setPollScale', scale: 3 }]);
+      expect(r.controls()).toEqual([{ op: 'setPollScale', scale: 3, ceiling: 3 * getExchangeMetadata(name).tickInterval! }]);
       expect(JSON.parse(r.construct.mock.calls[0][1])).not.toHaveProperty('tickInterval');
       expect(JSON.parse(r.construct.mock.calls[0][1])).not.toHaveProperty('pollingEnabled');
     },
@@ -130,7 +131,7 @@ describe('Rust periodic polling policy propagation', () => {
     expect(r.controls()).toEqual([{ op: 'setPollScale', scale: null }]);
     r.exchange.options.extra!.tickInterval = 4000;
     await vi.advanceTimersByTimeAsync(250);
-    expect(r.controls().at(-1)).toEqual({ op: 'setPollScale', scale: 2 });
+    expect(r.controls().at(-1)).toEqual({ op: 'setPollScale', scale: 2, ceiling: 4000 });
     await vi.advanceTimersByTimeAsync(1000);
     expect(r.controls()).toHaveLength(2);
     r.exchange.options.extra!.tickInterval = Infinity;
@@ -146,6 +147,8 @@ describe('Rust periodic polling policy propagation', () => {
     expect(r.controls().at(-1)?.scale).toBe(12);
     for (let i = 0; i < 20; i++) r.exchange.recordAuthFailure();
     expect(r.controls().at(-1)?.scale).toBe(120);
+    // The Base auth cap still bounds the slowest absolute cadence.
+    expect(r.controls().at(-1)?.ceiling).toBe(60_000);
     const count = r.controls().length;
     r.exchange.recordAuthFailure();
     expect(r.controls()).toHaveLength(count);
@@ -165,7 +168,7 @@ describe('Rust periodic polling policy propagation', () => {
     r.release();
     await vi.advanceTimersByTimeAsync(250);
     await starting;
-    expect(r.controls()).toEqual([{ op: 'setPollScale', scale: 32 }]);
+    expect(r.controls()).toEqual([{ op: 'setPollScale', scale: 32, ceiling: 16_000 }]);
   });
 
   it('does not duplicate unchanged policies or keep a disposed account subscribed when replacing it', async () => {
