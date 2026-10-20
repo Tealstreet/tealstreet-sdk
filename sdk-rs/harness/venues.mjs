@@ -180,21 +180,22 @@ export const VENUES = {
     createSocketAudit: (_impl, { isPrivate, books }) => {
       const states = new Map();
       const failures = [];
-      const state = (url) => {
-        if (!states.has(url)) states.set(url, { channels: new Set(), pings: new Set() });
-        return states.get(url);
+      const state = (url, socket) => {
+        const identity = socket ?? url;
+        if (!states.has(identity)) states.set(identity, { url, socket, channels: new Set(), pings: new Set() });
+        return states.get(identity);
       };
       return {
-        received(url, text) {
+        received(url, text, socket) {
           const frame = JSON.parse(text);
-          const current = state(url);
+          const current = state(url, socket);
           if (frame.ping !== undefined) current.pings.add(JSON.stringify({ pong: frame.ping }));
           else if (frame.event === 'ping') current.pings.add(JSON.stringify(frame.ts === undefined ? { event: 'pong' } : { event: 'pong', ts: frame.ts }));
           if (frame.channel && (frame.tick || frame.data) && frame.event_rep !== 'rep' && !current.channels.has(frame.channel))
             failures.push('data arrived without subscription: ' + frame.channel);
         },
-        sent(url, text) {
-          const current = state(url);
+        sent(url, text, socket) {
+          const current = state(url, socket);
           if (text === 'pong') return;
           const frame = JSON.parse(text);
           if (frame.event === 'sub') current.channels.add(frame.params.channel);
@@ -209,15 +210,20 @@ export const VENUES = {
           }
         },
         ready() {
-          return !isPrivate || [...states].some(([url, s]) => url.startsWith('wss://fapiws.bitrue.com/stream?listenKey=') && s.channels.has('user_account_update'));
+          return !isPrivate || [...states.values()].some((s) => !s.socket?.closed && s.url.startsWith('wss://fapiws.bitrue.com/stream?listenKey=') && s.channels.has('user_account_update'));
         },
         errors() {
-          for (const [url, s] of states) {
+          const publicChannels = new Map();
+          for (const s of states.values()) {
             if (s.pings.size) failures.push('missing Bitrue heartbeat reply');
-            if (url.includes('fmarket-ws')) for (const symbol of books) {
-              const native = 'e_' + symbol.replace(/^E-/, '').replaceAll('-', '').toLowerCase();
-              if (!s.channels.has(`market_${native}_simple_depth_step0`)) failures.push('missing Bitrue depth subscription: ' + symbol);
+            if (s.url.includes('fmarket-ws')) {
+              if (!publicChannels.has(s.url)) publicChannels.set(s.url, new Set());
+              for (const channel of s.channels) publicChannels.get(s.url).add(channel);
             }
+          }
+          for (const channels of publicChannels.values()) for (const symbol of books) {
+            const native = 'e_' + symbol.replace(/^E-/, '').replaceAll('-', '').toLowerCase();
+            if (!channels.has(`market_${native}_simple_depth_step0`)) failures.push('missing Bitrue depth subscription: ' + symbol);
           }
           return failures;
         },

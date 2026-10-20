@@ -61,3 +61,67 @@ test('production BingX matcher normalizes signing fields while retaining typed o
   assert.equal(responses.unusedWrites(), 0);
   assert.equal(responses.respond('POST', url, JSON.stringify(signed)).status, 599);
 });
+
+test('production Bitrue send and receive share subscription audit identity', () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('  send(socket, text) {');
+  const end = source.indexOf('\n  verifySignature(', start);
+  assert(start >= 0 && end > start);
+  const venue = venueOf('bitrue');
+  const ProductionTape = new Function('Tape', 'values', 'venue', 'subscriptionKeys', 'canonicalObject',
+    `return class extends Tape { ${source.slice(start, end)} }`)(Tape, { venue: 'bitrue' }, venue, subscriptionKeys, stable);
+  const tape = new ProductionTape([], venue);
+  const channel = 'market_e_btcusdt_ticker';
+  const rawUrl = 'wss://fapi.bitrue.com/kline-api/ws';
+  const socket = tape.connect(rawUrl, () => {}, () => {});
+  assert.notEqual(socket.url, socket.rawUrl, 'production canonical URLs include an empty query delimiter');
+  const subscribe = JSON.stringify({ event: 'sub', params: { channel, cb_id: 'minted-callback' } });
+  tape.send(socket, subscribe);
+  assert.deepEqual([...tape.fullSubscriptions], subscriptionKeys(rawUrl, subscribe, new Set(), { ...venue, fullSocketIdentity: true }));
+  socket.onMessage(JSON.stringify({ channel, tick: { close: 59000 } }));
+  assert.deepEqual(tape.audit.errors(), []);
+  tape.send(socket, JSON.stringify({ event: 'unsub', params: { channel, cb_id: 'other-callback' } }));
+  socket.onMessage(JSON.stringify({ channel, tick: { close: 59001 } }));
+  assert.deepEqual(tape.audit.errors(), ['data arrived without subscription: ' + channel]);
+});
+
+test('production Bitrue audit isolates replacement and parallel socket subscriptions', () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('  send(socket, text) {');
+  const end = source.indexOf('\n  verifySignature(', start);
+  const venue = venueOf('bitrue');
+  const ProductionTape = new Function('Tape', 'values', 'venue', 'subscriptionKeys', 'canonicalObject',
+    `return class extends Tape { ${source.slice(start, end)} }`)(Tape, { venue: 'bitrue' }, venue, subscriptionKeys, stable);
+  const rawUrl = 'wss://fapi.bitrue.com/kline-api/ws';
+  const channel = 'market_e_btcusdt_ticker';
+  const otherChannel = 'market_e_ethusdt_ticker';
+  const send = (tape, socket, event, channel) => tape.send(socket, JSON.stringify({ event, params: { channel } }));
+  const data = (socket, channel) => socket.onMessage(JSON.stringify({ channel, tick: { close: 59000 } }));
+  for (const parallel of [false, true]) {
+    const tape = new ProductionTape([], venue);
+    const first = tape.connect(rawUrl, () => {}, () => {});
+    send(tape, first, 'sub', channel);
+    if (!parallel) tape.close(first);
+    const second = tape.connect(rawUrl, () => {}, () => {});
+    if (parallel) send(tape, second, 'sub', otherChannel);
+    data(second, channel);
+    assert.deepEqual(tape.audit.errors(), ['data arrived without subscription: ' + channel],
+      parallel ? 'parallel sockets cannot inherit sibling subscriptions' : 'a replacement must resubscribe');
+    send(tape, second, 'sub', channel);
+    data(second, channel);
+    if (parallel) {
+      data(first, channel);
+      send(tape, second, 'unsub', channel);
+      data(first, channel);
+      data(second, otherChannel);
+    }
+    assert.equal(tape.audit.errors().length, 1, 'local subscription changes leave the other socket intact');
+  }
+  const depthTape = new ProductionTape([], venue, false, 30000, undefined, ['E-BTC-USDT', 'E-ETH-USDT']);
+  for (const symbol of ['btcusdt', 'ethusdt']) {
+    const socket = depthTape.connect('wss://fmarket-ws.bitrue.com/kline-api/ws', () => {}, () => {});
+    send(depthTape, socket, 'sub', `market_e_${symbol}_simple_depth_step0`);
+    depthTape.close(socket, 1000, true);
+  }
+  assert.deepEqual(depthTape.audit.errors(), [], 'split subscriptions remain visible after final local teardown');
+});

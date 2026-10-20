@@ -650,3 +650,23 @@ peak/net memory thresholds plus before-constructor sampling/real settling.
 For the observed TS -88/-112 cases, the signed delta reduces TS memory and makes
 Rust's comparison harder. Independent math/code review and regression cases
 cover this correction; no unsupported allocation-lifetime workaround added.
+
+Final thirteen-venue workspace bans/fmt/Clippy/tests/wasm Clippy PASS; final
+aggregate32 adapter/47 host tests PASS. Bitunix58 native tests pass. Its final
+single-venue module is698,289bytes; public28694frames/697markets+tickers/2books
+PASS (TS/Rust CPU1136.9/947.1ms, steady811.7/646.3ms, retained3.7/2.2MB,
+sampledpeak31.5/16.1MB), private42records PASS. Binance public/private PASS;
+MEXC corrected startup full public/private PASS. Remaining targets continue.
+
+391a14e7ac CI passes all native checks and twelve replay lanes, including
+Hyperliquid with exact signed net retention. Bitrue public caught an audit-key
+mismatch: outbound canonicalURL ended in '?' while inbound used rawURL. Use
+rawURL consistently. Independent review then proved replacement sockets could
+inherit URL-keyed subscriptions; audit per-frame topics and heartbeats by actual
+socket identity. Parallel connections remain isolated, reconnects resubscribe,
+closed private sockets do not satisfy readiness, and historical required-depth
+coverage survives final local teardown. All232 helpers and exact original
+reproductions PASS; actual TS public3287frames/2books/120bookEvents/780subscriptions
+has zero protocol/socket/signature/unserved/unused-write errors. Preserve full
+canonical TS/Rust subscription comparison. Focused re-review has no findings;
+new exact-head CI remains required before merge.

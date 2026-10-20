@@ -240,7 +240,7 @@ export class ReplayClock {
 const bitgetTopic = (arg) => `${arg.instType ?? ''}|${arg.channel ?? arg.topic}|${arg.instId ?? arg.symbol ?? ''}`;
 
 export const deliverSocketFrame = (socket, text, audit, validate) => {
-  audit?.received(socket.rawUrl ?? socket.url, text); validate?.(socket, text);
+  audit?.received(socket.rawUrl ?? socket.url, text, socket); validate?.(socket, text);
   (socket.onData ?? socket.onMessage)(text);
 };
 
@@ -626,7 +626,7 @@ export class Tape {
         this.pendingStartupSubscriptions--;
       }
     }
-    this.audit?.sent(socket.url, text);
+    this.audit?.sent(socket.rawUrl ?? socket.url, text, socket);
     if (this.venue.respondToPing && text === 'ping') {
       setImmediate(() => {
         if (!socket.closed) socket.onMessage('pong');
