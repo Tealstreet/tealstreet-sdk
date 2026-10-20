@@ -263,10 +263,10 @@ describe('Coinbase Starbase inert public WebSocket frame classifier', () => {
 
   it('remains absent from active Coinbase runtime, metadata, registry, and routing', () => {
     for (const file of [
-      'coinbase.api.ts',
-      'coinbase.exchange.ts',
-      'coinbase.ws-private.ts',
-      'coinbase.ws-public.ts',
+      '../../__tests__/reference/coinbase/coinbase.api.ts',
+      '../../__tests__/reference/coinbase/coinbase.exchange.ts',
+      '../../__tests__/reference/coinbase/coinbase.ws-private.ts',
+      '../../__tests__/reference/coinbase/coinbase.ws-public.ts',
       '../../createExchangeFromAccount.ts',
       '../../exchangeMetadata.ts',
       '../registry.native.ts',

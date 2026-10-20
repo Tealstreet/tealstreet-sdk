@@ -1,15 +1,15 @@
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeOptions } from '../../../types';
 
 import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
 import qs from 'qs';
 
-import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
-import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
-import { getTransport } from '../../transport/registry';
-import { replaceUrlParams } from '../../utils/replaceUrlParams';
-import { networkErrorOnRead } from '../../utils/retryReadsOnly';
-import { BaseExchange } from '../base';
+import { markSkipRemoteSigning } from '../../../remoteSigningAdapter';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../../safeCexAxiosCreate';
+import { getTransport } from '../../../transport/registry';
+import { replaceUrlParams } from '../../../utils/replaceUrlParams';
+import { networkErrorOnRead } from '../../../utils/retryReadsOnly';
+import { BaseExchange } from '../../../exchanges/base';
 import { BASE_URL, PUBLIC_ENDPOINTS, RECV_WINDOW } from './coinbase.types';
 import { sign } from './coinbase.utils';
 

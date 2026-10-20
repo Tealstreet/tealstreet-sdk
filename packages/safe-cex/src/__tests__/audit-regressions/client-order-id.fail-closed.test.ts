@@ -19,7 +19,7 @@ import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
 import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
 import { HyrotraderExchange } from '../../exchanges/bybit/hyrotrader.exchange';
-import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
+import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
 import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
 import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
