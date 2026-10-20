@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from 'node:util';
 // TS oracle fixers have no access to candidate outputs. This module receives
 // only the reference output and the input tape; keep it isolated from gate.mjs.
 import { parseRequestJson } from './request-json.mjs';
@@ -368,66 +367,6 @@ const KNOWN_TS_FIXES = {
     // Rust closes/backoffs rejected login and enforces an independent deadline.
     // Native failure tests prove this; no replay liveness output is rewritten.
     if (ts.account) fixBlofinAccount(ts.account);
-  },
-  bitunix: (ts) => {
-    // KNOWN_TS_FIXES: Bitunix TS parses ISO `ft` with parseFloat (the year) and
-    // ignores `nft`; the ticker contract is the next funding time in ms.
-    const latest = new Map();
-    for (const record of tapeRecords.filter((r) => r.type === 'ws')) {
-      const message = JSON.parse(record.text);
-      if (message.ch === 'price') latest.set(message.symbol, message.data);
-    }
-    for (const ticker of ts.tickers) {
-      const price = latest.get(ticker.symbol);
-      if (!price) continue;
-      const value = price.nft || price.ft;
-      const corrected = Number.isFinite(Number(value)) ? Number(value) : Date.parse(value);
-      if (ticker.fundingTime === Number.parseFloat(price.ft)) ticker.fundingTime = corrected;
-    }
-    if (!ts.account) return;
-    // KNOWN_TS_FIXES: TS never emits Bitunix live fills. Rebuild them from the
-    // tape's cumulative order updates over the REST baseline (tape only).
-    const totals = new Map();
-    for (const record of tapeRecords.filter((r) => r.type === 'http'
-      && new URL(r.url).pathname.endsWith('/trade/get_pending_orders') && (r.after ?? 0) === 0)) {
-      const data = JSON.parse(record.body).data;
-      for (const row of Array.isArray(data) ? data : data.orderList)
-        totals.set(String(row.orderId), [Number(row.tradeQty), Number(row.tradeQty) * Number(row.avgPrice ?? row.price)]);
-    }
-    ts.account.fills = [];
-    for (const record of tapeRecords.filter((r) => r.type === 'ws')) {
-      const message = JSON.parse(record.text);
-      if (message.ch !== 'order') continue;
-      const row = message.data;
-      const id = String(row.orderId);
-      const [previous, previousCost] = totals.get(id) ?? [0, 0];
-      const cumulative = Number(row.dealAmount ?? 0);
-      const delta = cumulative - previous;
-      if (delta > 0) {
-        const cost = Number(row.averagePrice) > 0
-          ? Number(row.averagePrice) * cumulative
-          : previousCost + delta * Number(row.price);
-        ts.account.fills.push({ id, symbol: row.symbol, side: row.side.toLowerCase(), amount: delta, price: (cost - previousCost) / delta });
-        totals.set(id, [cumulative, cost]);
-      }
-    }
-    // KNOWN_TS_FIXES: the TS history composite key drops distinct executions
-    // with equal order/time/price/size/side; restore them from tape trade IDs.
-    tapeRecords.filter((r) => r.type === 'command').forEach((request, index) => {
-      if (request.op !== 'fetchFills' || !Array.isArray(ts.commands?.[index]?.ok)) return;
-      const response = tapeRecords.find((r) => r.type === 'http' && r.url.includes('/trade/get_history_trades?')
-        && new URL(r.url).searchParams.get('orderId') === request.orderId);
-      if (!response) return;
-      const executions = JSON.parse(response.body).data.tradeList.map((r) => ({
-        id: r.tradeId, orderId: r.orderId, symbol: r.symbol, timestamp: Math.floor(r.ctime / 1000),
-        side: r.side.toLowerCase(), price: Number(r.price), qty: Number(r.qty),
-        commission: Math.abs(Number(r.fee)), commissionAsset: r.marginCoin,
-      }));
-      const key = (e) => JSON.stringify([e.orderId, e.timestamp, e.price, e.qty, e.side]);
-      const collapsed = [...new Map(executions.map((e) => [key(e), e])).values()].sort((a, b) => b.timestamp - a.timestamp);
-      if (collapsed.length !== executions.length && isDeepStrictEqual(ts.commands[index].ok, collapsed))
-        ts.commands[index].ok = executions.sort((a, b) => b.timestamp - a.timestamp);
-    });
   },
   mexc: (ts) => {
     // The official sub.tickers sparse all-contract feed prevents stale prices

@@ -884,3 +884,111 @@ fn malformed_order_rows_preserve_previous_snapshot() {
     assert!(e.store().order("one").is_some());
     assert!(e.store().order("").is_none());
 }
+
+#[test]
+fn plain_orders_carry_no_trigger_type_and_virtual_legs_no_client_id() {
+    let (e, _) = startup();
+    let parent = e.store().order("one").unwrap();
+    assert_eq!(parent.trigger_type, None);
+    assert_eq!(parent.client_order_id.as_deref(), Some("web"));
+    for leg in ["one__tp", "one__sl"] {
+        let row = e.store().order(leg).unwrap();
+        assert_eq!(row.client_order_id, None, "{leg}");
+        assert!(row.trigger_type.is_some(), "{leg}");
+    }
+}
+
+#[test]
+fn account_tick_reads_balance_every_500ms() {
+    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_bitunix::BitunixFutures::new(
+        safe_cex_venue_bitunix::Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            ..Default::default()
+        },
+    ));
+    e.start(0.0);
+    let r = requests(&mut e).remove(0);
+    reply(&mut e, r.id, PAIRS);
+    let r = requests(&mut e).remove(0);
+    reply(&mut e, r.id, TICKERS);
+    let tick = |actions: &[Action], at: f64| {
+        actions.iter().rev().find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
+            _ => None,
+        })
+    };
+    let actions: Vec<_> = e.drain_actions().collect();
+    let timer = tick(&actions, 500.0).expect("first tick at 500ms");
+    e.handle(500.0, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Http(r) if r.url.contains("/api/v1/futures/account?marginCoin=USDT")
+    )));
+    assert!(tick(&actions, 1000.0).is_some());
+}
+
+#[test]
+fn candle_interest_reads_symbol_leverage_and_margin_mode_once() {
+    use safe_cex_engine::model::Interval;
+    let (mut e, _) = startup();
+    for interval in [Interval::M1, Interval::M5] {
+        e.handle(
+            1.0,
+            Event::Command(safe_cex_engine::Command::SubscribeCandles {
+                symbol: "BTCUSDT".into(),
+                interval,
+            }),
+        );
+    }
+    let reads: Vec<_> = requests(&mut e)
+        .into_iter()
+        .filter(|r| r.url.contains("get_leverage_margin_mode"))
+        .collect();
+    assert_eq!(reads.len(), 1);
+    let read = &reads[0];
+    assert_eq!(read.method, safe_cex_engine::Method::Get);
+    assert!(
+        read.url.ends_with(
+            "/api/v1/futures/account/get_leverage_margin_mode?marginCoin=USDT&symbol=BTCUSDT"
+        ),
+        "{}",
+        read.url
+    );
+    assert!(read.headers.iter().any(|(name, _)| *name == "sign"));
+    reply(
+        &mut e,
+        read.id,
+        r#"{"code":0,"data":{"symbol":"BTCUSDT","marginCoin":"USDT","leverage":50,"marginMode":"CROSS"}}"#,
+    );
+    let setting = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!(
+        (setting.leverage, setting.margin_type),
+        (50.0, Some(MarginType::Cross))
+    );
+    for p in e
+        .store()
+        .positions()
+        .iter()
+        .filter(|p| p.symbol == "BTCUSDT")
+    {
+        assert_eq!((p.leverage, p.margin_type), (50.0, Some(MarginType::Cross)));
+    }
+}
+
+#[test]
+fn live_fill_price_and_amount_drop_binary_noise() {
+    let (mut e, s) = startup();
+    e.take_frame(0.0);
+    // REST baseline is 1 @ 100; (1.4 * 1000.1 - 100) / (1.4 - 1) is 3250.3500000000004 / 0.3999999999999999 raw.
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","side":"Sell","qty":"3","dealAmount":"1.4","averagePrice":"1000.1"}}"#,
+    );
+    assert_eq!(
+        observed_fills(&mut e),
+        [(OrderSide::Sell as u32, 3250.35, 0.4)]
+    );
+}

@@ -16,6 +16,7 @@ import {
 } from '../../types';
 import { v } from '../../utils/get-key';
 import { subtract } from '../../utils/safe-math';
+import { cleanFloat, createIncrementalFills } from '../../utils/incrementalFills';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { resolveTransportRouting } from '../../transport/registry';
@@ -30,6 +31,9 @@ import {
 import { sha256Hex } from './bitunix.utils';
 
 export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
+  // Bitunix order frames carry cumulative dealAmount/averagePrice only.
+  private incrementalFills = createIncrementalFills();
+
   pingLoopTimeoutId?: NodeJS.Timeout;
   handledPongEvent = false;
   lastPongEventTimestamp = 0;
@@ -168,6 +172,7 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
               // Create a new order object based on the websocket data
               const newOrder: Writable<Order> = {
                 id: v(orderData, 'orderId'),
+                clientOrderId: orderData.clientId || undefined,
                 status: OrderStatus.Open,
                 symbol: orderData.symbol,
                 type: ORDER_TYPE[orderData.type?.toUpperCase()],
@@ -235,6 +240,7 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                   },
                 };
 
+                this.emitExecution(existingOrder, updatedOrderData);
                 // Update the order in the store
                 this.parent.store.addOrUpdateOrders([updatedOrder]);
               }
@@ -266,6 +272,7 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                   info: closedOrderData,
                 };
 
+                this.emitExecution(orderToClose, closedOrderData);
                 // Update the order in the store
                 this.parent.store.addOrUpdateOrders([finalOrder]);
               }
@@ -598,4 +605,33 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
       });
     }
   };
+
+  /** Emit what this frame executed: the cumulative dealAmount/averagePrice
+   * beyond the order's previously known fill, priced from traded value. */
+  private emitExecution(previous: Order, data: Record<string, any>) {
+    const cumulative = Number(v(data, 'dealAmount'));
+    if (!Number.isFinite(cumulative)) return;
+    const previousAverage = Number(previous.info?.averagePrice ?? previous.info?.avgPrice);
+    const previousValue = previousAverage > 0 ? previous.filled * previousAverage : undefined;
+    const average = Number(data.averagePrice);
+    const value =
+      average > 0
+        ? cumulative * average
+        : previousValue !== undefined
+          ? previousValue + (cumulative - previous.filled) * Number(data.price)
+          : undefined;
+    // Seed with the already-known fill so a REST snapshot is not re-emitted.
+    this.incrementalFills(previous.id, previous.filled, previousValue);
+    const execution = this.incrementalFills(previous.id, cumulative, value);
+    if (!(execution.qty > 0)) return;
+    const price = execution.value !== undefined ? execution.value / execution.qty : Number(data.price);
+    if (!(price > 0)) return;
+    this.parent.emitter.emit('fill', {
+      id: previous.id,
+      side: ORDER_SIDE[String(data.side ?? '').toUpperCase()] ?? previous.side,
+      symbol: previous.symbol,
+      price: cleanFloat(price),
+      amount: cleanFloat(execution.qty),
+    });
+  }
 }

@@ -86,7 +86,6 @@ export const FIXER_CONTRACTS = deepFreeze({
   // TS gains only the tape-declared spot frontendOpenOrders reads its stub omits.
   hyperliquidspot: contract([], [{ path: 'requests', add: true, reorder: true, retainAll: true }]),
   // Expected TS feed set gains only the documented all-contract mini ticker.
-  bitunix: contract(['tickers[].fundingTime', ...fills, ...queryLeaves], [...fillArrays, ...queryArrays]),
   mexc: contract([], [{ path: 'subscriptions', add: true, reorder: true, retainAll: true }]),
   // Exact private fixture only: legacy cumulative-delta fills become native l/L executions.
   bitrue: contract(fills, fillArrays),

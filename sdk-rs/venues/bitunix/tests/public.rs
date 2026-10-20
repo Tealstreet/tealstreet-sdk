@@ -436,3 +436,25 @@ fn candle_requests_reject_malformed_intervals_and_compute_supported_durations() 
         );
     }
 }
+#[test]
+fn candle_interest_without_credentials_reads_no_symbol_settings() {
+    let (mut e, _) = ready();
+    e.handle(
+        1.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    // Public-only accounts neither send the signed read nor log a credentials failure.
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("get_leverage_margin_mode")))
+    );
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("credentials")
+    )));
+}

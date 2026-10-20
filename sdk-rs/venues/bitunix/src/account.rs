@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 pub const ACCOUNT: &str = "/api/v1/futures/account";
 pub const POSITIONS: &str = "/api/v1/futures/position/get_pending_positions";
+pub const SYMBOL_SETTINGS: &str = "/api/v1/futures/account/get_leverage_margin_mode";
 pub const ORDERS: &str = "/api/v1/futures/trade/get_pending_orders";
 pub const TPSL: &str = "/api/v1/futures/tpsl/get_pending_orders";
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -47,6 +48,8 @@ pub struct NativeOrder {
 }
 #[derive(Default)]
 pub struct AccountState {
+    /// Symbols whose leverage/margin mode were read on first candle interest.
+    pub symbol_settings: std::collections::HashSet<String>,
     pub generations: [u64; 3],
     pub serials: [u64; 4],
     pub initial_orders: [Option<Read>; 2],
@@ -63,6 +66,10 @@ pub struct AccountState {
     pub pending_executions: HashMap<String, f64>,
     pub login_retry: Option<TimerId>,
 }
+/// The TS Bitunix tick (exchange metadata): balance every tick, the full
+/// account every 32 ticks.
+const TICK_MS: f64 = 500.0;
+
 impl Axis {
     pub(crate) fn index(self) -> usize {
         match self {
@@ -142,7 +149,7 @@ impl BitunixFutures {
         self.read_axis(cx, Axis::Balance);
         self.read_axis(cx, Axis::Positions);
         self.read_axis(cx, Axis::Orders);
-        self.account.tick = Some(cx.set_timer(5_000.0));
+        self.account.tick = Some(cx.set_timer(TICK_MS));
     }
     pub(crate) fn signed_request(
         &mut self,
@@ -238,6 +245,70 @@ impl BitunixFutures {
         };
         self.signed_request(cx, Method::Get, path, params, None, Pending::Private(read));
     }
+    /// Like TS listenOHLCV: read a symbol's leverage and margin mode once,
+    /// so a flat symbol reports its real settings instead of defaults.
+    pub(crate) fn read_symbol_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        if self.credentials.is_none() || !self.account.symbol_settings.insert(symbol.into()) {
+            return;
+        }
+        let params = Params::default()
+            .str("marginCoin", "USDT")
+            .str("symbol", symbol);
+        let pending = Pending::SymbolSettings {
+            symbol: symbol.into(),
+        };
+        self.signed_request(cx, Method::Get, SYMBOL_SETTINGS, params, None, pending);
+    }
+    pub(crate) fn symbol_settings_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        response: Response<'_>,
+    ) {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Settings {
+            leverage: f64,
+            margin_mode: String,
+        }
+        let parsed = data(response.body)
+            .and_then(|raw| serde_json::from_str::<Settings>(raw).map_err(|e| e.to_string()));
+        let settings = match parsed {
+            Ok(s)
+                if (200..300).contains(&response.status)
+                    && s.leverage.is_finite()
+                    && s.leverage > 0.0 =>
+            {
+                s
+            }
+            Ok(_) => {
+                cx.log(LogLevel::Warning, "Malformed Bitunix leverage/margin mode");
+                return;
+            }
+            Err(e) => {
+                cx.log(
+                    LogLevel::Warning,
+                    format!("Bitunix leverage/margin mode read failed: {e}"),
+                );
+                return;
+            }
+        };
+        let margin = if settings.margin_mode.eq_ignore_ascii_case("ISOLATION") {
+            MarginType::Isolated
+        } else {
+            MarginType::Cross
+        };
+        cx.store.update_setting(symbol, |s| {
+            s.leverage = settings.leverage;
+            s.margin_type = Some(margin);
+        });
+        cx.store.update_positions(|p| {
+            if p.symbol == symbol {
+                p.leverage = settings.leverage;
+                p.margin_type = Some(margin);
+            }
+        });
+    }
     pub(crate) fn fail_private(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Candles { command } => cx.done(command, Err(error.into())),
@@ -326,7 +397,7 @@ impl BitunixFutures {
                     self.read_axis(cx, a);
                 }
             }
-            self.account.tick = Some(cx.set_timer(5_000.0));
+            self.account.tick = Some(cx.set_timer(TICK_MS));
             return true;
         }
         for axis in [Axis::Balance, Axis::Positions, Axis::Orders] {
@@ -673,7 +744,8 @@ impl BitunixFutures {
             } else {
                 cx.now
             },
-            trigger_type: Some(StopTriggerType::MarkPrice),
+            // Only protection legs trigger; a plain order has no trigger basis.
+            trigger_type: None,
             take_profit: None,
             stop_loss: None,
             extra: None,
@@ -728,6 +800,10 @@ impl BitunixFutures {
             row.side = if tpsl { side } else { side.opposite() };
             row.reduce_only = if tpsl { !ws && reduce || ws } else { true };
             row.trigger_type = stop;
+            // A caller ID names exactly one order: the parent, not its virtual legs.
+            if !tpsl {
+                row.client_order_id = None;
+            }
             row.time_in_force = if tpsl {
                 None
             } else {
@@ -1019,8 +1095,8 @@ impl BitunixFutures {
                                     order_id: o.order_id.to_string(),
                                     symbol: o.symbol.to_string(),
                                     side,
-                                    price: (cost - previous.1) / delta,
-                                    amount: delta,
+                                    price: clean_float((cost - previous.1) / delta),
+                                    amount: clean_float(delta),
                                 });
                                 self.account
                                     .filled
@@ -1104,4 +1180,14 @@ fn extract_account(text: &str, depth: u8) -> Option<Account<'_>> {
         .into_iter()
         .flatten()
         .find_map(|v| extract_account(v.get(), depth + 1))
+}
+
+/// Fifteen significant digits, like the TS `cleanFloat`: drops binary noise
+/// from value/quantity division (2999.4999999999995 -> 2999.5).
+fn clean_float(value: f64) -> f64 {
+    if value.is_finite() {
+        format!("{value:.14e}").parse().unwrap_or(value)
+    } else {
+        value
+    }
 }

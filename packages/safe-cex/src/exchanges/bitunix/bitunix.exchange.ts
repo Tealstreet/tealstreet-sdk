@@ -595,7 +595,8 @@ export class BitunixExchange extends BaseExchange {
             limits: {
               amount: {
                 min: 0,
-                max: v(m, 'maxLimitOrderVolume'),
+                // The catalogue sends a decimal string; consumers compare numerically.
+                max: Number(v(m, 'maxLimitOrderVolume')),
               },
               leverage: {
                 min: 1,
@@ -718,8 +719,11 @@ export class BitunixExchange extends BaseExchange {
         return acc;
       }, []);
 
+      // Leverage and margin mode are per symbol: the flat placeholder side
+      // inherits them from the real leg before cached settings or defaults.
       const createFakePosition = (m: Market, side: PositionSide, positionMode: PositionMode) => {
-        const symbolSettings = this.symbolSettings.get(m.symbol);
+        const real = formattedPositions.find((p) => p.symbol === m.symbol);
+        const symbolSettings = real ?? this.symbolSettings.get(m.symbol);
         return {
           id: createPositionId(m.symbol, side, positionMode),
           symbol: m.symbol,
@@ -821,6 +825,7 @@ export class BitunixExchange extends BaseExchange {
 
         const baseOrder = {
           id: v(o, 'orderId'),
+          clientOrderId: o.clientId || undefined,
           status: OrderStatus.Open,
           symbol: o.symbol,
           type: ORDER_TYPE[rawOrderType],
@@ -836,8 +841,13 @@ export class BitunixExchange extends BaseExchange {
           timeInForce,
           info: orderInfo,
           // Bitunix omits stop type when it's MarkPrice (the default)
-          tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'tpStopType')] || OrderStopTriggerType.MarkPrice,
-          slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'slStopType')] || OrderStopTriggerType.MarkPrice,
+          // Attached protection carries a trigger type only when that leg exists.
+          tpTriggerType: this.hasFiniteTriggerPrice(o.tpPrice)
+            ? ORDER_TRIGGER_TYPE[v(o, 'tpStopType')] || OrderStopTriggerType.MarkPrice
+            : undefined,
+          slTriggerType: this.hasFiniteTriggerPrice(o.slPrice)
+            ? ORDER_TRIGGER_TYPE[v(o, 'slStopType')] || OrderStopTriggerType.MarkPrice
+            : undefined,
         };
 
         const subList = [baseOrder];
@@ -846,6 +856,8 @@ export class BitunixExchange extends BaseExchange {
         if (this.hasFiniteTriggerPrice(o.tpPrice)) {
           subList.push({
             id: `${v(o, 'orderId')}__tp`,
+            // Virtual legs never carry the parent's caller ID.
+            clientOrderId: undefined,
             status: OrderStatus.Open,
             symbol: o.symbol,
             type: OrderType.TakeProfit,
@@ -868,6 +880,8 @@ export class BitunixExchange extends BaseExchange {
         if (this.hasFiniteTriggerPrice(o.slPrice)) {
           subList.push({
             id: `${v(o, 'orderId')}__sl`,
+            // Virtual legs never carry the parent's caller ID.
+            clientOrderId: undefined,
             status: OrderStatus.Open,
             symbol: o.symbol,
             type: OrderType.StopLoss,
@@ -1450,7 +1464,8 @@ export class BitunixExchange extends BaseExchange {
         if (toMilliseconds && execution.timestamp * 1000 > toMilliseconds) {
           continue;
         }
-        const key = `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
+        // tradeId identifies an execution; equal partial fills of one order are distinct.
+        const key = execution.id ?? `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
         deduped.set(key, execution);
       }
 
@@ -1563,6 +1578,14 @@ export class BitunixExchange extends BaseExchange {
         marginMode: isolated ? 'ISOLATION' : 'CROSS',
         marginCoin: 'USDT', // Required parameter according to docs
       });
+      // The acknowledged mode applies to both legs, like setLeverage.
+      const marginType = isolated ? MarginType.Isolated : MarginType.Cross;
+      const settings = this.symbolSettings.get(symbol);
+      if (settings) this.symbolSettings.set(symbol, { ...settings, marginType });
+      this.store.updatePositions([
+        [{ id: createPositionId(symbol, PositionSide.Long) }, { marginType }],
+        [{ id: createPositionId(symbol, PositionSide.Short) }, { marginType }],
+      ]);
     } catch (e: any) {
       this.emitAndLogError(e?.response?.data?.msg || e?.message);
       throw new Error(e?.response?.data?.msg || e?.message);

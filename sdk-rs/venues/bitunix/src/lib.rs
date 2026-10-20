@@ -37,6 +37,7 @@ pub enum Pending {
     Markets { rows: Vec<Market>, invalid: bool },
     Tickers { rows: Vec<Ticker>, invalid: bool },
     Candles { command: u32 },
+    SymbolSettings { symbol: String },
 }
 #[derive(Clone)]
 enum Feed {
@@ -496,6 +497,10 @@ impl Venue for BitunixFutures {
                 self.trade_response(cx, request, response);
                 return;
             }
+            Pending::SymbolSettings { symbol } => {
+                self.symbol_settings_response(cx, &symbol, response);
+                return;
+            }
             other => other,
         };
         if !(200..300).contains(&response.status) {
@@ -571,6 +576,7 @@ impl Venue for BitunixFutures {
                 self.debounce(cx, read.axis);
             }
             Pending::Candles { command } => cx.done(command, Err(error.into())),
+            Pending::SymbolSettings { .. } => cx.log(LogLevel::Warning, error),
             _ => {
                 cx.log(LogLevel::Error, error);
                 self.retry = Some(cx.set_timer(5_000.0));
@@ -659,6 +665,7 @@ impl Venue for BitunixFutures {
                     cx.log(LogLevel::Error, "Unsupported Bitunix candle interval");
                     return;
                 }
+                self.read_symbol_settings(cx, &symbol);
                 if self.candles.insert((symbol.clone(), i)) {
                     self.send_topic(
                         cx,

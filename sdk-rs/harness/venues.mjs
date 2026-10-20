@@ -1489,6 +1489,9 @@ export const VENUES = {
   },
   bitunix: {
     rust: 'bitunix',
+    // The private tape times account snapshots after each command; replay them
+    // on the recorded clock so a later snapshot cannot answer an earlier read.
+    virtualPrivateClock: true,
     ts: { module: `${root}/bitunix/bitunix.exchange.ts`, className: 'BitunixExchange', name: 'bitunix' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.futuresWebsocket.messageHandlers).filter((key) => key.includes('_depthop_')).length >= count,
@@ -1496,6 +1499,10 @@ export const VENUES = {
     isWrite: (method) => method !== 'GET',
     matchRequestBody: true,
     compareFillPrices: true,
+    // `{"ping": <ms>}` is a timestamped heartbeat, not a feed subscription.
+    socketMessage: (message) =>
+      message && typeof message === 'object' && Object.keys(message).length === 1 && message.ping !== undefined
+        ? undefined : message,
     // Documented double-SHA256 signature over nonce, timestamp, key, sorted
     // query (key+value pairs) and body; public /market/ reads are unsigned.
     validateRequest({ url, body = '', headers = {} }) {

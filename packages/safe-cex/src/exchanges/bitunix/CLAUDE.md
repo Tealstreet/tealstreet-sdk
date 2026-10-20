@@ -704,8 +704,9 @@ cancel/recreate amendment requires acknowledged cancellation and final remaining
 quantity. Public `ft`/`nft` may be ISO strings: the next funding time uses `nft`
 (or `ft` if absent), converted to epoch milliseconds rather than the ISO year.
 
-The replay compares client IDs from TS order `info` with typed Rust fields; this
-is a metadata projection, not a claimed TS client-ID loss.
+Orders expose the native `clientId` as top-level `clientOrderId` (REST and WS);
+virtual TP/SL legs carry none, since a caller ID names exactly one order. Live
+fills are emitted from cumulative `dealAmount`/`averagePrice` on UPDATE/CLOSE.
 
 Rust cancellation rejects absent-store IDs before any batch write because native
 symbol and protection identity require reconciliation. Empty lists remain no-ops.

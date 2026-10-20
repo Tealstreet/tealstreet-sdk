@@ -508,6 +508,10 @@ async function tsCommand(exchange, store, record) {
       return exchange.fetchOptionExpiries(args.underlying);
     case 'fetchAccountGreeks':
       return exchange.fetchAccountGreeks();
+    case 'subscribeCandles':
+      // Subscriptions are compared; live candle values are not replay output.
+      exchange.listenOHLCV(args, () => {});
+      return undefined;
     default:
       throw new Error(`unknown command ${op}`);
   }

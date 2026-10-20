@@ -49,7 +49,7 @@ describe('native placement quantity bridge', () => {
   });
 
   it.each([false, true])('restores exact decimal lot fills and position sizes (native tail=%s)', (nativeTail) => {
-    const value = frame();
+    const value = frame(1);
     const market = value.markets()!;
     value.markets = () => ({ ...market, contractSize: Float64Array.of(0.1) });
     const order = value.orders()!;
@@ -64,7 +64,7 @@ describe('native placement quantity bridge', () => {
         contracts: 0.3, liquidationPrice: 50, marginSize: 3, lastUpdate: 1 }),
     });
     const store = new DefaultStore();
-    new FrameApplier(store, true).apply(value);
+    new FrameApplier(store).apply(value);
     expect(store.orders[0]).toMatchObject({ amount: 0.7, filled: 0.3, remaining: 0.4,
       extra: { remainingNative: nativeTail ? 5 : 4, filledInPlacementUnits: 3 } });
     expect(store.positions[0]).toMatchObject({ contracts: 0.3, extra: { contractsNative: 3 } });

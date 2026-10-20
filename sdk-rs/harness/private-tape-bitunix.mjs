@@ -13,7 +13,7 @@ const records = [
   { t: 0, type: 'connect', url: PRIVATE, connection: 0, initial: true },
   { t: 0, type: 'open', url: PRIVATE, connection: 0 },
 ];
-const http = (method, path, query, data, requestBody, after) => records.push({ t: 0, type: 'http', method, url: `${REST}/api/v1/futures/${path}${query ? `?${query}` : ''}`, requestBody, after, status: 200, body: JSON.stringify({ code: 0, data, msg: 'Success' }) });
+const http = (method, path, query, data, requestBody, after) => records.push({ t: 0, type: 'http', method, url: `${REST}/api/v1/futures/${path}${query ? `?${query}` : ''}`, requestBody, availableAfter: after, status: 200, body: JSON.stringify({ code: 0, data, msg: 'Success' }) });
 const read = (path, query, data, after = 0) => http('GET', path, query, data, undefined, after);
 let t = 0;
 let privateConnection = 0;
@@ -45,7 +45,8 @@ ws(PRIVATE, orderEvent('CLOSE', { ...execution, dealAmount: '1', averagePrice: '
 const transient = { orderId: 'second', positionId: 'position-1', symbol: 'BTCUSDT', side: 'Sell', type: 'TPSL', tpPrice: '100200', tpQty: '0.001', tpStopType: 'Last' };
 ws(PRIVATE, { ch: 'tpsl', data: { event: 'CREATE', ...transient } });
 ws(PRIVATE, { ch: 'tpsl', data: { event: 'UPDATE', ...transient, tpPrice: '100500' } });
-ws(PRIVATE, { ch: 'tpsl', data: { event: 'CLOSE', ...transient, status: 'CANCELED' } });
+// The terminal snapshot carries the last amended trigger price.
+ws(PRIVATE, { ch: 'tpsl', data: { event: 'CLOSE', ...transient, tpPrice: '100500', status: 'CANCELED' } });
 command({ op: 'placeOrders', orders: [{ symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.0021, price: 90500.04, clientOrderId: 'caller-limit' }] });
 http('POST', 'trade/place_order', '', { orderId: '1003', clientId: 'caller-limit' }, { symbol: 'BTCUSDT', qty: '0.002', price: '90500', side: 'BUY', tradeSide: 'OPEN', orderType: 'LIMIT', effect: 'GTC', clientId: 'caller-limit', reduceOnly: false });
 const placed = { symbol: 'BTCUSDT', orderId: '1003', side: 'Buy', type: 'Limit', qty: '0.002', price: '90500', clientId: 'caller-limit', effect: 'GTC' };
