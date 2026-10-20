@@ -310,7 +310,7 @@ fn spot_amend_preserves_post_only_and_mints_new_identity() {
         param(&cancel.url, "origClientOrderId").as_deref(),
         Some("original-caller")
     );
-    h.reply(cancel.id, 200, "", r#"{"orderId":1}"#);
+    h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSDT","orderId":1,"origClientOrderId":"original-caller","clientOrderId":"cancel-original","status":"CANCELED","origQty":"2","executedQty":"0"}"#);
     let replacement = h.take("/api/v3/order");
     assert_eq!(
         param(&replacement.url, "type").as_deref(),
@@ -416,4 +416,95 @@ fn spot_unsupported_queries_complete_without_derivative_reads() {
     assert!(h.requests.is_empty());
     assert_eq!(h.done.len(), 3);
     assert!(h.done.iter().all(|(_, result)| result.is_err()));
+}
+
+fn seed_inverse_long_and_full_stop(h: &mut Harness) {
+    use safe_cex_engine::model::{
+        MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode, PositionSide,
+    };
+    h.engine.store_mut().set_positions(vec![Position {
+        id: "BTCUSD_PERP".into(),
+        symbol: "BTCUSD_PERP".into(),
+        side: PositionSide::Long,
+        entry_price: 100.0,
+        notional: 700.0,
+        leverage: 20.0,
+        margin_type: Some(MarginType::Cross),
+        position_mode: Some(PositionMode::Oneway),
+        unrealized_pnl: 0.0,
+        realized_pnl: None,
+        contracts: 7.0,
+        liquidation_price: 50.0,
+        margin_size: Some(0.35),
+        last_update: Some(1000.0),
+    }]);
+    h.engine.store_mut().set_orders(vec![Order {
+        id: "999".into(),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: "BTCUSD_PERP".into(),
+        kind: OrderType::StopLoss,
+        side: OrderSide::Sell,
+        price: 80.0,
+        amount: 0.0,
+        filled: 0.0,
+        remaining: 0.0,
+        reduce_only: false,
+        close: Some(true),
+        client_order_id: None,
+        time_in_force: None,
+        last_update: 1000.0,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    }]);
+}
+
+#[test]
+fn inverse_subcontract_or_negative_stop_quantity_cannot_become_an_unintended_full_stop() {
+    use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+    for amount in [-0.1, -0.49, 0.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut h = ready(Variant::CoinM);
+        seed_inverse_long_and_full_stop(&mut h);
+        let before = h.engine.store().positions().to_vec();
+        let mut stop = order(Variant::CoinM, r#""reduceOnly":true"#);
+        stop.kind = OrderType::StopLoss;
+        stop.side = OrderSide::Sell;
+        stop.amount = amount;
+        stop.price = Some(90.0);
+        place(
+            &mut h,
+            vec![order(Variant::CoinM, r#""reduceOnly":false"#), stop],
+        );
+        assert!(
+            h.requests.is_empty(),
+            "{amount} cannot place, cancel or trigger a read"
+        );
+        assert!(h.result(77).unwrap().is_err(), "{amount}");
+        assert_eq!(h.engine.store().positions(), before.as_slice());
+        assert_eq!(h.engine.store().orders()[0].status, OrderStatus::Open);
+    }
+}
+
+#[test]
+fn inverse_full_stop_requires_zero_input_or_an_explicit_close_intent() {
+    use safe_cex_engine::model::{OrderSide, OrderType};
+    for (amount, close) in [(0.0, None), (0.1, Some(true))] {
+        let mut h = ready(Variant::CoinM);
+        seed_inverse_long_and_full_stop(&mut h);
+        let mut stop = order(Variant::CoinM, r#""reduceOnly":true"#);
+        stop.kind = OrderType::StopLoss;
+        stop.side = OrderSide::Sell;
+        stop.amount = amount;
+        stop.price = Some(90.0);
+        stop.close = close;
+        place(&mut h, vec![stop]);
+        let cancel = h.take("/dapi/v1/order");
+        assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
+        h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSD_PERP","orderId":999,"status":"CANCELED","origQty":"0","executedQty":"0"}"#);
+        let placed = h.take("/dapi/v1/order");
+        assert_eq!(param(&placed.url, "closePosition").as_deref(), Some("true"));
+        assert!(param(&placed.url, "quantity").is_none());
+    }
 }

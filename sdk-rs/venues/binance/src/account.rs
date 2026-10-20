@@ -11,7 +11,7 @@ use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
 use serde::Deserialize;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Binance expires a listenKey 60 minutes after the last keepalive.
 const LISTEN_KEY_REFRESH_MS: f64 = 30.0 * 60_000.0;
@@ -88,6 +88,7 @@ pub struct AccountState {
     account_version: u32,
     spot_balances: HashMap<String, (f64, f64)>,
     native_executed: HashMap<(String, u64), (f64, bool)>,
+    unquantified_cancels: HashSet<(String, u64)>,
     spot_client_native: HashMap<(String, String), u64>,
     spot_subscribe_id: Option<String>,
     spot_subscribe_at: Option<f64>,
@@ -1173,13 +1174,26 @@ impl BinanceFutures {
                 .get(&key)
                 .copied()
                 .unwrap_or_default();
-            if terminal || filled < previous {
+            let unquantified = self.account.unquantified_cancels.contains(&key);
+            if (terminal
+                && !(unquantified
+                    && filled > previous
+                    && opt(&o.l) > 0.0
+                    && matches!(status, "PARTIALLY_FILLED" | "FILLED")))
+                || filled < previous
+            {
                 return;
             }
-            let terminal = matches!(
-                status,
-                "FILLED" | "CANCELED" | "CANCELLED" | "EXPIRED" | "EXPIRED_IN_MATCH" | "REJECTED"
-            );
+            let terminal = terminal
+                || matches!(
+                    status,
+                    "FILLED"
+                        | "CANCELED"
+                        | "CANCELLED"
+                        | "EXPIRED"
+                        | "EXPIRED_IN_MATCH"
+                        | "REJECTED"
+                );
             self.account.native_executed.insert(key, (filled, terminal));
             filled > previous && opt(&o.l) > 0.0
         } else {
@@ -1261,8 +1275,22 @@ impl BinanceFutures {
                 }
             });
         }
+        if inverse
+            && self
+                .account
+                .unquantified_cancels
+                .contains(&(o.s.to_string(), o.i))
+            && status != "FILLED"
+        {
+            cx.store.set_order_status(&id, OrderStatus::Canceled);
+        }
         if status == "FILLED" {
             cx.store.set_order_status(&id, OrderStatus::Closed);
+            if inverse {
+                self.account
+                    .unquantified_cancels
+                    .remove(&(o.s.to_string(), o.i));
+            }
         }
     }
 
@@ -1873,6 +1901,33 @@ impl BinanceFutures {
             .get(&client_key)
             .is_some_and(|current| *current > native)
         {
+            // An unquantified cancel-all can precede the old order's final fill,
+            // even after its caller ID has been reused for another native order.
+            let previous = self
+                .account
+                .native_executed
+                .get(&key)
+                .map_or(0.0, |(filled, _)| *filled);
+            let filled = num::parse(&event.z);
+            if self.account.unquantified_cancels.contains(&key)
+                && event.x == "TRADE"
+                && filled > previous
+                && num::parse(&event.l) > 0.0
+            {
+                cx.fill(Fill {
+                    order_id: id,
+                    symbol: event.s.to_string(),
+                    side: order_side(&event.side),
+                    price: num::parse(&event.last_price),
+                    amount: num::parse(&event.l),
+                });
+                self.account
+                    .native_executed
+                    .insert(key.clone(), (filled, true));
+                if event.status == "FILLED" {
+                    self.account.unquantified_cancels.remove(&key);
+                }
+            }
             return;
         }
         let amount = num::parse(&event.q);
@@ -1883,13 +1938,21 @@ impl BinanceFutures {
             .get(&key)
             .copied()
             .unwrap_or_default();
-        if terminal || filled < previous {
+        let unquantified = self.account.unquantified_cancels.contains(&key);
+        if (terminal
+            && !(unquantified
+                && event.x == "TRADE"
+                && filled > previous
+                && num::parse(&event.l) > 0.0))
+            || filled < previous
+        {
             return;
         }
-        let terminal = matches!(
-            event.status.as_ref(),
-            "FILLED" | "CANCELED" | "REJECTED" | "EXPIRED" | "EXPIRED_IN_MATCH"
-        );
+        let terminal = terminal
+            || matches!(
+                event.status.as_ref(),
+                "FILLED" | "CANCELED" | "REJECTED" | "EXPIRED" | "EXPIRED_IN_MATCH"
+            );
         self.account.native_executed.insert(key, (filled, terminal));
         let new_incarnation =
             self.account.spot_client_native.insert(client_key, native) != Some(native);
@@ -1947,8 +2010,14 @@ impl BinanceFutures {
             order.remaining = (amount - filled).max(0.0);
             order.last_update = now;
         });
+        if unquantified && event.status != "FILLED" {
+            cx.store.set_order_status(&id, OrderStatus::Canceled);
+        }
         if event.status == "FILLED" {
             cx.store.set_order_status(&id, OrderStatus::Closed);
+            self.account
+                .unquantified_cancels
+                .remove(&(event.s.to_string(), native));
         }
         if matches!(
             event.status.as_ref(),
@@ -1956,6 +2025,44 @@ impl BinanceFutures {
         ) {
             cx.store.set_order_status(&id, OrderStatus::Canceled);
         }
+    }
+}
+
+impl BinanceFutures {
+    pub(crate) fn spot_native_order_id(&self, symbol: &str, client: &str) -> Option<u64> {
+        self.account
+            .spot_client_native
+            .get(&(symbol.to_owned(), client.to_owned()))
+            .copied()
+    }
+
+    pub(crate) fn observe_unquantified_cancel(&mut self, symbol: &str, native: u64, filled: f64) {
+        self.observe_native_terminal(symbol, native, filled);
+        self.account
+            .unquantified_cancels
+            .insert((symbol.to_owned(), native));
+    }
+
+    pub(crate) fn fence_order_snapshots(&mut self) {
+        self.account.order_version += 1;
+    }
+
+    pub(crate) fn known_native_filled(&self, symbol: &str, native: u64) -> f64 {
+        self.account
+            .native_executed
+            .get(&(symbol.to_owned(), native))
+            .map_or(0.0, |(filled, _)| *filled)
+    }
+
+    pub(crate) fn observe_native_terminal(&mut self, symbol: &str, native: u64, filled: f64) {
+        let execution = self
+            .account
+            .native_executed
+            .entry((symbol.to_owned(), native))
+            .or_default();
+        execution.0 = execution.0.max(filled);
+        execution.1 = true;
+        self.account.order_version += 1;
     }
 }
 

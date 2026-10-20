@@ -2,14 +2,15 @@ import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { createHmac } from 'node:crypto';
 
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
 
-const setup = (spot: boolean) => {
+const setup = (spot: boolean, cancelReply?: () => Promise<unknown>) => {
+  let privateMessage: ((text: string) => void) | undefined;
   const symbol = spot ? 'BTCUSDT' : 'BTCUSD_PERP';
   const requests: Parameters<Transport['request']>[0][] = [];
   const subscriptions: Record<string, unknown>[] = [];
@@ -18,6 +19,7 @@ const setup = (spot: boolean) => {
   const transport: Transport = {
     now: () => 1_700_000_000_000,
     connect: (url, handlers) => {
+      if (url.includes('/ws-api/')) privateMessage = handlers.onMessage;
       queueMicrotask(handlers.onOpen);
       return {
         close() {},
@@ -154,6 +156,20 @@ const setup = (spot: boolean) => {
                 },
               ],
         );
+      if (path.endsWith('/order') && request.method === 'DELETE') {
+        const reply = cancelReply
+          ? await cancelReply()
+          : {
+              symbol,
+              orderId: 455,
+              origClientOrderId: 'MakerOld',
+              clientOrderId: 'CancelMaker',
+              origQty: '1',
+              executedQty: '0',
+              status: 'CANCELED',
+            };
+        return raw(reply);
+      }
       if (path.endsWith('/order')) return raw({ orderId: 123 });
       throw new Error(`Unexpected Binance request ${request.method} ${path}`);
     },
@@ -168,8 +184,16 @@ const setup = (spot: boolean) => {
     { key: 'key', secret: 'secret' },
     store,
   );
-  exchange.emitter.on('error', (e) => errors.push(e));
-  return { exchange, store, requests, subscriptions, errors, symbol };
+  exchange.emitter.on('error', (e: unknown) => errors.push(e));
+  return {
+    exchange,
+    store,
+    requests,
+    subscriptions,
+    errors,
+    symbol,
+    privateEvent: (event: unknown) => privateMessage!(JSON.stringify({ subscriptionId: 7, event })),
+  };
 };
 
 it('loads Spot balances and signed stream, then honors a caller ID through the real WASM boundary', async () => {
@@ -251,6 +275,78 @@ it('preserves COIN-M USD contract placement units and coin wallet valuation thro
       }),
     ).rejects.toThrow();
     expect(t.requests).toHaveLength(before);
+  } finally {
+    t.exchange.dispose();
+  }
+});
+
+it('never replaces a Spot order filled while cancellation is in flight across WASM', async () => {
+  let sent!: () => void;
+  const cancelSent = new Promise<void>((resolve) => {
+    sent = resolve;
+  });
+  let respond!: (reply: unknown) => void;
+  const response = new Promise<unknown>((resolve) => {
+    respond = resolve;
+  });
+  const t = setup(true, () => {
+    sent();
+    return response;
+  });
+  try {
+    await t.exchange.start();
+    const maker = t.store.orders.find((o) => o.id === 'MakerOld')!;
+    const pending = t.exchange.updateOrder({ order: maker, update: { price: 9998 } });
+    await cancelSent;
+    t.privateEvent({
+      e: 'executionReport',
+      s: t.symbol,
+      i: 455,
+      c: 'MakerOld',
+      S: 'BUY',
+      o: 'LIMIT_MAKER',
+      f: 'GTC',
+      q: '1',
+      p: '9999',
+      P: '0',
+      x: 'TRADE',
+      X: 'FILLED',
+      z: '1',
+      l: '1',
+      L: '9998',
+      T: 1700000000000,
+    });
+    respond({
+      symbol: t.symbol,
+      orderId: 455,
+      origClientOrderId: 'MakerOld',
+      clientOrderId: 'CancelMaker',
+      origQty: '1',
+      executedQty: '0.5',
+      status: 'CANCELED',
+    });
+    expect(await pending).toEqual([]);
+    expect(t.requests.filter((r) => r.method === 'POST')).toEqual([]);
+    await vi.waitFor(() =>
+      expect(t.store.orders.find((o) => o.id === 'MakerOld')).toMatchObject({
+        status: 'closed',
+        filled: 1,
+        remaining: 0,
+      }),
+    );
+  } finally {
+    t.exchange.dispose();
+  }
+});
+
+it('rejects an ambiguous Spot cancellation response before replacement across WASM', async () => {
+  const t = setup(true, async () => ({}));
+  try {
+    await t.exchange.start();
+    const maker = t.store.orders.find((o) => o.id === 'MakerOld')!;
+    await expect(t.exchange.updateOrder({ order: maker, update: { price: 9998 } })).rejects.toThrow();
+    expect(t.requests.filter((r) => r.method === 'POST')).toEqual([]);
+    expect(t.requests.filter((r) => r.method === 'DELETE')).toHaveLength(1);
   } finally {
     t.exchange.dispose();
   }

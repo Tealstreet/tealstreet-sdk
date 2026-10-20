@@ -20,13 +20,20 @@ Spot uses signed `userDataStream.subscribe.signature`, checks the matching
 subscription ACK and subscription ID, and checks `session.subscriptions` for
 liveness. It has coin balances and no derivative positions/settings. Spot
 order identity is the native client ID. A cancel/replace preserves time in
-force but generates a new client ID. Whole-batch validation rejects unsupported
+force but generates a new client ID. Spot/COIN-M cancellation replies must prove
+native identity, terminal status and cumulative quantity before replacement.
+Amendment recomputes the remaining size after the acknowledgement and racing
+fills; Filled wins, and ambiguous/unknown cancellation never places a replacement.
+Cancel-all handles Spot order-list/OCO replies atomically and preserves native
+terminal fences against stale replicas and reused client IDs. Whole-batch validation rejects unsupported
 trailing/conditional parameters, derivative execution flags, invalid triggers
 and client IDs before cancellation or placement.
 
 Spot public ticker streams use individual `@ticker` topics, with bid/ask from
 the same event, split into sockets of at most 1024 topics with stable feed
-identities. The retired `!bookTicker` and `!ticker@arr` topics are not used.
+identities. Each control frame is capped at 128 topics and 4096 UTF-8 bytes,
+paced at 400 ms per socket: Node WebSocket compression otherwise caused live
+`Payload too long` policy closes. The retired `!bookTicker` and `!ticker@arr` topics are not used.
 Depth and candles use a separate feed; Spot continuity uses the `U`/`u` range,
 while futures additionally require `pu` continuity after synchronization.
 Sources: [Spot changelog](https://developers.binance.com/docs/binance-spot-api-docs/CHANGELOG),

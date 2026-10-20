@@ -527,11 +527,34 @@ fn spot_rest_seeded_limit_maker_amend_keeps_post_only_semantics() {
         cancel.id,
         200,
         "",
-        r#"{"orderId":77,"clientOrderId":"spot-id","status":"CANCELED"}"#,
+        r#"{"orderId":77,"symbol":"BTCUSDT","clientOrderId":"spot-id","origQty":"2","executedQty":"0.5","status":"CANCELED"}"#,
     );
     let replacement = h.take("/api/v3/order");
     assert_eq!(replacement.method, Method::Post);
     assert!(replacement.url.contains("type=LIMIT_MAKER"));
     assert!(!replacement.url.contains("timeInForce="));
     assert!(!replacement.url.contains("newClientOrderId=spot-id"));
+}
+
+#[test]
+fn inverse_unpriced_collateral_keeps_its_native_amount_without_inventing_usd() {
+    let mut h = inverse();
+    h.now += 30_000.0;
+    let health = h.timers.iter().find(|(_, at)| *at == 4000.0).unwrap().0;
+    h.event(Event::TimerFired { timer: health });
+    h.respond("/dapi/v1/account", 200, r#"{"assets":[{"asset":"BTC","walletBalance":"1","availableBalance":"0.8","initialMargin":"0.1","unrealizedProfit":"0.01"},{"asset":"XYZ","walletBalance":"42","availableBalance":"40","initialMargin":"2","unrealizedProfit":"1"}]}"#);
+    let balance = h.engine.store().balance();
+    assert_eq!(
+        (balance.total, balance.free, balance.used, balance.upnl),
+        (10000.0, 8000.0, 1000.0, 100.0)
+    );
+    let xyz = h
+        .engine
+        .store()
+        .coin_balances()
+        .unwrap()
+        .iter()
+        .find(|coin| coin.base == "XYZ")
+        .unwrap();
+    assert_eq!((xyz.amount, xyz.notional), (42.0, 0.0));
 }

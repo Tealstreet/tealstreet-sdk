@@ -4,7 +4,10 @@ The Tealstreet exchange store. One `DefaultStore` per exchange
 account; mirrored across worker → main thread via the worker's
 throttled postMessage.
 
-Rust frames keep quantities in published base units. For MEXC and BloFin,
+Rust frames keep the venue adapter's published SDK quantity units. COIN-M
+orders carry native contract counts while positions carry base quantity; the
+COIN-M applier preserves the USD contract multiplier in native sizing extras.
+For MEXC and BloFin,
 `FrameApplier` also retains native placement-unit order extras in both worker
 and main stores. Prefer the exact native remaining column when present; legacy
 frames reconstruct placement quantities from `contractSize` so chaser arithmetic

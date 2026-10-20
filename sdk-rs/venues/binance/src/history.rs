@@ -159,7 +159,13 @@ fn nonzero(text: &str) -> Option<f64> {
 
 impl BinanceFutures {
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
-        if self.is_spot() {
+        if self.is_spot()
+            || (self.is_inverse()
+                && !matches!(
+                    read,
+                    Read::PublicTrades { .. } | Read::OrderByClientId { .. }
+                ))
+        {
             if matches!(
                 read,
                 Read::OrderByClientId { .. } | Read::PublicTrades { .. }

@@ -64,3 +64,66 @@ Hyro unchanged baseline: three-run public PASS, TS/Rust main50.8/34.4ms,
 steady17.6/13.2ms, retained16.1/0.9MB. Profiling found no confirmed production
 regression. Machine-wide concurrent work prevents claiming strict isolation;
 final fresh-artifact Hyro gates remain required with unchanged thresholds.
+
+
+### Integration and final review in progress
+
+- Fresh Spot capture after bounded subscription frames: 7,065 frames, 3,729
+  markets and two books over 20 seconds; no policy closes. COIN-M live capture:
+  203 frames/two books over 20 seconds. Both trimmed fixtures are being gated.
+- First strict private replays pass for all four profiles: USD-M14 frames,
+  PM6, Spot8, COIN-M6. Helper suite235 passes. These measurements precede the
+  final lifecycle fixes and do not replace final-head gates.
+- Final adversarial review found negative/tiny inverse quantities turning into
+  full-position stops, cancellation acknowledgements accepted without proof,
+  and amendments replacing already-filled quantities. Fixes and regression
+  proofs are in progress before final gates/PR creation.
+- TS retention audit: `registry.ts`, `registry.native.ts`, direct SDK creation
+  and non-opt-in workers still instantiate these TS classes; only explicit
+  `options.engine === 'rust'` selects the new registered profiles. Their TS is
+  not provably unused. Deleting it would change the existing rollout policy and
+  break direct SDK/default worker paths, so it remains the executable reference.
+
+
+Initial public fixture gates (three-run medians; superseded by final-head checks):
+
+| Profile | Frames | TS/Rust main CPU ms | TS/Rust steady CPU ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| Spot | 7045 | 530.4/339.7 | 224.0/89.8 | 26.5/7.5 |
+| COIN-M | 202 | 172.5/65.0 | 114.7/35.5 | 15.5/1.5 |
+| USD-M | 873 | 189.8/89.6 | 98.8/34.6 | 18.9/2.6 |
+| PM | 873 | 187.3/90.9 | 103.0/32.7 | 18.4/2.7 |
+
+Root tests passed all27 tasks (6971 safe-cex cases in each suite). Harness
+checkpoint `9a96deeaab` includes240 helper tests, strict raw signing and
+subscription audits, truthful input-derived TS reference corrections, and both
+live public fixtures. The final lifecycle checkpoint will rerun private gates
+against authoritative cancel acknowledgements.
+
+Nonblocking review limitation: native execution/terminal identity fences retain
+per-order history for the account lifetime. This avoids forgetting stale native
+identities; fixed-tape memory gates do not certify bounded lifetime retention.
+No gate threshold or measurement interval was relaxed.
+
+
+### Adversarial lifecycle checkpoint
+
+Final native and independent review passed:96 native tests, strict crate Clippy,
+240 harness cases, four real WASM boundary tests, root typecheck44 tasks,
+lint28 tasks and root tests27 tasks (6971 safe-cex cases per run). The ten
+original cancellation/amendment regression cases all fail on checkpoint
+`23f35ebdf3`; the expanded seventeen-case lifecycle suite passes on the fix.
+
+Cancellation now proves native identity, status and final cumulative quantity;
+amendment renders only after that proof and subtracts final cumulative fills.
+Filled wins over a late cancel. Unknown/malformed/partial rejection never retries
+or advances replacement. Missing original rows, reused client IDs and concurrent
+amendments through the replacement POST are fenced. Native terminal records also
+protect later replica reads after cancel-all while retaining late executions.
+Mixed Spot OCO replies are validated atomically. Raw inverse quantities that
+would round into an unintended full stop reject before any batch action.
+
+COIN-M public trades have a documented native regression. Unsupported private
+history remains the existing TS empty-result contract; no unverified history API
+expansion is claimed. Final replay rebuild is879753 bytes for Binance-only,
+below the unchanged1258291-byte limit. Final exact-head gates remain in progress.
