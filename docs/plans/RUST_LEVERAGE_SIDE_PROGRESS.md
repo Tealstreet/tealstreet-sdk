@@ -197,3 +197,24 @@ Reference-only TS for deleted families is inspected in
 - Phemex/Bitget follow-up: 273 native tests, scoped all-target clippy, bans and
   workspace formatting pass. Full native workspace checks are running;
   WASM/replay/size gates, PR reviews and green CI remain required.
+
+### Compiled-host checkpoint
+
+- Native workspace: 2,841 tests pass; the final Bitget/Phemex changes also pass
+  the 273-test scoped rerun. Workspace all-target clippy and wasm32 clippy pass.
+- Combined release WASM and native session fixture builds pass. Compiled JS
+  gates: SDK 443, Workers 76, frame wire 1, native session adapter 1, product
+  semantics 16, harness 589, scripted lifecycle 9, server consumer 11, MCP 5,
+  CLI 2, React Native 2 and Bitget Classic/UTA parity 4 tests pass. MCP build
+  and packaged smoke pass.
+- An additional combined-binary Bitget public probe matched output and used
+  less memory but failed CPU: TS/Rust main 1,178.8/1,513.3 ms, steady
+  912.8/1,064.1 ms. This result is retained; no thresholds changed. The canonical
+  CI single-venue build passes: main 939.7/819.9 ms, steady 654.8/559.7 ms,
+  retained memory 21.1/4.6 MB, WASM 1,016,226 bytes. Other affected public gates
+  now use the same isolated build procedure as CI. A controlled landing-base
+  combined comparison will determine whether the extra failure predates this
+  change; attribution is not yet established.
+- Paradex isolated size is 1,224,951 bytes against the unchanged 1,258,291-byte
+  budget. All 30 CI profile sizes and remaining replay gates are pending.
+- Secret scan: five lane commits, 148,051 bytes, no leaks.
