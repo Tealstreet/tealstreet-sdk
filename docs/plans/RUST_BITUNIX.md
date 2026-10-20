@@ -715,3 +715,17 @@ host/SDK review passes27wrapper/frame,36host/socket/wire and4adapter checks.
 WOO TS public77frames/222markets/2books and private60frames/20commands have
 zero unserved/unused/signature/protocol/socket errors. Local lint28tasks PASS;
 full root/native/WASM verification and exact-head CI remain pending.
+
+On760f7bb72d, CI passes13public/private venue lanes including Bitunix/BingX,
+all native/workspace/WASM checks; WOO alone catches a startup REST-seed race:
+TS handler readiness preceded its standalone book snapshots. Enable the
+existing symmetric per-symbol initialBookSnapshots barrier for WOO, retaining
+strict timestamps/hashes. Regression fails before/passes after;239helpers PASS.
+Actual TS first book now472ms with46events, matching Rust's reported trace,
+instead of754ms/44events. Independent review and final native replay follow.
+
+BingX throughput optimization now passes local public/private gates and CI:
+CI steady CPU TS56.2/Rust37.2ms; module827,296bytes below unchanged1,258,291.
+Bitunix CI public/private PASS with699,935-byte module,28694frames/697markets/
+2books; TS/Rust CPU346.3/310.7ms, steady152.7/139.6ms, retained3.6/2.1MB,
+sampledpeak17.9/15.8MB. RealizedPNL remains verbatim net of fees/funding.

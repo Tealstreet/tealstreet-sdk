@@ -147,6 +147,7 @@ export const mexcRequestUrl = (url) => {
 export const VENUES = {
   woo: {
     rust: 'woo',
+    initialBookSnapshots: true,
     wooProtocol: true,
     subscriptionGenerations: true,
     ts: { module: `${root}/woo/woo.exchange.ts`, className: 'WOOXExchange', name: 'woo' },

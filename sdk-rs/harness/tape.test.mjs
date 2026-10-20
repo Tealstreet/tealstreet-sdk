@@ -1048,6 +1048,7 @@ test('declared TS body repair changes only the comparison of the exactly matched
 test('REST-seeded venues wait for every requested book before activating tape time', async () => {
   assert.equal(venueOf('backpack').initialBookSnapshots, true);
   assert.equal(venueOf('mexc').initialBookSnapshots, true);
+  assert.equal(venueOf('woo').initialBookSnapshots, true);
   assert.equal(replayBooksReady(['SOL', 'BTC'], ['SOL', 'ETH']), false);
   assert.equal(replayBooksReady([], []), true);
   const url = 'wss://example.test/bootstrap';
