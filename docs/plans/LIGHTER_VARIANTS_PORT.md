@@ -72,3 +72,35 @@ in force, and venue code emits only the deployment's real REST/socket URLs.
   145 PASS (Lighter, venue registration, tape and gate tests).
 - Combined release WASM build and replay gates in progress.
 - Production phases committed as `1ee5bb304d`; all phase reviews PASS after fixes.
+
+## Landing integration and live capture
+
+- Committed harness/readiness checkpoint `a6af2c7aa2`, then merged landing
+  `0063068241` (live-smoke lane) in `59ec279dd5`; no conflicts.
+- Combined release compile passed; the running build script was edited before
+  its bindings stage and its shell read position became invalid. Syntax check
+  and a clean cached rerun both passed; bindings regenerated successfully.
+- Integrated harness: 146 PASS. Real WASM boundary: 14 PASS for both aliases,
+  including remote-only snapshots, no delegated callback/write and one execution.
+- Direct Robinhood REST succeeds, but WebSocket returns venue code 20558,
+  restricted jurisdiction; the standard socket is a working direct control.
+  The declared public host proxy succeeds without credentials. Recorder's new
+  opt-in `--tealstreet-ws-route` uses the existing `createEngineTransport` and
+  provider policy; venue code and recorded URLs remain original upstream URLs.
+  Existing routing tests: 219 PASS. No network settings changed.
+- Live command: `corepack yarn -s rust:record --venue lighter-robinhood
+  --tealstreet-ws-route --seconds 20 --books ETH,BTC
+  --out sdk-rs/harness/tapes/lighter-robinhood-smoke.jsonl`.
+- Trim command: `corepack yarn -s rust:trim-tape
+  --tape sdk-rs/harness/tapes/lighter-robinhood-smoke.jsonl --seconds 12
+  --out sdk-rs/harness/fixtures/lighter-robinhood-public.jsonl.gz`.
+  Fixture: 1,409 records, 178,888 gzip bytes, four real HTTP anchors, one open,
+  1,403 socket messages and both books. Twelve seconds retains startup anchors
+  and about six seconds of actual socket traffic without rewriting timestamps.
+- First mainnet private gate PASS (14 frames). Testnet gate exposed a missing
+  periodic authenticated `accountLimits` read when no builder is configured.
+  Fix in progress: one shared typed cache for polling and builder eligibility,
+  matching TS's five-minute success and one-minute retry deadlines. Failed reads
+  retain the cached tier; unsigned accounts never send the request. Independent
+  review found malformed nested payloads could mask a root Standard tier; add
+  lazy nested decoding and a regression before final gates.
