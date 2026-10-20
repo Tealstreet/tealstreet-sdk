@@ -1122,6 +1122,7 @@ impl Venue for Polymarket {
             | Command::SetMarginType { .. }
             | Command::SetPositionMode { .. }
             | Command::FetchLeverage { .. }
+            | Command::FetchMaxLeverage { .. }
             | Command::FetchAccount { .. }
             | Command::FetchOrderBook { .. }
             | Command::FetchStpMode { .. }
@@ -1132,11 +1133,6 @@ impl Venue for Polymarket {
         self.books.get(symbol).filter(|s| s.synced).map(|s| &s.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, s)| s.synced)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }

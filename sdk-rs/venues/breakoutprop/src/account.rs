@@ -5,7 +5,7 @@ use safe_cex_engine::model::{
     PositionSide, TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Store};
+use safe_cex_engine::{Cx, LogLevel, Store};
 use serde::Deserialize;
 use std::borrow::Cow;
 
@@ -92,13 +92,20 @@ pub(crate) struct Snapshot {
     positions: Vec<Position>,
     pub(crate) orders: Vec<Order>,
     settings: Vec<(String, MarketSetting)>,
+    /// Rows this engine cannot model, e.g. off-catalogue instruments or
+    /// terminal-placed multi-leg orders; logged instead of failing the snapshot.
+    skipped: Vec<String>,
 }
 impl Snapshot {
     pub(crate) fn commit(self, cx: &mut Cx<'_, Pending>) {
+        for row in &self.skipped {
+            cx.log(LogLevel::Warning, format!("BreakoutProp skipped {row}"));
+        }
         cx.store.set_balance(self.balance);
         cx.store.retain_position_ids();
         cx.store.set_positions(self.positions);
         cx.store.set_orders(self.orders);
+        cx.orders_reconciled(None);
         let settings = self
             .settings
             .into_iter()
@@ -143,6 +150,7 @@ pub(crate) fn parse_portfolio(
             return Err("Duplicate USD portfolio balance".into());
         }
     }
+    let mut skipped = Vec::new();
     let mut position_ids = std::collections::HashSet::new();
     for p in raw.positions {
         if p.account != account {
@@ -156,7 +164,6 @@ pub(crate) fn parse_portfolio(
             || p.quantity < 0.0
             || p.open_price <= 0.0
             || p.margin_rate <= 0.0
-            || store.market(&p.symbol).is_none()
         {
             return Err("Invalid DXtrade position".into());
         }
@@ -183,6 +190,14 @@ pub(crate) fn parse_portfolio(
         }
         balance.used += margin;
         balance.upnl += upnl;
+        // Margin still counts against the account; the position itself is not tradable here.
+        if store.market(&p.symbol).is_none() {
+            skipped.push(format!(
+                "position {} on unlisted {}",
+                p.position_code, p.symbol
+            ));
+            continue;
+        }
         if let Some((_, setting)) = settings.iter_mut().find(|(symbol, _)| symbol == &p.symbol) {
             setting.leverage = leverage;
         }
@@ -220,13 +235,23 @@ pub(crate) fn parse_portfolio(
         if order.final_status {
             continue;
         }
+        if order.order_code.is_empty() || !ids.insert(order.order_code.to_string()) {
+            return Err("Invalid DXtrade open order".into());
+        }
         if !matches!(order.status.as_ref(), "WORKING" | "ACCEPTED" | "IN_REVIEW")
             || order.legs.len() != 1
-            || order.order_code.is_empty()
             || store.market(&order.instrument).is_none()
-            || !ids.insert(order.order_code.to_string())
+            || !matches!(order.kind.as_ref(), "LIMIT" | "MARKET" | "STOP")
         {
-            return Err("Invalid DXtrade open order".into());
+            skipped.push(format!(
+                "order {} ({} {} with {} legs on {})",
+                order.order_code,
+                order.status,
+                order.kind,
+                order.legs.len(),
+                order.instrument
+            ));
+            continue;
         }
         let leg = &order.legs[0];
         if leg
@@ -306,6 +331,7 @@ pub(crate) fn parse_portfolio(
         positions,
         orders,
         settings,
+        skipped,
     }))
 }
 fn finite(value: f64) -> Result<(), String> {
@@ -450,5 +476,33 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn unmodelled_rows_are_skipped_without_discarding_the_snapshot() {
+        let xbt = POSITION
+            .replace("ETHUSD", "XBTUSD")
+            .replace("76515503", "90000001");
+        let multi_leg = ORDER.replace("4471153:55639", "multi").replace(
+            r#""legs":[{"#,
+            r#""legs":[{"side":"SELL","positionEffect":"OPEN","price":1,"quantity":1,"filledQuantity":0,"remainingQuantity":1},{"#,
+        );
+        let trailing = ORDER
+            .replace("4471153:55639", "trail")
+            .replace(r#""type":"LIMIT""#, r#""type":"TRAILING_STOP""#);
+        let snapshot = parse_portfolio(
+            &payload(
+                &format!("{POSITION},{xbt}"),
+                &format!("{ORDER},{multi_leg},{trailing}"),
+            ),
+            &store(),
+            "default:00002",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(snapshot.positions.len(), 1);
+        assert_eq!(snapshot.positions[0].symbol, "ETHUSD");
+        assert_eq!(snapshot.balance.used, 0.004);
+        assert_eq!(snapshot.orders.len(), 1);
+        assert_eq!(snapshot.skipped.len(), 3);
     }
 }

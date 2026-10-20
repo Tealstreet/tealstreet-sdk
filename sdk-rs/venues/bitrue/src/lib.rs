@@ -8,6 +8,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::time;
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
 };
@@ -166,7 +167,7 @@ fn singapore_seconds(s: &str) -> Option<f64> {
         return None;
     }
     let part = |a, b| s.get(a..b)?.parse::<i64>().ok();
-    let (mut y, m, d, h, min, sec) = (
+    let (y, m, d, h, min, sec) = (
         part(0, 4)?,
         part(5, 7)?,
         part(8, 10)?,
@@ -174,23 +175,7 @@ fn singapore_seconds(s: &str) -> Option<f64> {
         part(14, 16)?,
         part(17, 19)?,
     );
-    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let days = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    if !(1..=12).contains(&m)
-        || !(1..=days[(m - 1) as usize]).contains(&d)
+    if !time::days_in_month(y, m).is_some_and(|last| (1..=last).contains(&d))
         || h > 23
         || min > 59
         || sec > 59
@@ -200,13 +185,7 @@ fn singapore_seconds(s: &str) -> Option<f64> {
     {
         return None;
     }
-    y -= i64::from(m <= 2);
-    let era = y.div_euclid(400);
-    let yo = y - era * 400;
-    let mp = m + if m > 2 { -3 } else { 9 };
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yo * 365 + yo / 4 - yo / 100 + doy;
-    Some(((era * 146097 + doe - 719468) * 86400 + h * 3600 + min * 60 + sec - 28800) as f64)
+    Some((time::days_from_civil(y, m, d) * 86400 + h * 3600 + min * 60 + sec - 28800) as f64)
 }
 fn candle(row: &CandleWire<'_>, multiplier: f64) -> Option<Candle> {
     let timestamp = if row.ds.is_empty() {
@@ -551,6 +530,13 @@ impl Bitrue {
     }
 }
 impl Venue for Bitrue {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -1061,12 +1047,7 @@ impl Venue for Bitrue {
             .map(|s| &s.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, s)| s.received)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
 
