@@ -1647,7 +1647,9 @@ export class RustEngineExchange extends BaseExchange {
     if (this.isPublicDataOnly) return [];
     let rows: Array<Record<string, any>>;
     try {
-      rows = await this.fetchClosedPositionRows(opts);
+      // TS okx/blofin treat an empty symbol as account-wide; bybit sends it as given.
+      const symbol = okxNames.has(this.name) || this.name === 'blofin' ? opts.symbol || undefined : opts.symbol;
+      rows = await this.fetchClosedPositionRows({ ...opts, symbol });
     } catch {
       return [];
     }
