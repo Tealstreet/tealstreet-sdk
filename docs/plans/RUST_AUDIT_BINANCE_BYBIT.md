@@ -440,3 +440,28 @@ captures were also trimmed and gated separately without replacing that coverage.
   SDK/harness count and raw-log pointer corrections are applied above; no new
   correctness or false-green replay finding remains. The full SDK CI command
   includes the identical Vitest unit suite, so no duplicate unit rerun is needed.
+
+### Repeated Hyro CI CPU gate correction
+
+- Corrected head `febd6bf06c` passes 39 CI checks; Hyro's scripted public
+  steady CPU remains red (Rust 6.4 ms / TS 5.5 ms), while output, total
+  main-thread CPU and memory pass. The earlier head missed this same metric
+  by 0.1 ms. Do not merge or change thresholds/fixtures to hide the failure.
+- Public ticker frames now deserialize the eleven used numerical fields
+  directly into a compact delta instead of retaining the larger REST record.
+  The eight unused Greek/IV fields still validate string/null types and
+  duplicates with zero-sized storage. REST/options records remain unchanged.
+  Generic closure dispatch avoids a mapper function pointer in this hot path.
+- Differential documented/sparse payload tests preserve bitwise values, empty
+  versus whitespace semantics, negative zero, overflow/subnormals, escaped
+  strings/duplicate keys, invalid common/Greek types and full-frame atomicity.
+  Engine controls cover seven profile/category combinations, including inverse
+  volume mapping and forced-zero spot funding. All 162 Bybit native tests pass;
+  strengthened library tests pass 18/18, strict Clippy/format/bans pass.
+- Independent final source review and an independent 18-test execution pass.
+  The final generic-mapper change also passes author 18-test/strict checks and
+  independent inspection. No engine, harness, fixture or threshold changes.
+- The initial candidate passes the local Hyro replay, but its host load differs
+  substantially from the baseline; no quantitative speedup is claimed. Final
+  selected build and all Bybit profile gates are running before publication.
+  Binance/AsterDEX source and their selected artifacts remain unchanged.
