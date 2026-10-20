@@ -813,10 +813,14 @@ impl BinanceFutures {
                 let now = cx.now;
                 let mut orders = Vec::new();
                 let mut native_orders = Vec::new();
-                let mut malformed = false;
+                let mut invalid: Option<String> = None;
                 let parsed = json::each::<OpenOrder>(body, |o| {
                     let Some(kind) = order_type(&o.kind) else {
-                        malformed |= self.options.portfolio_margin || self.is_spot();
+                        if self.options.portfolio_margin || self.is_spot() {
+                            invalid.get_or_insert_with(|| {
+                                format!("order {} has unsupported type {}", o.order_id, o.kind)
+                            });
+                        }
                         return;
                     };
                     if (self.options.portfolio_margin || self.is_spot())
@@ -829,7 +833,7 @@ impl BinanceFutures {
                                 .is_some_and(|n| !nonnegative_number(n))
                             || num::parse(&o.executed_qty) > num::parse(&o.orig_qty))
                     {
-                        malformed = true;
+                        invalid.get_or_insert_with(|| format!("order {}", o.order_id));
                         return;
                     }
                     let price = num::parse(&o.price);
@@ -881,17 +885,17 @@ impl BinanceFutures {
                         });
                     }
                 }
-                if malformed {
+                if let Some(detail) = &invalid {
                     cx.log(
                         LogLevel::Error,
-                        "Binance open order row has invalid economics",
+                        format!("Binance open order row has invalid economics: {detail}"),
                     );
                 }
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
                     match parsed {
-                        Ok(()) if !malformed => {
+                        Ok(()) if invalid.is_none() => {
                             join.regular = Some(orders);
                             join.native_orders = native_orders;
                         }
@@ -904,10 +908,15 @@ impl BinanceFutures {
                 let now = cx.now;
                 let mut orders = Vec::new();
                 let mut native_strategies = Vec::new();
-                let mut malformed = false;
+                let mut invalid: Option<String> = None;
                 let parsed = json::each::<PmConditionalOrder>(body, |o| {
                     let Some(kind) = order_type(&o.strategy_type) else {
-                        malformed = true;
+                        invalid.get_or_insert_with(|| {
+                            format!(
+                                "strategy {} has unsupported type {}",
+                                o.new_client_strategy_id, o.strategy_type
+                            )
+                        });
                         return;
                     };
                     if !matches!(o.side.as_ref(), "BUY" | "SELL")
@@ -915,7 +924,9 @@ impl BinanceFutures {
                             .iter()
                             .any(|n| n.as_deref().is_some_and(|n| !nonnegative_number(n)))
                     {
-                        malformed = true;
+                        invalid.get_or_insert_with(|| {
+                            format!("strategy {}", o.new_client_strategy_id)
+                        });
                         return;
                     }
                     let price = opt(&o.price);
@@ -953,17 +964,17 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
-                if malformed {
+                if let Some(detail) = &invalid {
                     cx.log(
                         LogLevel::Error,
-                        "Binance conditional order row has invalid economics",
+                        format!("Binance conditional order row has invalid economics: {detail}"),
                     );
                 }
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
                     match parsed {
-                        Ok(()) if !malformed => {
+                        Ok(()) if invalid.is_none() => {
                             join.algo = Some(orders);
                             join.native_strategies = native_strategies;
                         }
