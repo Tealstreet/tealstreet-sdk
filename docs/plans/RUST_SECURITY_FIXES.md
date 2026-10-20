@@ -338,3 +338,17 @@ live trading, weakened parity oracle, or performance threshold changes.
   exported 185 working-tree files against landing 702a62050c, zero findings,
   without new exemptions. Final merged-source quality/replay/scanner receipts
   supersede these checkpoints. Broader raw-body logging remains a later lane.
+
+### Broker/cancellation landing integration
+
+- Merged landing `702a62050c` at `9fe87d1eed`. Kept incoming broker attribution,
+  cancellation preflights and replay signing-clock initialization. The three
+  conflicts retain both test sets and Blofin broker forwarding with credential
+  ownership transfer. Focused tests and formatting pass.
+- Independent correctness review accepted the union: global signer nonces,
+  nested credential erasure, caller receive windows, unsigned public broker
+  headers and primary/read-key routing remain intact. Named quality-audit log
+  leaks are struck separately from the still-open broader raw-body sweep.
+- All final quality, private/public replay, isolated size and combined consumer
+  receipts are regenerated on this integration. Earlier results remain
+  checkpoints; no performance or replay acceptance condition changes.
