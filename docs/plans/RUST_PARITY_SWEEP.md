@@ -121,3 +121,18 @@ with evidence, plus each gate's counts and CPU/memory/artifact measurements.
   35WSframes, three markets, 15commands, three executions. CI source/fixture
   phase independently reviewed PASS; two new public gates raise the pre-merge
   workflow to70replays plus7controls, without raising the wasm budget.
+
+### Landing integration checkpoint
+
+- Merged fetched Coinbase/Polymarket landing `a0c11afd87` in `f87356127d`.
+  Five shared-file conflicts resolved as unions, independently reviewed: both
+  frame bridges retain Coinbase native placement, Bitget inverse sizing, OKX
+  contract sizing and typed prediction metadata. Transport retains secondary
+  identity/primary exceptions plus landing alias-aware signature invariants.
+- Post-merge root typecheck44/44 and lint28/28 PASS; transport259/259,
+  independent combined account/transport271/271, bridge20/20 and core69/69
+  PASS. Bans and workspace formatting PASS. Workspace native/Clippy, combined
+  WASM/host tests and final replay measurements remain in progress.
+- The account review independently removed each tick/startup guard and proved
+  its intended assertion fails, then restored and re-ran all7 account tests.
+  Fixtures reject unexpected network requests; there are no live-key test calls.
