@@ -912,3 +912,36 @@ timeout requirements, and independent-case continuation that preserves invalid
 results as unresolved. All build/test/profiler writers must be quiet. Freeze
 actual configuration, independently inspect its rows, then launch. Performance
 acceptance and green CI remain pending.
+
+## Complete fixed collection29: performance acceptance fails
+
+The one declared Node22 collection completes, with every case present and no
+retries, unresolved cases, operational failures or source/artifact drift. All64
+private gates pass. All40 public profiles pass official output comparisons and
+all six same-implementation logical outputs match across runs and arms. Memory
+margins widen40/40; CPU margins widen6/40. Full objectives pass6 and fail34,
+producing41 findings. Candidate Breakout, Paradex and Hyro fail absolute CPU
+gates; the original control Breakout also fails. Independent private and public
+phase reviews confirm all608 raw output hashes,144 logs and all arithmetic.
+
+The raw report SHA is
+`ec48b251b07a1ca2b09d2e9b3098784c976239d0012193e94f8c9938436d9688`.
+Publish every before/after ratio and absolute main-CPU median in
+`RUST_PERF_DELIVERY29_RESULTS.md`. TS median CPU drifts between arms by
+−38.923% to+61.191%; ratios are descriptive, without isolated causal or
+significance claims. Full evidence retains763 files, including608 raw replays,
+in `RUST_PERF_DELIVERY29_RESULTS.json.gz`, SHA
+`349d770b7dc97966a83714a4577682bc73d9c700e14a1f5d3bc46ffda76b5f6f`.
+CI at95c0336b39 is38 checks green and two replay checks red: Paradex main CPU
+and Bybit Hyro steady CPU. Acceptance and merge remain blocked by performance.
+
+Next phase: exactly12 unscored method profiles and8 separate V8 CPU samples on
+OKX, Bybit, Hyro and Paradex, using existing production artifacts, pinned inputs,
+fixed commands and no retries. Independent plan review passes. Compare original
+single delivery with candidate single and batch delivery; candidate single also
+uses the new byte ABI, so differences are not pure core or crossing costs.
+Preserve all diagnostics and output parity. Sampling is still an observer;
+method timing includes boundary/JSON/copy costs. Original control already has
+sorted ticker lookup and OKX ticker updates bypass it: a broad ticker-search
+regression is unproven. Measure hotspots before choosing an engine fix, then
+verify and declare a genuinely new source cohort. Keep every failed result.
