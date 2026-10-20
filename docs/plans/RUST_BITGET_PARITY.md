@@ -253,3 +253,27 @@ green final-head CI. No stash, rebase, force push or master changes.
 - Shared-machine load reached148 on10 logical CPUs during local TS import
   timeouts. Do not weaken test timeouts or claim a local root-test pass; final
   complete CI remains required and is the repository test source of truth.
+
+## Reviewed artifact gate proof
+
+- Source704f836c78: independent adversarial and transport-merge reviews clear.
+  Bitget147 native, harness153, dedicated UTA/Classic integrations4, combined
+  WASM adapter29 and Worker/wire35 tests PASS. Workspace native tests, strict
+  clippy/fmt, bans and WASM checks PASS in CI; typecheck44/lint28 pass locally.
+- Final rebuilt CI Bitget public PASS:39,457frames,846markets/tickers,2books.
+  TS/Rust main CPU861.3/776.0ms, steady522.1/476.9ms, process1187.3/1138.4ms,
+  retained5.8/2.5MB, Rustlinear1.2MB. CI WASM928,011bytes, local928,001bytes;
+  both below unchanged1,258,291byte per-venue budget.
+- CI Classic private12frames and inverse private13frames PASS with strict
+  requests, native/display metadata, two inverse collateral coins and command
+  results. Private performance remains informational. Native UTA USDT/USDC
+  ledger/trailing and Classic trailing integrations4 PASS.
+- Final rebuilt CI Binance public/private PASS. Public873frames,917markets,
+  783tickers,3books; TS/Rust main CPU154.2/72.4ms, steady80.8/24.7ms,
+  retained4.2/2.2MB, Rustlinear1.5MB. Combined host built before29/35 tests.
+- Live inverse contracts remain unavailable in the recording attempt; no empty
+  public tape counted. External unsupported opening/ambiguous/limit/index UTA
+  trailing remains visible/cancelable and fails editing before cancellation.
+- Final documentation head must still receive complete green CI before merge.
+  Posted PR reviews and the eventual merge record are the landing proof; no
+  test timeout, replay assertion, performance threshold or budget was relaxed.
