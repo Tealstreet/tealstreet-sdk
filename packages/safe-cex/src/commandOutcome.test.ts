@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { deserializeCommandError, isErrorReported, markErrorReported, serializeCommandError } from './commandOutcome';
+import {
+  deserializeCommandError,
+  exchangeErrorCategory,
+  isErrorReported,
+  markErrorReported,
+  serializeCommandError,
+} from './commandOutcome';
 
 // The worker and normal CLI share this exact allowlist at their clone boundary.
 describe('command outcome serialization', () => {
@@ -187,4 +193,34 @@ describe('command outcome serialization', () => {
     const error = Object.assign(new Error('Read interrupted'), { code: 'ENGINE_DISPOSED', command: 'fetchOHLCV' });
     expect(serializeCommandError(error)).not.toHaveProperty('outcome');
   });
+
+  it('carries a classified venue failure across the worker boundary', () => {
+    const error = Object.assign(new Error('Margin is insufficient.'), {
+      kind: 'rejected',
+      outcome: 'rejected',
+      venueCode: '-2019',
+      venueMessage: 'Margin is insufficient.',
+      retryAfterMs: 1000,
+    });
+    const restored = deserializeCommandError(serializeCommandError(error));
+    expect(restored).toMatchObject({
+      message: 'Margin is insufficient.',
+      kind: 'rejected',
+      outcome: 'rejected',
+      venueCode: '-2019',
+      venueMessage: 'Margin is insufficient.',
+      retryAfterMs: 1000,
+    });
+    expect(exchangeErrorCategory(restored)).toBe('order_rejected');
+    expect(serializeCommandError({ message: 'x', kind: 'bogus', outcome: 'maybe', retryAfterMs: -1 })).toEqual({
+      message: 'x',
+    });
+  });
+
+  it('maps each classified kind onto the health categories and leaves unclassified errors to text', () => {
+    expect(exchangeErrorCategory({ kind: 'authExpired' })).toBe('auth_expired');
+    expect(exchangeErrorCategory({ kind: 'venueUnavailable' })).toBe('exchange_down');
+    expect(exchangeErrorCategory(new Error('plain'))).toBeUndefined();
+  });
 });
+

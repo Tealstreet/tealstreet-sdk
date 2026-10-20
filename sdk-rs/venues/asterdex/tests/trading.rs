@@ -9,6 +9,7 @@ struct Harness {
     engine: Engine<AsterDex>,
     requests: Vec<HttpRequest>,
     done: Vec<(u32, Result<String, String>)>,
+    failures: Vec<(u32, safe_cex_engine::VenueError)>,
 }
 impl Harness {
     fn new() -> Self {
@@ -55,6 +56,7 @@ impl Harness {
             engine,
             requests: Vec::new(),
             done: Vec::new(),
+            failures: Vec::new(),
         }
     }
     fn collect(&mut self) {
@@ -63,6 +65,10 @@ impl Harness {
                 Action::Http(request) => self.requests.push(request),
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, result))
+                }
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.done.push((command, Err(error.legacy_text())));
+                    self.failures.push((command, error));
                 }
                 _ => {}
             }
@@ -973,4 +979,70 @@ fn unknown_id_does_not_prevent_other_cancellations_in_the_batch() {
         h.engine.store().order("known").unwrap().status,
         OrderStatus::Canceled
     );
+}
+
+#[test]
+fn trading_failures_carry_the_aster_code_kind_and_outcome() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (status, body, kind, outcome) in [
+        (
+            400,
+            r#"{"code":-2019,"msg":"Margin is insufficient."}"#,
+            Some(ErrorKind::Rejected),
+            Outcome::Rejected,
+        ),
+        (
+            400,
+            r#"{"code":-1111,"msg":"Precision is over the maximum defined for this asset."}"#,
+            Some(ErrorKind::InvalidInput),
+            Outcome::Rejected,
+        ),
+        (
+            503,
+            r#"{"code":-2019,"msg":"Margin is insufficient."}"#,
+            Some(ErrorKind::Rejected),
+            Outcome::Unknown,
+        ),
+        (
+            503,
+            r#"{"msg":"Unknown error, please check your request or try again later."}"#,
+            None,
+            Outcome::Unknown,
+        ),
+        (
+            200,
+            r#"{"code":200,"msg":"success"}"#,
+            None,
+            Outcome::Unknown,
+        ),
+    ] {
+        let mut h = Harness::new();
+        h.place(limit());
+        let request = h.take(Method::Post);
+        h.engine.handle(
+            1700000000000.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        h.collect();
+        let [(1, error)] = h.failures.as_slice() else {
+            panic!("{body}: {:?}", h.failures);
+        };
+        assert_eq!(
+            (error.kind, error.outcome),
+            (kind, Some(outcome)),
+            "{status} {body}"
+        );
+        assert_eq!(
+            h.result(1),
+            &Err(error.message.clone()),
+            "text is unchanged"
+        );
+    }
 }
