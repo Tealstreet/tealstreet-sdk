@@ -313,3 +313,16 @@ collision (the existing token generator is unchanged), and an incoming Orderly
 Warning log's missing LogLevel import. These are compile repairs to preserved
 WIP/integration; no completed classifier coverage is claimed by them. Logs:
 /tmp/bridge-auth-response-time-{tests,clippy-complete,fmt,bans}.log.
+
+## Landing follow-ups (2026-10-21)
+
+- BingX classifies the final answer of the landing's re-signed reads; a first
+  100001 that will be resent is not evidence, and the resend keeps its tag.
+  BingX/WEEX skip undecodable rows individually, so a signed code-0 page is
+  accepted evidence.
+- Polling policy flips re-arm every poll from the moment of change. If one
+  scope alternates accepted/rejected faster than a slower poll's interval, that
+  poll can be postponed repeatedly. Anchoring re-arms to each poll's cycle
+  start fixes it; not yet done because it shifts every venue policy test's
+  expected deadlines.
+

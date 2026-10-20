@@ -1,5 +1,13 @@
 # Phase 6b authentication results — native slice B checkpoint
 
+**Landing status (2026-10-21):** slice B and the four earlier WIP hooks
+(Crypto.com, Lighter, OKX, WOO) were dropped when the bridge landed; those
+venues keep the default `account_auth_outcome` (no evidence) on
+`feat/rust-rewrite`. Only the foundation and the tested slice A classifiers
+(BingX, MEXC, WEEX) merged. The anchors below describe the dropped drafts on
+`origin/feat/rust-bridge-fixes`; resume from them with dedicated tests and an
+independent review.
+
 **Incomplete draft, stopped at the user's wind-down request.** This document
 records source state for a later explicitly authorized resume. It is not a
 claim that venue credential backoff is verified. No automatic follow-up is
