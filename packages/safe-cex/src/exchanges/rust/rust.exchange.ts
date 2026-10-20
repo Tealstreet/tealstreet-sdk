@@ -202,7 +202,11 @@ export class RustEngineExchange extends BaseExchange {
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     if (exchangeName === 'apexomni') {
-      this.getAccount = () => this.command<ExchangeAccount>({ op: 'getAccount' });
+      this.getAccount = async () => {
+        if (!this.host) await this.start();
+        await this.untilLoaded();
+        return this.command<ExchangeAccount>({ op: 'getAccount' });
+      };
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);

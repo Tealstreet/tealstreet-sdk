@@ -70,7 +70,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
     },
     store,
   );
-  return { exchange, construct, commands, result };
+  return { exchange, store, construct, commands, result };
 };
 
 describe('Rust ApeX Omni SDK boundary', () => {
@@ -171,11 +171,45 @@ describe('Rust ApeX Omni SDK boundary', () => {
     expect(commands).toEqual([]);
   });
 
-  it('returns the native account ID through the getAccount host command', async () => {
+  it('starts a fresh exchange before fetching the native account ID', async () => {
     const { exchange, commands, result } = setup();
-    await exchange.start();
     result.mockReturnValue({ userId: '611779989544632629', affiliateId: null });
     await expect(exchange.getAccount()).resolves.toEqual({ userId: '611779989544632629', affiliateId: null });
     expect(commands).toEqual([{ op: 'getAccount', command: 1 }]);
+  });
+
+  it('waits for account readiness before dispatching identity on an existing host', async () => {
+    const { exchange, store, commands, result, construct } = setup();
+    store.update({ loaded: { ...store.loaded, balance: false, orders: false, positions: false } });
+    const startup = exchange.start();
+    await vi.waitFor(() => expect(construct).toHaveBeenCalledOnce());
+    result.mockReturnValue({ userId: 'account-id', affiliateId: null });
+    const account = exchange.getAccount();
+    await Promise.resolve();
+    expect(commands).toEqual([]);
+    store.update({ loaded: { ...store.loaded, balance: true, orders: true, positions: true } });
+    await startup;
+    await expect(account).resolves.toEqual({ userId: 'account-id', affiliateId: null });
+    expect(commands).toEqual([{ op: 'getAccount', command: 1 }]);
+  });
+
+  it('propagates startup failure from identity lookup without dispatching a command', async () => {
+    const { exchange, commands, construct } = setup();
+    const failure = new Error('WASM load failed');
+    setWasmEngineLoader(async () => {
+      throw failure;
+    });
+    await expect(exchange.getAccount()).rejects.toBe(failure);
+    expect(construct).not.toHaveBeenCalled();
+    expect(commands).toEqual([]);
+  });
+
+  it('rejects identity lookup when disposed while the loader is pending', async () => {
+    const { exchange, commands } = setup();
+    setWasmEngineLoader(() => new Promise<WasmEngineModule>(() => {}));
+    const account = expect(exchange.getAccount()).rejects.toThrow('disposed during startup');
+    exchange.dispose();
+    await account;
+    expect(commands).toEqual([]);
   });
 });

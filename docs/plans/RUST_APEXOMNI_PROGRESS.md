@@ -250,3 +250,16 @@ generated ID and preserves both virtual siblings when editing one leg.
   signing/trading, native public/account/history, and TS/harness/SDK-host
   integration. Findings will be posted on the PR and resolved/re-reviewed.
 - CI is running; merge is authorized only after green checks and review.
+
+### PR review round 1 findings
+
+- Posted independent code-correctness findings on PR #1324: pre-start account
+  identity regression (P2), malformed financial row identifiers committing
+  empty snapshots (P2), subsecond history bounds losing fills (P2), and
+  inherited price-only partial-fill amendment over-ordering (P1).
+- Wrapper lifecycle correction passes 55 ApeX/Orderly tests, package typecheck
+  and lint. Fresh identity lookup now starts lazily and awaits readiness;
+  tests cover incomplete startup, failure and disposal.
+- Paired native/TS identifier and raw-time fixes pass 86 native / 58 TS tests
+  before amendment observer hooks. Final combined verification waits for the
+  bounded partial-amendment fix and expanded private tape.
