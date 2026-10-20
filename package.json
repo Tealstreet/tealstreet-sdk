@@ -40,6 +40,7 @@
     "rust:private-tape-cryptocom": "node sdk-rs/harness/private-tape-cryptocom.mjs",
     "rust:private-tape-kucoin": "node sdk-rs/harness/private-tape-kucoin.mjs",
     "rust:private-tape-okx": "node sdk-rs/harness/private-tape-okx.mjs",
+    "rust:private-tape:phemex": "node sdk-rs/harness/private-tape-phemex.mjs",
     "rust:private-tape:weex": "node sdk-rs/harness/private-tape-weex.mjs",
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
     "rust:gate": "node sdk-rs/harness/gate.mjs",
