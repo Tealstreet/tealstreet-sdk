@@ -2190,3 +2190,20 @@ socket until a valid retry. Spot output reservation occurs only after complete
 context parsing and changes capacity, never selection or output rows. No
 fixture, oracle, gate or timing policy changed. Rebuild and fresh parent/spot
 gates are required next; the previous failed replay remains evidence.
+
+
+Merged-candidate quality checks all pass: global bans, format, locked check,
+strict native and WASM workspace Clippy; 2,826 native tests across 218 groups,
+zero failures and zero ignored. Independent native merge and OKX product/frame
+union reviews pass. Hyperliquid scoped strict checks also pass.
+
+Fresh Hyperliquid release gates pass all four parent/spot public/private paths
+and three compiled spot parity controls. Module 1,061,457 bytes is within the
+unchanged 1,258,291-byte ceiling. Spot remains 67 frames, 302 markets/tickers,
+two books: TS/Rust main CPU 56.6/53.2 ms, steady 21.3/15.9 ms, retained
+2.0/1.9 MB, sampled peak 5.4/3.1 MB; WASM linear memory 1.1 MB. Parent:
+318 frames, 340 markets/tickers, two books; main 144.6/81.2 ms, steady
+49.8/29.9 ms, retained 6.8/2.1 MB, peak 15.7/3.1 MB. Logs are retained under
+/tmp/bitunix-df2-final-*. No fixture, threshold or measurement policy changes.
+Remaining selected integration/control gates continue sequentially from Kraken.
+Final compiled consumers, push/reviews, exact-head CI and merge remain pending.
