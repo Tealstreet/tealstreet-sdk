@@ -188,10 +188,6 @@ struct Mapped {
     proof: Option<Editable>,
     average: f64,
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "consumed by the following query phase")
-)]
 pub(crate) fn map_order(
     store: &safe_cex_engine::Store,
     text: &str,

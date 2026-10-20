@@ -6,13 +6,21 @@ Spec: `RUST_REWRITE.md`; process and acceptance: `VENUE_PORT_BRIEF.md`.
 ## Scope and boundaries
 
 One `safe-cex-venue-coinbase` crate serves `coinbase` and `coinbasespot`.
-Preserve active Advanced Trade INTX perpetuals, CFM dated futures plus spot,
+Preserve the TS Advanced Trade INTX compatibility, CFM dated futures plus spot,
 and the saved-account spot-only variant. Portfolio permission discovery decides
 the authenticated product family. Spot-only must never probe CFM or INTX private
 routes. Public-only INTX discovery remains keyless; the spot-only profile uses the documented unauthenticated Advanced Trade market routes. Starbase modules are inert
 in TS and remain outside runtime activation; do not guess their unresolved units
 or private notification envelopes. Typed records replace the deleted first-port
 JSON emulation described by stale Coinbase documentation.
+
+Current availability is narrower than TS's legacy surface: Coinbase's
+[October 2026 changelog](https://docs.cdp.coinbase.com/coinbase-app/introduction/changelog)
+retires Advanced Trade INTX and its `/intx/*` routes. This port preserves that
+legacy adapter's typed compatibility and deterministic tests without claiming live
+INTX account access or activating the unfinished Starbase migration. CFM and spot
+remain the Advanced Trade products in scope. As in TS, `testnet` uses the same
+real Advanced Trade URLs; it does not select a separate sandbox.
 
 ## Phases
 
@@ -125,6 +133,9 @@ Primary references checked 2026-10-20:
   JWT binds method/host/path, while query parameters are passed separately.
 - [General CDP JWT authentication](https://docs.cdp.coinbase.com/get-started/authentication/jwt-authentication):
   Ed25519 seed/public-key representation and issuer/audience alternatives.
+- [Coinbase App changelog](https://docs.cdp.coinbase.com/coinbase-app/introduction/changelog):
+  native client IDs are at most 128 characters (August 2025); public trade sides
+  describe the maker (July 2025), inverted for the SDK's taker-side contract.
 
 ## Progress
 
@@ -197,3 +208,19 @@ Verification: 67 venue tests pass (8 module, 16 account, 17 public, 26 trading),
 including the race regressions; strict targeted Clippy passes. Known TS corrections
 include per-ID cancellation outcomes, confirmed cancel/replace, placement caller
 IDs/order prices, and explicit fixed-setting limitations. Replay gates remain open.
+
+### Phase 4 checkpoint
+
+Typed streamed fills, terminal order history and public trades now implement the
+SDK JSON query shapes. Walks cap at 50 pages, 1000 returned rows and 16 concurrent
+reads; duplicate IDs require consistent economics, UTC ranges filter inclusively
+after widened exclusive API boundaries, and later failures reject the whole read.
+CFM query amounts stay in native contracts while quote notional uses contract size.
+Public trade sides invert the documented maker side to the SDK's taker convention.
+Unavailable income and exact client-ID lookup reject explicitly without inferring
+an empty ledger or definitive absence.
+
+Independent source/test review is clear after checking quote-size provenance,
+pagination, proof tokens, timestamp bounds, aliases and public trade side. All
+84 venue tests and strict targeted Clippy pass, including 13 new query cases.
+Integration and full acceptance gates remain open.

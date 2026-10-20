@@ -1,6 +1,7 @@
 //! Coinbase Advanced Trade: public INTX discovery and native account products.
 mod account;
 mod account_wire;
+mod history;
 mod public;
 mod rest;
 mod sign;
@@ -31,6 +32,7 @@ pub enum Pending {
     Public(public::Request),
     Account(account::Request),
     Trading(trading::Request),
+    History(history::Request),
 }
 pub struct Coinbase {
     pub(crate) options: Options,
@@ -39,6 +41,7 @@ pub struct Coinbase {
     rest: rest::Rest,
     pub(crate) account: account::Account,
     pub(crate) trading: trading::Trading,
+    pub(crate) history: history::History,
 }
 impl Coinbase {
     pub fn new(options: Options) -> Result<Self, String> {
@@ -60,6 +63,7 @@ impl Coinbase {
             rest: rest::Rest::default(),
             account: account::Account::default(),
             trading: trading::Trading::default(),
+            history: history::History::default(),
         })
     }
 }
@@ -95,6 +99,7 @@ impl Venue for Coinbase {
             Pending::Public(p) => self.public_response(cx, p, response),
             Pending::Account(p) => self.private_on_response(cx, p, response),
             Pending::Trading(p) => self.trading_response(cx, p, response),
+            Pending::History(p) => self.history_response(cx, p, response),
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
@@ -102,6 +107,7 @@ impl Venue for Coinbase {
             Pending::Public(p) => self.public_item(cx, p, item),
             Pending::Account(p) => self.private_on_item(cx, p, item),
             Pending::Trading(_) => {}
+            Pending::History(p) => self.history_item(cx, p, item),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -109,6 +115,7 @@ impl Venue for Coinbase {
             Pending::Public(p) => self.public_failed(cx, p, error),
             Pending::Account(p) => self.private_failed(cx, p, error),
             Pending::Trading(p) => self.trading_failed(cx, p, error),
+            Pending::History(p) => self.history_failed(cx, p, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -117,21 +124,11 @@ impl Venue for Coinbase {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if let Some(
-            Command::PlaceOrders { command, .. }
-            | Command::CancelOrders { command, .. }
-            | Command::AmendOrder { command, .. }
-            | Command::CancelSymbolOrders { command, .. }
-            | Command::SetLeverage { command, .. }
-            | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. }
-            | Command::FetchLeverage { command, .. }
-            | Command::Query { command, .. },
-        ) = self
+        if let Some(Command::Query { command, query }) = self
             .public_command(cx, command)
             .and_then(|command| self.trading_command(cx, command))
         {
-            cx.done(command, Err("Coinbase account is not ready".into()));
+            self.history_start(cx, command, query);
         }
     }
 
