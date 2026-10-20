@@ -670,3 +670,24 @@ reproductions PASS; actual TS public3287frames/2books/120bookEvents/780subscript
 has zero protocol/socket/signature/unserved/unused-write errors. Preserve full
 canonical TS/Rust subscription comparison. Focused re-review has no findings;
 new exact-head CI remains required before merge.
+
+On final 5a1ba0193b local targets, Bitunix/Binance/MEXC/Hyperliquid/Bitrue public
+and private gates all PASS; full root27 tasks PASS. Bitrue's corrected audit
+has3,287frames/2books, TS/Rust CPU111.5/94.2ms, retained4.4/2.9MB,
+sampledpeak17.8/6.9MB. All phase/adversarial findings were posted on PR#1309.
+
+### Bitget parity landing checkpoint
+
+Before final CI completed, d172a666b1 landed Bitget inverse sizing, UTA ledger
+and Classic/UTA trailing parity and made PR#1309 conflicting. Merge it while
+preserving all232harness controls and explicitroles/ownedfeed identities. Still
+13 publicvenue rows, now17private gate variants plus4Bitget native parity
+integration cases. The new inverse TS probe passes (13frames/2markets/3commands,
+zero unserved/protocol/socket errors). SDK inverse/linear compatibility review
+passes19wrapper and5wire tests.
+
+Engine review fixed exact preallocation for the new optional BALANCE collateral
+tail/coin strings, with failed-before/pass-after reservation regression. Engine
+61tests andBitget147tests PASS; BitunixO1indexes, railsettings, startupreservation,
+emptybooks and streamingdecoder contracts are retained. Full workspace/root
+verification, new aggregate build and exact-head CI continue before merge.

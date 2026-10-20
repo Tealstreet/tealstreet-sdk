@@ -436,6 +436,32 @@ mod tests {
     }
 
     #[test]
+    fn collateral_snapshot_reservation_includes_columns_and_strings() {
+        let mut store = Store::default();
+        store.set_coin_balances(
+            (0..64)
+                .map(|index| crate::model::CoinBalance {
+                    base: format!("COIN{index}"),
+                    amount: 1.0,
+                    notional: 100.0,
+                })
+                .collect(),
+        );
+        let pending = store.everything();
+        let mut writer = FrameWriter::new(Vec::new(), 1.0);
+        store.write(&pending, &mut writer);
+        let capacity = writer.buf.capacity();
+        assert_eq!(writer.strings.capacity(), 64);
+        let pointer = writer.buf.as_ptr();
+        let frame = writer.finish();
+        assert_eq!(frame.as_ptr(), pointer, "collateral strings must fit");
+        assert!(
+            capacity < frame.len() + 16,
+            "reserve the complete collateral tail"
+        );
+    }
+
+    #[test]
     fn interning_resolves_hash_collisions_by_full_string_equality() {
         let mut w = FrameWriter::new(Vec::new(), 0.);
         assert_eq!(w.intern("one", 7), 0);

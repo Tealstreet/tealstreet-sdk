@@ -360,6 +360,7 @@ const marketFields = (m) => ({
   base: m.base,
   quote: m.quote,
   active: m.active,
+  ...(venue.inverseNativeAmounts ? { isInverse: Boolean(m.isInverse) } : {}),
   contractSize: m.contractSize ?? null,
   precision: { amount: m.precision.amount, price: m.precision.price },
   limits: { amount: { min: Number(m.limits.amount.min), max: Number(m.limits.amount.max) } },
@@ -394,11 +395,15 @@ async function runRust() {
       const socket = tape.connect(url, onOpen, onMessage, onClose, { channel, context });
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket, 1000, true) };
     },
-    request: async ({ method, url, body: requestBody, headers }) => {
+    request: async ({ method, url, body: requestBody, headers, signal }) => {
+      signal?.throwIfAborted();
       const { status, headers: responseHeaders = '', body } = await tape.waitForResponse(tape.respond(method, url, requestBody, headers));
       const chunks = async function* () {
         const bytes = encoder.encode(body);
-        for (let offset = 0; offset < bytes.length; offset += 16 * 1024) yield bytes.subarray(offset, offset + 16 * 1024);
+        for (let offset = 0; offset < bytes.length; offset += 16 * 1024) {
+          signal?.throwIfAborted();
+          yield bytes.subarray(offset, offset + 16 * 1024);
+        }
       };
       return { status, headers: responseHeaders, body: chunks() };
     },
@@ -481,6 +486,7 @@ async function runRust() {
       base: markets.base(i),
       quote: markets.quote(i),
       active: (markets.flags[i] & 1) !== 0,
+      isInverse: (markets.flags[i] & 2) !== 0,
       contractSize: markets.contractSize[i] || undefined,
       precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
       limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
@@ -502,7 +508,7 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, bookEvents, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue') ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return { frames, metrics, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue') ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
@@ -515,12 +521,14 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   for (let i = 0; i < (orders?.count ?? 0); i++) {
     const row = { id: orders.id(i), clientOrderId: orders.clientOrderId(i), parentId: orders.parentId(i), symbol: symbol(orders.market[i]), ...orderEnums(orders.enums[i]) };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
+    if (venue.inverseNativeAmounts) row.extra = { remainingNative: Math.round(Math.max(0, row.amount - row.filled) * 1e12) / 1e12 };
     orderRows.push(row);
   }
   const positionRows = [];
   for (let i = 0; i < (positions?.count ?? 0); i++) {
     const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
     for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
+    if (venue.inverseNativeAmounts) row.extra = { contractsNative: row.notional, unrealizedPnlNative: row.unrealizedPnl };
     positionRows.push(row);
   }
   const settingRows = [];
@@ -709,7 +717,8 @@ async function runTs() {
   const account = isPrivate
     ? {
         hedged: Boolean(store.options.isHedged),
-        balance: { used: store.balance.used, free: store.balance.free, total: store.balance.total, upnl: store.balance.upnl },
+        balance: { used: store.balance.used, free: store.balance.free, total: store.balance.total, upnl: store.balance.upnl,
+          ...(venue.inverseNativeAmounts ? { coins: store.balance.coins ?? {} } : {}) },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.
         positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
@@ -719,7 +728,7 @@ async function runTs() {
     : undefined;
   exchange.dispose();
   clock?.restore();
-  return { frames, metrics, bookEvents, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue') ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return { frames, metrics, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue') ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
 }
 
 async function runTsCommand(exchange, store, record, { candleListeners, candleUpdates }) {
@@ -781,6 +790,7 @@ function normalizeAccount(account) {
     price: o.price,
     amount: o.amount,
     filled: o.filled,
+    ...(venue.inverseNativeAmounts ? { remainingNative: o.extra?.remainingNative } : {}),
     remaining: o.remaining,
     reduceOnly: Boolean(o.reduceOnly),
     close: Boolean(o.close),
@@ -793,6 +803,7 @@ function normalizeAccount(account) {
     entryPrice: p.entryPrice,
     contracts: p.contracts,
     notional: p.notional,
+    ...(venue.inverseNativeAmounts ? { contractsNative: p.extra?.contractsNative, unrealizedPnlNative: p.extra?.unrealizedPnlNative } : {}),
     leverage: p.leverage,
     unrealizedPnl: p.unrealizedPnl,
     ...(values.venue === 'bitunix' ? { realizedPnl: Number.isFinite(p.realizedPnl) ? p.realizedPnl : null } : {}),
@@ -821,9 +832,13 @@ writeFileSync(
     impl: values.impl,
     frames: result.frames,
     unserved: result.unserved,
+    requests: result.requests,
+    writes: result.writes,
+    writeCount: result.writes.length,
     unusedWrites: result.unusedWrites,
-    protocolErrors: result.protocolErrors,
+    missingWrites: result.unusedWrites,
     invalidSignatures: result.invalidSignatures,
+    protocolErrors: result.protocolErrors,
     wsRequests: result.wsRequests,
     metrics: result.metrics,
     markets: result.store.markets.filter(venue.marketFilter ?? (() => true)).map(marketFields),

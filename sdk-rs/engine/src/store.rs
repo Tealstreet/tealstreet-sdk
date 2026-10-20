@@ -1,7 +1,9 @@
 //! Typed exchange state plus change tracking. Once per flush the engine drains
 //! the changes with [`Store::take_pending`] and writes them into the flush
 //! frame with [`Store::write`].
-use crate::model::{Balance, Loaded, MarginType, Market, Order, OrderStatus, Position, Ticker};
+use crate::model::{
+    Balance, CoinBalance, Loaded, MarginType, Market, Order, OrderStatus, Position, Ticker,
+};
 use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
 use std::collections::HashMap;
 
@@ -16,6 +18,7 @@ pub struct Store {
     orders: Vec<Order>,
     positions: Vec<Position>,
     balance: Balance,
+    coin_balances: Option<Vec<CoinBalance>>,
     /// Per-market account settings, keyed by market index.
     settings: HashMap<u32, MarketSetting>,
     hedged: bool,
@@ -315,6 +318,19 @@ impl Store {
         &self.balance
     }
 
+    /// `None` means this venue has never supplied collateral holdings. An empty
+    /// slice explicitly clears previously supplied holdings in the consumer.
+    pub fn coin_balances(&self) -> Option<&[CoinBalance]> {
+        self.coin_balances.as_deref()
+    }
+
+    pub fn set_coin_balances(&mut self, coins: Vec<CoinBalance>) {
+        if self.coin_balances.as_ref() != Some(&coins) {
+            self.coin_balances = Some(coins);
+            self.changes.balance = true;
+        }
+    }
+
     pub fn set_balance(&mut self, balance: Balance) {
         if balance != self.balance {
             self.balance = balance;
@@ -451,6 +467,16 @@ impl Store {
             let b = &self.balance;
             w.begin(section::BALANCE);
             w.f64s([b.used, b.free, b.total, b.upnl]);
+            if let Some(coins) = &self.coin_balances {
+                w.u32(coins.len() as u32);
+                for coin in coins {
+                    let base = w.string(&coin.base);
+                    w.u32(base);
+                }
+                w.pad();
+                w.f64s(coins.iter().map(|coin| coin.amount));
+                w.f64s(coins.iter().map(|coin| coin.notional));
+            }
             w.end();
         }
         if changes.settings {
@@ -563,6 +589,15 @@ impl Store {
         }
         if changes.balance {
             bytes += 40;
+            if let Some(coins) = &self.coin_balances {
+                bytes += (4 + coins.len() * 4).next_multiple_of(8) + coins.len() * 16;
+                for coin in coins {
+                    strings += 1;
+                    indexed_strings += 1;
+                    string_refs += 1;
+                    string_bytes += coin.base.len();
+                }
+            }
         }
         if changes.status {
             bytes += 24;
@@ -959,5 +994,110 @@ mod tests {
         assert_eq!((value(24), value(32)), (20.0, 15.0));
         assert_eq!((value(40), value(56)), (20.0, 30.0));
         assert_eq!((value(48), value(64)), (15.0, 15.0));
+    }
+
+    fn balance_frame(store: &mut Store) -> Vec<u8> {
+        let pending = store.take_pending();
+        let mut writer = FrameWriter::new(vec![], 0.0);
+        store.write(&pending, &mut writer);
+        writer.finish()
+    }
+
+    #[test]
+    fn collateral_tail_preserves_legacy_balance_and_empty_means_clear() {
+        let mut store = Store::default();
+        let balance = Balance {
+            used: 1.0,
+            free: 2.0,
+            total: 3.0,
+            upnl: 4.0,
+        };
+        assert_eq!(store.coin_balances(), None);
+        store.set_balance(balance.clone());
+        let legacy = balance_frame(&mut store);
+        let (_, payload) = crate::wire::sections(&legacy)
+            .find(|(kind, _)| *kind == section::BALANCE)
+            .unwrap();
+        assert_eq!(payload.len(), 32);
+        let scalars = payload.to_vec();
+
+        store.set_coin_balances(vec![]);
+        assert_eq!(store.coin_balances(), Some([].as_slice()));
+        let cleared = balance_frame(&mut store);
+        let (_, payload) = crate::wire::sections(&cleared)
+            .find(|(kind, _)| *kind == section::BALANCE)
+            .unwrap();
+        assert_eq!(payload.len(), 40);
+        assert_eq!(&payload[..32], scalars);
+        assert_eq!(u32::from_le_bytes(payload[32..36].try_into().unwrap()), 0);
+        store.set_coin_balances(vec![]);
+        assert!(
+            crate::wire::sections(&balance_frame(&mut store))
+                .next()
+                .is_none()
+        );
+        store.set_balance(balance);
+        assert!(
+            crate::wire::sections(&balance_frame(&mut store))
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn collateral_changes_flush_columns_without_rewriting_aggregate_balance() {
+        let mut store = Store::default();
+        let coins = vec![
+            CoinBalance {
+                base: "BTC".into(),
+                amount: 0.25,
+                notional: 12_500.0,
+            },
+            CoinBalance {
+                base: "ETH".into(),
+                amount: 2.0,
+                notional: 5_000.0,
+            },
+        ];
+        store.set_coin_balances(coins.clone());
+        assert_eq!(store.coin_balances(), Some(coins.as_slice()));
+        let frame = balance_frame(&mut store);
+        let (_, payload) = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::BALANCE)
+            .unwrap();
+        let word = |at| u32::from_le_bytes(payload[at..at + 4].try_into().unwrap());
+        let value = |at| f64::from_le_bytes(payload[at..at + 8].try_into().unwrap());
+        assert_eq!(payload.len(), 80);
+        assert_eq!(word(32), 2);
+        assert_eq!((word(36), word(40)), (0, 1));
+        assert_eq!((value(48), value(56)), (0.25, 2.0));
+        assert_eq!((value(64), value(72)), (12_500.0, 5_000.0));
+        let (_, strings) = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::STRINGS)
+            .unwrap();
+        assert_eq!(u32::from_le_bytes(strings[..4].try_into().unwrap()), 2);
+        assert_eq!(&strings[16..22], b"BTCETH");
+
+        store.set_coin_balances(coins.clone());
+        assert!(
+            crate::wire::sections(&balance_frame(&mut store))
+                .next()
+                .is_none()
+        );
+        let mut changed = coins;
+        changed[0].notional = 12_501.0;
+        store.set_coin_balances(changed);
+        assert!(store.take_pending().changes.balance);
+        // A full snapshot must also retain collateral even after dirty state drains.
+        let mut writer = FrameWriter::new(vec![], 0.0);
+        store.write(&store.everything(), &mut writer);
+        let snapshot = writer.finish();
+        let (_, payload) = crate::wire::sections(&snapshot)
+            .find(|(kind, _)| *kind == section::BALANCE)
+            .unwrap();
+        assert_eq!(
+            f64::from_le_bytes(payload[64..72].try_into().unwrap()),
+            12_501.0
+        );
     }
 }
