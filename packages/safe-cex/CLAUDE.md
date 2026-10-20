@@ -909,7 +909,13 @@ Is requiresCors true?
   before the browser shared-worker or CLI/global refresh path, but invalid,
   expired, empty, or throwing contextual providers must fall back to the normal
   module token path. Do not replace this with module-global `setProxyToken` in
-  multi-user hosts.
+  multi-user hosts. Rust engine transports capture the provider of the context
+  that created the account and reinstate it around each proxy authorization
+  (`withProxyTokenProvider`), because engine requests start from timers, sockets
+  and shared feeds whose async context is not the account's. HOW requests and
+  relay sockets read the token after awaits or on open, so they bind the lookup
+  at request/socket start through `HOWConfig.bindProxyToken`
+  (`bindProxyTokenLookup`); the engine creates relays inside the scope.
 - **Static validation**: `exchangeMetadata.test.ts` has invariant tests that catch impossible configurations (e.g., `requiresCors + forbidCors`). Run `yarn test-ci` after changing metadata.
 - **Unknown metadata fails closed**: `getExchangeMetadata` throws for runtime
   names outside the exhaustive registry. Never restore a venue-shaped fallback;
