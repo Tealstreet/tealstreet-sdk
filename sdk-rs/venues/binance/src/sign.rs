@@ -14,14 +14,17 @@ pub use safe_cex_engine::url::Query;
 
 pub trait Signed {
     /// Append `timestamp`, `recvWindow` and the HMAC-SHA256 `signature`.
-    fn signed(self, credentials: &Credentials, now_ms: f64) -> String;
+    fn signed(self, credentials: &Credentials, now_ms: f64, recv_window: Option<f64>) -> String;
 }
 
 impl Signed for Query {
-    fn signed(self, credentials: &Credentials, now_ms: f64) -> String {
+    fn signed(self, credentials: &Credentials, now_ms: f64, recv_window: Option<f64>) -> String {
         let mut query = self
             .num("timestamp", now_ms.floor())
-            .num("recvWindow", f64::from(RECV_WINDOW_MS))
+            .num(
+                "recvWindow",
+                recv_window.unwrap_or(f64::from(RECV_WINDOW_MS)),
+            )
             .into_string();
         let signature = hmac_sha256(
             credentials.secret.as_bytes(),
@@ -54,9 +57,10 @@ mod tests {
             ),
             "3c661234138461fcc7a7d8746c6558c9842d4e10870d2ecbedf7777cad694af9"
         );
-        let signed = Query::new()
-            .str("symbol", "BTCUSDT")
-            .signed(&credentials, 1591702613943.7);
+        let signed =
+            Query::new()
+                .str("symbol", "BTCUSDT")
+                .signed(&credentials, 1591702613943.7, None);
         assert!(
             signed
                 .starts_with("symbol=BTCUSDT&timestamp=1591702613943&recvWindow=20000&signature=")

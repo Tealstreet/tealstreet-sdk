@@ -143,8 +143,8 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 //  - Bybit: TS may drop the initial ticker snapshot before a slow REST seed;
 //    Rust installs the seed before connecting. These cases have native regression
 //    coverage; the committed replay tapes require no normalization for them.
-//  - Bybit: with no mark price, TS can add a second Partial stop on amend;
-//    Rust amends the existing native order ID.
+//  - Bybit Partial TP/SL now follows the owner-selected TS replacement and
+//    missing-mark fallbacks; the former amend-in-place divergence is retired.
 //  - Bybit inverse: TS clamps USD contracts before splitting, silently shrinking
 //    large requests; Rust preserves the requested total in max lots + remainder.
 //  - Bybit inverse: TS sums coin PnL into the USD wallet; Rust converts using
@@ -549,6 +549,8 @@ const KNOWN_TS_FIXES = {
   //   instead targets c, which can be the cancellation request's client ID.
   // - Spot/COIN-M duplicate cumulative executions can emit fills again and
   //   stale NEW events reopen terminal orders; Rust fences by native order ID.
+  //   Spot also deduplicates the latest 16,384 native (symbol, order, trade) IDs,
+  //   independently of ACK totals and terminal lifecycle (native/SDK proofs).
   // - COIN-M malformed openOrders responses become authoritative empty in TS;
   //   Rust preserves the previous order state and retries reconciliation.
   // - COIN-M TS values an unpriced collateral coin at USD1; Rust keeps its
