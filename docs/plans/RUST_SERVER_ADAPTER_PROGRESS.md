@@ -55,3 +55,23 @@ inside an injected socket factory could leak its returned socket; fixed by
 closing a late-acquired resource before installing listeners. Added regression.
 AbortSignal also cancels handshake and pending snapshot delivery. Review now
 passes. Focused tests: **92/92**; package typecheck and lint PASS.
+
+## Phase 3
+
+Factory exports explicit native/TypeScript selection. Native calls the trusted
+account+venue resolver and never the public factory. TypeScript returns the
+original awaited handle; no captured exchange, startup, fetchMarkets, hydration,
+refresh or disposal logic is introduced. Coordination messages sent to the
+consumer-blockers owner (`codex-c6nf4w`); inspected its current contract, which
+keeps get/handle signatures and may replace handle.exchange after Rust refresh.
+Callers re-read that field. No PublicExchangeFactory implementation edits here.
+
+Plan audit caught inherited registry names reaching the resolver; added own-key
+validation and regressions. Disconnect must be wired before awaiting open;
+AbortSignal now covers resolution and native transport, with a bounded resolver
+deadline and cancellation signal for its external work. Late resolutions never
+connect. Real Rust fixture performs no exchange HTTP/sockets and checks actual
+snapshot/full BOOK/delta/delete/resync/fresh-reconnect frames through FrameApplier,
+byte-identical forwarding, independent clients using the same command ID and
+write counters proving no replay. Initial real loopback test **1/1 PASS**.
+Full server package **127/127 tests**, typecheck PASS; phase review in progress.
