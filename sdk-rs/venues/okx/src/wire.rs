@@ -24,45 +24,92 @@ pub fn envelope(text: &str) -> Result<&str, String> {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Instrument<'a> {
+    #[serde(deserialize_with = "nullable")]
     pub inst_id: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub inst_type: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub rule_type: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub uly: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub inst_family: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub base_ccy: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub quote_ccy: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub ct_type: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub ct_val: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub ct_val_ccy: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub settle_ccy: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub state: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub lot_sz: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub tick_sz: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub min_sz: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub max_iceberg_sz: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub max_lmt_sz: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub max_mkt_sz: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub max_stop_sz: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub max_trigger_sz: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub max_twap_sz: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub lever: &'a str,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Prices<'a> {
+    #[serde(deserialize_with = "nullable")]
     pub inst_id: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub bid_px: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub ask_px: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub last: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub open24h: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub vol_ccy24h: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub vol24h: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub mark_px: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub idx_px: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub oi_ccy: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub funding_rate: &'a str,
+    #[serde(deserialize_with = "nullable")]
     pub funding_time: &'a str,
+}
+
+// OKX sends `null` for some unset quote/catalog fields; treat it like a blank.
+fn nullable<'de: 'a, 'a, D: serde::Deserializer<'de>>(d: D) -> Result<&'a str, D::Error> {
+    Ok(Option::<&'a str>::deserialize(d)?.unwrap_or_default())
+}
+
+/// Identifies a catalog row that failed to decode as an [`Instrument`].
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstrumentId<'a> {
+    #[serde(default, deserialize_with = "nullable")]
+    pub inst_id: &'a str,
 }
 
 #[derive(Deserialize, Default)]
