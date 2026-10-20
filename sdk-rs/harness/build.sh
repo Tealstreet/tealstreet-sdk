@@ -9,7 +9,9 @@ if [[ $# -gt 0 ]]; then
     exit 2
   fi
   case "$2" in
-    breakoutprop|asterdex|binance|kucoin|bybit|hyperliquid|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|paradex|polymarket) build_args+=(--no-default-features --features "$2") ;;
+    breakoutprop|asterdex|binance|kucoin|bybit|hyperliquid|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|polymarket) build_args+=(--no-default-features --features "$2") ;;
+    # Compact this solo bundle's shared-feed dispatch; keep engine hot loops at O3.
+    paradex) build_args+=(--no-default-features --features paradex --config 'profile.release.package.safe-cex-wasm.opt-level="z"') ;;
     lighter-robinhood) build_args+=(--no-default-features --features lighter) ;;
     coinbase|coinbasespot) build_args+=(--no-default-features --features coinbase) ;;
     orderly|tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) build_args+=(--no-default-features --features orderly) ;;
