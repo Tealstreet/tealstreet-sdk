@@ -236,7 +236,7 @@ impl KrakenSpot {
                 if !self.options.public_data_only && self.signer.is_none() {
                     self.reject_auth(cx, &e);
                 }
-                self.private_failed(cx, request, &e);
+                self.private_failed(cx, request, super::trading::not_sent(e));
             }
         }
     }
@@ -569,7 +569,8 @@ impl KrakenSpot {
                 {
                     self.reject_auth(cx, &e);
                 }
-                self.private_failed(cx, request, &e);
+                let error = super::trading::write_failure(response.status, response.body, e);
+                self.private_failed(cx, request, error);
                 return;
             }
         };
@@ -655,25 +656,31 @@ impl KrakenSpot {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: &str,
+        error: safe_cex_engine::VenueError,
     ) {
-        match request.kind {
-            Kind::Balance { command, revision } => {
-                self.account.balance_flight.remove(&revision);
-                if let Some(c) = command {
-                    cx.done(c, Err(error.into()))
+        let Kind::Trade(_) = request.kind else {
+            let error = error.message.as_str();
+            match request.kind {
+                Kind::Balance { command, revision } => {
+                    self.account.balance_flight.remove(&revision);
+                    if let Some(c) = command {
+                        cx.done(c, Err(error.into()))
+                    }
                 }
-            }
-            Kind::Orders { .. } => self.account.orders_flight = false,
-            Kind::Token { socket } => {
-                if self.account.connection.socket == Some(socket) {
-                    cx.close(socket);
-                    self.private_close(cx, socket);
+                Kind::Orders { .. } => self.account.orders_flight = false,
+                Kind::Token { socket } => {
+                    if self.account.connection.socket == Some(socket) {
+                        cx.close(socket);
+                        self.private_close(cx, socket);
+                    }
                 }
+                Kind::Trade(_) => unreachable!("trade failures return below"),
             }
-            Kind::Trade(_) => self.trade_failed(cx, error),
-        }
-        cx.log(LogLevel::Warning, error);
+            cx.log(LogLevel::Warning, error);
+            return;
+        };
+        cx.log(LogLevel::Warning, &error.message);
+        self.trade_failed(cx, error);
     }
     pub(super) fn private_network_failed(
         &mut self,
@@ -686,6 +693,9 @@ impl KrakenSpot {
             let timer = cx.set_timer(0.);
             self.account.retries.push((timer, request));
         } else {
+            let error = safe_cex_engine::VenueError::new(error)
+                .kind(safe_cex_engine::ErrorKind::Network)
+                .outcome(safe_cex_engine::Outcome::Unknown);
             self.private_failed(cx, request, error)
         }
     }

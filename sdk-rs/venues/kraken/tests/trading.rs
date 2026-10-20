@@ -18,7 +18,7 @@ fn place(e: &mut Engine<Kraken>, orders: Vec<PlaceOrderOpts>) {
     command(e, Command::PlaceOrders { command: 7, orders });
 }
 fn http(e: &mut Engine<Kraken>, path: &str) -> HttpRequest {
-    let all = e.drain_actions().collect::<Vec<_>>();
+    let all = e.drain_plain().collect::<Vec<_>>();
     let debug = format!("{all:?}");
     all.into_iter()
         .find_map(|a| match a {
@@ -55,7 +55,7 @@ fn ack(e: &mut Engine<Kraken>, r: &HttpRequest, id: &str, status: &str) {
     );
 }
 fn done(e: &mut Engine<Kraken>) -> Result<String, String> {
-    e.drain_actions()
+    e.drain_plain()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { result, .. }) => Some(result),
             _ => None,
@@ -103,7 +103,7 @@ fn each_futures_bracket_step_receipts_its_actual_cli_ord_id_before_write() {
     place(&mut e, vec![order]);
     let mut identities = std::collections::HashSet::new();
     for index in 0..3 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         let (at, receipts) = actions
             .iter()
             .enumerate()
@@ -146,7 +146,7 @@ fn batch_prevalidates_every_caller_id_before_writes() {
         bad.kind = kind;
         bad.client_order_id = Some("caller".into());
         place(&mut e, vec![limit(), bad]);
-        let all = e.drain_actions().collect::<Vec<_>>();
+        let all = e.drain_plain().collect::<Vec<_>>();
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(all.iter().any(|a| matches!(
             a,
@@ -202,7 +202,7 @@ fn missing_or_rejected_semantic_ack_never_sends_bracket() {
         place(&mut e, vec![o]);
         let r = http(&mut e, "sendorder");
         reply(&mut e, &r, 200, body);
-        let all = e.drain_actions().collect::<Vec<_>>();
+        let all = e.drain_plain().collect::<Vec<_>>();
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(all.iter().any(|a| matches!(
             a,
@@ -390,7 +390,7 @@ fn ambiguous_write_is_not_retried_and_next_command_is_independent() {
             error: "response lost",
         },
     );
-    let all = e.drain_actions().collect::<Vec<_>>();
+    let all = e.drain_plain().collect::<Vec<_>>();
     assert!(all.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone {
@@ -629,7 +629,7 @@ fn execution_or_full_fill_racing_cancel_suppresses_protective_replacement() {
         let r = http(&mut e, "cancelorder");
         message(&mut e, socket, NOW, fill);
         cancel_ack(&mut e, &r, "old");
-        let all = e.drain_actions().collect::<Vec<_>>();
+        let all = e.drain_plain().collect::<Vec<_>>();
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(all.iter().any(|a| matches!(
             a,
@@ -674,7 +674,7 @@ fn queued_protective_amend_rejects_changed_order_before_cancelling() {
     );
     e.store_mut().update_order("old", |o| o.filled = 0.01);
     ack(&mut e, &r, "entry", "placed");
-    let all = e.drain_actions().collect::<Vec<_>>();
+    let all = e.drain_plain().collect::<Vec<_>>();
     assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(all.iter().any(|a| matches!(
         a,
@@ -692,7 +692,7 @@ fn fetch_leverage_missing_preferences_is_a_failure() {
     reply(&mut e, &r, 200, META);
     let r = http(&mut e, "tickers");
     reply(&mut e, &r, 200, TICKERS);
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     command(
         &mut e,
         Command::FetchLeverage {
@@ -915,7 +915,7 @@ fn batch_rejects_bybit_controls_before_any_write() {
             json!(5)
         };
         place(&mut e, vec![limit(), opts(bad)]);
-        let all = e.drain_actions().collect::<Vec<_>>();
+        let all = e.drain_plain().collect::<Vec<_>>();
         assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(all.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandDone { result: Err(error), .. })
@@ -930,7 +930,7 @@ fn batch_rejects_foreign_stp_controls_before_writes() {
     let mut bad = limit();
     bad.stp_mode = Some(StpMode::ExpireTaker);
     place(&mut e, vec![limit(), bad]);
-    let all = e.drain_actions().collect::<Vec<_>>();
+    let all = e.drain_plain().collect::<Vec<_>>();
     assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(all.iter().any(|a| matches!(a,
         Action::Notice(Notice::CommandDone { result: Err(error), .. })
@@ -947,7 +947,7 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
         (1.0, f64::INFINITY),
     ] {
         let (mut e, _) = ready();
-        e.drain_actions().for_each(drop);
+        e.drain_plain().for_each(drop);
         e.store_mut().update_markets(|market| {
             market.limits.leverage.min = min;
             market.limits.leverage.max = max;
@@ -961,7 +961,7 @@ fn invalid_dynamic_leverage_limits_reject_without_native_write() {
                 side: None,
             },
         );
-        let out = e.drain_actions().collect::<Vec<_>>();
+        let out = e.drain_plain().collect::<Vec<_>>();
         assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
         assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
     }
@@ -979,7 +979,7 @@ fn market_entry_with_tpsl_names_the_unsupported_legs() {
             .unwrap()],
         }),
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 41, result: Err(m) }) if m.contains("take-profit/stop-loss legs on a market entry"))));
 }
@@ -1013,7 +1013,7 @@ fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
     }
     let (mut e, _) = ready();
     place(&mut e, vec![app("stop_market", 90.5, Some(90.0))]);
-    let all = e.drain_actions().collect::<Vec<_>>();
+    let all = e.drain_plain().collect::<Vec<_>>();
     assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(all.iter().any(|a| matches!(
         a,
@@ -1037,7 +1037,7 @@ fn zero_bracket_prices_mean_no_leg_on_market_and_limit_entries() {
                 .unwrap()],
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         let writes = actions
             .iter()
             .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
@@ -1051,4 +1051,131 @@ fn zero_bracket_prices_mean_no_leg_on_market_and_limit_entries() {
             "{kind}"
         );
     }
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
+    let unknown = (None, Some(Outcome::Unknown));
+    let send = |status: &str| {
+        json!({"result":"success","sendStatus":{"order_id":"","status":status}}).to_string()
+    };
+    for (status, body, classified, text) in [
+        (
+            503,
+            "<html>".to_owned(),
+            unknown,
+            "Invalid Kraken trading response",
+        ),
+        (
+            503,
+            r#"{"result":"error"}"#.to_owned(),
+            unknown,
+            "Kraken HTTP 503",
+        ),
+        (
+            429,
+            r#"{"result":"error"}"#.to_owned(),
+            rejected(ErrorKind::RateLimited),
+            "Kraken HTTP 429",
+        ),
+        (
+            200,
+            r#"{"result":"error","error":"apiLimitExceeded"}"#.to_owned(),
+            rejected(ErrorKind::RateLimited),
+            "apiLimitExceeded",
+        ),
+        (
+            200,
+            r#"{"result":"error","error":"insufficientFunds"}"#.to_owned(),
+            rejected(ErrorKind::Rejected),
+            "insufficientFunds",
+        ),
+        (
+            200,
+            r#"{"result":"error","error":"Unavailable"}"#.to_owned(),
+            unknown,
+            "Unavailable",
+        ),
+        (
+            200,
+            r#"{"result":"error","error":"somethingNew"}"#.to_owned(),
+            (None, None),
+            "somethingNew",
+        ),
+        (
+            200,
+            send("insufficientAvailableFunds"),
+            rejected(ErrorKind::Rejected),
+            "Kraken placement rejected or incomplete: insufficientAvailableFunds",
+        ),
+        (
+            200,
+            send("partiallyFilled"),
+            (None, None),
+            "Kraken placement rejected or incomplete: partiallyFilled",
+        ),
+        (
+            200,
+            r#"{"result":"success"}"#.to_owned(),
+            unknown,
+            "Kraken placement missing sendStatus",
+        ),
+    ] {
+        let (mut e, _) = ready();
+        place(&mut e, vec![limit()]);
+        let r = http(&mut e, "sendorder");
+        reply(&mut e, &r, status, &body);
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(
+            ((error.kind, error.outcome), error.legacy_text().as_str()),
+            (classified, text),
+            "{status} {body}"
+        );
+    }
+    // Transport loss on a write is Unknown.
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit()]);
+    let r = http(&mut e, "sendorder");
+    e.handle(
+        NOW,
+        Event::HttpFailed {
+            request: r.id,
+            error: "reset",
+        },
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(
+        (error.kind, error.outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
+    // Preflight refusals were never sent.
+    let (mut e, _) = ready();
+    let mut invalid = limit();
+    invalid.client_order_id = Some("mine".into());
+    place(&mut e, vec![invalid]);
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+}
+
+#[test]
+fn a_refusal_after_an_accepted_placement_is_never_rejected() {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit(), limit()]);
+    let first = http(&mut e, "sendorder");
+    ack(&mut e, &first, "accepted", "placed");
+    let second = http(&mut e, "sendorder");
+    reply(
+        &mut e,
+        &second,
+        200,
+        r#"{"result":"error","error":"insufficientFunds"}"#,
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(
+        error.legacy_text(),
+        "insufficientFunds; already accepted order IDs: accepted"
+    );
+    assert_eq!(error.outcome, None);
 }

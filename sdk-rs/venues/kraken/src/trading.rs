@@ -2,7 +2,7 @@
 use crate::{Kraken, Pending, sign};
 use safe_cex_engine::model::*;
 use safe_cex_engine::num;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response};
+use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
@@ -19,6 +19,8 @@ struct Job {
     amend: Option<Order>,
     amend_filled: bool,
     amend_canceled: bool,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
 }
 #[derive(Clone)]
 enum Step {
@@ -178,23 +180,28 @@ impl Kraken {
                 hedged,
                 symbol: _,
             } => {
-                cx.done(
-                    *command,
-                    if *hedged {
-                        Err("Kraken Futures only supports one-way positions".into())
-                    } else {
-                        Ok("null".into())
-                    },
-                );
+                if *hedged {
+                    cx.fail(
+                        *command,
+                        not_sent("Kraken Futures only supports one-way positions")
+                            .kind(ErrorKind::Unsupported),
+                    );
+                } else {
+                    cx.done(*command, Ok("null".into()));
+                }
                 return true;
             }
             _ => return false,
         };
         match result {
-            Err(error) => cx.done(id, Err(error)),
+            Err(error) => cx.fail(id, not_sent(error)),
             Ok((steps, amend)) => {
                 if self.signer.is_none() || self.options.public_data_only {
-                    cx.done(id, Err("Kraken trading requires API credentials".into()));
+                    cx.fail(
+                        id,
+                        not_sent("Kraken trading requires API credentials")
+                            .kind(ErrorKind::AuthInvalid),
+                    );
                 } else {
                     self.trading.queue.push_back(Job {
                         command: id,
@@ -203,6 +210,7 @@ impl Kraken {
                         amend,
                         amend_filled: false,
                         amend_canceled: false,
+                        effective: false,
                     });
                     self.trading_pump(cx);
                 }
@@ -580,12 +588,14 @@ impl Kraken {
             {
                 self.trading_finish(
                     cx,
-                    Err("Kraken protective order changed before amendment dispatch".into()),
+                    Err(not_sent(
+                        "Kraken protective order changed before amendment dispatch",
+                    )),
                 );
                 continue;
             }
             if job.amend_filled && matches!(step, Step::Place(_)) {
-                self.trading_finish(cx,Err("Kraken protective order executed while cancellation was in flight; replacement suppressed".into()));
+                self.trading_finish(cx,Err(not_sent("Kraken protective order executed while cancellation was in flight; replacement suppressed")));
                 continue;
             }
             let command = job.command;
@@ -689,7 +699,7 @@ impl Kraken {
                     settings_revision: self.account_settings_revision(),
                 }),
             ) {
-                self.trading_finish(cx, Err(error));
+                self.trading_finish(cx, Err(not_sent(error)));
                 continue;
             }
             return;
@@ -701,21 +711,33 @@ impl Kraken {
         request: Request,
         response: Response<'_>,
     ) {
-        let reply = serde_json::from_str::<Reply>(response.body)
-            .map_err(|_| "Invalid Kraken trading response".to_owned());
+        let ok = (200..300).contains(&response.status);
+        let reply = serde_json::from_str::<Reply>(response.body).map_err(|_| {
+            let message = "Invalid Kraken trading response";
+            if ok {
+                unproven(message)
+            } else {
+                http_failure(response.status, message)
+            }
+        });
         let result = reply.and_then(|r| {
-            if !(200..300).contains(&response.status) {
-                return Err(format!("Kraken HTTP {}", response.status));
+            if !ok {
+                return Err(http_failure(
+                    response.status,
+                    format!("Kraken HTTP {}", response.status),
+                ));
             }
             if r.result != "success"
                 || matches!(r.status.as_deref(), Some("BAD_REQUEST" | "unauthorized"))
                 || r.error.as_ref().is_some_and(|e| !e.is_empty())
                 || !r.errors.is_empty()
             {
-                return Err(r
+                let code = r.error.clone().filter(|code| !code.is_empty());
+                let message = r
                     .error
                     .or_else(|| r.errors.first().map(|e| e.message.clone()))
-                    .unwrap_or_else(|| "Kraken rejected trading request".into()));
+                    .unwrap_or_else(|| "Kraken rejected trading request".into());
+                return Err(refusal(message, r.status.as_deref(), code));
             }
             self.trading_apply(cx, request.step, request.settings_revision, r)
         });
@@ -723,6 +745,9 @@ impl Kraken {
             Ok(Some(result)) => self.trading_finish(cx, Ok(result)),
             Ok(None) => {
                 self.trading.waiting = false;
+                if let Some(job) = self.trading.active.as_mut() {
+                    job.effective = true;
+                }
             }
             Err(error) => self.trading_finish(cx, Err(error)),
         }
@@ -734,16 +759,18 @@ impl Kraken {
         step: Step,
         settings_revision: u64,
         reply: Reply,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<String>, VenueError> {
         match step {
             Step::Place(mut p) => {
-                let status = reply.send.ok_or("Kraken placement missing sendStatus")?;
+                let status = reply
+                    .send
+                    .ok_or_else(|| unproven("Kraken placement missing sendStatus"))?;
                 if !matches!(status.status.as_str(), "placed" | "filled")
                     || status.order_id.is_empty()
                 {
-                    return Err(format!(
-                        "Kraken placement rejected or incomplete: {}",
-                        status.status
+                    return Err(status_failure(
+                        format!("Kraken placement rejected or incomplete: {}", status.status),
+                        &status.status,
                     ));
                 }
                 if self
@@ -752,7 +779,7 @@ impl Kraken {
                     .as_ref()
                     .is_some_and(|j| j.ids.contains(&status.order_id))
                 {
-                    return Err("Kraken placement returned duplicate order ID".into());
+                    return Err(unproven("Kraken placement returned duplicate order ID"));
                 }
                 p.order.id = status.order_id.clone();
                 p.order.last_update = cx.now;
@@ -778,32 +805,45 @@ impl Kraken {
                     vec![
                         reply
                             .cancel
-                            .ok_or("Kraken cancellation missing cancelStatus")?,
+                            .ok_or_else(|| unproven("Kraken cancellation missing cancelStatus"))?,
                     ]
                 } else {
                     reply
                         .batch
-                        .ok_or("Kraken batch cancellation missing batchStatus")?
+                        .ok_or_else(|| unproven("Kraken batch cancellation missing batchStatus"))?
                 };
                 if statuses.len() != ids.len() {
-                    return Err("Kraken batch cancellation response count mismatch".into());
+                    return Err(unproven(
+                        "Kraken batch cancellation response count mismatch",
+                    ));
                 }
                 let mut seen = HashSet::new();
                 let mut error = None;
+                let mut cancelled = false;
                 for status in statuses {
                     if status.status == "cancelled"
                         && ids.contains(&status.order_id)
                         && seen.insert(status.order_id.clone())
                     {
+                        cancelled = true;
                         self.account_order_removed(cx, &status.order_id);
                     } else {
-                        error = Some(format!(
+                        let message = format!(
                             "Kraken cancellation rejected or identity mismatch: {}",
                             status.status
-                        ));
+                        );
+                        error = Some(if ids.contains(&status.order_id) {
+                            status_failure(message, &status.status)
+                        } else {
+                            unproven(message)
+                        });
                     }
                 }
-                if let Some(error) = error {
+                if let Some(mut error) = error {
+                    // Other orders in the batch were cancelled.
+                    if cancelled && error.outcome == Some(Outcome::Rejected) {
+                        error.outcome = None;
+                    }
                     return Err(error);
                 }
                 if let Some(job) = self.trading.active.as_mut()
@@ -817,14 +857,21 @@ impl Kraken {
                 mut replacement,
                 ..
             } => {
-                let status = reply.edit.ok_or("Kraken amendment missing editStatus")?;
+                let status = reply
+                    .edit
+                    .ok_or_else(|| unproven("Kraken amendment missing editStatus"))?;
                 if !matches!(status.status.as_str(), "edited" | "filled")
                     || status.order_id != original.id
                 {
-                    return Err(format!(
+                    let message = format!(
                         "Kraken amendment rejected or identity mismatch: {}",
                         status.status
-                    ));
+                    );
+                    return Err(if status.order_id == original.id {
+                        status_failure(message, &status.status)
+                    } else {
+                        unproven(message)
+                    });
                 }
                 if status.status == "edited"
                     && let Some(current) = cx.store.order(&original.id).cloned()
@@ -864,6 +911,7 @@ impl Kraken {
                     .preferences
                     .ok_or("Kraken leverage response missing preferences")?;
                 let market = cx.store.market(&symbol).ok_or("Unknown Kraken market")?;
+                // A read: no outcome to classify.
                 let leverage = prefs
                     .iter()
                     .find(|p| p.symbol.eq_ignore_ascii_case(&market.symbol))
@@ -885,38 +933,158 @@ impl Kraken {
         }
         Ok(None)
     }
-    fn trading_finish(&mut self, cx: &mut Cx<'_, Pending>, result: Result<String, String>) {
+    fn trading_finish(&mut self, cx: &mut Cx<'_, Pending>, result: Result<String, VenueError>) {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
-            let result = result.map_err(|error| {
-                if job.amend_canceled {
-                    format!(
-                        "Kraken canceled the original protective order; replacement failed: {error}"
-                    )
-                } else if !job.ids.is_empty() {
-                    format!("{error}; already accepted order IDs: {}", job.ids.join(","))
-                } else {
-                    error
+            match result {
+                Ok(result) => cx.done(job.command, Ok(result)),
+                Err(mut error) => {
+                    if job.amend_canceled {
+                        error.message = format!(
+                            "Kraken canceled the original protective order; replacement failed: {}",
+                            error.message
+                        );
+                    } else if !job.ids.is_empty() {
+                        error.message = format!(
+                            "{}; already accepted order IDs: {}",
+                            error.message,
+                            job.ids.join(",")
+                        );
+                    }
+                    if (job.effective || job.amend_canceled || !job.ids.is_empty())
+                        && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                    {
+                        error.outcome = None;
+                    }
+                    cx.fail(job.command, error);
                 }
-            });
-            cx.done(job.command, result);
+            }
         }
     }
     pub(crate) fn trading_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        _request: Request,
+        request: Request,
         error: &str,
     ) {
-        self.trading_finish(
-            cx,
-            Err(format!(
-                "Kraken request failed; write outcome may be uncertain: {error}"
-            )),
-        );
+        let error = VenueError::new(format!(
+            "Kraken request failed; write outcome may be uncertain: {error}"
+        ))
+        .kind(ErrorKind::Network);
+        let error = if matches!(request.step, Step::Leverage { .. }) {
+            error
+        } else {
+            error.outcome(Outcome::Unknown)
+        };
+        self.trading_finish(cx, Err(error));
         self.trading_pump(cx);
     }
 }
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+/// A 2xx answer that does not prove what happened.
+fn unproven(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::Unknown)
+}
+
+/// A non-2xx answer: 408 and 5xx do not prove the venue refused it.
+fn http_failure(status: u16, message: impl Into<String>) -> VenueError {
+    let error = VenueError::new(message);
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    match status {
+        401 => rejected(error, ErrorKind::AuthInvalid),
+        403 => rejected(error, ErrorKind::AuthPermission),
+        429 => rejected(error, ErrorKind::RateLimited),
+        408 => error.outcome(Outcome::Unknown),
+        400..=499 => rejected(error, ErrorKind::Rejected),
+        _ => error.outcome(Outcome::Unknown),
+    }
+}
+
+/// A 2xx `result: error` envelope, classified by Kraken's documented error codes.
+fn refusal(message: String, status: Option<&str>, code: Option<String>) -> VenueError {
+    let error = VenueError::new(message);
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    let error = match (status, code.as_deref()) {
+        (Some("unauthorized"), _) | (_, Some("authenticationError")) => {
+            rejected(error, ErrorKind::AuthInvalid)
+        }
+        (_, Some("apiLimitExceeded")) => rejected(error, ErrorKind::RateLimited),
+        (
+            _,
+            Some(
+                "accountInactive"
+                | "insufficientFunds"
+                | "invalidAccount"
+                | "invalidAmount"
+                | "invalidArgument"
+                | "invalidUnit"
+                | "marketUnavailable"
+                | "nonceBelowThreshold"
+                | "nonceDuplicate"
+                | "notFound"
+                | "requiredArgumentMissing",
+            ),
+        )
+        | (Some("BAD_REQUEST"), _) => rejected(error, ErrorKind::Rejected),
+        (_, Some("Server Error" | "Unavailable" | "unknownError")) => {
+            error.outcome(Outcome::Unknown)
+        }
+        _ => error,
+    };
+    match code {
+        Some(code) => error.venue_code(code),
+        None => error,
+    }
+}
+
+/// A send/edit/cancel status that is not success. Only Kraken's documented
+/// refusal statuses prove nothing happened.
+fn status_failure(message: String, status: &str) -> VenueError {
+    let error = VenueError::new(message);
+    let refused = matches!(
+        status,
+        "marketSuspended"
+            | "marketInactive"
+            | "invalidPrice"
+            | "invalidSize"
+            | "tooManySmallOrders"
+            | "insufficientAvailableFunds"
+            | "wouldCauseLiquidation"
+            | "clientOrderIdAlreadyExist"
+            | "clientOrderIdTooBig"
+            | "clientOrderIdInvalid"
+            | "maxPositionViolation"
+            | "outsidePriceCollar"
+            | "wouldIncreasePriceDispersion"
+            | "notFound"
+            | "orderForEditNotAStop"
+            | "orderForEditNotFound"
+            | "postWouldExecute"
+            | "iocWouldNotExecute"
+            | "selfFill"
+            | "wouldNotReducePosition"
+            | "marketIsPostOnly"
+            | "tooManyOrders"
+            | "fixedLeverageTooHigh"
+            | "cannotEditTriggerPriceOfTrailingStop"
+            | "cannotEditLimitPriceOfTrailingStop"
+    );
+    if refused {
+        error
+            .kind(ErrorKind::Rejected)
+            .outcome(Outcome::Rejected)
+            .venue_code(status)
+    } else if status.is_empty() {
+        error.outcome(Outcome::Unknown)
+    } else {
+        error.venue_code(status)
+    }
+}
+
 fn number(n: f64) -> String {
     safe_cex_engine::num::format(n)
 }
