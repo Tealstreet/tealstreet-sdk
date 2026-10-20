@@ -2,7 +2,8 @@
 import type { WasmEngineLike } from './host.mjs';
 
 export class WasmEngine implements WasmEngineLike {
-  accountId(): string | undefined;
+  /** Available in builds with Coinbase portfolio selection. */
+  accountId?(): string | undefined;
   constructor(venue: string, optionsJson: string);
   start(now: number): string;
   command(json: string, now: number): string;
@@ -10,14 +11,18 @@ export class WasmEngine implements WasmEngineLike {
   snapshotFrame(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
   wsMessage(socket: number, text: string, now: number): string;
-  wsMessageActions(socket: number, text: string, now: number): string | undefined;
-  wsMessageBytes(socket: number, bytes: Uint8Array, now: number): string | undefined;
+  /** Optional text fast paths; Paradex-only builds use wsMessage for controls. */
+  wsMessageActions?(socket: number, text: string, now: number): string | undefined;
+  wsMessageBytes?(socket: number, bytes: Uint8Array, now: number): string | undefined;
   wsBinary(socket: number, data: Uint8Array, now: number): string;
   wsClose(socket: number, code: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;
   httpChunk(request: number, data: Uint8Array, now: number): string;
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
+  /** Headers are name:value lines, with no added whitespace. */
+  payloadSigned(request: number, signature: string, headers: string, now: number): string;
+  payloadSignFailed(request: number, error: string, now: number): string;
   timer(timer: number, now: number): string;
   free(): void;
 }

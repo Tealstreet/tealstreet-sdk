@@ -6,11 +6,17 @@ publish.workspace = true
 
 [features]
 order-locks = []
+# Prediction venues opt in; other standalone builds omit metadata storage and frames.
+prediction = []
+# Polling venues and native hosts opt into the polling configuration decoder.
+polling-control = []
+
 command-tracking = []
 book-deltas = []
 command-asterdex = []
 command-apexomni = []
 command-polymarket = []
+command-kucoinspot = []
 # Bybit opts in through its dependency so unrelated single-venue WASM builds
 # omit option-query deserialization and semantic frame storage/writers.
 # Public Command variants and unsupported-IV guards remain available everywhere.

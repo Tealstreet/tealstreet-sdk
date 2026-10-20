@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+spot = []
+
 [dependencies]
 safe-cex-engine = { workspace = true, features = ["order-locks"] }
 safe-cex-crypto.workspace = true

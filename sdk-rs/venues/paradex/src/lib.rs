@@ -16,6 +16,7 @@ pub struct Options {
     pub key: Option<String>,
     pub paradex_address: Option<String>,
     pub subkey_address: Option<String>,
+    pub payload_signer: bool,
 }
 
 impl Options {
@@ -152,6 +153,16 @@ impl Venue for Paradex {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         self.dispatch_failed(cx, pending, error);
+        self.failures(cx);
+    }
+    fn on_sign_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        match pending {
+            Pending::Trade(request) => {
+                self.trading
+                    .on_sign_failed(cx, &mut self.account, request, error)
+            }
+            other => self.dispatch_failed(cx, other, error),
+        }
         self.failures(cx);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
