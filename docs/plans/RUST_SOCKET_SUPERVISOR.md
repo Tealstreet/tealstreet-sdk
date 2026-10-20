@@ -106,7 +106,8 @@ KuCoin and Polymarket retain explicit pong requirements even amid other data.
   against the unchanged 1,258,291 budget (5,776-byte headroom); no further size
   refactoring was necessary. Engine default 93/all-feature 99 tests pass.
 - Merged root TypeScript checks pass: typecheck 44 tasks, lint 28 tasks and
-  tests 27 tasks. Workspace native/WASM checks and public recordings are active.
+  tests 27 tasks. Workspace native tests pass (2,829 tests); strict workspace
+  native and WASM Clippy pass. Public recording/replay verification continues.
 - Gate-plan review covers 21 frozen public profile controls, 23 fresh public
   profile gates from 21 captures, 29 generated private correctness cases and
   17 single-feature size selectors. Before any CPU measurement, the initial
@@ -114,6 +115,34 @@ KuCoin and Polymarket retain explicit pong requirements even amid other data.
   all recorded timestamps (ceil of the raw maximum timestamp, at least 20s),
   with every HTTP anchor. This retains native heartbeat/watchdog opportunities.
   Frozen fixtures, metrics, thresholds and output normalizers are unchanged.
+
+## Public alias discovery and coverage limitation
+
+On 2026-10-20, Bitget USDC's live contracts/tickers returned 49 native symbols,
+including `BTCPERP` and `ETHPERP`. Rust and TS both retain those native IDs.
+The initial `BTCUSDC,ETHUSDC` book selection was rejected by the venue; the
+recording matrix now uses `BTCPERP,ETHPERP`. Corrected capture and replay must
+pass before claiming USDC public-book or performance coverage.
+
+Classic inverse contracts returned HTTP 200/code `00000` with an empty catalog
+for both `coin-futures` and `COIN-FUTURES`; USDC also returned identical data
+for lowercase/uppercase queries. Query casing is therefore not the cause.
+The inverse capture's `BTCUSD,ETHUSD` book requests were rejected. Its two
+remaining ticker rows, `BTCUSDU26` and `ETHUSDU26`, have null bid/ask prices,
+zero volume and a delivery timestamp before capture; they do not establish
+available perpetual books. Bitget's [official classic coin-margined delisting
+announcement](https://www.bitget.com/support/articles/12560603893788) schedules
+BTCUSD/ETHUSD and seven other classic perpetuals for delisting on September 17,
+2026 at 15:00 UTC+8, distinguishing them from UTA products.
+
+Fresh classic-inverse public-book replay/performance coverage is unavailable
+against this empty live catalog. The rejected zero-book capture is discovery
+evidence, not a passing gate; no replacement public fixture is fabricated.
+Keep the Rust/TS inverse implementations and native/generated-private coverage;
+this limitation neither retires the product nor adds UTA inverse routing.
+Frozen inputs, thresholds and normalizers remain unchanged. Investigation
+includes the original captures and four independent official public HTTP
+responses; no authenticated live connectivity is claimed.
 
 ## Remaining migration inventory
 
