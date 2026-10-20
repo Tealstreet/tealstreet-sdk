@@ -193,6 +193,8 @@ export class Tape {
           )
         : records;
     this.venue = venue;
+    this.liveSmoke = records.some((record) => record.type === 'meta' && record.liveSmoke === true);
+    this.bootstrapFrame = (frame) => venue.bootstrapFrame?.(frame) || (this.liveSmoke && ['open', 'close', 'ws'].includes(frame.type) && frame.bootstrap === true);
     this.isPrivate = isPrivate;
     this.timeoutMs = timeoutMs;
     this.options = options ?? {
@@ -279,7 +281,9 @@ export class Tape {
     this.recordedSocketRequests = new Map();
     this.recordedSocketQueues = new Map();
     for (const record of records.filter((r) => r.type === 'ws-send')) {
-      const request = venue.socketRequest?.(JSON.parse(record.text));
+      let message;
+      try { message = JSON.parse(record.text); } catch { continue; /* Plain-text heartbeat. */ }
+      const request = venue.socketRequest?.(message);
       if (!request) continue;
       const key = `${canonicalUrl(record.url, this.callerIds, this.venue)} ${record.socket ?? 0} ${request.id}`;
       if (this.recordedSocketRequests.has(key)) throw new Error(`duplicate taped websocket request ${key}`);
@@ -843,7 +847,7 @@ export class Tape {
       // Fence only the first physical socket; a later command may create the
       // first frame's subscription. Bootstrap auth then selects its own socket.
       if (first) await this.socketFor(first.url, first.text, first.socket, true);
-      for (const frame of this.frames.filter((frame) => this.venue.bootstrapFrame?.(frame))) {
+      for (const frame of this.frames.filter((frame) => this.bootstrapFrame(frame))) {
         await this.deliverFrame(frame);
         await new Promise(setImmediate);
       }
@@ -861,9 +865,9 @@ export class Tape {
     this.replayClock = clock;
     const start = performance.now();
     let delivered = 0;
-    const warm = Math.floor(this.frames.reduce((count, frame) => count + (this.venue.bootstrapFrame?.(frame) ? 0 : 1), 0) / 4);
+    const warm = Math.floor(this.frames.reduce((count, frame) => count + (this.bootstrapFrame(frame) ? 0 : 1), 0) / 4);
     for (const frame of this.frames) {
-      if (this.venue.bootstrapFrame?.(frame)) continue;
+      if (this.bootstrapFrame(frame)) continue;
       if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
       if (this.isPrivate && !clock) {
         const wait = frame.t - (performance.now() - start);

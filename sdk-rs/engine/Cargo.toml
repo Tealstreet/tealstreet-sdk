@@ -7,8 +7,15 @@ publish.workspace = true
 [features]
 # Prediction venues opt in; other standalone builds omit metadata storage and frames.
 prediction = []
-# Live polling controls are needed only by polling venues and native hosts.
+# Polling venues and native hosts opt into the polling configuration decoder.
 polling-control = []
+
+command-tracking = []
+book-deltas = []
+command-asterdex = []
+command-apexomni = []
+command-polymarket = []
+command-kucoinspot = []
 
 [dependencies]
 serde.workspace = true

@@ -36,13 +36,8 @@ compile_error!(
     "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
-#[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
-use safe_cex_engine::model::CancelOrderRef;
-use safe_cex_engine::model::PlaceOrderOpts;
-#[cfg(feature = "asterdex")]
-use safe_cex_engine::model::StpMode;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
+    Action, Engine, Event, LogLevel, Notice, RequestId, SocketId, TimerId, Venue,
 };
 #[cfg(feature = "apexomni")]
 use safe_cex_venue_apexomni::{ApexOmni, Options as ApexOmniOptions};
@@ -539,343 +534,6 @@ fn encode(actions: &[Action]) -> String {
         })
         .collect();
     serde_json::to_string(&out).unwrap_or_default()
-}
-
-/// Commands as JavaScript sends them.
-#[derive(Deserialize)]
-#[serde(tag = "op", rename_all = "camelCase")]
-enum CommandIn {
-    #[cfg(any(feature = "apexomni", feature = "kucoinspot"))]
-    GetAccount {
-        command: u32,
-    },
-    SetTickerSymbols {
-        symbols: Vec<String>,
-    },
-    SubscribeOrderBook {
-        symbol: String,
-    },
-    UnsubscribeOrderBook {
-        symbol: String,
-    },
-    SubscribeCandles {
-        symbol: String,
-        interval: String,
-    },
-    UnsubscribeCandles {
-        symbol: String,
-        interval: String,
-    },
-    PlaceOrders {
-        command: u32,
-        orders: Vec<PlaceOrderOpts>,
-    },
-    CancelOrders {
-        command: u32,
-        ids: Vec<String>,
-    },
-    #[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
-    CancelOrdersWithSymbols {
-        command: u32,
-        orders: Vec<CancelOrderRef>,
-    },
-    AmendOrder {
-        command: u32,
-        id: String,
-        #[serde(default)]
-        price: Option<f64>,
-        #[serde(default)]
-        amount: Option<f64>,
-    },
-    #[cfg(feature = "kucoinspot")]
-    AmendOrderWithSymbol {
-        command: u32,
-        id: String,
-        symbol: String,
-        #[serde(default)]
-        price: Option<f64>,
-        #[serde(default)]
-        amount: Option<f64>,
-    },
-    CancelSymbolOrders {
-        command: u32,
-        symbol: String,
-    },
-    #[serde(rename_all = "camelCase")]
-    SetLeverage {
-        command: u32,
-        symbol: String,
-        leverage: f64,
-    },
-    SetMarginType {
-        command: u32,
-        symbol: String,
-        isolated: bool,
-    },
-    SetPositionMode {
-        command: u32,
-        hedged: bool,
-    },
-    #[cfg(feature = "asterdex")]
-    FetchStpMode {
-        command: u32,
-    },
-    #[cfg(any(feature = "asterdex", feature = "polymarket"))]
-    FetchAccount {
-        command: u32,
-    },
-    #[cfg(any(feature = "asterdex", feature = "polymarket"))]
-    FetchOrderBook {
-        command: u32,
-        symbol: String,
-        #[serde(default)]
-        limit: Option<u32>,
-    },
-    #[cfg(feature = "asterdex")]
-    SetStpMode {
-        command: u32,
-        mode: StpMode,
-    },
-    FetchLeverage {
-        command: u32,
-        symbol: String,
-    },
-    #[serde(rename_all = "camelCase")]
-    FetchFills {
-        command: u32,
-        #[serde(default)]
-        symbol: Option<String>,
-        #[serde(default)]
-        order_id: Option<String>,
-        #[serde(default)]
-        from: Option<f64>,
-        #[serde(default)]
-        to: Option<f64>,
-        #[serde(default)]
-        limit: Option<u32>,
-    },
-    FetchOrderHistory {
-        command: u32,
-        #[serde(default)]
-        symbol: Option<String>,
-        #[serde(default)]
-        from: Option<f64>,
-        #[serde(default)]
-        to: Option<f64>,
-        #[serde(default)]
-        limit: Option<u32>,
-    },
-    #[serde(rename_all = "camelCase")]
-    FetchIncome {
-        command: u32,
-        #[serde(default)]
-        symbol: Option<String>,
-        #[serde(default)]
-        income_type: Option<String>,
-        #[serde(default)]
-        from: Option<f64>,
-        #[serde(default)]
-        to: Option<f64>,
-        #[serde(default)]
-        limit: Option<u32>,
-    },
-    #[serde(rename_all = "camelCase")]
-    FindOrderByClientOrderId {
-        command: u32,
-        symbol: String,
-        client_order_id: String,
-    },
-    FetchPublicTrades {
-        command: u32,
-        symbol: String,
-        #[serde(default)]
-        limit: Option<u32>,
-    },
-    #[serde(rename_all = "camelCase")]
-    FetchCandles {
-        command: u32,
-        symbol: String,
-        interval: String,
-        #[serde(default)]
-        limit: Option<u32>,
-        #[serde(default)]
-        from: Option<f64>,
-        #[serde(default)]
-        to: Option<f64>,
-    },
-}
-
-impl From<CommandIn> for Command {
-    fn from(command: CommandIn) -> Self {
-        match command {
-            #[cfg(any(feature = "apexomni", feature = "kucoinspot"))]
-            CommandIn::GetAccount { command } => Self::FetchAccount { command },
-            CommandIn::FindOrderByClientOrderId {
-                command,
-                symbol,
-                client_order_id,
-            } => Self::Query {
-                command,
-                query: Query::OrderByClientId {
-                    symbol,
-                    client_order_id,
-                },
-            },
-            CommandIn::SetTickerSymbols { symbols } => Self::SetTickerSymbols { symbols },
-            CommandIn::SubscribeOrderBook { symbol } => Self::SubscribeOrderBook { symbol },
-            CommandIn::UnsubscribeOrderBook { symbol } => Self::UnsubscribeOrderBook { symbol },
-            CommandIn::SubscribeCandles { symbol, interval } => {
-                Self::SubscribeCandles { symbol, interval }
-            }
-            CommandIn::UnsubscribeCandles { symbol, interval } => {
-                Self::UnsubscribeCandles { symbol, interval }
-            }
-            CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
-            CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
-            #[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
-            CommandIn::CancelOrdersWithSymbols { command, orders } => {
-                Self::CancelOrdersWithSymbols { command, orders }
-            }
-            CommandIn::AmendOrder {
-                command,
-                id,
-                price,
-                amount,
-            } => Self::AmendOrder {
-                command,
-                id,
-                price,
-                amount,
-            },
-            #[cfg(feature = "kucoinspot")]
-            CommandIn::AmendOrderWithSymbol {
-                command,
-                id,
-                symbol,
-                price,
-                amount,
-            } => Self::AmendOrderWithSymbol {
-                command,
-                id,
-                symbol,
-                price,
-                amount,
-            },
-            CommandIn::SetMarginType {
-                command,
-                symbol,
-                isolated,
-            } => Self::SetMarginType {
-                command,
-                symbol,
-                isolated,
-            },
-            CommandIn::SetPositionMode { command, hedged } => {
-                Self::SetPositionMode { command, hedged }
-            }
-            #[cfg(feature = "asterdex")]
-            CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
-            #[cfg(any(feature = "asterdex", feature = "polymarket"))]
-            CommandIn::FetchAccount { command } => Self::FetchAccount { command },
-            #[cfg(any(feature = "asterdex", feature = "polymarket"))]
-            CommandIn::FetchOrderBook {
-                command,
-                symbol,
-                limit,
-            } => Self::FetchOrderBook {
-                command,
-                symbol,
-                limit,
-            },
-            #[cfg(feature = "asterdex")]
-            CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
-            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
-            CommandIn::FetchFills {
-                command,
-                symbol,
-                order_id,
-                from,
-                to,
-                limit,
-            } => Self::Query {
-                command,
-                query: Query::Fills {
-                    symbol,
-                    order_id,
-                    from_ms: from,
-                    to_ms: to,
-                    limit,
-                },
-            },
-            CommandIn::FetchOrderHistory {
-                command,
-                symbol,
-                from,
-                to,
-                limit,
-            } => Self::Query {
-                command,
-                query: Query::OrderHistory {
-                    symbol,
-                    from_ms: from,
-                    to_ms: to,
-                    limit,
-                },
-            },
-            CommandIn::FetchIncome {
-                command,
-                symbol,
-                income_type,
-                from,
-                to,
-                limit,
-            } => Self::Query {
-                command,
-                query: Query::Income {
-                    symbol,
-                    kind: income_type,
-                    from_ms: from,
-                    to_ms: to,
-                    limit,
-                },
-            },
-            CommandIn::FetchPublicTrades {
-                command,
-                symbol,
-                limit,
-            } => Self::Query {
-                command,
-                query: Query::PublicTrades { symbol, limit },
-            },
-            CommandIn::CancelSymbolOrders { command, symbol } => {
-                Self::CancelSymbolOrders { command, symbol }
-            }
-            CommandIn::SetLeverage {
-                command,
-                symbol,
-                leverage,
-            } => Self::SetLeverage {
-                command,
-                symbol,
-                leverage,
-            },
-            CommandIn::FetchCandles {
-                command,
-                symbol,
-                interval,
-                limit,
-                from,
-                to,
-            } => Self::FetchCandles {
-                command,
-                symbol,
-                interval,
-                limit,
-                from_ms: from,
-                to_ms: to,
-            },
-        }
-    }
 }
 
 /// Bytes of WebAssembly linear memory currently reserved by this module.
@@ -1394,42 +1052,13 @@ impl WasmEngine {
     }
 
     pub fn command(&mut self, command_json: &str, now: f64) -> Result<String, JsError> {
-        #[cfg(feature = "breakoutprop")]
-        {
-            #[derive(Deserialize)]
-            struct Header<'a> {
-                #[serde(borrow)]
-                op: std::borrow::Cow<'a, str>,
+        let event = match safe_cex_engine::command::decode_host_input(command_json)? {
+            safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
+            safe_cex_engine::command::HostInput::TickIntervalChanged { interval_ms } => {
+                Event::TickIntervalChanged { interval_ms }
             }
-            let header: Header<'_> = serde_json::from_str(command_json)?;
-            if header.op == "setTickInterval" {
-                #[derive(Deserialize)]
-                #[serde(untagged)]
-                enum Interval {
-                    Millis(f64),
-                    Paused(()),
-                }
-                #[derive(Deserialize)]
-                struct Control {
-                    interval: Interval,
-                }
-                let control: Control = serde_json::from_str(command_json)?;
-                let interval_ms = match control.interval {
-                    Interval::Millis(ms) => ms,
-                    Interval::Paused(()) => f64::INFINITY,
-                };
-                if interval_ms.is_nan() || interval_ms <= 0.0 {
-                    return Err(JsError::new(
-                        "Polling interval must be positive or null to pause",
-                    ));
-                }
-                self.inner
-                    .handle(now, Event::TickIntervalChanged { interval_ms });
-                return Ok(self.flush());
-            }
-        }
-        let command: CommandIn = serde_json::from_str(command_json)?;
-        self.inner.handle(now, Event::Command(command.into()));
+        };
+        self.inner.handle(now, event);
         Ok(self.flush())
     }
 
@@ -1491,11 +1120,12 @@ mod tests {
                 cfg!(any(feature = "asterdex", feature = "polymarket")),
             ),
         ] {
-            let parsed =
-                serde_json::from_str::<CommandIn>(&format!(r#"{{"op":"{op}","command":77}}"#));
+            let parsed = safe_cex_engine::command::decode_command(&format!(
+                r#"{{"op":"{op}","command":77}}"#
+            ));
             if enabled {
                 assert!(matches!(
-                    Command::from(parsed.unwrap()),
+                    parsed.unwrap(),
                     Command::FetchAccount { command: 77 }
                 ));
             } else {
@@ -1543,6 +1173,11 @@ mod tests {
     }
 
     use super::*;
+    use safe_cex_engine::Command;
+    #[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
+    use safe_cex_engine::model::CancelOrderRef;
+    #[cfg(feature = "asterdex")]
+    use safe_cex_engine::model::StpMode;
 
     #[test]
     fn delegated_header_lines_preserve_value_bytes_and_reject_malformed_lines() {
@@ -1561,22 +1196,22 @@ mod tests {
 
     #[test]
     fn amendment_symbol_context_is_preserved_for_spot_builds() {
-        let wire = serde_json::from_str::<CommandIn>(
+        let wire = safe_cex_engine::command::decode_command(
             r#"{"op":"amendOrderWithSymbol","command":19,"id":"unobserved","symbol":"BTC-USDT","price":100}"#,
         );
         #[cfg(feature = "kucoinspot")]
         assert!(
-            matches!(Command::from(wire.unwrap()), Command::AmendOrderWithSymbol { command: 19, id, symbol, price: Some(100.0), amount: None }
+            matches!(wire.unwrap(), Command::AmendOrderWithSymbol { command: 19, id, symbol, price: Some(100.0), amount: None }
             if id == "unobserved" && symbol == "BTC-USDT")
         );
         #[cfg(not(feature = "kucoinspot"))]
         assert!(wire.is_err());
-        let legacy = serde_json::from_str::<CommandIn>(
+        let legacy = safe_cex_engine::command::decode_command(
             r#"{"op":"amendOrder","command":19,"id":"legacy","symbol":"ignored","price":100}"#,
         )
         .unwrap();
         assert!(
-            matches!(Command::from(legacy), Command::AmendOrder { command: 19, id, price: Some(100.0), amount: None } if id == "legacy")
+            matches!(legacy, Command::AmendOrder { command: 19, id, price: Some(100.0), amount: None } if id == "legacy")
         );
     }
 
@@ -1681,11 +1316,11 @@ mod tests {
     #[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
     #[test]
     fn cancellation_with_symbols_preserves_caller_identity() {
-        let wire: CommandIn = serde_json::from_str(
+        let wire = safe_cex_engine::command::decode_command(
             r#"{"op":"cancelOrdersWithSymbols","command":19,"orders":[{"id":"22542179","symbol":"BTCUSDT"}]}"#,
         ).unwrap();
         assert!(
-            matches!(Command::from(wire), Command::CancelOrdersWithSymbols { command: 19, orders }
+            matches!(wire, Command::CancelOrdersWithSymbols { command: 19, orders }
             if orders == vec![CancelOrderRef { id: "22542179".into(), symbol: "BTCUSDT".into() }])
         );
     }
@@ -1703,14 +1338,14 @@ mod tests {
         for (index, json) in commands.into_iter().enumerate() {
             if index == 0 {
                 assert_eq!(
-                    serde_json::from_str::<CommandIn>(json).is_ok(),
+                    safe_cex_engine::command::decode_command(json).is_ok(),
                     cfg!(any(feature = "asterdex", feature = "kucoinspot"))
                 );
                 continue;
             }
-            let parsed = serde_json::from_str::<CommandIn>(json);
+            let parsed = safe_cex_engine::command::decode_command(json);
             #[cfg(feature = "asterdex")]
-            match (index, Command::from(parsed.unwrap())) {
+            match (index, parsed.unwrap()) {
                 (
                     0,
                     Command::CancelOrdersWithSymbols {
@@ -1749,7 +1384,7 @@ mod tests {
             }
             #[cfg(not(feature = "asterdex"))]
             if cfg!(feature = "polymarket") && matches!(index, 2 | 3) {
-                let command = Command::from(parsed.unwrap());
+                let command = parsed.unwrap();
                 assert!(matches!(
                     (index, command),
                     (2, Command::FetchAccount { command: 19 })
@@ -1773,11 +1408,12 @@ mod tests {
 
     #[test]
     fn forwards_leverage_metadata_command() {
-        let wire: CommandIn =
-            serde_json::from_str(r#"{"op":"fetchLeverage","command":17,"symbol":"BTCUSDT"}"#)
-                .unwrap();
+        let wire = safe_cex_engine::command::decode_command(
+            r#"{"op":"fetchLeverage","command":17,"symbol":"BTCUSDT"}"#,
+        )
+        .unwrap();
         assert!(matches!(
-            Command::from(wire),
+            wire,
             Command::FetchLeverage { command: 17, symbol } if symbol == "BTCUSDT"
         ));
     }

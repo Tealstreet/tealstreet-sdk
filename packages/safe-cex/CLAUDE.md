@@ -36,6 +36,15 @@ yarn test-ci       # Run all tests (deterministic, no network)
 yarn test          # Watch mode
 ```
 
+Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
+both `createExchange` (including saved-account/public factories) and
+`ExchangeWorker`. Registry defaults remain independent of that opt-in.
+`src/__tests__/cutover/*.wasm.test.ts` verifies the worker frame/store consumer
+contract for every `RUST_VENUES` name; actual native startup and independent
+binary lifecycle fixtures have separate evidence scopes. See phase 9 of
+`docs/plans/RUST_REWRITE.md` for deletion blockers; no TS venue may be removed
+merely because its name is registered in Rust.
+
 ## Client order ID contract
 
 `PlaceOrderOpts.clientOrderId` is a caller-supplied ID for the venue-native

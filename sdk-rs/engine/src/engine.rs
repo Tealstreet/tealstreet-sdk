@@ -330,7 +330,6 @@ impl<'a> Response<'a> {
 
 #[derive(Debug)]
 pub enum Event<'a> {
-    #[cfg(feature = "polling-control")]
     /// Host configuration update; infinity pauses optional venue polling.
     TickIntervalChanged {
         interval_ms: f64,
@@ -831,7 +830,6 @@ pub trait Venue {
         pending: Self::Pending,
         error: &str,
     );
-    #[cfg(feature = "polling-control")]
     fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, _interval_ms: f64) {}
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
     /// Opt in only when amendments retain the caller's symbol routing context.
@@ -849,6 +847,21 @@ pub struct Engine<V: Venue> {
     store: Store,
     io: Io<V::Pending>,
     started: bool,
+    #[cfg(feature = "command-tracking")]
+    commands_received: bool,
+    #[cfg(feature = "book-deltas")]
+    book_deltas: bool,
+    #[cfg(feature = "book-deltas")]
+    book_baselines: HashMap<String, BookBaseline>,
+    #[cfg(feature = "book-deltas")]
+    book_market_rows: Vec<(String, String)>,
+}
+
+#[cfg(feature = "book-deltas")]
+struct BookBaseline {
+    market: u32,
+    id: String,
+    book: Book,
 }
 
 impl<V: Venue> Engine<V> {
@@ -858,6 +871,14 @@ impl<V: Venue> Engine<V> {
             store: Store::default(),
             io: Io::default(),
             started: false,
+            #[cfg(feature = "command-tracking")]
+            commands_received: false,
+            #[cfg(feature = "book-deltas")]
+            book_deltas: false,
+            #[cfg(feature = "book-deltas")]
+            book_baselines: HashMap::new(),
+            #[cfg(feature = "book-deltas")]
+            book_market_rows: Vec::new(),
         }
     }
 
@@ -871,6 +892,44 @@ impl<V: Venue> Engine<V> {
 
     pub fn venue(&self) -> &V {
         &self.venue
+    }
+
+    /// Networked hosts opt into level deltas. Browser consumers retain full
+    /// books by default. Switching modes starts a fresh full-book baseline.
+    #[cfg(feature = "book-deltas")]
+    pub fn set_book_deltas(&mut self, enabled: bool) {
+        if self.book_deltas != enabled {
+            self.book_deltas = enabled;
+            self.book_baselines.clear();
+            self.book_market_rows.clear();
+            let symbols: Vec<_> = self
+                .venue
+                .books()
+                .map(|(symbol, _)| symbol.to_owned())
+                .collect();
+            for symbol in symbols {
+                self.request_book_resync(&symbol);
+            }
+        }
+    }
+
+    /// Force a full BOOK on the next flush, including when another client
+    /// joins an existing upstream subscription.
+    #[cfg(feature = "book-deltas")]
+    pub fn request_book_resync(&mut self, symbol: &str) {
+        self.book_baselines.remove(symbol);
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        cx.book_changed(symbol);
+    }
+
+    /// Hosts that allocate command IDs require a fresh command boundary.
+    #[cfg(feature = "command-tracking")]
+    pub fn has_received_commands(&self) -> bool {
+        self.commands_received
     }
 
     pub fn account_id(&self) -> Option<&str> {
@@ -890,13 +949,26 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        #[cfg(feature = "command-tracking")]
+        if matches!(&event, Event::Command(_)) {
+            self.commands_received = true;
+        }
+        #[cfg(feature = "book-deltas")]
+        match &event {
+            Event::Command(Command::SubscribeOrderBook { symbol }) => {
+                self.request_book_resync(symbol);
+            }
+            Event::Command(Command::UnsubscribeOrderBook { symbol }) => {
+                self.book_baselines.remove(symbol);
+            }
+            _ => {}
+        }
         let mut cx = Cx {
             now,
             store: &mut self.store,
             io: &mut self.io,
         };
         match event {
-            #[cfg(feature = "polling-control")]
             Event::TickIntervalChanged { interval_ms } => {
                 self.venue.on_tick_interval(&mut cx, interval_ms)
             }
@@ -1106,7 +1178,9 @@ impl<V: Venue> Engine<V> {
 
     /// The whole current state as one frame, for a consumer that starts late
     /// or skipped frames (a new tab, a throttled hidden tab). Frames taken
-    /// afterwards still apply on top: every value in them is absolute.
+    /// afterwards still apply on top: every value in them is absolute. Delta
+    /// hosts must flush their existing stream before snapshotting a new client;
+    /// this method deliberately leaves the stream's baseline untouched.
     pub fn snapshot_frame(&mut self, now: f64) -> &[u8] {
         let buffer = std::mem::take(&mut self.io.snapshot);
         let mut w = FrameWriter::new(buffer, now);
@@ -1135,16 +1209,91 @@ impl<V: Venue> Engine<V> {
     }
 
     fn write_frame(&mut self, now: f64, store: bool) -> Option<&[u8]> {
+        #[cfg(feature = "book-deltas")]
+        let write_books = {
+            let markets_match = !self.book_deltas
+                || (self.book_market_rows.len() == self.store.markets().len()
+                    && self.book_market_rows.iter().zip(self.store.markets()).all(
+                        |((symbol, id), market)| symbol == &market.symbol && id == &market.id,
+                    ));
+            if self.book_deltas {
+                self.book_baselines.retain(|symbol, _| {
+                    self.venue.book(symbol).is_some() && self.store.market_index(symbol).is_some()
+                });
+                if store && !markets_match {
+                    self.book_market_rows = self
+                        .store
+                        .markets()
+                        .iter()
+                        .map(|market| (market.symbol.clone(), market.id.clone()))
+                        .collect();
+                    let symbols: Vec<_> = self
+                        .venue
+                        .books()
+                        .filter_map(|(symbol, _)| {
+                            let market = self.store.market_index(symbol)?;
+                            let id = &self.store.markets()[market as usize].id;
+                            self.book_baselines
+                                .get(symbol)
+                                .is_none_or(|baseline| {
+                                    baseline.market != market || &baseline.id != id
+                                })
+                                .then(|| symbol.to_owned())
+                        })
+                        .collect();
+                    for symbol in symbols {
+                        self.request_book_resync(&symbol);
+                    }
+                }
+            }
+            // A market-only flush must not publish row indexes ahead of MARKETS.
+            !self.book_deltas || store || markets_match
+        };
         let buffer = std::mem::take(&mut self.io.frame);
         let mut w = FrameWriter::new(buffer, now);
         let pending = store.then(|| self.store.take_pending());
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
         }
-        for symbol in &self.io.changed_books[..self.io.changed_books_active] {
+        let books = self.io.changed_books[..self.io.changed_books_active].iter();
+        #[cfg(feature = "book-deltas")]
+        let books = books.filter(|_| write_books);
+        for symbol in books {
             if let (Some(book), Some(market)) =
                 (self.venue.book(symbol), self.store.market_index(symbol))
             {
+                #[cfg(feature = "book-deltas")]
+                if self.book_deltas {
+                    let id = &self.store.markets()[market as usize].id;
+                    match self.book_baselines.get_mut(symbol) {
+                        Some(baseline)
+                            if baseline.market == market
+                                && &baseline.id == id
+                                && baseline.book.reset_generation() == book.reset_generation() =>
+                        {
+                            book.write_delta(&baseline.book, market, &mut w);
+                            baseline.book.clone_from(book);
+                        }
+                        baseline => {
+                            book.write(market, &mut w);
+                            if let Some(baseline) = baseline {
+                                baseline.market = market;
+                                baseline.id.clone_from(id);
+                                baseline.book.clone_from(book);
+                            } else {
+                                self.book_baselines.insert(
+                                    symbol.clone(),
+                                    BookBaseline {
+                                        market,
+                                        id: id.clone(),
+                                        book: book.clone(),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
                 book.write(market, &mut w);
             }
         }
@@ -1177,7 +1326,14 @@ impl<V: Venue> Engine<V> {
         }
         let empty = w.is_empty();
         let frame = w.finish();
-        self.io.changed_books_active = 0;
+        #[cfg(feature = "book-deltas")]
+        if write_books {
+            self.io.changed_books_active = 0;
+        }
+        #[cfg(not(feature = "book-deltas"))]
+        {
+            self.io.changed_books_active = 0;
+        }
         if let Some(pending) = pending {
             self.store.recycle_pending(pending);
         }
@@ -1315,8 +1471,50 @@ mod streaming_tests {
             self.book.as_ref()
         }
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-            Box::new(std::iter::empty())
+            Box::new(self.book.iter().map(|book| ("A", book)))
         }
+    }
+
+    #[cfg(feature = "command-tracking")]
+    #[test]
+    fn command_boundary_allows_startup_but_records_commands_before_dispatch() {
+        let mut engine = frame_engine();
+        assert!(!engine.has_received_commands());
+        engine.start(0.);
+        assert!(
+            !engine.has_received_commands(),
+            "startup is outside the command ID domain"
+        );
+        engine.handle(
+            1.,
+            Event::WsOpened {
+                socket: SocketId(999),
+            },
+        );
+        assert!(!engine.has_received_commands());
+        engine.handle(
+            1.,
+            Event::TickIntervalChanged {
+                interval_ms: f64::INFINITY,
+            },
+        );
+        assert!(
+            !engine.has_received_commands(),
+            "host configuration is outside the command ID domain"
+        );
+        engine.handle(
+            2.,
+            Event::Command(Command::SubscribeOrderBook { symbol: "A".into() }),
+        );
+        assert!(
+            engine.has_received_commands(),
+            "subscription commands also close the boundary"
+        );
+        engine.start(3.);
+        assert!(
+            engine.has_received_commands(),
+            "start never resets prior command history"
+        );
     }
 
     fn stream(at: ArrayAt, body: &[u8]) -> StreamVenue {
@@ -1445,6 +1643,180 @@ mod streaming_tests {
             .filter(|(kind, _)| *kind == section::BOOK)
             .map(|(_, row)| u32::from_le_bytes(row[..4].try_into().unwrap()))
             .collect()
+    }
+
+    #[cfg(feature = "book-deltas")]
+    fn change_book(
+        engine: &mut Engine<StreamVenue>,
+        side: crate::book::BookSide,
+        price: f64,
+        amount: f64,
+    ) {
+        engine
+            .venue
+            .book
+            .as_mut()
+            .unwrap()
+            .apply(side, price, amount);
+        engine.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "A",
+            },
+        );
+    }
+
+    #[cfg(feature = "book-deltas")]
+    fn book_sections(frame: &[u8]) -> Vec<(u16, Vec<u8>)> {
+        crate::wire::sections(frame)
+            .filter(|(kind, _)| matches!(*kind, section::BOOK | section::BOOK_DELTA))
+            .map(|(kind, payload)| (kind, payload.to_vec()))
+            .collect()
+    }
+
+    #[cfg(feature = "book-deltas")]
+    #[test]
+    fn deltas_coalesce_net_changes_and_snapshots_do_not_consume_the_baseline() {
+        use crate::book::BookSide::{Asks, Bids};
+        let mut engine = frame_engine();
+        engine.set_book_deltas(true);
+        engine.store.set_markets(vec![market("A")]);
+        change_book(&mut engine, Bids, 100., 1.);
+        change_book(&mut engine, Asks, 101., 2.);
+        assert_eq!(
+            book_sections(engine.take_frame(1.).unwrap())[0].0,
+            section::BOOK
+        );
+        change_book(&mut engine, Bids, 100., 3.);
+        change_book(&mut engine, Bids, 99., 4.);
+        change_book(&mut engine, Asks, 101., 0.);
+        assert_eq!(book_sections(engine.snapshot_frame(2.))[0].0, section::BOOK);
+        let sections = book_sections(engine.take_market_frame(2.).unwrap());
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].0, section::BOOK_DELTA);
+        let payload = &sections[0].1;
+        assert_eq!(
+            &payload[..16],
+            &[0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]
+        );
+        let rows: Vec<_> = payload[16..]
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|row| f64::from_le_bytes(*row))
+            .collect();
+        assert_eq!(rows, [100., 3., 99., 4., 101., 0.]);
+        change_book(&mut engine, Bids, 100., 7.);
+        engine.snapshot_frame(3.);
+        change_book(&mut engine, Bids, 100., 3.);
+        // Mid-interval snapshots cannot be used as a new stream boundary.
+        // The global baseline remains the previously flushed value, 3.
+        assert!(engine.take_market_frame(3.).is_none());
+        assert!(engine.take_frame(3.).is_none());
+    }
+
+    #[cfg(feature = "book-deltas")]
+    #[test]
+    fn deltas_resync_on_book_reset_subscription_and_market_identity_changes() {
+        use crate::book::BookSide::Bids;
+        let mut engine = frame_engine();
+        engine.set_book_deltas(true);
+        engine.store.set_markets(vec![market("A")]);
+        change_book(&mut engine, Bids, 100., 1.);
+        engine.take_frame(0.).unwrap();
+        for reset in 0..5 {
+            match reset {
+                0 => engine.venue.book.as_mut().unwrap().clear(),
+                1 => engine
+                    .venue
+                    .book
+                    .as_mut()
+                    .unwrap()
+                    .load_sorted(Bids, [(100., 1.)]),
+                2 => engine
+                    .venue
+                    .book
+                    .as_mut()
+                    .unwrap()
+                    .load_sorted_owned(Bids, vec![(100., 1.)]),
+                3 => engine.venue.book = Some(Book::default()),
+                _ => engine.handle(
+                    1.,
+                    Event::Command(Command::SubscribeOrderBook { symbol: "A".into() }),
+                ),
+            }
+            change_book(&mut engine, Bids, 100., 1.);
+            assert_eq!(
+                book_sections(engine.take_frame(1.).unwrap())[0].0,
+                section::BOOK
+            );
+        }
+        let mut renamed = market("A");
+        renamed.id = "new-native-id".into();
+        engine.store.set_markets(vec![market("B"), renamed]);
+        change_book(&mut engine, Bids, 100., 2.);
+        assert!(
+            engine.take_market_frame(2.).is_none(),
+            "new market indexes wait for MARKETS"
+        );
+        assert_eq!(book_markets(engine.take_frame(2.).unwrap()), [1]);
+        engine.store.set_markets(vec![market("A")]);
+        assert_eq!(
+            book_markets(engine.take_frame(3.).unwrap()),
+            [0],
+            "identity changes resync even without a dirty notification"
+        );
+    }
+
+    #[cfg(feature = "book-deltas")]
+    #[test]
+    fn delta_baselines_are_removed_with_books_and_markets_and_modes_can_switch() {
+        use crate::book::BookSide::Bids;
+        let mut engine = frame_engine();
+        engine.set_book_deltas(true);
+        engine.store.set_markets(vec![market("A")]);
+        change_book(&mut engine, Bids, 100., 1.);
+        engine.take_frame(0.).unwrap();
+        assert_eq!(engine.book_baselines.len(), 1);
+        engine.handle(
+            1.,
+            Event::Command(Command::UnsubscribeOrderBook { symbol: "A".into() }),
+        );
+        assert!(engine.book_baselines.is_empty());
+        engine.venue.book = None;
+        assert!(engine.take_frame(1.).is_none());
+        engine.venue.book = Some(Book::default());
+        change_book(&mut engine, Bids, 100., 1.);
+        assert_eq!(
+            book_sections(engine.take_frame(2.).unwrap())[0].0,
+            section::BOOK
+        );
+        engine.store.set_markets(Vec::new());
+        engine.take_frame(3.).unwrap();
+        assert!(engine.book_baselines.is_empty());
+        engine.store.set_markets(vec![market("A")]);
+        assert_eq!(
+            book_sections(engine.take_frame(4.).unwrap())[0].0,
+            section::BOOK
+        );
+        engine.set_book_deltas(false);
+        change_book(&mut engine, Bids, 100., 2.);
+        assert_eq!(
+            book_sections(engine.take_frame(5.).unwrap())[0].0,
+            section::BOOK
+        );
+        assert!(engine.book_baselines.is_empty());
+        engine.set_book_deltas(true);
+        assert_eq!(
+            book_sections(engine.take_frame(6.).unwrap())[0].0,
+            section::BOOK
+        );
+        change_book(&mut engine, Bids, 100., 3.);
+        assert_eq!(
+            book_sections(engine.take_frame(7.).unwrap())[0].0,
+            section::BOOK_DELTA
+        );
     }
 
     #[test]
