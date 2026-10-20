@@ -83,3 +83,20 @@ negative net total while retaining finite absolute counters and exact signed
 arithmetic; public default validation and thresholds are unchanged. Refresh
 both roots to this helper checkpoint in a new manifest19b, then rerun all36
 private variants before sampling. Original production binaries stay pinned.
+
+Pre-sample implementation audit clarifies the contract: only candidate pooled
+ratios must exceed one. The control may fail an original performance threshold;
+that remains valid retained data with informational threshold status. Candidate
+main CPU/memory must still be strictly wider, and candidate steady CPU must
+pass. A 0.9→1.2 improvement passes; 1.3→1.2 fails widening; 0.8→0.9 fails the
+candidate threshold. Control correctness/operational failures still abort.
+This fixes an unnecessarily strict driver loop before any sample. Manifest19b
+is pinned to SHA256749c690f7c5e78bfeeacac79bca7fcc9d118086e036bc3b457fb031af576cc0b.
+
+Reviewed one-off driver snapshots are committed alongside this protocol as
+`RUST_PERF_CROSSOVER19.driver.py` and `.profile-driver.py`. They retain the
+recorded local paths and refuse prior output destinations. Driver SHA256
+dde386702ddce22687c893608754781340ee597e1126939cb870a4555f71257e
+and profile-driver SHA256
+a4de5e12650857853da0df09e8966fd3750b4fe86e97f6f64810a65cab0837c8
+were independently audited before any performance children ran.

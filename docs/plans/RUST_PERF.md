@@ -11,7 +11,7 @@ green CI, merge and fresh follow-up branch. No stash/rebase/force push.
 Production source is `ecca589fb3`, integrated through landing `922b5fdc89`.
 There are 15 isolated WASM families and 19 public fixture profiles. Release,
 all size budgets, 1,295 Rust tests, native/wasm and isolated-feature Clippy,
-271 harness tests, 100 host tests, 78 SDK WASM tests and repository checks pass.
+273 harness tests, 100 host tests, 78 SDK WASM tests and repository checks pass.
 The 36 private gates are running. The final public comparison and diagnostic
 profiles have not started; performance widening remains unproven. Earlier
 negative eleven-family results remain in `RUST_PERF_INITIAL11.json`.
