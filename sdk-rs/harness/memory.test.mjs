@@ -171,17 +171,27 @@ test('collector rejection propagates unchanged and clears the real deadline time
 
 test('a hung collector shares the total real deadline and cannot sample after late completion', async () => {
   const original = globalThis.setTimeout;
-  let release, sampled = 0, calls = 0;
+  const timers = () => process.getActiveResourcesInfo().filter((name) => name === 'Timeout').length;
+  const before = timers();
+  let release, entered, sampled = 0, calls = 0;
   const pending = new Promise((resolve) => { release = resolve; });
+  const collecting = new Promise((resolve) => { entered = resolve; });
   globalThis.setTimeout = () => { throw new Error('virtual timer cannot own collection deadline'); };
   try {
     const started = performance.now();
-    await assert.rejects(settledMemory({
-      collect: () => { calls++; return pending; },
+    const result = settledMemory({
+      collect: () => { calls++; entered(); return pending; },
       sample: () => { sampled++; return { arrayBuffers: 0 }; },
+      // This case isolates a hung collector, not time spent in the sampling pause.
+      // The real deadline remains live even with a fixed supplied sampling clock.
+      pause: async () => {}, now: () => 0,
       timeoutMs: 30,
-    }), /Backing-buffer memory did not settle/);
+    });
+    await collecting;
+    assert.equal(calls, 1);
+    await assert.rejects(result, /Backing-buffer memory did not settle/);
     assert(performance.now() - started < 500, 'hung collection exceeded its bounded deadline');
+    assert.equal(timers(), before);
     release();
     await new Promise(setImmediate);
     assert.equal(sampled, 0);

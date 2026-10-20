@@ -2480,3 +2480,24 @@ renames prediction_store to market_position_store, while the retained semantic
 frame-capacity regression still references the old name. Update that single
 call, preserving every fixture and assertion. Production workspace check passed
 because this branch is test-only; all-target checks correctly reject it.
+
+
+Test scheduling correction is independently reviewed PASS. Two unit tests had
+assumed setup reached the intended wait before their short wall deadline; the
+full suite correctly timed out earlier under contention. Test-only setup now
+enters actual Tape.play open delivery at logical 50 before its unchanged 30 ms
+deadline and asserts no nested clock pump. The collector case explicitly proves
+entry with an immediate fixture pause/fixed supplied sampling clock while its
+original real 30 ms timer stays live; resource cleanup and suppression of late
+sampling remain required. Production clock/memory code is untouched. Delayed
+originals reproduce both exact failures, revised fixtures pass the same 60 ms
+delays, and restoring the forbidden nested pump still fails. All 36 scoped
+controls and the subsequent 833-helper aggregate pass. Proof logs are
+/tmp/bitunix-harness-timing-{before,stress-after,nested-mutation,after}.log.
+
+Merged source checks pass: 44 typecheck tasks, 28 lint tasks and 27 repository
+test tasks; SDK 7,792 tests in 526 files pass in each source target. The direct
+SDK typecheck also passes after harness changes, bypassing Turbo's cache for
+imports outside the package. Strict all-target native Clippy passes after the
+stale test helper correction. Full native tests and WASM lint continue before
+release replay; no new performance result is claimed yet.

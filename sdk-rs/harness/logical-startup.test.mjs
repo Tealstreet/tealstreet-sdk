@@ -192,10 +192,10 @@ test('actual production adapter releases transformed errors and permits retry ba
 test('actual explicit open delivery cannot borrow an unbounded nested socket clock pump', async () => {
   const url = 'wss://example.test/public';
   const tape = new Tape([
-    { type: 'connect', t: 0, url, connection: 0 },
     { type: 'open', t: 50, url, connection: 0 },
     { type: 'ws', t: 100, url, connection: 0, text: 'data' },
   ], { explicitOpens: true, timeoutMs: 30 });
+  tape.synchronousTicks = true; // There is no tick producer in this fixture.
   const clock = new ReplayClock(epoch);
   clock.install();
   try {
@@ -206,7 +206,20 @@ test('actual explicit open delivery cannot borrow an unbounded nested socket clo
       constructed = true;
       tape.connect(url, () => {}, () => {});
     }, 75);
+    // Enter the open wait before its short wall deadline starts. CPU contention
+    // during earlier settlement must not be mistaken for reaching that wait.
+    await clock.advance(50);
+    let entered = false, nestedPumps = 0;
+    const deliver = tape.deliver.bind(tape);
+    tape.deliver = (...args) => {
+      if (args[0].type === 'open') entered = true;
+      return deliver(...args);
+    };
+    const wait = clock.wait.bind(clock);
+    clock.wait = (...args) => { nestedPumps++; return wait(...args); };
     await assert.rejects(tape.play(undefined, undefined, undefined, clock), /timeout/);
+    assert.equal(entered, true);
+    assert.equal(nestedPumps, 0);
     assert.equal(constructed, false);
     assert.equal(clock.time - epoch, 50);
   } finally { clock.restore(); }
