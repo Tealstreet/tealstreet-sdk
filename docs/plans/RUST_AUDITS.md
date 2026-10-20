@@ -26,7 +26,8 @@ or a downstream caller that breaks. Fix to that bar, not to TS's shape.
    `'typescript' | 'rust'`, a per-venue downstream flag, and a live soak before
    deleting a family.
 
-Settled: Backpack spot retired; Kraken market+TP/SL rejects with a clear error;
+Settled: Backpack spot retired; Kraken market+TP/SL rejects with a clear error
+(futures and spot; spot was placing the entry unprotected until verification);
 Bybit Partial TP/SL keeps TS semantics (sensitive, no change). Standing licence:
 obvious improvements (clearer errors, better messages) need no decision.
 
@@ -85,9 +86,12 @@ High:
   ApeX's required immediate subscriptions and validated ACK-less wallet data.
 - ~~Binance USD-M emits fills from non-TRADE events and does not dedupe on trade id
   (`binance/src/account.rs:1169`).~~ Fixed: TRADE-only execution-ID dedupe, including PM/COIN-M.
+  Verification found liquidation (`x=CALCULATED`) fills dropped; they emit again.
 
 Medium:
 - ~~Phemex cancel-all fails while any place is in flight (`phemex/src/trading.rs:806`).~~ Pending placements are fenced before resolving native cancellation targets. See [verification](RUST_ORDER_RACES.md).
+  Verification found the uncertain-placement fence never cleared on Phemex (cancel-all
+  failed for the session); a post-failure `activeList` read now reconciles it.
 - ~~Cancel-all misses just-placed orders: okx, asterdex, breakoutprop, bitget, blofin, bitrue.~~ Retained acknowledgement routes, pending-placement fences and SDK attempted-symbol scopes cover the gap; Aster/Breakout acknowledgement caches already existed and were retained. See [verification](RUST_ORDER_RACES.md).
 - ~~Backpack amend replaces full size after partial fill (`backpack/src/trading.rs:411`).~~ Replacement subtracts prior and cancel-racing executions and requires definitive cancellation. See [verification](RUST_ORDER_RACES.md).
 - ~~No per-order lock between amend and cancel in most venues.~~ Shared scoped admission covers concurrent/preplanned cancel-replace adapters; existing serial-intent or explicit-lock paths remain. Binance/Bybit findings belong to their lane. See [verification](RUST_ORDER_RACES.md).
@@ -373,6 +377,8 @@ per-venue canary holding the circular-evidence venues last.
   blanks as 0 and continues. Parse blanks as 0, retry with backoff.~~ Fixed:
   blank or malformed seed quotes start at 0 (row kept for live updates); a failed
   or unusable catalog/ticker read retries the whole product chain with backoff.
+  Verification: JSON `null` quotes now behave like blanks (they dropped the row),
+  live nulls keep the last good value, and an all-undecodable ticker read retries.
 - ~~Medium: one bad instrument row aborts the catalogue (`lib.rs:738`); leverage
   for flat symbols missing (no `leverage-info`); account config (posMode, acctLv)
   read once, so a mode change in the OKX app makes every order reject.~~ Fixed:
@@ -602,7 +608,8 @@ TxFlow loses nothing (master TS was a placeholder).
 - Medium: ~~one unknown id rejects the whole cancel batch (`trading.rs:505,1034`)~~
   (uncached IDs sent directly; later cancellations continue and failures surface);
   ~~one malformed REST row freezes reconciliation (`account.rs:652`)~~ (skipped
-  with the store's copy kept; still counted in the page census);
+  with the store's copy kept; still counted in the page census; verification fixed
+  attached `__stop_loss`/`__take_profit` legs and positions being dropped behind it);
   ~~caller client id on attached TP/SL rejected (`trading.rs:120`)~~ (no change:
   the client-ID contract honours caller IDs only on plain Limit/Market).
 - Low: leverage sent as `10.0`; fill without `matchPrice` dropped; spot polls
@@ -624,7 +631,8 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   Phemex now requires one market and sends one PUT; WEEX preserves optional scope;
   ~~one unknown order status/type drops the whole private frame incl. positions
   and balances (`account_wire.rs:298`, `account.rs:601`)~~ (that row is skipped,
-  its executions still emit, the store keeps its copy).
+  its executions still emit, the store keeps its copy; verification: documented
+  `Deactivated`/`Expired` rows now cancel instead of leaving the order Open).
 - Medium: one bad public row stops startup; ~~one bad position row freezes a
   currency slice (`account.rs:286`)~~ (REST and stream rows skip, keeping the
   store copy; the slice balance still commits); no fallback read when a symbol's mode or
@@ -826,7 +834,9 @@ StarkNet typed data, JWT, payloads and SBE decoding match.
 
 ### Cross-venue: silent partial failures
 - Child-leg failures (TP/SL after an entry) must surface as errors on every
-  venue (~~Paradex logs at Warning~~; now Error with a native regression).
+  venue (~~Paradex logs at Warning~~; now Error with a native regression;
+  verification: a rejected TP no longer drops the queued SL, and wrong-side
+  brackets reject before any write instead of placing a bare entry).
 - Batches that fail midway must return placed ids with the error (~~Paradex~~ repaired,
   Binance COIN-M, Bitrue cancels).
 - Integers serialized as floats (`20.0`): ~~Paradex leverage~~ repaired, KuCoin leverage;
