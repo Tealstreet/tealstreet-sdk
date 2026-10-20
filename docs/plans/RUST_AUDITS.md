@@ -203,3 +203,25 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   market orders; spot cancel uses `C`; amend keeps TIF; PM conditional client id
   `newClientStrategyId`; PM TRIGGERED closes; PM cancel-all both endpoints;
   COIN-M rejects caller client ids; spot retired streams; depth snapshot retry.
+
+### Bybit family
+- High: Brazil inverse/option sockets routed to the linear host (engine
+  transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
+  `bybit/src/lib.rs:407`); per-coin balances never set (`account.rs:662`);
+  fills history includes funding/settlement rows (`history.rs:564`); income
+  dedupe drops hedge-mode funding legs (`history.rs:131`).
+- Medium: option failures stall linear startup (`lib.rs:857`); option catalog
+  `baseCoin=All` unverified; live candles lack trade aggregation and seconds
+  intervals; option WS ticker field names likely wrong; no UNIFIED retry on the
+  wallet call; demo reduce-only fill check missing; Hyro tears down on one bad
+  poll (`account.rs:1838`); order/income history caps; Partial TP/SL amend
+  semantics (owner decision); spot create params (`marketUnit`); one unmappable
+  order invalidates every later snapshot (`account.rs:1569`).
+- Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
+  breadth; split-lot error handling; classic upnl; inverse reference price;
+  demo key hint, recvWindow, rate limiter; Hyro early pings.
+- Confirm (TS bugs Rust fixed): spot amount precision, option books socket, spot
+  cancel-all groups, spot trailing/full TP/SL endpoint, inverse position-mode
+  category, stop with only price, category-filtered private topics,
+  PartiallyFilledCanceled, inverse units, failed position read zeroing, create
+  network errors, live candle volume units.
