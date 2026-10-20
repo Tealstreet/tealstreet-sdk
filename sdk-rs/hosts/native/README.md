@@ -146,21 +146,24 @@ Send the exact same JSON command objects as `WasmEngine.command`, for example:
 ```
 
 Polling configuration uses the same host-input decoder as WASM:
-`{"op":"setTickInterval","interval":2500}` updates the account's venue polling,
-and `interval: null` pauses optional polling. Zero, negative, missing or wrongly
-typed intervals are rejected. Configuration has no command ID or result and
+`{"op":"setPollScale","scale":2,"ceiling":10000}` scales each venue poll's own
+cadence (2x slower here) and bounds slowed polls at the optional `ceiling`
+milliseconds unless a native cadence is already slower; `scale: null` pauses
+optional polling. Zero, negative, missing or wrongly typed values are rejected. Configuration has no command ID or result and
 applies to the account, including other connected clients. Very long future
 timers remain cancelable even when their deadline exceeds the system clock.
 
 All trading, account and query variants use the shared typed decoder; individual
 venues still reject operations they do not implement. Text
 responses have `type: "done"`, the caller's `command`, and either `result` (a
-JSON string, as in the WASM host) or `error`. IDs need only be unique among that
+JSON string, as in the WASM host) or `error`; a structured failure adds
+`detail` (`engine/src/error.rs`) beside the unchanged `error` text. IDs need only be unique among that
 client's pending commands; the server allocates separate internal IDs. Duplicate
 pending IDs and resource-limit failures produce `type: "error"` (with `command`
 where known). Malformed JSON and binary commands produce an error without venue
-side effects. Logs (`type: "log"`, `level`, `message`) and `type: "deactivate"`
-notices go to all clients of the account. Results go only to their requester.
+side effects. Logs (`type: "log"`, `level`, `message`), `type: "deactivate"`
+and `type: "startupFailed"` (with `detail`) notices go to all clients of the
+account. Results go only to their requester.
 
 Repeated book/candle subscriptions are idempotent per client, and the venue sees
 only first-subscribe/last-unsubscribe transitions. Another subscription to a live

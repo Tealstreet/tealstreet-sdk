@@ -2,6 +2,9 @@ use safe_cex_engine::model::OrderSide;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_polymarket::{Options, Polymarket, PolymarketOptions, sign};
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 10_000.0;
+
 const KEY: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 const SIGNER: &str = "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf";
 const MARKETS: &str = r#"[{"conditionId":"0x123","slug":"election","question":"Who wins?","clobTokenIds":"[\"1\",\"2\"]","outcomes":"[\"Yes\",\"No\"]","orderPriceMinTickSize":0.01,"orderMinSize":5,"active":true,"closed":false}]"#;
@@ -12,8 +15,8 @@ const POSITIONS: &str = r#"[{"asset":"1","size":10,"avgPrice":0.5,"curPrice":0,"
 fn periodic_pause_keeps_dirty_snapshot_repair_active() {
     let mut h = H::new();
     h.initial();
-    h.event(Event::TickIntervalChanged {
-        interval_ms: f64::INFINITY,
+    h.event(Event::PollScaleChanged {
+        scale: f64::INFINITY,
     });
     // Opening the private stream starts reconciliation; another authenticated
     // event while it is busy makes the current snapshot dirty.
@@ -29,7 +32,12 @@ fn periodic_pause_keeps_dirty_snapshot_repair_active() {
     assert!(h.http.iter().any(|r| r.url.contains("/balance-allowance")));
     h.initial();
     // Ordinary repair completes, then returns to a parked recurring poll.
-    h.e.handle(h.now, Event::TickIntervalChanged { interval_ms: 500. });
+    h.e.handle(
+        h.now,
+        Event::PollScaleChanged {
+            scale: 500. / POLL_MS,
+        },
+    );
     let resumed: Vec<_> =
         h.e.drain_actions()
             .filter_map(|a| match a {
@@ -47,6 +55,7 @@ struct H {
     opened: bool,
     sends: Vec<String>,
     timers: Vec<(TimerId, f64)>,
+    logs: Vec<String>,
 }
 impl H {
     fn with(options: Options) -> Self {
@@ -58,6 +67,7 @@ impl H {
             opened: false,
             sends: vec![],
             timers: vec![],
+            logs: vec![],
         };
         h.e.start(h.now);
         h.collect();
@@ -89,6 +99,9 @@ impl H {
                 Action::WsSend { text, .. } => self.sends.push(text),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
+                    self.logs.push(message)
+                }
                 _ => {}
             }
         }
@@ -340,6 +353,91 @@ fn malformed_money_and_missing_holding_identity_fail_closed() {
     assert_eq!(h.e.store().positions()[0].contracts, 10.0);
 }
 #[test]
+fn malformed_position_row_keeps_its_known_holding_while_other_rows_commit() {
+    for bad in [
+        r#"{"asset":"1","size":"NaN","avgPrice":0.5}"#,
+        r#"{"asset":"1","size":4,"avgPrice":2}"#,
+    ] {
+        let mut h = H::new();
+        h.initial();
+        h.poll();
+        h.response(
+            "/positions",
+            200,
+            &format!(r#"[{bad},{{"asset":"2","size":3,"avgPrice":0.4,"curPrice":0.5}}]"#),
+        );
+        let positions = h.e.store().positions();
+        assert_eq!(positions.len(), 2, "{bad}");
+        let known = positions
+            .iter()
+            .find(|p| p.symbol == "election-Yes")
+            .unwrap();
+        assert_eq!(known.contracts, 10.0);
+        let fresh = positions
+            .iter()
+            .find(|p| p.symbol == "election-No")
+            .unwrap();
+        assert_eq!(fresh.contracts, 3.0);
+        let holdings = h.e.store().prediction_holdings().unwrap();
+        assert_eq!(holdings.len(), 2);
+        assert!(holdings.iter().any(|h| h.market == 0 && h.redeemable));
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"1","allowances":{}}"#,
+        );
+        h.response("/data/orders", 200, r#"{"data":[],"next_cursor":"LTE="}"#);
+        h.poll();
+        h.response("/positions", 200, "[]");
+        assert!(h.e.store().positions().is_empty());
+    }
+}
+#[test]
+fn unusable_current_price_still_commits_the_fresh_holding_size() {
+    for cur in ["7", r#""bogus""#, "null", r#"{"x":1}"#] {
+        let mut h = H::new();
+        h.initial();
+        h.poll();
+        h.response(
+            "/positions",
+            200,
+            &format!(r#"[{{"asset":"1","size":4,"avgPrice":0.25,"curPrice":{cur}}}]"#),
+        );
+        let p = &h.e.store().positions()[0];
+        assert_eq!(p.contracts, 4.0, "{cur}");
+        // Ticker midpoint 0.5 stands in for the unusable quote.
+        assert_eq!(p.notional, 2.0, "{cur}");
+        assert_eq!(p.unrealized_pnl, 1.0, "{cur}");
+    }
+}
+#[test]
+fn holdings_on_unloaded_markets_are_logged_once_per_asset() {
+    let mut h = H::new();
+    h.initial();
+    let unlisted =
+        r#"[{"asset":"77","size":3,"avgPrice":0.5},{"asset":"78","size":0,"avgPrice":0.5}]"#;
+    for _ in 0..2 {
+        h.poll();
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"1","allowances":{}}"#,
+        );
+        h.response("/data/orders", 200, r#"{"data":[],"next_cursor":"LTE="}"#);
+        h.response("/positions", 200, unlisted);
+    }
+    let reports: Vec<_> = h
+        .logs
+        .iter()
+        .filter(|l| l.contains("has no loaded market"))
+        .collect();
+    assert_eq!(
+        reports,
+        ["Polymarket holding 77 has no loaded market; not shown"]
+    );
+    assert!(h.e.store().positions().is_empty());
+}
+#[test]
 fn cursor_orders_commit_atomically_and_cycles_fail_closed() {
     let mut h = H::new();
     h.initial();
@@ -576,8 +674,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     e.drain_actions().for_each(drop);
     e.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let stale: Vec<_> = e
@@ -593,8 +691,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     for interval in [200_000_f64, 500.] {
         e.handle(
             now,
-            Event::TickIntervalChanged {
-                interval_ms: interval,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
             },
         );
         let actions: Vec<_> = e.drain_actions().collect();
@@ -633,8 +731,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     // chain, but must not recreate an active recurring host timer.
     e.handle(
         due,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     e.drain_actions().for_each(drop);
@@ -670,8 +768,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert!(pending.is_empty(), "all fixture account reads complete");
     e.handle(
         due + 2.,
-        Event::TickIntervalChanged {
-            interval_ms: 10_000.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
         },
     );
     let resumed: Vec<_> = e

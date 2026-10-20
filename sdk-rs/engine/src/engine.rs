@@ -1,6 +1,7 @@
 //! The sans-I/O driver. Hosts feed [`Event`]s in and execute the [`Action`]s
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
+use crate::error::VenueError;
 use crate::json::{ArrayAt, ArraySplitter, ItemCheck};
 use crate::model::{
     CancelOrderRef, Candle, OrderIdentityReceipt, OrderSide, PlaceOrderOpts, PositionSide,
@@ -141,6 +142,17 @@ pub enum Notice {
         command: CommandId,
         receipts: Vec<OrderIdentityReceipt>,
     },
+    /// Startup cannot complete without intervention (bad configuration or an
+    /// account the venue refuses); hosts fail `start` with it.
+    StartupFailed {
+        error: VenueError,
+    },
+    /// Completes a command with a structured failure; hosts report it like a
+    /// `CommandDone` error, plus the detail.
+    CommandFailed {
+        command: CommandId,
+        error: VenueError,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -213,6 +225,23 @@ pub enum Action {
         timer: TimerId,
     },
     Notice(Notice),
+}
+
+/// Venue-specific actions outside the shared trading surface.
+#[derive(Clone, Debug, PartialEq)]
+pub enum VenueAction {
+    /// Lighter: the cached account tier as a JSON string, or `null`.
+    FetchAccountTier,
+    /// Lighter: switch the account tier (`standard`, `premium` or `plus`).
+    SetAccountTier { tier: String },
+}
+
+/// The shared rejection for a venue action the venue does not implement.
+pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
+    cx.done(
+        command,
+        Err("This action is not supported on this venue".into()),
+    );
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -306,6 +335,12 @@ pub enum Command {
     SetStpMode {
         command: CommandId,
         mode: crate::model::StpMode,
+    },
+    /// A venue-specific action; the engine rejects it unless the venue implements
+    /// `Venue::on_venue_action`, so venue `on_command` matches never see it.
+    Venue {
+        command: CommandId,
+        action: VenueAction,
     },
     /// Refresh account-specific leverage rails and margin mode for a symbol.
     FetchLeverage {
@@ -418,9 +453,14 @@ impl<'a> Response<'a> {
 
 #[derive(Debug)]
 pub enum Event<'a> {
-    /// Host configuration update; infinity pauses optional venue polling.
-    TickIntervalChanged {
-        interval_ms: f64,
+    /// Host polling policy: a factor on each poll's own cadence (resolved SDK
+    /// tick over its metadata tick); infinity pauses optional venue polling.
+    PollScaleChanged {
+        scale: f64,
+    },
+    /// Host's absolute bound on slowed polls (its resolved tick); `None` lifts it.
+    PollCeilingChanged {
+        ceiling_ms: Option<f64>,
     },
     WsOpened {
         socket: SocketId,
@@ -517,7 +557,8 @@ struct Io<P> {
     streams: HashMap<RequestId, (ArrayAt, ItemCheck)>,
     incoming: HashMap<RequestId, Incoming>,
     timers: HashMap<TimerId, ()>,
-    poll_interval_ms: Option<f64>,
+    poll_scale: Option<f64>,
+    poll_ceiling_ms: Option<f64>,
     poll_timers: HashMap<TimerId, PollTimer>,
     poll_physical: HashMap<TimerId, TimerId>,
     next_id: u32,
@@ -548,7 +589,8 @@ impl<P> Default for Io<P> {
             streams: HashMap::new(),
             incoming: HashMap::new(),
             timers: HashMap::new(),
-            poll_interval_ms: None,
+            poll_scale: None,
+            poll_ceiling_ms: None,
             poll_timers: HashMap::new(),
             poll_physical: HashMap::new(),
             next_id: 1,
@@ -575,7 +617,7 @@ impl<P> Io<P> {
 
     fn arm_poll(&mut self, now: f64, logical: TimerId) {
         let poll = &self.poll_timers[&logical];
-        let interval = self.poll_interval_ms.unwrap_or(poll.default_interval_ms);
+        let interval = self.poll_interval(poll.default_interval_ms);
         // Never hand an infinite/invalid deadline to a host. Infinity policy
         // retains the registration so a finite update can resume it.
         if !interval.is_finite()
@@ -607,22 +649,41 @@ impl<P> Io<P> {
         }
     }
 
-    fn set_poll_interval(&mut self, now: f64, interval_ms: f64) {
-        if self.poll_interval_ms == Some(interval_ms) {
+    /// A poll's own cadence times the host scale. A slowdown never exceeds the
+    /// host's absolute ceiling unless the native cadence is already slower.
+    fn poll_interval(&self, default_ms: f64) -> f64 {
+        Self::interval_for(default_ms, self.poll_scale, self.poll_ceiling_ms)
+    }
+
+    fn interval_for(default_ms: f64, scale: Option<f64>, ceiling_ms: Option<f64>) -> f64 {
+        let interval = default_ms * scale.unwrap_or(1.);
+        match ceiling_ms {
+            Some(ceiling) if interval.is_finite() && ceiling.is_finite() => {
+                interval.min(default_ms.max(ceiling))
+            }
+            _ => interval,
+        }
+    }
+
+    fn set_poll_policy(&mut self, now: f64, scale: Option<f64>, ceiling_ms: Option<f64>) {
+        let (old_scale, old_ceiling) = (self.poll_scale, self.poll_ceiling_ms);
+        if (old_scale, old_ceiling) == (scale, ceiling_ms) {
             return;
         }
-        let previous = self.poll_interval_ms.replace(interval_ms);
+        self.poll_scale = scale;
+        self.poll_ceiling_ms = ceiling_ms;
         // Sort logical IDs so action ordering is independent of HashMap seeds.
         let mut logicals: Vec<_> = self.poll_timers.keys().copied().collect();
         logicals.sort_unstable_by_key(|timer| timer.0);
         for logical in logicals {
             let poll = &self.poll_timers[&logical];
-            let old_interval = previous.unwrap_or(poll.default_interval_ms);
+            let old_interval = Self::interval_for(poll.default_interval_ms, old_scale, old_ceiling);
+            let new_interval = Self::interval_for(poll.default_interval_ms, scale, ceiling_ms);
             if old_interval.is_finite()
                 && old_interval > 0.
-                && interval_ms.is_finite()
+                && new_interval.is_finite()
                 && old_interval.max(poll.bounds.minimum_interval_ms)
-                    == interval_ms.max(poll.bounds.minimum_interval_ms)
+                    == new_interval.max(poll.bounds.minimum_interval_ms)
             {
                 // An equivalent cadence must not postpone an already due poll.
                 continue;
@@ -1029,6 +1090,24 @@ impl<P> Cx<'_, P> {
         }
     }
 
+    pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
+        self.io.actions.push(Action::Notice(Notice::StartupFailed {
+            error: error.into(),
+        }));
+    }
+
+    pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
+        #[cfg(feature = "order-locks")]
+        {
+            self.io.order_locks.finish(command, true);
+            self.io.active_commands.remove(&command);
+        }
+        self.io.actions.push(Action::Notice(Notice::CommandFailed {
+            command,
+            error: error.into(),
+        }));
+    }
+
     /// Every placement in this response is proven accepted or explicitly rejected.
     pub fn placement_resolved(&mut self, command: CommandId) {
         #[cfg(feature = "order-locks")]
@@ -1155,7 +1234,7 @@ pub trait Venue {
         pending: Self::Pending,
         error: &str,
     );
-    fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, _interval_ms: f64) {}
+    fn on_poll_scale(&mut self, _cx: &mut Cx<'_, Self::Pending>, _scale: f64) {}
     /// Revalue account-derived state after host-owned public prices change.
     fn on_public_feed(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
@@ -1164,6 +1243,15 @@ pub trait Venue {
         false
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
+    /// Venue-specific actions; the engine never passes `Command::Venue` to `on_command`.
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        command: CommandId,
+        _action: VenueAction,
+    ) {
+        unsupported_venue_action(cx, command);
+    }
     fn book(&self, symbol: &str) -> Option<&Book>;
     /// Every subscribed book, including unsynchronized subscriptions.
     /// Snapshot frames clear subscriptions for which `book` returns `None`.
@@ -1471,12 +1559,18 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         match event {
-            Event::TickIntervalChanged { interval_ms } => {
-                if interval_ms.is_nan() || interval_ms <= 0. {
+            Event::PollScaleChanged { scale } => {
+                if scale.is_nan() || scale <= 0. {
                     return;
                 }
-                cx.io.set_poll_interval(now, interval_ms);
-                self.venue.on_tick_interval(&mut cx, interval_ms)
+                let ceiling = cx.io.poll_ceiling_ms;
+                cx.io.set_poll_policy(now, Some(scale), ceiling);
+                self.venue.on_poll_scale(&mut cx, scale)
+            }
+            Event::PollCeilingChanged { ceiling_ms } => {
+                let ceiling_ms = ceiling_ms.filter(|ms| ms.is_finite() && *ms > 0.);
+                let scale = cx.io.poll_scale;
+                cx.io.set_poll_policy(now, scale, ceiling_ms);
             }
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
@@ -1553,6 +1647,9 @@ impl<V: Venue> Engine<V> {
                     };
                     self.venue.on_timer(&mut cx, logical);
                 }
+            }
+            Event::Command(Command::Venue { command, action }) => {
+                self.venue.on_venue_action(&mut cx, command, action);
             }
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
                 if !self.venue.supports_amend_order_with_symbol() =>
@@ -2804,8 +2901,8 @@ mod streaming_tests {
         assert!(!engine.has_received_commands());
         engine.handle(
             1.,
-            Event::TickIntervalChanged {
-                interval_ms: f64::INFINITY,
+            Event::PollScaleChanged {
+                scale: f64::INFINITY,
             },
         );
         assert!(
@@ -3081,6 +3178,26 @@ mod streaming_tests {
         assert!(
             engine.take_market_frame(2.).is_none(),
             "baseline must remain the last flushed size"
+        );
+    }
+
+    #[test]
+    fn venue_actions_default_to_one_shared_rejection() {
+        let mut engine = frame_engine();
+        engine.handle(
+            0.0,
+            Event::Command(Command::Venue {
+                command: 9,
+                action: VenueAction::FetchAccountTier,
+            }),
+        );
+        let result = engine.drain_actions().find_map(|action| match action {
+            Action::Notice(Notice::CommandDone { command: 9, result }) => Some(result),
+            _ => None,
+        });
+        assert_eq!(
+            result,
+            Some(Err("This action is not supported on this venue".into()))
         );
     }
 

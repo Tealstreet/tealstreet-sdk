@@ -5,6 +5,9 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_kraken::sign::Signer;
 use spot_support::*;
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 10_000.0;
+
 #[test]
 fn official_spot_auth_vector_and_form_nonce_are_exact() {
     let signer = Signer::new(
@@ -519,8 +522,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     e.drain_actions().for_each(drop);
     e.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let stale: Vec<_> = e
@@ -536,8 +539,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     for interval in [200_000_f64, 500.] {
         e.handle(
             now,
-            Event::TickIntervalChanged {
-                interval_ms: interval,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
             },
         );
         let actions: Vec<_> = e.drain_actions().collect();
@@ -576,8 +579,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     // chain, but must not recreate an active recurring host timer.
     e.handle(
         due,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     e.drain_actions().for_each(drop);
@@ -611,8 +614,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert!(pending.is_empty(), "all fixture account reads complete");
     e.handle(
         due + 2.,
-        Event::TickIntervalChanged {
-            interval_ms: 10_000.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
         },
     );
     let resumed: Vec<_> = e

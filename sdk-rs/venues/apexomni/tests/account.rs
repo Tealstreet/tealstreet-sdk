@@ -6,6 +6,9 @@ use safe_cex_engine::{
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 use support::*;
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 2_000.0;
+
 const ACCOUNT: &str = r#"{"code":0,"data":{"id":"611779989544632629","l2key":"key","positions":[{"symbol":"BTC-USDT","side":"LONG","entryPrice":"100","size":"2","customImr":"0.1","unrealisedPnl":"4","curRealisedPnl":"3","liqPrice":"50"}],"contractAccount":{"makerFeeRate":"0.0002","takerFeeRate":"0.0005"}}}"#;
 const EMPTY_ACCOUNT: &str = r#"{"code":0,"data":{"id":"611779989544632629","positions":[],"contractAccount":{"makerFeeRate":"0.0002","takerFeeRate":"0.0005"}}}"#;
 const EMPTY_ORDERS: &str = r#"{"code":0,"data":[]}"#;
@@ -750,30 +753,6 @@ fn private_pong_reports_rounded_one_way_latency() {
 }
 
 #[test]
-fn invalid_omni_seed_fails_private_start_without_hiding_public_markets() {
-    let mut e = Engine::new(ApexOmni::new(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("passphrase".into()),
-        omni_key_seed: Some("bad".into()),
-        ..Default::default()
-    }));
-    e.start(0.0);
-    let r = requests(&mut e).remove(0);
-    response(&mut e, &r, 10.0, MARKETS);
-    assert_eq!(e.store().markets().len(), 1);
-    let actions: Vec<_> = e.drain_actions().collect();
-    assert!(!actions.iter().any(|a| matches!(
-        a,
-        Action::WsConnect {
-            channel: Some(SocketChannel::Private),
-            ..
-        } | Action::Http(_)
-    )));
-    assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::Log{message,..}) if message.contains("Invalid OmniKey seed"))));
-}
-
-#[test]
 fn missing_passphrase_does_not_open_a_permanently_unauthenticated_socket() {
     let mut e = Engine::new(ApexOmni::new(Options {
         key: Some("key".into()),
@@ -821,8 +800,13 @@ fn silent_private_handshake_is_closed_and_reconnected_without_open_event() {
             _ => None,
         })
         .unwrap();
-    let timer = actions
+    let private = actions
         .iter()
+        .position(|a| matches!(a, Action::WsConnect { socket: s, .. } if *s == socket))
+        .unwrap();
+    let timer = actions[..private]
+        .iter()
+        .rev()
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if *at_ms == 5010.0 => Some(*timer),
             _ => None,
@@ -1056,8 +1040,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     e.drain_actions().for_each(drop);
     e.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let stale: Vec<_> = e
@@ -1073,8 +1057,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     for interval in [200_000_f64, 500.] {
         e.handle(
             now,
-            Event::TickIntervalChanged {
-                interval_ms: interval,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
             },
         );
         let actions: Vec<_> = e.drain_actions().collect();
@@ -1113,8 +1097,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     // chain, but must not recreate an active recurring host timer.
     e.handle(
         due,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     e.drain_actions().for_each(drop);
@@ -1150,8 +1134,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert!(pending.is_empty(), "all fixture account reads complete");
     e.handle(
         due + 2.,
-        Event::TickIntervalChanged {
-            interval_ms: 10_000.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
         },
     );
     let resumed: Vec<_> = e

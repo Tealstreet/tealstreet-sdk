@@ -3,6 +3,9 @@ mod support;
 use safe_cex_engine::{Action, Command, Event, Query, SocketChannel, SocketId, wire};
 use safe_cex_venue_paradex::Options;
 use support::*;
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 10_000.0;
+
 const POSITION: &str = r#"{"market":"BTC-USD-PERP","status":"OPEN","side":"LONG","size":"2","average_entry_price":"100","unrealized_pnl":"4","realized_positional_pnl":"1","last_updated_at":1700000000000}"#;
 const ORDER: &str = r#"{"id":"123","market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN","side":"BUY","size":"2","remaining_size":"2","price":"99","instruction":"GTC","time_in_force":"GTC","created_at":1700000000000,"last_updated_at":1700000000000,"client_id":"caller-1"}"#;
 fn options() -> Options {
@@ -841,8 +844,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     e.drain_actions().for_each(drop);
     e.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let stale: Vec<_> = e
@@ -858,8 +861,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     for interval in [200_000_f64, 500.] {
         e.handle(
             now,
-            Event::TickIntervalChanged {
-                interval_ms: interval,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
             },
         );
         let actions: Vec<_> = e.drain_actions().collect();
@@ -898,8 +901,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     // chain, but must not recreate an active recurring host timer.
     e.handle(
         due,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     e.drain_actions().for_each(drop);
@@ -935,8 +938,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert!(pending.is_empty(), "all fixture account reads complete");
     e.handle(
         due + 2.,
-        Event::TickIntervalChanged {
-            interval_ms: 10_000.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
         },
     );
     let resumed: Vec<_> = e

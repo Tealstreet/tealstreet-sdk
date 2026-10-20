@@ -18,19 +18,6 @@ pub fn encode(text: &str) -> String {
     }
     out
 }
-/// JS encodeURIComponent used by the batch JSON special case.
-pub fn encode_uri(text: &str) -> String {
-    let mut out = String::new();
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-._~!'()*".contains(&byte) {
-            out.push(byte as char);
-        } else {
-            use std::fmt::Write;
-            write!(out, "%{byte:02X}").unwrap();
-        }
-    }
-    out
-}
 pub fn form(params: &[(&str, String)]) -> String {
     let mut sorted: Vec<_> = params.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(b.0));

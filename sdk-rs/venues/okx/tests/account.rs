@@ -40,14 +40,14 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
         .unwrap();
     complete(&mut e, pending, ORDER);
     let expected = e.store().balance().clone();
-    for interval_ms in [f64::INFINITY, 30_000., 500.] {
-        e.handle(100., Event::TickIntervalChanged { interval_ms });
+    for scale in [f64::INFINITY, 15., 0.25] {
+        e.handle(100., Event::PollScaleChanged { scale });
         assert!(actions(&mut e).is_empty());
     }
     e.handle(
         100.,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     e.store_mut().set_balance(Default::default());
@@ -604,4 +604,56 @@ fn partially_effective_algo_remains_visible_and_accepts_later_live_updates() {
         ),
     );
     assert_eq!(e.store().order("algo123_tp").unwrap().price, 43000.0);
+}
+
+#[test]
+fn undecodable_instrument_row_still_reports_its_exposure() {
+    for bad in [
+        r#"{"instId":"ETH-USDT-SWAP","instType":"SWAP","ctType":"linear","ctVal":1}"#,
+        r#"{"instId":"ETH-USDT-SWAP","instType":"SWAP","ctType":null,"ctVal":"1"}"#,
+    ] {
+        reports_exposure_on_malformed_instrument(bad);
+    }
+}
+
+fn reports_exposure_on_malformed_instrument(bad: &str) {
+    let mut e = Engine::new(Okx::new(Options {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(&format!("{MARKET},{bad}")), 1.0);
+    let a = actions(&mut e)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
+    reply(&mut e, &a, &envelope(TICKER), 2.0);
+    let config = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut e,
+        &config,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.0,
+    );
+    let positions = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
+        .unwrap();
+    reply(
+        &mut e,
+        &positions,
+        &envelope(&POSITION.replace("BTC-USDT-SWAP", "ETH-USDT-SWAP")),
+        4.0,
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. })
+            if message.contains("ETH-USDT-SWAP has open exposure")
+    )));
 }

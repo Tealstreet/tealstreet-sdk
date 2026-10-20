@@ -158,14 +158,14 @@ test('compiled polling controls pause and resume through the fire-and-forget hos
   try {
     r.host.start();
     await r.until(() => r.store.loaded.balance && r.requests.filter((request) => new URL(request.url).pathname.endsWith('/marketdata')).length >= 2);
-    await assert.rejects(r.host.command({ op: 'setTickInterval' }), /interval/);
+    await assert.rejects(r.host.command({ op: 'setPollScale' }), /scale/);
     assert.ok(r.timers.size > 0);
-    await r.host.command({ op: 'setTickInterval', interval: null });
+    await r.host.command({ op: 'setPollScale', scale: null });
     assert.equal(r.timers.size, 0);
     const before = r.requests.length;
     await settle();
     assert.equal(r.requests.length, before);
-    await r.host.command({ op: 'setTickInterval', interval: 10000 });
+    await r.host.command({ op: 'setPollScale', scale: 5 });
     assert.equal(r.timers.size, 1);
     await r.until(() => r.requests.length > before);
     assert.ok(new URL(r.requests[before].url).pathname.endsWith('/portfolio'));

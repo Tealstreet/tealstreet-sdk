@@ -5,6 +5,9 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_grvt::{Grvt, Options};
 
+/// Native cadence of the venue's recurring account poll; policy scales it.
+const POLL_MS: f64 = 60_000.0;
+
 const NOW: f64 = 1_700_000_000_000.;
 const CATALOG: &str = r#"{"r":[{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6}]}"#;
 const SUMMARY: &str = r#"{"r":{"te":"100","ts2":"80","tu":"2","sas":[{"si":"777"}]}}"#;
@@ -309,6 +312,68 @@ fn zero_available_is_zero_and_auto_detected_account_precedes_reads() {
     );
     let leverage = h.take("get_all_initial_leverage");
     assert_eq!(leverage.body, positions.body);
+}
+
+#[test]
+fn spot_balances_publish_summed_per_currency_balances() {
+    let mut h = Harness::new(true);
+    h.reply(
+        "login",
+        r#"{"status":"success","sub_account_id":"777"}"#,
+        "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xaccount",
+    );
+    h.reply(
+        "aggregated_account_summary",
+        r#"{"r":{"te":"100","ts2":"80","tu":"2","sb":[{"c":"USDT","b":"60.5"},{"c":"BTC","b":"0.25"},{"c":"USDT","b":"4.5"}]}}"#,
+        "",
+    );
+    let coins: Vec<_> = h
+        .engine
+        .store()
+        .currency_balances()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c.currency.as_str(),
+                c.balance.total,
+                c.balance.free,
+                c.balance.used,
+                c.balance.upnl,
+            )
+        })
+        .collect();
+    assert_eq!(
+        coins,
+        [("BTC", 0.25, 0.25, 0., 0.), ("USDT", 65., 65., 0., 0.)]
+    );
+}
+
+#[test]
+fn malformed_spot_balance_row_keeps_aggregate_and_other_coins() {
+    let mut h = Harness::new(true);
+    h.reply(
+        "login",
+        r#"{"status":"success","sub_account_id":"777"}"#,
+        "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xaccount",
+    );
+    h.reply(
+        "aggregated_account_summary",
+        r#"{"r":{"te":"100","ts2":"80","tu":"2","spot_balances":[{"currency":"ETH","balance":"bad"},{"b":"3"},{"currency":"USDT","balance":"65"}]}}"#,
+        "",
+    );
+    let balance = h.engine.store().balance();
+    assert_eq!(
+        (balance.total, balance.free, balance.used),
+        (100., 80., 20.)
+    );
+    let coins = h.engine.store().currency_balances().unwrap();
+    assert_eq!(coins.len(), 1);
+    assert_eq!(
+        (coins[0].currency.as_str(), coins[0].balance.total),
+        ("USDT", 65.)
+    );
+    assert_eq!(skip_warnings(&h, "spot balance"), 1);
 }
 
 #[test]
@@ -1192,8 +1257,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     e.drain_actions().for_each(drop);
     e.handle(
         now,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     let stale: Vec<_> = e
@@ -1209,8 +1274,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     for interval in [200_000_f64, 500.] {
         e.handle(
             now,
-            Event::TickIntervalChanged {
-                interval_ms: interval,
+            Event::PollScaleChanged {
+                scale: interval / POLL_MS,
             },
         );
         let actions: Vec<_> = e.drain_actions().collect();
@@ -1251,8 +1316,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     // chain, but must not recreate an active recurring host timer.
     e.handle(
         due,
-        Event::TickIntervalChanged {
-            interval_ms: f64::INFINITY,
+        Event::PollScaleChanged {
+            scale: f64::INFINITY,
         },
     );
     e.drain_actions().for_each(drop);
@@ -1282,8 +1347,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     assert!(pending.is_empty(), "all fixture account reads complete");
     e.handle(
         due + 2.,
-        Event::TickIntervalChanged {
-            interval_ms: 10_000.,
+        Event::PollScaleChanged {
+            scale: 10_000. / POLL_MS,
         },
     );
     let resumed: Vec<_> = e

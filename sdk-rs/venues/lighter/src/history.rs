@@ -1,11 +1,17 @@
 //! Cursor-owned rare reads. Failed pages never masquerade as complete history.
 use crate::{Lighter, Pending};
+use safe_cex_engine::de::number;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use std::{borrow::Cow, collections::HashSet};
+use std::borrow::Cow;
+
+/// Pages per stage before a read that still has a cursor fails as incomplete.
+const MAX_PAGES: u32 = 1000;
 
 pub struct Request {
     command: CommandId,
@@ -18,13 +24,10 @@ pub struct Request {
     from: Option<f64>,
     to: Option<f64>,
     limit: usize,
-    cursor: Option<String>,
-    cursors: HashSet<String>,
-    seen: HashSet<String>,
+    walk: CursorWalk,
     rows: Vec<Row>,
     count: usize,
     failed: Option<String>,
-    pages: u32,
     /// Trades arrive newest first; a row older than `from` ends the window.
     past_window: bool,
 }
@@ -152,23 +155,6 @@ fn atom<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Cow<'de, str>, D::Erro
 #[derive(Default, Deserialize)]
 #[serde(transparent)]
 struct Num(#[serde(deserialize_with = "number")] f64);
-fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Number<'a> {
-        N(f64),
-        S(#[serde(borrow)] Cow<'a, str>),
-    }
-    let value = match Number::deserialize(d)? {
-        Number::N(n) => n,
-        Number::S(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
-    if value.is_finite() {
-        Ok(value)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
-}
 #[derive(Deserialize)]
 struct TradeWire<'a> {
     #[serde(default, borrow)]
@@ -392,13 +378,10 @@ impl Lighter {
             from,
             to,
             limit: limit.unwrap_or(100).clamp(1, 200) as usize,
-            cursor: None,
-            cursors: HashSet::new(),
-            seen: HashSet::new(),
+            walk: CursorWalk::new(MAX_PAGES),
             rows: Vec::new(),
             count: 0,
             failed: None,
-            pages: 0,
             past_window: false,
         };
         self.history_request(cx, request);
@@ -406,7 +389,6 @@ impl Lighter {
 
     fn history_request(&self, cx: &mut Cx<'_, Pending>, mut request: Request) {
         request.count = 0;
-        request.pages += 1;
         let path = match request.stage {
             Stage::Trades => "trades",
             Stage::Orders => "accountInactiveOrders",
@@ -438,7 +420,7 @@ impl Lighter {
                 }
             }
         }
-        if let Some(cursor) = &request.cursor {
+        if let Some(cursor) = request.walk.cursor() {
             url.push_str(&format!("&cursor={}", encode(cursor)));
         }
         let mut headers = Vec::new();
@@ -508,7 +490,7 @@ impl Lighter {
         if !within(request, timestamp) {
             return Ok(());
         }
-        if !request.seen.insert(format!("trade:{}:{id}", t.market_id.0)) {
+        if !request.walk.fresh(format!("trade:{}:{id}", t.market_id.0)) {
             return Ok(());
         }
         let quote = t.usd_amount.as_ref().map_or(t.price.0 * t.size.0, |n| n.0);
@@ -648,8 +630,8 @@ impl Lighter {
         }
         if within(request, timestamp)
             && request
-                .seen
-                .insert(format!("funding:{}:{}", f.market_id.0, f.funding_id.0))
+                .walk
+                .fresh(format!("funding:{}:{}", f.market_id.0, f.funding_id.0))
         {
             request.rows.push(Row::Income(Income {
                 symbol: symbol.into(),
@@ -690,8 +672,8 @@ impl Lighter {
             .ok_or("Lighter historical order has no timestamp")?;
         if !within(request, timestamp)
             || !request
-                .seen
-                .insert(format!("order:{}:{}", order.symbol, order.id))
+                .walk
+                .fresh(format!("order:{}:{}", order.symbol, order.id))
         {
             return Ok(());
         }
@@ -761,17 +743,25 @@ impl Lighter {
             .filter(|c| !c.is_empty())
             .map(Cow::into_owned);
         let enough = enough || request.past_window;
-        if !enough && let Some(cursor) = cursor {
-            if !request.cursors.insert(cursor.clone()) || request.pages >= 1000 {
+        let page = CursorPage {
+            next: cursor,
+            rows: request.count,
+            fresh: request.count,
+            want_more: !enough,
+        };
+        match request.walk.advance(page) {
+            CursorStep::More(_) => {
+                self.history_request(cx, request);
+                return;
+            }
+            CursorStep::Stalled(_) => {
                 cx.done(
                     request.command,
                     Err("Lighter history cursor did not make progress".into()),
                 );
                 return;
             }
-            request.cursor = Some(cursor);
-            self.history_request(cx, request);
-            return;
+            CursorStep::Done => {}
         }
         if !enough && request.count >= 100 {
             cx.done(
@@ -782,8 +772,7 @@ impl Lighter {
         }
         if request.stage == Stage::Trades && matches!(request.read, Read::Income(IncomeKind::All)) {
             request.stage = Stage::Funding;
-            request.cursor = None;
-            request.cursors.clear();
+            request.walk.restart();
             request.past_window = false;
             self.history_request(cx, request);
             return;
@@ -855,16 +844,4 @@ fn millis(time: f64) -> f64 {
 }
 fn within(request: &Request, time: f64) -> bool {
     request.from.is_none_or(|from| time >= from) && request.to.is_none_or(|to| time <= to)
-}
-fn encode(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
-            out.push(char::from(b));
-        } else {
-            use std::fmt::Write;
-            write!(out, "%{b:02X}").unwrap();
-        }
-    }
-    out
 }
