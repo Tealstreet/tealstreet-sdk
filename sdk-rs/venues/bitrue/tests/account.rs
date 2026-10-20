@@ -40,7 +40,7 @@ impl Harness {
             .actions
             .iter()
             .find_map(|a| match a {
-                Action::WsConnect { socket, url } if url.contains("fapiws.bitrue.com") => {
+                Action::WsConnect { socket, url, .. } if url.contains("fapiws.bitrue.com") => {
                     Some(*socket)
                 }
                 _ => None,

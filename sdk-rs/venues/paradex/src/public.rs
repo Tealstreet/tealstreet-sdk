@@ -674,32 +674,43 @@ impl Paradex {
                 }
                 Err(_) => *invalid = true,
             },
-            Request::Tickers { rows, invalid } => match serde_json::from_str::<Tick<'_>>(item) {
-                Ok(t) => {
-                    if t.symbol.ends_with("-PERP") && cx.store.market(&t.symbol).is_some() {
-                        rows.push(Ticker {
-                            id: t.symbol.to_string(),
-                            symbol: t.symbol.into_owned(),
-                            bid: t.bid.0,
-                            ask: t.ask.0,
-                            last: t.last_traded_price.0,
-                            mark: t.mark_price.0,
-                            index: if t.underlying_price.0 != 0. {
-                                t.underlying_price.0
-                            } else {
-                                t.mark_price.0
-                            },
-                            percentage: t.price_change_rate_24h.0 * 100.,
-                            volume: t.volume_24h.0,
-                            quote_volume: t.volume_24h.0,
-                            open_interest: t.open_interest.0,
-                            funding_rate: t.funding_rate.0,
-                            ..Ticker::default()
-                        });
-                    }
+            Request::Tickers { rows, invalid } => {
+                let Ok(identity) = serde_json::from_str::<MarketIdentity<'_>>(item) else {
+                    *invalid = true;
+                    return;
+                };
+                if !identity.symbol.ends_with("-PERP")
+                    || cx.store.market(&identity.symbol).is_none()
+                {
+                    return;
                 }
-                Err(_) => *invalid = true,
-            },
+                match serde_json::from_str::<Tick<'_>>(item) {
+                    Ok(t) => {
+                        if t.symbol.ends_with("-PERP") && cx.store.market(&t.symbol).is_some() {
+                            rows.push(Ticker {
+                                id: t.symbol.to_string(),
+                                symbol: t.symbol.into_owned(),
+                                bid: t.bid.0,
+                                ask: t.ask.0,
+                                last: t.last_traded_price.0,
+                                mark: t.mark_price.0,
+                                index: if t.underlying_price.0 != 0. {
+                                    t.underlying_price.0
+                                } else {
+                                    t.mark_price.0
+                                },
+                                percentage: t.price_change_rate_24h.0 * 100.,
+                                volume: t.volume_24h.0,
+                                quote_volume: t.volume_24h.0,
+                                open_interest: t.open_interest.0,
+                                funding_rate: t.funding_rate.0,
+                                ..Ticker::default()
+                            });
+                        }
+                    }
+                    Err(_) => *invalid = true,
+                }
+            }
             Request::Candles { rows, invalid, .. } => {
                 match serde_json::from_str::<Vec<Number>>(item)
                     .ok()
@@ -729,6 +740,39 @@ impl Paradex {
             } => {
                 self.public.price_bands = bands;
                 cx.store.set_markets(rows);
+                self.public
+                    .books
+                    .retain(|symbol, _| cx.store.market(symbol).is_some());
+                self.public
+                    .candles
+                    .retain(|(symbol, _), _| cx.store.market(symbol).is_some());
+                let queued: Vec<_> = self
+                    .public
+                    .candles
+                    .iter()
+                    .map(|((symbol, interval), state)| {
+                        (
+                            symbol.clone(),
+                            interval.clone(),
+                            state.generation,
+                            state.revision,
+                        )
+                    })
+                    .collect();
+                for (symbol, interval, generation, revision) in queued {
+                    let step = interval_ms(&interval).expect("validated interval");
+                    self.fetch_candles(
+                        cx,
+                        CandleTarget::Poll {
+                            generation,
+                            revision,
+                        },
+                        symbol,
+                        interval,
+                        (Some(cx.now - step * 3.), Some(cx.now)),
+                        false,
+                    );
+                }
                 self.public_seed(cx, false);
             }
             Request::Tickers {
@@ -1040,7 +1084,7 @@ impl Paradex {
         match command {
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
-                if cx.store.market(&symbol).is_none() {
+                if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
                     cx.log(LogLevel::Warning, "Unknown Paradex market");
                     return None;
                 }
@@ -1070,7 +1114,9 @@ impl Paradex {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                if interval_ms(&interval).is_none() || cx.store.market(&symbol).is_none() {
+                if interval_ms(&interval).is_none()
+                    || (cx.store.loaded().markets && cx.store.market(&symbol).is_none())
+                {
                     cx.log(LogLevel::Warning, "Unsupported Paradex candle subscription");
                     return None;
                 }
@@ -1097,6 +1143,9 @@ impl Paradex {
                         revision: 0,
                     },
                 );
+                if !cx.store.loaded().markets {
+                    return None;
+                }
                 let step = interval_ms(&interval).unwrap();
                 self.fetch_candles(
                     cx,

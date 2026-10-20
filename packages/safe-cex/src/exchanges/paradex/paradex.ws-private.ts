@@ -2,7 +2,7 @@ import { Balance, LogSeverity, MarginType, Order, OrderStatus, Position, Positio
 import { createPositionId } from '../../utils/createPositionId';
 import { BaseWebSocket } from '../base.ws';
 import { ParadexExchange } from './paradex.exchange';
-import { BASE_WS_URL, isParadexTriggerOrderType, ORDER_SIDE } from './paradex.types';
+import { BASE_WS_URL, isParadexTriggerOrderType, ORDER_SIDE, paradexTimeInForce } from './paradex.types';
 import { decodeParadexMessage } from './paradex.sbe';
 
 type Data = Record<string, any>;
@@ -169,7 +169,8 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         filled: parseFloat(order.size) - parseFloat(order.remaining_size),
         remaining: parseFloat(order.remaining_size),
         reduceOnly,
-        timeInForce: order.time_in_force,
+        clientOrderId: order.client_id || order.client_order_id || undefined,
+        timeInForce: paradexTimeInForce(order),
         lastUpdate: Date.now(),
         info: order, // Store all raw data from WebSocket
       };
@@ -355,7 +356,7 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         total,
         free,
         used,
-        upnl: 0, // Will be calculated from positions
+        upnl: this.parent.store.positions.reduce((sum, position) => sum + position.unrealizedPnl, 0),
       };
 
       // Calculate unrealized PnL from positions

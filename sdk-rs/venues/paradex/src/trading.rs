@@ -68,6 +68,7 @@ struct Preparation {
 struct Quote {
     bid: Option<f64>,
     ask: Option<f64>,
+    fair: Option<f64>,
 }
 pub struct Request {
     job: u64,
@@ -77,6 +78,7 @@ pub struct Request {
 pub struct Trading {
     next: u64,
     jobs: HashMap<u64, Job>,
+    amend_locks: HashSet<String>,
 }
 
 fn encode(text: &str) -> String {
@@ -445,12 +447,17 @@ impl Trading {
             }
             Command::CancelSymbolOrders { command, symbol } => (
                 command,
-                Ok(VecDeque::from([Operation {
-                    method: Method::Delete,
-                    path: format!("/orders?market={}", encode(&symbol)),
-                    body: None,
-                    kind: Kind::Empty,
-                }])),
+                cx.store
+                    .market(&symbol)
+                    .ok_or_else(|| "Paradex cancel-all requires a known nonempty market".to_owned())
+                    .map(|market| {
+                        VecDeque::from([Operation {
+                            method: Method::Delete,
+                            path: format!("/orders?market={}", encode(&market.id)),
+                            body: None,
+                            kind: Kind::Empty,
+                        }])
+                    }),
                 false,
                 false,
             ),
@@ -506,7 +513,7 @@ impl Trading {
                     if isolated {
                         Err("Paradex isolated account routing is unsupported".into())
                     } else {
-                        Ok("null".into())
+                        Ok("[]".into())
                     },
                 );
                 return true;
@@ -517,7 +524,7 @@ impl Trading {
                     if hedged {
                         Err("Paradex supports one-way mode only".into())
                     } else {
-                        Ok("null".into())
+                        Ok("[]".into())
                     },
                 );
                 return true;
@@ -610,6 +617,10 @@ impl Trading {
             return;
         };
         if let Some(operation) = state.operations.pop_front() {
+            if let Kind::Amend(id) = &operation.kind {
+                self.amend_locks.insert(id.clone());
+                account.invalidate_order(id);
+            }
             account.bump_orders();
             account.bump_positions();
             account.request(
@@ -629,7 +640,7 @@ impl Trading {
                 if state.placement {
                     serde_json::to_string(&state.results).map_err(|e| e.to_string())
                 } else {
-                    Ok("null".into())
+                    Ok("[]".into())
                 }
             } else {
                 Err(state.errors.join("; "))
@@ -647,7 +658,8 @@ impl Trading {
         if let Kind::Quotes(symbol) = &request.kind {
             let result = crate::success(response).and_then(|()| decode_quote(response.body));
             match result {
-                Ok(quote) => {
+                Ok(mut quote) => {
+                    quote.fair = snapshot_fair(cx, symbol);
                     if let Some(preparation) = self
                         .jobs
                         .get_mut(&request.job)
@@ -749,6 +761,14 @@ impl Trading {
         request: Request,
         result: Result<Vec<String>, String>,
     ) {
+        if !matches!(request.kind, Kind::Quotes(_) | Kind::Rails(_)) {
+            account.bump_orders();
+            account.bump_positions();
+        }
+        if let Kind::Amend(id) = &request.kind {
+            self.amend_locks.remove(id);
+            account.invalidate_order(id);
+        }
         let Some(job) = self.jobs.get_mut(&request.job) else {
             return;
         };
@@ -786,6 +806,9 @@ impl Trading {
         price: Option<f64>,
         amount: Option<f64>,
     ) -> Result<VecDeque<Operation>, String> {
+        if self.amend_locks.contains(id) {
+            return Err("Paradex amendment is awaiting confirmation and reconciliation".into());
+        }
         let raw = account
             .native_order(id)
             .ok_or("Paradex amend requires exactly reconciled native order")?;
@@ -937,6 +960,7 @@ fn decode_quote(body: &str) -> Result<Quote, String> {
     let book: Book =
         serde_json::from_str(body).map_err(|_| "Invalid Paradex capped market orderbook")?;
     Ok(Quote {
+        fair: None,
         bid: book
             .bids
             .first()
@@ -961,6 +985,21 @@ fn round_price(price: f64, step: f64, up: bool) -> f64 {
         step,
     )
 }
+fn snapshot_fair(cx: &Cx<'_, Pending>, symbol: &str) -> Option<f64> {
+    let ticker = cx.store.ticker(symbol)?;
+    let midpoint =
+        (positive(ticker.bid) && positive(ticker.ask)).then_some((ticker.bid + ticker.ask) / 2.);
+    [
+        Some(ticker.mark),
+        Some(ticker.index),
+        ticker.mid_price,
+        Some(ticker.last),
+        midpoint,
+    ]
+    .into_iter()
+    .flatten()
+    .find(|p| positive(*p))
+}
 fn capped_price(
     order: &PlaceOrderOpts,
     quote: Quote,
@@ -971,16 +1010,7 @@ fn capped_price(
     let touch = if buy { quote.ask } else { quote.bid }
         .filter(|p| positive(*p))
         .ok_or("Paradex capped market order needs a live touch price")?;
-    let ticker = cx.store.ticker(&order.symbol);
-    let midpoint =
-        ticker.and_then(|t| (positive(t.bid) && positive(t.ask)).then_some((t.bid + t.ask) / 2.));
-    let fair = ticker
-        .into_iter()
-        .flat_map(|t| [Some(t.mark), Some(t.index), t.mid_price, Some(t.last)])
-        .chain([midpoint, Some(touch)])
-        .flatten()
-        .find(|p| positive(*p))
-        .unwrap_or(touch);
+    let fair = quote.fair.unwrap_or(touch);
     let cap = order.max_slippage_pct.expect("capped market").max(0.) / 100.;
     let band_limit = band
         .filter(|b| positive(*b))

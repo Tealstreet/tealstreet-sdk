@@ -20,6 +20,7 @@ pub struct Request {
     fallback: bool,
     lookup_history: bool,
     lookup_complete: bool,
+    open_complete: bool,
     rows: Rows,
 }
 enum Rows {
@@ -129,6 +130,49 @@ struct PublicTrade {
     side: OrderSide,
     timestamp: f64,
 }
+fn finite(s: &str) -> Option<f64> {
+    s.parse::<f64>().ok().filter(|v| v.is_finite())
+}
+fn valid_row(row: &Row, query: &Query, fallback: bool) -> bool {
+    if row.id.is_empty()
+        || row.market.is_empty()
+        || !finite(&row.created_at).is_some_and(|v| v > 0.)
+    {
+        return false;
+    }
+    let optional = [
+        &row.fee,
+        &row.realized_pnl,
+        &row.realized_funding,
+        &row.avg_fill_price,
+        &row.last_updated_at,
+    ];
+    if optional
+        .into_iter()
+        .any(|s| !s.is_empty() && finite(s).is_none())
+    {
+        return false;
+    }
+    match query {
+        Query::Income { .. } => true,
+        Query::OrderHistory { .. } => {
+            side(&row.side).is_some()
+                && finite(&row.size).is_some_and(|n| n > 0.)
+                && finite(&row.remaining_size).is_some_and(|n| n >= 0. && n <= number(&row.size))
+                && (row.price.is_empty() || finite(&row.price).is_some_and(|n| n >= 0.))
+        }
+        Query::Fills { .. } | Query::PublicTrades { .. } => {
+            side(&row.side).is_some()
+                && finite(&row.size).is_some_and(|n| n > 0.)
+                && (finite(&row.price).is_some_and(|n| n > 0.)
+                    || (fallback && finite(&row.avg_fill_price).is_some_and(|n| n > 0.)))
+                && (!fallback
+                    || finite(&row.remaining_size)
+                        .is_some_and(|n| n >= 0. && n <= number(&row.size)))
+        }
+        Query::OrderByClientId { .. } => true,
+    }
+}
 fn number(s: &str) -> f64 {
     safe_cex_engine::num::parse(s)
 }
@@ -220,6 +264,26 @@ impl History {
             cx.done(command, Err("invalid Paradex client order ID".into()));
             return;
         }
+        let bounds = match &query {
+            Query::Fills { from_ms, to_ms, .. }
+            | Query::OrderHistory { from_ms, to_ms, .. }
+            | Query::Income { from_ms, to_ms, .. } => (*from_ms, *to_ms),
+            _ => (None, None),
+        };
+        if bounds
+            .0
+            .into_iter()
+            .chain(bounds.1)
+            .any(|v| !v.is_finite() || v < 0.)
+            || matches!(bounds, (Some(a),Some(b)) if a>b)
+        {
+            cx.done(command, Err("invalid Paradex history time range".into()));
+            return;
+        }
+        if matches!(query, Query::Fills { symbol: None, .. }) {
+            cx.done(command, Ok("[]".into()));
+            return;
+        }
         let rows = match query {
             Query::Fills { .. } => Rows::Fills(Vec::new()),
             Query::OrderHistory { .. } => Rows::Orders(Vec::new()),
@@ -240,6 +304,7 @@ impl History {
             fallback: false,
             lookup_history: false,
             lookup_complete: false,
+            open_complete: false,
             rows,
         };
         self.issue(cx, account, request);
@@ -332,7 +397,14 @@ impl History {
         }
         if let Some(symbol) = symbol {
             let Some(market) = cx.store.market(symbol) else {
-                cx.done(request.command, Ok("[]".into()));
+                cx.done(
+                    request.command,
+                    Ok(if matches!(request.query, Query::OrderByClientId { .. }) {
+                        "{\"found\":false,\"definitive\":false}".into()
+                    } else {
+                        "[]".into()
+                    }),
+                );
                 return;
             };
             params.push(format!("market={}", encode(&market.id)));
@@ -405,6 +477,21 @@ impl History {
             request.valid = false;
             return;
         };
+        if !valid_row(&row, &request.query, request.fallback) {
+            request.valid = false;
+            return;
+        }
+        let wanted_symbol = match &request.query {
+            Query::Fills { symbol, .. }
+            | Query::OrderHistory { symbol, .. }
+            | Query::Income { symbol, .. } => symbol.as_deref(),
+            Query::PublicTrades { symbol, .. } | Query::OrderByClientId { symbol, .. } => {
+                Some(symbol.as_str())
+            }
+        };
+        if wanted_symbol.is_some_and(|symbol| symbol != row.market) {
+            return;
+        }
         if request.fallback && row.order_id.is_empty() {
             row.order_id = row.id.clone();
         }
@@ -575,11 +662,25 @@ impl History {
             return;
         };
         request.page += 1;
+        let next = envelope.next.filter(|s| !s.is_empty());
         if matches!(request.query, Query::OrderByClientId { .. }) && !request.lookup_history {
             if matches!(&request.rows, Rows::Lookup(rows) if !rows.is_empty()) {
                 self.finish(cx, request);
                 return;
             }
+            if let Some(next) = &next
+                && request.page < 50
+            {
+                if !request.cursors.insert(next.clone()) {
+                    self.on_failed(cx, request, "Paradex repeated open-order cursor");
+                    return;
+                }
+                request.cursor = Some(next.clone());
+                request.received = 0;
+                self.issue(cx, account, request);
+                return;
+            }
+            request.open_complete = next.is_none();
             request.lookup_history = true;
             request.page = 0;
             request.received = 0;
@@ -591,6 +692,7 @@ impl History {
         if matches!(request.query, Query::Fills { .. })
             && request.raw_rows == 0
             && !request.fallback
+            && (next.is_none() || request.page >= 5)
         {
             request.fallback = true;
             request.cursor = None;
@@ -610,9 +712,8 @@ impl History {
             Query::PublicTrades { .. } => 1,
             _ => 50,
         };
-        let next = envelope.next.filter(|s| !s.is_empty());
-        request.lookup_complete = request.lookup_history && next.is_none();
-        if request.received > 0
+        request.lookup_complete = request.open_complete && request.lookup_history && next.is_none();
+        if (request.received > 0 || matches!(request.query, Query::Fills { .. }))
             && !filled_limit
             && !request.fallback
             && let Some(next) = next
@@ -639,9 +740,10 @@ impl History {
     fn finish(&self, cx: &mut Cx<'_, Pending>, request: Request) {
         let limit = match request.query {
             Query::Fills { limit, .. } => Some(limit.unwrap_or(100).clamp(1, 500) as usize),
-            Query::OrderHistory { limit, .. }
-            | Query::Income { limit, .. }
-            | Query::PublicTrades { limit, .. } => limit.map(|v| v as usize),
+            Query::OrderHistory { limit, .. } | Query::Income { limit, .. } => {
+                limit.filter(|v| *v > 0).map(|v| v as usize)
+            }
+            Query::PublicTrades { limit, .. } => Some(limit.unwrap_or(100).clamp(1, 500) as usize),
             _ => None,
         };
         let result = match request.rows {

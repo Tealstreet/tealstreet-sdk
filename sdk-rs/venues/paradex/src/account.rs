@@ -2,11 +2,11 @@
 use crate::{
     Options, Pending,
     sign::{Credentials, SystemConfig},
-    wire::{Many, Number},
+    wire::Number,
 };
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
-    PositionSide,
+    PositionSide, TimeInForce,
 };
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, json::ArrayAt,
@@ -159,6 +159,9 @@ impl Account {
     }
     pub fn credentials(&self) -> Option<&Credentials> {
         self.credentials.as_ref()
+    }
+    pub fn invalidate_order(&mut self, id: &str) {
+        self.native.remove(id);
     }
     pub fn native_order(&self, id: &str) -> Option<&NativeOrder> {
         self.native.get(id)
@@ -855,6 +858,21 @@ impl Account {
         });
     }
     pub fn on_item(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
+        if matches!(request, Request::Positions { .. } | Request::Orders { .. }) {
+            match registered_market(cx, item) {
+                Ok(false) => return,
+                Err(()) => {
+                    match request {
+                        Request::Positions { invalid, .. } | Request::Orders { invalid, .. } => {
+                            *invalid = true
+                        }
+                        _ => {}
+                    };
+                    return;
+                }
+                Ok(true) => {}
+            }
+        }
         match request {
             Request::Margins { rows, invalid, .. } => {
                 match serde_json::from_str::<Margin<'_>>(item) {
@@ -1104,16 +1122,24 @@ impl Account {
         }
     }
     fn order_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
-        let Ok(rows) = serde_json::from_str::<Many<NativeOrder>>(text) else {
+        let Ok(rows) = raw_rows(text) else {
             return false;
         };
         let mut valid = false;
-        for row in rows.rows() {
-            valid |= self.apply_order(cx, row);
+        for raw in rows {
+            if registered_market(cx, raw.get()) != Ok(true) {
+                continue;
+            }
+            if let Ok(row) = serde_json::from_str::<NativeOrder>(raw.get()) {
+                valid |= self.apply_order(cx, row);
+            }
         }
         valid
     }
     fn apply_order(&mut self, cx: &mut Cx<'_, Pending>, row: NativeOrder) -> bool {
+        if cx.store.market(&row.market).is_none() {
+            return false;
+        }
         let Ok(mut order) = map_order(&row) else {
             return false;
         };
@@ -1154,17 +1180,22 @@ impl Account {
         true
     }
     fn position_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
-        let Ok(rows) = serde_json::from_str::<Many<PositionRow<'_>>>(text) else {
+        let Ok(rows) = raw_rows(text) else {
             return false;
         };
         let mut valid = false;
-        for row in rows.rows() {
-            valid |= self.apply_position(cx, row);
+        for raw in rows {
+            if registered_market(cx, raw.get()) != Ok(true) {
+                continue;
+            }
+            if let Ok(row) = serde_json::from_str::<PositionRow<'_>>(raw.get()) {
+                valid |= self.apply_position(cx, row);
+            }
         }
         valid
     }
     fn apply_position(&mut self, cx: &mut Cx<'_, Pending>, row: PositionRow<'_>) -> bool {
-        if row.market.is_empty() {
+        if cx.store.market(row.market).is_none() {
             return false;
         }
         let updated = if row.last_updated_at.0 > 0. {
@@ -1273,16 +1304,24 @@ impl Account {
         true
     }
     fn fill_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
-        let Ok(rows) = serde_json::from_str::<Many<FillRow<'_>>>(text) else {
+        let Ok(rows) = raw_rows(text) else {
             return false;
         };
         let mut valid = false;
-        for row in rows.rows() {
-            valid |= self.apply_fill(cx, row);
+        for raw in rows {
+            if registered_market(cx, raw.get()) != Ok(true) {
+                continue;
+            }
+            if let Ok(row) = serde_json::from_str::<FillRow<'_>>(raw.get()) {
+                valid |= self.apply_fill(cx, row);
+            }
         }
         valid
     }
     fn apply_fill(&mut self, cx: &mut Cx<'_, Pending>, row: FillRow<'_>) -> bool {
+        if cx.store.market(row.market).is_none() {
+            return false;
+        }
         let side = match row.side {
             "BUY" => OrderSide::Buy,
             "SELL" => OrderSide::Sell,
@@ -1335,6 +1374,7 @@ pub struct NativeOrder {
     pub post_only: Option<bool>,
     pub time_in_force: String,
     pub on_behalf_of_account: String,
+    #[serde(alias = "client_order_id")]
     pub client_id: String,
     pub cancel_reason: String,
     #[serde(deserialize_with = "scalar")]
@@ -1427,7 +1467,21 @@ pub fn map_order(row: &NativeOrder) -> Result<Order, String> {
         reduce_only,
         close: None,
         client_order_id: (!row.client_id.is_empty()).then(|| row.client_id.clone()),
-        time_in_force: None,
+        time_in_force: if row.post_only == Some(true) {
+            Some(TimeInForce::PostOnly)
+        } else {
+            match if row.instruction.is_empty() {
+                row.time_in_force.as_str()
+            } else {
+                row.instruction.as_str()
+            } {
+                "GTC" | "GTT" | "GoodTillCancel" => Some(TimeInForce::GoodTillCancel),
+                "IOC" | "ImmediateOrCancel" => Some(TimeInForce::ImmediateOrCancel),
+                "FOK" | "FillOrKill" => Some(TimeInForce::FillOrKill),
+                "POST_ONLY" | "PostOnly" => Some(TimeInForce::PostOnly),
+                _ => None,
+            }
+        },
         last_update: row.created_at.parse().unwrap_or(0.),
         trigger_type: None,
         take_profit: None,
@@ -1579,4 +1633,25 @@ fn decimal8(mantissa: i64) -> String {
     }
     let fraction = format!("{fraction:08}");
     format!("{sign}{integer}.{}", fraction.trim_end_matches('0'))
+}
+
+fn registered_market(cx: &Cx<'_, Pending>, raw: &str) -> Result<bool, ()> {
+    #[derive(Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow)]
+        market: &'a str,
+    }
+    let identity: Identity<'_> = serde_json::from_str(raw).map_err(|_| ())?;
+    if identity.market.is_empty() {
+        return Err(());
+    }
+    Ok(cx.store.market(identity.market).is_some())
+}
+
+fn raw_rows(text: &str) -> Result<Vec<&serde_json::value::RawValue>, serde_json::Error> {
+    if text.trim_start().starts_with('[') {
+        serde_json::from_str(text)
+    } else {
+        serde_json::from_str(text).map(|row| vec![row])
+    }
 }

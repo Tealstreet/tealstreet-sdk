@@ -59,6 +59,12 @@ pub struct Margin {
     pub imf_base: Number,
 }
 
+#[derive(Deserialize)]
+pub struct MarketIdentity<'a> {
+    #[serde(borrow, alias = "market")]
+    pub symbol: Str<'a>,
+}
+
 #[derive(Deserialize, Default)]
 #[serde(default)]
 pub struct Tick<'a> {

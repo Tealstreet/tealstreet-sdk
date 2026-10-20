@@ -587,3 +587,82 @@ fn sbe_declared_blocks_groups_nullability_and_unknown_versions_are_checked_befor
             .any(|a| matches!(a,Action::WsClose{socket}if *socket==h.public))
     );
 }
+
+#[test]
+fn irrelevant_option_summaries_with_empty_or_null_numbers_cannot_block_perpetual_startup() {
+    let mut h = Harness::empty(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    h.reply("/markets", MARKETS);
+    h.reply("summary",r#"{"results":[{"symbol":"BTC-USD-PERP","last_traded_price":"100","mark_price":"101","volume_24h":"20"},{"symbol":"BTC-USD-23OCT26-82500-P","last_traded_price":"","bid":"","ask":"","funding_rate":null},{"symbol":"UNLISTED-USD-PERP","bid":""}]}"#);
+    assert!(h.e.store().loaded().tickers);
+    assert_eq!(h.e.store().tickers().len(), 1);
+    assert_eq!(h.e.store().ticker(BTC).unwrap().last, 100.);
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::WsConnect {
+            channel: Some(SocketChannel::Public),
+            ..
+        }
+    )));
+}
+
+#[test]
+fn preseed_subscriptions_keep_reference_counts_and_cancelled_interest_stays_cancelled() {
+    let mut h = Harness::empty(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    for symbol in [BTC, BTC, "ETH-USD-PERP", "UNKNOWN-USD-PERP"] {
+        h.command(Command::SubscribeOrderBook {
+            symbol: symbol.into(),
+        });
+    }
+    h.command(Command::UnsubscribeOrderBook { symbol: BTC.into() });
+    h.command(Command::UnsubscribeOrderBook {
+        symbol: "ETH-USD-PERP".into(),
+    });
+    h.command(Command::SubscribeCandles {
+        symbol: BTC.into(),
+        interval: "1m".into(),
+    });
+    h.command(Command::SubscribeCandles {
+        symbol: "ETH-USD-PERP".into(),
+        interval: "5m".into(),
+    });
+    h.command(Command::UnsubscribeCandles {
+        symbol: "ETH-USD-PERP".into(),
+        interval: "5m".into(),
+    });
+    assert_eq!(h.pending.len(), 1);
+    h.reply("/markets", MARKETS);
+    assert_eq!(h.pending.len(), 2);
+    let candles = h.take("klines");
+    assert!(candles.url.contains("symbol=BTC-USD-PERP"));
+    h.reply("summary", TICKERS);
+    h.public = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket,
+                channel: Some(SocketChannel::Public),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: h.public });
+    h.collect();
+    let books = h
+        .sent()
+        .into_iter()
+        .filter(|text| text.contains("order_book."))
+        .collect::<Vec<_>>();
+    assert_eq!(books.len(), 1);
+    assert!(books[0].contains(BTC));
+    assert!(h.e.book("UNKNOWN-USD-PERP").is_none());
+    h.command(Command::UnsubscribeOrderBook { symbol: BTC.into() });
+    assert!(h.e.book(BTC).is_none());
+}

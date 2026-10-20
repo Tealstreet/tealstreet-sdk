@@ -118,8 +118,16 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
-  // Paired TS correction: old snapshot@15 dropped full depth, deletes and sequence
-  // checks. Both engines now consume the documented full-depth deltas feed.
+  // Paired production fixes, compared without rewriting either replay result:
+  // preserve full-depth incremental books; verify subscription acknowledgements;
+  // fence polled candles against newer trades and reject older trade buckets;
+  // apply every per-market BBO/summary update; emit unique private executions;
+  // clear closed positions and classify CLOSED orders without reopening them;
+  // negotiate and decode the venue's mandatory SBE 1:2 wire protocol; preserve
+  // venue JWT Authorization beside Tealstreet-Authorization on routed requests;
+  // preserve native client IDs and canonical time-in-force; derive account UPnL
+  // from positions; support idempotent cross-margin/one-way mode settings;
+  // validate public-trade query windows and deduplicate native fill IDs/quantity.
   paradex() {},
   // Paired TS fixes: contract-sized public volumes; private cumulative z/native
   // units, execution L prices, monotonic terminal state and ping timestamp echo.

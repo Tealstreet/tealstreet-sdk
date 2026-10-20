@@ -43,7 +43,7 @@ This directory contains the Paradex exchange integration for Tealstreet. Paradex
 | `paradex.exchange.ts`   | Main exchange class (`ParadexExchange`) extending `BaseExchange`; all trading operations |
 | `paradex.types.ts`      | Type definitions: URLs, endpoints, order/side/status maps, response types                |
 | `paradex.sdk.ts`        | SDK integration: account init, `ParadexRequestSigner`, `ParadexJWTManager`               |
-| `paradex.ws-public.ts`  | Public WebSocket: BBO tickers, orderbook snapshots, trades, OHLCV polling                |
+| `paradex.ws-public.ts`  | Public WebSocket: BBO tickers, full-depth books, trades, OHLCV polling                |
 | `paradex.ws-private.ts` | Private WebSocket: orders, positions, balance updates with JWT auth                      |
 
 Private position events are coalesced into a throttled REST reconciliation. The
@@ -227,9 +227,17 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 ### Public WebSocket (`paradex.ws-public.ts`)
 
-**Protocol**: JSON-RPC 2.0
+**Protocol**: JSON-RPC 2.0 control messages and binary SBE market/account data.
+Both public and private URLs explicitly negotiate `sbeSchemaId=1&sbeSchemaVersion=2`.
+The live venue rejects a JSON-only handshake. `paradex.sbe.ts` decodes the published
+schema 1:2 with checked lengths, mandatory fields and enum validation; malformed
+frames leave state untouched. The engine's host must preserve raw binary frames
+and deliver them through the binary ingress; text control messages remain text.
+Routing uses the account's existing Tealstreet resolver. Routed Paradex requests
+carry proxy credentials in `Tealstreet-Authorization`, preserving the venue's JWT
+`Authorization: Bearer …` header.
 
-**Connection URL**: `wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false`
+**Connection URL**: `wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2`
 
 **Ping/pong**: Sends `{ type: "ping" }` every 30 seconds via `setTimeout` (`paradex.ws-public.ts:116-126`).
 
@@ -259,20 +267,20 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 | Channel                                               | Format    | Description                                                                                    |
 | ----------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------- |
-| `bbo.{market}`                                        | Automatic | Best bid/ask/index per symbol (throttled 100ms in handler)                                     |
+| `bbo.{market}`                                        | Automatic | Best bid/ask/index per symbol (every state update is applied)                                     |
 | `trades.{market}`                                     | Automatic | Live last-price + drives in-memory OHLCV update from trade ticks                               |
 | `markets_summary`                                     | Automatic | Aggregate stream for volume_24h / open_interest / funding_rate (slow cadence)                  |
 | `order_book.{market}.deltas` | On-demand | Full-depth initial snapshot, then incremental inserts/updates/deletes |
 
 **BBO handling** (`paradex.ws-public.ts`):
 
-- Throttled to 100ms (leading + trailing)
+- Applies every message synchronously, including consecutive different markets
 - Updates bid/ask/index in ticker store from per-symbol `bbo.{market}` events
 - Last price is **not** updated from bbo — that comes from the trades feed
 
 **Markets summary handling** (`paradex.ws-public.ts`):
 
-- Throttled to 100ms (leading + trailing)
+- Applies every message synchronously, including consecutive different markets
 - Used as a **secondary** source for volume / open-interest / funding rate updates only.
 - Bid/ask/last/mark/index updates come from `bbo` and `trades`, not from `markets_summary`,
   because `markets_summary` does not push at tick-rate cadence and would visibly lag the
@@ -281,11 +289,12 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 **Orderbook handling** (`paradex.ws-public.ts:190-247`):
 
-- Throttled to 100ms (leading + trailing)
-- Paradex snapshots commonly use `inserts`, `updates`, `deletes` arrays
+- Applies every delta synchronously; callbacks are throttled separately per symbol to 100ms
+- Full-depth snapshots and deltas use `inserts`, `updates`, `deletes` arrays
 - Each level: `{side: "BUY"|"SELL", price: string, size: string}`
-- Handler also tolerates `bids`/`asks` snapshot array variants, and falls back to channel-derived symbol when `data.market` is omitted
-- Updates best bid/ask in ticker store and emits to registered callbacks
+- Validates the complete update before mutation; a gap resubscribes and awaits a fresh snapshot
+- Retains the sequence floor during recovery so stale snapshots cannot rewind the book
+- Emits the complete sorted book to registered callbacks
 - On-demand subscription: `subscribeToOrderBook()` / `unsubscribeFromOrderBook()`
 - Resubscribes active orderbooks on reconnect (`paradex.ws-public.ts:396-403`)
 
@@ -308,9 +317,17 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 ### Private WebSocket (`paradex.ws-private.ts`)
 
-**Protocol**: JSON-RPC 2.0
+**Protocol**: JSON-RPC 2.0 control messages and binary SBE market/account data.
+Both public and private URLs explicitly negotiate `sbeSchemaId=1&sbeSchemaVersion=2`.
+The live venue rejects a JSON-only handshake. `paradex.sbe.ts` decodes the published
+schema 1:2 with checked lengths, mandatory fields and enum validation; malformed
+frames leave state untouched. The engine's host must preserve raw binary frames
+and deliver them through the binary ingress; text control messages remain text.
+Routing uses the account's existing Tealstreet resolver. Routed Paradex requests
+carry proxy credentials in `Tealstreet-Authorization`, preserving the venue's JWT
+`Authorization: Bearer …` header.
 
-**Connection URL**: Same as public (`wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false`)
+**Connection URL**: Same as public (`wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2`)
 
 **Authentication**: JWT bearer token sent via `{method: "auth", params: {bearer: token}}` immediately on open.
 
@@ -572,7 +589,7 @@ For order signatures, size and price are scaled by `1e8`:
 
 ### WebSocket
 
-- **Markets summary handler**: Throttled to 100ms (lodash `throttle` with leading+trailing)
+- **BBO/markets summary handlers**: Apply every message synchronously; a global throttle would discard different markets
 - **Orderbook handler**: Every delta is applied; callbacks are throttled per symbol to 100ms (leading+trailing). Invalid updates or sequence gaps resubscribe and wait for a fresh snapshot; duplicate/older sequence numbers are ignored.
 - **Order fetch throttle**: 1-second debounce (`paradex.ws-private.ts:430-435`)
 - **Position fetch throttle**: 500ms minimum between fetches (`paradex.ws-private.ts:287-318`)
@@ -657,8 +674,8 @@ For order signatures, size and price are scaled by `1e8`:
 
 - **REST Livenet**: `https://api.prod.paradex.trade/v1`
 - **REST Testnet**: `https://api.testnet.paradex.trade/v1`
-- **WebSocket Livenet**: `wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false`
-- **WebSocket Testnet**: `wss://ws.api.testnet.paradex.trade/v1?cancel-on-disconnect=false`
+- **WebSocket Livenet**: `wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2`
+- **WebSocket Testnet**: `wss://ws.api.testnet.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2`
 
 ### Differences
 

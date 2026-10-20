@@ -292,6 +292,14 @@ fn untriggered_stop_with_null_execution_price_can_be_amended_without_cancel_repl
     assert!(payload.signature.unwrap().starts_with("[\""));
     h.respond(request, 200, r#"{"id":"123"}"#);
     assert_eq!(h.result(13), Ok("[\"123\"]"));
+    h.command(Command::AmendOrder {
+        command: 130,
+        id: "123".into(),
+        price: None,
+        amount: Some(4.),
+    });
+    assert!(h.result(130).is_err());
+    assert!(h.pending.is_empty());
 }
 
 #[test]
@@ -308,4 +316,106 @@ fn a_single_native_eligible_limit_uses_the_batch_endpoint_once() {
         r#"{"orders":[{"id":"one","client_id":"caller"}]}"#,
     );
     assert_eq!(h.result(14), Ok("[\"one\"]"));
+}
+
+#[test]
+fn cancel_all_rejects_an_empty_or_unknown_market_before_sending_a_delete() {
+    for symbol in ["", "UNKNOWN-USD-PERP"] {
+        let mut h = private();
+        h.command(Command::CancelSymbolOrders {
+            command: 15,
+            symbol: symbol.into(),
+        });
+        assert!(h.pending.is_empty());
+        assert!(h.result(15).is_err());
+    }
+}
+#[test]
+fn accepted_amend_fences_reads_started_in_flight_and_requires_fresh_reconciliation() {
+    let mut h = private();
+    let socket = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket });
+    h.collect();
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket,
+            text: r#"{"jsonrpc":"2.0","id":0,"result":{}}"#,
+        },
+    );
+    h.collect();
+    const ROW: &str = r#"{"id":"123","market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN","side":"BUY","size":"2","remaining_size":"2","price":"100","flags":[],"instruction":"GTC","created_at":1700000000000,"last_updated_at":1700000000000}"#;
+    let message = format!(
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"subscription\",\"params\":{{\"channel\":\"orders.ALL\",\"data\":{ROW}}}}}"
+    );
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket,
+            text: &message,
+        },
+    );
+    h.collect();
+    h.command(Command::AmendOrder {
+        command: 16,
+        id: "123".into(),
+        price: Some(101.),
+        amount: None,
+    });
+    let amend = h.take("/orders/123");
+    h.command(Command::AmendOrder {
+        command: 17,
+        id: "123".into(),
+        price: None,
+        amount: Some(3.),
+    });
+    assert!(h.result(17).is_err());
+    assert!(h.pending.is_empty());
+    h.timer(h.now + 1_000.);
+    let snapshot = h.take("/orders");
+    h.respond(amend, 200, r#"{"id":"123"}"#);
+    h.respond(snapshot, 200, &format!("{{\"results\":[{ROW}]}}"));
+    h.command(Command::AmendOrder {
+        command: 18,
+        id: "123".into(),
+        price: None,
+        amount: Some(3.),
+    });
+    assert!(h.result(18).is_err());
+    assert!(h.pending.is_empty());
+    let updated = message
+        .replace("\"price\":\"100\"", "\"price\":\"101\"")
+        .replace(
+            "\"last_updated_at\":1700000000000",
+            "\"last_updated_at\":1700000001000",
+        );
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket,
+            text: &updated,
+        },
+    );
+    h.collect();
+    h.command(Command::AmendOrder {
+        command: 19,
+        id: "123".into(),
+        price: None,
+        amount: Some(3.),
+    });
+    let request = h.take("/orders/123");
+    let payload: Payload = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.price.as_deref(), Some("101"));
+    assert_eq!(payload.size.as_deref(), Some("3"));
 }

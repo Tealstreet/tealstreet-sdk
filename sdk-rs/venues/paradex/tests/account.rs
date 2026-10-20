@@ -234,7 +234,7 @@ fn jwt_refresh_is_singleflight_and_queued_reads_fail_explicitly_on_auth_failure(
         h.command(Command::Query {
             command,
             query: Query::Fills {
-                symbol: None,
+                symbol: Some("BTC-USD-PERP".into()),
                 order_id: None,
                 from_ms: None,
                 to_ms: None,
@@ -317,6 +317,10 @@ fn binary_private_events_preserve_amendment_decimals_and_fill_identity() {
     }
     binary(&mut h, socket, &order);
     assert_eq!(h.e.store().orders()[0].price, 99.12345678);
+    assert_eq!(
+        h.e.store().orders()[0].time_in_force,
+        Some(safe_cex_engine::model::TimeInForce::PostOnly)
+    );
     assert_eq!(h.e.store().orders()[0].remaining, 1.5);
     let mut fill = packet(21, 116);
     fill[8 + 17] = 1;
@@ -536,4 +540,42 @@ fn http_200_object_business_errors_cannot_replace_a_good_snapshot_with_empty_dat
         r#"{"error":{"code":"UNAVAILABLE"},"results":[]}"#,
     );
     assert_eq!(h.e.store().positions().len(), 1);
+}
+
+#[test]
+fn mixed_instrument_snapshots_and_streams_only_emit_registered_perpetual_markets() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    message(
+        &mut h,
+        socket,
+        r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"positions","data":[{"market":"BTC-USD-250101-100000-C","status":"OPEN","size":null},{"market":"BTC-USD-PERP","status":"OPEN","side":"LONG","size":"3","average_entry_price":"100","unrealized_pnl":"6","last_updated_at":1700000000001}]}}"#,
+    );
+    assert_eq!(h.e.store().positions().len(), 1);
+    assert_eq!(h.e.store().positions()[0].contracts, 3.);
+    assert_eq!(h.e.store().balance().total, 1000.);
+    message(
+        &mut h,
+        socket,
+        r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"orders.ALL","data":{"id":"option","market":"BTC-USD-250101-100000-C","type":"LIMIT","status":"OPEN","side":"BUY","price":"1","size":"1","remaining_size":"1"}}}"#,
+    );
+    assert!(!h.e.store().orders().iter().any(|o| o.id == "option"));
+    fills(&mut h);
+    message(
+        &mut h,
+        socket,
+        r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"fills.ALL","data":{"id":"option-fill","order_id":"option","market":"BTC-USD-250101-100000-C","side":"BUY","price":"1","size":"1"}}}"#,
+    );
+    assert_eq!(fills(&mut h), 0);
+    h.timer(h.now + 500.);
+    let request = h.take("/positions");
+    h.respond(
+        request,
+        200,
+        &format!(
+            "{{\"results\":[{POSITION},{{\"market\":\"BTC-USD-250101-100000-C\",\"size\":null}}]}}"
+        ),
+    );
+    assert_eq!(h.e.store().positions().len(), 1);
+    assert_eq!(h.e.store().positions()[0].symbol, "BTC-USD-PERP");
 }

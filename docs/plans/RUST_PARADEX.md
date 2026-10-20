@@ -130,3 +130,35 @@ merge and create a fresh follow-up branch.
   credentials identically for the native resolvedplan and JS host.
 - No replay, performance, finalCI or PR/merge gate has been claimed yet. Harness
   registration and live20second publicrecording are underway.
+
+### Trading/query phase completion
+
+- Phase3 independent review PASS after invalidating/locking native amendment
+  continuations and fencing reads again at write completion; empty/unknown
+  cancel-all markets reject before I/O. All quote reads, shapes, IDs and signatures
+  preflight before the first write. Fresh capped-market quotes pin fair price,
+  apply venue bands and side-aware tick rounding; LIMIT chunks use1..10 orders.
+  Fourteen trading regressions pass; fixed-mode commands return the established
+  empty-array completion, with unsupported isolated/hedged operations rejecting.
+- Phase4 two independent reviews PASS. Open client-ID pages are exhausted before
+  closed history; only complete coverage makes a miss definitive. Cursor loops,
+  incomplete capped lookups, malformed financial fields, invalid ranges and unknown
+  symbols have explicit outcomes. Fills retain execution size and identity, walk
+  empty cursor pages, stop at the requested bound and use the bounded TS order
+  fallback only after primary coverage. Thirteen query regressions pass.
+- Private phase now17 tests, including canonical TIF/client identities and
+  filtering unregistered option/spot rows before typed perp decoding. Balance
+  remains venue aggregate; rare ledger reads retain delisted/raw market IDs.
+- The first live record exposed two startup bugs, repaired and independently
+  reviewed: irrelevant option summaries with empty numerics poisoned the perp
+  seed; early book/candle subscriptions were discarded before markets arrived.
+  Twenty-five public tests now pass, including queued reference counts/cancel.
+- First scripted private replay verifies real signatures, all writes and every
+  query. Remaining account formatting/parity differences are being paired with
+  TS fixes (canonical TIF, preserved client IDs, balance uPnL and fixed modes),
+  never normalized away. Harness170 tests pass, including17 Paradex protocol
+  and signing negatives; public recording/performance gate is in progress.
+- This is the spec's phase8 opt-in engine lane. Production realm loader adoption
+  remains phase6 and default TS retirement remains phase9; no default-runtime
+  cutover or generated-WASM publishing is claimed. The TS implementation remains
+  the independently executing oracle alongside the other landing-branch venues.

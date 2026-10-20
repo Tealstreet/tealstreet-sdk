@@ -30,6 +30,7 @@ import {
   Position,
   PositionMode,
   PositionSide,
+  PublicTrade,
   Ticker,
   timeframeToSeconds,
   UpdateOrderOpts,
@@ -57,6 +58,7 @@ import {
   MARKET_RESPONSE,
   ORDER_RESPONSE,
   ORDER_SIDE,
+  paradexTimeInForce,
   ORDER_TYPE,
   ORDERBOOK_RESPONSE,
   POSITION_RESPONSE,
@@ -1084,7 +1086,7 @@ export class ParadexExchange extends BaseExchange {
           return acc;
         }
 
-        const executionOrderId = String(row.order_id || row.orderId || row.client_id || '');
+        const executionOrderId = String(row.order_id || row.orderId || (aggregateOrders ? row.id : undefined) || row.client_id || '');
         if (orderId && executionOrderId && executionOrderId !== String(orderId)) {
           return acc;
         }
@@ -1313,6 +1315,28 @@ export class ParadexExchange extends BaseExchange {
       this.log(`Positions error details: ${describeError(err)}`, LogSeverity.Debug);
       throw err;
     }
+  };
+
+  fetchPublicTrades = async (symbol: string, limit = 100): Promise<PublicTrade[]> => {
+    const market = this.store.marketsBySymbol[symbol];
+    if (!market) return [];
+    const { data } = await this.xhr.get('/trades', { params: { market: market.id, page_size: Math.min(Math.max(limit, 1), 500) } });
+    if (!Array.isArray(data?.results)) throw new Error('Invalid Paradex trades envelope');
+    const trades: PublicTrade[] = [];
+    const seen = new Set<string>();
+    for (const row of data.results) {
+      const price = Number(row.price);
+      const qty = Number(row.size);
+      const timestamp = Number(row.created_at);
+      const side = ORDER_SIDE[row.side];
+      if (typeof row.id !== 'string' || !row.id || !side || row.market !== market.id ||
+          !Number.isFinite(price) || price <= 0 || !Number.isFinite(qty) || qty <= 0 ||
+          !Number.isFinite(timestamp) || timestamp <= 0) throw new Error('Invalid Paradex public trade');
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      trades.push({ id: row.id, symbol, side, price, qty, quoteQty: price * qty, timestamp });
+    }
+    return trades;
   };
 
   fetchOrderBook = async (symbol: string, depth = 20): Promise<OrderBook> => {
@@ -2358,6 +2382,14 @@ export class ParadexExchange extends BaseExchange {
     }
   };
 
+  changeMarginType = async (isolated: boolean) => {
+    if (isolated) this.rejectPreflight('Paradex isolated account routing is unsupported');
+  };
+
+  changePositionMode = async (hedged: boolean) => {
+    if (hedged) this.rejectPreflight('Paradex supports one-way mode only');
+  };
+
   setMaxSlippage = async (maxSlippage: string, market: string): Promise<void> => {
     try {
       if (!market) {
@@ -2417,7 +2449,8 @@ export class ParadexExchange extends BaseExchange {
       filled: parseFloat(o.size) - parseFloat(o.remaining_size),
       remaining: parseFloat(o.remaining_size),
       reduceOnly,
-      timeInForce: undefined,
+      clientOrderId: o.client_id || o.client_order_id || undefined,
+      timeInForce: paradexTimeInForce(o),
       lastUpdate: new Date(o.created_at).getTime(),
       info: o, // Store all raw data from API
     };
