@@ -161,6 +161,9 @@ struct Fixture {
 }
 impl Fixture {
     async fn new(config: ServerConfig) -> Self {
+        Self::with_policy(config, safe_cex_engine::PublicFeedPolicy::Direct).await
+    }
+    async fn with_policy(config: ServerConfig, policy: safe_cex_engine::PublicFeedPolicy) -> Self {
         let mut server = FrameServer::new(config).unwrap();
         let a = Tape::default();
         let observed = Rc::new(RefCell::new(Vec::new()));
@@ -173,24 +176,19 @@ impl Fixture {
             let mut book = Book::default();
             book.apply(BookSide::Bids, 99., 1.);
             book.apply(BookSide::Asks, 101., 1.);
+            let mut engine = Engine::new(TestVenue {
+                label,
+                book,
+                observed: commands,
+                pending: Vec::new(),
+                received: received.clone(),
+                started: Rc::default(),
+                tick_intervals: tick_intervals.clone(),
+                poll_timer: None,
+            });
+            engine.set_public_feed_policy(policy).unwrap();
             server
-                .add_account(
-                    label,
-                    &format!("secret-{label}"),
-                    Host::new(
-                        Engine::new(TestVenue {
-                            label,
-                            book,
-                            observed: commands,
-                            pending: Vec::new(),
-                            received: received.clone(),
-                            started: Rc::default(),
-                            tick_intervals: tick_intervals.clone(),
-                            poll_timer: None,
-                        }),
-                        tape,
-                    ),
-                )
+                .add_account(label, &format!("secret-{label}"), Host::new(engine, tape))
                 .unwrap();
         }
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -803,4 +801,43 @@ async fn polling_deadlines_clamp_at_both_bounds_and_remain_cancelable() {
             fixture.stop().await;
         })
         .await;
+}
+
+#[tokio::test]
+async fn socket_clients_cannot_inject_shared_public_data() {
+    LocalSet::new().run_until(async {
+        let fixture = Fixture::new(config()).await;
+        let mut socket = fixture.connect("a").await;
+        frame(&mut socket).await;
+        send(&mut socket, r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"BTCUSDT","bid":1}]}"#).await;
+        assert!(matches!(reply(&mut socket).await, Reply::Error { error } if error.contains("trusted host provider")));
+        assert!(fixture.observed.borrow().is_empty());
+        // Rejecting a provider control does not drop the authenticated account session.
+        send(&mut socket, r#"{"op":"fetchAccount","command":7}"#).await;
+        assert!(matches!(reply(&mut socket).await, Reply::Done { command: 7, error: None, .. }));
+        fixture.stop().await;
+    }).await;
+}
+
+#[tokio::test]
+async fn trusted_native_host_provider_updates_private_account_frames() {
+    LocalSet::new().run_until(async {
+        let fixture = Fixture::with_policy(config(), safe_cex_engine::PublicFeedPolicy::Shared).await;
+        let mut socket = fixture.connect("a").await;
+        frame(&mut socket).await;
+        let safe_cex_engine::command::HostInput::PublicFeedUpdate(update) =
+            safe_cex_engine::command::decode_host_input(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"BTCUSDT","bid":88,"ask":90}],"books":[{"symbol":"BTCUSDT","bids":[[88,2]],"asks":[[90,3]]}]}"#).unwrap() else { panic!("provider update") };
+        fixture.a.0.borrow().as_ref().unwrap().send(HostEvent::PublicFeedUpdate(update)).unwrap();
+        let next = frame(&mut socket).await;
+        let book = sections(&next).find(|(kind, _)| *kind == section::BOOK).unwrap().1;
+        let (_, bid, ask) = book_top(book).unwrap();
+        assert_eq!((bid, ask), (88., 90.));
+        assert!(fixture.observed.borrow().is_empty(), "provider ingress never dispatches a venue command");
+        let mut late = fixture.connect("a").await;
+        let snapshot = frame(&mut late).await;
+        let book = sections(&snapshot).find(|(kind, _)| *kind == section::BOOK).unwrap().1;
+        let (_, bid, ask) = book_top(book).unwrap();
+        assert_eq!((bid, ask), (88., 90.));
+        fixture.stop().await;
+    }).await;
 }

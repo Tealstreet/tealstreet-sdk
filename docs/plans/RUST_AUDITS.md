@@ -447,3 +447,146 @@ Normal inputs send the same requests as TS; the risk is resilience.
   the snapshot (`account.rs:1246`).
 - Low: CFM `upnl` and spot `total` sources differ (equity double-count risk);
   OHLCV honours `from`; placement errors lose Coinbase's message.
+
+### Lighter
+Signing, integer scaling, tx encoding and nonces match TS.
+- High: position `initial_margin_fraction` ("20.00" = 5x) read in basis points
+  (`lighter/src/account.rs:424,877`), so leverage reads as the market max and a
+  margin-mode change signs max leverage (`trading.rs:567`). Apply TS's three-way
+  rule to the position field; add a `"20.00"` test.
+- Medium: windowed fill history pages the whole account history then fails
+  (`history.rs:404,744`); one bad market/account row stalls startup or sync;
+  account tier not exposed and `changeAccountTier` missing.
+- Low: thinner error mapping (rate-limit guidance, 21613 refresh); reduce-only
+  re-check races a fixed 2 s timer. Shared with TS: amend re-places the full
+  original size after a partial fill.
+
+### WOO
+No confirmed highs; valid data matches TS.
+- Medium: algo child rows don't inherit the parent's side/status/reduceOnly, so
+  fills can be lost (`woo/src/account.rs:700`; verify one live frame); one bad
+  position row freezes positions (`account.rs:749,949`); one unmappable
+  fill/order-history/instrument/ticker row fails the read or startup.
+- Low: SL trigger falls back to `triggerType`; algo reduceOnly default; leverage
+  readback can report a false error; isolated warning; stop without reference
+  price rejects the snapshot.
+
+### AsterDEX
+No confirmed highs.
+- Medium: failed position-mode read silently leaves one-way, never retried, and
+  orders can go before it lands (`asterdex/src/account.rs:566`); order events
+  with unmapped types (e.g. `LIQUIDATION`) dropped with their fills
+  (`account.rs:817`); one malformed row halts startup (`lib.rs:849,781`); one bad
+  row discards open-orders/positions snapshots (`account.rs:402,415`); hedge
+  amend of a closing order may open the opposite side (shared with TS; reuse the
+  row's `positionSide`).
+- Low: no credential check at start; ACCOUNT_UPDATE strict on `ep`/`cr`; fills
+  history fails on one row and refuses >7 day windows; listen-key keepalive
+  omits `listenKey` and tears down on failure; partial balance rows skipped.
+
+### Crypto.com
+Mostly matches TS.
+- Medium: per-coin balances (`position_balances`) dropped
+  (`cryptocom/src/account.rs:232`); caller client id refused on stop/TP orders
+  (`trading.rs:76`).
+- Low: one invalid order fails the whole batch; null string fields fail reads;
+  one bad instrument row stops startup.
+
+### Bitrue
+- High: orders refused on symbols with no account leverage data, and a fresh
+  account can never trade (`bitrue/src/trading.rs:363`, `account.rs:948`);
+  default margin to Cross and take leverage from a successful change, never
+  the market max. A cancel batch stops at its first failure and leaves the rest
+  live (`trading.rs:866,884`).
+- Medium: orders marked loaded only after every market's open-orders read
+  succeeds, one bad symbol blocks forever (`account.rs:382,487`); per-coin
+  balances dropped; max leverage stuck at 100 with silent clamping (no
+  leverage bracket read, `lib.rs:758`).
+- Low: one bad contract row blocks startup; stream stops misclassified;
+  snapshot starvation under load (revision discard, `account.rs:581,1310`);
+  malformed snapshot never sets loaded.
+
+### Cross-venue: per-coin balances and snapshot starvation
+- Per-coin balances missing on Bybit, Crypto.com, Bitrue; check every venue.
+- Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
+  check every venue that fences REST snapshots by stream revision.
+
+### ApeX Omni
+Signing and payloads match; no confirmed highs.
+- Medium: cancelled ids hidden for good (terminal map, `apexomni/src/account.rs:150`;
+  cancel-all marks untriggered stops terminal, `trading.rs:928`); one bad
+  open-order row leaves the account side dead incl. signing state
+  (`account.rs:975`); null fields drop whole private frames incl. fills
+  (`private_wire.rs:205`); one odd `/v3/symbols` row blocks private start; a bad
+  omni key seed kills read-only monitoring (`account.rs:504`).
+- Low: caller client id rejected on stops/brackets/splits; float remaining size;
+  zero-price candle rejects batch; leverage always sent. Unchecked: private
+  socket via Tealstreet proxy.
+
+### Paradex
+StarkNet typed data, JWT, payloads and SBE decoding match.
+- High: one blank ticker field halts the venue incl. private side
+  (`paradex/src/public.rs:714`, `lib.rs:127`); a failed TP/SL child logs at
+  Warning so no toast — user believes they are protected (`trading.rs:855`);
+  REST positions may never commit if `leverage`/`liquidation_price` are blank
+  (`account.rs:1824`; verify live).
+- Medium: multi-order placement stops at first failure and loses placed ids
+  (`trading.rs:458,699,867`); venue rejection reasons dropped (`lib.rs:231`);
+  leverage serialized `20.0` (`trading.rs:542`; verify live); one malformed SBE
+  frame recycles the public socket (`public.rs:388`).
+- Low: one unmappable order row discards refresh; leverage-0 config row; TP/SL
+  of 0 rejects order; history fails on one row; stale uPnL after WS close;
+  README says remote signing rejected.
+
+### Cross-venue: silent partial failures
+- Child-leg failures (TP/SL after an entry) must surface as errors on every
+  venue (Paradex logs at Warning).
+- Batches that fail midway must return placed ids with the error (Paradex,
+  Binance COIN-M, Bitrue cancels).
+- Integers serialized as floats (`20.0`): Paradex leverage, KuCoin leverage;
+  check every venue's integer fields.
+
+### GRVT
+Signing and integer scaling exact; no highs.
+- Medium: builder check fails once → every order rejected for the session, and
+  a matching row without `mfr` treated as unknown (`grvt/src/account.rs:1531,1011`,
+  `trading.rs:777`); one unknown-instrument row hides all positions or orders
+  (`account.rs:516,422,970`); GRVT's rejection message dropped and misleading
+  "reconcile" advice added on definitive rejects (`wire.rs:180`, `trading.rs:1348`).
+- Low: order history fails on one bad row; signer mismatch blocks trading;
+  1008 loses the proxy-whitelist message; amend may cancel without replacing if
+  cancels are asynchronous (verify live).
+
+### Polymarket (development-only)
+CLOB V2 signing and amounts match the official client.
+- Medium: one `null` in a Gamma market row breaks the venue with no retry
+  (`polymarket/src/wire.rs:33`, `lib.rs:688,832`).
+- Low: cancel-all reports failure after a successful cancel; one bad position
+  row freezes positions; auth failures invisible.
+
+### Registration and options (all RUST_VENUES aliases)
+Alias→product mapping, credentials, testnet, routing and broker/builder
+attribution are correct for all 48 names (BloFin `brokerId` aside).
+- Medium: Coinbase accounts with a saved read-only key fail to start — no
+  `secondaryReadHeaders` entry or `read_credentials` (`transport/engine.ts:76,116`,
+  `hosts/wasm/src/lib.rs:656`); Coinbase is Rust-only.
+- Low/medium: polling controls ignored — `extra.tickInterval` (incl. `Infinity`
+  to stop polling), the server slowdown multiplier and credential-rejection
+  backoff reach only BreakoutProp (and raw tickInterval to Orderly, where
+  `Infinity` becomes `null`) (`rust.exchange.ts:308,512`); every other venue polls
+  a fixed constant, so the rate-limit incident lever does nothing on Rust.
+
+### Backpack
+Signing, order payloads (incl. app stop shapes), amend, cancel and positions match.
+- Medium: spot markets dropped — 88 SPOT pairs vanish and open spot orders
+  can't be seen or cancelled (`backpack/src/lib.rs:543`); owner decision: port
+  spot or retire it before cutover. A mark-price failure or one bad ticker row
+  blocks startup (`lib.rs:211,787`).
+- Low: one bad fill row fails fill history (`history.rs:312`). Verify live:
+  open-order rows with `"quantity": null`.
+
+### BreakoutProp (disabled in production)
+App stop payloads accepted; amend stricter than TS.
+- High if re-enabled: one unexpected portfolio row (XBTUSD lot, terminal-placed
+  order type, multi-leg order) rejects the whole snapshot
+  (`breakoutprop/src/account.rs:159,226,261`, `lib.rs:920`).

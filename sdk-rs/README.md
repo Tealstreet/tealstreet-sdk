@@ -65,6 +65,11 @@ transport. `rust:private-tape-mexc` generates a synthetic MEXC futures account
 tape; `rust:gate --venue mexc --tape <path> --books ''` compares its private
 state and command results with TypeScript.
 
+Socket routing memoizes successful default URL identities per replay, for both
+engines. Caller IDs and custom URL/query rules bypass this cache; socket state,
+subscriptions and reconnect generations are always checked live. HTTP request
+identity, validation and the gate's measurement windows remain independent.
+
 An optional `meta` record sets `private` and an epoch in milliseconds. Socket
 records identify their connection with a zero-based `socket` ordinal per URL,
 including reconnects. This distinguishes MEXC's public and private sockets on

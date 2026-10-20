@@ -98,6 +98,7 @@ describe('Rust ApeX Omni SDK boundary', () => {
       testnet: true,
       publicDataOnly: false,
       enableSpotMarkets: false,
+      publicFeed: { mode: 'direct' },
     });
   });
 

@@ -180,3 +180,32 @@ live trading, weakened parity oracle, or performance threshold changes.
 - Wasm workspace Clippy is running. The serialized 30-venue isolated build,
   size/public/private replay matrix follows it, then combined bindings,
   consumer and fake-account lifecycle checks. No real private trading occurred.
+
+### Consumer landing integration and replay scheduling
+
+- Strict native and Wasm workspace Clippy both passed before this integration.
+  Paradex and Binance isolated public/private/size gates passed. Their standalone
+  Wasm sizes were 1252329 and 937923 bytes against the unchanged 1258291 budget.
+  Public main-thread CPU (TS/Rust) was 1084.5/981.3 ms and 314.8/154.1 ms;
+  retained memory was 19.1/2.3 MiB and 18.2/4.1 MiB respectively.
+- ApeX and Aster private correctness passed (50 and 14 frames respectively);
+  public attempts stopped in TS's final heap sampler before any comparison.
+  Original logs remain `/tmp/security-gate-apexomni-public.log` and
+  `/tmp/security-gate-asterdex-public.log`; these are not public gate passes.
+  Independent read-only review found unchanged sampler/TS behavior and measured
+  severe host contention: 10 CPUs, load approximately 160/160/128, 45 Vitest
+  workers and simultaneous Rust builds, with 2.72 GiB of swap used. Do not alter
+  the sampler, tapes, deadlines or acceptance criteria to obtain a result.
+- Stopped orchestration after the current Backpack build completed, before its
+  replay. Landing advanced to `fc809a9d85` with shared public-feed consumer
+  support; integrate it before restarting gates on the final combined source.
+  Existing receipts remain checkpoint evidence. Schedule timed replays after
+  host contention subsides; repeated failures under quiet conditions require
+  diagnosis rather than repeated acceptance retries.
+- Independent integration reviews found no new signer storage/nonce issue.
+  Preserve sensitive option ownership, redacted Debug, global nonces and
+  hedged Lighter signatures alongside incoming feed valuation behavior.
+- The host review found a new production-impact boundary gap: network Workers
+  commands could inject trusted-provider `publicFeedUpdate` quotes/books. Add
+  rejection and a regression at that network boundary, preserving trusted
+  in-process provider delivery and the incoming native server rejection.
