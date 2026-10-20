@@ -351,3 +351,21 @@ Private frame counts remain USD-M 14, PM 6, Spot 8 and COIN-M 6. Zero unserved r
 Binance WASM **895,511 bytes**, budget 1,258,291; SHA-256 `3397c74b6ffc4c60def631debc53fcabc2cc03406c4b7f576dba228cdc0496a8`.
 
 Coinbase changed the optional shared currency tail: a freshly rebuilt matched producer/decoder passes all 88 real WASM checks across seven suites, including worker/main Spot balances, and 63 host/wire cases. Native Binance 99 and engine 65, harness helpers 377, focused wrapper/frame/transport 285, root typecheck 44/lint 28, fmt/bans and strict Binance/default WASM Clippy pass. Feature-range credential scan is clean. CI on the resulting pushed head must pass before merge.
+
+
+### Polymarket landing integration
+
+Source `897980dcf2` passes all eight fresh Binance gates after merging Polymarket. The prior head `35bfc0605f` passed all 32 CI checks, but a new landing introduced conflicts just before merge; those results are not relabeled as current-head CI. Independent wrapper, shared-state and harness reviews pass. All 386 merged harness helpers and 256 focused wrapper/frame/transport cases pass. Prediction metadata is optional and leaves Binance/Bybit units and the currency layout unchanged.
+
+| Profile | Frames | TS/Rust main ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| USD-M | 873 | 291.441/151.274 | 159.868/81.124 | 19.295/2.573 |
+| PM | 873 | 293.464/178.916 | 176.535/95.676 | 18.744/2.572 |
+| Spot | 7045 | 944.287/688.102 | 476.000/293.263 | 26.767/7.706 |
+| COIN-M | 202 | 262.182/120.562 | 181.339/73.984 | 15.917/1.555 |
+
+Private frames remain USD-M 14, PM 6, Spot 8, COIN-M 6. Every replay has zero unserved requests, missing writes, invalid signatures or protocol errors. Native quantities and every numeric Spot currency field remain compared.
+
+Binance-only WASM **898,165 bytes**, budget 1,258,291; SHA-256 `e61067173975ec815c3e45c478ab4efb28670764162405285de3674bd1b26e99`.
+
+Fresh combined build passes 104 actual WASM tests across eight suites, including worker/main Binance balances, and 64 host/wire cases. Native Binance 99/engine 67, root typecheck 44/lint 28, fmt/bans and strict Binance/default WASM Clippy pass. Feature-range credential scan is clean. Fresh CI on the pushed head is required before merge. Bybit/Hyro measurements above remain scoped to their tested source; the previous current-head CI passed the full Bybit/Hyro variants matrix.
