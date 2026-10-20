@@ -260,3 +260,17 @@ position IDs at startup, before any position frame, so identity is stable both
 before/after Greek availability. Independent review PASS; repaired combined
 artifact passes all 16 semantic integrations and 406 SDK tests, with Bybit 138
 native tests and strict Clippy. Other profiles retain their prior ID policy.
+
+Final-head CI on `02607761a8` passed the Bybit, OKX, Binance and Paradex
+controls but missed Breakout total main-thread CPU: Rust 20.1 vs TS 19.4 ms
+(steady 6.7 vs 7.1 passed). The retained CPU profile identified generic
+formatting in percent-encoding and request dispatch. Breakout now emits the
+same uppercase hex escapes directly, encodes the account only when a path or
+query uses it, and assembles the unchanged URL/auth header without the general
+formatter. No auth cache, parser, fixture or measurement control changed.
+Independent correctness review PASS, including UTF8/reserved/control/percent
+bytes and exact URL/header/JSON semantics. Native 106, strict native/WASM
+Clippy and format PASS. Unchanged public/private gates PASS locally: public
+main 19.8 vs TS 63.1 ms, steady 7.7 vs 8.7 ms, retained 0.8 vs 12.5 MB.
+TS startup timing varied substantially, so these figures establish the local
+gate result rather than a stable speedup; final-head green CI remains required.

@@ -326,25 +326,22 @@ impl BreakoutProp {
         };
         let mut headers = vec![("Content-Type", "application/json".into())];
         if !matches!(operation, Operation::Login) {
-            headers.push((
-                "Authorization",
-                format!(
-                    "DXAPI {}",
-                    self.session.token.as_deref().unwrap_or_default()
-                ),
-            ));
+            let token = self.session.token.as_deref().unwrap_or_default();
+            let mut authorization = String::with_capacity("DXAPI ".len() + token.len());
+            authorization.push_str("DXAPI ");
+            authorization.push_str(token);
+            headers.push(("Authorization", authorization));
         }
         if method == Method::Delete {
             headers.push(("If-Match", "*".into()));
         }
         let stream = operation.stream();
-        let id = cx.request(
-            method,
-            format!("{BASE_URL}/{}", path.trim_start_matches('/')),
-            headers,
-            body,
-            pending,
-        );
+        let path = path.trim_start_matches('/');
+        let mut url = String::with_capacity(BASE_URL.len() + 1 + path.len());
+        url.push_str(BASE_URL);
+        url.push('/');
+        url.push_str(path);
+        let id = cx.request(method, url, headers, body, pending);
         cx.request_timeout(id, self.options.timeout_ms);
         if let Some(stream) = stream {
             cx.stream_response(id, stream);
@@ -362,7 +359,6 @@ impl BreakoutProp {
         operation: &Operation,
     ) -> Result<(Method, String, Option<String>), String> {
         let account = self.account_code().unwrap_or_default();
-        let encoded = wire::path_segment(account);
         let serialize = |body: &MarketData<'_>| {
             serde_json::to_string(body)
                 .map(Some)
@@ -389,9 +385,11 @@ impl BreakoutProp {
                     ),
                 )
             }
-            Operation::Portfolio { .. } => {
-                (Method::Get, format!("accounts/{encoded}/portfolio"), None)
-            }
+            Operation::Portfolio { .. } => (
+                Method::Get,
+                format!("accounts/{}/portfolio", wire::path_segment(account)),
+                None,
+            ),
             Operation::Discover => (
                 Method::Get,
                 format!("users/{}", wire::path_segment(&self.options.key)),
@@ -399,12 +397,15 @@ impl BreakoutProp {
             ),
             Operation::Instruments { .. } => (
                 Method::Get,
-                format!("instruments/query?accountCode={encoded}"),
+                format!(
+                    "instruments/query?accountCode={}",
+                    wire::path_segment(account)
+                ),
                 None,
             ),
             Operation::Details { .. } => (
                 Method::Get,
-                format!("accounts/{encoded}/instruments/query"),
+                format!("accounts/{}/instruments/query", wire::path_segment(account)),
                 None,
             ),
             Operation::Quotes { .. } => {
