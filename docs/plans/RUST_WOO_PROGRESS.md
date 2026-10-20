@@ -249,3 +249,20 @@ Remaining phases:
   tests in both entrypoints). Later focused guard/reopen regressions pass too.
   Native account auxiliary classification and legacy query follow-ups remain
   in review before final artifact/gate/CI reruns.
+
+### Query parity follow-ups reviewed
+
+- Native queries now try TS's four symbol spellings plus unfiltered V3 before
+  the matching legacy sequence, and decode top-level/nested rows, optional
+  execution IDs and legacy aggregate fields. First legacy page omits `page`;
+  later native pagination remains explicit. New V3 windows reset page state.
+- Independent review caught page state crossing windows and then raw-ID versus
+  trade-ID precedence in the order fallback. Fixed both; fill and order IDs
+  now preserve TS's distinct nullish precedence, including explicit empty IDs.
+  Final bounded re-review PASS, 26 history tests and all-target WOO clippy PASS.
+- SDK seconds/milliseconds bounds and chart/response aliases retain active TS
+  behavior, with eight wrapper cases and native normalization regressions.
+- Tape now adds alternate-symbol recovery and id-less legacy aggregation:
+  144 records / 20 commands. Final TS replay's first attempt failed the shared
+  backing-buffer settling check under concurrent full tests; rerun the same
+  unchanged memory gate after builds/tests settle. No gate threshold changed.

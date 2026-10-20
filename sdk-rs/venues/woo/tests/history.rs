@@ -96,10 +96,62 @@ fn execution_queries_accept_chart_aliases_and_map_native_suffix_spellings() {
         );
         let rows: serde_json::Value = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
         assert_eq!(rows.as_array().unwrap().len(), 2, "{symbol}");
-        assert!(rows.as_array().unwrap().iter().all(|r| r["symbol"] == "BTCUSDT"));
+        assert!(
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .all(|r| r["symbol"] == "BTCUSDT")
+        );
         assert!(e.store().orders().is_empty());
         assert!(e.store().positions().is_empty());
     }
+}
+
+#[test]
+fn account_execution_history_retains_ts_product_and_symbol_normalization() {
+    let mut e = ready();
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(8),
+        },
+    );
+    let rows = [
+        "PERP_BTC_USDT",
+        "BTC_USDT_PERP",
+        "BTC-USDT-PERP",
+        "BTCUSDT",
+        "btc/usdt",
+        "SPOT_BTC_USDT",
+        "woo:PERP_BTC_USDT",
+        "BTCPERP",
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, symbol)| fill(i as u64 + 1, NOW, "BUY").replace("PERP_BTC_USDT", symbol))
+    .collect::<Vec<_>>()
+    .join(",");
+    response(
+        &mut e,
+        &r,
+        NOW + 1.0,
+        &format!(r#"{{"success":true,"data":{{"rows":[{rows}]}}}}"#),
+    );
+    let rows: serde_json::Value = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 8);
+    assert!(
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["symbol"] == "BTCUSDT")
+    );
+    assert_eq!(e.store().markets().len(), 1);
+    assert!(e.store().orders().is_empty());
+    assert!(e.store().positions().is_empty());
 }
 
 #[test]
@@ -173,16 +225,19 @@ fn ascending_v3_history_advances_time_windows_instead_of_ignored_page() {
 fn empty_v3_falls_back_to_v1_with_distinct_parameter_vocabulary() {
     let mut e = ready();
     let r = query(&mut e, fills(Some(2)));
-    response(
-        &mut e,
-        &r,
-        NOW + 1.0,
-        r#"{"success":true,"data":{"rows":[]}}"#,
-    );
-    let r = requests(&mut e).remove(0);
+    let mut r = r;
+    for i in 0..5 {
+        response(
+            &mut e,
+            &r,
+            NOW + i as f64 + 1.0,
+            r#"{"success":true,"data":{"rows":[]}}"#,
+        );
+        r = requests(&mut e).remove(0);
+    }
     assert!(r.url.contains("/v1/client/trades"));
     assert!(r.url.contains("size=2"));
-    assert!(r.url.contains("page=1"));
+    assert!(!r.url.contains("page="));
     assert!(!r.url.contains("limit="));
     assert!(!r.url.contains("hist_trades"));
     let row = r#"{"id":1,"order_id":2,"symbol":"PERP_BTC_USDT","side":"SELL","executed_price":60000,"executed_quantity":0.001,"executed_timestamp":"1786603865.910","fee":0.01,"fee_asset":"USDT","realized_pnl":null,"is_maker":true}"#;
@@ -547,7 +602,7 @@ fn maker_flags_preserve_boolean_integer_string_and_null_semantics() {
 }
 
 #[test]
-fn required_and_optional_history_ids_keep_distinct_empty_and_null_rules() {
+fn optional_execution_ids_keep_exact_strings_and_omit_null_or_empty() {
     #[derive(Deserialize)]
     struct Execution {
         id: String,
@@ -555,7 +610,7 @@ fn required_and_optional_history_ids_keep_distinct_empty_and_null_rules() {
         order_id: Option<String>,
     }
     for (raw, expected) in [
-        ("null", None),
+        ("null", Some("18446744073709551615")),
         (r#""""#, None),
         ("0", Some("0")),
         (r#""0001""#, Some("0001")),
@@ -576,7 +631,7 @@ fn required_and_optional_history_ids_keep_distinct_empty_and_null_rules() {
         assert_eq!(rows[0].id, "18446744073709551615");
         assert_eq!(rows[0].order_id.as_deref(), expected, "{raw}");
     }
-    for raw in ["null", r#""""#, "-1", "-0", "1.0", "true", "[]"] {
+    for raw in ["-1", "-0", "1.0", "true", "[]"] {
         let mut e = ready();
         let r = query(&mut e, fills(Some(1)));
         let row = fill(1, NOW, "BUY").replace(r#""id":1"#, &format!(r#""id":{raw}"#));
@@ -587,5 +642,374 @@ fn required_and_optional_history_ids_keep_distinct_empty_and_null_rules() {
             &format!(r#"{{"success":true,"data":{{"rows":[{row}]}}}}"#),
         );
         assert!(result(&mut e).is_err(), "{raw}");
+    }
+}
+
+#[test]
+fn empty_canonical_fill_query_tries_alternate_v3_symbol_before_legacy() {
+    let mut e = ready();
+    let r = query(&mut e, fills(Some(2)));
+    assert!(r.url.contains("symbol=PERP_BTC_USDT"));
+    response(&mut e, &r, NOW + 1.0, r#"{"success":true,"rows":[]}"#);
+    let r = requests(&mut e).remove(0);
+    assert!(r.url.contains("/v3/trade/transactionHistory"));
+    assert!(r.url.contains("symbol=BTC_USDT_PERP"));
+    let row = r#"{"symbol":"BTC_USDT_PERP","orderId":99,"executedPrice":"60000","executedQuantity":"0.005","side":"BUY","executedTimestamp":"1752055400.100"}"#;
+    response(
+        &mut e,
+        &r,
+        NOW + 2.0,
+        &format!(r#"{{"success":true,"rows":[{row}]}}"#),
+    );
+    let rows: serde_json::Value = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    assert_eq!(
+        rows[0],
+        serde_json::json!({
+            "symbol":"BTCUSDT", "orderId":"99", "timestamp":1752055400.0,
+            "price":60000.0, "qty":0.005, "side":"buy", "positionSide":"both",
+        })
+    );
+    assert!(requests(&mut e).is_empty());
+}
+
+#[test]
+fn legacy_aggregate_fill_accepts_optional_id_and_legacy_price_quantity_time_aliases() {
+    let mut e = ready();
+    let mut r = query(&mut e, fills(Some(2)));
+    for (i, symbol) in [
+        "PERP_BTC_USDT",
+        "BTC_USDT_PERP",
+        "BTC-USDT-PERP",
+        "BTCUSDT",
+        "",
+    ]
+    .iter()
+    .enumerate()
+    {
+        assert!(r.url.contains("/v3/trade/transactionHistory"));
+        if symbol.is_empty() {
+            assert!(!r.url.contains("symbol="));
+        } else {
+            assert!(r.url.contains(&format!("symbol={symbol}")));
+        }
+        response(
+            &mut e,
+            &r,
+            NOW + i as f64 + 1.0,
+            r#"{"success":true,"rows":[]}"#,
+        );
+        r = requests(&mut e).remove(0);
+    }
+    assert!(r.url.contains("/v1/client/trades"));
+    let row = r#"{"symbol":"PERP_BTC_USDT","order_id":123,"average_executed_price":"62000","executed":"0.002","side":"BUY","created_time":"1752055600.100","total_fee":"0.01","fee_asset":"USDT"}"#;
+    response(
+        &mut e,
+        &r,
+        NOW + 6.0,
+        &format!(
+            r#"{{"success":true,"rows":[{row}],"meta":{{"total":1,"records_per_page":2,"current_page":1}}}}"#
+        ),
+    );
+    let rows: serde_json::Value = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    assert_eq!(
+        rows[0],
+        serde_json::json!({
+            "symbol":"BTCUSDT", "orderId":"123", "timestamp":1752055600.0,
+            "price":62000.0, "qty":0.002, "side":"buy", "positionSide":"both",
+            "commission":0.01, "commissionAsset":"USDT",
+        })
+    );
+}
+
+#[test]
+fn empty_bounded_fill_window_walks_each_v3_and_legacy_spelling_then_finishes() {
+    let mut e = ready();
+    let mut r = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(NOW - 1000.0),
+            to_ms: Some(NOW),
+            limit: Some(2),
+        },
+    );
+    for i in 0..10 {
+        let v3 = i < 5;
+        assert!(r.url.contains(if v3 {
+            "/v3/trade/transactionHistory"
+        } else {
+            "/v1/client/trades"
+        }));
+        assert!(r.url.contains(if v3 {
+            "startTime=1786603864910"
+        } else {
+            "start_t=1786603864910"
+        }));
+        let symbol = [
+            "PERP_BTC_USDT",
+            "BTC_USDT_PERP",
+            "BTC-USDT-PERP",
+            "BTCUSDT",
+            "",
+        ][i % 5];
+        if symbol.is_empty() {
+            assert!(!r.url.contains("symbol="));
+        } else {
+            assert!(r.url.contains(&format!("symbol={symbol}")));
+        }
+        response(
+            &mut e,
+            &r,
+            NOW + i as f64 + 1.0,
+            r#"{"success":true,"rows":[]}"#,
+        );
+        if i < 9 {
+            r = requests(&mut e).remove(0);
+        }
+    }
+    assert_eq!(result(&mut e).unwrap(), "[]");
+    assert!(requests(&mut e).is_empty());
+}
+
+#[test]
+fn idless_fills_preserve_distinct_millisecond_times_and_optional_id_shapes() {
+    for id in [None, Some("null"), Some(r#""""#)] {
+        let mut e = ready();
+        let r = query(&mut e, fills(Some(2)));
+        let rows = [NOW, NOW + 1.0]
+            .iter()
+            .map(|time| {
+                let row = fill(1, *time, "BUY");
+                match id {
+                    Some(id) => row.replace(r#""id":1"#, &format!(r#""id":{id}"#)),
+                    None => row.replace(r#""id":1,"#, ""),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        response(
+            &mut e,
+            &r,
+            NOW + 2.0,
+            &format!(r#"{{"success":true,"rows":[{rows}]}}"#),
+        );
+        let rows: serde_json::Value = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+        assert_eq!(rows.as_array().unwrap().len(), 2);
+        assert!(
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row.get("id").is_none())
+        );
+    }
+}
+
+#[test]
+fn fill_fields_choose_active_ts_precedence_when_legacy_and_canonical_values_coexist() {
+    let mut e = ready();
+    let r = query(&mut e, fills(Some(1)));
+    let row = fill(1, NOW, "BUY").replace(
+        r#""executedPrice":60000"#,
+        r#""executedPrice":60000,"price":59000,"average_executed_price":58000,"last_price":57000"#,
+    ).replace(
+        r#""executedQuantity":0.001"#,
+        r#""executedQuantity":0.001,"quantity":0.01,"executed":0.02,"last_qty":0.03"#,
+    ).replace(
+        r#""executedTimestamp":1786603865910"#,
+        r#""executedTimestamp":1786603865910,"created_time":1752055600.1,"trade_time":1752055600.2"#,
+    );
+    response(
+        &mut e,
+        &r,
+        NOW + 1.0,
+        &format!(r#"{{"success":true,"data":{{"rows":[{row}]}}}}"#),
+    );
+    let rows: serde_json::Value = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    assert_eq!(rows[0]["price"], 60000.0);
+    assert_eq!(rows[0]["qty"], 0.001);
+    assert_eq!(rows[0]["timestamp"], 1786603865.0);
+}
+
+#[test]
+fn failed_symbol_candidates_remain_visible_when_all_fallbacks_are_empty() {
+    let mut e = ready();
+    let mut r = query(&mut e, fills(Some(2)));
+    for i in 0..10 {
+        if i == 0 {
+            e.handle(
+                NOW + i as f64 + 1.0,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: Response {
+                        status: 500,
+                        headers: "",
+                        body: r#"{"success":false,"message":"busy"}"#,
+                    },
+                },
+            );
+        } else {
+            response(
+                &mut e,
+                &r,
+                NOW + i as f64 + 1.0,
+                r#"{"success":true,"rows":[]}"#,
+            );
+        }
+        if i < 9 {
+            r = requests(&mut e).remove(0);
+        }
+    }
+    assert!(
+        result(&mut e)
+            .unwrap_err()
+            .contains("history request rejected")
+    );
+}
+
+#[test]
+fn id_only_fill_inherits_order_id_for_output_and_order_filter() {
+    let mut e = ready();
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: Some("1".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(1),
+        },
+    );
+    let row = fill(1, NOW, "BUY").replace(r#""orderId":9007199254740993,"#, "");
+    response(
+        &mut e,
+        &r,
+        NOW + 1.0,
+        &format!(r#"{{"success":true,"data":{{"rows":[{row}]}}}}"#),
+    );
+    let rows: serde_json::Value = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    assert_eq!(rows[0]["id"], "1");
+    assert_eq!(rows[0]["orderId"], "1");
+}
+
+#[test]
+fn new_v3_window_resets_page_after_a_paginated_legacy_fallback() {
+    let mut e = ready();
+    let from = NOW - 30.0 * 86_400_000.0 - 1000.0;
+    let mut r = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(from),
+            to_ms: Some(NOW),
+            limit: Some(10),
+        },
+    );
+    for i in 0..5 {
+        response(
+            &mut e,
+            &r,
+            NOW + i as f64 + 1.0,
+            r#"{"success":true,"rows":[]}"#,
+        );
+        r = requests(&mut e).remove(0);
+    }
+    assert!(r.url.contains("/v1/client/trades"));
+    assert!(!r.url.contains("page="));
+    response(
+        &mut e,
+        &r,
+        NOW + 6.0,
+        &format!(
+            r#"{{"success":true,"rows":[{}],"meta":{{"total":2,"records_per_page":1,"current_page":1}}}}"#,
+            fill(1, from + 1.0, "BUY"),
+        ),
+    );
+    let r = requests(&mut e).remove(0);
+    assert!(r.url.contains("page=2"));
+    response(
+        &mut e,
+        &r,
+        NOW + 7.0,
+        &format!(
+            r#"{{"success":true,"rows":[{}],"meta":{{"total":2,"records_per_page":1,"current_page":2}}}}"#,
+            fill(2, from + 2.0, "BUY"),
+        ),
+    );
+    let r = requests(&mut e).remove(0);
+    assert!(r.url.contains("/v3/trade/transactionHistory"));
+    assert!(r.url.contains("symbol=PERP_BTC_USDT"));
+    assert!(r.url.contains(&format!("startTime={}", NOW - 1000.0)));
+    response(&mut e, &r, NOW + 8.0, r#"{"success":true,"rows":[]}"#);
+    let r = requests(&mut e).remove(0);
+    assert!(r.url.contains("/v3/trade/transactionHistory"));
+    assert!(r.url.contains("symbol=BTC_USDT_PERP"));
+}
+
+#[test]
+fn trade_id_only_rows_emit_fill_ids_without_inventing_order_ids_or_matching_order_filters() {
+    for key in ["tradeId", "trade_id"] {
+        for order_filter in [None, Some("102")] {
+            let mut e = ready();
+            let r = query(
+                &mut e,
+                Query::Fills {
+                    symbol: Some("BTCUSDT".into()),
+                    order_id: order_filter.map(String::from),
+                    from_ms: None,
+                    to_ms: None,
+                    limit: Some(1),
+                },
+            );
+            let row = fill(1, NOW, "BUY")
+                .replace(r#""id":1"#, &format!(r#""{key}":102"#))
+                .replace(r#""orderId":9007199254740993,"#, "");
+            response(
+                &mut e,
+                &r,
+                NOW + 1.0,
+                &format!(r#"{{"success":true,"rows":[{row}]}}"#),
+            );
+            let rows: serde_json::Value = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+            if order_filter.is_some() {
+                assert!(rows.as_array().unwrap().is_empty());
+            } else {
+                assert_eq!(rows[0]["id"], "102");
+                assert!(rows[0].get("orderId").is_none());
+            }
+        }
+    }
+}
+
+#[test]
+fn fill_identifier_precedence_preserves_nullish_and_explicit_empty_boundaries() {
+    for (raw_id, trade_id, snake_trade_id, expected_fill, expected_order) in [
+        ("123", "456", "789", Some("123"), Some("123")),
+        (r#""""#, "789", "456", None, None),
+        ("null", "789", "456", Some("789"), None),
+        ("null", r#""""#, "456", None, None),
+        ("null", "null", "456", Some("456"), None),
+    ] {
+        let mut e = ready();
+        let r = query(&mut e, fills(Some(1)));
+        let row = fill(1, NOW, "BUY")
+            .replace(
+                r#""id":1"#,
+                &format!(r#""id":{raw_id},"tradeId":{trade_id},"trade_id":{snake_trade_id}"#),
+            )
+            .replace(r#""orderId":9007199254740993,"#, "");
+        response(
+            &mut e,
+            &r,
+            NOW + 1.0,
+            &format!(r#"{{"success":true,"rows":[{row}]}}"#),
+        );
+        let rows: serde_json::Value = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+        assert_eq!(rows[0].get("id").and_then(|v| v.as_str()), expected_fill);
+        assert_eq!(
+            rows[0].get("orderId").and_then(|v| v.as_str()),
+            expected_order
+        );
     }
 }

@@ -30,6 +30,8 @@ pub struct Read {
     command: CommandId,
     route: Route,
     symbol: Option<String>,
+    symbol_candidate: u8,
+    last_fill_error: Option<String>,
     order_id: Option<String>,
     kind: Option<String>,
     from: Option<f64>,
@@ -64,7 +66,8 @@ enum Row {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Execution {
-    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
     timestamp: f64,
     symbol: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,6 +151,19 @@ fn optional_id<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Err
     let value = crate::wire::id(d)?;
     Ok((!value.is_empty()).then_some(value))
 }
+// Outer None is absent/null; Some(None) is an explicit empty string. Keep
+// them distinct for the TS nullish-coalescing precedence of native ID fields.
+fn nullish_id<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
+    #[derive(Deserialize)]
+    struct Id(#[serde(deserialize_with = "optional_id")] Option<String>);
+    Option::<&serde_json::value::RawValue>::deserialize(d)?
+        .map(|raw| {
+            serde_json::from_str::<Id>(raw.get())
+                .map(|id| id.0)
+                .map_err(serde::de::Error::custom)
+        })
+        .transpose()
+}
 fn maker<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -166,40 +182,101 @@ fn maker<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
 }
 #[derive(Deserialize)]
 struct FillRow<'a> {
-    #[serde(deserialize_with = "exact_id", alias = "tradeId", alias = "trade_id")]
-    id: String,
+    #[serde(default, deserialize_with = "nullish_id")]
+    id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "nullish_id", rename = "tradeId")]
+    trade_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "nullish_id", rename = "trade_id")]
+    trade_id_snake: Option<Option<String>>,
     #[serde(
         default,
-        deserialize_with = "optional_id",
+        deserialize_with = "nullish_id",
         rename = "orderId",
         alias = "order_id"
     )]
-    order_id: Option<String>,
+    order_id: Option<Option<String>>,
     #[serde(borrow)]
     symbol: Str<'a>,
     #[serde(borrow)]
     side: Str<'a>,
     #[serde(
-        deserialize_with = "number",
+        default,
+        deserialize_with = "optional_number",
         rename = "executedPrice",
-        alias = "executed_price",
-        alias = "price"
+        alias = "executed_price"
     )]
-    price: f64,
+    executed_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    price: Option<f64>,
     #[serde(
-        deserialize_with = "number",
+        default,
+        deserialize_with = "optional_number",
+        rename = "averageExecutedPrice",
+        alias = "average_executed_price"
+    )]
+    average_price: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "optional_number",
+        rename = "lastPrice",
+        alias = "last_price"
+    )]
+    last_price: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "optional_number",
         rename = "executedQuantity",
-        alias = "executed_quantity",
-        alias = "quantity"
+        alias = "executed_quantity"
     )]
-    qty: f64,
+    executed_quantity: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    quantity: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    executed: Option<f64>,
     #[serde(
-        deserialize_with = "number",
-        rename = "executedTimestamp",
-        alias = "executed_timestamp",
-        alias = "timestamp"
+        default,
+        deserialize_with = "optional_number",
+        rename = "lastQty",
+        alias = "last_qty"
     )]
-    timestamp: f64,
+    last_quantity: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "optional_number",
+        rename = "executedTimestamp",
+        alias = "executed_timestamp"
+    )]
+    executed_timestamp: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "optional_number",
+        rename = "executedTime",
+        alias = "executed_time"
+    )]
+    executed_time: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "optional_number",
+        rename = "tradeTime",
+        alias = "trade_time"
+    )]
+    trade_time: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    timestamp: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "optional_number",
+        rename = "createdTime",
+        alias = "created_time"
+    )]
+    created_time: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "optional_number",
+        rename = "updatedTime",
+        alias = "updated_time"
+    )]
+    updated_time: Option<f64>,
     #[serde(default, deserialize_with = "optional_number", alias = "total_fee")]
     fee: Option<f64>,
     #[serde(borrow, default, rename = "feeAsset", alias = "fee_asset")]
@@ -447,7 +524,9 @@ impl Woo {
             }
         };
         let symbol = if route == Route::Fills {
-            symbol.filter(|s| !s.is_empty()).map(|s| requested_symbol(&s))
+            symbol
+                .filter(|s| !s.is_empty())
+                .map(|s| requested_symbol(&s))
         } else {
             symbol
         };
@@ -489,6 +568,8 @@ impl Woo {
             command,
             route,
             symbol,
+            symbol_candidate: 0,
+            last_fill_error: None,
             order_id,
             kind,
             from,
@@ -537,22 +618,39 @@ impl Woo {
         if let Some(s) = &r.symbol
             && r.route != Route::Income
         {
-            params.push(("symbol".into(), native(cx.store.market(s).unwrap())));
+            let symbol = if matches!(r.route, Route::Fills | Route::LegacyFills) {
+                let base = s.strip_suffix("USDT").unwrap_or(s);
+                match r.symbol_candidate {
+                    0 => Some(native(cx.store.market(s).unwrap())),
+                    1 => Some(format!("{base}_USDT_PERP")),
+                    2 => Some(format!("{base}-USDT-PERP")),
+                    3 => Some(s.clone()),
+                    _ => None,
+                }
+            } else {
+                Some(native(cx.store.market(s).unwrap()))
+            };
+            if let Some(symbol) = symbol {
+                params.push(("symbol".into(), symbol));
+            }
         }
         let (path, at) = match r.route {
             Route::Fills => {
                 params.push(("limit".into(), r.size.to_string()));
                 (
                     "/v3/trade/transactionHistory",
-                    ArrayAt::EnvelopeFieldOrNested("data", "rows"),
+                    ArrayAt::Envelope(&[&["data", "rows"], &["rows"], &["data"]]),
                 )
             }
             Route::LegacyFills => {
-                params.extend([
-                    ("size".into(), r.size.to_string()),
-                    ("page".into(), r.page.to_string()),
-                ]);
-                ("/v1/client/trades", ArrayAt::Field("rows"))
+                params.push(("size".into(), r.size.to_string()));
+                if r.page > 1 {
+                    params.push(("page".into(), r.page.to_string()));
+                }
+                (
+                    "/v1/client/trades",
+                    ArrayAt::Envelope(&[&["data", "rows"], &["rows"], &["data"]]),
+                )
             }
             Route::Orders => {
                 params.extend([
@@ -628,6 +726,9 @@ impl Woo {
             match r.walk.as_mut().unwrap().step() {
                 Step::Fetch { from, to } => {
                     r.window = (Some(from), Some(to));
+                    r.page = 1;
+                    r.symbol_candidate = 0;
+                    r.last_fill_error = None;
                     self.history_page(cx, r);
                     return;
                 }
@@ -668,10 +769,10 @@ impl Woo {
             cx.done(r.command, Err("Malformed WOO history row".into()));
             return;
         }
-        if r.route == Route::Fills && r.count == 0 {
-            r.route = Route::LegacyFills;
-            r.page = 1;
-            self.history_page(cx, r);
+        if r.count == 0
+            && (r.route == Route::Fills || (r.route == Route::LegacyFills && r.page == 1))
+        {
+            self.history_fill_fallback(cx, r, None);
             return;
         }
         let page = match meta(response.body) {
@@ -771,11 +872,37 @@ impl Woo {
             serde_json::to_string(&rows).map_err(|e| e.to_string()),
         );
     }
-    pub(crate) fn history_failed(&mut self, cx: &mut Cx<'_, Pending>, mut r: Request, error: &str) {
-        if r.route == Route::Fills {
+    // The active TS adapter tries each venue spelling before falling back to
+    // the older fills route. These are reads, never retries of ambiguous writes.
+    fn history_fill_fallback(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut r: Request,
+        error: Option<&str>,
+    ) {
+        if let Some(error) = error {
+            r.last_fill_error = Some(error.into());
+        }
+        if r.symbol.is_some() && r.symbol_candidate < 4 && r.page == 1 {
+            r.symbol_candidate += 1;
+            self.history_page(cx, r);
+        } else if r.route == Route::Fills {
             r.route = Route::LegacyFills;
+            r.symbol_candidate = 0;
             r.page = 1;
             self.history_page(cx, r);
+        } else if let Some(error) = r.last_fill_error.take() {
+            cx.done(r.command, Err(error));
+        } else if r.walk.is_some() {
+            r.route = Route::Fills;
+            self.history_next_window(cx, r);
+        } else {
+            Self::history_finish(cx, r);
+        }
+    }
+    pub(crate) fn history_failed(&mut self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
+        if matches!(r.route, Route::Fills | Route::LegacyFills) && r.page == 1 {
+            self.history_fill_fallback(cx, r, Some(error));
         } else {
             cx.done(r.command, Err(error.into()));
         }
@@ -809,29 +936,62 @@ fn history_entry(r: &Request, item: &str) -> Result<Option<Entry>, String> {
                 return Ok(None);
             }
             let (side, leg) = side(&row.side).ok_or("Invalid WOO execution side")?;
-            if row.price <= 0.0 || row.qty <= 0.0 || row.timestamp <= 0.0 {
-                return Err("Invalid WOO execution".into());
-            }
-            let time = millis(row.timestamp);
-            let id = row.id;
-            Entry {
-                id: id.clone(),
-                time,
+            let price = row
+                .executed_price
+                .or(row.price)
+                .or(row.average_price)
+                .or(row.last_price)
+                .filter(|price| *price > 0.0)
+                .ok_or("Invalid WOO execution price")?;
+            let qty = row
+                .executed_quantity
+                .or(row.quantity)
+                .or(row.executed)
+                .or(row.last_quantity)
+                .filter(|qty| *qty > 0.0)
+                .ok_or("Invalid WOO execution quantity")?;
+            let timestamp = [
+                row.executed_timestamp,
+                row.executed_time,
+                row.trade_time,
+                row.timestamp,
+                row.created_time,
+                row.updated_time,
+            ]
+            .into_iter()
+            .flatten()
+            .find(|time| *time != 0.0)
+            .filter(|time| *time > 0.0)
+            .ok_or("Invalid WOO execution timestamp")?;
+            let time = millis(timestamp);
+            let execution = Execution {
+                order_id: row.order_id.unwrap_or_else(|| row.id.clone().flatten()),
+                id: row.id.or(row.trade_id).or(row.trade_id_snake).flatten(),
+                timestamp: (time / 1000.0).floor(),
                 symbol: symbol.clone(),
-                row: Row::Fill(Execution {
-                    id,
-                    timestamp: (time / 1000.0).floor(),
-                    symbol,
-                    order_id: row.order_id,
-                    price: row.price,
-                    qty: row.qty,
-                    side,
-                    commission: row.fee,
-                    commission_asset: row.fee_asset.map(|s| s.into_owned()),
-                    position_side: position(row.position_side.as_deref(), leg),
-                    realized_pnl: row.realized_pnl,
-                    maker: row.maker,
-                }),
+                price,
+                qty,
+                side,
+                commission: row.fee,
+                commission_asset: row.fee_asset.map(|s| s.into_owned()),
+                position_side: position(row.position_side.as_deref(), leg),
+                realized_pnl: row.realized_pnl,
+                maker: row.maker,
+            };
+            // Id-less historical aggregates remain id-less to callers. Their
+            // canonical content gives the pager an internal deduplication key.
+            let id = match &execution.id {
+                Some(id) => format!("fill:{id}"),
+                None => format!(
+                    "anonymous:{time}:{}",
+                    serde_json::to_string(&execution).map_err(err)?
+                ),
+            };
+            Entry {
+                id,
+                time,
+                symbol,
+                row: Row::Fill(execution),
             }
         }
         Route::Orders => {
