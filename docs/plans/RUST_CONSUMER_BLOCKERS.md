@@ -132,3 +132,15 @@ publish an empty snapshot or dispose the previous good engine.
   cadence uses Store prices in both modes. The targeted quote-side-effect audit
   found no further concrete bypasses; this is code audit evidence, not all-venue
   live connectivity proof.
+
+- Native follow-ups committed after independent reviews: TxFlow `558dc48f5b`
+  (76 tests), ApeX Omni `94e734dc31` (101 tests plus final two hook regressions),
+  GRVT/Lighter `868340d9a5` (177 tests), strict Clippy PASS. Explicit zero-mark
+  regressions preserve each venue's normalized mark-to-last fallback; cumulative
+  shared snapshots intentionally retain the current mark on last-only updates.
+- Final combined artifact at `868340d9a5`: 11,387,205 bytes; web/node and packaged
+  MCP SHA-256 `0adfe0dcc81bfc2af5f47bf5c6189cd865416be8713decfaea11e5c4474f313c`.
+  SDK WASM 391/391 in 14 files, server native WASM 11/11, CLI 2/2, MCP 3/3,
+  RN loader 2/2 PASS. MCP final build and isolated package smoke PASS: 17 protocol
+  tools, Poseidon and actual native Coinbase startup outside the checkout;
+  131 JavaScript and 353 Rust dependency notices.
