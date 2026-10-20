@@ -588,3 +588,25 @@ no profiling, numerical retries or additional warmups inside this collection.
 Retain numerical failures and narrower margins; stop on operational/parity/
 invalid-metric failures. Report all three-run ranges and TS drift alongside
 medians without statistical-significance claims. Full goals and PR are pending.
+
+## Collection stopped before public samples; landing refresh
+
+The frozen corrected-method collection stopped on its first private gate,
+Breakout TS final memory collection: 92 samples, 84 backing-buffer transitions,
+10,058 ms elapsed against the unchanged 10-second deadline. No replay outputs,
+private passes, or public samples exist. Endpoint and per-gate guards pass.
+Preserve report, log, frozen configuration and runner in
+`RUST_PERF_DELIVERY26_URL_COLLECTION_STOP.json.gz`; do not retry or call this a
+venue performance failure. Independent source audits found no proven ongoing
+polling bug: polling/rate-limit timers remain virtual during final collection.
+No diagnostic child, timeout adjustment or additional heap snapshot ran.
+
+Landing has advanced with production changes including KuCoin spot, Paradex
+signing and host APIs. Merge it before collecting final PR evidence. All older
+source-bound results remain historical. Reconcile host batching and family
+builds, review the merge, verify affected checks and fresh artifacts, then use
+the current CI venue roster. Keep an explicit unresolved-gate record rather
+than hiding failures behind successful-only summaries. Open a reviewable PR as
+soon as the implementation and required checks support it; final landing still
+requires green CI and the requested correctness reviews. Full performance
+requirements remain unfulfilled.
