@@ -292,7 +292,7 @@ pub(crate) fn write_failure(
             rejected(error, ErrorKind::AuthInvalid)
         }
         "400006" | "400007" | "411100" => rejected(error, ErrorKind::AuthPermission),
-        "429000" | "200002" => rejected(error, ErrorKind::RateLimited),
+        "429000" => rejected(error, ErrorKind::RateLimited),
         "400100" | "200004" => rejected(error, ErrorKind::Rejected),
         code if code.starts_with("3000") && code.len() == 6 => rejected(error, ErrorKind::Rejected),
         "500000" => error.outcome(Outcome::Unknown),

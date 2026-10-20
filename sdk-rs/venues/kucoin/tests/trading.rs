@@ -1160,3 +1160,50 @@ fn a_refusal_after_an_accepted_placement_is_never_rejected() {
     assert_eq!(h.failures.len(), 1);
     assert_eq!(h.failures[0].outcome, None);
 }
+
+#[test]
+fn cancel_legs_combine_outcomes_without_overclaiming() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (first, second, outcome) in [
+        // A refused first leg then an undocumented answer: the outcome is not proven.
+        (
+            (400, r#"{"code":"100001","msg":"Unknown order"}"#),
+            (200, r#"{"code":"999999","msg":"new"}"#),
+            (Some(ErrorKind::Rejected), None),
+        ),
+        // A refused leg then a lost answer: Unknown, with the lost leg's kind.
+        (
+            (400, r#"{"code":"100001","msg":"Unknown order"}"#),
+            (0, ""),
+            (Some(ErrorKind::Network), Some(Outcome::Unknown)),
+        ),
+    ] {
+        let mut h = Harness::new();
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["a".into(), "b".into()],
+        });
+        let a = h.take("/api/v1/orders/a");
+        h.response(&a, first.0, first.1);
+        h.pace();
+        let b = h.take("/api/v1/orders/b");
+        if second.0 == 0 {
+            h.event(Event::HttpFailed {
+                request: b.id,
+                error: "reset",
+            });
+        } else {
+            h.response(&b, second.0, second.1);
+        }
+        h.pace();
+        assert_eq!(
+            h.done(1).as_ref().unwrap_err(),
+            "KuCoin API Error 100001: Unknown order (HTTP 400)"
+        );
+        let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+        assert_eq!((error.kind, error.outcome), outcome);
+        if outcome.1.is_some() {
+            assert_eq!(error.venue_code, None);
+        }
+    }
+}

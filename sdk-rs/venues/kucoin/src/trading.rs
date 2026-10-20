@@ -56,14 +56,19 @@ struct Job {
     effective: bool,
 }
 impl Job {
-    /// Keeps the first failure's text; an Unknown leg makes the whole command Unknown.
+    /// Keeps the first failure's text. An Unknown leg makes the whole command
+    /// Unknown with its details; legs that disagree otherwise leave it unset.
     fn record(&mut self, error: VenueError) {
         match &mut self.error {
             None => self.error = Some(error),
+            Some(first) if first.outcome == Some(Outcome::Unknown) => {}
             Some(first) if error.outcome == Some(Outcome::Unknown) => {
-                first.outcome = Some(Outcome::Unknown);
+                first.outcome = error.outcome;
                 first.kind = error.kind;
+                first.venue_code = error.venue_code;
+                first.venue_message = error.venue_message;
             }
+            Some(first) if first.outcome != error.outcome => first.outcome = None,
             Some(_) => {}
         }
     }
