@@ -384,6 +384,7 @@ impl Woo {
         state.generation = self.generation;
         state.book.clear();
         state.sync = Sync::Retry(cx.set_timer(1000.0));
+        cx.book_changed(symbol);
     }
     fn apply(book: &mut Book, delta: Delta) {
         for (side, rows) in [(BookSide::Bids, delta.bids), (BookSide::Asks, delta.asks)] {
@@ -408,7 +409,11 @@ impl Woo {
             Sync::Buffer(rows) if rows.len() < 2000 => rows.push(Buffered { time, delta }),
             Sync::Buffer(_) => self.book_retry(cx, symbol),
             Sync::Live(previous) => {
-                if time < *previous {
+                if time <= *previous {
+                    return;
+                }
+                if delta.previous.is_some_and(|p| p != *previous) {
+                    self.book_retry(cx, symbol);
                     return;
                 }
                 *previous = time;
@@ -596,6 +601,10 @@ impl Woo {
 }
 
 impl Venue for Woo {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -717,7 +726,8 @@ impl Venue for Woo {
                     .jittered(self.public.attempts.saturating_sub(1), cx.now),
             ),
         );
-        for state in self.depth.values_mut() {
+        for (symbol, state) in &mut self.depth {
+            cx.book_changed(symbol);
             self.generation += 1;
             state.generation = self.generation;
             state.book.clear();
@@ -991,7 +1001,14 @@ impl Venue for Woo {
                 }
                 let mut last = raw.timestamp;
                 for b in buffer {
-                    if b.time > raw.timestamp && b.time >= last {
+                    if b.time > last {
+                        // The first delta may overlap a REST snapshot between WS ticks.
+                        if b.delta.previous.is_some_and(|previous| {
+                            previous > last || (last > raw.timestamp && previous != last)
+                        }) {
+                            self.book_retry(cx, &symbol);
+                            return;
+                        }
                         last = b.time;
                         Self::apply(&mut state.book, b.delta);
                     }
@@ -1153,12 +1170,7 @@ impl Venue for Woo {
             .map(|s| &s.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.depth
-                .iter()
-                .filter(|(_, s)| matches!(s.sync, Sync::Live(_)))
-                .map(|(s, d)| (s.as_str(), &d.book)),
-        )
+        Box::new(self.depth.iter().map(|(s, d)| (s.as_str(), &d.book)))
     }
 }
 

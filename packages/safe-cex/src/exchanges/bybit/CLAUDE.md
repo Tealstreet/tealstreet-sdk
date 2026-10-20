@@ -1972,3 +1972,13 @@ callers. No proven-unused helper or alternate Rust venue crate is retained. Veri
 known TS defects and live-connectivity limits are recorded in
 `docs/plans/BYBIT_VARIANTS_PORT.md` and
 `docs/plans/RUST_PRODUCT_SEMANTICS.md`.
+
+Rust Partial position TP/SL edits preserve the owner-selected TS cancel/recreate
+semantics: the raw requested price against mark selects SL or TP while keeping
+Buy/Sell. A replacement uses trading-stop directly, native total quantity and
+the new leg's default trigger when flipping type. The cancellation must prove
+the captured order was accepted (matching per-row status or Hyro order ID),
+and replacement errors remain visible. Missing-mark and standalone inverse
+amount-only fallbacks retain their distinct TS fields. Shared-family success
+requests authoritative order reconciliation even with a healthy private socket;
+it never restores the old canceled row to mimic a local TS lifecycle state.

@@ -1220,7 +1220,7 @@ impl Venue for Grvt {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, d)| d.ready && d.subscribers > 0)
+                .filter(|(_, d)| d.subscribers > 0)
                 .map(|(s, d)| (s.as_str(), &d.book)),
         )
     }

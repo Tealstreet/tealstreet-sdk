@@ -2,10 +2,11 @@
 use super::*;
 use safe_cex_engine::model::*;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 const BROKER: &str = "b3cdedc0a20880ba";
 #[derive(Default)]
 pub(crate) struct Trading {
+    acknowledged: HashMap<String, Target>,
     queue: VecDeque<Command>,
     busy: bool,
     pause: Option<(TimerId, Job)>,
@@ -37,7 +38,11 @@ struct Step {
     delay: f64,
 }
 enum Effect {
-    Place { family: u8, count: usize },
+    Place {
+        family: u8,
+        count: usize,
+        inst_id: String,
+    },
     Cancel(Vec<Target>),
     Verify(Target),
     Setting,
@@ -650,6 +655,7 @@ impl Blofin {
                 effect: Effect::Place {
                     family: 0,
                     count: batch.len(),
+                    inst_id: first.inst_id.clone(),
                 },
                 delay: 350.0,
             });
@@ -662,7 +668,11 @@ impl Blofin {
                     "/api/v1/trade/order-algo"
                 },
                 body: serde_json::to_string(&payload).unwrap(),
-                effect: Effect::Place { family, count: 1 },
+                effect: Effect::Place {
+                    family,
+                    count: 1,
+                    inst_id: payload.inst_id.clone(),
+                },
                 delay: 350.0,
             });
         }
@@ -671,9 +681,15 @@ impl Blofin {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
         for id in ids {
-            let order = cx.store.order(id).ok_or_else(|| {
-                format!("Order {id} not found; cancellation requires a reconciled order")
-            })?;
+            let Some(order) = cx.store.order(id) else {
+                let target = self.trading.acknowledged.get(id).ok_or_else(|| {
+                    format!("Order {id} not found; cancellation requires a reconciled order")
+                })?;
+                if seen.insert((target.family, target.id.clone())) {
+                    out.push(target.clone());
+                }
+                continue;
+            };
             if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
                 continue;
             }
@@ -866,6 +882,12 @@ impl Blofin {
         self.placement(cx, &raw, source)
     }
     pub(crate) fn trading_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        self.trading.acknowledged.retain(|id, _| {
+            !cx.store
+                .orders()
+                .iter()
+                .any(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
+        });
         let (id, plan) = self.plan_trade(cx, command.clone());
         match plan {
             Ok(_) => {
@@ -900,6 +922,9 @@ impl Blofin {
             let mut job = Job::new(command_id);
             match command {
                 Command::PlaceOrders { orders, .. } => {
+                    if self.trading.acknowledged.len() >= 4096 {
+                        return Err("BloFin unobserved placement capacity exceeded; reconcile before placing".into());
+                    }
                     if orders.iter().any(|order| {
                         order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some()
                     }) {
@@ -976,8 +1001,25 @@ impl Blofin {
                         .store
                         .orders()
                         .iter()
-                        .filter(|o| o.symbol == symbol && o.status == OrderStatus::Open)
+                        .filter(|o| {
+                            o.symbol == symbol
+                                && !matches!(
+                                    o.status,
+                                    OrderStatus::Closed
+                                        | OrderStatus::Canceled
+                                        | OrderStatus::Creating
+                                )
+                        })
                         .map(|o| o.id.clone())
+                        .chain(
+                            self.trading
+                                .acknowledged
+                                .iter()
+                                .filter(|(_, t)| {
+                                    cx.store.market(&symbol).is_some_and(|m| m.id == t.inst_id)
+                                })
+                                .map(|(id, _)| id.clone()),
+                        )
                         .collect::<Vec<_>>();
                     Self::add_cancels(&mut job, self.cancel_targets(cx, &ids)?);
                 }
@@ -1284,6 +1326,9 @@ impl Blofin {
         }
     }
     pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+        if matches!(request.step.effect, Effect::Place { .. }) {
+            self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
+        }
         if request.joined {
             self.finish_join(cx, Some(error.to_owned()));
             return;
@@ -1349,7 +1394,11 @@ impl Blofin {
         let rows = reply.data.map(ResultRows::rows).unwrap_or_default();
         let mut error = None;
         match &request.step.effect {
-            Effect::Place { family, count } => {
+            Effect::Place {
+                family,
+                count,
+                inst_id,
+            } => {
                 if reply.code != "0" || rows.len() != *count {
                     error = Some(format!("BloFin placement {}: {}", reply.code, reply.msg));
                 }
@@ -1368,7 +1417,21 @@ impl Blofin {
                     {
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
                     } else {
-                        request.job.ids.push(id.into_owned());
+                        let id = id.into_owned();
+                        if cx.store.order(&id).is_none() {
+                            self.trading.acknowledged.insert(
+                                id.clone(),
+                                Target {
+                                    id: id.clone(),
+                                    inst_id: inst_id.clone(),
+                                    family: *family,
+                                    store_ids: vec![],
+                                    filled: 0.0,
+                                    filled_native: 0.0,
+                                },
+                            );
+                        }
+                        request.job.ids.push(id);
                     }
                 }
             }
@@ -1399,6 +1462,7 @@ impl Blofin {
                         error = Some("BloFin replacement requires a confirmed cancellation".into());
                     }
                     if gone || (reply.code == "0" && (row.code.is_empty() || row.code == "0")) {
+                        self.trading.acknowledged.remove(&target.id);
                         self.account.orders_revision += 1;
                         if target.family != 1 {
                             self.remember_terminal(&target.id);

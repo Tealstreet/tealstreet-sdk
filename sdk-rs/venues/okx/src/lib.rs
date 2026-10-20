@@ -628,6 +628,14 @@ impl Okx {
 }
 
 impl Venue for Okx {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -1044,7 +1052,7 @@ impl Venue for Okx {
         if let Pending::Account(request) = pending {
             self.account_failed(cx, request, error);
         } else if let Pending::Trade(request) = pending {
-            self.trade_failed(cx, request, error);
+            self.trade_lost(cx, request, error);
         } else if let Pending::History(request) = pending {
             self.history_failed(cx, request, error);
         } else if let Pending::Candles { command, .. } = pending {
@@ -1236,12 +1244,7 @@ impl Venue for Okx {
             .map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, b)| b.sequence.is_some())
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
 

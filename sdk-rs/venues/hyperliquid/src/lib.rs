@@ -694,6 +694,10 @@ fn spot_rows(
 }
 
 impl Venue for Hyperliquid {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.spot && !self.options.public_data_only {
@@ -1203,12 +1207,7 @@ impl Venue for Hyperliquid {
             .map(|l| &l.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, l)| l.depth_time.is_some())
-                .map(|(s, l)| (s.as_str(), &l.book)),
-        )
+        Box::new(self.books.iter().map(|(s, l)| (s.as_str(), &l.book)))
     }
 }
 fn interval_ms(interval: &str) -> f64 {
