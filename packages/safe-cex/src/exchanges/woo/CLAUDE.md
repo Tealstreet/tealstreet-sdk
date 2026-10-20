@@ -971,3 +971,9 @@ mutation supports Cross only. Caller IDs are rejected for split orders, brackets
 and algorithms before writes. Read failures retain state and ambiguous writes
 are never retried. No live authenticated account was available for this port;
 private validation uses exact signed request/response tapes and native tests.
+
+Private algo execution reports reconcile each child independently; terminal parent-only
+reports terminate known children and retain tombstones against stale snapshots. REST
+algo snapshots reject malformed executable known-market leaves as a whole. A delayed
+unseen trade still emits a fill, but optimistic position updates apply only the
+cumulative delta not already present in reconciled order state.

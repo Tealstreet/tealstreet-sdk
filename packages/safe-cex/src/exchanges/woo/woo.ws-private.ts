@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
+import { OrderStatus } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ORDER_SIDE } from './woo.types';
@@ -58,15 +59,18 @@ export class WooPrivateWebscoket extends BaseWebSocket<WOOXExchange> {
     const timestamp = this.parseTimestampToSeconds(
       row.executedTimestamp ?? row.tradeTime ?? row.updatedTime ?? row.updated_time ?? row.timestamp,
     );
-    this.parent.emitter.emit('fill', {
-      id: tradeId === undefined || tradeId === null ? orderId : String(tradeId),
-      orderId,
-      side,
-      symbol,
-      price,
-      amount,
-      ...(timestamp ? { timestamp } : {}),
-    });
+    this.parent.emitOrderExecution(
+      {
+        id: tradeId === undefined || tradeId === null ? orderId : String(tradeId),
+        orderId,
+        side,
+        symbol,
+        price,
+        amount,
+        ...(timestamp ? { timestamp } : {}),
+      },
+      Math.min(amount, Math.max(0, cumulative - known)),
+    );
   };
 
   private parseTimestampToSeconds = (raw: unknown): number | undefined => {
@@ -226,19 +230,40 @@ export class WooPrivateWebscoket extends BaseWebSocket<WOOXExchange> {
 
   handleAlgoExecutionReport = (data: Array<Record<string, any>> | Record<string, any>) => {
     for (const raw of Array.isArray(data) ? data : data ? [data] : []) {
-      const id = String(raw.algoOrderId ?? raw.orderId ?? raw.id ?? '');
-      const previousAmount = this.store.orders.find((o) => o.id === id)?.filled || 0;
-      const row = this.executionRow(raw, id, previousAmount);
-      const mapped = this.parent.mapAlgoOrder(row);
-      for (const order of mapped) {
-        const previous = this.store.orders.find((o) => o.id === order.id)?.filled || 0;
-        this.parent.acceptOrder(order);
-        if (['FILLED', 'PARTIAL_FILLED', 'PARTIALLY_FILLED'].includes(row.algoStatus)) {
-          this.emitExecution(
-            { ...row, side: row.side || order.info?.side, symbol: row.symbol || order.symbol },
-            order.id,
-            previous,
-          );
+      const rootId = String(raw.algoOrderId ?? raw.orderId ?? raw.id ?? '');
+      if (!Array.isArray(raw.childOrders) && ['CANCELLED', 'CANCELED', 'REJECTED', 'FILLED'].includes(raw.algoStatus)) {
+        // WOO can acknowledge a parent cancellation without resending its leaves.
+        for (const order of this.store.orders.filter((order) => order.parentId === rootId && order.id !== rootId)) {
+          this.parent.acceptOrder({
+            ...order,
+            status: raw.algoStatus === 'FILLED' ? OrderStatus.Closed : OrderStatus.Canceled,
+          });
+        }
+      }
+      const rows = Array.isArray(raw.childOrders)
+        ? raw.childOrders.map((child: Record<string, any>) => ({
+            ...child,
+            symbol: child.symbol ?? raw.symbol,
+            side: child.side ?? raw.side,
+            reduceOnly: child.reduceOnly ?? raw.reduceOnly,
+            rootAlgoOrderId: child.rootAlgoOrderId ?? raw.rootAlgoOrderId ?? rootId,
+            algoStatus: child.algoStatus ?? raw.algoStatus,
+          }))
+        : [raw];
+      for (const leaf of rows) {
+        const id = String(leaf.algoOrderId ?? leaf.orderId ?? leaf.id ?? '');
+        const previous = this.store.orders.find((o) => o.id === id)?.filled || 0;
+        const row = this.executionRow(leaf, id, previous);
+        const mapped = this.parent.mapAlgoOrder(row);
+        for (const order of mapped) {
+          this.parent.acceptOrder(order);
+          if (['FILLED', 'PARTIAL_FILLED', 'PARTIALLY_FILLED'].includes(row.algoStatus)) {
+            this.emitExecution(
+              { ...row, side: row.side || order.info?.side, symbol: row.symbol || order.symbol },
+              order.id,
+              previous,
+            );
+          }
         }
       }
     }

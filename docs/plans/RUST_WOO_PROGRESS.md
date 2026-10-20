@@ -224,3 +224,28 @@ Remaining phases:
 4. Review each phase with sub-agents, rerun brief gates and root checks, commit
    and push, post adversarial re-review findings, merge only green CI, then cut
    a fresh branch from feat/rust-rewrite.
+
+### PR fix checkpoints
+
+- Committed cancel-family independence as d3cb8a23f4. Both global families are
+  attempted once after HTTP/transport/nested business failures; final errors
+  identify failed families and release the FIFO. Independent review PASS;
+  24 trading tests PASS.
+- TS oracle repairs now handle nested child executions and dedup, minimal
+  terminal parents, malformed executable leaves, and reconciled optimistic
+  quantities. Re-review caught zero-delta fills clearing a newer position guard;
+  fixed while preserving refresh scheduling. Expanded tape caught synthetic
+  flat margin surviving authoritative/optimistic reopen; explicitly cleared in
+  both mappers. Independent TS/harness review PASS; 28 focused tests PASS.
+- Request-validator exceptions persist even when the app catches a failed read
+  and retries successfully. Independent public/private negative proof PASS;
+  153 harness tests PASS. No signature, body, state or performance relaxation.
+- Expanded private tape passes: 58 frames, 18 commands, 134 fixture records,
+  nested parent-NEW child-FILLED plus duplicate, new camel-only order, chart
+  query and native response aliases. Informational CPU 142.9 -> 82.8 ms,
+  retained 3.8 -> 0.9 MB. Public 77 frames/222 markets/tickers/two books PASS:
+  CPU 72.6 -> 56.4 ms, steady 35.7 -> 24.2 ms, retained 1.6 -> 1.1 MB.
+- Root checks: typecheck 44, lint 28, complete tests 27 tasks PASS (6667 safe-cex
+  tests in both entrypoints). Later focused guard/reopen regressions pass too.
+  Native account auxiliary classification and legacy query follow-ups remain
+  in review before final artifact/gate/CI reruns.

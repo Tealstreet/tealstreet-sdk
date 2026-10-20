@@ -68,6 +68,8 @@ ws(150, PUBLIC, { event: 'pong' });
 for (const [t, executed, executionId] of [[250, 0.001, 7001], [300, 0.002, 7002], [350, 0.002, 7002], [400, 0.003, 7003]]) {
   regularWs(t, regular(100, 0.003, 59000, executed, executed === 0.003 ? 'FILLED' : 'PARTIAL_FILLED', { tradeId: executionId, executedQuantity: 0.001, executedPrice: 59000, executedTimestamp: EPOCH + t }));
 }
+// A new camel-only terminal order cannot borrow a previously decoded type.
+regularWs(525, { symbol: 'PERP_BTC_USDT', orderId: 98, orderType: 'LIMIT', orderQuantity: 0.001, orderPrice: 57000, totalExecutedQuantity: 0, status: 'CANCELLED', side: 'BUY' });
 command(550, 'placeOrders', { orders: [
   { symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.01, price: 59000 },
   { symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.01, price: 59000, clientOrderId: '01' },
@@ -123,7 +125,12 @@ http('POST', '/v1/client/futures_leverage', null, { success: true }, form({ symb
 http('GET', '/v1/client/futures_leverage', { symbol: 'PERP_BTC_USDT', position_mode: 'ONE_WAY', margin_mode: 'CROSS' }, leverage(20), undefined, stage());
 http('GET', '/v3/positions', null, pos(0.023, 20), undefined, { ...stage(), effectiveAt: 0 });
 // An external closing execution leaves mode-switch preconditions flat.
-regularWs(8600, regular(900, 0.023, 60000, 0.023, 'FILLED', { side: 'SELL', reduce_only: true, tradeId: 7900, executedQuantity: 0.023, executedPrice: 60000, executedTimestamp: EPOCH + 8600 }));
+const closingPair = pair(910, 911, 912, 58000);
+closingPair.childOrders[0] = { ...closingPair.childOrders[0], quantity: 0.023, algoStatus: 'FILLED', totalExecutedQuantity: 0.023, executedQuantity: 0.023, averageExecutedPrice: 58000, tradeId: 7900, executedTimestamp: EPOCH + 8600 };
+closingPair.childOrders[1].algoStatus = 'CANCELLED';
+// Parent remains NEW: each child's execution fields are authoritative.
+algoWs(8600, closingPair);
+algoWs(8700, closingPair); // Exact repeated executions emit no second fill.
 http('GET', '/v3/positions', null, pos(0), undefined, { ...stage(), effectiveAt: 8600 });
 command(9500, 'setPositionMode', { hedged: true });
 http('POST', '/v1/client/position_mode', null, { success: true }, form({ position_mode: 'HEDGE_MODE' }));
@@ -131,10 +138,10 @@ http('GET', '/v3/accountinfo', null, info('HEDGE_MODE'), undefined, stage());
 http('GET', '/v3/positions', null, pos(0), undefined, { ...stage(), effectiveAt: 0 });
 http('GET', '/v3/positions', null, pos(0.01, 20), undefined, { ...stage(), effectiveAt: 11000 });
 
-command(11500, 'fetchFills', { symbol: 'BTCUSDT', limit: 2 });
+command(11500, 'fetchFills', { symbol: 'woo:BTCUSDT.P', limit: 2 });
 http('GET', '/v3/trade/transactionHistory', { symbol: 'PERP_BTC_USDT', limit: 2 }, ok({ rows: [
-  { id: 10001, orderId: 100, symbol: 'PERP_BTC_USDT', side: 'OPEN LONG', executedPrice: 59000, executedQuantity: 0.001, executedTimestamp: EPOCH + 250, fee: 0.01, feeAsset: 'USDT', realizedPnl: null, isMaker: 0 },
-  { id: 10002, orderId: 900, symbol: 'PERP_BTC_USDT', side: 'CLOSE LONG', executedPrice: 60000, executedQuantity: 0.023, executedTimestamp: EPOCH + 8600, fee: 0.02, feeAsset: 'USDT', realizedPnl: null, isMaker: 0 },
+  { id: 10001, orderId: 100, symbol: 'BTC_USDT_PERP', side: 'OPEN LONG', executedPrice: 59000, executedQuantity: 0.001, executedTimestamp: EPOCH + 250, fee: 0.01, feeAsset: 'USDT', realizedPnl: null, isMaker: 0 },
+  { id: 10002, orderId: 911, symbol: 'BTC-USDT-PERP', side: 'CLOSE LONG', executedPrice: 60000, executedQuantity: 0.023, executedTimestamp: EPOCH + 8600, fee: 0.02, feeAsset: 'USDT', realizedPnl: null, isMaker: 0 },
 ] }));
 command(12500, 'fetchOrderHistory', { symbol: 'BTCUSDT', limit: 100 });
 http('GET', '/v1/orders', { symbol: 'PERP_BTC_USDT', size: 100, page: 1, realized_pnl: true }, page([

@@ -13,6 +13,7 @@ import {
   PositionMode,
   PositionSide,
 } from '../../types';
+import { createPositionId } from '../../utils/createPositionId';
 
 const NOW = 1786603865910;
 const instances: WOOXExchange[] = [];
@@ -65,6 +66,58 @@ afterEach(() => {
 });
 
 describe('WOO active protocol Rust parity repairs', () => {
+  it('clears synthetic flat margin when an authoritative holding reopens', async () => {
+    const { exchange, store } = make();
+    const id = createPositionId('BTCUSDT', PositionSide.Long, PositionMode.OneWay);
+    store.update({
+      positions: [{ id, symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0, marginSize: 0 } as any],
+    });
+    exchange.xhr = {
+      get: vi.fn().mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            positions: [
+              {
+                symbol: 'PERP_BTC_USDT',
+                holding: 0.01,
+                averageOpenPrice: 60000,
+                leverage: 10,
+                marginMode: 'CROSS',
+                estLiqPrice: 50000,
+              },
+            ],
+          },
+        },
+      }),
+    } as any;
+    store.addOrUpdatePositionsFull(await exchange.fetchOpenPositions());
+    expect(store.positions.find((position) => position.id === id)).toEqual(
+      expect.objectContaining({ contracts: 0.01, marginSize: undefined }),
+    );
+  });
+
+  it('clears synthetic flat margin when a stream execution reopens the position', () => {
+    const { exchange, store } = make();
+    (exchange as any)._accountPositionMode = PositionMode.OneWay;
+    const id = createPositionId('BTCUSDT', PositionSide.Long, PositionMode.OneWay);
+    store.update({
+      positions: [{ id, symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0, marginSize: 0 } as any],
+    });
+    exchange.privateWebsocket.handleExecutionReport(
+      ordinary({
+        totalExecutedQuantity: 0.002,
+        status: 'PARTIAL_FILLED',
+        tradeId: 104,
+        executedQuantity: 0.002,
+        executedPrice: 59000,
+      }),
+    );
+    expect(store.positions.find((position) => position.id === id)).toEqual(
+      expect.objectContaining({ contracts: 0.002, marginSize: undefined }),
+    );
+  });
+
   it('publishes the authoritative account position mode into the store', async () => {
     const { exchange, store } = make();
     vi.mocked(exchange.getPositionMode).mockRestore();
@@ -139,6 +192,134 @@ describe('WOO active protocol Rust parity repairs', () => {
     expect(fills.map((f) => f.amount)).toEqual([0.001, 0.001, 0.001]);
   });
 
+  it('emits nested algo child fills independently of parent status and deduplicates them', () => {
+    const { exchange, store } = make();
+    const fills: any[] = [];
+    exchange.on('fill', (fill: any) => fills.push(fill));
+    const report = {
+      algoOrderId: 200,
+      symbol: 'PERP_BTC_USDT',
+      side: 'SELL',
+      algoStatus: 'NEW',
+      childOrders: [
+        {
+          algoOrderId: 201,
+          algoType: 'STOP_LOSS',
+          quantity: 0.003,
+          triggerPrice: 58000,
+          algoStatus: 'FILLED',
+          totalExecutedQuantity: 0.003,
+          executedQuantity: 0.003,
+          averageExecutedPrice: 58000,
+          tradeId: 7001,
+        },
+        {
+          algoOrderId: 202,
+          algoType: 'TAKE_PROFIT',
+          quantity: 0.003,
+          triggerPrice: 62000,
+          algoStatus: 'CANCELLED',
+        },
+      ],
+    };
+    exchange.privateWebsocket.handleAlgoExecutionReport(report);
+    exchange.privateWebsocket.handleAlgoExecutionReport(report);
+    expect(fills).toEqual([
+      expect.objectContaining({ id: '7001', orderId: '201', amount: 0.003, price: 58000, side: OrderSide.Sell }),
+    ]);
+    expect(store.orders.find((order) => order.id === '201')).toMatchObject({
+      status: OrderStatus.Closed,
+      filled: 0.003,
+      parentId: '200',
+    });
+    expect(store.orders.find((order) => order.id === '202')).toMatchObject({ status: OrderStatus.Canceled });
+  });
+
+  it('cancels children from a minimal parent terminal report and blocks stale REST resurrection', async () => {
+    const { exchange, store } = make();
+    const parent = {
+      algoOrderId: 200,
+      symbol: 'PERP_BTC_USDT',
+      side: 'SELL',
+      algoStatus: 'NEW',
+      childOrders: [201, 202].map((id) => ({
+        algoOrderId: id,
+        algoType: id === 201 ? 'STOP_LOSS' : 'TAKE_PROFIT',
+        quantity: 0.003,
+        triggerPrice: id === 201 ? 58000 : 62000,
+        algoStatus: 'NEW',
+      })),
+    };
+    exchange.privateWebsocket.handleAlgoExecutionReport(parent);
+    exchange.privateWebsocket.handleAlgoExecutionReport({ algoOrderId: 200, algoStatus: 'CANCELLED' });
+    expect(store.orders).toHaveLength(2);
+    expect(store.orders.every((order) => order.status === OrderStatus.Canceled)).toBe(true);
+    // A later empty snapshot may remove canceled rows; tombstones still protect a stale page.
+    store.update({ orders: [] });
+    vi.spyOn(exchange, 'fetchOrdersRecursively').mockResolvedValue([parent]);
+    expect((await exchange.fetchAlgoOrders()).every((order) => order.status === OrderStatus.Canceled)).toBe(true);
+  });
+
+  it('emits a delayed unseen fill already reflected in REST without doubling the position', () => {
+    const { exchange, store } = make();
+    (exchange as any)._accountPositionMode = PositionMode.OneWay;
+    store.update({
+      positions: [
+        {
+          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.OneWay),
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          entryPrice: 59000,
+          contracts: 0.01,
+          notional: 590,
+          unrealizedPnl: 0,
+          liquidationPrice: 0,
+          leverage: 5,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.OneWay,
+        },
+      ],
+    });
+    store.addOrUpdateOrder(exchange.mapLimitOrder(ordinary({ totalExecutedQuantity: 0.005 }))!);
+    const fills: any[] = [];
+    exchange.on('fill', (fill: any) => fills.push(fill));
+    exchange.privateWebsocket.handleExecutionReport(
+      ordinary({
+        totalExecutedQuantity: 0.005,
+        status: 'PARTIAL_FILLED',
+        tradeId: 101,
+        executedQuantity: 0.005,
+        executedPrice: 59000,
+      }),
+    );
+    expect(fills).toEqual([expect.objectContaining({ id: '101', amount: 0.005 })]);
+    expect(store.positions.find((position) => position.contracts > 0)?.contracts).toBe(0.01);
+    exchange.privateWebsocket.handleExecutionReport(
+      ordinary({
+        totalExecutedQuantity: 0.007,
+        status: 'PARTIAL_FILLED',
+        tradeId: 102,
+        executedQuantity: 0.002,
+        executedPrice: 59000,
+      }),
+    );
+    expect(store.positions.find((position) => position.contracts > 0)?.contracts).toBe(0.012);
+    const guard = new Map((exchange as any)._fillExpectedPositionSignatureBySymbol);
+    expect(guard.size).toBe(1);
+    exchange.privateWebsocket.handleExecutionReport(
+      ordinary({
+        totalExecutedQuantity: 0.005,
+        status: 'PARTIAL_FILLED',
+        tradeId: 103,
+        executedQuantity: 0.005,
+        executedPrice: 59000,
+      }),
+    );
+    expect(fills).toHaveLength(3);
+    expect(store.positions.find((position) => position.contracts > 0)?.contracts).toBe(0.012);
+    expect((exchange as any)._fillExpectedPositionSignatureBySymbol).toEqual(guard);
+  });
+
   it('accumulates individual executions when cumulative quantity is omitted', () => {
     const { exchange, store } = make();
     const fills: any[] = [];
@@ -185,6 +366,38 @@ describe('WOO active protocol Rust parity repairs', () => {
     vi.spyOn(exchange, 'fetchOrdersRecursively').mockResolvedValue([{ symbol: 'PERP_BTC_USDT', quantity: 1 }]);
     await expect(exchange.fetchLimitOrders()).rejects.toThrow('Invalid WOO regular order');
   });
+
+  it.each([{ quantity: 'bad' }, { quantity: -1 }, { totalExecutedQuantity: 'bad' }, { executed: -1 }])(
+    'rejects malformed algo amounts atomically including a nested sibling: %j',
+    async (invalid) => {
+      const { exchange, store } = make();
+      const existing = exchange.mapLimitOrder(ordinary())!;
+      store.update({ orders: [existing] });
+      const leaf = {
+        algoOrderId: 201,
+        algoType: 'STOP_LOSS',
+        quantity: 0.003,
+        triggerPrice: 58000,
+        algoStatus: 'NEW',
+      };
+      const malformed = { ...leaf, algoOrderId: 202, ...invalid };
+      // Avoid an explicit zero cumulative value masking the invalid executed alias.
+      vi.spyOn(exchange, 'fetchOrdersRecursively').mockResolvedValue([
+        {
+          algoOrderId: 200,
+          symbol: 'PERP_BTC_USDT',
+          side: 'SELL',
+          childOrders: [leaf, malformed],
+        },
+      ]);
+      await expect(exchange.fetchAlgoOrders()).rejects.toThrow('Invalid WOO algo order');
+      expect(store.orders).toEqual([existing]);
+      vi.mocked(exchange.fetchOrdersRecursively).mockResolvedValue([
+        { ...malformed, symbol: 'PERP_BTC_USDT', side: 'SELL' },
+      ]);
+      await expect(exchange.fetchAlgoOrders()).rejects.toThrow('Invalid WOO algo order');
+    },
+  );
 
   it('protects a private update arriving while a REST page is pending', async () => {
     const { exchange, store } = make();

@@ -29,6 +29,7 @@ import {
   OHLCVOptions,
   Order,
   OrderBook,
+  OrderFillEvent,
   OrderHistoryOptions,
   OrderSide,
   OrderStatus,
@@ -57,7 +58,7 @@ import { createAPI } from './woo.api';
 import { buildWooIncomeParams, mapWooIncomeRecord, wooIncomeIdentity } from './woo.income';
 import { buildWooLegacyFillsParams } from './woo.legacy-fills';
 import { mapWooHistoricalOrder } from './woo.order-history';
-import { splitWooQuantity } from './woo.order-state';
+import { assertWooAlgoSnapshotRow, splitWooQuantity } from './woo.order-state';
 import {
   ACCOUNT_RESPONSE,
   ENDPOINTS,
@@ -309,12 +310,9 @@ export class WOOXExchange extends BaseExchange {
 
     this.publicWebsocket = new WooPublicWebsocket(this);
     this.privateWebsocket = new WooPrivateWebscoket(this);
-
-    this.on('fill', this.handleFillForPositionSync);
   }
 
   dispose = () => {
-    this.off('fill', this.handleFillForPositionSync);
     this._fillPositionRefreshTimers.forEach((timer) => clearTimeout(timer));
     this._fillPositionRefreshTimers.clear();
     this._fillPositionRefreshInFlight.clear();
@@ -865,12 +863,21 @@ export class WOOXExchange extends BaseExchange {
       unrealizedPnl: nextContracts === 0 ? 0 : currentOpenPosition?.unrealizedPnl || 0,
       contracts: nextContracts,
       liquidationPrice: nextContracts === 0 ? 0 : currentOpenPosition?.liquidationPrice || 0,
+      marginSize: undefined,
       positionMode,
       marginType,
     };
 
     this.store.addOrUpdatePosition(optimisticPosition);
     return true;
+  };
+
+  emitOrderExecution = (fill: OrderFillEvent, positionAmount: number) => {
+    // An unseen execution still belongs in the fill stream when REST already
+    // includes it. Only the unaccounted cumulative delta may move positions.
+    if (positionAmount > 0) this.handleFillForPositionSync({ ...fill, amount: positionAmount });
+    else this.scheduleFillPositionRefresh(fill.symbol, 0);
+    this.emitter.emit('fill', fill);
   };
 
   private handleFillForPositionSync = (orderFill: {
@@ -1412,6 +1419,8 @@ export class WOOXExchange extends BaseExchange {
           unrealizedPnl: upnl,
           contracts,
           liquidationPrice: v(p, 'estLiqPrice'),
+          // Clear the synthetic flat position's zero when this holding reopens.
+          marginSize: undefined,
           positionMode: positionMode,
           marginType: p.marginMode === 'CROSS' ? MarginType.Cross : MarginType.Isolated,
           info: p,
@@ -2034,15 +2043,19 @@ export class WOOXExchange extends BaseExchange {
 
       const orders: Order[] = [];
       for (let i = 0; i < rows.length; i++) {
-        const childOrders = this.mapAlgoOrder(rows[i]);
-        if (
-          !childOrders.length &&
-          this.store.marketsBySymbol[normalizeSymbol(rows[i].symbol || '')] &&
-          (rows[i].triggerPrice || rows[i].algoType === 'TRAILING_STOP')
-        )
-          throw new Error('Invalid WOO algo order');
-        for (let j = 0; j < childOrders.length; j++) {
-          orders.push(childOrders[j]);
+        assertWooAlgoSnapshotRow(rows[i], (symbol) => !!this.store.marketsBySymbol[normalizeSymbol(symbol)]);
+        const leaves = Array.isArray(rows[i].childOrders) ? rows[i].childOrders : [rows[i]];
+        for (const leaf of leaves) {
+          const childOrders = this.mapAlgoOrder(
+            Array.isArray(rows[i].childOrders) ? { ...rows[i], childOrders: [leaf] } : leaf,
+          );
+          if (
+            !childOrders.length &&
+            this.store.marketsBySymbol[normalizeSymbol(leaf.symbol || rows[i].symbol || '')] &&
+            ['STOP', 'STOP_LOSS', 'TAKE_PROFIT', 'TRAILING_STOP'].includes(leaf.algoType)
+          )
+            throw new Error('Invalid WOO algo order');
+          orders.push(...childOrders);
         }
       }
       return orders;
@@ -2075,7 +2088,7 @@ export class WOOXExchange extends BaseExchange {
                 ? extreme + (side === OrderSide.Buy ? callback : -callback)
                 : old?.price,
             );
-      if (!(price > 0)) continue;
+      if (!Number.isFinite(price) || !(price > 0)) continue;
       let type = ORDER_TYPE[algoType] ?? old?.type;
       if (algoType === 'STOP') {
         const reference = source === OrderStopTriggerType.LastPrice ? ticker?.last : ticker?.mark;
@@ -2088,6 +2101,7 @@ export class WOOXExchange extends BaseExchange {
       if (!type) continue;
       const amount = Number(co.quantity ?? old?.amount ?? 0);
       const filled = Number(co.totalExecutedQuantity ?? co.executed ?? old?.filled ?? 0);
+      if (!Number.isFinite(amount) || amount < 0 || !Number.isFinite(filled) || filled < 0) continue;
       const status =
         co.algoStatus === 'FILLED'
           ? OrderStatus.Closed
@@ -2097,7 +2111,13 @@ export class WOOXExchange extends BaseExchange {
       result.push(
         this.reconcileOrder({
           id,
-          parentId: String(o.rootAlgoOrderId || co.rootAlgoOrderId || old?.parentId || id),
+          parentId: String(
+            o.rootAlgoOrderId ||
+              co.rootAlgoOrderId ||
+              (Array.isArray(o.childOrders) ? o.algoOrderId || o.orderId || o.id : undefined) ||
+              old?.parentId ||
+              id,
+          ),
           status,
           symbol,
           type,
