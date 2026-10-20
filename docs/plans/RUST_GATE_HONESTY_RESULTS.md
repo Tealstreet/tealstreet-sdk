@@ -1,14 +1,16 @@
 # Strict replay results
 
-A complete reviewed **107-case** collection at `8ae409915b` in
-[run 39429258321](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39429258321)
-reported **27 strict PASS / 80 strict FAIL**. Its newly observed literal paths
+A complete reviewed **107-case** collection at `b1140e392d` in
+[run 39434565069](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39434565069)
+reported **26 strict PASS / 81 strict FAIL**. Its newly observed literal paths
 were independently classified and added to the manifest afterward; that run's
 verifier correctly rejected them until declared. The table records the reviewed
-collection, not universal parity. Earlier harness defects are corrected:
+collection, not universal parity. Woo public checkpoint visibility failed in this
+collection after passing in the previous run; both observations remain recorded.
+Earlier harness defects are corrected:
 Coinbase's seven TS and seven Rust measured receipts match their respective
 audits, and TxFlow's paced-startup fixture replays without unmatched requests.
-Exact merge-head certification and raw artifacts are attached to
+Exact merge-head certification status and raw artifacts are recorded on
 [PR #1346](https://github.com/Tealstreet/tealstreet-sdk/pull/1346).
 Harness integrity failures cannot enter the venue exception list.
 
@@ -74,7 +76,7 @@ does not assign every mismatch to Rust. Exact paths and raw reports carry the de
 | `txflow` | 1 PASS | 1 FAIL | Per-side leverage and margin settings differ at intermediate command boundaries. |
 | `weex` | 1 PASS | 1 FAIL | Order lifecycle and TS execution IDs/fees/timestamps absent from the native live-fill frame. |
 | `what` | not separately gated | 2 FAIL | Orderly-family bracket/root terminal lifecycle, leverage/settings and duplicate executions (mainnet/testnet fixtures). |
-| `woo` | 1 PASS | 1 FAIL | Initial books; orders/positions/settings/executions, plus incomplete auth/heartbeat/private subscriptions in both fixture replays. |
+| `woo` | 1 FAIL | 1 FAIL | Initial books; orders/positions/settings/executions, plus incomplete auth/heartbeat/private subscriptions in both fixture replays. |
 | `woofi` | not separately gated | 2 FAIL | Orderly-family bracket/root terminal lifecycle, leverage/settings and duplicate executions (mainnet/testnet fixtures). |
 
 ## Measurement and artifact boundaries
@@ -85,9 +87,9 @@ does not assign every mismatch to Rust. Exact paths and raw reports carry the de
 - CI performance uses standalone venue artifacts. The combined shipping artifact
   is separately size-budgeted; standalone CPU results do not prove combined-load
   or browser performance. Private metrics are informational only.
-- Collection `39429258321` combined web and Node artifacts are each 12,199,435 bytes
+- Collection `39434565069` combined web and Node artifacts are each 12,258,087 bytes
   (ceiling 12,582,912), SHA256
-  `085ac4da04b16f6a5faa5e1d3097f332656b6682ebf2f9d5ba02776031862435`.
+  `27d6c1b92cda35313d566996cf83c9ca156ee02a82506e4266912dfa047e2bc8`.
   The standalone ceiling remains 1,258,291 bytes.
 - Fixer output reports every overwritten leaf count; raw checkpoints precede
   fixers. Per-venue permissions do not authorize rewrites to Rust output.

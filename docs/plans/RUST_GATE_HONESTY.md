@@ -390,3 +390,37 @@ never retry an unchanged failed performance measurement to obtain a pass.
   precisely three input record changes; no fixture or comparator workaround.
   Policy/verifier tests 9/9 PASS. Publish this reviewed merge and hash binding;
   full CI rebuilds combined artifacts and runs seven interleaved public pairs.
+- New-head CI `39434565069` exposes one additional literal Paradex path at
+  checkpoint 9: TS retains open existing order 1000 after cancelSymbolOrders,
+  while native applies the taped empty orders response. Independent raw/source
+  review PASS: unchanged tape, commands and checkpoint identities; per-engine
+  receipts match run 39426820375 (private refresh counts vary in other runs).
+  Both process 33 events, all fifteen commands succeed and nine writes
+  match, all integrity counters zero. Keep every prior observation and declare
+  only this path, with no comparator/threshold/integrity relaxation. Clarify
+  results-document wording: final certification status is recorded on the PR,
+  never implied by a historical collection. Require another green exact-head
+  CI after the declarations-only update.
+- Full run `39434565069` collected all 31 suites / 107 cases: 26 strict PASS
+  and 81 strict FAIL. Woo public now exposes an already-declared startup
+  checkpoint difference (earlier PASS remains historical evidence). Both
+  shipping artifacts are 12,258,087 bytes, SHA256
+  `27d6c1b92cda35313d566996cf83c9ca156ee02a82506e4266912dfa047e2bc8`,
+  below the unchanged 12,582,912 ceiling. All generic/native checks pass.
+- Coinbase exposes eighteen more literal paths under unchanged existing tape
+  identities: three CFM ES256 same-order stale-open statuses; eleven CFM EdDSA
+  row shifts/terminal-retention paths; four base-coinbase Spot EdDSA missing TS
+  client IDs (distinct from the separately declared coinbasespot alias).
+  Independent raw/source review PASS. Each runner processes 61 events and all
+  fifteen command results are unchanged, including existing error results;
+  writes and checkpoint identities agree, all integrity counters zero. Private
+  refresh counts vary; no private performance claim or exemption. Preserve all
+  previous observations; only these exact eighteen paths are added. Results
+  table now pins the reviewed collection and its shipping bytes. Require green
+  exact-head CI after this declarations-only refresh before merge.
+- Final combined declaration/table review PASS: exactly nineteen new literal
+  keys, all historical keys/rationales preserved; all 107 reports assess clean.
+  Twenty neighbor/hash/protected-integrity probes reject; policy controls 9/9
+  PASS. All 49 table aliases and combined artifact bytes/hash independently
+  match the cited run. Publish this stable declarations-only checkpoint, then
+  wait for fresh full exact-head green CI; no venue FAIL is relabeled PASS.

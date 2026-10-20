@@ -44,6 +44,18 @@
         "/tmp/gate-honesty-audit-binance-frozen-report.json"
       ],
       "note": "Freshly rebuilt standalone Binance at the merged trading-audit source. New canonical tape changes only two trade IDs and complete cancellation ACK economics; its 78 diagnostic keys exactly match the prior declaration. Frozen fixture unchanged, all six commands succeed, same 22 known paths. Both pairs have zero protocol/integrity errors. Correctness only; final CI must rebuild combined size and run seven public pairs."
+    },
+    "paradexCancelRefresh": {
+      "ciRun": 39434565069,
+      "ciHead": "b1140e392d55766dba54f73557b3b2e4848dbff0",
+      "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39434565069",
+      "note": "One independently reviewed literal checkpoint-9 open-order visibility path after cancelSymbolOrders; tape, commands and boundaries unchanged. Per-engine receipts match run 39426820375; TS private order-refresh counts vary across other collections. All earlier observations remain declared. No comparison, threshold or integrity protection changed."
+    },
+    "coinbaseLifecycleRefresh": {
+      "ciRun": 39434565069,
+      "ciHead": "b1140e392d55766dba54f73557b3b2e4848dbff0",
+      "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39434565069",
+      "note": "Eighteen independently reviewed literal paths under unchanged CFM ES256/EdDSA and base-coinbase Spot EdDSA tape identities. Stale open status, row alignment/terminal retention, and missing TS live client IDs. All prior observations retained; no comparison, timing threshold or integrity protection changed. Private polling counts can vary; no private performance exemption or claim."
     }
   },
   "failures": [
@@ -10042,6 +10054,14 @@
             "checkpoint 14 account.orders[1].parentId",
             "checkpoint 14 account.orders[4]"
           ]
+        },
+        {
+          "divergence": "At checkpoints 7\u20139, both rows identify order 12, but TS accepts its stale open REST snapshot while the native terminal fence retains canceled status. Private TS polling counts vary across runs; all commands and taped checkpoints complete.",
+          "keys": [
+            "checkpoint 7 account.orders[1].status",
+            "checkpoint 8 account.orders[1].status",
+            "checkpoint 9 account.orders[1].status"
+          ]
         }
       ]
     },
@@ -10364,6 +10384,15 @@
             "checkpoint 8 account.balance.currencies.USD.total",
             "checkpoint 9 account.balance.currencies.BTC.total",
             "checkpoint 9 account.balance.currencies.USD.total"
+          ]
+        },
+        {
+          "divergence": "TS omits the client ID for stop order 50 while native preserves tealstreet-stop at checkpoints 7\u201310, row 5. This is the base coinbase Spot account profile, independently pinned from the separately declared coinbasespot alias.",
+          "keys": [
+            "checkpoint 10 account.orders[5].clientOrderId",
+            "checkpoint 7 account.orders[5].clientOrderId",
+            "checkpoint 8 account.orders[5].clientOrderId",
+            "checkpoint 9 account.orders[5].clientOrderId"
           ]
         }
       ]
@@ -16344,6 +16373,22 @@
             "checkpoint 9 account.balance.currencies.BTC.total",
             "checkpoint 9 account.balance.currencies.USD.total",
             "checkpoint 9 account.balance.upnl"
+          ]
+        },
+        {
+          "divergence": "At checkpoint 12, TS order reconciliation retains rows 11/13/50 while native retains 11/12/13/30/40/50. Positional row shifts expose different IDs, geometry and parent references; native retains canceled 12/30 and closed 40. These are interim lifecycle/retention paths, not independent same-order economic divergences.",
+          "keys": [
+            "checkpoint 12 account.orders[1].id",
+            "checkpoint 12 account.orders[1].parentId",
+            "checkpoint 12 account.orders[1].status",
+            "checkpoint 12 account.orders[2].id",
+            "checkpoint 12 account.orders[2].parentId",
+            "checkpoint 12 account.orders[2].price",
+            "checkpoint 12 account.orders[2].side",
+            "checkpoint 12 account.orders[2].timeInForce",
+            "checkpoint 12 account.orders[2].type",
+            "checkpoint 12 account.orders[3]",
+            "checkpoint 12 account.orders[4]"
           ]
         }
       ]
@@ -39418,7 +39463,7 @@
           ]
         },
         {
-          "divergence": "At checkpoints 1–3 native retains 83.6 of order 101 reservation after it closes while TS refreshes balances; the exact delta is .02 × 38000 ÷ 10 × 1.1. Commands, writes and taped boundaries agree.",
+          "divergence": "At checkpoints 1\u20133 native retains 83.6 of order 101 reservation after it closes while TS refreshes balances; the exact delta is .02 \u00d7 38000 \u00f7 10 \u00d7 1.1. Commands, writes and taped boundaries agree.",
           "keys": [
             "checkpoint 1 account.balance.currencies.USDT.free",
             "checkpoint 1 account.balance.currencies.USDT.used",
@@ -42644,7 +42689,7 @@
           ]
         },
         {
-          "divergence": "TS retains canceled caller and batch orders 1001/2001/2002 at checkpoints 10–13 while native reconciliation omits them; commands, taped boundaries and write sequences agree.",
+          "divergence": "TS retains canceled caller and batch orders 1001/2001/2002 at checkpoints 10\u201313 while native reconciliation omits them; commands, taped boundaries and write sequences agree.",
           "keys": [
             "checkpoint 10 account.orders[1]",
             "checkpoint 10 account.orders[2]",
@@ -42677,6 +42722,12 @@
             "checkpoint 8 account.orders[2].remaining",
             "checkpoint 8 account.orders[2].side",
             "checkpoint 8 account.orders[2].symbol"
+          ]
+        },
+        {
+          "divergence": "At checkpoint 9 after cancelSymbolOrders, TS retains open existing order 1000 while native applies the taped empty orders response. Commands and checkpoint boundaries are unchanged; per-engine receipts match run 39426820375. This is interim acknowledged-cancel reconciliation visibility.",
+          "keys": [
+            "checkpoint 9 account.orders[0]"
           ]
         }
       ]
