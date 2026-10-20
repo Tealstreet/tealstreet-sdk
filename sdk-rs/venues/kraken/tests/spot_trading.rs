@@ -11,7 +11,7 @@ fn done(
     e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>,
     command: u32,
 ) -> Result<String, String> {
-    e.drain_actions()
+    e.drain_plain()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command: c, result }) if c == command => {
                 Some(result)
@@ -35,7 +35,7 @@ fn every_spot_bracket_leg_receipts_its_exact_native_cl_ord_id_before_dispatch() 
     );
     let mut identities = std::collections::HashSet::new();
     for index in 0..3 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         let (at, receipts) = actions
             .iter()
             .enumerate()
@@ -134,7 +134,7 @@ fn caller_ids_bad_brackets_and_zero_trailing_fail_before_any_write() {
                 orders: vec![opts("limit", 99.), bad],
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(
             a,
@@ -203,7 +203,7 @@ fn trigger_amend_uses_trigger_price_and_unsafe_types_reject_without_cancel() {
                 r#"{{"channel":"executions","type":"snapshot","data":[{{"order_id":"TRIGGER","symbol":"BTC/USD","side":"sell","order_type":"{raw}","order_qty":2,"cum_qty":0,"trigger_price":99}}]}}"#
             ),
         );
-        e.drain_actions().for_each(drop);
+        e.drain_plain().for_each(drop);
         e.handle(
             NOW,
             Event::Command(Command::AmendOrder {
@@ -213,7 +213,7 @@ fn trigger_amend_uses_trigger_price_and_unsafe_types_reject_without_cancel() {
                 amount: None,
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         if matches!(raw, "stop-loss" | "take-profit") {
             let r = actions
                 .into_iter()
@@ -266,7 +266,7 @@ fn queues_serialize_brackets_and_independent_commands() {
     let tp = requests(&mut e).pop().unwrap();
     assert!(tp.body.as_ref().unwrap().contains("ordertype=take-profit"));
     reply(&mut e, &tp, r#"{"error":[],"result":{"txid":["TP"]}}"#);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:6,result:Ok(ids)})if ids.contains("ENTRY")&&ids.contains("STOP")&&ids.contains("TP"))));
     assert!(
         actions
@@ -309,7 +309,7 @@ fn uncertain_write_is_never_replayed_but_signature_rejection_resigns_once() {
             error: "timeout after send",
         },
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(
         !actions
             .iter()
@@ -339,7 +339,7 @@ fn failed_cancel_stops_batch_and_does_not_remove_store_orders() {
         &r,
         r#"{"error":["EOrder:Unknown order"],"result":{}}"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(e.store().order("O-100").is_some());
 }
@@ -423,13 +423,13 @@ fn queued_amend_rechecks_reconciled_native_kind_before_write() {
         private.unwrap(),
         r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"stop-loss-limit","order_qty":2,"cum_qty":0.5,"exec_type":"amended","limit_price":98,"timestamp":"2023-11-14T22:13:21Z"}]}"#,
     );
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     reply(
         &mut e,
         &first,
         r#"{"error":[],"result":{"txid":["ENTRY"]}}"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,
@@ -448,7 +448,7 @@ fn trailing_quantizes_the_distance_from_unrounded_chart_price() {
         s,
         r#"{"channel":"ticker","type":"update","data":[{"symbol":"BTC/USD","last":100.04}]}"#,
     );
-    e.drain_actions().for_each(drop);
+    e.drain_plain().for_each(drop);
     e.handle(
         NOW,
         Event::Command(Command::PlaceOrders {
@@ -475,7 +475,7 @@ fn zero_disabled_brackets_match_ts_without_a_protective_write() {
     );
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, r#"{"error":[],"result":{"txid":["ENTRY"]}}"#);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(
         a,
@@ -501,7 +501,7 @@ fn trade_permission_denied_fails_the_order_without_deactivating_a_read_key() {
         &r,
         r#"{"error":["EGeneral:Permission denied"],"result":{}}"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(
         !actions
             .iter()
@@ -521,7 +521,7 @@ fn market_entry_with_tpsl_names_the_unsupported_legs() {
             orders: vec![opts("limit", 99.), o],
         }),
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 44, result: Err(m) }) if m.contains("take-profit/stop-loss legs on a market entry"))));
 }
@@ -539,7 +539,7 @@ fn market_entry_with_zero_brackets_places_only_the_entry() {
     );
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, r#"{"error":[],"result":{"txid":["ENTRY"]}}"#);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = e.drain_plain().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 45, result: Ok(ids) }) if ids == r#"["ENTRY"]"#)));
 }
@@ -557,7 +557,7 @@ fn trigger_price_is_refused_unless_it_repeats_the_stop_price() {
                 orders: vec![o],
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 46, result: Err(m) }) if m.contains("triggerPrice"))));
     }
@@ -573,4 +573,99 @@ fn trigger_price_is_refused_unless_it_repeats_the_stop_price() {
     );
     let r = requests(&mut e).pop().unwrap();
     assert!(r.body.as_ref().unwrap().contains("ordertype=stop-loss"));
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome, Response};
+    let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
+    let unknown = (None, Some(Outcome::Unknown));
+    for (status, body, classified, text) in [
+        (
+            200,
+            r#"{"error":["EOrder:Insufficient funds"]}"#,
+            rejected(ErrorKind::Rejected),
+            "Kraken Spot: EOrder:Insufficient funds",
+        ),
+        (
+            200,
+            r#"{"error":["EAPI:Rate limit exceeded"]}"#,
+            rejected(ErrorKind::RateLimited),
+            "Kraken Spot: EAPI:Rate limit exceeded",
+        ),
+        (
+            200,
+            r#"{"error":["EService:Unavailable"]}"#,
+            unknown,
+            "Kraken Spot: EService:Unavailable",
+        ),
+        (
+            200,
+            r#"{"error":["EFuture:Something"]}"#,
+            (None, None),
+            "Kraken Spot: EFuture:Something",
+        ),
+        (
+            200,
+            r#"{"error":[],"result":{}}"#,
+            unknown,
+            "Kraken Spot missing placement txids",
+        ),
+        (503, "<html>", unknown, "Kraken Spot invalid response"),
+        (
+            429,
+            r#"{"error":[]}"#,
+            rejected(ErrorKind::RateLimited),
+            "Kraken Spot HTTP 429",
+        ),
+    ] {
+        let (mut e, _, _) = ready(false);
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 8,
+                orders: vec![opts("limit", 99.)],
+            }),
+        );
+        let r = requests(&mut e).pop().unwrap();
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(
+            ((error.kind, error.outcome), error.legacy_text().as_str()),
+            (classified, text),
+            "{status} {body}"
+        );
+    }
+    // Transport loss on a write is Unknown and never retried.
+    let (mut e, _, _) = ready(false);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 8,
+            orders: vec![opts("limit", 99.)],
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    e.handle(
+        NOW,
+        Event::HttpFailed {
+            request: r.id,
+            error: "reset",
+        },
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(
+        (error.kind, error.outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
 }

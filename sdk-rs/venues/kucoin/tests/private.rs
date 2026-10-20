@@ -16,8 +16,21 @@ const POSITION: &str = r#"{"symbol":"XBTUSDTM","currentQty":10,"avgEntryPrice":"
 struct Harness {
     engine: Engine<Kucoin>,
     actions: Vec<Action>,
+    failures: Vec<safe_cex_engine::VenueError>,
     now: f64,
     socket: SocketId,
+}
+
+/// Records a failure and renders it as the plain text the host shows.
+fn plain(action: Action, failures: &mut Vec<safe_cex_engine::VenueError>) -> Action {
+    match action {
+        Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {
+            let result = Err(error.legacy_text());
+            failures.push(error);
+            Action::Notice(safe_cex_engine::Notice::CommandDone { command, result })
+        }
+        action => action,
+    }
 }
 impl Harness {
     fn new() -> Self {
@@ -29,6 +42,7 @@ impl Harness {
                 ..Default::default()
             })),
             actions: vec![],
+            failures: vec![],
             now: 1610000000000.0,
             socket: SocketId(0),
         };
@@ -67,7 +81,10 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        self.actions.extend(self.engine.drain_actions());
+        for action in self.engine.drain_actions() {
+            let action = plain(action, &mut self.failures);
+            self.actions.push(action);
+        }
     }
     fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);
@@ -900,6 +917,7 @@ fn account_reconciliation_starts_without_the_private_socket() {
             ..Default::default()
         })),
         actions: vec![],
+        failures: vec![],
         now: 1610000000000.0,
         socket: SocketId(0),
     };

@@ -1,11 +1,12 @@
 //! DXtrade writes have no transport retry. A placement batch is sequential;
 //! cancellation waits for every result in each bounded group of ten.
-use crate::{BreakoutProp, Operation, Pending};
+use crate::{BreakoutProp, Operation, Pending, not_sent};
 use safe_cex_engine::model::{
     Market, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, StopTriggerType,
 };
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, OrderIdentityKind, OrderIdentityReceipt, Store, num,
+    Command, CommandId, Cx, ErrorKind, Method, OrderIdentityKind, OrderIdentityReceipt, Outcome,
+    Store, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -220,10 +221,31 @@ struct Job {
     steps: VecDeque<Step>,
     in_flight: usize,
     cancel_batch: bool,
-    error: Option<String>,
+    error: Option<VenueError>,
+    /// A step took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
     ids: Vec<String>,
     reserved_places: usize,
     cancel_targets: Vec<String>,
+}
+
+impl Job {
+    /// Keeps the first failure's text; an Unknown leg makes the whole command Unknown.
+    fn record(&mut self, error: VenueError) {
+        match &mut self.error {
+            None => self.error = Some(error),
+            Some(first) if error.outcome == Some(Outcome::Unknown) => {
+                first.outcome = Some(Outcome::Unknown);
+                first.kind = error.kind;
+            }
+            Some(_) => {}
+        }
+    }
+}
+
+/// A 2xx answer that does not prove what happened.
+fn unproven(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::Unknown)
 }
 
 #[derive(Default)]
@@ -501,7 +523,11 @@ impl BreakoutProp {
             | Command::SetPositionMode { command, .. }
             | Command::SetStpMode { command, .. }
             | Command::FetchStpMode { command } => {
-                cx.done(command, Err("Breakout Prop uses fixed one-way cross accounts; this setting is unsupported".into()));
+                cx.fail(
+                    command,
+                    not_sent("Breakout Prop uses fixed one-way cross accounts; this setting is unsupported")
+                        .kind(ErrorKind::Unsupported),
+                );
                 return true;
             }
             _ => return false,
@@ -509,16 +535,13 @@ impl BreakoutProp {
         match job {
             Ok(job) if self.trading.jobs.contains_key(&id) => {
                 let _ = job;
-                cx.done(
-                    id,
-                    Err("Breakout Prop command is already in progress".into()),
-                );
+                cx.fail(id, not_sent("Breakout Prop command is already in progress"));
             }
             Ok(job) => {
                 self.trading.jobs.insert(id, job);
                 self.advance_trade(cx, id);
             }
-            Err(error) => cx.done(id, Err(error)),
+            Err(error) => cx.fail(id, not_sent(error)),
         }
         true
     }
@@ -637,13 +660,17 @@ impl BreakoutProp {
         }
         if job.error.is_some() || job.steps.is_empty() {
             let job = self.trading.jobs.remove(&id).expect("job present");
-            cx.done(
-                id,
-                job.error.map_or_else(
-                    || Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
-                    Err,
-                ),
-            );
+            match job.error {
+                None => cx.done(id, Ok(serde_json::to_string(&job.ids).unwrap_or_default())),
+                Some(mut error) => {
+                    if (job.effective || !job.ids.is_empty())
+                        && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                    {
+                        error.outcome = None;
+                    }
+                    cx.fail(id, error);
+                }
+            }
             return;
         }
         let limit = if job.cancel_batch { CANCEL_BATCH } else { 1 };
@@ -651,7 +678,7 @@ impl BreakoutProp {
         job.in_flight = steps.len();
         for step in steps {
             let Some(account) = self.account_code() else {
-                self.on_trade_failed_step(cx, id, "DXtrade account is not initialized".into());
+                self.on_trade_failed_step(cx, id, not_sent("DXtrade account is not initialized"));
                 continue;
             };
             let base = format!("/accounts/{}/orders", safe_cex_engine::url::encode(account));
@@ -665,7 +692,7 @@ impl BreakoutProp {
                         step,
                     },
                     Err(error) => {
-                        self.on_trade_failed_step(cx, id, error);
+                        self.on_trade_failed_step(cx, id, not_sent(error));
                         continue;
                     }
                 },
@@ -703,6 +730,7 @@ impl BreakoutProp {
             Step::Place { code, order } => serde_json::from_str::<PlaceAck>(body)
                 .map_err(|_| "Invalid DXtrade placement acknowledgement".to_owned())
                 .and_then(|ack| ack.order_id.text())
+                .map_err(unproven)
                 .map(|id| {
                     self.trading.acknowledged.insert(
                         id.clone(),
@@ -730,8 +758,9 @@ impl BreakoutProp {
                     self.on_trade_failed_step(
                         cx,
                         command,
-                        "Invalid DXtrade cancel acknowledgement; replacement was not submitted"
-                            .into(),
+                        unproven(
+                            "Invalid DXtrade cancel acknowledgement; replacement was not submitted",
+                        ),
                     );
                     return;
                 }
@@ -746,6 +775,9 @@ impl BreakoutProp {
                 });
                 let canonical = self.trading.canonical_code(cx.store, &id).to_owned();
                 self.record_canceled(cx, &id, &code);
+                if let Some(job) = self.trading.jobs.get_mut(&command) {
+                    job.effective = true;
+                }
                 self.trading.acknowledged.retain(|ack_id, ack| {
                     ack_id != &id && ack.code != canonical && ack.code != code
                 });
@@ -767,7 +799,9 @@ impl BreakoutProp {
                 }
                 self.order_revision = self.order_revision.wrapping_add(1);
                 if filled_during_cancel {
-                    Err("Breakout Prop order filled during cancellation; replacement was not submitted".into())
+                    Err(not_sent(
+                        "Breakout Prop order filled during cancellation; replacement was not submitted",
+                    ))
                 } else {
                     if let Some(expected) = amend_baseline
                         && let Some(job) = self.trading.jobs.get_mut(&command)
@@ -791,15 +825,18 @@ impl BreakoutProp {
                 &native_id,
                 &code,
                 &expected,
-            ),
+            )
+            // A read before the replacement: nothing new was sent.
+            .map_err(not_sent),
         };
         if was_place && outcome.is_err() {
             self.order_revision = self.order_revision.wrapping_add(1);
         }
         if let Some(job) = self.trading.jobs.get_mut(&command) {
             job.in_flight = job.in_flight.saturating_sub(1);
-            if let Err(error) = outcome {
-                job.error.get_or_insert(error);
+            match outcome {
+                Ok(()) => job.effective = true,
+                Err(error) => job.record(error),
             }
         }
         self.advance_trade(cx, command);
@@ -809,7 +846,7 @@ impl BreakoutProp {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: String,
+        error: VenueError,
     ) {
         if matches!(request.step, Step::Place { .. }) {
             self.order_revision = self.order_revision.wrapping_add(1);
@@ -820,11 +857,11 @@ impl BreakoutProp {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         command: CommandId,
-        error: String,
+        error: VenueError,
     ) {
         if let Some(job) = self.trading.jobs.get_mut(&command) {
             job.in_flight = job.in_flight.saturating_sub(1);
-            job.error.get_or_insert(error);
+            job.record(error);
         }
         self.advance_trade(cx, command);
     }
