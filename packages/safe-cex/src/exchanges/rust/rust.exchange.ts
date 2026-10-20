@@ -50,7 +50,6 @@ import {
   hasAsterDEXV3AuthContext,
   isAsterDEXStpMode,
   resolveAsterDEXApiVersion,
-  resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
 import {
   BaseExchange,
@@ -488,24 +487,6 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
-    }
-    if (
-      ![
-        'hyperliquid',
-        'paradex',
-        'lighter',
-        'lighter-robinhood',
-        'txflow',
-        'coinbase',
-        'coinbasespot',
-        'polymarket',
-        'breakoutprop',
-      ].includes(this.name) &&
-      !this.isPublicDataOnly &&
-      (!this.options.key ||
-        !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
-    ) {
-      throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
     const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
       const disposed = () => {

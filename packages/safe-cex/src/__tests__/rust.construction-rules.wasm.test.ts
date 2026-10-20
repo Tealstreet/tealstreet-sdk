@@ -55,3 +55,10 @@ it('Polymarket private accounts need a wallet private key', () =>
 
 it('Orderly private accounts need an application id', () =>
   startRejects('tealstreet-dex', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
+
+it('locally signing venues refuse private accounts without a local signing key', () =>
+  startRejects(
+    'binance',
+    { key: 'key', remoteSigner: {} as ExchangeOptions['remoteSigner'] },
+    'Rust engine private accounts require a local API key and secret; remote signing is unsupported',
+  ));
