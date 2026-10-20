@@ -48,6 +48,12 @@ execution price and size must be positive. Required REST account amounts reject
 missing, null, empty or negative values instead of silently becoming zero.
 Balance socket notifications are partial by design and trigger a fresh REST
 trade-account read. Zero-size terminal order notifications remain valid.
+Current open-order matches validate financial geometry and the known execution
+floor before emitting or consuming a trade identity. Execution bounds use only
+explicit native totals and cumulative fills, with decimal tolerance; delayed
+unique executions survive newer-order and terminal fences when optional native
+quantities are absent. A rejected packet leaves its identity available for a
+corrected execution.
 
 The engine names real `https://api.kucoin.com` and bullet-supplied WebSocket
 URLs. The existing TS-resolved Tealstreet host transport applies account routing.

@@ -402,13 +402,26 @@ impl KucoinSpot {
         let Some(mut order) = row.order(cx.now, previous, true) else {
             return;
         };
-        if !valid_order(&order) {
+        if !valid_native_quantities(&row) || order.price < 0.0 {
+            return;
+        }
+        if order.status == OrderStatus::Open
+            && !self.terminal.contains(row.id())
+            && previous.is_none_or(|old| order.last_update >= old.last_update)
+            && (!valid_order(&order) || previous.is_some_and(|old| old.filled > order.amount))
+        {
             return;
         }
         if row.event == "match" {
             let amount = row.match_size.or(row.filled_size).map_or(0.0, |n| n.0);
             let price = row.match_price.or(row.price).map_or(0.0, |n| n.0);
-            if amount <= 0.0 || price <= 0.0 {
+            if amount <= 0.0
+                || price <= 0.0
+                || row.total().is_some_and(|total| exceeds(amount, total))
+                || row
+                    .cumulative()
+                    .is_some_and(|filled| exceeds(amount, filled))
+            {
                 return;
             }
             let key = if let Some(id) = row.trade_id {
@@ -443,12 +456,15 @@ impl KucoinSpot {
         if self.terminal.contains(row.id()) && order.status == OrderStatus::Open {
             return;
         }
+        if order.status == OrderStatus::Open && !valid_order(&order) {
+            return;
+        }
         if let Some(old) = old {
-            if order.status == OrderStatus::Open && order.amount < old.filled {
-                return;
-            }
             order.filled = order.filled.max(old.filled);
             order.remaining = order.remaining.min((order.amount - order.filled).max(0.0));
+        }
+        if order.status == OrderStatus::Open && !valid_order(&order) {
+            return;
         }
         if matches!(order.status, OrderStatus::Canceled | OrderStatus::Closed) {
             // Terminal identities fence snapshots started before a fill/cancel.
@@ -526,6 +542,29 @@ impl KucoinSpot {
                 cx.candle(symbol, &i, c);
             }
         }
+    }
+}
+fn exceeds(value: f64, bound: f64) -> bool {
+    value > bound + (bound.abs() * 1e-12).max(1e-12)
+}
+fn valid_native_quantities(row: &OrderRow<'_>) -> bool {
+    let (total, filled, remaining) = (row.total(), row.cumulative(), row.remain_size.map(|n| n.0));
+    if [total, filled, remaining]
+        .into_iter()
+        .flatten()
+        .any(|n| n < 0.0)
+    {
+        return false;
+    }
+    match total {
+        Some(total) => {
+            !filled.is_some_and(|filled| exceeds(filled, total))
+                && !remaining.is_some_and(|remaining| exceeds(remaining, total))
+                && !filled
+                    .zip(remaining)
+                    .is_some_and(|(filled, remaining)| exceeds(filled + remaining, total))
+        }
+        None => true,
     }
 }
 fn valid_order(o: &Order) -> bool {

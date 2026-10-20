@@ -189,6 +189,17 @@ impl OrderRow<'_> {
         }
     }
 
+    pub fn total(&self) -> Option<f64> {
+        self.size
+            .or(self.origin_size)
+            .or(self.order_size)
+            .map(|n| n.0)
+    }
+
+    pub fn cumulative(&self) -> Option<f64> {
+        self.deal_size.or(self.filled_size).map(|n| n.0)
+    }
+
     pub fn order(&self, now: f64, old: Option<&Order>, ws: bool) -> Option<Order> {
         let symbol = if self.symbol.is_empty() {
             old?.symbol.as_str()
@@ -209,15 +220,10 @@ impl OrderRow<'_> {
             _ => old.map_or(OrderType::Limit, |o| o.kind),
         };
         let filled = self
-            .deal_size
-            .or(self.filled_size)
-            .map(|n| n.0)
+            .cumulative()
             .unwrap_or_else(|| old.map_or(0.0, |o| o.filled));
         let amount = self
-            .size
-            .or(self.origin_size)
-            .or(self.order_size)
-            .map(|n| n.0)
+            .total()
             .or_else(|| old.map(|o| o.amount))
             .or_else(|| self.remain_size.map(|n| n.0 + filled))
             .unwrap_or(0.0);

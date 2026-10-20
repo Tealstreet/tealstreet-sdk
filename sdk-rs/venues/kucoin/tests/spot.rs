@@ -792,3 +792,111 @@ fn private_disconnect_fences_account_reads_started_before_the_socket_gap() {
     assert_eq!(h.e.store().orders().len(), 1);
     assert_eq!(h.e.store().balance().total, 1300.0);
 }
+#[test]
+fn contradictory_new_matches_do_not_emit_or_consume_the_execution_identity() {
+    let mut h = H::new(true);
+    h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","type":"update","status":"open","size":"2","filledSize":"0.7","remainSize":"1.3","ts":1700000000001000000u64}));
+    let invalid = json!({"orderId":"order-1","symbol":"BTC-USDT","type":"match","orderType":"limit","status":"match","side":"buy","size":"0.5","filledSize":"0.2","remainSize":"0.3","price":"90","matchSize":"0.2","matchPrice":"89.5","tradeId":"retry-after-invalid","ts":1700000000002000000u64});
+    h.ws(true, "/spotMarket/tradeOrdersV2", invalid.clone());
+    assert!(h.fill_rows().is_empty());
+    let o = &h.e.store().orders()[0];
+    assert_eq!((o.amount, o.filled, o.remaining), (2.0, 0.7, 1.3));
+    let mut valid = invalid;
+    valid["size"] = json!("2");
+    valid["filledSize"] = json!("0.9");
+    valid["remainSize"] = json!("1.1");
+    valid["ts"] = json!(1700000000003000000u64);
+    h.ws(true, "/spotMarket/tradeOrdersV2", valid.clone());
+    h.ws(true, "/spotMarket/tradeOrdersV2", valid);
+    assert_eq!(h.fill_rows(), vec![(89.5, 0.2)]);
+}
+#[test]
+fn explicit_native_execution_bounds_reject_without_consuming_identity() {
+    for (total, cumulative) in [
+        (Some("size"), Some("filledSize")),
+        (Some("originSize"), Some("dealSize")),
+        (Some("orderSize"), Some("filledSize")),
+        (Some("size"), None),
+        (None, Some("dealSize")),
+    ] {
+        let mut h = H::new(true);
+        let mut event = json!({"orderId":"order-1","symbol":"BTC-USDT","type":"match","orderType":"limit","status":"match","side":"buy","price":"90","matchSize":"3","matchPrice":"89.5","tradeId":"retry-bounds","ts":1700000000001000000u64});
+        if let Some(field) = total {
+            event[field] = json!("2");
+        }
+        if let Some(field) = cumulative {
+            event[field] = json!("0.7");
+        }
+        h.ws(true, "/spotMarket/tradeOrdersV2", event.clone());
+        assert!(h.fill_rows().is_empty());
+        event["matchSize"] = json!("0.2");
+        h.ws(true, "/spotMarket/tradeOrdersV2", event.clone());
+        h.ws(true, "/spotMarket/tradeOrdersV2", event);
+        assert_eq!(h.fill_rows(), vec![(89.5, 0.2)]);
+    }
+}
+#[test]
+fn optional_native_totals_do_not_borrow_cached_fill_bounds_for_unique_executions() {
+    for scenario in [
+        "stale-total",
+        "stale-partial",
+        "current-partial",
+        "terminal-partial",
+    ] {
+        let mut h = H::new(true);
+        h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","type":"update","status":"open","size":"2","filledSize":"0.7","remainSize":"1.3","ts":1700000000003000000u64}));
+        if scenario == "terminal-partial" {
+            h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","type":"canceled","status":"done","ts":1700000000004000000u64}));
+        }
+        let mut event = json!({"orderId":"order-1","symbol":"BTC-USDT","type":"match","orderType":"limit","status":"match","side":"buy","price":"90","matchSize":"0.8","matchPrice":"89.5","tradeId":"unique-partial","ts":1700000000001000000u64});
+        let amount = if scenario == "stale-total" {
+            event["size"] = json!("0.5");
+            event["matchSize"] = json!("0.2");
+            0.2
+        } else {
+            0.8
+        };
+        if scenario == "current-partial" {
+            event["ts"] = json!(1700000000005000000u64);
+        }
+        h.ws(true, "/spotMarket/tradeOrdersV2", event.clone());
+        h.ws(true, "/spotMarket/tradeOrdersV2", event);
+        assert_eq!(h.fill_rows(), vec![(89.5, amount)]);
+        if scenario == "terminal-partial" {
+            assert!(h.e.store().orders().is_empty());
+        } else {
+            let o = &h.e.store().orders()[0];
+            assert_eq!((o.amount, o.filled, o.remaining), (2.0, 0.7, 1.3));
+        }
+    }
+}
+#[test]
+fn explicit_execution_bounds_tolerate_decimal_roundoff() {
+    let mut h = H::new(true);
+    let amount = 0.1 + 0.2;
+    h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"decimal-order","symbol":"BTC-USDT","type":"match","orderType":"limit","status":"match","side":"buy","size":"0.3","filledSize":"0.3","remainSize":"0","price":"90","matchSize":amount,"matchPrice":"89.5","tradeId":"decimal","ts":1700000000001000000u64}));
+    assert_eq!(h.fill_rows(), vec![(89.5, amount)]);
+}
+#[test]
+fn zero_size_terminal_without_cumulative_removes_a_partially_filled_order() {
+    let mut h = H::new(true);
+    h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","type":"canceled","status":"done","size":"0","remainSize":"0","ts":1700000000001000000u64}));
+    assert!(h.e.store().orders().is_empty());
+}
+#[test]
+fn current_partial_matches_reject_cached_geometry_before_consuming_identity() {
+    for field in ["filledSize", "remainSize"] {
+        let mut h = H::new(true);
+        h.ws(true,"/spotMarket/tradeOrdersV2",json!({"orderId":"order-1","symbol":"BTC-USDT","type":"update","status":"open","size":"2","filledSize":"0.7","remainSize":"1.3","ts":1700000000001000000u64}));
+        let mut event = json!({"orderId":"order-1","symbol":"BTC-USDT","type":"match","orderType":"limit","status":"match","side":"buy","price":"90","matchSize":"0.2","matchPrice":"89.5","tradeId":"retry-cached-geometry","ts":1700000000002000000u64});
+        event[field] = json!("3");
+        h.ws(true, "/spotMarket/tradeOrdersV2", event.clone());
+        assert!(h.fill_rows().is_empty());
+        let o = &h.e.store().orders()[0];
+        assert_eq!((o.amount, o.filled, o.remaining), (2.0, 0.7, 1.3));
+        event[field] = json!(if field == "filledSize" { "0.9" } else { "1.1" });
+        h.ws(true, "/spotMarket/tradeOrdersV2", event.clone());
+        h.ws(true, "/spotMarket/tradeOrdersV2", event);
+        assert_eq!(h.fill_rows(), vec![(89.5, 0.2)]);
+    }
+}
