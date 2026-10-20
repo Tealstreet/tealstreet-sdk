@@ -85,7 +85,7 @@ impl ApexOmni {
             options,
             contracts: HashMap::new(),
             public: public::Public::default(),
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
         }
     }
