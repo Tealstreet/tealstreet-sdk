@@ -713,12 +713,14 @@ Mostly matches TS.
 
 ### ApeX Omni
 Signing and payloads match; no confirmed highs.
-- Medium: cancelled ids hidden for good (terminal map, `apexomni/src/account.rs:150`;
+- Medium: ~~cancelled ids hidden for good (terminal map, `apexomni/src/account.rs:150`;
   cancel-all marks untriggered stops terminal, `trading.rs:928`); one bad
   open-order row leaves the account side dead incl. signing state
   (`account.rs:975`); null fields drop whole private frames incl. fills
   (`private_wire.rs:205`); one odd `/v3/symbols` row blocks private start; a bad
-  omni key seed kills read-only monitoring (`account.rs:504`).
+  omni key seed kills read-only monitoring (`account.rs:504`).~~ Cancels fence by
+  version with a 5 s hide (kept orders reappear with a warning); bad rows are
+  skipped per row keeping stored copies and fills; a bad seed disables only placement.
 - Low: caller client id rejected on stops/brackets/splits; float remaining size;
   zero-price candle rejects batch; leverage always sent. Unchecked: private
   socket via Tealstreet proxy.
