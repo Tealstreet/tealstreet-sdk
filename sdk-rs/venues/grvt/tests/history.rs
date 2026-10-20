@@ -755,3 +755,96 @@ fn filtered_current_order_walk_starts_near_creation_without_changing_explicit_bo
         assert_eq!(rows.len(), usize::from(to == NOW));
     }
 }
+
+/// Pins the exact request sequence of a paged read: funding pages by cursor,
+/// then the fills stage from a fresh cursor. Paging refactors keep it.
+#[test]
+fn paged_income_request_sequence_is_pinned() {
+    let mut h = Harness::new(true);
+    h.query(Query::Income {
+        symbol: None,
+        kind: None,
+        from_ms: Some(NOW - 1000.),
+        to_ms: Some(NOW),
+        limit: None,
+    });
+    let mut sent = Vec::new();
+    let mut step = |h: &mut Harness, path: &str, body: String| {
+        let r = h.take(path);
+        sent.push(format!(
+            "{} {}",
+            r.url.rsplit('/').next().unwrap(),
+            r.body.clone().unwrap_or_default()
+        ));
+        h.respond(r, &body, "");
+    };
+    let funding = |ti: &str, next: &str| {
+        format!(
+            r#"{{"r":[{{"et":"1700000000000000000","sa":"777","i":"BTC_USDT_Perp","ti":"{ti}","c":"USDT","a":"25"}}],"n":"{next}"}}"#
+        )
+    };
+    step(&mut h, "funding_payment_history", funding("0x01", "f1"));
+    step(&mut h, "funding_payment_history", funding("0x02", ""));
+    step(
+        &mut h,
+        "fill_history",
+        format!(r#"{{"r":[{FILL}],"n":"t1"}}"#),
+    );
+    let second = FILL.replace("9007199254740993-1", "9007199254740993-2");
+    step(
+        &mut h,
+        "fill_history",
+        format!(r#"{{"r":[{second}],"n":""}}"#),
+    );
+    assert!(h.result().is_ok());
+    assert_eq!(sent.len(), 4);
+    let cursors: Vec<_> = sent
+        .iter()
+        .map(|s| {
+            let body: serde_json::Value =
+                serde_json::from_str(s.split_once(' ').unwrap().1).unwrap();
+            (
+                s.split(' ').next().unwrap().to_owned(),
+                body["c"].as_str().unwrap_or("").to_owned(),
+                body["l"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        cursors,
+        [
+            (
+                "funding_payment_history".into(),
+                "".into(),
+                serde_json::json!(1000)
+            ),
+            (
+                "funding_payment_history".into(),
+                "f1".into(),
+                serde_json::json!(1000)
+            ),
+            ("fill_history".into(), "".into(), serde_json::json!(1000)),
+            ("fill_history".into(), "t1".into(), serde_json::json!(1000)),
+        ]
+    );
+    // Every other body field is unchanged between pages of one stage.
+    let strip = |s: &str| {
+        let mut v: serde_json::Value = serde_json::from_str(s.split_once(' ').unwrap().1).unwrap();
+        v.as_object_mut().unwrap().remove("c");
+        v
+    };
+    assert_eq!(strip(&sent[0]), strip(&sent[1]));
+    assert_eq!(strip(&sent[2]), strip(&sent[3]));
+    insta_like(&sent);
+}
+
+/// The full request bodies, pinned verbatim.
+fn insta_like(sent: &[String]) {
+    let expected = [
+        r#"funding_payment_history {"sa":"777","st":"1699999999000000000","et":"1700000000000000000","l":1000,"c":""}"#,
+        r#"funding_payment_history {"sa":"777","st":"1699999999000000000","et":"1700000000000000000","l":1000,"c":"f1"}"#,
+        r#"fill_history {"sa":"777","st":"1699999999000000000","et":"1700000000000000000","l":1000,"c":""}"#,
+        r#"fill_history {"sa":"777","st":"1699999999000000000","et":"1700000000000000000","l":1000,"c":"t1"}"#,
+    ];
+    assert_eq!(sent, expected);
+}
