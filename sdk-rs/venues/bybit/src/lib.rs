@@ -1351,7 +1351,7 @@ impl BybitLinear {
 }
 
 fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerDelta<'_>, variant: Variant) {
-    let percentage = d.price24h_pcnt.map(|p| p * 100.0);
+    let percentage = d.price24h_pcnt.or(d.change24h).map(|p| p * 100.0);
     let open_interest = d.open_interest;
     let funding_rate = if variant.is_spot() {
         Some(0.0)
@@ -1373,8 +1373,8 @@ fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerDelta<'_>, variant: Variant) {
                 *slot = value;
             }
         };
-        set(&mut t.bid, d.bid1_price);
-        set(&mut t.ask, d.ask1_price);
+        set(&mut t.bid, d.bid1_price.or(d.bid_price));
+        set(&mut t.ask, d.ask1_price.or(d.ask_price));
         set(&mut t.last, d.last_price);
         set(&mut t.mark, d.mark_price);
         set(&mut t.index, d.index_price);
@@ -1403,7 +1403,9 @@ fn ticker_from_rest(t: &TickerRow<'_>, inverse: bool) -> Ticker {
         mark: float_of(&t.mark_price),
         index: float_of(&t.index_price),
         mid_price: None,
-        percentage: float_of(&t.price24h_pcnt) * 100.0,
+        percentage: present(&t.price24h_pcnt)
+            .map_or_else(|| float_of(&t.change24h), |_| float_of(&t.price24h_pcnt))
+            * 100.0,
         open_interest: float_of(&t.open_interest),
         funding_rate: float_of(&t.funding_rate),
         funding_time: float_of(&t.next_funding_time),

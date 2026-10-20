@@ -693,3 +693,32 @@ fn inverse_position_uses_native_mark_before_last_when_the_ticker_mark_is_cold() 
     assert_eq!(inverse.notional, 1000.0);
     assert_eq!(inverse.contracts, 0.01);
 }
+
+// https://bybit-exchange.github.io/docs/v5/websocket/public/ticker (option example, an object)
+#[test]
+fn documented_option_ticker_frame_updates_quotes_and_change() {
+    let mut h = ready(false);
+    let symbol = "BTC-25DEC26-100000-C-USDT";
+    let frame = |bid: &str| {
+        format!(
+            r#"{{"id":"tickers.{symbol}-1","topic":"tickers.{symbol}","ts":1672917511074,"data":{{"symbol":"{symbol}","bidPrice":"{bid}","bidSize":"1","bidIv":"0.4","askPrice":"1020","askSize":"2","askIv":"0.6","lastPrice":"1001","highPrice24h":"1100","lowPrice24h":"900","markPrice":"1003","indexPrice":"99100","markPriceIv":"0.5","underlyingPrice":"99050","openInterest":"3","turnover24h":"10","volume24h":"5","totalVolume":"6","totalTurnover":"11","delta":"0.4","gamma":"0.01","vega":"12","theta":"-8","predictedDeliveryPrice":"0","change24h":"-0.05"}},"type":"snapshot"}}"#
+        )
+    };
+    h.message("public/option", &frame("990"));
+    let t = h.engine.store().ticker(symbol).unwrap().clone();
+    assert_eq!(
+        (t.bid, t.ask, t.last, t.mark),
+        (990.0, 1020.0, 1001.0, 1003.0)
+    );
+    assert!((t.percentage + 5.0).abs() < 1e-9, "{}", t.percentage);
+    h.message("public/option", &frame("0"));
+    assert_eq!(h.engine.store().ticker(symbol).unwrap().bid, 0.0);
+    // Derivative frames keep their own spelling.
+    h.message(
+        "public/linear",
+        r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","bid1Price":"41000","ask1Price":"41001","price24hPcnt":"0.01"}}"#,
+    );
+    let t = h.engine.store().ticker("BTCUSDT").unwrap();
+    assert_eq!((t.bid, t.ask), (41000.0, 41001.0));
+    assert!((t.percentage - 1.0).abs() < 1e-9);
+}
