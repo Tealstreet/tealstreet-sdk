@@ -1222,6 +1222,16 @@ impl Coinbase {
         };
         let id = request.command;
         self.trading.waiting = true;
+        if let Step::Place { payload, order, .. } = &request.step {
+            cx.command_progress(
+                id,
+                vec![OrderIdentityReceipt {
+                    symbol: order.symbol.clone(),
+                    kind: OrderIdentityKind::ClientOrderId,
+                    identity: payload.client_order_id.clone(),
+                }],
+            );
+        }
         if let Err(error) = self.request(cx, method, path, body, None, Pending::Trading(request)) {
             self.trading_finish_error(cx, id, error);
         } else if method == Method::Post {

@@ -380,3 +380,19 @@ writes, while reads receive no write-outcome marker. It must not parse CLI text
 or invent caller/native IDs. `exec-result.error` and
 `updatePositions:done.reason` remain strings; optional `errorDetails` carries the
 original structured failure when it is still available.
+
+Native `command-progress` is an additive typed worker event with object data
+(`StoreWorkerCommandProgress`), including the host-session receipt key, native
+command ID, exact typed receipt rows, completion/late flags, owning account and
+original worker generation. It remains routable after the corresponding RPC
+has timed out; it never depends on a pending request or enters the Store,
+SCXF frames, or shared public feeds. Closed/replaced generations cannot emit
+receipts. No receipt ledger or trading replay is maintained by the worker.
+Existing logging consumers receive the adapter's late-receipt log fallback;
+the worker does not produce a duplicate log for the typed event.
+
+Command errors distinguish caller `clientOrderId(s)` from actual native
+`orderIdentities` and `actualClientOrderIds`. A numeric `clientOrderIndex` or
+`orderCode` stays an exact string in its original namespace. A receipt records
+an identity selected for a write, not venue acknowledgement or proof of
+acceptance; an interruption snapshot may be incomplete while native work lives.

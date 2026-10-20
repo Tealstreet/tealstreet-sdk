@@ -1,4 +1,4 @@
-import type { EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { CommandProgress, EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
   Candle,
@@ -648,6 +648,7 @@ export class RustEngineExchange extends BaseExchange {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,
         onDead: this.receiveEngineFailure,
+        onCommandProgress: this.receiveCommandProgress,
         onDeactivate: () => {
           this.startupFailure = new Error(`${this.name} credentials were rejected`);
           for (const wake of this.startupWaiters) wake();
@@ -668,6 +669,18 @@ export class RustEngineExchange extends BaseExchange {
         ? { outcome: 'unknown' as const }
         : {}),
     });
+
+  private receiveCommandProgress = (progress: CommandProgress) => {
+    if (this.isDisposed || this.engineFailure) return;
+    try {
+      this.emitter.emit('command-progress', progress);
+    } finally {
+      // Existing main-thread log consumers can retain IDs selected after an RPC
+      // timed out, even before they adopt the typed progress event.
+      if (progress.late && progress.receipts.length)
+        this.log(`Late order identity receipt ${progress.receiptKey}: ${JSON.stringify(progress.receipts)}`);
+    }
+  };
 
   private receiveEngineFailure = (error: Error) => {
     if (this.engineFailure) return;

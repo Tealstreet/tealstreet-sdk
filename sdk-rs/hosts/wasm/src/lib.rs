@@ -484,6 +484,10 @@ enum ActionOut<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<&'a str>,
     },
+    CommandProgress {
+        command: u32,
+        receipts: &'a [safe_cex_engine::OrderIdentityReceipt],
+    },
 }
 
 fn socket_channel(channel: &safe_cex_engine::SocketChannel) -> &'static str {
@@ -581,6 +585,12 @@ fn encode(actions: &[Action]) -> String {
                 result: result.as_ref().ok().map(String::as_str),
                 error: result.as_ref().err().map(String::as_str),
             },
+            Action::Notice(Notice::CommandProgress { command, receipts }) => {
+                ActionOut::CommandProgress {
+                    command: *command,
+                    receipts,
+                }
+            }
         })
         .collect();
     serde_json::to_string(&out).unwrap_or_default()
@@ -1263,6 +1273,37 @@ fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn command_progress_serializes_native_identity_namespaces_in_action_order() {
+        use safe_cex_engine::{Action, Notice, OrderIdentityKind, OrderIdentityReceipt};
+        let receipts = [
+            (OrderIdentityKind::ClientOrderId, "client"),
+            (OrderIdentityKind::ClientOrderIndex, "9007199254740993"),
+            (OrderIdentityKind::OrderCode, "code"),
+        ]
+        .into_iter()
+        .map(|(kind, identity)| OrderIdentityReceipt {
+            symbol: "BTC-USD".into(),
+            kind,
+            identity: identity.into(),
+        })
+        .collect::<Vec<_>>();
+        let encoded = super::encode(&[
+            Action::Notice(Notice::CommandProgress {
+                command: 19,
+                receipts,
+            }),
+            Action::Notice(Notice::CommandDone {
+                command: 19,
+                result: Ok("[]".into()),
+            }),
+        ]);
+        assert_eq!(
+            encoded,
+            r#"[{"op":"commandProgress","command":19,"receipts":[{"symbol":"BTC-USD","kind":"clientOrderId","identity":"client"},{"symbol":"BTC-USD","kind":"clientOrderIndex","identity":"9007199254740993"},{"symbol":"BTC-USD","kind":"orderCode","identity":"code"}]},{"op":"done","command":19,"result":"[]"}]"#
+        );
+    }
+
     #[test]
     fn host_commands_dispatch_once_and_flush_once_with_original_clock() {
         use safe_cex_engine::command::HostInput;

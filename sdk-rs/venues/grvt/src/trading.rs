@@ -1282,6 +1282,16 @@ impl Grvt {
                     .set_order_status(&target.id, OrderStatus::Canceling);
             }
             Effect::Place(order) => {
+                if let Some(identity) = &order.client_order_id {
+                    cx.command_progress(
+                        plan.command,
+                        vec![OrderIdentityReceipt {
+                            symbol: order.symbol.clone(),
+                            kind: OrderIdentityKind::ClientOrderId,
+                            identity: identity.clone(),
+                        }],
+                    );
+                }
                 self.account
                     .record_identity(&order.id, None, order.last_update);
                 cx.store.upsert_order(*order.clone());

@@ -285,6 +285,72 @@ fn create_wire(request: &HttpRequest) -> CreateWire {
 }
 
 #[test]
+fn caller_and_generated_batch_identities_precede_each_native_placement() {
+    fn placement(s: &mut Session) -> HttpRequest {
+        let mut receipts = Vec::new();
+        for _ in 0..100 {
+            let mut answered = false;
+            for action in s.e.drain_actions().collect::<Vec<_>>() {
+                match action {
+                    Action::Notice(safe_cex_engine::Notice::CommandProgress {
+                        command: 71,
+                        receipts: actual,
+                    }) => receipts.extend(actual),
+                    Action::Http(request) if request.url.ends_with("/orders") => {
+                        assert_eq!(
+                            receipts,
+                            vec![OrderIdentityReceipt {
+                                symbol: "BTC-USD".into(),
+                                kind: OrderIdentityKind::ClientOrderId,
+                                identity: create_wire(&request).client_order_id,
+                            }],
+                            "receipt must already be available when HTTP dispatches"
+                        );
+                        return request;
+                    }
+                    Action::Http(request) => {
+                        s.answer(request);
+                        answered = true;
+                    }
+                    Action::SetTimer { timer, at_ms } => s.timers.push((at_ms, timer)),
+                    Action::ClearTimer { timer } => {
+                        s.timers.retain(|(_, pending)| *pending != timer)
+                    }
+                    _ => {}
+                }
+            }
+            if !answered {
+                s.fire();
+            }
+        }
+        panic!("placement request")
+    }
+    let mut s = Session::new("DEFAULT", true).ready();
+    let mut caller = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.);
+    caller.client_order_id = Some("caller-receipt".into());
+    s.command(Command::PlaceOrders {
+        command: 71,
+        orders: vec![
+            caller,
+            opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.),
+        ],
+    });
+    let first = placement(&mut s);
+    assert_eq!(create_wire(&first).client_order_id, "caller-receipt");
+    s.reply(
+        first,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"first"}}"#,
+    );
+    let second = placement(&mut s);
+    assert!(
+        create_wire(&second)
+            .client_order_id
+            .starts_with("tealstreet-")
+    );
+}
+
+#[test]
 fn native_create_payloads_preserve_caller_ids_market_ioc_and_postonly_limit() {
     let mut s = Session::new("DEFAULT", true).ready();
     let mut first = opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.2344);

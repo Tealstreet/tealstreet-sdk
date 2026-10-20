@@ -17,6 +17,7 @@ pub use engine::{
     PayloadSignRequest, Query, RequestId, RequestRoute, Response, SignatureTarget, SocketChannel,
     SocketContext, SocketId, TimerId, Venue,
 };
+pub use model::{OrderIdentityKind, OrderIdentityReceipt};
 pub use store::Store;
 
 pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};

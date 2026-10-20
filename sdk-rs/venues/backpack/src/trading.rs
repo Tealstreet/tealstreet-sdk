@@ -42,6 +42,16 @@ pub struct NativeOrder {
     stop_loss_trigger_by: Option<&'static str>,
 }
 impl NativeOrder {
+    fn identity(&self, store: &safe_cex_engine::Store) -> Option<OrderIdentityReceipt> {
+        Some(OrderIdentityReceipt {
+            symbol: store
+                .market_by_id(&self.symbol)
+                .map_or_else(|| self.symbol.clone(), |market| market.symbol.clone()),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity: self.client_id?.to_string(),
+        })
+    }
+
     pub(crate) fn params(&self) -> Params {
         let mut p: Params = [
             ("symbol".into(), self.symbol.clone()),
@@ -532,6 +542,17 @@ impl Backpack {
         };
         let mut previous = None;
         let mut targets = vec![];
+        if !job.internal {
+            let receipts = match &step {
+                Step::Place { order, .. } => order.identity(cx.store).into_iter().collect(),
+                Step::Pair(orders) => orders
+                    .iter()
+                    .filter_map(|order| order.identity(cx.store))
+                    .collect(),
+                _ => vec![],
+            };
+            cx.command_progress(command as CommandId, receipts);
+        }
         let (method, path, params, body) = match &step {
             Step::Place { order, .. } => (
                 Method::Post,

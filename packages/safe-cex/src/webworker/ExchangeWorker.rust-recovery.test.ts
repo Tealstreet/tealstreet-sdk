@@ -1,4 +1,4 @@
-import type { Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { CommandProgress, OrderIdentityReceipt, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, Market, StoreData } from '../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,6 +35,9 @@ class ControlledEngine implements WasmEngineLike {
   trapSubscriptions = false;
   holdCommands = false;
   completeAfterMs = 0;
+  progressAfterMs: number | undefined;
+  receipts: OrderIdentityReceipt[] = [];
+  scheduledActions = new Map<number, unknown[]>();
   commandError: Record<string, unknown> | undefined;
   commands: Array<Record<string, unknown>> = [];
   current: Partial<StoreData> = {
@@ -59,6 +62,18 @@ class ControlledEngine implements WasmEngineLike {
     if (this.trapWrites && command.op === 'placeOrders') throw new WebAssembly.RuntimeError('placement panic');
     if (this.trapSubscriptions && command.op === 'subscribeOrderBook')
       throw new WebAssembly.RuntimeError('subscription panic');
+    if (command.command !== undefined && this.progressAfterMs !== undefined) {
+      const progressTimer = command.command * 2;
+      const doneTimer = progressTimer + 1;
+      this.scheduledActions.set(progressTimer, [
+        { op: 'commandProgress', command: command.command, receipts: this.receipts },
+      ]);
+      this.scheduledActions.set(doneTimer, [{ op: 'done', command: command.command, result: '["late-accepted"]' }]);
+      return JSON.stringify([
+        { op: 'setTimer', timer: progressTimer, at: Date.now() + this.progressAfterMs },
+        { op: 'setTimer', timer: doneTimer, at: Date.now() + this.progressAfterMs + 40 },
+      ]);
+    }
     if (command.command !== undefined && this.completeAfterMs) {
       return JSON.stringify([{ op: 'setTimer', timer: command.command, at: Date.now() + this.completeAfterMs }]);
     }
@@ -102,7 +117,8 @@ class ControlledEngine implements WasmEngineLike {
   httpChunk = this.wsOpen;
   httpEnd = this.wsOpen;
   httpFailed = this.wsOpen;
-  timer = (id: number) => JSON.stringify([{ op: 'done', command: id, result: '["late-accepted"]' }]);
+  timer = (id: number) =>
+    JSON.stringify(this.scheduledActions.get(id) ?? [{ op: 'done', command: id, result: '["late-accepted"]' }]);
 }
 const transport: Transport = {
   now: () => Date.now(),
@@ -129,6 +145,14 @@ const createWorker = (options: Partial<ExchangeOptions> = {}, account = 'same-na
   );
   workers.push(worker);
   return { worker, messages };
+};
+// Capture the actual registered callback so a stale invocation still exercises
+// generation fencing even after dispose has removed emitter registrations.
+const progressListener = (worker: ExchangeWorker) => {
+  const emitter = worker.exchange!.emitter as unknown as {
+    e: Record<string, Array<{ fn: (progress: CommandProgress) => void }>>;
+  };
+  return emitter.e['command-progress'].at(-1)!.fn;
 };
 const start = async (worker: ExchangeWorker) => {
   const promise = worker.start();
@@ -652,6 +676,125 @@ describe('Rust worker engine ownership', () => {
       expect(messages.some((m) => m.op === 'frame' && m.data.byteLength === 1)).toBe(false);
     },
   );
+
+  it('routes native receipts after RPC timeout to their original account without changing the settled error', async () => {
+    registerCommandExecutor(async (exchange, _symbol, _command, reqId) => {
+      const orderIds = await exchange.placeOrder({
+        symbol: market.symbol,
+        side: OrderSide.Buy,
+        type: OrderType.Market,
+        amount: 1,
+        clientOrderId: 'caller-parent',
+      });
+      exchange.emitter.emit('exec-result', { reqId, handled: true, success: true, data: { orderIds } });
+    });
+    const { worker, messages } = createWorker({ extra: { rustCommandTimeoutMs: 20 } }, 'receipt-owner');
+    const sibling = createWorker({}, 'other-owner');
+    await start(worker);
+    await start(sibling.worker);
+    sources[0].progressAfterMs = 40;
+    sources[0].receipts = [
+      { symbol: market.symbol, kind: 'clientOrderId', identity: 'native-generated-child' },
+      { symbol: market.symbol, kind: 'clientOrderIndex', identity: '9007199254740993' },
+      { symbol: market.symbol, kind: 'orderCode', identity: '0000000017' },
+    ];
+    worker.handlePayload({ op: 'exec', data: { reqId: 'late-identities', command: 'fixture' } });
+    await vi.advanceTimersByTimeAsync(25);
+    const replies = () => messages.filter((m) => m.op === 'exec-result' && m.data[0].reqId === 'late-identities');
+    expect(replies()).toHaveLength(1);
+    const snapshot = structuredClone(replies()[0].data[0].errorDetails);
+    expect(snapshot).toMatchObject({
+      code: 'COMMAND_TIMEOUT',
+      outcome: 'unknown',
+      clientOrderId: 'caller-parent',
+      clientOrderIds: ['caller-parent'],
+      orderIdentities: [],
+      actualClientOrderIds: [],
+      receiptKey: expect.any(String),
+      commandId: expect.any(Number),
+    });
+    expect(messages.filter((m) => m.op === 'command-progress')).toHaveLength(0);
+    const positionsVersion = worker.store.updateIds.positions;
+    await vi.advanceTimersByTimeAsync(20);
+    const progress = messages.filter((m) => m.op === 'command-progress');
+    expect(progress).toHaveLength(1);
+    expect(progress[0].data).toMatchObject({
+      account: 'receipt-owner',
+      generation: expect.any(Number),
+      receiptKey: snapshot.receiptKey,
+      commandId: snapshot.commandId,
+      receipts: sources[0].receipts,
+      complete: false,
+      late: true,
+    });
+    expect(sibling.messages.some((m) => m.op === 'command-progress')).toBe(false);
+    expect(worker.store.updateIds.positions).toBe(positionsVersion);
+    expect(worker.store.orders).toEqual([]);
+    await vi.advanceTimersByTimeAsync(40);
+    expect(replies()).toHaveLength(1);
+    expect(replies()[0].data[0].errorDetails).toEqual(snapshot);
+    expect(messages.filter((m) => m.op === 'command-progress').at(-1)?.data).toMatchObject({
+      account: 'receipt-owner',
+      receiptKey: snapshot.receiptKey,
+      receipts: [],
+      complete: true,
+      late: true,
+    });
+    expect(sources[0].commands.filter((c) => c.op === 'placeOrders')).toHaveLength(1);
+    const staleProgress = progressListener(worker);
+    const priorEvents = messages.filter((m) => m.op === 'command-progress').length;
+    worker.dispose();
+    staleProgress({
+      ...progress[0].data,
+      receipts: [{ symbol: market.symbol, kind: 'clientOrderId', identity: 'closed-stream' }],
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(messages.filter((m) => m.op === 'command-progress')).toHaveLength(priorEvents);
+  });
+
+  it('preserves actual pre-deadline receipts and fences the old host after reconstruction', async () => {
+    registerCommandExecutor(async (exchange) => {
+      await exchange.placeOrder({
+        symbol: market.symbol,
+        side: OrderSide.Buy,
+        type: OrderType.Market,
+        amount: 1,
+        clientOrderId: 'caller-request',
+      });
+    });
+    const { worker, messages } = createWorker({ extra: { rustCommandTimeoutMs: 20 } });
+    await start(worker);
+    const staleProgress = progressListener(worker);
+    sources[0].progressAfterMs = 0;
+    sources[0].receipts = [{ symbol: market.symbol, kind: 'clientOrderId', identity: 'selected-native' }];
+    worker.handlePayload({ op: 'exec', data: { reqId: 'early-identities', command: 'fixture' } });
+    await vi.advanceTimersByTimeAsync(25);
+    const reply = messages.find((m) => m.op === 'exec-result' && m.data[0].reqId === 'early-identities');
+    expect(reply?.data[0].errorDetails).toMatchObject({
+      code: 'COMMAND_TIMEOUT',
+      clientOrderIds: ['caller-request'],
+      actualClientOrderIds: ['selected-native'],
+      orderIdentities: sources[0].receipts,
+    });
+    const first = messages.find((m) => m.op === 'command-progress')!.data;
+    expect(first).toMatchObject({ late: false, complete: false, account: 'same-name' });
+    await panic(sources[0]);
+    await vi.advanceTimersByTimeAsync(1000);
+    const count = messages.filter((m) => m.op === 'command-progress').length;
+    staleProgress(first);
+    expect(messages.filter((m) => m.op === 'command-progress')).toHaveLength(count);
+    worker.exchange!.emitter.emit('command-progress', {
+      ...first,
+      receiptKey: 'new-host:1',
+      commandId: 1,
+      account: 'spoofed-owner',
+      generation: -1,
+    });
+    const newest = messages.filter((m) => m.op === 'command-progress').at(-1)!.data;
+    expect(newest.account).toBe(first.account);
+    expect(newest.generation).toBeGreaterThan(first.generation);
+    expect(newest.receiptKey).toBe('new-host:1');
+  });
 
   it('keeps SharedWorker attachments on the recovering owner', async () => {
     const context = () => {

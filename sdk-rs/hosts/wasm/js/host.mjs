@@ -23,6 +23,38 @@ const commandTimeout = (value) => {
 const WRITE_COMMANDS = new Set(['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
   'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode', 'setStpMode']);
 class UnknownEngineActionError extends Error {}
+class CommandProgressCallbackError extends Error {
+  constructor(cause) { super('Command progress callback failed', { cause }); }
+}
+let nextReceiptSession = 0;
+
+function receiptSession() {
+  const sequence = ++nextReceiptSession;
+  try {
+    if (typeof globalThis.crypto?.randomUUID === 'function') return `${globalThis.crypto.randomUUID()}:${sequence}`;
+  } catch { /* Correlation must also work in native hosts without Web Crypto. */ }
+  const bytes = new Uint8Array(16);
+  try {
+    if (typeof globalThis.crypto?.getRandomValues !== 'function') throw new Error('Web Crypto unavailable');
+    globalThis.crypto.getRandomValues(bytes);
+  } catch {
+    // This is an opaque correlation token, never an authentication token.
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}:${sequence}`;
+}
+
+function commandReceiptSnapshot(error, command) {
+  if (!command?.receiptKey) return;
+  error.receiptKey = command.receiptKey;
+  error.commandId = command.commandId;
+  error.orderIdentities = Object.freeze((command.orderIdentities ?? []).map((receipt) => Object.freeze({ ...receipt })));
+  error.actualClientOrderIds = Object.freeze([...new Set(error.orderIdentities
+    .filter((receipt) => receipt.kind === 'clientOrderId').map((receipt) => receipt.identity))]);
+}
 
 function interruptedCommand(error, command, interrupted) {
   if (!command) return;
@@ -33,6 +65,7 @@ function interruptedCommand(error, command, interrupted) {
   }
   if (command.clientOrderId !== undefined) error.clientOrderId = command.clientOrderId;
   if (command.clientOrderIds?.length) error.clientOrderIds = command.clientOrderIds;
+  commandReceiptSnapshot(error, command);
 }
 
 export class CommandTimeoutError extends Error {
@@ -86,6 +119,7 @@ export class EngineDeadError extends Error {
       }
       if (command.clientOrderId !== undefined) this.clientOrderId = command.clientOrderId;
       if (command.clientOrderIds?.length) this.clientOrderIds = command.clientOrderIds;
+      commandReceiptSnapshot(this, command);
     }
   }
 }
@@ -102,6 +136,7 @@ export class EngineHost {
     this.requests = new Map();
     this.signings = new Map();
     this.nextCommand = 1;
+    this.receiptSession = undefined;
     this.disposed = false;
     this.deadError = undefined;
     this.wsEncoder = undefined;
@@ -149,7 +184,8 @@ export class EngineHost {
     const clientOrderIds = reply !== undefined && Array.isArray(command.orders)
       ? command.orders.map((order) => order?.clientOrderId).filter((id) => typeof id === 'string') : undefined;
     const identity = reply === undefined ? undefined : { op: command.op,
-      clientOrderId: command.clientOrderId ?? (clientOrderIds?.length === 1 ? clientOrderIds[0] : undefined), clientOrderIds };
+      clientOrderId: command.clientOrderId ?? (clientOrderIds?.length === 1 ? clientOrderIds[0] : undefined), clientOrderIds,
+      receiptKey: `${this.receiptSession ??= receiptSession()}:${reply}`, commandId: reply, orderIdentities: [] };
     const promise = reply === undefined
       ? Promise.resolve()
       : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity }));
@@ -186,6 +222,9 @@ export class EngineHost {
         else console.error(error);
       }
       const pending = this.commands.get(reply);
+      if (pending && error instanceof Error) {
+        try { commandReceiptSnapshot(error, pending.identity); } catch { /* Preserve even a frozen validation error. */ }
+      }
       this.settleCommand(reply, error instanceof UnknownEngineActionError
         ? new CommandProtocolError(error, pending?.identity) : error, true);
     }
@@ -199,6 +238,14 @@ export class EngineHost {
     try { pending.clearDeadline?.(); } catch { /* A timer adapter cannot strand the caller. */ }
     if (rejected) pending.reject(value);
     else pending.resolve(value);
+  }
+
+  commandProgress(id, receipts, complete, late) {
+    if (!Number.isSafeInteger(id) || id <= 0 || id >= this.nextCommand || !this.receiptSession) return;
+    const event = Object.freeze({ receiptKey: `${this.receiptSession}:${id}`, commandId: id,
+      receipts: Object.freeze(receipts), complete, late });
+    try { this.handlers.onCommandProgress?.(event); }
+    catch (cause) { throw new CommandProgressCallbackError(cause); }
   }
 
   /**
@@ -351,13 +398,29 @@ export class EngineHost {
   run(actionsJson) {
     if (this.disposed || !actionsJson) return;
     let unknown;
+    let progressFailure;
     for (const action of JSON.parse(actionsJson)) {
       // Unknown protocol actions remain errors, but cannot discard the batch's
       // subsequent command completions. Ordinary callbacks still propagate.
       try { this.execute(action); }
       catch (error) {
+        if (error instanceof CommandProgressCallbackError) { progressFailure ??= error; continue; }
         if (!(error instanceof UnknownEngineActionError)) throw error;
         unknown ??= error;
+      }
+    }
+    if (progressFailure) {
+      // Broken diagnostic consumers must not turn a dispatched write into an
+      // ordinary rejection that a caller could mistake for a safe retry.
+      let reported = false;
+      try {
+        if (this.handlers.onLog) {
+          this.handlers.onLog('error', progressFailure.message);
+          reported = true;
+        }
+      } catch { /* Fall back independently of the outcome of the native command. */ }
+      if (!reported) {
+        try { console.error(progressFailure); } catch { /* Diagnostics are best effort. */ }
       }
     }
     if (unknown) throw unknown;
@@ -469,9 +532,36 @@ export class EngineHost {
       case 'log':
         this.handlers.onLog?.(action.level, action.message);
         break;
+      case 'commandProgress': {
+        const pending = this.commands.get(action.command);
+        const receipts = [];
+        for (const receipt of action.receipts) {
+          if (typeof receipt.symbol !== 'string' || typeof receipt.identity !== 'string'
+            || !['clientOrderId', 'clientOrderIndex', 'orderCode'].includes(receipt.kind)) continue;
+          if (!receipts.some((row) => row.symbol === receipt.symbol && row.kind === receipt.kind && row.identity === receipt.identity)) {
+            receipts.push(Object.freeze({ symbol: receipt.symbol, kind: receipt.kind, identity: receipt.identity }));
+          }
+        }
+        if (pending) {
+          for (const receipt of receipts) {
+            if (!pending.identity.orderIdentities.some((row) => row.symbol === receipt.symbol && row.kind === receipt.kind && row.identity === receipt.identity)) {
+              pending.identity.orderIdentities.push(receipt);
+            }
+          }
+        }
+        this.commandProgress(action.command, receipts, false, !pending);
+        break;
+      }
       case 'done': {
         const pending = this.commands.get(action.command);
-        if (!pending) break;
+        if (!pending) {
+          // Late definitive results close the receipt stream without a tombstone.
+          // Malformed/duplicate results still cannot change an earlier outcome.
+          try { if (action.error === undefined && action.result !== undefined) JSON.parse(action.result); }
+          catch { break; }
+          this.commandProgress(action.command, [], true, true);
+          break;
+        }
         if (action.error !== undefined) {
           const error = new Error(action.error);
           try {
@@ -485,6 +575,7 @@ export class EngineHost {
               error.failedOrderIndex = details.failedOrderIndex;
             }
           } catch { /* Plain venue errors carry only their message. */ }
+          commandReceiptSnapshot(error, pending.identity);
           this.settleCommand(action.command, error, true);
         }
         else {
@@ -493,6 +584,7 @@ export class EngineHost {
           catch (cause) { this.settleCommand(action.command, new CommandProtocolError(cause, pending.identity), true); break; }
           this.settleCommand(action.command, result);
         }
+        this.commandProgress(action.command, [], true, false);
         break;
       }
       default:

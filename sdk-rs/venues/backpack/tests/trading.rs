@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::model::OrderStatus;
+use safe_cex_engine::model::{OrderIdentityKind, OrderStatus};
 use safe_cex_engine::{Action, Command, Event, Method, Notice};
 use support::*;
 fn place(e: &mut Driver, id: u32, orders: &str) {
@@ -22,6 +22,91 @@ fn done(e: &mut Driver) -> Result<String, String> {
             }
         })
         .expect("command completed")
+}
+
+#[test]
+fn caller_and_generated_pair_identities_precede_the_signed_write() {
+    caller_or_generated_pair_identities(false);
+    caller_or_generated_pair_identities(true);
+}
+
+fn caller_or_generated_pair_identities(generated: bool) {
+    let (mut e, _) = ready();
+    e.store_mut()
+        .update_markets(|market| market.limits.amount.max = 1000.0);
+    let orders = if generated {
+        r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140},{"symbol":"SOL_USDC_PERP","type":"limit","side":"sell","amount":1,"price":150}]"#
+    } else {
+        r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"clientOrderId":"4294967295"}]"#
+    };
+    place(&mut e, 91, orders);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let (progress_at, receipts) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(index, action)| match action {
+            Action::Notice(Notice::CommandProgress {
+                command: 91,
+                receipts,
+            }) => Some((index, receipts)),
+            _ => None,
+        })
+        .expect("native client identities");
+    let (write_at, request) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(index, action)| match action {
+            Action::Http(request) => Some((index, request)),
+            _ => None,
+        })
+        .unwrap();
+    assert!(progress_at < write_at);
+    #[derive(serde::Deserialize)]
+    struct Row {
+        #[serde(rename = "clientId")]
+        client_id: u32,
+    }
+    let body = request.body.as_deref().unwrap();
+    let rows: Vec<Row> = if generated {
+        serde_json::from_str(body).unwrap()
+    } else {
+        vec![serde_json::from_str(body).unwrap()]
+    };
+    assert_eq!(receipts.len(), rows.len());
+    if generated {
+        assert_eq!(rows.len(), 2);
+        assert!(rows[0].client_id > 0 && rows[1].client_id > 0);
+        assert_ne!(rows[0].client_id, rows[1].client_id);
+    } else {
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].client_id, u32::MAX);
+    }
+    for (receipt, row) in receipts.iter().zip(rows) {
+        assert_eq!(receipt.symbol, "SOL_USDC_PERP");
+        assert_eq!(receipt.kind, OrderIdentityKind::ClientOrderId);
+        assert_eq!(receipt.identity, row.client_id.to_string());
+    }
+}
+
+#[test]
+fn a_single_native_order_without_client_id_does_not_invent_a_receipt() {
+    let (mut e, _) = ready();
+    place(
+        &mut e,
+        92,
+        r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140}]"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Notice(Notice::CommandProgress { .. })))
+    );
 }
 #[test]
 fn bybit_execution_controls_reject_entire_batch_before_writes() {

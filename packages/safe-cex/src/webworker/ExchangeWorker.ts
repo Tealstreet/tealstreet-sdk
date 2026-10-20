@@ -1,8 +1,9 @@
+import type { CommandProgress } from '@tealstreet/safe-cex-wasm/host';
 import type { SerializedCommandError } from '../commandOutcome';
 import type { Exchange } from '../exchanges/base';
 import type { PackedTickerDelta, Store } from '../store/store.interface';
 import type { ExchangeName, ExchangeOptions, OrderFillEvent, StoreData, Ticker } from '../types';
-import type { StoreWorkerPayload, StoreWorkerStorePayload } from './StoreWorkerPayload';
+import type { StoreWorkerCommandProgress, StoreWorkerPayload, StoreWorkerStorePayload } from './StoreWorkerPayload';
 import type { TwapInstance } from './twap/TwapInstance';
 
 import throttle from 'lodash/throttle';
@@ -1174,6 +1175,14 @@ export class ExchangeWorker {
       if (isCurrent()) this._throttledStoreUpdate(data);
     });
     if (exchange instanceof RustEngineExchange) {
+      exchange.on('command-progress', (progress: CommandProgress) => {
+        // A command deadline can remove its RPC before native code chooses an
+        // identity. The current account still owns those later receipts; closed
+        // generations can neither publish them nor relabel them as a new host.
+        if (!isCurrent()) return;
+        const data: StoreWorkerCommandProgress = { ...progress, account: this._accountName, generation };
+        this._ctx.postMessage({ op: 'command-progress', data });
+      });
       exchange.on('engine-dead', (error: Error) => {
         if (isCurrent()) this._handleEngineDead(error);
       });

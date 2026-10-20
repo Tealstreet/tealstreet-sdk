@@ -108,6 +108,53 @@ fn engine_mode(mode: &str) -> Engine<PhemexPerpetuals> {
 fn engine() -> Engine<PhemexPerpetuals> {
     engine_mode("OneWay")
 }
+
+#[test]
+fn caller_and_generated_order_identities_precede_mutation() {
+    for generated in [false, true] {
+        let mut e = engine();
+        let mut order = opts("caller-identity");
+        if generated {
+            order.client_order_id = None;
+        }
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 94,
+                orders: vec![order],
+            },
+        );
+        let (progress_at, receipts) = actions
+            .iter()
+            .enumerate()
+            .find_map(|(index, action)| match action {
+                Action::Notice(Notice::CommandProgress {
+                    command: 94,
+                    receipts,
+                }) => Some((index, receipts)),
+                _ => None,
+            })
+            .expect("native placement identity");
+        let (write_at, request) = actions
+            .iter()
+            .enumerate()
+            .find_map(|(index, action)| match action {
+                Action::Http(request) if request.url.contains("/g-orders/create") => {
+                    Some((index, request))
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(progress_at < write_at);
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].symbol, "BTCUSDT");
+        assert_eq!(receipts[0].kind, OrderIdentityKind::ClientOrderId);
+        assert_eq!(receipts[0].identity, p(request, "clOrdID").unwrap());
+        if !generated {
+            assert_eq!(receipts[0].identity, "caller-identity");
+        }
+    }
+}
 fn opts(id: &str) -> PlaceOrderOpts {
     PlaceOrderOpts {
         symbol: "BTCUSDT".into(),

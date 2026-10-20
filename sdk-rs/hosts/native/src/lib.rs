@@ -301,7 +301,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
 #[cfg(test)]
 mod timer_tests {
     use super::*;
-    use safe_cex_engine::{Cx, HttpRequest, Response, book::Book};
+    use safe_cex_engine::{Cx, HttpRequest, Method, Response, book::Book};
 
     #[derive(Default)]
     struct TimerVenue {
@@ -327,7 +327,26 @@ mod timer_tests {
         fn on_timer(&mut self, _: &mut Cx<'_, ()>, timer: TimerId) {
             self.fired.push(timer);
         }
-        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+        fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
+            if let Command::FetchLeverage { command, symbol } = command {
+                cx.command_progress(command, Vec::new());
+                cx.command_progress(
+                    command,
+                    vec![safe_cex_engine::OrderIdentityReceipt {
+                        symbol,
+                        kind: safe_cex_engine::OrderIdentityKind::ClientOrderId,
+                        identity: "native-receipt".into(),
+                    }],
+                );
+                cx.request(
+                    Method::Post,
+                    "https://example.test/orders".into(),
+                    vec![],
+                    None,
+                    (),
+                );
+            }
+        }
         fn book(&self, _: &str) -> Option<&Book> {
             None
         }
@@ -343,6 +362,38 @@ mod timer_tests {
         fn request(&self, _: HttpRequest, _: Events) {
             panic!("timer venue never requests HTTP")
         }
+    }
+
+    #[test]
+    fn native_host_observes_command_receipts_before_transport_dispatch() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        struct Recorded(Rc<RefCell<Vec<&'static str>>>);
+        impl Transport for Recorded {
+            fn connect(&self, _: SocketId, _: String, _: Events) -> mpsc::UnboundedSender<String> {
+                panic!("receipt test never opens a socket")
+            }
+            fn request(&self, _: HttpRequest, _: Events) {
+                self.0.borrow_mut().push("http");
+            }
+        }
+        let order = Rc::new(RefCell::new(Vec::new()));
+        let mut host = Host::new(Engine::new(TimerVenue::default()), Recorded(order.clone()));
+        host.engine.handle(
+            0.,
+            Event::Command(Command::FetchLeverage {
+                command: 9,
+                symbol: "BTC-USD".into(),
+            }),
+        );
+        host.execute(&mut |notice| {
+            assert!(
+                matches!(notice, Notice::CommandProgress { command: 9, ref receipts }
+                if receipts.len() == 1 && receipts[0].identity == "native-receipt")
+            );
+            order.borrow_mut().push("progress");
+        });
+        assert_eq!(*order.borrow(), ["progress", "http"]);
     }
 
     #[tokio::test(start_paused = true)]

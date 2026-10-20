@@ -56,16 +56,40 @@ export interface EngineHandlers {
   /** One frame per flush; transfer it, don't copy it. */
   onFrame?(buffer: ArrayBuffer): void;
   onLog?(level: 'info' | 'warning' | 'error', message: string): void;
+  /** Native identities are delivered before the corresponding I/O. Late events
+   * retain the same key after a deadline; consumers may merge receipt tuples.
+   * Complete events are idempotent and may repeat for duplicate native done. */
+  onCommandProgress?(event: CommandProgress): void;
+}
+
+export interface OrderIdentityReceipt {
+  readonly symbol: string;
+  readonly kind: 'clientOrderId' | 'clientOrderIndex' | 'orderCode';
+  /** Exact native identity; numeric indices and codes remain decimal strings. */
+  readonly identity: string;
+}
+
+export interface CommandProgress {
+  readonly receiptKey: string;
+  readonly commandId: number;
+  /** Immutable per-action delta. The host keeps no receipt ledger after settlement. */
+  readonly receipts: readonly OrderIdentityReceipt[];
+  readonly complete: boolean;
+  readonly late: boolean;
 }
 
 export class EngineDeadError extends Error {
-  constructor(cause: unknown, command?: { op: string; clientOrderId?: string; clientOrderIds?: string[] });
+  constructor(cause: unknown, command?: CommandIdentity);
   readonly code: 'ENGINE_DEAD';
   readonly command?: string;
   /** An interrupted write may already have been accepted; reconcile before retrying. */
   readonly outcome?: 'unknown';
   readonly clientOrderId?: string;
   readonly clientOrderIds?: string[];
+  readonly receiptKey?: string;
+  readonly commandId?: number;
+  readonly orderIdentities?: readonly OrderIdentityReceipt[];
+  readonly actualClientOrderIds?: readonly string[];
 }
 
 export interface CommandIdentity {
@@ -73,6 +97,9 @@ export interface CommandIdentity {
   /** Caller-supplied identifiers only; native-generated identifiers need separate receipts. */
   clientOrderId?: string;
   clientOrderIds?: string[];
+  receiptKey?: string;
+  commandId?: number;
+  orderIdentities?: readonly OrderIdentityReceipt[];
 }
 
 export class CommandTimeoutError extends Error {
@@ -84,6 +111,10 @@ export class CommandTimeoutError extends Error {
   readonly outcome?: 'unknown';
   readonly clientOrderId?: string;
   readonly clientOrderIds?: string[];
+  readonly receiptKey?: string;
+  readonly commandId?: number;
+  readonly orderIdentities?: readonly OrderIdentityReceipt[];
+  readonly actualClientOrderIds?: readonly string[];
 }
 
 /** The host could not arm a deadline after handing the command to the engine.
@@ -95,6 +126,10 @@ export class CommandDeadlineError extends Error {
   readonly outcome?: 'unknown';
   readonly clientOrderId?: string;
   readonly clientOrderIds?: string[];
+  readonly receiptKey?: string;
+  readonly commandId?: number;
+  readonly orderIdentities?: readonly OrderIdentityReceipt[];
+  readonly actualClientOrderIds?: readonly string[];
 }
 
 /** A malformed result or unsupported action prevents confirming the command outcome. */
@@ -105,6 +140,10 @@ export class CommandProtocolError extends Error {
   readonly outcome?: 'unknown';
   readonly clientOrderId?: string;
   readonly clientOrderIds?: string[];
+  readonly receiptKey?: string;
+  readonly commandId?: number;
+  readonly orderIdentities?: readonly OrderIdentityReceipt[];
+  readonly actualClientOrderIds?: readonly string[];
 }
 
 export class EngineDisposedError extends Error {
@@ -114,6 +153,10 @@ export class EngineDisposedError extends Error {
   readonly outcome?: 'unknown';
   readonly clientOrderId?: string;
   readonly clientOrderIds?: string[];
+  readonly receiptKey?: string;
+  readonly commandId?: number;
+  readonly orderIdentities?: readonly OrderIdentityReceipt[];
+  readonly actualClientOrderIds?: readonly string[];
 }
 
 export interface EngineHostOptions {

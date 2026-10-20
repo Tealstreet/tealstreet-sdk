@@ -210,6 +210,47 @@ fn plain_same_symbol_limits_use_batch_with_distinct_ids_and_sequential_nonces() 
 }
 
 #[test]
+fn generated_client_order_indices_are_receipted_before_the_signed_batch() {
+    let (mut e, _) = ready_unattributed();
+    place(&mut e, vec![limit(), limit()]);
+    let nonce = http(&mut e, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let (progress_at, receipts) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(index, action)| match action {
+            Action::Notice(Notice::CommandProgress {
+                command: 7,
+                receipts,
+            }) => Some((index, receipts)),
+            _ => None,
+        })
+        .expect("native client indices before submission");
+    let (write_at, request) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(index, action)| match action {
+            Action::Http(request) if request.url.contains("sendTxBatch") => Some((index, request)),
+            _ => None,
+        })
+        .unwrap();
+    assert!(progress_at < write_at);
+    let infos: Vec<String> = serde_json::from_str(&param(request, "tx_infos")).unwrap();
+    assert_eq!(receipts.len(), infos.len());
+    for (receipt, info) in receipts.iter().zip(infos) {
+        let wire: Value = serde_json::from_str(&info).unwrap();
+        assert_eq!(receipt.symbol, "ETH");
+        assert_eq!(receipt.kind, OrderIdentityKind::ClientOrderIndex);
+        assert_eq!(
+            receipt.identity,
+            wire["ClientOrderIndex"].as_u64().unwrap().to_string()
+        );
+    }
+    assert_ne!(receipts[0].identity, receipts[1].identity);
+}
+
+#[test]
 fn bracket_waits_for_each_ack_and_gives_siblings_their_own_indexes() {
     let (mut e, _) = ready_unattributed();
     let mut opts = limit();

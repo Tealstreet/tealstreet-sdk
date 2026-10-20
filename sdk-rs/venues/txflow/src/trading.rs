@@ -697,6 +697,23 @@ impl TxFlow {
         }
         self.trading.inflight = true;
         self.trading.last_write = Some(cx.now);
+        if let Action::Order { orders, .. } = &action {
+            cx.command_progress(
+                command,
+                orders
+                    .iter()
+                    .map(|order| OrderIdentityReceipt {
+                        // Active market validation above already established this asset.
+                        symbol: self
+                            .symbol(order.a)
+                            .expect("validated order asset")
+                            .to_owned(),
+                        kind: OrderIdentityKind::ClientOrderId,
+                        identity: order.c.clone(),
+                    })
+                    .collect(),
+            );
+        }
         cx.request(
             Method::Post,
             format!("{}/exchange", self.rest()),

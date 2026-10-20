@@ -295,3 +295,87 @@ PASS. The later full phase-3a run passes all 7,807 SDK unit cases.
   error-report correlation. The dedicated identity plan records source hook
   inventory rather than claiming runtime proof. Account/aggregate consumer
   findings and phases 4–7 remain outstanding; no PR/landing claim yet.
+
+### Phase 3b implementation plan
+
+- Native emits typed command progress before the matching write action. Required
+  receipt fields are symbol, identity kind and opaque string value; capture all
+  actual parent/split/child/replacement identities without changing entropy,
+  signatures, native payloads or retry behavior. No existing consumer requires
+  reconstructed input indexes; keep them optional rather than refactoring every
+  planner. Namespace client IDs, Lighter indices and Breakout order codes.
+- Cx owns no receipt ledger/Store section. WASM serializes the notice; native
+  hosts observe it in action order and server routes it to the initiating client
+  with the original command number. Do not broadcast receipts to other clients
+  or claim durable remote delivery before dispatch.
+- Host stores validated tuple-deduplicated receipts before callbacks, snapshots
+  them immutably into interrupted errors, and forwards progress after deadline
+  expiry using a host-session receipt key. Existing clientOrderId fields remain
+  requested IDs; actualClientOrderIds/orderIdentities describe native values.
+  Completion closes the correlated stream without an unbounded tombstone map.
+- Wrapper emits typed progress and logs late identity receipts through the
+  existing log transport. Worker attaches account and originating generation,
+  independent of pending RPCs, without public-feed/frame propagation. Validated
+  error serialization retains receipts across consumer boundaries.
+- First native slice covers core/hosts plus Coinbase and Txflow; root adds the
+  retained typed dispatch hooks for Backpack, GRVT, Lighter and Phemex. Remaining
+  venue formatter hooks follow in disjoint reviewed slices. No complete
+  generated-ID coverage claim until every actual generation path is verified.
+- Verify receipt-before-I/O, unchanged request/signature oracles, numeric-string
+  precision, omitted identities, immutable timeout/dead/dispose errors, late
+  progress/completion, worker generation/account isolation and no write replay.
+  Run scoped native checks, host/SDK tests and independent review before commit.
+
+### Phase 3b first-six checkpoint
+
+- Core/native/WASM hosts publish typed progress in action order; native server
+  keeps the original caller command and client ownership until done. The TS
+  NativeFrameSession accepts the additive notice without closing the session.
+  No public SCXF section or cross-client receipt broadcast is introduced.
+- Host snapshots immutable, namespace-separated actual identities before user
+  callbacks. A broken progress/log consumer cannot turn an already dispatched
+  write into an ordinary rejection. Late SDK progress also uses the existing
+  log path; worker messages retain account and engine generation independently
+  of pending RPCs. Independent core/native, host/SDK and server/worker reviews
+  pass after fixing callback-error handling.
+- Native hooks cover Backpack (uint32 IDs, including generated pairs), Coinbase,
+  GRVT, Lighter (client-order-index namespace), Phemex and Txflow. Retained typed
+  fields supply identities without changing payloads, signatures or entropy.
+  Backpack internal repair jobs are excluded from external command receipts.
+- Scoped verification: 734 selected native tests across core/host and six venue
+  runs, one WASM notice-encoding test, 130 host tests, 37 worker/helper tests and
+  100 native TS session tests pass. Selected native and wasm32 strict Clippy,
+  bans, format, SDK/server typechecks and scoped lint pass. This is partial
+  venue coverage, not all-venue or final gate acceptance.
+- Official combined build: 12,178,853 bytes; identical web/Node SHA256
+  `727ba33169fbc5676b1c109d1d6532a3936a9e5df6267cc3addf6e6728499e99`.
+  All 11 actual Coinbase WASM cases pass, including receipt-before-HTTP,
+  immutable timed-out snapshots, a queued generated ID delivered late under
+  the same key, throwing listener fallback and exactly two writes. The initial
+  new-test 20 ms deadline expired before first dispatch while startup work
+  drained; the fixture now observes the first dispatch before queuing command
+  two and uses 1 s command deadlines. Existing assertions/deadlines are intact.
+
+### Phase 3b remaining venue plans and audit
+
+Three disjoint native slices have independent read-only plan audits. Each must
+retain exact final typed identities, emit only for the selected write and leave
+signing, entropy, omission and retry behavior unchanged:
+
+- A: Binance, Bybit/Hyro, OKX, Bitget and ApeX Omni. Preserve serialized fallback
+  metadata and split/bracket/replacement IDs; Hyro replays existing dispatched
+  create links to late waiters, bounded by its existing creates. A rejected link
+  replaced before another dispatch is not attributed to new waiters.
+- B: Hyperliquid/spot, Kraken futures/spot, Kucoin futures/spot, MEXC, BingX and
+  BloFin. Carry IDs through serialization and batching. MEXC reports the final
+  refreshed payload's ID, not discarded preflight IDs. Missing trigger/attached
+  identities remain absent; BloFin preserves per-batch alignment.
+- C: Bitrue, BreakoutProp, Paradex and WEEX. Bitrue reports final per-split child
+  IDs; Breakout uses orderCode; Paradex retains receipts through JWT/delegated
+  signing queues and preserves identity-free children. Replacement guards run
+  before reporting an actual replacement write.
+
+Each slice runs scoped native tests/strict Clippy and independent implementation
+review before its checkpoint. Tests compare receipts to final outgoing fields
+before I/O, including omitted IDs, caller/generated variants and delayed or
+rejected replacements. Combined artifact and broad gates follow stable sources.

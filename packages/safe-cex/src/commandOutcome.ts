@@ -1,3 +1,5 @@
+import type { OrderIdentityReceipt } from '@tealstreet/safe-cex-wasm/host';
+
 /** Cloneable command failure details shared by SDK workers and CLI consumers. */
 export type SerializedCommandError = {
   message: string;
@@ -9,6 +11,12 @@ export type SerializedCommandError = {
   outcome?: 'unknown';
   clientOrderId?: string;
   clientOrderIds?: string[];
+  /** Correlates this immutable snapshot with later native receipt events. */
+  receiptKey?: string;
+  commandId?: number;
+  orderIdentities?: OrderIdentityReceipt[];
+  /** Actual native client IDs; caller requests and other namespaces stay separate. */
+  actualClientOrderIds?: string[];
   partialOrderIds?: string[];
   partialOrderCount?: number;
   totalOrderCount?: number;
@@ -21,7 +29,7 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
   const result: SerializedCommandError = {
     message: typeof source.message === 'string' ? source.message : String(value),
   };
-  for (const key of ['name', 'stack', 'command', 'clientOrderId'] as const) {
+  for (const key of ['name', 'stack', 'command', 'clientOrderId', 'receiptKey'] as const) {
     const field = source[key];
     if (typeof field === 'string') result[key] = field;
   }
@@ -36,9 +44,15 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
   )
     result.timeoutMs = source.timeoutMs;
   if (source.outcome === 'unknown') result.outcome = 'unknown';
-  for (const key of ['clientOrderIds', 'partialOrderIds'] as const) {
+  for (const key of ['clientOrderIds', 'actualClientOrderIds', 'partialOrderIds'] as const) {
     const ids = source[key];
     if (Array.isArray(ids) && ids.every((id): id is string => typeof id === 'string')) result[key] = [...ids];
+  }
+  if (typeof source.commandId === 'number' && Number.isSafeInteger(source.commandId) && source.commandId > 0) {
+    result.commandId = source.commandId;
+  }
+  if (Array.isArray(source.orderIdentities) && source.orderIdentities.every(isOrderIdentityReceipt)) {
+    result.orderIdentities = source.orderIdentities.map(({ symbol, kind, identity }) => ({ symbol, kind, identity }));
   }
   for (const key of ['partialOrderCount', 'totalOrderCount', 'failedOrderIndex'] as const) {
     const count = source[key];
@@ -51,4 +65,14 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
 export const deserializeCommandError = (value: unknown): Error & SerializedCommandError => {
   const details = serializeCommandError(value);
   return Object.assign(new Error(details.message), details);
+};
+
+const isOrderIdentityReceipt = (value: unknown): value is OrderIdentityReceipt => {
+  if (value === null || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.symbol === 'string' &&
+    typeof row.identity === 'string' &&
+    ['clientOrderId', 'clientOrderIndex', 'orderCode'].includes(row.kind as string)
+  );
 };

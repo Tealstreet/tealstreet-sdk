@@ -2,7 +2,7 @@
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
 use crate::json::{ArrayAt, ArraySplitter};
-use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts};
+use crate::model::{CancelOrderRef, Candle, OrderIdentityReceipt, OrderSide, PlaceOrderOpts};
 use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 use crate::store::Store;
 use crate::wire::{FrameWriter, section};
@@ -111,6 +111,11 @@ pub enum Notice {
     CommandDone {
         command: CommandId,
         result: Result<String, String>,
+    },
+    /// Actual native write identities, emitted before their corresponding I/O.
+    CommandProgress {
+        command: CommandId,
+        receipts: Vec<OrderIdentityReceipt>,
     },
 }
 
@@ -783,6 +788,17 @@ impl<P> Cx<'_, P> {
         self.io
             .actions
             .push(Action::Notice(Notice::CommandDone { command, result }));
+    }
+
+    pub fn command_progress(&mut self, command: CommandId, receipts: Vec<OrderIdentityReceipt>) {
+        if !receipts.is_empty() {
+            self.io
+                .actions
+                .push(Action::Notice(Notice::CommandProgress {
+                    command,
+                    receipts,
+                }));
+        }
     }
 
     /// Queue a live candle for the next frame; a newer update of the same
@@ -1646,6 +1662,39 @@ fn apply_signature(
 #[cfg(test)]
 mod streaming_tests {
     use super::*;
+
+    #[test]
+    fn command_progress_skips_empty_batches_and_precedes_io_without_store_changes() {
+        let mut engine = frame_engine();
+        let before = engine.snapshot_frame(0.).to_vec();
+        let receipts = vec![OrderIdentityReceipt {
+            symbol: "BTC-USD".into(),
+            kind: crate::OrderIdentityKind::ClientOrderId,
+            identity: "actual-native-id".into(),
+        }];
+        {
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            cx.command_progress(7, Vec::new());
+            cx.command_progress(7, receipts.clone());
+            cx.request(
+                Method::Post,
+                "https://example.test/orders".into(),
+                vec![],
+                None,
+                Vec::new(),
+            );
+        }
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(matches!(actions.as_slice(), [
+            Action::Notice(Notice::CommandProgress { command: 7, receipts: actual }),
+            Action::Http(_),
+        ] if actual == &receipts));
+        assert_eq!(before, engine.snapshot_frame(0.));
+    }
 
     struct StreamVenue {
         at: ArrayAt,

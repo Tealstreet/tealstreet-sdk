@@ -86,7 +86,14 @@ result, while `{"op":"fetchLeverage","command":7,"symbol":"BTCUSDT"}` produces
 unique among pending commands for this connection; the native server isolates
 them across clients. `setTickerSymbols`, `setTickInterval` and book/candle
 subscribe/unsubscribe have no completion. `setTickInterval` affects the whole
-account. Other notices are `error`, `log` and `deactivate`, relayed as JSON.
+account. Native writes can first emit
+`{"type":"commandProgress","command":7,"receipts":[{"symbol":"BTCUSDT","kind":"clientOrderId","identity":"native-id"}]}`.
+These are selected native identities, not placement acknowledgements. Kinds
+`clientOrderId`, `clientOrderIndex` and `orderCode` remain distinct; values stay
+strings. Progress retains the initiating client's command ID and can arrive
+after that application's waiting deadline until native completion. It is not
+broadcast to other clients or replayed across disconnect. Other notices are
+`error`, `log` and `deactivate`, relayed as JSON.
 Native typed decoding and venue capability checks remain authoritative.
 
 The adapter never retries or replays a sent command. On disconnect a sent

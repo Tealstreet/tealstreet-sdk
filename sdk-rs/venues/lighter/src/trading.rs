@@ -508,6 +508,20 @@ impl Lighter {
         if let Effect::Setting { symbol, .. } = &effect {
             self.account_setting_write(symbol);
         }
+        let job = self.trading.active.as_ref().unwrap();
+        if let Some(Step::Place(orders)) = job.steps.front() {
+            cx.command_progress(
+                job.command,
+                orders
+                    .iter()
+                    .map(|prepared| OrderIdentityReceipt {
+                        symbol: prepared.order.symbol.clone(),
+                        kind: OrderIdentityKind::ClientOrderIndex,
+                        identity: prepared.native.order_id.to_string(),
+                    })
+                    .collect(),
+            );
+        }
         self.trading.inflight = true;
         cx.request(
             Method::Post,

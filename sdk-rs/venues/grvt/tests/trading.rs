@@ -315,6 +315,53 @@ fn signed_lite_order_preserves_large_native_account_and_caller_identity() {
         "[\"9223372036854775807\"]"
     );
 }
+
+#[test]
+fn selected_caller_and_generated_identities_precede_their_signed_requests() {
+    for generated in [false, true] {
+        let mut e = boot();
+        let mut order = opts();
+        if generated {
+            order.client_order_id = None;
+        }
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 93,
+                orders: vec![order],
+            },
+        );
+        let (progress_at, receipts) = actions
+            .iter()
+            .enumerate()
+            .find_map(|(index, action)| match action {
+                Action::Notice(Notice::CommandProgress {
+                    command: 93,
+                    receipts,
+                }) => Some((index, receipts)),
+                _ => None,
+            })
+            .expect("native identity before dispatch");
+        let (write_at, request) = actions
+            .iter()
+            .enumerate()
+            .find_map(|(index, action)| match action {
+                Action::Http(request) if request.url.ends_with("create_order") => {
+                    Some((index, request))
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(progress_at < write_at);
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].symbol, "BTC_USDT_PERP");
+        assert_eq!(receipts[0].kind, OrderIdentityKind::ClientOrderId);
+        assert_eq!(receipts[0].identity, body(request).o.m.co);
+        if !generated {
+            assert_eq!(receipts[0].identity, "9223372036854775807");
+        }
+    }
+}
 #[test]
 fn entire_batch_preflight_prevents_partial_writes() {
     let mut e = boot();

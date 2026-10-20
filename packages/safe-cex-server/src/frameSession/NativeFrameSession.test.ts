@@ -363,6 +363,12 @@ describe('NativeFrameSession', () => {
     '{"type":"log","level":["info"],"message":"bad"}',
     '{"type":"log","level":"info","message":3}',
     '{"type":"deactivate","unexpected":"value"}',
+    '{"type":"commandProgress","command":4294967296,"receipts":[]}',
+    '{"type":"commandProgress","command":1,"receipts":{}}',
+    '{"type":"commandProgress","command":1,"receipts":[{"symbol":"ETH","kind":"clientOrderIndex","identity":9007199254740993}]}',
+    '{"type":"commandProgress","command":1,"receipts":[{"symbol":"ETH","kind":"nonce","identity":"1"}]}',
+    '{"type":"commandProgress","command":1,"receipts":[{"symbol":"ETH","kind":["clientOrderId"],"identity":"1"}]}',
+    '{"type":"commandProgress","command":1,"receipts":[{"symbol":"ETH","kind":"clientOrderId","identity":"1","unexpected":"value"}]}',
   ])('rejects malformed native notices %#', async (notice) => {
     const { socket, promise, sink } = setup();
     socket.open();
@@ -378,6 +384,8 @@ describe('NativeFrameSession', () => {
     '{"type":"log","level":"warning","message":"retry"}',
     '{"type":"log","level":"error","message":"disconnected"}',
     '{"type":"deactivate"}',
+    '{"type":"commandProgress","command":4294967295,"receipts":[{"symbol":"ETH","kind":"clientOrderIndex","identity":"900719925474099312345"}]}',
+    '{"type":"commandProgress","command":1,"receipts":[{"symbol":"BTCUSDT","kind":"clientOrderId","identity":"client-parent"},{"symbol":"ETHUSD","kind":"orderCode","identity":"code-001"}]}',
   ])('forwards valid native notices without treating venue errors as stream gaps %#', async (notice) => {
     const { session, socket, sink } = await connected();
     socket.message(notice);

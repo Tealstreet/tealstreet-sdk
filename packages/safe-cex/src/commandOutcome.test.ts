@@ -61,6 +61,60 @@ describe('command outcome serialization', () => {
     expect(restored.partialOrderIds).not.toBe(error.partialOrderIds);
   });
 
+  it('copies actual receipts without conflating requested IDs or numeric identity namespaces', () => {
+    const error = Object.assign(new Error('Interrupted'), {
+      receiptKey: 'host-session:7',
+      commandId: 7,
+      clientOrderId: 'requested-parent',
+      clientOrderIds: ['requested-parent'],
+      actualClientOrderIds: ['selected-parent', 'generated-child'],
+      orderIdentities: [
+        { symbol: 'BTCUSDT', kind: 'clientOrderId', identity: 'selected-parent', raw: { secret: 'excluded' } },
+        { symbol: 'BTCUSDT', kind: 'clientOrderId', identity: 'generated-child' },
+        { symbol: 'ETHUSDT', kind: 'clientOrderIndex', identity: '9007199254740993' },
+        { symbol: 'BTCUSDT', kind: 'orderCode', identity: '00000000000000000017' },
+      ],
+    });
+    const details = serializeCommandError(error);
+    const restored = deserializeCommandError(structuredClone(details));
+    expect(restored).toMatchObject({
+      receiptKey: 'host-session:7',
+      commandId: 7,
+      clientOrderId: 'requested-parent',
+      clientOrderIds: ['requested-parent'],
+      actualClientOrderIds: ['selected-parent', 'generated-child'],
+      orderIdentities: [
+        { symbol: 'BTCUSDT', kind: 'clientOrderId', identity: 'selected-parent' },
+        { symbol: 'BTCUSDT', kind: 'clientOrderId', identity: 'generated-child' },
+        { symbol: 'ETHUSDT', kind: 'clientOrderIndex', identity: '9007199254740993' },
+        { symbol: 'BTCUSDT', kind: 'orderCode', identity: '00000000000000000017' },
+      ],
+    });
+    expect(details.actualClientOrderIds).not.toBe(error.actualClientOrderIds);
+    expect(details.orderIdentities).not.toBe(error.orderIdentities);
+    expect(details.orderIdentities?.[0]).not.toBe(error.orderIdentities[0]);
+    expect(details.orderIdentities?.[0]).not.toHaveProperty('raw');
+    error.orderIdentities[0].identity = 'mutated';
+    expect(details.orderIdentities?.[0].identity).toBe('selected-parent');
+  });
+
+  it.each([
+    { receipts: [{ symbol: 'BTCUSDT', kind: 'clientOrderIndex', identity: 9007199254740992 }] },
+    { receipts: [{ symbol: 'BTCUSDT', kind: 'nonce', identity: 'secret-nonce' }] },
+    { receipts: [{ symbol: 123, kind: 'clientOrderId', identity: 'actual' }] },
+    { receipts: [null] },
+  ])('drops malformed receipt arrays without fabricating identities', ({ receipts }) => {
+    expect(
+      serializeCommandError({
+        message: 'Interrupted',
+        orderIdentities: receipts,
+        commandId: Number.MAX_SAFE_INTEGER + 1,
+        actualClientOrderIds: ['valid', 123],
+        receiptKey: 123,
+      }),
+    ).toEqual({ message: 'Interrupted' });
+  });
+
   it('drops invalid metadata and does not coerce mixed identity arrays or unsafe counts', () => {
     expect(
       serializeCommandError({
