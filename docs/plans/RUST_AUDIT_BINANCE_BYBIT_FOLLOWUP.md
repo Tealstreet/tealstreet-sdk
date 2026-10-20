@@ -164,3 +164,13 @@ No new error architecture or unrelated engine helper migration belongs here.
   Clippy/typecheck/ESLint passed. Eight actual selected-WASM HMAC scenarios are
   prepared but await the root's serialized build. An earlier wrong-selected-
   package 'unsupported venue' attempt is explicitly not regression evidence.
+
+## Authorized next task after this PR merges
+
+Owner confirmed the Partial cancel/recreate decision against TS, including
+the missing-mark path. After this follow-up merges green, cut a fresh branch
+from landing for the Bybit highs and mediums in RUST_AUDITS.md: Brazil routing,
+per-coin balances, funding/settlement rows in fills, hedge funding dedupe, then
+the medium findings excluding the settled Partial TP/SL item. Reverify current
+source and judge production impact; do not fold that new scope into this PR.
+Coordination: thread-dmam5utc39vm, owner reply received 2026-10-20.
