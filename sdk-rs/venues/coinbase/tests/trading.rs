@@ -28,8 +28,10 @@ struct Session {
     read_portfolio: &'static str,
     failing_positions: bool,
     reject_read_key: bool,
+    read_portfolios_status: Option<u16>,
     key_permission_failures: u32,
     deactivated: bool,
+    warnings: Vec<String>,
 }
 impl Session {
     fn new(kind: &'static str, spot: bool) -> Self {
@@ -60,8 +62,10 @@ impl Session {
             read_portfolio: "portfolio-one",
             failing_positions: false,
             reject_read_key: false,
+            read_portfolios_status: None,
             key_permission_failures: 0,
             deactivated: false,
+            warnings: vec![],
         }
     }
     fn reply(&mut self, r: HttpRequest, status: u16, body: &str) {
@@ -85,6 +89,10 @@ impl Session {
                     self.results.push((command, result))
                 }
                 Action::Notice(safe_cex_engine::Notice::Deactivate) => self.deactivated = true,
+                Action::Notice(safe_cex_engine::Notice::Log {
+                    level: safe_cex_engine::LogLevel::Warning,
+                    message,
+                }) => self.warnings.push(message.to_string()),
                 Action::Http(r) => {
                     self.urls.push(r.url.clone());
                     self.requests.push(r.clone());
@@ -123,6 +131,12 @@ impl Session {
             && jwt_subject(&r).ends_with("/read")
         {
             return self.reply(r, 401, r#"{"error":"UNAUTHENTICATED"}"#);
+        }
+        if let Some(status) = self.read_portfolios_status
+            && url.ends_with("/portfolios")
+            && jwt_subject(&r).ends_with("/read")
+        {
+            return self.reply(r, status, r#"{"error":"PERMISSION_DENIED"}"#);
         }
         let body = if url.ends_with("/key_permissions") {
             let portfolio = if jwt_subject(&r).ends_with("/read") {
@@ -1165,9 +1179,9 @@ fn external_partial_close_reserves_execution_until_position_repair() {
     let mut s = Session::new("INTX", false).ready();
     s.message(0,"snapshot",r#"[{"order_id":"external-close","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"SELL","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"100","avg_price":"0"}]"#);
     s.message(1,"update",r#"[{"order_id":"external-close","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"SELL","order_type":"Limit","cumulative_quantity":"0.5","leaves_quantity":"0.5","limit_price":"100","avg_price":"100"}]"#);
-    s.closing(240, 1.5);
+    s.closing(240, 2.0);
     assert!(s.done(240).is_err());
-    s.closing(241, 1.0);
+    s.closing(241, 1.5);
     let r = s.write();
     assert_eq!(
         create_wire(&r)
@@ -1175,7 +1189,7 @@ fn external_partial_close_reserves_execution_until_position_repair() {
             .market_market_ioc
             .unwrap()
             .base_size,
-        "1"
+        "1.5"
     );
 }
 #[test]
@@ -1287,7 +1301,7 @@ fn recovered_zero_fill_cfm_identity_keeps_closing_exposure_reserved() {
     );
     assert!(s.done(280).is_err());
     s.message(1,"update",r#"[{"order_id":"recovered-cfm","client_order_id":"recover-cfm","product_id":"BTC-CDE","status":"OPEN","order_side":"BUY","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"100","avg_price":"0"}]"#);
-    let mut next = opts("BTC-CDE", OrderType::Market, OrderSide::Buy, 2.0);
+    let mut next = opts("BTC-CDE", OrderType::Limit, OrderSide::Buy, 2.0);
     next.reduce_only = Some(true);
     s.command(Command::PlaceOrders {
         command: 281,
@@ -1692,6 +1706,104 @@ fn protective_stop_and_take_profit_reserve_capacity_independently() {
 }
 
 #[test]
+fn reduce_only_close_is_not_blocked_by_a_resting_full_size_take_profit() {
+    let mut s = Session::new("INTX", false).ready();
+    let mut tp = opts("BTC-PERP-INTX", OrderType::Limit, OrderSide::Sell, 2.0);
+    tp.reduce_only = Some(true);
+    tp.price = Some(120.0);
+    let r = s.place(330, tp);
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"tp"}}"#,
+    );
+    assert!(s.done(330).is_ok());
+    let mut half = opts("BTC-PERP-INTX", OrderType::Market, OrderSide::Sell, 1.5);
+    half.reduce_only = Some(true);
+    s.command(Command::PlaceOrders {
+        command: 331,
+        orders: vec![half.clone(), half],
+    });
+    assert!(s.done(331).unwrap_err().contains("exceed"));
+    let mut close = opts("BTC-PERP-INTX", OrderType::Market, OrderSide::Sell, 2.0);
+    close.reduce_only = Some(true);
+    let r = s.place(332, close);
+    assert!(
+        create_wire(&r)
+            .order_configuration
+            .market_market_ioc
+            .is_some()
+    );
+    assert!(
+        s.warnings
+            .iter()
+            .any(|w| w.contains("reduce-only orders tp exceeding")),
+        "{:?}",
+        s.warnings
+    );
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"close"}}"#,
+    );
+    assert!(s.done(332).is_ok());
+}
+
+#[test]
+fn explicit_limit_close_is_not_blocked_by_a_resting_full_size_take_profit() {
+    let mut s = Session::new("INTX", false).ready();
+    let mut tp = opts("BTC-PERP-INTX", OrderType::Limit, OrderSide::Sell, 2.0);
+    tp.reduce_only = Some(true);
+    tp.price = Some(120.0);
+    let r = s.place(333, tp);
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"tp"}}"#,
+    );
+    assert!(s.done(333).is_ok());
+    let mut close = opts("BTC-PERP-INTX", OrderType::Limit, OrderSide::Sell, 2.0);
+    close.close = Some(true);
+    let r = s.place(334, close);
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"close"}}"#,
+    );
+    assert!(s.done(334).is_ok());
+}
+
+#[test]
+fn resting_full_size_limit_close_reserves_the_close_and_take_profit_pools() {
+    let mut s = Session::new("INTX", false).ready();
+    let mut close = opts("BTC-PERP-INTX", OrderType::Limit, OrderSide::Sell, 2.0);
+    close.close = Some(true);
+    close.price = Some(120.0);
+    let r = s.place(336, close.clone());
+    let client = create_wire(&r).client_order_id;
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"limit-close"}}"#,
+    );
+    assert!(s.done(336).is_ok());
+    s.message(0, "snapshot", &format!(r#"[{{"order_id":"limit-close","client_order_id":"{client}","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"SELL","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"2","limit_price":"120","avg_price":"0"}}]"#));
+    assert_eq!(s.e.store().order("limit-close").unwrap().close, None);
+    s.command(Command::PlaceOrders {
+        command: 337,
+        orders: vec![close],
+    });
+    assert!(s.done(337).unwrap_err().contains("exceed"));
+    let mut tp = opts("BTC-PERP-INTX", OrderType::Limit, OrderSide::Sell, 0.5);
+    tp.reduce_only = Some(true);
+    s.command(Command::PlaceOrders {
+        command: 338,
+        orders: vec![tp],
+    });
+    assert!(s.done(338).unwrap_err().contains("exceed"));
+}
+
+#[test]
 fn spot_reduce_only_sell_is_a_plain_sell() {
     let mut s = Session::new("DEFAULT", true).ready();
     let mut sell = opts("BTC-USD", OrderType::Limit, OrderSide::Sell, 1.0);
@@ -2055,6 +2167,37 @@ fn concurrent_read_key_rejections_never_deactivate_the_account() {
         r#"{"success":true,"success_response":{"order_id":"still-active"}}"#,
     );
     assert!(s.done(327).is_ok());
+}
+
+#[test]
+fn read_key_refused_portfolios_falls_back_to_the_trading_key() {
+    for status in [403, 404] {
+        let mut s =
+            read_key_session_with("portfolio-one", |s| s.read_portfolios_status = Some(status));
+        s.collect();
+        assert!(!s.deactivated, "HTTP {status}");
+        assert_eq!(s.e.account_id(), Some("portfolio-one"));
+        let listed = s
+            .requests
+            .iter()
+            .filter(|r| r.url.ends_with("/portfolios"))
+            .map(jwt_subject)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            listed,
+            [
+                "organizations/test/apiKeys/read",
+                "organizations/test/apiKeys/test"
+            ]
+        );
+        let r = s.place(335, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
+        s.reply(
+            r,
+            200,
+            r#"{"success":true,"success_response":{"order_id":"after-403"}}"#,
+        );
+        assert!(s.done(335).is_ok());
+    }
 }
 
 #[test]
