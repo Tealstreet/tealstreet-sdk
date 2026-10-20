@@ -325,3 +325,23 @@ TxFlow loses nothing (master TS was a placeholder).
 - Low: one bad market row or unknown order row fails closed (startup lane);
   trailing-stop display price; cancels skipped for unknown/finished ids;
   candle `from`/`to` filtering a latest-N fetch.
+
+### KuCoin
+- High: cancel-symbol also deletes the symbol's TP/SL stops
+  (`kucoin/src/trading.rs:515`; TS only `/api/v3/orders`); one failed or
+  malformed markets/tickers read stops the venue, and futures private REST
+  waits for the private socket `welcome` (`lib.rs:767,954,1026`).
+- Medium: one unknown id rejects the whole cancel batch (`trading.rs:505,1034`);
+  one malformed REST row freezes reconciliation (`account.rs:652`); caller client
+  id on attached TP/SL rejected (`trading.rs:120`).
+- Low: leverage sent as `10.0`; fill without `matchPrice` dropped; spot polls
+  5 s vs 500 ms; per-symbol cancel-all; partial balance rows ignored.
+- Confirm (TS bugs Rust fixed): stop side read-back, amend overfill, amend
+  keeping trigger type and post-only, standalone stop client id, open-order
+  paging, spot partial snapshot, swallowed cancel errors.
+
+### Cross-venue: app stop payloads
+The app sends stops with `triggerPrice` equal to `price`. Orderly rejected every
+such stop. Many venues test `trigger_price.is_some()` in placement (apexomni,
+backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
+…); each must accept the app's exact payloads.
