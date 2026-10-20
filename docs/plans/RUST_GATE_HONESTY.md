@@ -33,3 +33,9 @@ never retry an unchanged failed performance measurement to obtain a pass.
   origin and created the requested fresh branch. Read the port brief, rewrite
   spec and gate-honesty audit. Current gate compares final state, accepts three
   runs, has the circular margin fixer and no combined build budget.
+- Phase 1: margin corrections now use Binance native wallet/configuration and
+  Bybit positionIM inputs only. Moved all TS oracle functions into an isolated
+  module receiving no candidate results. AST lint covers imported helpers,
+  renamed candidate parameters, computed Rust access and captured aliases.
+  Independent review found the first lint bypass, now corrected; re-review PASS
+  with 2/2 targeted regressions. Full harness verification recorded below.

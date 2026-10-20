@@ -1,10 +1,49 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { VENUES } from './venues.mjs';
+import { fixerLint } from './fixer-lint.mjs';
+import { fixPositionMargins } from './margin-expectation.mjs';
+
+test('no TS fixer may read or accept Rust output', () => {
+  for (const name of ['ts-oracle.mjs', 'known-ts-fixes.mjs', 'known-ts-fixes-coinbase.mjs', 'known-ts-fixes-orderly.mjs', 'margin-expectation.mjs']) {
+    const source = readFileSync(new URL(name, import.meta.url), 'utf8');
+    assert.deepEqual(fixerLint(source, name, true), []);
+  }
+  for (const source of [
+    'const KNOWN_TS_FIXES = { binance(ts, rust) { ts.marginSize = rust.marginSize; } };',
+    'const KNOWN_TS_FIXES = { binance: (ts) => { const candidate = rust; ts.x = candidate.x; } };',
+    'const fixAccount = (ts, rust) => Object.assign(ts, rust);',
+    'const KNOWN_TS_FIXES = { binance: (ts, candidate) => { ts.x = candidate.x; } };',
+    'const KNOWN_TS_FIXES = { alias: (ts, rust) => KNOWN_TS_FIXES.binance(ts, rust) };',
+    'export function fixFoo(ts, candidate) { ts.x = candidate.x; }',
+    'const KNOWN_TS_FIXES = { binance(ts) { ts.x = results["rust"][0].x; } };',
+    'const candidate = results["rust"][0]; const KNOWN_TS_FIXES = { binance(ts) { ts.x = candidate.x; } };',
+  ]) assert.ok(fixerLint(source, 'fixture.mjs', true).length, source);
+});
+
+test('margin expectation uses native input and preserves unsupported cases', () => {
+  const positions = [{ symbol: 'BTCUSDT', side: 'long', marginSize: 0 }, { symbol: 'ETHUSDT', side: 'short', marginSize: 0 }];
+  const output = { account: { positions } };
+  const records = [
+    { type: 'http', status: 200, url: 'https://fapi.binance.com/fapi/v1/symbolConfig', body: '[{"symbol":"BTCUSDT","leverage":20}]' },
+    { type: 'ws', text: JSON.stringify({ e: 'ACCOUNT_UPDATE', a: { P: [{ s: 'BTCUSDT', pa: '0.01', ep: '95000', up: '12.5', iw: '0' }] } }) },
+    { type: 'ws', text: JSON.stringify({ e: 'ACCOUNT_UPDATE', a: { P: [{ s: 'ETHUSDT', ps: 'SHORT', pa: '-1', ep: '3000', up: '2', iw: '301.72' }] } }) },
+  ];
+  fixPositionMargins(output, records, 'binance');
+  assert.deepEqual(positions.map((p) => p.marginSize), [48.125, 301.72]);
+  positions[0].marginSize = 0;
+  fixPositionMargins(output, [], 'binance');
+  assert.equal(positions[0].marginSize, 0);
+  fixPositionMargins(output, [{ type: 'ws', text: JSON.stringify({ topic: 'position', data: [{ symbol: 'BTCUSDT', side: 'Buy', positionIM: '95' }] }) }], 'bybit');
+  assert.equal(positions[0].marginSize, 95);
+  positions[0].marginSize = 7;
+  fixPositionMargins(output, records, 'binance');
+  assert.equal(positions[0].marginSize, 7);
+});
 
 // Exercise the actual CLI and comparison call sites. Stub only the expensive
 // replay subprocess, supplying independently controlled TS and Rust results.
