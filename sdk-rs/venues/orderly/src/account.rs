@@ -1,4 +1,5 @@
 use crate::{Connection, Orderly, Pending, Seed, sign, symbol, wire::*};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
@@ -1101,9 +1102,12 @@ impl Orderly {
             cx.clear_timer(t);
         }
         self.account.socket.attempts = self.account.socket.attempts.saturating_add(1);
-        self.account.socket.reconnect = Some(cx.set_timer(
-            (1000.0 * 2f64.powi(self.account.socket.attempts.min(6) as i32 - 1)).min(30000.0),
-        ));
+        self.account.socket.reconnect = Some(
+            cx.set_timer(
+                Backoff::new(1_000.0, 5, 30_000.0)
+                    .jittered(self.account.socket.attempts.saturating_sub(1), cx.now),
+            ),
+        );
     }
     pub(crate) fn order_terminal(&self, id: &str) -> bool {
         self.account.terminal.contains(id)

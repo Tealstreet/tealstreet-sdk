@@ -97,14 +97,19 @@ impl Rig {
         panic!("native spot fixture did not settle");
     }
     fn fire(&mut self, at: f64) {
+        self.fire_within(at, at);
+    }
+    /// Fires at `at` every timer due in `earliest..=at`; reconnect jitter shortens delays.
+    fn fire_within(&mut self, earliest: f64, at: f64) {
         let due: Vec<_> = self
             .timers
             .iter()
-            .filter(|(_, time)| *time == at)
+            .filter(|(_, time)| (earliest..=at).contains(time))
             .map(|(id, _)| *id)
             .collect();
         assert!(!due.is_empty(), "missing native timer at {at}");
-        self.timers.retain(|(_, time)| *time != at);
+        self.timers
+            .retain(|(_, time)| !(earliest..=at).contains(time));
         for timer in due {
             self.engine.handle(at, Event::TimerFired { timer });
         }
@@ -206,7 +211,7 @@ fn non_direct_spot_suppresses_public_socket_but_preserves_private_token_refresh_
             },
         );
         rig.drain(NOW + 16_000.);
-        rig.fire(NOW + 17_000.);
+        rig.fire_within(NOW + 16_750., NOW + 17_000.);
         assert!(rig.public.is_none());
         assert_eq!(rig.private.len(), 2);
         assert_eq!(

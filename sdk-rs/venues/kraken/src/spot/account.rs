@@ -1,5 +1,6 @@
 use super::{Connection, KrakenSpot, Pending, wire::*};
 use crate::wire::{number, optional_number};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, model::*,
 };
@@ -376,9 +377,12 @@ impl KrakenSpot {
             cx.clear_timer(t)
         }
         self.account.connection.attempts = self.account.connection.attempts.saturating_add(1);
-        self.account.connection.reconnect = Some(cx.set_timer(
-            (1000. * 2f64.powi(self.account.connection.attempts.min(5) as i32 - 1)).min(30_000.),
-        ));
+        self.account.connection.reconnect = Some(
+            cx.set_timer(
+                Backoff::new(1_000.0, 4, 30_000.0)
+                    .jittered(self.account.connection.attempts.saturating_sub(1), cx.now),
+            ),
+        );
         true
     }
     fn balance_response(

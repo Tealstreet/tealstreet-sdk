@@ -5,6 +5,7 @@ mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, Min, MinMax, Precision, Ticker};
@@ -147,9 +148,9 @@ impl Backpack {
             return;
         }
         let attempt = &mut self.seed.attempts[kind as usize];
-        let delay = (1000u32 << (*attempt).min(5)).min(30000);
+        let delay = Backoff::new(1_000.0, 5, 30_000.0).delay(*attempt);
         *attempt = attempt.saturating_add(1);
-        self.seed.retries.push((cx.set_timer(delay as f64), kind));
+        self.seed.retries.push((cx.set_timer(delay), kind));
     }
     pub fn new(options: Options) -> Self {
         Self {
@@ -525,7 +526,10 @@ impl Venue for Backpack {
         }
         self.public.attempts += 1;
         self.public.reconnect = Some(
-            cx.set_timer((1000.0 * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30000.0)),
+            cx.set_timer(
+                Backoff::new(1_000.0, 4, 30_000.0)
+                    .jittered(self.public.attempts.saturating_sub(1), cx.now),
+            ),
         );
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {

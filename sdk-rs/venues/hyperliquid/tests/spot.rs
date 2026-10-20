@@ -1201,10 +1201,10 @@ fn non_direct_spot_account_socket_keeps_private_topics_ping_and_reconnect_only()
         let reconnect = e
             .drain_actions()
             .find_map(|a| match a {
-                Action::SetTimer {
-                    timer,
-                    at_ms: 18000.,
-                } => Some(timer),
+                // Reconnect jitter shortens the 1 s delay by up to a quarter.
+                Action::SetTimer { timer, at_ms } if (17750. ..=18000.).contains(&at_ms) => {
+                    Some(timer)
+                }
                 _ => None,
             })
             .unwrap();

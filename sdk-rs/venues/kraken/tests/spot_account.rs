@@ -62,7 +62,10 @@ fn token_refreshed_per_socket_and_stale_token_never_subscribes_new_socket() {
     let reconnect = e
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == NOW + 1000. => Some(timer),
+            // Reconnect jitter shortens the 1 s delay by up to a quarter.
+            Action::SetTimer { timer, at_ms } if (NOW + 750. ..=NOW + 1000.).contains(&at_ms) => {
+                Some(timer)
+            }
             _ => None,
         })
         .unwrap();

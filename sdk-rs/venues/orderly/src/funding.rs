@@ -1,6 +1,7 @@
 //! Orderly limits each public socket to one hundred topics. Keep funding on
 //! dedicated ninety-topic shards so books and candles retain the main socket.
 use crate::{Connection, Orderly, Pending, wire::Envelope};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::{Cx, LogLevel, SocketId, TimerId};
 use serde::Serialize;
 
@@ -170,7 +171,10 @@ impl Orderly {
         }
         connection.attempts = connection.attempts.saturating_add(1);
         connection.reconnect = Some(
-            cx.set_timer((1000.0 * 2f64.powi(connection.attempts.min(6) as i32 - 1)).min(30000.0)),
+            cx.set_timer(
+                Backoff::new(1_000.0, 5, 30_000.0)
+                    .jittered(connection.attempts.saturating_sub(1), cx.now),
+            ),
         );
         true
     }

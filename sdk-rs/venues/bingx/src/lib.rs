@@ -7,6 +7,7 @@ pub mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
@@ -240,7 +241,7 @@ impl Bingx {
             List::Daily => 1,
             List::Premium => 2,
         };
-        let delay = (1000. * 2f64.powi(self.failures[slot].min(5) as i32)).min(30_000.);
+        let delay = Backoff::new(1_000.0, 5, 30_000.0).delay(self.failures[slot]);
         self.failures[slot] += 1;
         self.retries.insert(cx.set_timer(delay), kind);
     }

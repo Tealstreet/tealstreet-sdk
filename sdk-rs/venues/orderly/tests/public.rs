@@ -786,10 +786,10 @@ fn funding_watchdog_reconnects_only_its_shard_and_ignores_late_old_socket_frames
     let retry = out
         .into_iter()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 32000.0,
-            } => Some(timer),
+            // Reconnect jitter shortens the 1 s delay by up to a quarter.
+            Action::SetTimer { timer, at_ms } if (31750.0..=32000.0).contains(&at_ms) => {
+                Some(timer)
+            }
             _ => None,
         })
         .unwrap();

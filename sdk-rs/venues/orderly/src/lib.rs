@@ -5,6 +5,7 @@ mod history;
 mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
@@ -202,8 +203,7 @@ impl Orderly {
     fn retry_seed(&mut self, cx: &mut Cx<'_, Pending>, kind: Seed, error: &str) {
         cx.log(LogLevel::Warning, error);
         if self.seed_retry.is_none() {
-            let t =
-                cx.set_timer((1000.0 * 2f64.powi(self.seed_attempts.min(5) as i32)).min(30000.0));
+            let t = cx.set_timer(Backoff::new(1_000.0, 5, 30_000.0).delay(self.seed_attempts));
             self.seed_attempts = self.seed_attempts.saturating_add(1);
             self.seed_retry = Some((t, kind));
         }
@@ -643,7 +643,10 @@ impl Venue for Orderly {
         }
         self.public.attempts = self.public.attempts.saturating_add(1);
         self.public.reconnect = Some(
-            cx.set_timer((1000.0 * 2f64.powi(self.public.attempts.min(6) as i32 - 1)).min(30000.0)),
+            cx.set_timer(
+                Backoff::new(1_000.0, 5, 30_000.0)
+                    .jittered(self.public.attempts.saturating_sub(1), cx.now),
+            ),
         );
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {

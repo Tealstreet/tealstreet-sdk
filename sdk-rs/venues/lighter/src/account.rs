@@ -1,5 +1,6 @@
 //! Account snapshots are committed only after every scoped read succeeds.
 use crate::{Lighter, Pending, sign};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId, json};
 use serde::Deserialize;
@@ -785,7 +786,8 @@ impl Lighter {
         let delay = if code == 1013 {
             30_000.0
         } else {
-            (1000.0 * 2f64.powi(self.account.connection.attempts.min(5) as i32 - 1)).min(30_000.0)
+            Backoff::new(1_000.0, 4, 30_000.0)
+                .jittered(self.account.connection.attempts.saturating_sub(1), cx.now)
         };
         self.account.connection.reconnect = Some(cx.set_timer(delay));
         true

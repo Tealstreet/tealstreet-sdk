@@ -5,6 +5,7 @@ pub mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
@@ -731,8 +732,9 @@ impl Venue for TxFlow {
         }
         conn.subscriptions.clear();
         conn.attempts = conn.attempts.saturating_add(1);
-        conn.reconnect =
-            Some(cx.set_timer((1000.0 * 2f64.powi(conn.attempts.min(5) as i32 - 1)).min(30_000.0)));
+        conn.reconnect = Some(cx.set_timer(
+            Backoff::new(1_000.0, 4, 30_000.0).jittered(conn.attempts.saturating_sub(1), cx.now),
+        ));
         if !api {
             for (symbol, ladder) in &mut self.books {
                 ladder.book.clear();

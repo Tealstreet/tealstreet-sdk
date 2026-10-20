@@ -6,6 +6,7 @@ mod sign;
 mod trading;
 pub mod wire;
 
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
@@ -483,7 +484,8 @@ impl BinanceFutures {
         if let Some(watchdog) = connection.watchdog.take() {
             cx.clear_timer(watchdog);
         }
-        let delay = (250.0 * 2f64.powi(connection.attempts as i32)).min(MAX_RECONNECT_DELAY_MS);
+        let delay = Backoff::new(250.0, u32::MAX, MAX_RECONNECT_DELAY_MS)
+            .jittered(connection.attempts, cx.now);
         let timer = cx.set_timer(delay);
         self.connection(channel).reconnect = Some(timer);
         if channel == Channel::Private {
@@ -492,7 +494,7 @@ impl BinanceFutures {
         }
         cx.log(
             LogLevel::Warning,
-            format!("Binance socket closed ({code}); reconnecting in {delay} ms"),
+            format!("Binance socket closed ({code}); reconnecting in {delay:.0} ms"),
         );
     }
 
@@ -894,7 +896,8 @@ impl BinanceFutures {
     fn snapshot_failed(cx: &mut Cx<'_, Pending>, state: &mut BookState, min_delay_ms: f64) {
         state.book.clear();
         state.failures += 1;
-        let backoff = (1_000.0 * 2f64.powi(state.failures as i32 - 1)).min(MAX_SNAPSHOT_BACKOFF_MS);
+        let backoff = Backoff::new(1_000.0, u32::MAX, MAX_SNAPSHOT_BACKOFF_MS)
+            .delay(state.failures.saturating_sub(1));
         state.sync = Sync::Cooldown(cx.set_timer(backoff.max(min_delay_ms)));
     }
 

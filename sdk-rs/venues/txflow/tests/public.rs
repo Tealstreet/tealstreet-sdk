@@ -845,7 +845,8 @@ fn socket_rate_limit_discards_old_queue_and_restores_current_intents_on_reconnec
                 _ => None,
             })
             .unwrap();
-        assert_eq!(at, 4001.0);
+        // Reconnect jitter shortens the 1 s delay by up to a quarter.
+        assert!((3751.0..=4001.0).contains(&at), "{at}");
         e.handle(at, Event::TimerFired { timer });
         let replacement = e
             .drain_actions()

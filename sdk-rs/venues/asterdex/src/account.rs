@@ -1,6 +1,7 @@
 //! Account reconciliation is split by state domain; failed or stale reads never clear it.
 use crate::sign::Query;
 use crate::{AsterDex, Pending};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
@@ -680,7 +681,8 @@ impl AsterDex {
                     cx.store.set_hedged(value);
                     self.mode_known(cx);
                 } else {
-                    let delay = 1_000.0 * 2f64.powi(self.account.mode_failures.min(5) as i32);
+                    let delay =
+                        Backoff::new(1_000.0, 5, f64::INFINITY).delay(self.account.mode_failures);
                     self.account.mode_failures = self.account.mode_failures.saturating_add(1);
                     let reason = error.as_deref().unwrap_or("unrecognized dualSidePosition");
                     cx.log(

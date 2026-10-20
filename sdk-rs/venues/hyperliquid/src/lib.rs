@@ -6,6 +6,7 @@ mod trading;
 mod wire;
 
 use base64::Engine as _;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
@@ -795,9 +796,12 @@ impl Venue for Hyperliquid {
             ladder.book.clear();
         }
         self.connection.attempts = self.connection.attempts.saturating_add(1);
-        self.connection.reconnect = Some(cx.set_timer(
-            (1000.0 * 2f64.powi(self.connection.attempts.min(5) as i32 - 1)).min(30_000.0),
-        ));
+        self.connection.reconnect = Some(
+            cx.set_timer(
+                Backoff::new(1_000.0, 4, 30_000.0)
+                    .jittered(self.connection.attempts.saturating_sub(1), cx.now),
+            ),
+        );
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if !(200..300).contains(&response.status) {

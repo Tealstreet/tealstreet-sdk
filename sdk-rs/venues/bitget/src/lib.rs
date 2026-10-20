@@ -8,6 +8,7 @@ mod trading;
 mod wire;
 
 use book::BookState;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
@@ -255,7 +256,7 @@ impl BitgetFutures {
             return;
         }
         if connection.reconnect.is_none() {
-            let delay = (1_000.0 * 2f64.powi(connection.attempts.min(5) as i32)).min(30_000.0);
+            let delay = Backoff::new(1_000.0, 5, 30_000.0).jittered(connection.attempts, cx.now);
             connection.attempts += 1;
             connection.reconnect = Some(cx.set_timer(delay));
         }

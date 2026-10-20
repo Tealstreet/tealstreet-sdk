@@ -509,7 +509,18 @@ fn dead_private_socket_reconnects_and_auth_uses_fresh_expiry() {
                 a.iter()
                     .any(|a| matches!(a,Action::WsClose{socket}if *socket==s))
             );
-            let reconnect = timer(&a, NOW + 16000.);
+            // Reconnect jitter shortens the 1 s delay by up to a quarter.
+            let reconnect = a
+                .iter()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, at_ms }
+                        if (NOW + 15750. ..=NOW + 16000.).contains(at_ms) =>
+                    {
+                        Some(*timer)
+                    }
+                    _ => None,
+                })
+                .unwrap();
             e.handle(NOW + 16000., Event::TimerFired { timer: reconnect });
             let a: Vec<_> = e.drain_actions().collect();
             let fresh = a

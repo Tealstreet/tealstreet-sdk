@@ -1,6 +1,7 @@
 //! Atomic private snapshots, protected from newer stream and command updates.
 use super::*;
 use safe_cex_engine::Fill;
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1421,9 +1422,9 @@ impl Blofin {
                 self.refresh_account(cx);
                 self.refresh_orders(cx, 1);
             }
-            self.account.tick = Some(cx.set_timer(
-                (10_000.0 * 2f64.powi(self.account.auth_failures.min(3) as i32)).min(60_000.0),
-            ));
+            self.account.tick = Some(
+                cx.set_timer(Backoff::new(10_000.0, 3, 60_000.0).delay(self.account.auth_failures)),
+            );
             return true;
         }
         if self.account.debounce == Some(timer) {

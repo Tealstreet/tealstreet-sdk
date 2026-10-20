@@ -1,6 +1,7 @@
 //! Authenticated account snapshots and monotonic execution reconciliation.
 use crate::wire::{Envelope, Str, id, number, optional_number};
 use crate::{Connection, Pending, Woo, compact, native};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
@@ -1255,7 +1256,8 @@ impl Woo {
         let delay = if self.account.refresh_attempt == 0 {
             0.0
         } else {
-            150.0 * 2f64.powi(self.account.refresh_attempt as i32 - 1)
+            Backoff::new(150.0, u32::MAX, f64::INFINITY)
+                .delay(self.account.refresh_attempt.saturating_sub(1))
         };
         self.account.refresh = Some(cx.set_timer(delay));
     }

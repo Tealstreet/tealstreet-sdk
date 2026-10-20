@@ -1,5 +1,6 @@
 //! Private challenge state, atomic reconciliation and execution-only fills.
 use crate::{Kraken, Pending, wire};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
     json::{self, ArrayAt},
@@ -609,7 +610,7 @@ impl Kraken {
     }
     fn account_schedule_heal(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.heal.is_none() {
-            let delay = (1000.0 * 2f64.powi(self.account.read_failures.min(5) as i32)).min(30000.0);
+            let delay = Backoff::new(1_000.0, 5, 30_000.0).delay(self.account.read_failures);
             self.account.heal = Some(cx.set_timer(delay));
         }
     }
@@ -658,7 +659,7 @@ impl Kraken {
             cx.clear_timer(t);
         }
         if self.account.reconnect.is_none() {
-            let delay = (1000.0 * 2f64.powi(self.account.attempts.min(5) as i32)).min(30000.0);
+            let delay = Backoff::new(1_000.0, 5, 30_000.0).jittered(self.account.attempts, cx.now);
             self.account.attempts += 1;
             self.account.reconnect = Some(cx.set_timer(delay));
         }

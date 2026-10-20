@@ -2,6 +2,7 @@
 //! succeed. Private events and acknowledged writes invalidate older snapshots.
 use crate::account_wire::*;
 use crate::{Pending, Task, WeexFutures};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderStatus, Position, PositionMode, PositionSide,
@@ -604,8 +605,8 @@ impl WeexFutures {
         }
         if matches!(request.kind, Kind::Config | Kind::Metadata) {
             self.account.settings_failures += 1;
-            self.account.settings_retry_at = cx.now
-                + (2_000.0 * 2f64.powi(self.account.settings_failures.min(5) as i32)).min(60_000.0);
+            self.account.settings_retry_at =
+                cx.now + Backoff::new(2_000.0, 5, 60_000.0).delay(self.account.settings_failures);
             self.account_finished(cx, false);
             return;
         }
@@ -661,8 +662,8 @@ impl WeexFutures {
             } else {
                 self.account.failures = 0;
             }
-            let delay = (2_000.0 * 2f64.powi(self.account.failures.min(5) as i32))
-                .min(60_000.0)
+            let delay = Backoff::new(2_000.0, 5, 60_000.0)
+                .delay(self.account.failures)
                 .max(self.paused_until - cx.now);
             self.account.refresh = Some(cx.set_timer(delay));
         }
@@ -837,9 +838,12 @@ impl WeexFutures {
             cx.clear_timer(timer);
         }
         self.account.attempts += 1;
-        self.account.reconnect = Some(cx.set_timer(
-            (1000.0 * 2f64.powi(self.account.attempts.min(5) as i32 - 1)).min(30_000.0),
-        ));
+        self.account.reconnect = Some(
+            cx.set_timer(
+                Backoff::new(1_000.0, 4, 30_000.0)
+                    .jittered(self.account.attempts.saturating_sub(1), cx.now),
+            ),
+        );
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {

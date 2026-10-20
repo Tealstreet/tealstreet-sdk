@@ -2,6 +2,7 @@
 pub use crate::account_wire::Context;
 use crate::account_wire::{AccountRow, OrderRow, PositionRow, integer, order_side};
 use crate::{Pending, PhemexPerpetuals};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
@@ -290,7 +291,7 @@ impl PhemexPerpetuals {
             0
         };
         let wait = if self.account.failed {
-            2_000. * 2f64.powi(self.account.failures.min(4) as i32 - 1)
+            Backoff::new(1_000.0, 4, f64::INFINITY).delay(self.account.failures)
         } else {
             2_000.
         };
@@ -964,8 +965,12 @@ impl PhemexPerpetuals {
         }
         self.account.attempts = self.account.attempts.saturating_add(1);
         if self.account.reconnect.is_none() {
-            self.account.reconnect =
-                Some(cx.set_timer(1_000. * 2f64.powi(self.account.attempts.min(5) as i32 - 1)));
+            self.account.reconnect = Some(
+                cx.set_timer(
+                    Backoff::new(1_000.0, 4, f64::INFINITY)
+                        .jittered(self.account.attempts.saturating_sub(1), cx.now),
+                ),
+            );
         }
         true
     }

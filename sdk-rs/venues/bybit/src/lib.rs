@@ -10,6 +10,7 @@ mod wire;
 
 use paths::Paths;
 pub use paths::{Category, Endpoints, Variant};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
@@ -606,7 +607,8 @@ impl BybitLinear {
         connection.attempts += 1;
         connection.outbox.clear();
         let timers = [connection.watchdog.take(), connection.outbox_timer.take()];
-        let delay = (250.0 * 2f64.powi(connection.attempts as i32)).min(MAX_RECONNECT_DELAY_MS);
+        let delay = Backoff::new(250.0, u32::MAX, MAX_RECONNECT_DELAY_MS)
+            .jittered(connection.attempts, cx.now);
         for timer in timers.into_iter().flatten() {
             cx.clear_timer(timer);
         }
@@ -622,7 +624,7 @@ impl BybitLinear {
         }
         cx.log(
             LogLevel::Warning,
-            format!("Bybit socket closed ({code}); reconnecting in {delay} ms"),
+            format!("Bybit socket closed ({code}); reconnecting in {delay:.0} ms"),
         );
     }
 

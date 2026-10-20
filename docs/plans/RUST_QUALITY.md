@@ -103,9 +103,11 @@ Low risk, do first:
 2. `engine::url`: one RFC 3986 encoder copied in 7+ venues, plus
    `encodeURIComponent` and axios dialects; 5 `Query` types. Signing vectors
    settle it.
-3. `engine::backoff::Backoff`: ~40 inline exponential formulas, no jitter.
-   Migrate with constants unchanged, then jitter, then one startup-retry policy
-   (fixes startup fail-closed on OKX, BloFin, Bitget).
+3. `engine::backoff::Backoff`: ~~~40 inline exponential formulas, no jitter.
+   Migrate with constants unchanged, then jitter~~ (done: one schedule shared
+   with `engine::socket::Supervisor`, reconnects jittered); then one
+   startup-retry policy (fixes startup fail-closed on OKX, BloFin, Bitget),
+   landing with the public-startup PR.
 4. `engine::time`: ISO/civil-date math in 9 venues.
 
 Medium:

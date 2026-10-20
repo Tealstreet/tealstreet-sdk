@@ -340,10 +340,10 @@ fn private_initial_and_reconnect_handshakes_time_out_without_open_callbacks() {
     let retry = out
         .into_iter()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 12000.0,
-            } => Some(timer),
+            // Reconnect jitter shortens the 1 s delay by up to a quarter.
+            Action::SetTimer { timer, at_ms } if (11750.0..=12000.0).contains(&at_ms) => {
+                Some(timer)
+            }
             _ => None,
         })
         .unwrap();
@@ -384,8 +384,9 @@ fn private_initial_and_reconnect_handshakes_time_out_without_open_callbacks() {
             .any(|a| matches!(a, Action::WsClose { socket } if *socket == fresh))
     );
     assert!(
-        out.iter()
-            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 24000.0)),
+        out.iter().any(
+            |a| matches!(a, Action::SetTimer { at_ms, .. } if (23500.0..=24000.0).contains(at_ms))
+        ),
         "consecutive handshake failures back off"
     );
 }

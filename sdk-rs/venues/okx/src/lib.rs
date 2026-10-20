@@ -5,6 +5,7 @@ mod sign;
 mod trading;
 mod wire;
 
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
@@ -328,7 +329,7 @@ impl Okx {
     fn retry_startup(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
         cx.log(LogLevel::Error, error);
         if self.startup_retry.is_none() {
-            let delay = (1_000.0 * 2f64.powi(self.startup_failures.min(5) as i32)).min(30_000.0);
+            let delay = Backoff::new(1_000.0, 5, 30_000.0).delay(self.startup_failures);
             self.startup_failures = self.startup_failures.saturating_add(1);
             self.startup_retry = Some(cx.set_timer(delay));
         }
@@ -709,7 +710,7 @@ impl Venue for Okx {
         }
         c.attempts = c.attempts.saturating_add(1);
         c.reconnect =
-            Some(cx.set_timer((500.0 * 2f64.powi(c.attempts.min(6) as i32)).min(30_000.0)));
+            Some(cx.set_timer(Backoff::new(500.0, 6, 30_000.0).jittered(c.attempts, cx.now)));
         if channel == PUBLIC {
             for state in self.books.values_mut() {
                 state.sequence = None;

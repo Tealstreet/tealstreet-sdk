@@ -1,4 +1,5 @@
 use crate::{Coinbase, Pending, ProductKind, account_wire as wire};
+use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId};
@@ -742,9 +743,13 @@ impl Coinbase {
             && *attempt < 3
         {
             *attempt += 1;
-            *timer = Some(cx.set_timer(
-                (1000.0 * 2f64.powi(i32::from(*attempt))).max(self.account.backoff_until - cx.now),
-            ));
+            *timer = Some(
+                cx.set_timer(
+                    Backoff::new(1_000.0, 3, f64::INFINITY)
+                        .delay(u32::from(*attempt))
+                        .max(self.account.backoff_until - cx.now),
+                ),
+            );
             return;
         }
         let rows = self.take_deferred(id);
@@ -968,8 +973,8 @@ impl Coinbase {
         }
         self.account.sequence = None;
         if self.account.reconnect.is_none() {
-            let delay = (2000.0 * 2f64.powi(i32::from(self.account.reconnect_failures.min(4))))
-                .min(30000.0);
+            let delay = Backoff::new(2_000.0, 4, 30_000.0)
+                .jittered(u32::from(self.account.reconnect_failures), cx.now);
             self.account.reconnect_failures = self.account.reconnect_failures.saturating_add(1);
             self.account.reconnect = Some(cx.set_timer(delay))
         }
@@ -1687,7 +1692,8 @@ impl Coinbase {
                 if self.account.startup_retry.is_none() && self.account.startup_failures < 5 {
                     self.account.startup_failures += 1;
                     let t = cx.set_timer(
-                        (1000.0 * 2f64.powi(i32::from(self.account.startup_failures)))
+                        Backoff::new(1_000.0, 5, f64::INFINITY)
+                            .delay(u32::from(self.account.startup_failures))
                             .max(self.account.backoff_until - cx.now),
                     );
                     self.account.startup_retry = Some((t, req));
