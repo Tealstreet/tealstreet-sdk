@@ -528,6 +528,7 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
             command: 2,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         }),
     );
     let out = actions(&mut e);
@@ -645,5 +646,86 @@ fn bybit_execution_controls_reject_the_whole_batch_before_writes() {
         assert!(out.iter().any(|action| matches!(action,
             Action::Notice(Notice::CommandDone { result: Err(message), .. })
                 if message.contains("only on Bybit"))));
+    }
+}
+
+#[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let mut e = trading_engine();
+        e.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        e.handle(
+            5.0,
+            Event::Command(Command::SetLeverage {
+                command: 99,
+                symbol: "BTCUSDT".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+        let out = actions(&mut e);
+        assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+    }
+}
+
+#[test]
+fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+    use safe_cex_engine::{Action, Notice};
+    for mixed in [false, true] {
+        let mut e = trading_engine();
+        e.store_mut().set_orders(vec![Order {
+            id: "123".into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTCUSDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 90.0,
+            amount: 1.0,
+            filled: 0.0,
+            remaining: 1.0,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }]);
+        e.drain_actions().for_each(drop);
+        e.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 991,
+                ids: if mixed {
+                    vec!["123".into(), "456".into()]
+                } else {
+                    vec!["456".into()]
+                },
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
+                    if error.contains("456") && error.contains("not found")
+            )),
+            "missing cancellation error: {actions:?}"
+        );
+        assert_eq!(e.store().order("123").unwrap().status, OrderStatus::Open);
     }
 }

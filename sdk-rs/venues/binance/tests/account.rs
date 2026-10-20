@@ -211,6 +211,7 @@ fn order_events_drive_the_order_lifecycle_and_report_each_execution() {
 
     let partial = new
         .replace(r#""X":"NEW""#, r#""X":"PARTIALLY_FILLED""#)
+        .replace(r#""x":"NEW""#, r#""x":"TRADE""#)
         .replace(
             r#""l":"0","z":"0","L":"0""#,
             r#""l":"0.001","z":"0.001","L":"97000.5""#,
@@ -227,7 +228,8 @@ fn order_events_drive_the_order_lifecycle_and_report_each_execution() {
 
     let filled = partial
         .replace(r#""X":"PARTIALLY_FILLED""#, r#""X":"FILLED""#)
-        .replace(r#""z":"0.001""#, r#""z":"0.002""#);
+        .replace(r#""z":"0.001""#, r#""z":"0.002""#)
+        .replace(r#""t":0"#, r#""t":1"#);
     h.message("/private/ws", &filled);
     assert_eq!(
         h.engine.store().order("8886774").unwrap().status,
@@ -486,14 +488,14 @@ fn amend_cancels_then_places_the_replacement() {
         cancel.id,
         200,
         "",
-        r#"{"orderId":8389765519993909000,"status":"CANCELED"}"#,
+        r#"{"symbol":"BTCUSDT","orderId":8389765519993909000,"status":"CANCELED","origQty":"0.004","executedQty":"0.001"}"#,
     );
     let replacement = h.take("/fapi/v1/order");
     assert_eq!(replacement.method, Method::Post);
     assert_eq!(param(&replacement.url, "price").as_deref(), Some("91000"));
     assert_eq!(
         param(&replacement.url, "quantity").as_deref(),
-        Some("0.004")
+        Some("0.003")
     );
 }
 
@@ -504,6 +506,7 @@ fn leverage_and_position_mode_update_the_settings_frame() {
         command: 13,
         symbol: "BTCUSDT".into(),
         leverage: 500.0,
+        side: None,
     }));
     let request = h.take("/fapi/v1/leverage");
     assert_eq!(
@@ -523,6 +526,7 @@ fn leverage_and_position_mode_update_the_settings_frame() {
     h.event(Event::Command(Command::SetPositionMode {
         command: 14,
         hedged: true,
+        symbol: None,
     }));
     assert!(h.requests.is_empty(), "refused while a position is open");
     assert!(matches!(h.result(14), Some(Err(_))));
@@ -650,4 +654,60 @@ fn streamed_lists_arrive_in_chunks() {
     h.event(Event::HttpEnd { request });
     assert_eq!(h.engine.store().markets().len(), 1);
     assert_eq!(h.engine.store().markets()[0].limits.amount.max, 120.0);
+}
+
+#[test]
+fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+    use safe_cex_engine::{Action, Notice};
+    for mixed in [false, true] {
+        let mut h = ready();
+        h.engine.store_mut().set_orders(vec![Order {
+            id: "123".into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTCUSDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 90.0,
+            amount: 1.0,
+            filled: 0.0,
+            remaining: 1.0,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }]);
+        h.engine.drain_actions().for_each(drop);
+        h.engine.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 991,
+                ids: if mixed {
+                    vec!["123".into(), "456".into()]
+                } else {
+                    vec!["456".into()]
+                },
+            }),
+        );
+        let actions = h.engine.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
+                    if error.contains("456") && error.contains("not found")
+            )),
+            "missing cancellation error: {actions:?}"
+        );
+        assert_eq!(
+            h.engine.store().order("123").unwrap().status,
+            OrderStatus::Open
+        );
+    }
 }

@@ -333,6 +333,7 @@ fn inherited_history_lookup_and_settings_settle_explicitly() {
             command: 12,
             symbol: "XBT/USD".into(),
             leverage: 2.,
+            side: None,
         }),
     );
     assert!(done(&mut e, 12).is_err());

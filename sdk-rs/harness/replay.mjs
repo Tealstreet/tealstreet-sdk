@@ -47,11 +47,12 @@ if (values.venue === 'hyrotrader' && replayOptions.endpoints) {
 const bookSymbols = values.books.split(',').filter(Boolean);
 const metadata = records.find((r) => r.type === 'meta');
 // Pin generated timestamps and freshness windows to the tape, across processes.
+// Begin the signing clock after module/crypto setup, before venue startup.
 // Keep this wall clock continuous through startup: venue clocks may measure
 // elapsed real Date/dayjs time since their initial sync. Rebasing only Date.now
 // at readiness would move their signatures ahead of the freshness oracle.
 // Tape.play owns a separate readiness-relative clock for record scheduling.
-const clockStart = performance.now();
+let clockStart = performance.now();
 if (Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
@@ -194,6 +195,7 @@ async function runRust() {
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
 
+  clockStart = performance.now();
   const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
   clock?.install();
   // What the main thread keeps: the latest market table, ticker columns, books.
@@ -427,13 +429,13 @@ async function tsCommand(exchange, store, record) {
       return result.clientOrderId ? { orderIds: [...result], clientOrderId: result.clientOrderId } : result;
     }
     case 'setLeverage':
-      await exchange.setLeverage(args.symbol, args.leverage);
+      await exchange.setLeverage(args.symbol, args.leverage, args.side);
       return [];
     case 'setMarginType':
       await exchange.changeMarginType(args.isolated, args.symbol);
       return [];
     case 'setPositionMode':
-      await exchange.changePositionMode(args.hedged);
+      await exchange.changePositionMode(args.hedged, args.symbol);
       return [];
     case 'fetchStpMode':
       return exchange.fetchStpMode();
@@ -654,6 +656,7 @@ async function runTs() {
   await venue.loadTs?.({ isPrivate });
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
+  clockStart = performance.now();
   const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
   clock?.install();
 

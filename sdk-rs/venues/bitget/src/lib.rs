@@ -143,7 +143,7 @@ impl BitgetFutures {
         cx.request_streamed(
             Method::Get,
             format!("{}{path}", paths::REST),
-            vec![],
+            vec![("X-CHANNEL-API-CODE", "Tealstreet".into())],
             ArrayAt::Envelope(&[&["data"]]),
             pending,
         );
@@ -411,8 +411,8 @@ fn market(row: &Contract<'_>) -> Market {
                 .unwrap_or(f64::INFINITY),
             },
             leverage: MinMax {
-                min: row.min_lever.or(1.0),
-                max: row.max_lever.or(20.0),
+                min: row.min_lever.0.filter(|n| *n != 0.0).unwrap_or(1.0),
+                max: row.max_lever.0.filter(|n| *n != 0.0).unwrap_or(20.0),
             },
             price: None,
         },

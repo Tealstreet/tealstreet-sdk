@@ -211,6 +211,39 @@ fn is_virtual(id: &str) -> bool {
     id.ends_with(STOP_LOSS_SUFFIX) || id.ends_with(TAKE_PROFIT_SUFFIX)
 }
 
+fn cancel_all_affected(body: &str) -> Result<Vec<String>, &'static str> {
+    #[derive(serde::Deserialize)]
+    struct Reply {
+        result: Affected,
+    }
+    #[derive(serde::Deserialize)]
+    struct Affected {
+        list: Vec<Identity>,
+        success: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Identity {
+        order_id: String,
+    }
+    let reply = serde_json::from_str::<Reply>(body).map_err(
+        |_| "Bybit cancel-all outcome is unknown: missing or malformed affected-order list",
+    )?;
+    if reply.result.success.is_some_and(|success| success != "1") {
+        return Err("Bybit cancel-all was not successful");
+    }
+    let mut ids = Vec::with_capacity(reply.result.list.len());
+    for row in reply.result.list {
+        if row.order_id.trim().is_empty() || is_virtual(&row.order_id) {
+            return Err("Bybit cancel-all outcome is unknown: invalid affected native order ID");
+        }
+        ids.push(row.order_id);
+    }
+    ids.sort_unstable();
+    ids.dedup();
+    Ok(ids)
+}
+
 fn single(path: &'static str, body: String, call: Call) -> Job {
     Job {
         steps: VecDeque::from([Step {
@@ -248,7 +281,11 @@ impl BybitLinear {
         }
         if self.variant.is_hyro() {
             match command {
-                Command::SetPositionMode { command, hedged } => {
+                Command::SetPositionMode {
+                    command,
+                    hedged,
+                    symbol: _,
+                } => {
                     return Some((
                         *command,
                         if *hedged {
@@ -420,11 +457,15 @@ impl BybitLinear {
         let (id, plan) = match command {
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
             Command::CancelOrders { command, ids } => {
-                let orders: Vec<Order> = ids
+                let orders = ids
                     .iter()
-                    .filter_map(|id| cx.store.order(id).cloned())
-                    .collect();
-                (command, Ok(self.plan_cancel(&orders)))
+                    .map(|id| {
+                        cx.store.order(id).cloned().ok_or_else(|| {
+                            format!("Order {id} not found; cancellation requires its symbol")
+                        })
+                    })
+                    .collect::<Result<Vec<Order>, String>>();
+                (command, orders.map(|orders| self.plan_cancel(&orders)))
             }
             Command::AmendOrder {
                 command,
@@ -484,7 +525,7 @@ impl BybitLinear {
                         .store
                         .orders()
                         .iter()
-                        .filter(|o| o.symbol == symbol)
+                        .filter(|o| o.symbol == symbol && !is_virtual(&o.id))
                         .map(|o| o.id.clone())
                         .collect();
                     let body = Body::new()
@@ -499,6 +540,7 @@ impl BybitLinear {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => (
                 command,
                 plan_leverage(cx, self.paths.category, symbol, leverage),
@@ -518,7 +560,11 @@ impl BybitLinear {
                     Ok(single("/v5/account/set-margin-mode", body, call)),
                 )
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 if self.category == Category::Inverse {
                     let mut coins = std::collections::BTreeSet::new();
                     for market in cx.store.markets() {
@@ -840,31 +886,57 @@ impl BybitLinear {
                         _ => canceled.push(id.clone()),
                     }
                 }
+                if !canceled.is_empty() {
+                    self.note_order_terminal(&canceled);
+                }
                 mark_canceled(cx, &canceled, self.local_order_lifecycle());
             }
-            (Call::Cancel { ids } | Call::CancelAll { ids }, Err((_, message)))
-                if already_gone(&message) =>
-            {
+            (Call::Cancel { ids }, Err((_, message))) if already_gone(&message) => {
+                self.note_order_terminal(&ids);
                 mark_canceled(cx, &ids, self.local_order_lifecycle());
             }
             (Call::CancelAll { ids }, Ok(body)) => {
-                #[derive(serde::Deserialize)]
-                struct Reply {
-                    result: Option<Success>,
-                }
-                #[derive(serde::Deserialize)]
-                struct Success {
-                    success: Option<String>,
-                }
-                let rejected = serde_json::from_str::<Reply>(body)
-                    .ok()
-                    .and_then(|r| r.result)
-                    .and_then(|r| r.success)
-                    .is_some_and(|s| s != "1");
-                if rejected {
-                    errors.push("Bybit cancel-all was not successful".into());
-                } else {
-                    mark_canceled(cx, &ids, self.local_order_lifecycle());
+                match cancel_all_affected(body) {
+                    Ok(affected) => {
+                        // Futures select at most 500 native orders. The affected
+                        // list, including uncaptured arrivals, is the only proof.
+                        let omitted = ids
+                            .iter()
+                            .filter(|id| {
+                                !affected.contains(id)
+                                    && cx.store.order(id).is_some_and(|order| {
+                                        !matches!(
+                                            order.status,
+                                            OrderStatus::Closed | OrderStatus::Canceled
+                                        )
+                                    })
+                            })
+                            .count();
+                        if !affected.is_empty() {
+                            self.note_order_terminal(&affected);
+                            mark_canceled(cx, &affected, self.local_order_lifecycle());
+                        }
+                        if self.local_order_lifecycle() {
+                            // Clean up captured terminal rows without inventing native cancel proof.
+                            let terminal: Vec<_> = ids
+                                .iter()
+                                .filter(|id| {
+                                    cx.store.order(id).is_some_and(|order| {
+                                        matches!(
+                                            order.status,
+                                            OrderStatus::Closed | OrderStatus::Canceled
+                                        )
+                                    })
+                                })
+                                .cloned()
+                                .collect();
+                            mark_canceled(cx, &terminal, true);
+                        }
+                        if omitted != 0 {
+                            errors.push(format!("Bybit cancel-all left {omitted} live order(s) unconfirmed; reconcile before retrying"));
+                        }
+                    }
+                    Err(message) => errors.push(message.into()),
                 }
             }
             (Call::Leverage { symbol, leverage }, outcome)

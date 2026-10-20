@@ -56,7 +56,7 @@ enum Call {
     Leverage {
         symbol: String,
         leverage: f64,
-        commit: bool,
+        side: Option<PositionSide>,
     },
     Margin {
         symbol: String,
@@ -289,13 +289,18 @@ impl Trading {
                 command,
                 symbol,
                 leverage,
-            } => (command, self.leverage(cx, &symbol, leverage)),
+                side,
+            } => (command, self.leverage(cx, &symbol, leverage, side)),
             Command::SetMarginType {
                 command,
                 symbol,
                 isolated,
             } => (command, self.margin(cx, &symbol, isolated)),
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 let plan = if cx.store.positions().iter().any(|p| p.contracts > 0.0)
                     || cx
                         .store
@@ -490,11 +495,25 @@ impl Trading {
                 Call::Leverage {
                     symbol,
                     leverage,
-                    commit,
+                    side,
                 } => {
-                    if commit {
-                        cx.store.update_setting(&symbol, |s| s.leverage = leverage);
-                    }
+                    cx.store.update_setting(&symbol, |s| match side {
+                        Some(PositionSide::Long) => {
+                            s.leverage = leverage;
+                            s.buy_leverage = Some(leverage);
+                        }
+                        Some(PositionSide::Short) => s.sell_leverage = Some(leverage),
+                        None => {
+                            s.leverage = leverage;
+                            s.buy_leverage = Some(leverage);
+                            s.sell_leverage = Some(leverage);
+                        }
+                    });
+                    cx.store.update_positions(|p| {
+                        if p.symbol == symbol && side.is_none_or(|side| p.side == side) {
+                            p.leverage = leverage;
+                        }
+                    });
                     Ok(Vec::new())
                 }
                 Call::Margin { symbol, isolated } => {
@@ -1003,7 +1022,13 @@ impl Trading {
             },
         ))
     }
-    fn leverage(&self, cx: &Cx<'_, Pending>, symbol: &str, input: f64) -> Result<Job, String> {
+    fn leverage(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        input: f64,
+        side: Option<PositionSide>,
+    ) -> Result<Job, String> {
         let market = cx.store.market(symbol).ok_or("Market not found")?;
         let input = positive(Some(input), "Leverage")?;
         if !market.limits.leverage.min.is_finite()
@@ -1013,28 +1038,31 @@ impl Trading {
             return Err("Market leverage limits are invalid".into());
         }
         let leverage = input.clamp(market.limits.leverage.min, market.limits.leverage.max);
-        let sides: &[&str] = if cx.store.hedged() {
-            &["LONG", "SHORT"]
+        let side = if cx.store.hedged() {
+            Some(side.ok_or("Side is required when position mode is hedged")?)
         } else {
-            &["BOTH"]
+            None
         };
-        let mut job = Job::default();
-        for (index, side) in sides.iter().enumerate() {
-            job.steps.push_back(Step {
-                method: Method::Post,
-                path: "/openApi/swap/v2/trade/leverage",
-                params: Params::new()
-                    .str("symbol", &market.id)
-                    .str("side", side)
-                    .num("leverage", leverage),
-                call: Call::Leverage {
-                    symbol: symbol.into(),
-                    leverage,
-                    commit: index + 1 == sides.len(),
-                },
-            });
-        }
-        Ok(job)
+        Ok(one(
+            Method::Post,
+            "/openApi/swap/v2/trade/leverage",
+            Params::new()
+                .str("symbol", &market.id)
+                .str(
+                    "side",
+                    match side {
+                        Some(PositionSide::Long) => "LONG",
+                        Some(PositionSide::Short) => "SHORT",
+                        None => "BOTH",
+                    },
+                )
+                .num("leverage", leverage),
+            Call::Leverage {
+                symbol: symbol.into(),
+                leverage,
+                side,
+            },
+        ))
     }
     fn margin(&self, cx: &Cx<'_, Pending>, symbol: &str, isolated: bool) -> Result<Job, String> {
         let market = cx.store.market(symbol).ok_or("Market not found")?;

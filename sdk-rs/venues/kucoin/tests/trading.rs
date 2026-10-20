@@ -485,10 +485,7 @@ fn symbol_cancel_uses_v3_and_account_cancel_covers_both_families() {
     assert_eq!(request.method, Method::Delete);
     h.response(&request, 200, r#"{"code":"200000","data":[]}"#);
     h.pace();
-    let stop = h.take("/api/v1/stopOrders?symbol=XBTUSDTM");
-    assert_eq!(stop.method, Method::Delete);
-    h.response(&stop, 200, r#"{"code":"200000","data":[]}"#);
-    h.pace();
+    assert!(!h.has("/api/v1/stopOrders"));
     assert_eq!(h.done(1), &Ok("[]".into()));
     h.command(Command::CancelSymbolOrders {
         command: 2,
@@ -502,18 +499,15 @@ fn symbol_cancel_uses_v3_and_account_cancel_covers_both_families() {
 }
 
 #[test]
-fn symbol_cancel_cannot_report_success_when_the_stop_family_rejects() {
+fn account_cancel_cannot_report_success_when_the_stop_family_rejects() {
     let mut h = Harness::new();
     h.command(Command::CancelSymbolOrders {
         command: 1,
-        symbol: "BTCUSDT".into(),
+        symbol: "".into(),
     });
-    h.reply(
-        "/api/v3/orders?symbol=XBTUSDTM",
-        r#"{"code":"200000","data":[]}"#,
-    );
+    h.reply("/api/v3/orders", r#"{"code":"200000","data":[]}"#);
     h.pace();
-    let stop = h.take("/api/v1/stopOrders?symbol=XBTUSDTM");
+    let stop = h.take("/api/v1/stopOrders");
     h.response(
         &stop,
         400,
@@ -530,6 +524,7 @@ fn leverage_requires_cross_metadata_and_clamps_to_market_limits() {
         command: 1,
         symbol: "BTCUSDT".into(),
         leverage: 150.0,
+        side: None,
     });
     h.metadata(false, "CROSS");
     let request = h.take("changeCrossUserLeverage");
@@ -548,6 +543,7 @@ fn leverage_requires_cross_metadata_and_clamps_to_market_limits() {
         command: 1,
         symbol: "BTCUSDT".into(),
         leverage: 5.0,
+        side: None,
     });
     h.metadata(false, "ISOLATED");
     assert!(!h.has("changeCrossUserLeverage"));
@@ -588,6 +584,7 @@ fn mode_switch_reads_current_positions_and_rejects_open_or_malformed_quantities(
         h.command(Command::SetPositionMode {
             command: 1,
             hedged: true,
+            symbol: None,
         });
         h.reply(
             "/api/v1/positions",
@@ -601,6 +598,7 @@ fn mode_switch_reads_current_positions_and_rejects_open_or_malformed_quantities(
     h.command(Command::SetPositionMode {
         command: 1,
         hedged: true,
+        symbol: None,
     });
     h.reply("/api/v1/positions", r#"{"code":"200000","data":[]}"#);
     h.pace();
@@ -878,4 +876,78 @@ fn explicit_active_flag_overrides_a_contradictory_canceled_status() {
     h.confirm_cancel("old", 10.0, 4.0);
     let body = h.take("/api/v1/orders").body.unwrap();
     assert!(body.contains(r#""size":"6""#), "{body}");
+}
+
+#[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let mut h = Harness::new();
+        h.engine.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        h.command(Command::SetLeverage {
+            command: 99,
+            symbol: "BTCUSDT".into(),
+            leverage: 5.0,
+            side: None,
+        });
+        h.metadata(false, "CROSS");
+        assert!(!h.actions.iter().any(
+            |action| matches!(action, Action::Http(request) if request.method != Method::Get)
+        ));
+        assert!(h.done(99).as_ref().unwrap_err().contains("leverage limits"));
+    }
+}
+
+#[test]
+fn uncached_cancel_ids_send_directly_and_do_not_block_known_ids_after_rejection() {
+    for reject_unknown in [false, true] {
+        let mut h = Harness::new();
+        h.set_order("known", OrderType::Limit, 2.0);
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["unknown".into(), "known".into()],
+        });
+        let unknown = h.take("/api/v1/orders/unknown");
+        assert!(unknown.url.ends_with("/api/v1/orders/unknown"));
+        assert_eq!(unknown.method, Method::Delete);
+        if reject_unknown {
+            h.response(&unknown, 400, r#"{"code":"100001","msg":"Unknown order"}"#);
+        } else {
+            h.response(
+                &unknown,
+                200,
+                r#"{"code":"200000","data":{"cancelledOrderIds":["unknown"]}}"#,
+            );
+        }
+        h.pace();
+        let known = h.take("/api/v1/orders/known?symbol=XBTUSDTM");
+        h.response(
+            &known,
+            200,
+            r#"{"code":"200000","data":{"cancelledOrderIds":["known"]}}"#,
+        );
+        h.pace();
+        assert_eq!(h.done(1).is_err(), reject_unknown);
+        assert!(!h.has("/api/v1/orders/unknown"));
+    }
+}
+
+#[test]
+fn an_empty_native_cancel_id_never_becomes_a_bulk_delete() {
+    for id in ["", "__stop_loss"] {
+        let mut h = Harness::new();
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec![id.into()],
+        });
+        assert!(!h.has("/api/v1/orders"));
+        assert!(h.done(1).is_err());
+    }
 }

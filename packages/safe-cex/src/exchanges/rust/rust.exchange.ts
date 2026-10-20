@@ -18,6 +18,7 @@ import type {
   Order,
   OrderBook,
   OrderHistoryOptions,
+  PositionSide,
   PublicTrade,
   UpdateOrderOpts,
   ValidateAccountResult,
@@ -356,7 +357,7 @@ export class RustEngineExchange extends BaseExchange {
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
-    if (['woo', 'grvt', 'kucoinspot'].includes(this.name)) {
+    if (['woo', 'grvt', 'kucoin', 'kucoinspot'].includes(this.name)) {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       };
@@ -560,6 +561,7 @@ export class RustEngineExchange extends BaseExchange {
           : {}),
         ...(this.name === 'apexomni' ? { omniKeySeed } : {}),
         testnet: Boolean(testnet),
+        ...(this.name === 'blofin' ? { brokerAttribution: process.env.NODE_ENV === 'production' || Boolean(this.options.tealstreetProxy) } : {}),
         publicDataOnly: Boolean(publicDataOnly),
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
@@ -1051,13 +1053,13 @@ export class RustEngineExchange extends BaseExchange {
     if (orderlyNames.has(this.name)) await this.command({ op: 'setLeverage', symbol: '', leverage });
     else {
       for (const position of this.store.positions) {
-        if (!this.isDisposed) await this.setLeverage(position.symbol, leverage);
+        if (!this.isDisposed) await this.setLeverage(position.symbol, leverage, position.side);
       }
     }
   };
 
-  setLeverage = async (symbol: string, leverage: number) => {
-    await this.command({ op: 'setLeverage', symbol, leverage });
+  setLeverage = async (symbol: string, leverage: number, side?: PositionSide) => {
+    await this.command({ op: 'setLeverage', symbol, leverage, ...(side !== undefined ? { side } : {}) });
     if (this.name === 'kucoinspot') {
       this.applier.applyLeverage(symbol, { buyLeverage: 1, sellLeverage: 1 });
     }
@@ -1068,8 +1070,8 @@ export class RustEngineExchange extends BaseExchange {
     await this.command({ op: 'setMarginType', symbol: symbol ?? '', isolated });
   };
 
-  changePositionMode = async (hedged: boolean) => {
-    await this.command({ op: 'setPositionMode', hedged });
+  changePositionMode = async (hedged: boolean, symbol?: string) => {
+    await this.command({ op: 'setPositionMode', hedged, ...(symbol !== undefined ? { symbol } : {}) });
   };
 
   private validateAsterStp = (mode?: AsterDEXStpMode): void => {
@@ -1204,6 +1206,11 @@ export class RustEngineExchange extends BaseExchange {
 
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
+      this.host?.flush();
+      const known = this.store.fetchedLeverage[symbol];
+      if (['bitget', 'bitgetinverse', 'bitgetusdc', 'bingx', 'mexc', 'phemex', 'weex'].includes(this.name)
+        && known && Number.isFinite(known.buyLeverage) && known.buyLeverage > 0
+        && Number.isFinite(known.sellLeverage) && known.sellLeverage > 0) return known;
       let leverage: FetchedLeverage;
       if (
         [

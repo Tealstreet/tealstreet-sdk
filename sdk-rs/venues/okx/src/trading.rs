@@ -140,6 +140,7 @@ impl Okx {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => {
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
@@ -156,7 +157,11 @@ impl Okx {
                     if !leverage.is_finite() {
                         return Err("leverage must be finite".into());
                     }
-                    let leverage = leverage.clamp(m.limits.leverage.min, m.limits.leverage.max);
+                    let leverage = num::clamp_leverage(
+                        leverage,
+                        m.limits.leverage.min,
+                        m.limits.leverage.max,
+                    )?;
                     let step = step(
                         "/api/v5/account/set-leverage",
                         &Leverage {
@@ -171,7 +176,11 @@ impl Okx {
                 })();
                 (command, result)
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Mode {
@@ -485,9 +494,9 @@ impl Okx {
         let mut seen = HashSet::new();
         let mut optimistic = Vec::new();
         for id in &ids {
-            let Some(o) = cx.store.order(id) else {
-                continue;
-            };
+            let o = cx.store.order(id).ok_or_else(|| {
+                format!("Order {id} not found; cancellation requires a reconciled order")
+            })?;
             let m = cx
                 .store
                 .market(&o.symbol)

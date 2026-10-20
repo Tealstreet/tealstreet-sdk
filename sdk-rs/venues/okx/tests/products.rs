@@ -357,6 +357,7 @@ fn failed_later_product_position_refresh_keeps_both_previous_products() {
             command: 7,
             symbol: "BTCUSD261225".into(),
             leverage: 8.0,
+            side: None,
         }),
     );
     let a = actions(&mut e)
@@ -436,6 +437,7 @@ fn read_keys_override_http_passphrase_but_never_private_socket_login_or_writes()
             command: 8,
             symbol: "BTCUSD261225".into(),
             leverage: 5.0,
+            side: None,
         }),
     );
     let out = actions(&mut e);

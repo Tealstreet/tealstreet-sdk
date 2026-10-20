@@ -509,6 +509,7 @@ fn setting_commands_update_store_only_after_ack_and_failures_preserve_settings()
         command: 1,
         symbol: "BTCUSDT".into(),
         leverage: 500.0,
+        side: None,
     });
     let (request, p) = body(&mut h, "/set-leverage");
     assert_eq!(p["leverage"].as_f64(), Some(125.0));
@@ -532,6 +533,7 @@ fn setting_commands_update_store_only_after_ack_and_failures_preserve_settings()
     h.command(Command::SetPositionMode {
         command: 3,
         hedged: true,
+        symbol: None,
     });
     h.respond("/set-position-mode", 200, r#"{"code":"00000","data":{}}"#);
     assert!(h.engine.store().hedged());
@@ -729,11 +731,68 @@ fn isolated_hedge_leverage_ack_only_updates_the_requested_long_side() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         });
         let (request, p) = body(&mut h, "/set-leverage");
         assert_eq!(p[if uta_account { "posSide" } else { "holdSide" }], "long");
         h.reply(request, 200, r#"{"code":"00000","data":{}}"#);
         assert_eq!(h.engine.store().position("long").unwrap().leverage, 20.0);
         assert_eq!(h.engine.store().position("short").unwrap().leverage, 10.0);
+    }
+}
+
+#[test]
+fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+    use safe_cex_engine::{Action, Notice};
+    for mixed in [false, true] {
+        let mut h = Harness::classic();
+        h.engine.store_mut().set_orders(vec![Order {
+            id: "123".into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTCUSDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 90.0,
+            amount: 1.0,
+            filled: 0.0,
+            remaining: 1.0,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }]);
+        h.engine.drain_actions().for_each(drop);
+        h.engine.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 991,
+                ids: if mixed {
+                    vec!["123".into(), "456".into()]
+                } else {
+                    vec!["456".into()]
+                },
+            }),
+        );
+        let actions = h.engine.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
+                    if error.contains("456") && error.contains("not found")
+            )),
+            "missing cancellation error: {actions:?}"
+        );
+        assert_eq!(
+            h.engine.store().order("123").unwrap().status,
+            OrderStatus::Open
+        );
     }
 }

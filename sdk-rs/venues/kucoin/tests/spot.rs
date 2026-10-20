@@ -698,6 +698,7 @@ fn fixed_settings_changes_never_send_derivative_writes() {
             command: 1,
             symbol: "BTC-USDT".into(),
             leverage: 99.0,
+            side: None,
         },
         Command::SetMarginType {
             command: 2,
@@ -707,6 +708,7 @@ fn fixed_settings_changes_never_send_derivative_writes() {
         Command::SetPositionMode {
             command: 3,
             hedged: true,
+            symbol: None,
         },
     ] {
         h.command(c);
@@ -1168,14 +1170,17 @@ fn secondary_reads_preserve_primary_mutations_and_unsigned_public_gets() {
             } else if request.url.contains("/bullet-private") {
                 assert_identity(request, false, "replay-passphrase", h.now);
             } else {
+                assert!(request.headers.iter().all(|(name, _)| {
+                    !name.starts_with("KC-API-") && *name != "KC-BROKER-NAME"
+                }));
                 assert!(
-                    !request
+                    request
                         .headers
                         .iter()
-                        .any(|(name, _)| name.starts_with("KC-API-"))
+                        .any(|(name, value)| { *name == "X-CHANNEL-API-CODE" && value == "3zexp" })
                 );
             }
-            // Host GET routing selects the read client even for unsigned public endpoints.
+            // Public requests stay unsigned; private GETs use the read identity.
             assert_eq!(request.route, None);
         }
         h.command(Command::FetchAccount { command: 1 });
@@ -1203,10 +1208,10 @@ fn secondary_reads_preserve_primary_mutations_and_unsigned_public_gets() {
         assert_eq!(candles.method, Method::Get);
         assert_eq!(candles.route, None);
         assert!(
-            !candles
+            candles
                 .headers
                 .iter()
-                .any(|(name, _)| name.starts_with("KC-API-"))
+                .all(|(name, _)| { !name.starts_with("KC-API-") && *name != "KC-BROKER-NAME" })
         );
         h.command(Command::PlaceOrders {
             command: 4,

@@ -627,9 +627,9 @@ impl Bitrue {
             Command::CancelOrders { ids, .. } => {
                 let mut seen = HashSet::new();
                 for id in &ids {
-                    let Some(order) = cx.store.order(id) else {
-                        continue;
-                    };
+                    let order = cx.store.order(id).ok_or_else(|| {
+                        format!("Order {id} not found; cancellation requires a reconciled order")
+                    })?;
                     if terminal(order.status) || !seen.insert(id.clone()) {
                         continue;
                     }
@@ -722,7 +722,11 @@ impl Bitrue {
                 );
                 return true;
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 if *hedged {
                     cx.done(
                         *command,
