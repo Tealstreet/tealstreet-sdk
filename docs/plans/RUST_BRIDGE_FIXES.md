@@ -409,6 +409,15 @@ gates remain pending for these newly added hooks.
 
 ### Phase 3c plan for command errors
 
+Plan audit passes with explicit error-only `Notice::CommandError { command,
+message }` / `Cx::command_error` and WASM `commandError` action. Native server
+routes this notice only to the initiating client/original command. Command zero
+without a reply retains ordinary error-log visibility. The host records its
+first diagnostic before callbacks, settles known success before final error
+delivery and contains diagnostic callback failures through the remaining action
+batch. The SDK command catch owns rejected-result error reporting. This leaves
+partial-success errors visible without string matching or a permanent ledger.
+
 - Add explicit native command-log attribution at sites where the command is
   known, including errors deferred until batch completion and Hyro waiters.
   Ordinary background logs keep their existing behavior. Avoid message/time
