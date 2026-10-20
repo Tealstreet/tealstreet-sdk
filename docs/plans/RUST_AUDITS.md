@@ -127,4 +127,31 @@ no freshness fence, so every venue reinvents dedupe and terminal fencing.
 
 ## Gate honesty
 
-Pending.
+No venue has live private evidence; private tapes are generated in CI from
+documented or synthetic payloads (14–24 frames for several venues).
+
+- Binance/Bybit oracle copies Rust's `marginSize` into TS when TS is 0
+  (`harness/gate.mjs:646`). Circular.
+- "Identical output" is final-state only and partial (`harness/replay.mjs:803`):
+  no TP/SL, realizedPnl, fees, fill timestamps or execution ids; fill prices
+  skipped on binance, bybit, bitget, bingx, cryptocom, mexc, hyperliquid, weex,
+  breakoutprop; rows keyed by symbol collapse duplicates (`gate.mjs:87`).
+- Whole-section rewrites of the TS side (kraken, backpack, coinbase, orderly,
+  kucoin, phemex, cryptocom, bingx, lighter, weex, binance variants); some
+  normalizations apply to Rust too and can mask regressions.
+- ~20 TS venues were edited on this branch as paired fixes, so the oracle moved
+  with the port. Gate against master TS and declare deltas.
+- Perf: median of 3 with no margin, harness audit cost inside the window, wasm
+  compile outside it, process CPU ungated (Rust loses on grvt, hyperliquidspot,
+  bybit, woo, breakoutprop), failed perf jobs re-run to green, retained memory
+  mostly TS module graph and redefined ~10 times.
+- Size budget covers per-venue builds; the shipped combined build (≈10–11.7 MB)
+  has none. Paradex has 678 bytes of headroom.
+- Public fixtures are recorded by driving Rust, so TS-only subscriptions cannot
+  diverge; fixtures refreshed alongside behaviour fixes.
+- `bitgetusdc` has no CI replay gate; HyroTrader and BreakoutProp public data are synthetic.
+
+Before cutover: live-smoke private captures on every venue (mainnet minimum size
+for coinbase, backpack, mexc with approval), a 3–7 day read-only production
+shadow diffing full store snapshots, public fixtures re-recorded with TS, and a
+per-venue canary holding the circular-evidence venues last.
