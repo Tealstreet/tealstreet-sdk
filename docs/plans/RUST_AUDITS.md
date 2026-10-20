@@ -225,3 +225,28 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   category, stop with only price, category-filtered private topics,
   PartiallyFilledCanceled, inverse units, failed position read zeroing, create
   network errors, live candle volume units.
+
+### BloFin
+- High: a failed or malformed ticker read at startup means the private side
+  never starts, no retry (`blofin/src/lib.rs:617,651`); `brokerId` never sent,
+  losing broker attribution (`trading.rs:126`, TS `blofin.exchange.ts:2159`);
+  per-symbol margin mode stays stale after a position closes, so orders go out
+  in the wrong margin mode (`trading.rs:271`, `account.rs:614`).
+- Medium: `null` in order/position/ticker fields rejects whole snapshots/frames
+  (`wire.rs`; verify against one live frame); WS login timestamp serialized as
+  float (`account.rs:284`); one odd instrument row aborts startup
+  (`lib.rs:505`); cancel of an id the store lacks resolves OK with no request
+  (`trading.rs:671`).
+- Low: strict leverage fetch; trigger TP/SL not tick-rounded; missing
+  iso/cross warnings; 102143 not translated; history shape.
+- Confirm (TS bugs Rust fixed): IOC/FOK rejected; TP/SL trigger type honored;
+  zero-size partial TP/SL rejected; amend checks order-detail (endpoint
+  unexercised live); per-row cancel errors; empty snapshot commits; income
+  filters; boolean reduceOnly.
+
+### Cross-venue patterns from the port reviews
+- Startup is fail-closed with no retry on OKX and BloFin where TS continues on
+  partial data; check every venue and set one engine policy.
+- Broker attribution: BloFin drops `brokerId`; check every venue's broker/referral
+  tag against TS.
+- Cancel of ids not in the store silently succeeds (Binance, BloFin).
