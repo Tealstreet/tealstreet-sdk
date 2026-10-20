@@ -268,31 +268,17 @@ impl ArraySplitter {
                 }
                 continue;
             }
-            if self.phase != Phase::InArray {
-                self.keep(byte);
-                if self.invalid {
-                    return;
-                }
+            // Array elements are scanned by `feed_array`; this loop only sees
+            // the envelope around the array.
+            self.keep(byte);
+            if self.invalid {
+                return;
             }
             if self.phase == Phase::Done && !matches!(self.at, ArrayAt::PathOmitLists(_)) {
                 continue;
             }
             if self.in_string {
-                if self.phase == Phase::InArray {
-                    self.item.push(byte);
-                    if !self.escaped && byte != b'\\' && byte != b'"' {
-                        // Ordinary string bytes cannot change nesting or escape
-                        // state. Copy the span together, leaving its delimiter
-                        // for the existing state machine (also across chunks).
-                        let len = data
-                            .iter()
-                            .position(|&byte| byte == b'\\' || byte == b'"')
-                            .unwrap_or(data.len());
-                        self.item.extend_from_slice(&data[..len]);
-                        data = &data[len..];
-                        continue;
-                    }
-                } else if self.capturing_key {
+                if self.capturing_key {
                     self.key.push(byte);
                 }
                 if self.escaped {
@@ -312,7 +298,6 @@ impl ArraySplitter {
                 }
                 continue;
             }
-            let at_array_level = self.phase == Phase::InArray && self.depth == self.array_depth;
             match byte {
                 b'"' => {
                     self.in_string = true;
@@ -376,10 +361,7 @@ impl ArraySplitter {
                             continue;
                         }
                     }
-                    if byte == b'['
-                        && self.phase != Phase::InArray
-                        && matches!(self.at, ArrayAt::PathOmitLists(_))
-                    {
+                    if byte == b'[' && matches!(self.at, ArrayAt::PathOmitLists(_)) {
                         let mut ignored = Box::new(Self::new(ArrayAt::Root));
                         ignored.feed(b"[", ignore_item as fn(&str));
                         self.ignored = Some(ignored);
@@ -387,38 +369,14 @@ impl ArraySplitter {
                     }
                 }
                 b']' | b'}' => {
-                    if at_array_level && byte == b']' {
-                        self.emit(&mut on_item);
-                        self.phase = Phase::Done;
-                        self.depth = self.depth.saturating_sub(1);
-                        self.keep(byte);
-                        continue;
-                    }
                     if self.phase == Phase::Seeking {
                         self.containers.pop();
                     }
                     self.depth = self.depth.saturating_sub(1);
                 }
-                b',' if at_array_level => {
-                    self.emit(&mut on_item);
-                    // Collapse completed rows; preserve malformed separators.
-                    if self.envelope.ends_with(b"null,null") {
-                        self.envelope.truncate(self.envelope.len() - 5);
-                    }
-                    if self.envelope.len() >= METADATA_LIMIT {
-                        self.invalid = true;
-                        return;
-                    }
-                    self.envelope.push(b',');
-                    continue;
-                }
-                b' ' | b'\n' | b'\r' | b'\t' if at_array_level && self.item.is_empty() => continue,
                 b' ' | b'\n' | b'\r' | b'\t' => {}
                 _ if self.phase == Phase::Seeking => self.armed = false,
                 _ => {}
-            }
-            if self.phase == Phase::InArray {
-                self.item.push(byte);
             }
         }
     }
@@ -508,7 +466,9 @@ impl ArraySplitter {
                     if self.item_check == ItemCheck::Venue
                         || serde_json::from_str::<IgnoredAny>(text).is_ok() =>
                 {
-                    on_item(text.trim())
+                    // JSON whitespace only: Unicode trim would accept a row
+                    // that the venue-checked mode never syntax-checks whole.
+                    on_item(text.trim_matches([' ', '\n', '\r', '\t']))
                 }
                 _ => self.invalid = true,
             }
@@ -669,6 +629,26 @@ mod tests {
         splitter.feed(body, |_| rows += 1);
         assert_eq!(rows, 0);
         assert!(!splitter.finished());
+        // Non-JSON whitespace around a row stays in the text the venue parses.
+        for row in [
+            "{\"a\":1}\u{c}",
+            "\u{a0}{\"a\":1}",
+            "{\"a\":1}\u{2028}",
+            "\u{b}1",
+        ] {
+            for check in [ItemCheck::Splitter, ItemCheck::Venue] {
+                let mut splitter = ArraySplitter::with_item_check(ArrayAt::Root, check);
+                let mut rows = Vec::new();
+                splitter.feed(format!("[{row}]").as_bytes(), |item| {
+                    rows.push(item.to_owned())
+                });
+                assert!(
+                    rows.iter()
+                        .all(|item| serde_json::from_str::<IgnoredAny>(item).is_err()),
+                    "{check:?} {row:?} {rows:?}"
+                );
+            }
+        }
     }
 
     #[test]
