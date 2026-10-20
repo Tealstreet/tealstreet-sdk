@@ -917,7 +917,7 @@ fn queries_return_history_in_the_shared_shapes() {
         r#"{"retCode":0,"retMsg":"OK","result":{"nextPageCursor":"","list":[{"transSubType":"","id":"592324_XRPUSDT_161440249321","symbol":"XRPUSDT","side":"Buy","funding":"-0.003676","orderLinkId":"","orderId":"1672128000-8-592324-1-2","fee":"0.00000000","change":"-0.003676","cashFlow":"0","transactionTime":"1672128000000","type":"SETTLEMENT","feeRate":"0.0001","bonusChange":"","size":"100","qty":"100","cashBalance":"5086.55825002","currency":"USDT","category":"linear","tradePrice":"0.3676","tradeId":"534c0003-4bf7-486f-aa02-78cee36825e4","extraFees":""},{"transSubType":"","id":"592324_XRPUSDT_161440249321","symbol":"XRPUSDT","side":"Buy","funding":"","orderLinkId":"linear-order","orderId":"592b7e41-78fd-42e2-9aa3-91e1835ef3e1","fee":"0.01908720","change":"-0.0190872","cashFlow":"0","transactionTime":"1672121182224","type":"TRADE","feeRate":"0.0006","bonusChange":"-0.1430544","size":"100","qty":"88","cashBalance":"5086.56192602","currency":"USDT","category":"linear","tradePrice":"0.3615","tradeId":"5184f079-88ec-54c7-8774-5173cafd2b4e","extraFees":""}]},"retExtInfo":{},"time":1672132481405}"#,
     );
     let result = h.result(22).unwrap().as_ref().unwrap();
-    assert!(result.contains(r#"{"symbol":"XRPUSDT","incomeType":"FUNDING_FEE","income":-0.003676,"asset":"USDT","timestamp":1672128000000.0,"tranId":"592324_XRPUSDT_161440249321-XRPUSDT-SETTLEMENT-Buy-100-1672128000000:funding""#), "{result}");
+    assert!(result.contains(r#"{"symbol":"XRPUSDT","incomeType":"FUNDING_FEE","income":-0.003676,"asset":"USDT","timestamp":1672128000000.0,"tranId":"534c0003-4bf7-486f-aa02-78cee36825e4-XRPUSDT-SETTLEMENT-1672128000000:funding""#), "{result}");
     assert!(result.contains(r#""incomeType":"COMMISSION","income":-0.0190872"#));
 
     h.command(Command::Query {
@@ -1511,4 +1511,34 @@ fn a_malformed_order_row_still_preserves_the_whole_last_good_snapshot() {
     );
     assert!(h.engine.store().order(ORDER_ID).is_some());
     assert!(h.engine.store().order("new-1").is_none());
+#[test]
+fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
+    let mut h = ready();
+    h.command(Command::Query {
+        command: 35,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    });
+    for page in 0..20 {
+        let rows: Vec<String> = (page * 50..page * 50 + 50)
+            .map(|i| format!(r#"{{"orderId":"o{i}","symbol":"BTCUSDT","side":"Buy","orderType":"Limit","orderStatus":"Cancelled","qty":"1","cumExecQty":"0","price":"100","createdTime":"{}"}}"#, 1672000000000u64 + i as u64))
+            .collect();
+        let body = format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"c{}","list":[{}]}}}}"#,
+            page + 1,
+            rows.join(",")
+        );
+        let request = h.take("/v5/order/history");
+        h.reply(request.id, 200, &body);
+    }
+    assert!(!h.has_request("/v5/order/history"));
+    let rows =
+        serde_json::from_str::<Vec<serde_json::Value>>(h.result(35).unwrap().as_ref().unwrap())
+            .unwrap();
+    assert_eq!(rows.len(), 1000);
+    assert!(h.logs.iter().any(|m| m.contains("page limit")));
 }
