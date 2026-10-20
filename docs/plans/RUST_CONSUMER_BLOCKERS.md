@@ -194,31 +194,50 @@ publish an empty snapshot or dispose the previous good engine.
   policy integration and fresh combined-artifact affected gates follow.
 
 
+- Lighter integration checkpoint `eb9b96a2de`: strict fixture handles the new
+  authenticated tier request; mainnet/testnet Robinhood × disabled/shared policy
+  tests preserve private sockets, native USDG metadata, private snapshots and
+  provider-derived prices/PnL across polling. Independent review PASS; full
+  Lighter suite 107 tests. A central run compiled before the fixture edits settled
+  and executed an obsolete assertion; fresh default/all-feature focused runs and
+  the full workspace rerun use the committed fixture.
+- Integrated artifact is 11,395,355 bytes, SHA-256
+  `eb2f1751aeb243ccf46264aa35b1a2e2e99de17c6f03463cc2f40a37594b3359`.
+  SDK unit 7,457/513 files, SDK WASM 413/14 files, host 70, harness 561,
+  server unit 138 and native WASM 11, and CLI/MCP/mobile seven WASM tests PASS.
+  MCP isolated build/smoke PASS with matching packaged bytes and unchanged
+  131 JS / 353 Rust dependency notices. Root typecheck 44 and lint 28 tasks PASS.
+  Central native workspace: 2,487 tests / 205 result suites PASS; workspace
+  all-target/all-feature Clippy, WASM32 Clippy, bans and formatting PASS.
+  Current-artifact replay follows. This adds Robinhood public/mainnet/testnet
+  controls to the prior twelve public/nineteen private control set.
+
 ## Final public replay metrics
 
-Three-run medians on the final `afeee9aa…6d710` combined binary. Values are
+Three-run medians on the integrated `eb2f1751…b3359` combined binary. Values are
 TypeScript → Rust. Public gates enforce main-thread CPU, steady CPU and
 retained memory; process CPU is an additional diagnostic. Private replay
-controls enforce correctness only. Existing documented fixtures are reused;
-this consumer change adds no live venue capture or new TS protocol correction.
+controls enforce correctness only. The updated landing GRVT/Lighter fixtures
+are used; this consumer change adds no live venue capture or TS protocol fix.
 
 | Profile | Main CPU ms | Steady CPU ms | Process CPU ms | Retained MB |
 | --- | ---: | ---: | ---: | ---: |
-| binance | 179.8 → 92.6 | 98.1 → 33.8 | 240.6 → 164.1 | 18.5 → 5.2 |
-| binancespot | 517.2 → 385.3 | 225.8 → 111.5 | 690.1 → 529.3 | 27.9 → 11.8 |
-| binanceinverse | 161.3 → 69.0 | 108.8 → 35.7 | 191.9 → 106.8 | 14.2 → 3.0 |
-| binancepm | 170.7 → 93.0 | 95.2 → 34.0 | 225.9 → 164.4 | 18.4 → 5.2 |
-| hyperliquid | 342.6 → 59.3 | 23.2 → 20.8 | 431.6 → 149.6 | 24.7 → 3.8 |
-| coinbase | 804.4 → 310.2 | 464.8 → 87.2 | 1012.5 → 426.0 | 39.1 → 21.7 |
-| phemex | 369.7 → 113.9 | 255.3 → 40.0 | 463.2 → 186.0 | 20.5 → 5.6 |
-| asterdex | 174.0 → 99.4 | 65.2 → 45.3 | 299.7 → 210.9 | 28.2 → 7.5 |
-| txflow | 74.8 → 55.1 | 13.0 → 9.3 | 119.3 → 100.2 | 17.9 → 2.6 |
-| grvt | 168.3 → 153.6 | 111.4 → 94.9 | 202.2 → 255.9 | 27.2 → 2.8 |
-| lighter | 291.5 → 177.4 | 191.3 → 103.1 | 386.3 → 301.8 | 17.6 → 3.9 |
-| apexomni | 78.1 → 36.6 | 47.1 → 6.1 | 109.3 → 81.0 | 21.8 → 3.4 |
+| binance | 281.0 → 144.7 | 158.3 → 67.5 | 351.3 → 235.4 | 18.8 → 5.2 |
+| binancespot | 928.6 → 783.9 | 495.7 → 368.7 | 1091.7 → 963.6 | 28.0 → 11.9 |
+| binanceinverse | 234.2 → 102.5 | 158.0 → 57.0 | 260.8 → 154.9 | 14.1 → 3.0 |
+| binancepm | 222.0 → 107.9 | 114.4 → 42.2 | 275.3 → 192.4 | 18.4 → 5.2 |
+| hyperliquid | 335.2 → 53.0 | 26.0 → 15.5 | 419.7 → 141.7 | 24.9 → 3.7 |
+| coinbase | 791.4 → 311.6 | 454.5 → 92.5 | 987.2 → 410.6 | 38.8 → 21.8 |
+| phemex | 371.0 → 100.2 | 261.2 → 33.4 | 456.7 → 164.8 | 20.6 → 5.7 |
+| asterdex | 168.6 → 94.1 | 65.3 → 42.1 | 285.7 → 203.8 | 28.2 → 7.5 |
+| txflow | 92.7 → 73.1 | 21.4 → 16.6 | 144.5 → 128.9 | 18.0 → 2.5 |
+| grvt | 169.9 → 147.9 | 102.7 → 82.2 | 208.4 → 257.8 | 27.2 → 2.9 |
+| lighter | 400.6 → 243.0 | 270.3 → 156.4 | 497.1 → 382.1 | 17.7 → 4.0 |
+| lighter-robinhood | 267.5 → 96.8 | 187.4 → 43.0 | 334.7 → 209.0 | 20.5 → 6.2 |
+| apexomni | 78.6 → 39.2 | 47.0 → 6.8 | 110.3 → 83.7 | 21.8 → 3.4 |
 
-All 12 public controls PASS. GRVT process CPU is higher in this run;
+All 13 public controls PASS. GRVT process CPU is higher in this run;
 its gated main/steady CPU and retained memory remain below TS. Public
-main-thread speedups range from 1.10× to 5.78×; retained memory reductions
-range from 1.80× to 9.58×. No benchmark builds/tests ran concurrently with
+main-thread speedups range from 1.15× to 6.32×; retained memory reductions
+range from 1.78× to 9.45×. No benchmark builds/tests ran concurrently with
 these public measurements in this lane.
