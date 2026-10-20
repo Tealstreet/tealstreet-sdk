@@ -253,3 +253,22 @@ live trading, weakened parity oracle, or performance threshold changes.
   removal of 145 Set-Cookie headers across 120 HTTP records in 12 captures.
   Proof files: `/tmp/security-gitleaks-final-receipt.json` and
   `/tmp/security-fixture-final-proof.json`.
+
+### Final source quality acceptance
+
+- At source `5a9314df83`, all seven serialized quality stages pass. Root
+  typecheck 44/44, lint 28/28 and test tasks 27/27 pass. Both safe-cex runners
+  pass 7759 tests across 525 files. The initial exit-137 attempt remains in the
+  failure log; the bounded rerun completed in 295.9 seconds without relaxing
+  assertions. Native workspace remains 2852/2852 tests across 244 suites,
+  strict native/Wasm Clippy pass, and standalone engine is 93/93 across three
+  suites. The native session adapter fixture also builds successfully.
+- Both HTTP and WebSocket original-boundary negative controls fail as expected;
+  restored mock host suite is 50/50. Independent final transport review accepted.
+- Scanner refreshed at `5a9314df83`: 151 changed files, zero findings, exit 0.
+  Receipt: `/tmp/security-gitleaks-transport-final-receipt.json`.
+- The 30-venue isolated build/size/public/private matrix now runs against this
+  source, with low-contention scheduling before timed replays. It restores
+  combined bindings afterward and runs host, wrapper, consumer, frame/session,
+  product, startup/polling, scripted live-smoke and harness checks. Final replay
+  gate numbers and hosted CI/PR review receipts remain outstanding.
