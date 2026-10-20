@@ -6,6 +6,7 @@ use support::*;
 fn order(text: &str) -> PlaceOrderOpts {
     serde_json::from_str(text).unwrap()
 }
+
 fn place(
     e: &mut safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
     orders: Vec<PlaceOrderOpts>,
@@ -16,6 +17,7 @@ fn place(
     );
     actions(e)
 }
+
 #[test]
 fn caller_id_and_contract_amount_are_sent_verbatim_after_lot_adjustment() {
     let mut e = trading_engine();
@@ -40,6 +42,7 @@ fn caller_id_and_contract_amount_are_sent_verbatim_after_lot_adjustment() {
     );
     assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(s), .. }) if s == "[\"1234\"]")));
 }
+
 #[test]
 fn whole_batch_rejects_unhonorable_or_duplicate_caller_id_before_writes() {
     for bad in [
@@ -62,6 +65,7 @@ fn whole_batch_rejects_unhonorable_or_duplicate_caller_id_before_writes() {
         )));
     }
 }
+
 #[test]
 fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
     let mut e = trading_engine();
@@ -99,6 +103,7 @@ fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
     );
     assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(s), .. }) if s == "[\"1\",\"2\",\"3\"]")));
 }
+
 #[test]
 fn lost_write_response_never_retries() {
     let mut e = trading_engine();
@@ -126,9 +131,10 @@ fn lost_write_response_never_retries() {
         },
     );
     let out = actions(&mut e);
+    assert!(out.iter().any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get && r.url.contains("orders-pending"))));
     assert!(
         !out.iter()
-            .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
     );
     assert!(out.iter().any(|a| matches!(
         a,
@@ -160,17 +166,20 @@ fn stored(id: &str, kind: safe_cex_engine::model::OrderType) -> safe_cex_engine:
         extra: None,
     }
 }
+
 fn http(out: &[Action]) -> &Action {
     out.iter()
         .find(|a| matches!(a, Action::Http(_)))
         .expect("HTTP action")
 }
+
 fn body(action: &Action) -> &str {
     let Action::Http(r) = action else {
         panic!("HTTP action")
     };
     r.body.as_deref().unwrap()
 }
+
 fn ack(
     e: &mut safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
     a: &Action,
@@ -548,7 +557,16 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
         },
     );
     let out = actions(&mut e);
-    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get)),
+        "ambiguous server error must reconcile"
+    );
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)),
+        "write must not be retried"
+    );
     assert!(out.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone { result: Err(_), .. })
@@ -650,30 +668,402 @@ fn bybit_execution_controls_reject_the_whole_batch_before_writes() {
 }
 
 #[test]
-fn invalid_dynamic_leverage_limits_reject_without_native_write() {
-    for (min, max) in [
-        (30.0, 20.0),
-        (f64::NAN, 20.0),
-        (1.0, 0.0),
-        (1.0, f64::INFINITY),
-    ] {
+fn lost_cancel_and_amend_responses_keep_pending_state_until_a_fresh_read() {
+    use safe_cex_engine::model::{OrderStatus, OrderType};
+    for amend in [false, true] {
         let mut e = trading_engine();
-        e.store_mut().update_markets(|market| {
-            market.limits.leverage.min = min;
-            market.limits.leverage.max = max;
-        });
+        e.store_mut()
+            .upsert_order(stored("uncertain", OrderType::Limit));
         e.handle(
             5.0,
-            Event::Command(Command::SetLeverage {
-                command: 99,
-                symbol: "BTCUSDT".into(),
-                leverage: 5.0,
-                side: None,
+            Event::Command(if amend {
+                Command::AmendOrder {
+                    command: 11,
+                    id: "uncertain".into(),
+                    price: Some(37000.0),
+                    amount: None,
+                }
+            } else {
+                Command::CancelOrders {
+                    command: 11,
+                    ids: vec!["uncertain".into()],
+                }
             }),
         );
+        let request = actions(&mut e)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(
+            6.0,
+            Event::HttpFailed {
+                request: request.id,
+                error: "timeout after exchange acceptance",
+            },
+        );
         let out = actions(&mut e);
-        assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
-        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+        assert_eq!(
+            e.store().order("uncertain").unwrap().status,
+            if amend {
+                OrderStatus::Updating
+            } else {
+                OrderStatus::Canceling
+            }
+        );
+        assert!(out.iter().any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get && r.url.contains("orders-pending"))));
+        assert!(
+            !out.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+        );
+        assert!(out.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 11,
+                result: Err(_)
+            })
+        )));
+    }
+}
+
+#[test]
+fn cancel_all_includes_acknowledged_entries_and_brackets_before_any_stream_rows() {
+    let mut e = trading_engine();
+    let mut out = place(
+        &mut e,
+        vec![order(
+            r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":2,"price":38000,"stopLoss":36000,"takeProfit":42000}"#,
+        )],
+    );
+    for (id, algo) in [("entry", false), ("stop", true), ("profit", true)] {
+        let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
+        let ack = if algo {
+            format!(r#"{{"algoId":"{id}","sCode":"0"}}"#)
+        } else {
+            format!(r#"{{"ordId":"{id}","sCode":"0"}}"#)
+        };
+        reply(&mut e, request, &envelope(&ack), 6.0);
+        out = actions(&mut e);
+    }
+    assert!(
+        e.store().orders().is_empty(),
+        "the private stream has not populated any rows"
+    );
+    e.handle(
+        7.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 2,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let out = actions(&mut e);
+    let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
+    assert!(
+        matches!(request, Action::Http(r) if r.url.ends_with("/cancel-batch-orders") && r.body.as_ref().unwrap().contains("entry"))
+    );
+    reply(
+        &mut e,
+        request,
+        &envelope(r#"{"ordId":"entry","sCode":"0"}"#),
+        8.0,
+    );
+    let out = actions(&mut e);
+    let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
+    assert!(
+        matches!(request, Action::Http(r) if r.url.ends_with("/cancel-algos") && r.body.as_ref().unwrap().contains("stop") && r.body.as_ref().unwrap().contains("profit"))
+    );
+    reply(
+        &mut e,
+        request,
+        r#"{"code":"0","data":[{"algoId":"stop","sCode":"0"},{"algoId":"profit","sCode":"0"}]}"#,
+        9.0,
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 2,
+            result: Ok(_)
+        })
+    )));
+}
+
+#[test]
+fn partial_batch_accepted_order_remains_cancelable_before_the_stream() {
+    let mut e = trading_engine();
+    let out = place(
+        &mut e,
+        vec![
+            order(r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":2,"price":38000}"#),
+            order(r#"{"symbol":"BTCUSDT","type":"limit","side":"sell","amount":2,"price":42000}"#),
+        ],
+    );
+    let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
+    reply(
+        &mut e,
+        request,
+        r#"{"code":"2","data":[{"ordId":"accepted","sCode":"0"},{"sCode":"51008","sMsg":"Insufficient margin"}]}"#,
+        6.0,
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 1,
+            result: Err(_)
+        })
+    )));
+    e.handle(
+        7.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 2,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/cancel-batch-orders") && r.body.as_ref().unwrap().contains("accepted"))));
+}
+
+fn ready_with_held_reconciliation() -> (
+    safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
+    Vec<Action>,
+) {
+    use safe_cex_engine::Engine;
+    use safe_cex_venue_okx::{Okx, Options};
+    let mut e = Engine::new(Okx::new(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("pass".into()),
+        ..Default::default()
+    }));
+    e.start(0.);
+    let request = http(&actions(&mut e)).clone();
+    reply(&mut e, &request, &envelope(MARKET), 1.);
+    // Private startup begins with the catalogue, alongside the ticker seed.
+    let out = actions(&mut e);
+    let tickers = out
+        .iter()
+        .find(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
+        .unwrap();
+    reply(&mut e, tickers, &envelope(TICKER), 2.);
+    let config = out
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut e,
+        config,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.,
+    );
+    let out = actions(&mut e);
+    let private = out
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let mut reads: Vec<_> = out
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    while let Some(read) = reads.pop() {
+        let body = if matches!(&read, Action::Http(r) if r.url.contains("account-position-risk")) {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else {
+            envelope("")
+        };
+        reply(&mut e, &read, &body, 4.);
+        reads.extend(
+            actions(&mut e)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+    }
+    e.handle(5., Event::WsOpened { socket: private });
+    actions(&mut e);
+    ws(&mut e, private, r#"{"event":"login","code":"0","msg":""}"#);
+    let held: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    assert!(
+        held.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending")))
+    );
+    (e, held)
+}
+
+#[test]
+fn ambiguous_http_and_native_timeouts_preserve_writes_and_force_fresh_reconciliation() {
+    use safe_cex_engine::model::{OrderStatus, OrderType};
+    use safe_cex_engine::{Method, Response};
+    // https://www.okx.com/en-us/help/api-faq-eea: 50004 may succeed or fail.
+    for (status, body) in [
+        (408, "request timed out"),
+        (500, "internal error"),
+        (503, "unavailable"),
+        (504, "gateway timeout"),
+        (
+            200,
+            r#"{"code":"50004","msg":"Endpoint request timeout","data":[]}"#,
+        ),
+        (
+            400,
+            r#"{"code":"50004","msg":"Endpoint request timeout","data":[]}"#,
+        ),
+        (
+            200,
+            r#"{"code":"0","data":[{"ordId":"uncertain","sCode":"50004","sMsg":"Operation timeout"}]}"#,
+        ),
+        (200, "truncated"),
+        (200, r#"{"code":"0","data":{}}"#),
+        (200, r#"{"code":"0","data":[]}"#),
+        (200, r#"{"code":"0","data":[{}]}"#),
+    ] {
+        for amend in [false, true] {
+            let (mut e, held) = ready_with_held_reconciliation();
+            e.store_mut()
+                .upsert_order(stored("uncertain", OrderType::Limit));
+            e.handle(
+                5.,
+                Event::Command(if amend {
+                    Command::AmendOrder {
+                        command: 81,
+                        id: "uncertain".into(),
+                        price: Some(37000.),
+                        amount: None,
+                    }
+                } else {
+                    Command::CancelOrders {
+                        command: 81,
+                        ids: vec!["uncertain".into()],
+                    }
+                }),
+            );
+            let write = http(&actions(&mut e)).clone();
+            let Action::Http(write) = write else {
+                unreachable!()
+            };
+            e.handle(
+                6.,
+                Event::HttpResponse {
+                    request: write.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            let out = actions(&mut e);
+            let expected = if amend {
+                OrderStatus::Updating
+            } else {
+                OrderStatus::Canceling
+            };
+            assert_eq!(
+                e.store().order("uncertain").unwrap().status,
+                expected,
+                "{status}: {body}"
+            );
+            assert!(out.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone {
+                    command: 81,
+                    result: Err(_)
+                })
+            )));
+            assert!(
+                !out.iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+                "write was replayed"
+            );
+            let mut fresh: Vec<_> = out
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")))
+                .collect();
+            assert!(
+                !fresh.is_empty(),
+                "held snapshot cannot prevent a new order read"
+            );
+            for read in held {
+                reply(&mut e, &read, &envelope(""), 7.);
+            }
+            assert_eq!(
+                e.store().order("uncertain").unwrap().status,
+                expected,
+                "pre-write empty snapshot must not clear pending state"
+            );
+            actions(&mut e);
+            while let Some(read) = fresh.pop() {
+                reply(&mut e, &read, &envelope(""), 8.);
+                fresh.extend(
+                    actions(&mut e).into_iter().filter(
+                        |a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")),
+                    ),
+                );
+            }
+            assert!(
+                e.store().order("uncertain").is_none(),
+                "fresh complete empty reconciliation must retire the order"
+            );
+        }
+    }
+}
+
+#[test]
+fn definite_business_rejection_restores_cancel_or_amend_state() {
+    use safe_cex_engine::{
+        Response,
+        model::{OrderStatus, OrderType},
+    };
+    for amend in [false, true] {
+        let mut e = trading_engine();
+        e.store_mut()
+            .upsert_order(stored("rejected", OrderType::Limit));
+        e.handle(
+            5.,
+            Event::Command(if amend {
+                Command::AmendOrder {
+                    command: 82,
+                    id: "rejected".into(),
+                    price: Some(37000.),
+                    amount: None,
+                }
+            } else {
+                Command::CancelOrders {
+                    command: 82,
+                    ids: vec!["rejected".into()],
+                }
+            }),
+        );
+        let Action::Http(write) = http(&actions(&mut e)).clone() else {
+            unreachable!()
+        };
+        e.handle(
+            6.,
+            Event::HttpResponse {
+                request: write.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"code":"1","data":[{"sCode":"51000","sMsg":"Parameter error"}]}"#,
+                },
+            },
+        );
+        let out = actions(&mut e);
+        assert_eq!(
+            e.store().order("rejected").unwrap().status,
+            OrderStatus::Open
+        );
+        assert!(out.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 82,
+                result: Err(_)
+            })
+        )));
     }
 }
 
@@ -727,6 +1117,34 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
             "missing cancellation error: {actions:?}"
         );
         assert_eq!(e.store().order("123").unwrap().status, OrderStatus::Open);
+    }
+}
+
+#[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let mut e = trading_engine();
+        e.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        e.handle(
+            5.0,
+            Event::Command(Command::SetLeverage {
+                command: 99,
+                symbol: "BTCUSDT".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+        let out = actions(&mut e);
+        assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
     }
 }
 

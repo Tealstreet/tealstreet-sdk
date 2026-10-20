@@ -501,6 +501,10 @@ fn interval(i: &str, stream: bool) -> bool {
     ) || (stream && matches!(i, "2h" | "6h"))
 }
 impl Venue for WeexFutures {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.read_credentials
@@ -1053,12 +1057,7 @@ impl Venue for WeexFutures {
             .map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, b)| b.last.is_some() && b.retry.is_none())
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
 

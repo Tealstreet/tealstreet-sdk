@@ -70,6 +70,8 @@ pub struct Account {
     terminal: HashMap<String, (OrderStatus, f64)>,
     fills: HashMap<String, f64>,
     cumulative: HashMap<String, f64>,
+    execution_cumulative: HashMap<String, f64>,
+    orders_seeded: bool,
     equity: Option<f64>,
     metadata_at: HashMap<String, f64>,
     expected: HashMap<String, (f64, f64)>,
@@ -1188,6 +1190,15 @@ impl Woo {
                             row.status = *status;
                         }
                     }
+                    if !self.account.orders_seeded {
+                        for order in &combined {
+                            self.account
+                                .execution_cumulative
+                                .entry(order.id.clone())
+                                .or_insert(order.filled);
+                        }
+                        self.account.orders_seeded = true;
+                    }
                     cx.store.set_orders(combined);
                     self.account_metadata(cx);
                 }
@@ -1446,6 +1457,21 @@ impl Woo {
             .max(cx.store.order(&order.id).map_or(0.0, |o| o.filled));
         let cumulative = r.total_executed.or(r.executed);
         let delta = cumulative.map(|n| (n - baseline).max(0.0));
+        // REST progress describes order state, not executions already delivered to the caller.
+        let execution_baseline = self
+            .account
+            .execution_cumulative
+            .get(&order.id)
+            .copied()
+            .unwrap_or(0.0);
+        let execution_delta = cumulative.map(|n| {
+            let previous = if n > baseline {
+                baseline.max(execution_baseline)
+            } else {
+                execution_baseline
+            };
+            (n - previous).max(0.0)
+        });
         let key = if r.trade_id.is_empty() {
             None
         } else {
@@ -1455,9 +1481,9 @@ impl Woo {
             .as_ref()
             .is_none_or(|k| !self.account.fills.contains_key(k));
         let quantity = if key.is_some() {
-            r.executed_quantity.or(delta)
+            r.executed_quantity.or(execution_delta)
         } else {
-            delta
+            execution_delta
         };
         if cumulative.is_none()
             && key.is_some()
@@ -1480,6 +1506,14 @@ impl Woo {
                 .cumulative
                 .insert(order.id.clone(), baseline.max(n));
         }
+        if matches!(status, "FILLED" | "PARTIAL_FILLED" | "PARTIALLY_FILLED")
+            && price > 0.0
+            && let Some(n) = cumulative
+        {
+            self.account
+                .execution_cumulative
+                .insert(order.id.clone(), execution_baseline.max(n));
+        }
         self.account_upsert(cx, order.clone());
         if matches!(status, "FILLED" | "PARTIAL_FILLED" | "PARTIALLY_FILLED")
             && fresh
@@ -1488,6 +1522,11 @@ impl Woo {
         {
             if let Some(key) = key {
                 self.account.fills.insert(key, cx.now);
+            }
+            if cumulative.is_none() {
+                self.account
+                    .execution_cumulative
+                    .insert(order.id.clone(), execution_baseline + amount);
             }
             let fill = Fill {
                 order_id: order.id,
@@ -1650,6 +1689,9 @@ impl Woo {
             }
             self.account
                 .cumulative
+                .retain(|id, _| retained.contains(id));
+            self.account
+                .execution_cumulative
                 .retain(|id, _| retained.contains(id));
             self.account.algos.retain(|id, _| retained.contains(id));
             self.account.versions.retain(|key, _| {

@@ -1138,3 +1138,42 @@ fn unknown_working_live_order_cannot_clear_previous_snapshot_or_consume_sequence
     assert!(e.store().loaded().orders);
     assert_eq!(e.store().order("one").unwrap().price, 69000.0);
 }
+
+#[test]
+fn unsupported_order_type_or_status_skips_only_that_row() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    let site = order("New", 100)
+        .replace("\"one\"", "\"site\"")
+        .replace("\"Limit\"", "\"Bracket\"");
+    ws(
+        &mut e,
+        s,
+        &format!(
+            r#"{{"type":"snapshot","sequence":1,"orders_p":[{},{site}],"positions_p":[{}]}}"#,
+            order("New", 100),
+            BTC.replace("0.01", "0.02")
+        ),
+    );
+    assert!(e.store().loaded().orders);
+    assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
+    assert!(e.store().order("site").is_none());
+    assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.02);
+    let filled = order("Expired", 200)
+        .replace("\"cumQty\":\"0\"", r#""cumQty":"0.1","execID":"exec-x","execQty":"0.1","execPriceRp":"69000","tradeType":"Trade""#);
+    ws(
+        &mut e,
+        s,
+        &format!(
+            r#"{{"type":"incremental","sequence":2,"orders_p":[{filled}],"positions_p":[{}]}}"#,
+            BTC.replace("0.01", "0.03")
+                .replace("1700000000000000000", "1700000000000000005")
+        ),
+    );
+    assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.03);
+    assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
+    let frame = e.take_frame(NOW).unwrap();
+    let data = execution_rows(frame, 1);
+    assert_eq!(f64::from_le_bytes(data[8..16].try_into().unwrap()), 0.1);
+}

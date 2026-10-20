@@ -346,3 +346,95 @@ fn first_rest_seed_retains_live_quotes_and_values_early_native_holdings_with_the
     assert_eq!(engine.store().balance().total, 1410.);
     assert_eq!(engine.store().currency_balances().unwrap().len(), 4);
 }
+
+// Official Kraken v2 checksum example: decimal precision and trailing zeros are significant.
+// https://docs.kraken.com/exchange/guides/websockets/book-checksum-v2
+const CHECKSUM_SNAPSHOT: &str = r#"{"channel":"book","type":"snapshot","data":[{"symbol":"BTC/USD","bids":[{"price":"45283.5","qty":"0.10000000"},{"price":"45283.4","qty":"1.54582015"},{"price":"45282.1","qty":"0.10000000"},{"price":"45281.0","qty":"0.10000000"},{"price":"45280.3","qty":"1.54592586"},{"price":"45279.0","qty":"0.07990000"},{"price":"45277.6","qty":"0.03310103"},{"price":"45277.5","qty":"0.30000000"},{"price":"45277.3","qty":"1.54602737"},{"price":"45276.6","qty":"0.15445238"}],"asks":[{"price":"45285.2","qty":"0.00100000"},{"price":"45286.4","qty":"1.54571953"},{"price":"45286.6","qty":"1.54571109"},{"price":"45289.6","qty":"1.54560911"},{"price":"45290.2","qty":"0.15890660"},{"price":"45291.8","qty":"1.54553491"},{"price":"45294.7","qty":"0.04454749"},{"price":"45296.1","qty":"0.35380000"},{"price":"45297.5","qty":"0.09945542"},{"price":"45299.5","qty":"0.18772827"}],"checksum":3310070434}]}"#;
+
+#[test]
+fn checksum_mismatch_clears_consumer_book_and_requires_fresh_snapshot() {
+    for numeric_tokens in [false, true] {
+        let (mut e, socket, _) = ready(true);
+        e.handle(
+            NOW,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: "XBT/USD".into(),
+            }),
+        );
+        e.drain_actions().for_each(drop);
+        let snapshot = if numeric_tokens {
+            CHECKSUM_SNAPSHOT
+                .replace("\"price\":\"", "\"price\":")
+                .replace("\",\"qty\":\"", ",\"qty\":")
+                .replace("\"}", "}")
+        } else {
+            CHECKSUM_SNAPSHOT.into()
+        };
+        message(&mut e, socket, &snapshot);
+        assert_eq!(e.book("XBT/USD").unwrap().best_bid(), Some(45283.5));
+        e.take_frame(NOW);
+        // A missing or changed level must not become an apparently synchronized book.
+        message(
+            &mut e,
+            socket,
+            r#"{"channel":"book","type":"update","data":[{"symbol":"BTC/USD","bids":[{"price":45283.5,"qty":5}],"checksum":3310070434}]}"#,
+        );
+        assert!(e.book("XBT/USD").is_none());
+        let frame = e.take_frame(NOW).unwrap();
+        assert!(
+            safe_cex_engine::wire::sections(frame).any(|(kind, payload)| {
+                kind == safe_cex_engine::wire::section::BOOK && payload[4..12] == [0; 8]
+            })
+        );
+        let sent: Vec<_> = e
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::WsSend { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sent.iter().filter(|s| s.contains("book")).count(), 2);
+        assert!(sent[0].contains("unsubscribe") && sent[1].contains("subscribe"));
+        message(
+            &mut e,
+            socket,
+            r#"{"channel":"book","type":"update","data":[{"symbol":"BTC/USD","bids":[{"price":45283.5,"qty":1}]}]}"#,
+        );
+        assert!(e.book("XBT/USD").is_none());
+        message(&mut e, socket, &snapshot);
+        assert_eq!(e.book("XBT/USD").unwrap().best_bid(), Some(45283.5));
+    }
+}
+
+#[test]
+fn checksum_valid_updates_apply_all_rows_and_trim_subscribed_depth() {
+    let (mut e, socket, _) = ready(true);
+    e.handle(
+        NOW,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "XBT/USD".into(),
+        }),
+    );
+    let bids = (1..=101)
+        .map(|p| format!(r#"{{"price":{p},"qty":1}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    // Independently computed IEEE CRC32 of "1022" then top-ten (price,qty) digits.
+    message(
+        &mut e,
+        socket,
+        &format!(
+            r#"{{"channel":"book","type":"snapshot","data":[{{"symbol":"BTC/USD","bids":[{bids}],"asks":[{{"price":102,"qty":2}}],"checksum":2319673332}}]}}"#
+        ),
+    );
+    assert_eq!(e.book("XBT/USD").unwrap().bids().len(), 100);
+    assert_eq!(e.book("XBT/USD").unwrap().bids().last().unwrap().0, 2.0);
+    message(
+        &mut e,
+        socket,
+        r#"{"channel":"book","type":"update","data":[{"symbol":"BTC/USD","bids":[{"price":101,"qty":0},{"price":101.5,"qty":1}],"checksum":1711568279}]}"#,
+    );
+    let book = e.book("XBT/USD").expect("valid complete update CRC");
+    assert_eq!(book.best_bid(), Some(101.5));
+    assert_eq!(book.bids().len(), 100);
+}

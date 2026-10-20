@@ -226,7 +226,7 @@ fn startup_position_failure_still_loads_balance_orders_and_connects_private_sock
     assert!(e.store().loaded().balance && e.store().loaded().orders);
     assert!(!e.store().loaded().positions);
     let (e, _) = ready_position(404, "endpoint not found");
-    assert!(e.store().loaded().positions);
+    assert!(!e.store().loaded().positions);
     assert!(e.store().positions().is_empty());
 }
 
@@ -301,5 +301,22 @@ fn unknown_working_order_rejects_snapshot_but_terminal_and_spot_rows_remain_out_
             .replace("New", status);
         let (e, _) = ready_orders(&format!("[{order}]"));
         assert_eq!(e.store().loaded().orders, loaded, "{symbol} {status}");
+    }
+}
+
+#[test]
+fn every_positions_404_preserves_the_last_successful_snapshot() {
+    for body in [
+        "endpoint not found",
+        r#"{"code":"NOT_FOUND","message":"gateway route missing"}"#,
+    ] {
+        let (mut e, socket) = ready();
+        e.handle(1000.0, Event::WsOpened { socket });
+        let read = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.ends_with("/position"))
+            .unwrap();
+        reply(&mut e, &read, 404, body);
+        assert_eq!(e.store().positions()[0].contracts, 5.0);
     }
 }

@@ -117,7 +117,7 @@ fn ticker_seed_merges_untouched_markets_without_replacing_newer_stream() {
     assert_eq!(e.store().ticker("BTC").unwrap().mark, 200.0);
 }
 #[test]
-fn malformed_success_depth_does_not_commit_empty_book() {
+fn malformed_success_depth_does_not_restore_a_stale_book() {
     for invalid in [
         r#"{}"#,
         r#"{"code":200,"message":"missing levels"}"#,
@@ -150,7 +150,19 @@ fn malformed_success_depth_does_not_commit_empty_book() {
             })
             .unwrap();
         reply(&mut e, &request, 100_001.0, invalid);
-        assert_eq!(e.book("ETH").unwrap().bids(), [(100.0, 2.0)], "{invalid}");
+        // The per-book silence deadline invalidates the old baseline before recovery.
+        // A malformed response must not restore it or establish a new snapshot.
+        assert!(e.book("ETH").unwrap().is_empty(), "{invalid}");
+        message(
+            &mut e,
+            socket,
+            100_002.0,
+            r#"{"channel":"order_book:0","type":"update/order_book","order_book":{"begin_nonce":10,"nonce":11,"bids":[{"price":"99","size":"1"}]}}"#,
+        );
+        assert!(
+            e.book("ETH").unwrap().is_empty(),
+            "invalid REST cannot establish continuity"
+        );
     }
 }
 #[test]

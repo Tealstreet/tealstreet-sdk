@@ -564,10 +564,14 @@ impl KrakenSpot {
                     self.send_private(cx, r);
                     return;
                 }
-                if e.contains("EAPI:Invalid key")
-                    || e.contains("EAPI:Invalid signature")
-                    || e.contains("EGeneral:Permission denied")
-                    || matches!(response.status, 401 | 403)
+                // A key without trade permission still reads; only fail that write.
+                let permission_on_write = e.contains("EGeneral:Permission denied")
+                    && matches!(request.kind, Kind::Trade(_));
+                if !permission_on_write
+                    && (e.contains("EAPI:Invalid key")
+                        || e.contains("EAPI:Invalid signature")
+                        || e.contains("EGeneral:Permission denied")
+                        || matches!(response.status, 401 | 403))
                 {
                     self.reject_auth(cx, &e);
                 }

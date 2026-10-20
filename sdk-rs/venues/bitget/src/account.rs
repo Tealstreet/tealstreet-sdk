@@ -35,6 +35,7 @@ pub enum Request {
 }
 
 pub struct OrderSnapshot {
+    version: u64,
     source: OrderSource,
     cursor: Option<String>,
     cursors: HashSet<String>,
@@ -75,6 +76,7 @@ struct WsPosition {
 pub struct Account {
     pub(crate) supervisor: Supervisor,
     pub generation: u64,
+    pub orders_version: u64,
     pub config_at: Option<f64>,
     pub uta: bool,
     pub detected: bool,
@@ -446,6 +448,7 @@ impl BitgetFutures {
         self.order_page(
             cx,
             OrderSnapshot {
+                version: self.account.orders_version,
                 source: OrderSource::Normal,
                 cursor: None,
                 cursors: HashSet::new(),
@@ -747,6 +750,11 @@ impl BitgetFutures {
                 }
             }
             Request::Orders(mut snapshot) if !snapshot.invalid => {
+                if snapshot.version != self.account.orders_version {
+                    self.account.orders_in_flight = false;
+                    self.refresh_orders(cx, false);
+                    return;
+                }
                 #[derive(Deserialize)]
                 #[serde(untagged)]
                 enum Meta {
@@ -832,6 +840,9 @@ impl BitgetFutures {
                         snapshot.started,
                         snapshot.stream_revision,
                     );
+                    if !snapshot.virtual_only {
+                        cx.orders_reconciled(None);
+                    }
                     if self.account.uta && self.account.orders_dirty {
                         self.refresh_orders(cx, false);
                     }

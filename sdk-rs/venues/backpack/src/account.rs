@@ -473,15 +473,6 @@ impl Backpack {
         pending: Request,
         response: Response<'_>,
     ) {
-        if response.status == 404
-            && let Request::Positions { revision, next, .. } = &pending
-        {
-            if *revision == self.account.positions_revision {
-                cx.store.set_positions(vec![]);
-            }
-            self.next_account(cx, *next);
-            return;
-        }
         if !(200..300).contains(&response.status) {
             self.account_failed(
                 cx,
