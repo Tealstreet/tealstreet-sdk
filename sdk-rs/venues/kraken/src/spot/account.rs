@@ -1,5 +1,6 @@
 use super::{Connection, KrakenSpot, Pending, wire::*};
 use crate::wire::{number, optional_number};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::url;
 use safe_cex_engine::{
     Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, model::*, socket::Tick,
@@ -9,6 +10,8 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet, VecDeque},
 };
+
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 #[derive(Clone)]
 pub enum Kind {
@@ -39,6 +42,7 @@ pub struct Account {
     native_times: HashMap<String, f64>,
     pub balance_revision: u64,
     balance_flight: HashSet<u64>,
+    balance_guard: StaleGuard,
     orders_flight: bool,
     pub provenance: HashMap<String, String>,
     pub terminal: HashSet<String>,
@@ -471,7 +475,13 @@ impl KrakenSpot {
             });
         })
         .map_err(|_| "Kraken Spot invalid balance")?;
-        if revision == self.account.balance_revision {
+        let current = revision == self.account.balance_revision;
+        // An admitted stale read is re-read by the caller's stale-revision path.
+        if self
+            .account
+            .balance_guard
+            .admit_issued(current, revision, STALE_SNAPSHOT_LIMIT)
+        {
             cx.store.set_currency_balances(currencies);
             self.account.wallet_valuation_pending = true;
             self.revalue_pending_balances(cx);
