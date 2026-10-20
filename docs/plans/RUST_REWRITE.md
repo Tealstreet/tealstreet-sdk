@@ -280,9 +280,64 @@ as they are; zero-copy book consumers (`Float64Array` rows into the order
 book, DOM and depth chart) come after that. How the web build obtains the
 compiled wasm is decided then.
 
-Then: exchange-server moves to the native host and streams the same frames
-(with `BOOK_DELTA` sections for networked clients — full books every flush
-are ~450 KB/s for two 1,000-level books).
+Then: exchange-server moves to the native host and streams the same frames.
+The first step is the native frame server (plan and acceptance checkpoints in
+`RUST_FRAME_SERVER_PROGRESS.md`). Deployment and application adoption remain
+separate from this engine/transport change.
+
+#### Native frame server migration
+
+The mirror's `packages/safe-cex-server` is a library, not the deployed
+exchange-server application. Its current exports are:
+
+- `RedisCandleCacheBackend`: adapts a caller-supplied Redis/Valkey client to
+  the SDK key-value candle cache; prefers SCAN, with KEYS as a fallback.
+- `PublicExchangeFactory`: owns a public-only exchange per venue, hydrates
+  market stores from quantized UTC-hour snapshots, serializes refreshes with
+  an in-process lock, and falls back to the latest valid cached snapshot.
+  Market snapshots and their validated latest pointers have three-hour TTLs.
+  Ticker-cache helpers provide a 150-second bootstrap seed with a 300-second
+  TTL; these seeds are not executable quotes.
+- `PublicdataTickerBridge`: filters explicitly requested Binance/Bybit
+  capabilities and fresh connected health, loads market indexes, and maps
+  the publicdata service's JSON ticker snapshots/deltas into SDK ticker state.
+  An empty eligible set does not subscribe to all venues.
+
+The native host replaces the per-account venue/Store execution loop, outbound
+venue REST/WebSockets/timers, and repeated serialization of live account and
+book state. A configured account owns one engine independently of its client
+connections. Its authenticated clients receive a binary `snapshot_frame`
+first, then ordered SCXF flush frames; commands and their correlated results
+remain typed JSON. An account token grants full command access to that account;
+client-supplied venue credentials and account creation are outside this protocol.
+The embedding application supplies account engines, routing and token policy.
+The runnable example uses Binance; the server API accepts other venue engines.
+
+`BOOK_DELTA` carries only changed `[price, amount]` levels since the previous
+flush (zero deletes). Full `BOOK` replaces the baseline on subscription,
+resnapshot/gap, or market identity changes. Local WASM consumers retain full
+books by default. Network consumers reconstruct sorted levels and cumulative
+totals. A new connection first establishes the current flush boundary before
+its snapshot, so snapshot interleaving cannot omit a later reverted level.
+A slow client is disconnected instead of dropping frames; reconnect starts
+with a fresh snapshot. A lost connection is a stream gap, never permission to
+apply more deltas against stale state.
+
+For now TS retains Redis persistence, hourly refresh/stale-fallback policy,
+bootstrap ticker caches, the publicdata capability/health adapter, and the
+worker shell's chasers, TWAP, CLI, post-processors and derived store fields.
+Application session authorization, TLS termination, credential provisioning,
+process supervision and public routing remain deployment responsibilities.
+No cache export or existing hosted-account protocol is removed in this step.
+A later TS session adapter can translate worker commands and feed these frames
+through `FrameApplier`; only after parity for shell behavior and cache hydration
+can the deployed exchange-server stop its old worker execution path. Browser
+adoption is still the separate master/Copybara step above.
+
+Bandwidth is measured with a deterministic two-book fixture, without a load
+test. Report depth per side, number of changed levels, flush cadence, full and
+delta SCXF bytes, WebSocket framing and initial/resync snapshots separately;
+compression and TCP/TLS/IP overhead are not inferred from payload bytes.
 
 ### 7. CI — Binance, Bybit, Backpack, OKX, Crypto.com, WEEX and BingX
 
