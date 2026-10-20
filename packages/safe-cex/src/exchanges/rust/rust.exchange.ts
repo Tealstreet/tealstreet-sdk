@@ -85,6 +85,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   hyrotrader: 'hyrotrader',
   cryptocom: 'cryptocom',
   kucoin: 'kucoin',
+  polymarket: 'polymarket',
   hyperliquid: 'hyperliquid',
   paradex: 'paradex',
   kraken: 'kraken',
@@ -232,6 +233,15 @@ export class RustEngineExchange extends BaseExchange {
     this.isSpot = exchangeName === 'bybitspot';
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
+    if (exchangeName === 'polymarket') {
+      this.cancelAllOrders = async () => {
+        await this.command({ op: 'cancelSymbolOrders', symbol: '' });
+      };
+      this.fetchSymbolMaxLeverage = async (symbol: string) => {
+        const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+        return Math.max(rails.buyLeverage, rails.sellLeverage);
+      };
+    }
     if (exchangeName === 'apexomni') {
       this.getAccount = async () => {
         await this.ensureHost();
@@ -268,6 +278,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   get isPublicDataOnly(): boolean {
+    if (this.name === 'polymarket') return this.options.publicDataOnly === true || !this.options.key;
     if (this.name === 'paradex') {
       return (
         this.options.publicDataOnly === true ||
@@ -333,12 +344,26 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
     if (
-      !['hyperliquid', 'paradex', 'lighter', 'coinbase', 'coinbasespot'].includes(this.name) &&
+      !['hyperliquid', 'paradex', 'lighter', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) &&
       !this.isPublicDataOnly &&
       (!this.options.key ||
         !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
     ) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
+    }
+    if (this.name === 'polymarket' && !this.isPublicDataOnly) {
+      if (!/^(?:0x)?[a-fA-F0-9]{64}$/.test(this.options.key)) {
+        throw new Error('Polymarket requires a local 32-byte wallet private key');
+      }
+      const { apiKey, apiSecret, apiPassphrase, signerType = 0, funderAddress } = this.options.polymarket ?? {};
+      const credentials = [apiKey, apiSecret, apiPassphrase];
+      if (credentials.some((value) => value !== undefined) && !credentials.every((value) => typeof value === 'string' && value.trim())) {
+        throw new Error('Polymarket requires all three L2 API credentials together');
+      }
+      if (![0, 1, 2, 3].includes(signerType)) throw new Error('Invalid Polymarket signature type');
+      if ((signerType !== 0 || funderAddress !== undefined) && !/^0x[a-fA-F0-9]{40}$/.test(funderAddress ?? '')) {
+        throw new Error('Polymarket requires a valid funder address for non-EOA signing');
+      }
     }
     if (orderlyNames.has(this.name) && !this.isPublicDataOnly) {
       if (!this.options.applicationId || !/^[A-Za-z0-9_-]+$/.test(this.options.applicationId)) {
@@ -411,6 +436,7 @@ export class RustEngineExchange extends BaseExchange {
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
+        ...(this.name === 'polymarket' ? { polymarket: this.options.polymarket } : {}),
         ...(this.name === 'paradex' ? { paradexAddress, subkeyAddress } : {}),
         ...(this.name === 'asterdex'
           ? {
@@ -659,7 +685,7 @@ export class RustEngineExchange extends BaseExchange {
       if (!userId || this.isPublicDataOnly) throw new Error('Coinbase private portfolio ID is unavailable');
       return { userId };
     }
-    if (this.name === 'asterdex') return this.command<ExchangeAccount>({ op: 'fetchAccount' });
+    if (this.name === 'asterdex' || this.name === 'polymarket') return this.command<ExchangeAccount>({ op: 'fetchAccount' });
     if (!orderlyNames.has(this.name)) throw new Error('Not implemented');
     if (!this.host) await this.start();
     await this.untilLoaded();
@@ -729,9 +755,9 @@ export class RustEngineExchange extends BaseExchange {
     return market.limits.leverage.max;
   };
 
-  fetchOrderBook = async (symbol: string, limit = 100): Promise<OrderBook> => {
-    if (this.name !== 'asterdex') throw new Error('Orderbook snapshot queries are unavailable for this venue');
-    return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit });
+  fetchOrderBook = async (symbol: string, limit?: number): Promise<OrderBook> => {
+    if (this.name !== 'asterdex' && this.name !== 'polymarket') throw new Error('Orderbook snapshot queries are unavailable for this venue');
+    return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit: this.name === 'asterdex' ? limit ?? 100 : limit });
   };
 
   private candleInterval = (interval: OHLCVOptions['interval']): OHLCVOptions['interval'] =>
@@ -772,7 +798,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (['asterdex', 'blofin', 'bitrue', 'paradex', 'coinbase', 'coinbasespot'].includes(this.name) || orderlyNames.has(this.name))
+      if (['asterdex', 'blofin', 'bitrue', 'paradex', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) || orderlyNames.has(this.name))
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
