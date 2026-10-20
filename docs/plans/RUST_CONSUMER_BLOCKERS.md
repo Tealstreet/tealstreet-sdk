@@ -515,6 +515,29 @@ publish an empty snapshot or dispose the previous good engine.
   retained 13.5 → 0.8 MB. Restore/reverify combined consumer bytes and require
   the new exact-head CI before landing; all earlier runtime misses stay visible.
 
+- Final implementation checkpoint `0532692dbe`: combined browser/Node and
+  isolated packaged bytes are 11,950,205 bytes, SHA
+  `5658fe55a8cac61ed36cf33ab1968409e2a1a46f699ab3ed5533f44c50b5dbdb`.
+  Fresh tests pass: SDK 433 WASM, server 11 WASM, CLI/MCP/mobile 9 WASM;
+  packaged smoke exposes 17 tools and a real native Coinbase catalog outside
+  the checkout, retaining 131 JS and 353 Rust notices. Earlier unchanged-TS-source
+  root typecheck/lint and unit results remain valid; the native suite is
+  now 2,714 tests. No source or artifact edits occurred during CPU controls.
+  All three latest combined controls pass (TS → Rust): Binance main
+  194.2 → 88.5 ms, steady 105.5 → 33.7 ms, retained 18.2 → 4.9 MB;
+  TxFlow main 80.3 → 55.1 ms, steady 12.0 → 9.4 ms, retained 17.4 → 2.2 MB;
+  Hyro main 28.5 → 20.9 ms, steady 6.8 → 3.5 ms, retained 13.5 → 1.7 MB.
+  The exact-head canonical Linux Bybit job also passes, including Hyro main
+  27.5 → 26.0 ms, steady 4.4 → 3.6 ms, retained 13.3 → 0.8 MB. Earlier
+  failed trials stay recorded; these are new-source receipts, not retries.
+- Landing advanced only in audit documentation (`1c8f479f48`, `bd94abb524`),
+  integrated without Rust/TS code changes. [RUST_AUDITS.md](RUST_AUDITS.md)
+  records broader delivery, hosted-signing, mobile-host, wire/trading and
+  evidence limitations that remain cutover work. This lane's offline startup,
+  feed and packaging proofs neither certify live private trading nor authorize
+  TS deletion, registry changes, publication or deployment. Require green CI
+  on the final documentation-integrated head before merging PR #1342.
+
 ## Historical public replay metrics (6afa artifact)
 
 Prior acceptance runtime: Node 22.23.3, three-run medians. Fifteen profiles, including OKX EU,

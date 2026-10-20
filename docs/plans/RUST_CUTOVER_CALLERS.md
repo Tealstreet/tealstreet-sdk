@@ -115,6 +115,12 @@ arbitrary `market.info`, or hosted deployments. Provider/catalog failure stops
 receiving accounts; it never silently opens account public sockets. See
 [RUST_CONSUMER_BLOCKERS.md](RUST_CONSUMER_BLOCKERS.md).
 
+Additional [rewrite audit findings](RUST_AUDITS.md) remain cutover gates.
+The consumer repairs and offline proofs do not settle downstream engine delivery,
+hosted keyless signing, a Hermes/native bridge, full live private parity or the
+production shadow/canary evidence. Keep these separate from the repaired startup,
+shared-feed and package-loading boundaries documented here.
+
 ## Source-proven deletion blockers and repaired boundaries
 
 The Polymarket landing adds typed prediction sections to

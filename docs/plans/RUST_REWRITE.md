@@ -580,6 +580,12 @@ binary and device integration remain unproved**. These are deterministic offline
 consumer/packaging proofs, not live account authentication or deployment claims.
 See [RUST_CONSUMER_BLOCKERS.md](RUST_CONSUMER_BLOCKERS.md) for checkpoints/gates.
 
+Additional [rewrite audit findings](RUST_AUDITS.md) remain cutover gates.
+The consumer repairs and offline proofs do not settle downstream engine delivery,
+hosted keyless signing, a Hermes/native bridge, full live private parity or the
+production shadow/canary evidence. Keep these separate from the repaired startup,
+shared-feed and package-loading boundaries documented here.
+
 Deletion proceeds in separate, reviewable PRs:
 
 1. Close missing products/account modes and the blockers above, then prove
