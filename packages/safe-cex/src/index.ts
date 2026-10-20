@@ -23,8 +23,9 @@ export {
   isExchangeSupportedOnMobile,
 } from './exchangeMetadata';
 
-export { serializeCommandError, deserializeCommandError } from './commandOutcome';
-export type { SerializedCommandError } from './commandOutcome';
+export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
+export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
+export { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 
 export { RustPublicFeedProvider } from './exchanges/rust/publicFeed';
 export type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';

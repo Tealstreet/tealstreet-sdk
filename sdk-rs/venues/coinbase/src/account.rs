@@ -1496,6 +1496,16 @@ impl Coinbase {
                         self.select_portfolio(cx, portfolio, ProductKind::Spot);
                         return;
                     }
+                    // A read key without portfolio scope says nothing about the trading key.
+                    Request::Portfolios if read_signed => {
+                        let reason = format!("cannot list portfolios (HTTP {})", response.status);
+                        if self.read_credentials.is_some() {
+                            self.read_key_unverified(cx, &reason);
+                        } else {
+                            self.private_failed(cx, req, &reason);
+                        }
+                        return;
+                    }
                     Request::Portfolios if matches!(response.status, 403 | 404) => {
                         cx.log(LogLevel::Error, "Coinbase credentials rejected");
                         cx.deactivate();
