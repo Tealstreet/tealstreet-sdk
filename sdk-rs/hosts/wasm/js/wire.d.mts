@@ -81,7 +81,8 @@ export interface PredictionHoldingTable {
   market: Uint32Array;
   flags: Uint32Array;
 }
-export type TickerTable = { count: number; market: Uint32Array } & Columns<TickerField>;
+export interface TickerIdentity { id: string; symbol: string }
+export type TickerTable = { count: number; market: Uint32Array; identity?(i: number): TickerIdentity } & Columns<TickerField>;
 export interface BookRows {
   market: number;
   /** `[price, amount, total]` per level, best first. */
@@ -104,12 +105,15 @@ export type OrderTable = { count: number; market: Uint32Array; enums: Uint32Arra
 };
 export type PositionTable = { count: number; market: Uint32Array; enums: Uint32Array; id(i: number): string | undefined } & Columns<PositionColumn>;
 export interface CoinBalance { base: string; amount: number; notional: number }
-export interface Balance {
-  coins?: Record<string, CoinBalance>;
+export interface CurrencyBalance {
   used: number;
   free: number;
   total: number;
   upnl: number;
+}
+export interface Balance extends CurrencyBalance {
+  coins?: Record<string, CoinBalance>;
+  currencies?: Record<string, CurrencyBalance>;
 }
 export interface Status {
   loaded: number;
@@ -159,5 +163,6 @@ export class TickerState {
   count: number;
   market: Uint32Array;
   columns: Partial<Columns<TickerField>>;
+  identity?: (i: number) => TickerIdentity;
   apply(frame: Frame): void;
 }

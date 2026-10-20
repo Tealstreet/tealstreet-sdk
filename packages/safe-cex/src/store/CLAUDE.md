@@ -18,6 +18,11 @@ string references for venue-defined position IDs; preserve these when present
 so simultaneous Cross and Isolated rows for a symbol remain distinct. Older
 frames still derive identity from symbol and position mode.
 
+Aggregate venue ticker streams may still contain delisted symbols absent from
+the current market table. `TICKERS` then carries optional symbol/ID references;
+`FrameApplier` uses those identities for orphan rows and preserves packed delta
+indexes. Keep those ticker rows without synthesizing markets or filtering them.
+
 `serialize()` carries every derived display bridge field, including
 `displayedPositions` and `displayedMargin`. Hosted or force-full-store paths
 must not depend on postprocessors happening to reconstruct a field after

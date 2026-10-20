@@ -1,13 +1,18 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
-import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
+import { APEX_SEED, apexWireBody, createApexSocketAudit, prepareApexReplay, prepareApexTs, validateApexRequest } from './apexomni-protocol.mjs';
+import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
 import { polymarket } from './polymarket.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
+import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
+import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
 
+import {createKrakenRequestAudit,validateKrakenSocketMessage,validateKrakenSocketFrame,krakenRequestBody,krakenCommandResult} from './kraken-protocol.mjs';
+let krakenRequestAudit;
 let lighterVerifier;
 
 const root = '../../packages/safe-cex/src/exchanges';
@@ -509,6 +514,82 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  apexomni: {
+    rust: 'apexomni',
+    ts: { module: `${root}/apexomni/apexomni.exchange.ts`, className: 'ApexOmniExchange', name: 'apexomni' },
+    privateSocket: '/realtime_private',
+    replayCredentials: { omniKeySeed: APEX_SEED },
+    publicOptions: { passphrase: '' },
+    recordOptions: { publicDataOnly: true, key: '', secret: '' },
+    prepareReplay: prepareApexReplay,
+    prepareTs: prepareApexTs,
+    wireBody: apexWireBody,
+    matchRequestBody: true,
+    generatedId: () => false,
+    generatedBodyId: (key) => ['clientId', 'clientOrderId', 'tpClientOrderId', 'slClientOrderId', 'expiration', 'tpExpiration', 'slExpiration', 'tpSignature', 'slSignature'].includes(key),
+    compareWriteOrder: true,
+    compareFillPrices: true,
+    compareClientIds: true,
+    subscriptionGenerations: true,
+    createSocketAudit: createApexSocketAudit,
+    validateRequest: validateApexRequest,
+    independentLeverage: true,
+    tsSettings: (_exchange, store) => store.markets.map((market) => ({
+      symbol: market.symbol,
+      marginType: 'cross',
+      buyLeverage: store.positions.find((position) => position.symbol === market.symbol && position.side === 'long')?.leverage ?? 0,
+      sellLeverage: store.positions.find((position) => position.symbol === market.symbol && position.side === 'short')?.leverage ?? 0,
+    })),
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderBook200.H.')).length >= count,
+    isWrite: (method) => method !== 'GET',
+  },
+  kraken: {
+    rust: 'kraken',
+    compareBalanceCoins:true,
+    productSubscriptions:true,
+    tsBooksReady:(exchange,store)=>Boolean(store.loaded.tickers&&exchange.publicWebsocket),
+    tsSettings:(exchange,store)=>store.markets.map(m=>{
+      const position=store.positions.find(p=>p.symbol===m.symbol&&p.contracts>0);
+      return {symbol:m.symbol,leverage:exchange.leverageSettings.get(m.symbol)??position?.leverage??m.limits.leverage.max,marginType:exchange.marginTypePreferences.get(m.symbol)??position?.marginType??'cross'};
+    }),
+    ts: {module: `${root}/kraken/kraken.exchange.ts`, className: 'KrakenExchange', name: 'kraken'},
+    replayCredentials: {key:'replay-key',secret:'cmVwbGF5LXNlY3JldA=='},
+    tsBooksSubscribed: (exchange,count) => Object.values(exchange.publicWebsocket.orderBookHandlers).filter(v=>v.length).length>=count,
+    isPrivateRecord: record=>record.type==='ws'&&/"(?:fills|open_orders|open_positions|challenge)"/.test(record.text??''),
+    initializeReplay(impl){krakenRequestAudit=createKrakenRequestAudit({strict:impl==='rust'});},
+    validateRequest: request=>krakenRequestAudit(request),
+    validateSocketMessage:validateKrakenSocketMessage,
+    validateSocketFrame:validateKrakenSocketFrame,
+    requestBody:krakenRequestBody,
+    commandResult:krakenCommandResult,
+    requestBodies:true,
+    compareFillPrices:true,
+    compareWriteOrder:true,
+    isWrite:method=>method!=='GET',
+  },
+  asterdex: {
+    initializeReplay: initializeAsterCrypto,
+    rust: 'asterdex',
+    ts: { module: `${root}/asterdex/asterdex.exchange.ts`, className: 'AsterDEXExchange', name: 'asterdex' },
+    privateSocket: '/ws/',
+    compareFillPrices: true,
+    compareBalanceCurrencies: true,
+    compareWriteOrder: true,
+    requestUrl: asterRequestUrl,
+    createRequestValidator: createAsterRequestValidator,
+    createSocketAudit: asterSocketAudit,
+    isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.topics).filter((topic) => topic.endsWith('@depth20@100ms')).length >= count,
+    startupSubscriptions: (records, books) => {
+      const url = records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/stream')?.url ?? 'wss://fstream.asterdex.com/stream';
+      return subscriptionKeys(url, { method: 'SUBSCRIBE', params: ['!ticker@arr', '!markPrice@arr@1s', ...books.map((symbol) => `${symbol.toLowerCase()}@depth20@100ms`)] });
+    },
+    prepareTsTransport: async (_exchange, adapter) => {
+      const { default: axios } = await import('axios');
+      axios.defaults.adapter = adapter;
+      createRequire(import.meta.url)('axios').defaults.adapter = adapter;
+    },
+  },
   ...Object.fromEntries([...Object.keys(ORDERLY_BROKERS), 'orderly'].map((name) => [name, orderly(name)])),
   lighter: {
     rust: 'lighter',

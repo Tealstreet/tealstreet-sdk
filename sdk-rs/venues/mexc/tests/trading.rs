@@ -919,6 +919,7 @@ fn plan_stop_amend_keeps_latest_native_source_after_ws() {
         sl_trigger_type: Some(StopTriggerType::MarkPrice),
         client_order_id: None,
         close: None,
+        stp_mode: None,
         max_slippage_pct: None,
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,

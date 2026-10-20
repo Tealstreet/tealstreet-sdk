@@ -307,3 +307,30 @@ it('cancels every venue order through native cancel-all even with an empty SDK o
   await expect(exchange.cancelAllOrders()).resolves.toBeUndefined();
   expect(requests.filter((request) => request.method === 'DELETE').map((request) => new URL(request.url).pathname)).toEqual(['/cancel-all']);
 });
+
+it('queries the signer account and a full REST book without starting a book subscription', async () => {
+  const { exchange, sockets } = await start({ key: KEY, secret: '', polymarket: API }, (request) => {
+    if (new URL(request.url).pathname !== '/book') return;
+    expect(new URL(request.url).searchParams.get('token_id')).toBe(TOKEN);
+    return response({ asset_id: TOKEN, bids: [{ price: '0.4', size: '2' }, { price: '0.5', size: '3' }], asks: [{ price: '0.8', size: '5' }, { price: '0.6', size: '4' }] });
+  });
+  expect(await exchange.getAccount()).toEqual({ userId: SIGNER, affiliateId: null });
+  expect(await exchange.fetchOrderBook(SYMBOL)).toEqual({
+    bids: [{ price: 0.5, amount: 3, total: 3 }, { price: 0.4, amount: 2, total: 5 }],
+    asks: [{ price: 0.6, amount: 4, total: 4 }, { price: 0.8, amount: 5, total: 9 }],
+  });
+  expect(sockets.some((socket) => socket.url.endsWith('/market'))).toBe(false);
+  await expect(exchange.fetchOrderBook('unknown')).rejects.toThrow('Unknown');
+});
+
+it('keeps more than one hundred levels in a default REST book query', async () => {
+  const bids = Array.from({ length: 150 }, (_, i) => ({ price: String((i + 1) / 1000), size: '1' }));
+  const { exchange } = await start({ key: '', secret: '', publicDataOnly: true }, (request) => {
+    if (new URL(request.url).pathname === '/book') return response({ asset_id: TOKEN, bids, asks: [] });
+  });
+  const book = await exchange.fetchOrderBook(SYMBOL);
+  expect(book.bids).toHaveLength(150);
+  expect(book.bids[0]).toEqual({ price: 0.15, amount: 1, total: 1 });
+  expect(book.bids[149]).toEqual({ price: 0.001, amount: 1, total: 150 });
+  expect((await exchange.fetchOrderBook(SYMBOL, 10)).bids).toHaveLength(10);
+});

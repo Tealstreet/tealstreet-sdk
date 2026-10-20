@@ -137,12 +137,16 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
   lastConnectTime = 0;
   ordersThrottleTimeout: NodeJS.Timeout | undefined;
   positionsThrottleTimeout: NodeJS.Timeout | undefined;
-  // Per-orderId cumulative-fill / cumulative-fee trackers. Apex order updates
-  // carry CUMULATIVE totals (cumSuccessFillSize / cumSuccessFillFee), not deltas.
-  // Mirroring Blofin's lastFilledSizeByOrderId pattern lets us derive a positive
-  // delta and avoid double-counting against contents.fills rows.
-  private lastCumFilledByOrderId: Map<string, number> = new Map();
-  private lastCumFeeByOrderId: Map<string, number> = new Map();
+  private executionProgress = new Map<string, { reported: number; topic: number; synthetic: number; fee: number }>();
+  private terminalOrderIds = new Set<string>();
+
+  private progressFor = (id: string) => {
+    const progress = this.executionProgress.get(id) || { reported: 0, topic: 0, synthetic: 0, fee: 0 };
+    this.executionProgress.delete(id);
+    this.executionProgress.set(id, progress);
+    if (this.executionProgress.size > 4096) this.executionProgress.delete(this.executionProgress.keys().next().value!);
+    return progress;
+  };
 
   throttleFetchOrders = () => {
     if (this.ordersThrottleTimeout) {
@@ -302,10 +306,10 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
 
   handleWsAccountsV2Topic = (data: WsZkAccountsV3Message) => {
     if (data.contents.fills) {
-      this.handleFillTopic(data.contents.fills);
+      this.handleFillTopic(data.contents.fills, data.type === 'snapshot');
     }
     if (data.contents.orders) {
-      this.handleOrderTopic(data.contents.orders);
+      this.handleOrderTopic(data.contents.orders, data.type === 'snapshot');
     }
     if (data.contents.positions) {
       this.handlePositionTopic(data.contents.positions);
@@ -321,168 +325,123 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
     UNTRIGGERED: OrderStatus.Open,
   */
 
-  handleFillTopic = (fills: WsZkAccountsV3Message['contents']['fills']) => {
-    // IMPORTANT: do NOT emit 'fill' events from this handler.
-    //
-    // The pre-PR Apex private WS only emitted 'fill' from handleOrderTopic
-    // (gated by `shouldNotify` = within 5s of order update AND >5s after
-    // connect). Our PR added handleFillTopic to capture per-fill rows for
-    // the new fetchHistoricalFills / chart fill-arrows cache via
-    // recordWsExecution — that part is correct and needed.
-    //
-    // However, this handler initially also emitted 'fill' events, which
-    // caused two regressions:
-    //
-    //   1. Live-fill duplication: contents.fills[] and contents.orders[]
-    //      both arrive in the same aop_p batch for a single fill, so
-    //      handleFillTopic + handleOrderTopic each fired emit('fill') →
-    //      2 fill toasters per real fill.
-    //
-    //   2. Cold-start spam: Apex sends type:'snapshot' on connect with
-    //      historical fills in contents.fills[]. handleFillTopic had no
-    //      shouldNotify-equivalent guard, so it fired emit('fill') for
-    //      each historical fill → 3-5 stale toasters on every cold start.
-    //
-    // Restoring pre-PR toaster behavior: handleOrderTopic remains the
-    // sole 'fill' emitter (with its existing guards). recordWsExecution
-    // continues to populate the chart fill-arrow cache for both live and
-    // snapshot rows, which is the desired behavior for that cache.
-    fills.forEach((fill) => {
-      this.parent.recordWsExecution(fill as Record<string, any>);
+  handleFillTopic = (fills: WsZkAccountsV3Message['contents']['fills'], snapshot = false) => {
+    fills.forEach((row) => {
+      const execution = this.parent.recordWsExecution(row as Record<string, any>);
+      if (!execution) return;
+      const orderId = execution.orderId || '';
+      const progress = this.progressFor(orderId);
+      const covered = Math.min(progress.synthetic, execution.qty);
+      progress.synthetic -= covered;
+      progress.topic += execution.qty;
+      if (covered > 0) this.parent.consumeSyntheticExecutions(orderId, covered);
+      if (!snapshot) {
+        this.parent.noteAmendFillProgress(execution, execution.qty);
+        this.emitter.emit('fill', {
+          id: orderId,
+          symbol: execution.symbol,
+          side: execution.side,
+          price: execution.price,
+          amount: execution.qty,
+        });
+      }
     });
   };
 
-  handleOrderTopic = (data: WsZkAccountsV3Message['contents']['orders']) => {
-    // Check if any orders are CANCELED before deciding to throttle fetch
-    const hasCanceledOrders = data.some((order) => order.status === 'CANCELED');
-
-    // Only fetch orders if we're not dealing with cancellations
-    // Cancellations should be handled by the blacklist mechanism, not by re-fetching
-    if (!hasCanceledOrders) {
-      this.throttleFetchOrders();
-    }
-
+  handleOrderTopic = (data: WsZkAccountsV3Message['contents']['orders'], snapshot = false) => {
+    if (!data.some((order) => order.status === 'CANCELED')) this.throttleFetchOrders();
     data.forEach((order) => {
-      // Skip recently cancelled orders
-      if (this.parent.recentlyCancelledOrders.has(order.id)) {
+      let orders;
+      try {
+        orders = this.parent.mapOrder(order);
+      } catch (error) {
+        this.parent.log(`Invalid private order update: ${String(error)}`, LogSeverity.Warning);
         return;
       }
-
-      const orders = this.parent.mapOrder(order);
       if (orders.length === 0) return;
-
       const price = parseFloat(v(order, 'price'));
       const amount = parseFloat(v(order, 'size'));
+      if (order.status === 'FILLED' && price <= 0 && amount <= 0) return;
+      const cumulative = Number.parseFloat(v(order, 'cumSuccessFillSize') || '0');
+      if (Number.isFinite(cumulative) && cumulative >= 0 && cumulative <= amount) {
+        this.parent.noteAmendOrderProgress(
+          String(order.id),
+          cumulative,
+          order.status === 'FILLED' || order.status === 'EXPIRED',
+          v(order, 'updatedAt') || v(order, 'updatedTime'),
+        );
+      }
+      if (this.parent.recentlyCancelledOrders.has(order.id) || this.terminalOrderIds.has(order.id)) return;
 
-      const isFreshOrder = Date.now() - order.updatedAt <= 5_000;
-      const isEnoughTimePassedAfterConnect = virtualClock.getCurrentTimeMs() - this.lastConnectTime > 5_000;
-
-      const shouldNotify = isEnoughTimePassedAfterConnect && isFreshOrder;
-
-      if (order.status === 'FILLED') {
-        // False positive when order is replaced
-        // it emits a partially filled with 0 amount & price
-        if (price <= 0 && amount <= 0) return;
-
-        // Apex order updates carry CUMULATIVE fill totals, not per-event deltas. Recording
-        // the cumulative qty as a single execution would double-count alongside the per-fill
-        // rows from contents.fills (handled in handleFillTopic). Mirror Blofin's pattern:
-        // track last seen cumulative per orderId and only push a synthetic execution when
-        // there's a positive delta — and only as a safety net for deltas not already
-        // accounted for by the fills topic.
-        const cumulativeFilledSize = Number.parseFloat(v(order, 'cumSuccessFillSize') || '0');
-        if (Number.isFinite(cumulativeFilledSize) && cumulativeFilledSize > 0) {
-          const orderKey = String(order.id);
-          const previousCumulative = this.lastCumFilledByOrderId.get(orderKey) || 0;
-          const fillDelta = cumulativeFilledSize - previousCumulative;
-          if (fillDelta > 0) {
-            this.lastCumFilledByOrderId.set(orderKey, cumulativeFilledSize);
-            const cumulativeFee = Number.parseFloat(v(order, 'cumSuccessFillFee') || '0');
-            const previousCumulativeFee = this.lastCumFeeByOrderId.get(orderKey) || 0;
-            const feeDelta = Number.isFinite(cumulativeFee) ? Math.max(cumulativeFee - previousCumulativeFee, 0) : 0;
-            if (Number.isFinite(cumulativeFee)) {
-              this.lastCumFeeByOrderId.set(orderKey, cumulativeFee);
-            }
-            this.parent.recordWsExecution({
+      const progress = this.progressFor(String(order.id));
+      const delta = Math.max(cumulative - Math.max(progress.reported, progress.topic), 0);
+      const fee = Number.parseFloat(v(order, 'cumSuccessFillFee') || '0');
+      const feeDelta = Number.isFinite(fee) ? Math.max(fee - progress.fee, 0) : 0;
+      progress.reported = Math.max(progress.reported, cumulative);
+      if (Number.isFinite(fee)) progress.fee = fee;
+      if (snapshot) progress.topic = Math.max(progress.topic, cumulative);
+      else if (delta > 0) {
+        progress.synthetic += delta;
+        const executionPrice = [v(order, 'latestMatchFillPrice'), v(order, 'averagePrice'), v(order, 'price')]
+          .map(Number)
+          .find((candidate) => Number.isFinite(candidate) && candidate > 0);
+        if (executionPrice) {
+          // Order totals can repair history, but cannot identify individual executions.
+          this.parent.recordWsExecution(
+            {
               symbol: order.symbol,
               side: order.side,
               orderId: order.id,
-              price: v(order, 'latestMatchFillPrice') || v(order, 'averagePrice') || v(order, 'price'),
-              size: `${fillDelta}`,
+              price: executionPrice,
+              size: `${delta}`,
+              cumulative,
               fee: `${feeDelta}`,
               token: v(order, 'token'),
               feeCurrency: v(order, 'feeCurrency'),
               createdAt: v(order, 'updatedAt') || v(order, 'createdAt'),
-            });
-          } else if (fillDelta === 0 && previousCumulative === 0) {
-            // First time we see a non-zero cumulative without prior tracking — record the
-            // baseline so subsequent deltas compute correctly without duplicating this row
-            // (handleFillTopic already emitted the per-fill executions if Apex sent them).
-            this.lastCumFilledByOrderId.set(orderKey, cumulativeFilledSize);
-            const cumulativeFeeBaseline = Number.parseFloat(v(order, 'cumSuccessFillFee') || '0');
-            if (Number.isFinite(cumulativeFeeBaseline)) {
-              this.lastCumFeeByOrderId.set(orderKey, cumulativeFeeBaseline);
-            }
-          }
-        }
-      }
-
-      if (order.status === 'FILLED' && shouldNotify) {
-        this.emitter.emit('fill', {
-          id: orders[0].id,
-          side: orders[0].side,
-          symbol: orders[0].symbol,
-          price,
-          amount,
-        });
-      }
-
-      if (order.status === 'FILLED' || order.status === 'CANCELED') {
-        // Order is terminal — drop our cumulative-fill trackers so they don't leak memory.
-        const orderKey = String(order.id);
-        this.lastCumFilledByOrderId.delete(orderKey);
-        this.lastCumFeeByOrderId.delete(orderKey);
-
-        // We remove the order and its stop loss and take profit
-        // if they exists, because they will be replaced with correct IDs
-        if (
-          order.status !== 'FILLED' &&
-          shouldNotify &&
-          order.cancelReason &&
-          // exclude EC_PerCancelRequest from error as thats simply user canceling the order
-          order.cancelReason !== 'UNKNOWN_ORDER_CANCEL_REASON' &&
-          order.cancelReason !== 'INTERNAL_FAILED' &&
-          order.cancelReason !== 'USER_CANCELED'
-        ) {
-          this.emitAndLogError(order.cancelReason);
-        }
-
-        if (order.status === 'CANCELED') {
-          // Remove cancelled orders entirely instead of adding them back with Canceled status
-          const idsToRemove = [
-            { id: orders[0].id },
-            { id: `${orders[0].id}__stop_loss` },
-            { id: `${orders[0].id}__take_profit` },
-          ];
-          this.store.removeOrders(idsToRemove);
-        } else {
-          // For FILLED orders, update their status
-          this.store.addOrUpdateOrders(
-            orders.map((safeCexOrder) => ({
-              ...safeCexOrder,
-              status: OrderStatus.Closed,
-            })),
+            },
+            true,
           );
         }
-      } else if (order.status === 'OPEN' || order.status === 'UNTRIGGERED') {
-        // Only add open/untriggered orders - don't re-add filled/cancelled ones
+      }
+
+      if (order.status === 'FILLED' || order.status === 'CANCELED' || order.status === 'EXPIRED') {
+        this.terminalOrderIds.add(order.id);
+        if (this.terminalOrderIds.size > 8192)
+          this.terminalOrderIds.delete(this.terminalOrderIds.values().next().value!);
+        const terminal = order.status === 'CANCELED' ? OrderStatus.Canceled : OrderStatus.Closed;
+        const ids = [order.id, `${order.id}__stop_loss`, `${order.id}__take_profit`].map((id) => ({ id }));
+        this.store.markOrdersTerminal(ids, terminal);
+        if (order.status === 'CANCELED') {
+          this.store.removeOrders(ids);
+          const fresh = Date.now() - order.updatedAt <= 5000;
+          const connected = virtualClock.getCurrentTimeMs() - this.lastConnectTime > 5000;
+          if (
+            !snapshot &&
+            fresh &&
+            connected &&
+            order.cancelReason &&
+            !['UNKNOWN_ORDER_CANCEL_REASON', 'INTERNAL_FAILED', 'USER_CANCELED'].includes(order.cancelReason)
+          ) {
+            this.emitAndLogError(order.cancelReason);
+          }
+        } else {
+          this.store.addOrUpdateOrders(orders.map((mapped) => ({ ...mapped, status: OrderStatus.Closed })));
+        }
+      } else if (order.status === 'OPEN' || order.status === 'UNTRIGGERED' || order.status === 'PENDING') {
         this.store.addOrUpdateOrders(orders);
       }
     });
   };
 
   handlePositionTopic = (data: WsZkAccountsV3Message['contents']['positions']) => {
-    const positions: Position[] = data.map(this.parent.mapPosition.bind(this)).filter((p): p is Position => p !== null);
+    let positions: Position[];
+    try {
+      positions = data.map(this.parent.mapPosition.bind(this)).filter((p): p is Position => p !== null);
+    } catch (error) {
+      this.parent.log(`Invalid private positions update: ${String(error)}`, LogSeverity.Warning);
+      return;
+    }
     const updates: Array<[Position, Position]> = positions.map((p) => [p, p]);
     this.store.updatePositions(updates);
     this.parent.lastWebsocketPositionsUpdate = virtualClock.getCurrentTimeMs();

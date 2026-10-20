@@ -44,6 +44,11 @@ pub struct Options {
 pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
+    Book {
+        command: CommandId,
+        token: String,
+        limit: Option<u32>,
+    },
     Markets {
         count: usize,
         rows: Vec<Market>,
@@ -649,12 +654,21 @@ impl Venue for Polymarket {
             self.trading_response(cx, request, response);
             return;
         }
+        if let Pending::Book {
+            command,
+            token,
+            limit,
+        } = pending
+        {
+            self.book_response(cx, command, &token, limit, response);
+            return;
+        }
         if let Err(e) = success(response) {
             self.on_request_failed(cx, pending, &e);
             return;
         }
         match pending {
-            Pending::Account(_) | Pending::Trade(_) => unreachable!(),
+            Pending::Account(_) | Pending::Trade(_) | Pending::Book { .. } => unreachable!(),
             Pending::Markets {
                 count,
                 rows,
@@ -911,7 +925,8 @@ impl Venue for Polymarket {
                 self.account_failed(cx, request);
                 return;
             }
-            Pending::Candles {
+            Pending::Book { command: c, .. }
+            | Pending::Candles {
                 command: Some(c), ..
             } => {
                 cx.done(c, Err(error.into()));
@@ -1049,6 +1064,13 @@ impl Venue for Polymarket {
                     cx.clear_timer(t);
                 }
             }
+            Command::CancelOrdersWithSymbols { command, orders } => self.trading_command(
+                cx,
+                Command::CancelOrders {
+                    command,
+                    ids: orders.into_iter().map(|o| o.id).collect(),
+                },
+            ),
             command @ (Command::PlaceOrders { .. }
             | Command::CancelOrders { .. }
             | Command::AmendOrder { .. }
@@ -1057,7 +1079,11 @@ impl Venue for Polymarket {
             | Command::SetLeverage { .. }
             | Command::SetMarginType { .. }
             | Command::SetPositionMode { .. }
-            | Command::FetchLeverage { .. }) => self.read_command(cx, command),
+            | Command::FetchLeverage { .. }
+            | Command::FetchAccount { .. }
+            | Command::FetchOrderBook { .. }
+            | Command::FetchStpMode { .. }
+            | Command::SetStpMode { .. }) => self.read_command(cx, command),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {

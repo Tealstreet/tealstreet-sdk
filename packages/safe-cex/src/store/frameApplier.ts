@@ -85,7 +85,8 @@ export class FrameApplier {
       const rows: Ticker[] = [];
       for (let i = 0; i < tickers.count; i++) {
         const market = update.markets?.[tickers.market[i]] ?? this.store.marketsBySymbol[this.symbol(tickers.market[i])];
-        const ticker: Record<string, number | string> = { id: market?.id ?? '', symbol: market?.symbol ?? '' };
+        const identity = tickers.identity?.(i);
+        const ticker: Record<string, number | string> = { id: market?.id ?? identity?.id ?? '', symbol: market?.symbol ?? identity?.symbol ?? '' };
         for (const field of TICKER_FIELDS) ticker[field] = tickers[field][i];
         rows.push(ticker as unknown as Ticker);
       }

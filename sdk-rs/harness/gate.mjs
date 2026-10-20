@@ -10,7 +10,7 @@ import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { parseRequestJson } from './request-json.mjs';
-import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands } from './known-ts-fixes.mjs';
+import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands, fixKrakenOutput } from './known-ts-fixes.mjs';
 import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
@@ -162,6 +162,51 @@ const KNOWN_TS_FIXES = {
     // Share sizing uses financial half-up precision, correcting TS toFixed's
     // binary midpoint artifact; JavaScript formatting is never emulated.
     // Unsupported history contracts fail explicitly instead of empty success.
+  },
+  // ApeX repairs are in the TS reference; output is compared without rewriting:
+  // continuous book sequences and atomic invalid depth updates; top-level ping
+  // detection avoids answering echoed ping acknowledgements; stable original
+  // payloads for legacy HMAC across form transforms; canonical hedged position
+  // IDs; failure-safe private snapshots and required row identifiers;
+  // documented realizedPnl aliases; raw-millisecond history bounds/order;
+  // one fill per genuine execution, isolated synthetic replay identity;
+  // distinct equal executions preserved in REST/WS history; exact tick splitting;
+  // both bracket siblings preserved during parent cancel/replace amendments.
+  // Price-only amendments keep the observed residual quantity; invalid/no-op
+  // amendments reject before cancellation and filled sources are not replaced.
+  apexomni: [],
+  kraken: {
+    output: fixKrakenOutput,
+    fixes: [
+      'Retain full depth, reject sequence gaps/stale snapshots, unsubscribe unused books.',
+      'Full native ticker statistics stay live; omitted relative funding resets zero instead of retaining a stale rate.',
+      'Negative instrument quantity precision is a positive power-of-ten step; TS clamps it to 0.1.',
+      'Deduplicate native execution IDs; suppress historical fills snapshots.',
+      'Use monotonic nonces beyond 1000 same-millisecond requests and clock regression.',
+      'Use documented index triggerSignal (TS sends stale spot enum).',
+      'Keep accepted settings and newer socket state across delayed reads/write ACKs.',
+      'Replace partially executed protective orders with remaining size and stop on raced fills.',
+      'Reject missing/contradictory semantic ACKs and failed/incomplete reads explicitly.',
+      'Keep exact native milliseconds for fill filters/cursors before seconds output.',
+      'Count raw ledger rows for pagination rather than mapped cash components.',
+      'One-way mode is an accepted no-op; TS inherits an unimplemented setter.',
+      'Use valid authenticated feeds and REST balance instead of invalid account_balances.',
+      'Preserve absent position margin allocation instead of TS base-store synthetic zero.',
+      'Map native post/ioc/fok orders as limits and reject unsupported opening conditional shapes before a write.',
+      'Keep initialized event-driven private feeds alive while bounding retained execution and terminal identities.',
+    ],
+  },
+  asterdex: {
+    // Native payload tests exercise these corrections; ordinary tapes compare
+    // unchanged, including exact execution prices and economic request fields.
+    notes: [
+      'A zero-size hedge WS update closes only its reported leg; TS removes every position for the symbol.',
+      'Nonce uniqueness is scoped to the agent address as documented; TS scopes it to owner plus agent and can collide across owners.',
+      'Failed or malformed history reads propagate errors instead of silently returning an authoritative empty result.',
+      'Historical candle timestamps use engine seconds consistently; TS returns raw milliseconds on this REST path.',
+      'Do not submit an amendment replacement after the old order fills during cancellation, including fills reported by the cancel response; an unknown-order rejection cannot authorize replacement.',
+      'Configured leverage reads use the actual native setting rather than the inherited TS market-maximum fallback that overwrites it.',
+    ],
   },
   hyperliquid() {
     // Native command regressions pin these deliberate TS fixes:
@@ -619,6 +664,7 @@ const fixCryptocomAccount = (account) => {
 for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
+
   if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
   // Every request must match a taped one: an unserved request sent different parameters.
   for (const impl of ['ts', 'rust']) {
@@ -645,6 +691,7 @@ for (let run = 0; run < runs; run++) {
       ? KNOWN_TS_FIXES.bybit
       : undefined);
   if (typeof fix === 'function') fix(ts, rust);
+  if (values.venue === 'kraken') KNOWN_TS_FIXES.kraken.output(ts, tapeRecords);
   if (JSON.stringify(ts.wsRequests) !== JSON.stringify(rust.wsRequests))
     differences.push(
       `websocket requests differ: ts=${JSON.stringify(ts.wsRequests)} rust=${JSON.stringify(rust.wsRequests)}`,

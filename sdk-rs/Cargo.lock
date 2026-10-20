@@ -3629,6 +3629,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-apexomni"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "safe-cex-venue-asterdex"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "safe-cex-venue-binance",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-venue-backpack"
 version = "0.1.0"
 dependencies = [
@@ -3725,6 +3746,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-kraken"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "hmac 0.12.1",
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "zeroize",
+]
+
+[[package]]
 name = "safe-cex-venue-kucoin"
 version = "0.1.0"
 dependencies = [
@@ -3818,6 +3853,8 @@ version = "0.1.0"
 dependencies = [
  "js-sys",
  "safe-cex-engine",
+ "safe-cex-venue-apexomni",
+ "safe-cex-venue-asterdex",
  "safe-cex-venue-backpack",
  "safe-cex-venue-binance",
  "safe-cex-venue-bingx",
@@ -3827,6 +3864,7 @@ dependencies = [
  "safe-cex-venue-bybit",
  "safe-cex-venue-cryptocom",
  "safe-cex-venue-hyperliquid",
+ "safe-cex-venue-kraken",
  "safe-cex-venue-kucoin",
  "safe-cex-venue-lighter",
  "safe-cex-venue-mexc",

@@ -135,6 +135,7 @@ impl Polymarket {
             || options.sl_trigger_type.is_some()
             || options.reduce_only == Some(true)
             || options.close == Some(true)
+            || options.stp_mode.is_some()
             || options.bybit_bbo.is_some()
             || options.bybit_slippage_tolerance_ticks.is_some()
             || !matches!(
@@ -593,6 +594,7 @@ impl Polymarket {
                         tp_trigger_type: None,
                         sl_trigger_type: None,
                         client_order_id: None,
+                        stp_mode: None,
                         close: None,
                         bybit_bbo: None,
                         bybit_slippage_tolerance_ticks: None,

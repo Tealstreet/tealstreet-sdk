@@ -245,3 +245,22 @@ Independent repair review additionally found token-scope emptyACK could falsely
 confirm cancellation. Token scopes now carry their capturedexpectedIDs too;
 empty/subset ACK errors preserve unconfirmedorders.24trading tests and crate
 all-target clippyPASS. Independent global/token repairreviewPASS.
+
+### Landing integration checkpoint
+
+Merged landing ecb313026f (AsterDEX, Kraken and ApeX Omni) preserving venue
+registrations, HTTP deadlines, currency balances and orphan ticker identities.
+Prediction frame sections13/14 remain optional with legacy columns unchanged.
+Independent merge review: engine61, wire12, SDK frame4 and incoming wrappers33
+checks PASS. Merged harness295/295PASS after making the Polymarket ethers
+oracle lazy: selecting other venues must not load its signing dependencies.
+
+Landing adds account/book/STP and symbol-routed cancellation commands. Native
+Polymarket routes cancellations by exact nativeID without requiring cached
+symbols, exposes signer account and validated complete REST books, and rejects
+STP settings/orders before writes. Independent integration audit found a100level
+SDK default would truncate Polymarket REST books. Fixed optional limit (Aster
+keeps100);150level default/explicitlimit actualWasm regression PASS. History7,
+trading26 and boundary15 tests PASS; selectedWasm848,107bytes below1,258,291.
+Root44typecheck/28lint, wasmclippy and workspace native tests PASS. Remaining
+combined gates and PR review will be recorded at their actual head.

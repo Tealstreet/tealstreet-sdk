@@ -3,13 +3,17 @@ import { createHmac } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { requestKey,subscriptionKeys } from './requests.mjs';
 const require = createRequire(new URL('../../packages/safe-cex/package.json', import.meta.url));
-const { ethers } = require('ethers');
+let ethers, address;
 export const POLYMARKET_REPLAY = {
   // Public deterministic Ethereum signing vector, never a funded account.
   key: `0x${'01'.repeat(32)}`,
   polymarket: { apiKey: 'poly-replay-key', apiSecret: Buffer.from('poly-replay-secret').toString('base64url'), apiPassphrase: 'poly-replay-pass', signerType: 0 },
 };
-const address = new ethers.Wallet(POLYMARKET_REPLAY.key).address;
+function initializeCrypto() {
+  if (ethers) return;
+  ({ ethers } = require('ethers'));
+  address = new ethers.Wallet(POLYMARKET_REPLAY.key).address;
+}
 const fields = [
   ['salt','uint256'],['maker','address'],['signer','address'],['tokenId','uint256'],
   ['makerAmount','uint256'],['takerAmount','uint256'],['side','uint8'],['signatureType','uint8'],
@@ -24,6 +28,8 @@ function verify({method,url,headers={},body=''}) {
   if (parsed.hostname!=='clob.polymarket.com') return ['GET'].includes(method);
   if (['/midpoints','/books'].includes(parsed.pathname)) return method==='POST';
   if (['/prices-history','/book','/time'].includes(parsed.pathname)) return method==='GET';
+  // Standalone protocol tests may verify a request without replay setup.
+  initializeCrypto();
   const h=Object.fromEntries(Object.entries(headers).map(([k,v])=>[k.toUpperCase(),String(v)]));
   if (h.POLY_ADDRESS!==address || !/^\d+$/.test(h.POLY_TIMESTAMP??'')) return false;
   const seconds=Number(h.POLY_TIMESTAMP);
@@ -52,6 +58,9 @@ function verify({method,url,headers={},body=''}) {
 }
 export const polymarket = {
   rust:'polymarket',
+  // Only the selected venue loads its independent crypto oracle; do it before
+  // replay takes the memory baseline, symmetrically for TS and Rust.
+  initializeReplay: initializeCrypto,
   // Discovery may enumerate many pages; capture the full requested live window.
   recordAfterReady:true,
   publicOptions:{polymarket:{marketSlugs:['xi-jinping-out-before-2027','will-gavin-newsom-win-the-2028-democratic-presidential-nomination-568']}},

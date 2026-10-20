@@ -862,3 +862,32 @@ fn token_cancel_subset_ack_reports_failure_and_only_removes_proven_ids() {
     assert_eq!(h.done.last().unwrap().1, Ok("[]".into()));
     assert!(h.e.store().orders().is_empty());
 }
+
+#[test]
+fn self_trade_prevention_rejects_whole_batch_before_writing() {
+    let mut h = H::new();
+    let mut unsupported = order();
+    unsupported.stp_mode = Some(StpMode::ExpireBoth);
+    h.command(Command::PlaceOrders {
+        command: 90,
+        orders: vec![order(), unsupported],
+    });
+    assert_eq!(h.writes(), 0);
+    assert!(matches!(&h.done[..], [(90, Err(error))] if error.contains("plain GTC")));
+}
+#[test]
+fn cancellation_with_symbol_uses_native_id_without_store_lookup() {
+    let mut h = H::new();
+    h.command(Command::CancelOrdersWithSymbols {
+        command: 91,
+        orders: vec![CancelOrderRef {
+            id: "unseen".into(),
+            symbol: "unknown".into(),
+        }],
+    });
+    let request = h.take("/orders");
+    assert_eq!(request.method, Method::Delete);
+    assert_eq!(request.body.as_deref(), Some(r#"["unseen"]"#));
+    h.respond(request, 200, r#"{"canceled":["unseen"],"not_canceled":{}}"#);
+    assert!(matches!(&h.done[..], [(91, Ok(_))]));
+}

@@ -190,6 +190,7 @@ export class Tape {
       passphrase: 'replay-passphrase',
       ...venue.replayCredentials,
     };
+    this.validateRequest = venue.createRequestValidator?.(this.options) ?? venue.validateRequest;
     this.callerIds = callerIdsOf(records);
     this.bookSymbols = books;
     this.bitget = venue.rust?.startsWith('bitget') ?? false;
@@ -353,7 +354,7 @@ export class Tape {
 
   respond(method, url, body, headers) {
     try {
-      this.venue.validateRequest?.({ method, url, body, headers });
+      this.validateRequest?.({ method, url, body, headers, callerIds: this.callerIds });
     } catch (error) {
       this.invalidSignatures++;
       throw error;
@@ -424,7 +425,8 @@ export class Tape {
   }
 
   send(socket, text) {
-    this.venue.validateSocketMessage?.(socket, text);
+    try { this.venue.validateSocketMessage?.(socket, text); }
+    catch(error) { this.invalidSignatures++; throw error; }
     let message;
     try {
       message = JSON.parse(text);
@@ -664,7 +666,8 @@ export class Tape {
         throw new Error(`Taped login success preceded a valid login on ${socket.url}`);
       this.assertSubscribed(socket, message);
     }
-    deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame);
+    try { deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame); }
+    catch(error) { this.invalidSignatures++; throw error; }
   }
 
   async deliverFrame(frame) {

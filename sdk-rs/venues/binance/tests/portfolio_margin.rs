@@ -73,6 +73,7 @@ fn limit(amount: f64, price: f64) -> PlaceOrderOpts {
         bybit_bbo: None,
         bybit_slippage_tolerance_ticks: None,
         close: None,
+        stp_mode: None,
     }
 }
 
