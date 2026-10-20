@@ -588,3 +588,22 @@ unchanged, and optional wsMessage output, buffer reuse and role/context
 serialization survive. Typecheck44, lint28 and licenses31 pass. The corrected
 combined release build passed; combined functional, 35 replay gates and final
 head CI are pending. Do not use the earlier partial matrix as final evidence.
+
+### Reviewed source ready for final CI
+
+On `f77c744f99`, all 910 workspace native tests, 172 harness helpers, 49 combined
+wasm, 37 host and 8 frame/copier cases pass. All focused routing265 and extended
+native-role/control176 cases pass. Independent audits pass for every resolved
+phase; bans/fmt/workspace Clippy/wasm Clippy, typecheck44/lint28/licenses31 pass.
+The complete root command passes 27/27 tasks, including both 6,856-case safe-cex
+suites. The run uses two test workers passed through Turbo's environment and
+serial root tasks on this shared host; no timeout/assertion was relaxed.
+
+All twelve required Bybit-profile/Binance public and private gates pass on this
+final source. Hyperliquid public/private also pass (14 of the 35 broader gates
+complete). Bundle sizes so far: Bybit 921,841; Binance 758,842; Hyperliquid
+995,381 bytes, each below 1,258,291. Push this reviewed source to run final-head
+CI in parallel with the remaining regression bundles. Do not merge until the
+full regression matrix and exact final-head CI pass. Final counters/performance
+and CI evidence will be posted on PR #1307; these checkpoint entries retain the
+observed state at each commit. Hyro live connectivity remains unverified.
