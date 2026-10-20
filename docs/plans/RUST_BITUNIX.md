@@ -3135,7 +3135,7 @@ results below show TS / Rust values; every public row uses3runs, private uses1.
 | Paradex | 15,220 | 417.5 / 393.7 | 1.9 / 1.6 | 27.8 / 21.3 |
 
 Six private profiles pass: Bitunix, KuCoin futures/Spot, Binance, Paradex, Bitrue.
-Module byte counts: Bitunix856206, KuCoin820572, KuCoinSpot721043,
+Module byte counts: Bitunix856206, KuCoin819125, KuCoinSpot721043,
 Binance969416, OKX861779, Paradex1224575, Bitrue850131. Each under1258291.
 All source/native/compiled/consumer checks above remain current. Actual PR review
 and green CI are still required; no live private credentials were used.
