@@ -2,15 +2,14 @@
 use crate::{Kucoin, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::paging::{self, WindowOrder};
-
-/// Requests per read, and windows per range, before a read is refused.
-const MAX_REQUESTS: u32 = 10_000;
 use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const DAY: u64 = 86_400_000;
+/// Requests per read, and windows per range, before a read is refused.
+const MAX_REQUESTS: u32 = 10_000;
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Fills,
@@ -35,6 +34,8 @@ pub struct Request {
     chunk_end: u64,
     /// Windows still to read after the current one, newest first.
     windows: VecDeque<(u64, u64)>,
+    /// The range reaches past the newest windows the request budget allows.
+    clipped: bool,
     page: u32,
     offset: Option<u64>,
     limit: usize,
@@ -319,17 +320,20 @@ impl Kucoin {
         } else {
             7 * DAY - 1
         };
+        // Only the newest windows the request budget could ever reach are
+        // built; a read that walks past them without reaching its limit fails,
+        // as the request guard did when windows were generated lazily.
+        let reachable = end.saturating_sub(u64::from(MAX_REQUESTS) * (width + 1) - 1);
+        let clipped = start < reachable;
         // Millisecond integers below 2^53 tile exactly as f64.
-        // Millisecond integers below 2^53 tile exactly as f64. The window
-        // budget matches the request guard, so a huge range fails up front.
         let Some(tiles) = paging::windows(
-            start as f64,
+            start.max(reachable) as f64,
             end as f64,
             width as f64,
             WindowOrder::NewestFirst,
             MAX_REQUESTS as usize,
         ) else {
-            cx.done(command, Err("KuCoin history range is too large".into()));
+            cx.done(command, Err("Invalid KuCoin query time range".into()));
             return;
         };
         let mut windows: VecDeque<(u64, u64)> = tiles
@@ -352,6 +356,7 @@ impl Kucoin {
             offset: None,
             limit: limit.unwrap_or(if kind == Kind::Trades { 100 } else { 1000 }) as usize,
             explicit_range,
+            clipped,
             rows: Vec::new(),
             page_rows: Vec::new(),
             seen: HashSet::new(),
@@ -687,6 +692,10 @@ impl Kucoin {
             self.history_schedule(cx, r);
             return;
         }
+        if !capped && r.clipped {
+            cx.done(r.command, Err("KuCoin history range is too large".into()));
+            return;
+        }
         r.rows.sort_by(|a, b| {
             b.time()
                 .total_cmp(&a.time())
@@ -891,27 +900,35 @@ mod tests {
         }
     }
     #[test]
-    fn a_range_beyond_the_request_budget_fails_before_allocating_windows() {
+    fn a_huge_range_builds_only_reachable_windows_and_a_limited_read_still_succeeds() {
+        // to = MAX_SAFE_INTEGER must not tile ~10^8 windows before the first request.
         let mut e = engine();
-        e.handle(
-            2_000_000_000_000.0,
-            Event::Command(safe_cex_engine::Command::Query {
-                command: 77,
-                query: Query::Income {
-                    symbol: None,
-                    kind: None,
-                    from_ms: Some(0.0),
-                    to_ms: Some(9_007_199_254_740_991.0),
-                    limit: None,
-                },
-            }),
+        let r = query(
+            &mut e,
+            Query::Income {
+                symbol: None,
+                kind: None,
+                from_ms: Some(0.0),
+                to_ms: Some(9_007_199_254_740_991.0),
+                limit: Some(1),
+            },
         );
-        let actions: Vec<Action> = e.drain_actions().collect();
-        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a| matches!(
-            a,
-            Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("too large")
-        )));
+        assert!(r.url.contains("endAt=9007199254740991"), "{}", r.url);
+        // An old start with no end reaches its limit in the newest window.
+        let mut e = engine();
+        let r = query(
+            &mut e,
+            Query::Income {
+                symbol: None,
+                kind: None,
+                from_ms: Some(0.0),
+                to_ms: None,
+                limit: Some(1),
+            },
+        );
+        let body = r#"{"code":"200000","data":{"hasMore":false,"dataList":[{"time":1999999999000,"type":"RealisedPNL","amount":1,"fee":0,"accountEquity":1,"status":"Completed","remark":"XBTUSDTM","offset":5,"currency":"USDT"}]}}"#;
+        let actions = reply(&mut e, r, body);
+        assert!(done(&actions).contains("1999999999"), "{actions:?}");
     }
     /// Pins the exact request sequence of a windowed, page-numbered read:
     /// 7-day windows newest first, the first walked over two pages. Paging
