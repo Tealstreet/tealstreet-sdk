@@ -376,3 +376,32 @@ for(const name of ['lighter','lighter-robinhood']){
   }finally{Date.now=oldNow;}
  });
 }
+
+test('actual Lighter public socket transport IDs vary while unrelated socket query identity stays exact',()=>{
+ const source=readFileSync(new URL('../../packages/safe-cex/src/exchanges/lighter/lighter.ws-public.ts',import.meta.url),'utf8');
+ const start=source.indexOf("      const separator = endpoint.includes('?')");
+ const end=source.indexOf("      this.ws.addEventListener('open'",start);
+ assert(start>=0 && end>start);
+ // Run the production URL construction through its createWebsocket boundary.
+ const connect=new Function('endpoint','nanoid','shouldUseReadonlyDirectRoute','shouldUseProxyRoute','virtualClock',
+  `${source.slice(start,end)}\nreturn this.ws;`);
+ const actualUrl=(endpoint,token,readonly=false)=>connect.call({createWebsocket:(url)=>url},endpoint,()=>token,readonly,false,{getCurrentTimeMs:()=>0});
+ for(const [name,endpoint] of [
+  ['lighter','wss://mainnet.zklighter.elliot.ai/stream'],
+  ['lighter-robinhood','wss://api.rh.lighter.xyz/stream'],
+ ]){
+  const venue={...venueOf(name),fullSocketIdentity:true};
+  const keys=(url)=>subscriptionKeys(url,{type:'subscribe',channel:'market_stats/all'},new Set(),venue);
+  const first=actualUrl(endpoint,'abcdefghijklmnopqrstu');
+  const next=actualUrl(endpoint,'ZYXWVUTSRQPONMLKJIHGF');
+  assert.equal(new URL(first).searchParams.get('requestId'),'abcdefghijklmnopqrstu');
+  assert.deepEqual(keys(first),keys(endpoint),name);
+  assert.deepEqual(keys(first),keys(next),name);
+  for(const [field,value] of [['readonly','true'],['account_index','43'],['unknownSocketField','1']]){
+   const changed=new URL(first);changed.searchParams.set(field,value);
+   assert.notDeepEqual(keys(first),keys(changed.href),`${name} ${field}`);
+  }
+  assert.notDeepEqual(keys(first),keys(actualUrl(endpoint,'abcdefghijklmnopqrstu',true)));
+  assert.notDeepEqual(keys(first),keys(endpoint.replace('/stream','/other-stream')));
+ }
+});

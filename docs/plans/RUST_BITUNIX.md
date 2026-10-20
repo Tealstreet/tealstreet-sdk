@@ -2380,3 +2380,16 @@ HTTP unknown-query rejection controls, verify the actual Base WS transport
 requestId generation, and add socket token/unrelated-field controls. This
 restores existing socket behavior without a new projection or fixture change.
 Independent review and all helper controls precede the fresh related batch.
+
+
+HTTP/socket scope correction frozen and independently reviewed PASS. The same
+strict HTTP options now live only in requestOptions, preserving every signed
+HTTP counterexample. Actual LighterPublicWebsocket.connectAndSubscribe source
+(line 170) adds the nanoid transport requestId; the new test executes its real
+URL construction. Both profiles preserve existing no-token/token-A/token-B
+socket identity while readonly, account index, unrelated fields and paths stay
+distinct. Independent re-probes confirm all seven unsupported HTTP queries
+still reject with ACK retained. Focused 27/27 and aggregate 819/819 helpers,
+syntax and diff checks pass; fail-before socket proof retained. No new URL
+projection, fixture or measurement change. Owned jobs are quiet; restart the
+related release batch on this reviewed two-file correction.
