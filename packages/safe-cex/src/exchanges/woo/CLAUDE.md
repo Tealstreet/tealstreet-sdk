@@ -973,7 +973,10 @@ are never retried. No live authenticated account was available for this port;
 private validation uses exact signed request/response tapes and native tests.
 
 Private algo execution reports reconcile each child independently; terminal parent-only
-reports terminate known children and retain tombstones against stale snapshots. REST
-algo snapshots reject malformed executable known-market leaves as a whole. A delayed
-unseen trade still emits a fill, but optimistic position updates apply only the
-cumulative delta not already present in reconciled order state.
+reports terminate known children and retain tombstones against stale snapshots. Children
+that omit side, status or reduceOnly inherit the parent's (a statusless child of a FILLED
+parent with nothing executed maps to Canceled). Malformed REST order, algo-leaf, position,
+market, ticker and history rows are skipped with a warning and keep the store's copy;
+only a read with no usable row fails. A delayed unseen trade still emits a fill, but
+optimistic position updates apply only the cumulative delta not already present in
+reconciled order state.
