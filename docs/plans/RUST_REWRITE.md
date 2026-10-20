@@ -110,6 +110,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]`; optional appended f64 `buyLeverage[n]`, `sellLeverage[n]` |
 | 13 | `PREDICTION_MARKETS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][6]` (conditionId, outcome, question, description, endDate, slug); `u32 flags[n]` (bit 0 negRisk); aligned f64 tickSize[n] |
 | 14 | `PREDICTION_HOLDINGS` (optional replace with POSITIONS) | `u32 n`; `u32 market[n]`; `u32 flags[n]` (bit 0 redeemable, bit 1 mergeable) |
+| 15 | `BOOK_DELTA` | `u32 market`, `u32 bid changes`, `u32 ask changes`, `u32 0`; f64 rows `[price, amount]` for bids then asks; zero amount deletes the price |
 
 Prediction venues map each outcome token to one ordinary market, with shares
 as base size and collateral as quote. Optional typed metadata sections preserve
@@ -297,9 +298,74 @@ as they are; zero-copy book consumers (`Float64Array` rows into the order
 book, DOM and depth chart) come after that. How the web build obtains the
 compiled wasm is decided then.
 
-Then: exchange-server moves to the native host and streams the same frames
-(with `BOOK_DELTA` sections for networked clients — full books every flush
-are ~450 KB/s for two 1,000-level books).
+Then: exchange-server moves to the native host and streams the same frames.
+The first step is the native frame server (plan and acceptance checkpoints in
+`RUST_FRAME_SERVER_PROGRESS.md`). Deployment and application adoption remain
+separate from this engine/transport change.
+
+#### Native frame server migration
+
+The mirror's `packages/safe-cex-server` is a library, not the deployed
+exchange-server application. Its current exports are:
+
+- `RedisCandleCacheBackend`: adapts a caller-supplied Redis/Valkey client to
+  the SDK key-value candle cache; prefers SCAN, with KEYS as a fallback.
+- `PublicExchangeFactory`: owns a public-only exchange per venue, hydrates
+  market stores from quantized UTC-hour snapshots, serializes refreshes with
+  an in-process lock, and falls back to the latest valid cached snapshot.
+  Market snapshots and their validated latest pointers have three-hour TTLs.
+  Ticker-cache helpers provide a 150-second bootstrap seed with a 300-second
+  TTL; these seeds are not executable quotes.
+- `PublicdataTickerBridge`: filters explicitly requested Binance/Bybit
+  capabilities and fresh connected health, loads market indexes, and maps
+  the publicdata service's JSON ticker snapshots/deltas into SDK ticker state.
+  An empty eligible set does not subscribe to all venues.
+
+The native host replaces the per-account venue/Store execution loop, outbound
+venue REST/WebSockets/timers, and repeated serialization of live account and
+book state. A configured account owns one engine independently of its client
+connections. Its authenticated clients receive a binary `snapshot_frame`
+first, then ordered SCXF flush frames; commands and their correlated results
+remain typed JSON. An account token grants full command access to that account;
+client-supplied venue credentials and account creation are outside this protocol.
+The embedding application supplies account engines, routing and token policy.
+The runnable example uses Binance; the server API accepts other venue engines.
+
+`BOOK_DELTA` carries only changed `[price, amount]` levels since the previous
+flush (zero deletes). Full `BOOK` replaces the baseline on subscription,
+resnapshot/gap, or market identity changes. Local WASM consumers retain full
+books by default. The engine's `book-deltas` feature is enabled by the native
+host; default WASM builds omit the producer and baseline state while retaining
+the shared wire decoder. Network consumers reconstruct sorted levels and cumulative
+totals. A new connection first establishes the current flush boundary before
+its snapshot, so snapshot interleaving cannot omit a later reverted level.
+A slow client is disconnected instead of dropping frames; reconnect starts
+with a fresh snapshot. A lost connection is a stream gap, never permission to
+apply more deltas against stale state.
+
+For now TS retains Redis persistence, hourly refresh/stale-fallback policy,
+bootstrap ticker caches, the publicdata capability/health adapter, and the
+worker shell's chasers, TWAP, CLI, post-processors and derived store fields.
+Application session authorization, TLS termination, credential provisioning,
+process supervision and public routing remain deployment responsibilities.
+No cache export or existing hosted-account protocol is removed in this step.
+A later TS session adapter can translate worker commands and feed these frames
+through `FrameApplier`; only after parity for shell behavior and cache hydration
+can the deployed exchange-server stop its old worker execution path. Browser
+adoption is still the separate master/Copybara step above.
+
+Bandwidth is measured with a deterministic two-book fixture, without a load
+test. Report depth per side, number of changed levels, flush cadence, full and
+delta SCXF bytes, WebSocket framing and initial/resync snapshots separately;
+compression and TCP/TLS/IP overhead are not inferred from payload bytes.
+The deterministic Rust writer/JS reader check (`yarn rust:test-frame-wire`)
+measures two books with 1,000 levels **per side**, changing ten levels per side
+per book at four flushes/second: full SCXF frames are 96,064 bytes and deltas
+704 bytes, a 99.267% payload reduction (384,256 versus 2,816 B/s). With one
+unmasked WebSocket message per frame the totals are 384,296 versus 2,832 B/s.
+A book-only initial/resync snapshot still costs 96,064 bytes; market and account
+sections add their current serialized size. Change counts and cadence are
+fixture assumptions, not a live-feed bandwidth forecast.
 
 ### 7. CI — Binance, Bybit, Backpack, OKX, Crypto.com, WEEX and BingX
 

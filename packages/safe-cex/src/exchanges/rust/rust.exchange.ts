@@ -569,7 +569,7 @@ export class RustEngineExchange extends BaseExchange {
 
   private receiveFrame = (buffer: ArrayBuffer) => {
     const frame = new Frame(buffer);
-    this.applier.apply(frame);
+    this.applier.apply(frame, !this.onFrame);
     for (const fill of this.applier.fills(frame)) this.emitter.emit('fill', fill);
     if (!this.onFrame) {
       for (const { symbol, orderbook } of this.applier.books(frame)) {

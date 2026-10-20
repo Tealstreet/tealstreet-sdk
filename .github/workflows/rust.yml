@@ -209,6 +209,9 @@ jobs:
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
       - run: yarn install --frozen-lockfile --network-timeout 600000
+      - name: Rust book delta wire through the JS decoder and SDK
+        if: matrix.venue == 'binance'
+        run: yarn rust:test-frame-wire
       - name: Build the combined wasm engine
         if: matrix.venue == 'binance'
         run: yarn rust:build-wasm

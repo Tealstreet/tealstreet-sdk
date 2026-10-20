@@ -14,6 +14,7 @@ export const SECTION: {
   SETTINGS: 12;
   PREDICTION_MARKETS: 13;
   PREDICTION_HOLDINGS: 14;
+  BOOK_DELTA: 15;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -89,6 +90,12 @@ export interface BookRows {
   bids: Float64Array;
   asks: Float64Array;
 }
+export interface BookDeltaRows {
+  market: number;
+  /** Changed `[price, amount]` pairs; zero amount deletes a price. */
+  bids: Float64Array;
+  asks: Float64Array;
+}
 export interface CandleRows {
   count: number;
   market: Uint32Array;
@@ -149,6 +156,7 @@ export class Frame {
   tickers(): TickerTable | undefined;
   tickerDeltas(): Float64Array | undefined;
   books(): Generator<BookRows>;
+  bookDeltas(): Generator<BookDeltaRows>;
   candles(): CandleRows | undefined;
   orders(): OrderTable | undefined;
   positions(): PositionTable | undefined;
