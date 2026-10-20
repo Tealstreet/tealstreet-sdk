@@ -232,6 +232,24 @@ the cached per-flush SETTINGS index is retained. Engine tests pass 95 unit +
 9 feed integration, cross-language writer tests 7/7, formatting and Clippy pass.
 The final combined rebuild, replays and exact-head CI follow.
 
+
+Wire lane final allocation follow-up (`feat/rust-wire-fixes`): all twelve final
+combined-WASM gates pass at `ebe329766f`; both general CI runs and 34 of 35 Rust
+jobs pass. The declared unchanged-head retry passes Paradex but Hyperliquid Spot
+misses startup by 0.4 ms (TS 64.6/Rust 65.0; steady 17.9/15.4 passes). Standalone
+Paradex host opt2 exceeded the fixed size budget; host s fit but measured worse
+CPU. Both experiments were removed, so build profiles remain unchanged.
+Review found the ticker reserve still assumed 92 bytes/row after revision 1 grew
+to 108. A full-startup allocation regression reproduces capacity 62,348 for 32,152
+encoded bytes; the corrected estimate uses 33,222 for identical bytes. It checks
+all 128 market refs, midpoints and exact identity tails after string packing.
+Independent review passes. Engine lib tests pass 90 default/96 all-features;
+Clippy, formatting and seven cross-language writer regressions pass. Alternating
+three-pair standalone replays match all output: main median 43.848 → 40.483 ms,
+steady 14.503 → 12.333 ms; retained memory is effectively unchanged. Canonical
+Hyperliquid Spot gate passes: TS/Rust main 56.1/49.8 ms, steady 20.9/16.4 ms,
+retained 18.9/6.1 MB. Exact-head CI and final combined verification follow.
+
 ## Security
 
 - Workers Durable Object has no client auth and serves the first client's account
@@ -690,21 +708,3 @@ App stop payloads accepted; amend stricter than TS.
 - High if re-enabled: one unexpected portfolio row (XBTUSD lot, terminal-placed
   order type, multi-leg order) rejects the whole snapshot
   (`breakoutprop/src/account.rs:159,226,261`, `lib.rs:920`).
-
-
-Wire lane final allocation follow-up (`feat/rust-wire-fixes`): all twelve final
-combined-WASM gates pass at `ebe329766f`; both general CI runs and 34 of 35 Rust
-jobs pass. The declared unchanged-head retry passes Paradex but Hyperliquid Spot
-misses startup by 0.4 ms (TS 64.6/Rust 65.0; steady 17.9/15.4 passes). Standalone
-Paradex host opt2 exceeded the fixed size budget; host s fit but measured worse
-CPU. Both experiments were removed, so build profiles remain unchanged.
-Review found the ticker reserve still assumed 92 bytes/row after revision 1 grew
-to 108. A full-startup allocation regression reproduces capacity 62,348 for 32,152
-encoded bytes; the corrected estimate uses 33,222 for identical bytes. It checks
-all 128 market refs, midpoints and exact identity tails after string packing.
-Independent review passes. Engine lib tests pass 90 default/96 all-features;
-Clippy, formatting and seven cross-language writer regressions pass. Alternating
-three-pair standalone replays match all output: main median 43.848 → 40.483 ms,
-steady 14.503 → 12.333 ms; retained memory is effectively unchanged. Canonical
-Hyperliquid Spot gate passes: TS/Rust main 56.1/49.8 ms, steady 20.9/16.4 ms,
-retained 18.9/6.1 MB. Exact-head CI and final combined verification follow.
