@@ -186,3 +186,10 @@ never retry an unchanged failed performance measurement to obtain a pass.
 - Round-2 integrated harness: 754/754 PASS before the final base-row/clock follow-up.
   Verifier logging now distinguishes unexpected/invalid results from genuinely
   declared known FAILs; invalid PASS reports are never counted as certified.
+- Independent follow-up required base economic/identity row keys as well as the
+  widened fields. Every always-projected order/position/fill field and each
+  settings leverage shape now has a presence contract. Previously undefined
+  production values serialize explicitly as null, preserving null-vs-zero
+  differences without inventing facts. Shared erasure controls, including final
+  outputs, pass 17/17 CLI tests; unit controls 33/33 and lifecycle 9/9 PASS.
+  Presence does not establish facts absent in both production consumers.

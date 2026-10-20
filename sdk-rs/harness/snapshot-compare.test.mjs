@@ -5,11 +5,13 @@ import { compareCheckpoints, compareSnapshots, duplicateSymbols, checkpointCover
 const snapshot = () => ({
   markets: [{ symbol: 'BTC' }], tickers: [{ symbol: 'BTC', last: 100 }], books: {},
   account: {
-    hedged: false, balance: { used: 20, free: 80, total: 100, upnl: 0 }, settings: [], flatPositionPnl: [],
+    hedged: false, balance: { used: 20, free: 80, total: 100, upnl: 0 }, settings: [{ symbol: 'BTC', marginType: 'cross', leverage: 10 }], flatPositionPnl: [],
     orders: [{ id: '1', symbol: 'BTC', clientOrderId: 'caller', takeProfit: 110, stopLoss: 90, conditionalOrderPrice: 99, parentId: 'parent',
-      takeProfitTrigger: 'mark_price', stopLossTrigger: 'last_price' }],
-    positions: [{ symbol: 'BTC', realizedPnl: 7 }],
-    fills: [{ id: '1', price: 100, fee: 0.1, timestamp: 123, executionId: 'exec' }],
+      takeProfitTrigger: 'mark_price', stopLossTrigger: 'last_price', status: 'open', type: 'limit', side: 'buy', price: 100,
+      amount: 2, filled: 1, remaining: 1, reduceOnly: false, close: false, trigger: null, rejectReason: null, timeInForce: 'GTC' }],
+    positions: [{ symbol: 'BTC', realizedPnl: 7, side: 'long', entryPrice: 100, contracts: 1, notional: 100, leverage: 10,
+      unrealizedPnl: 0, liquidationPrice: null, marginType: 'cross', positionMode: null, marginSize: 10 }],
+    fills: [{ id: '1', symbol: 'BTC', side: 'buy', amount: 1, price: 100, fee: 0.1, timestamp: 123, executionId: 'exec' }],
   },
 });
 
@@ -168,5 +170,32 @@ test('private row coverage rejects null, scalar and sparse rows even when both s
       assert.ok(snapshotCoverageErrors(malformed, 'private', { isPrivate: true })
         .some((error) => error.includes(`account.${section}[0] row object missing`)));
     }
+  }
+});
+
+test('base normalized row keys cannot disappear from both financial snapshots', () => {
+  const original = snapshot();
+  for (const section of ['orders', 'positions', 'settings', 'fills']) {
+    for (const field of Object.keys(original.account[section][0])) {
+      const missing = structuredClone(original); delete missing.account[section][0][field];
+      assert.deepEqual(compareSnapshots(missing, structuredClone(missing)), []);
+      assert.ok(snapshotCoverageErrors(missing, 'private', { isPrivate: true }).length, `${section}.${field}`);
+    }
+  }
+  // Explicit unavailable values remain evidence; no zero or venue facts are invented.
+  const unavailable = snapshot();
+  for (const section of ['orders', 'positions', 'settings', 'fills'])
+    for (const field of Object.keys(unavailable.account[section][0])) unavailable.account[section][0][field] = null;
+  assert.deepEqual(snapshotCoverageErrors(unavailable, 'private', { isPrivate: true }), []);
+});
+
+test('settings require exactly one complete normalized leverage shape', () => {
+  for (const leverage of [{ leverage: null }, { buyLeverage: null, sellLeverage: null }, { buyLeverage: '10', sellLeverage: '20' }]) {
+    const value = snapshot(); value.account.settings = [{ symbol: 'BTC', marginType: null, ...leverage }];
+    assert.deepEqual(snapshotCoverageErrors(value, 'private', { isPrivate: true }), []);
+  }
+  for (const leverage of [{}, { buyLeverage: 10 }, { sellLeverage: 10 }, { leverage: 10, buyLeverage: 10, sellLeverage: 10 }, { leverage: undefined }]) {
+    const value = snapshot(); value.account.settings = [{ symbol: 'BTC', marginType: null, ...leverage }];
+    assert.ok(snapshotCoverageErrors(value, 'private', { isPrivate: true }).some((error) => error.includes('leverage or buyLeverage/sellLeverage')));
   }
 });

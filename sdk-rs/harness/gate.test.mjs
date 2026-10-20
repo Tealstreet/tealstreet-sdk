@@ -173,14 +173,19 @@ const gate = (venue, isPrivate = false, defect) => {
           for (const point of output.checkpoints) delete point.account[defect.split(':')[1]];
         if (defect.startsWith('checkpoint-coverage-erase-balance:'))
           for (const point of output.checkpoints) delete point.account.balance[defect.split(':')[1]];
-        if (defect.startsWith('checkpoint-coverage-erase-row:')) {
+        if (defect.startsWith('checkpoint-coverage-erase-row:') || defect.startsWith('checkpoint-coverage-erase-final-row:')) {
           const [, section, field] = defect.split(':');
           const complete = {
-            orders: { clientOrderId: null, takeProfit: null, stopLoss: null, conditionalOrderPrice: null, parentId: null, takeProfitTrigger: null, stopLossTrigger: null },
-            positions: { realizedPnl: 0 }, fills: { price: 100, fee: null, timestamp: null, executionId: null },
+            orders: { id: 'order', symbol: 'BTCUSDT', status: 'open', type: 'limit', side: 'buy', price: 100, amount: 1,
+              filled: 0, remaining: 1, reduceOnly: false, close: false, trigger: null, rejectReason: null, timeInForce: 'GTC',
+              clientOrderId: null, takeProfit: null, stopLoss: null, conditionalOrderPrice: null, parentId: null, takeProfitTrigger: null, stopLossTrigger: null },
+            positions: { symbol: 'BTCUSDT', side: 'long', entryPrice: 100, contracts: 1, notional: 100, leverage: 10,
+              unrealizedPnl: 0, liquidationPrice: null, marginType: 'cross', positionMode: null, marginSize: 10, realizedPnl: 0 },
+            settings: { symbol: 'BTCUSDT', marginType: 'cross', leverage: 10 },
+            fills: { id: 'order', symbol: 'BTCUSDT', side: 'buy', amount: 1, price: 100, fee: null, timestamp: null, executionId: null },
             flatPositionPnl: { symbol: 'BTCUSDT', side: 'long', positionMode: null, realizedPnl: 0 },
           };
-          for (const point of output.checkpoints) {
+          for (const point of defect.startsWith('checkpoint-coverage-erase-final-row:') ? [output] : output.checkpoints) {
             point.account[section] = [structuredClone(complete[section])];
             delete point.account[section][0][field];
           }
@@ -375,5 +380,26 @@ test('gate CLI rejects shared private financial-section and widened-row omission
     assert.equal(result.status, 1, result.stderr + result.stdout);
     assert.match(result.stdout, /checkpoint coverage ts point \d+:/, defect);
     assert.match(result.stdout, /checkpoint coverage rust point \d+:/, defect);
+  }
+});
+
+test('gate CLI rejects shared base normalized row-key erasure at checkpoints and final output', () => {
+  const fields = {
+    orders: ['id', 'symbol', 'status', 'type', 'side', 'price', 'amount', 'filled', 'remaining', 'reduceOnly', 'close', 'trigger', 'rejectReason', 'timeInForce'],
+    positions: ['symbol', 'side', 'entryPrice', 'contracts', 'notional', 'leverage', 'unrealizedPnl', 'liquidationPrice', 'marginType', 'positionMode', 'marginSize'],
+    settings: ['symbol', 'marginType', 'leverage'],
+    fills: ['id', 'symbol', 'side', 'amount'],
+  };
+  for (const [section, keys] of Object.entries(fields)) for (const field of keys) {
+    const result = gate('binance', true, 'checkpoint-coverage-erase-row:' + section + ':' + field);
+    assert.equal(result.status, 1, result.stderr + result.stdout);
+    assert.match(result.stdout, /checkpoint coverage ts point \d+:/, `${section}.${field}`);
+    assert.match(result.stdout, /checkpoint coverage rust point \d+:/, `${section}.${field}`);
+  }
+  for (const [section, field] of [['orders', 'amount'], ['positions', 'contracts'], ['settings', 'leverage'], ['fills', 'amount']]) {
+    const result = gate('binance', true, 'checkpoint-coverage-erase-final-row:' + section + ':' + field);
+    assert.equal(result.status, 1, result.stderr + result.stdout);
+    assert.match(result.stdout, /checkpoint coverage ts final:/, `${section}.${field}`);
+    assert.match(result.stdout, /checkpoint coverage rust final:/, `${section}.${field}`);
   }
 });

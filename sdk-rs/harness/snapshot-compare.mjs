@@ -61,7 +61,7 @@ export function snapshotCoverageErrors(snapshot, label = 'snapshot', { isPrivate
     const account = snapshot.account;
     const requireFields = (row, fields, path) => {
       if (!object(row)) { errors.push(`${prefix} ${path} row object missing`); return; }
-      for (const field of fields) if (!Object.hasOwn(row, field)) errors.push(`${prefix} ${path}.${field} missing`);
+      for (const field of fields) if (!Object.hasOwn(row, field) || row[field] === undefined) errors.push(`${prefix} ${path}.${field} missing`);
     };
     if (!Object.hasOwn(account, 'hedged') || typeof account.hedged !== 'boolean')
       errors.push(`${prefix} account.hedged boolean missing`);
@@ -75,10 +75,13 @@ export function snapshotCoverageErrors(snapshot, label = 'snapshot', { isPrivate
       }
     }
     const rowFields = {
-      orders: ['takeProfit', 'stopLoss', 'conditionalOrderPrice', 'parentId', 'takeProfitTrigger', 'stopLossTrigger',
+      orders: ['id', 'symbol', 'status', 'type', 'side', 'price', 'amount', 'filled', 'remaining', 'reduceOnly', 'close', 'trigger', 'rejectReason',
+        'takeProfit', 'stopLoss', 'conditionalOrderPrice', 'parentId', 'takeProfitTrigger', 'stopLossTrigger',
         ...(comparesField(venue, 'clientOrderId') ? ['clientOrderId'] : [])],
-      positions: ['realizedPnl'], settings: [],
-      fills: ['executionId', 'fee', 'timestamp', ...(comparesField(venue, 'fillPrice') ? ['price'] : [])],
+      positions: ['symbol', 'side', 'entryPrice', 'contracts', 'notional', 'leverage', 'unrealizedPnl', 'liquidationPrice',
+        'marginType', 'positionMode', 'marginSize', 'realizedPnl'],
+      settings: ['symbol', 'marginType'],
+      fills: ['id', 'symbol', 'side', 'amount', 'executionId', 'fee', 'timestamp', ...(comparesField(venue, 'fillPrice') ? ['price'] : [])],
       flatPositionPnl: ['symbol', 'side', 'positionMode', 'realizedPnl'],
     };
     for (const [section, fields] of Object.entries(rowFields)) {
@@ -86,7 +89,19 @@ export function snapshotCoverageErrors(snapshot, label = 'snapshot', { isPrivate
         errors.push(`${prefix} account.${section} rows missing`);
         continue;
       }
-      for (const [index, row] of account[section].entries()) requireFields(row, fields, `account.${section}[${index}]`);
+      for (const [index, row] of account[section].entries()) {
+        const path = `account.${section}[${index}]`;
+        requireFields(row, fields, path);
+        if (!object(row)) continue;
+        if (section === 'orders' && row.type === 'limit' && comparesField(venue, 'clientOrderId'))
+          requireFields(row, ['timeInForce'], path);
+        if (section === 'settings') {
+          const own = (field) => Object.hasOwn(row, field) && row[field] !== undefined;
+          const single = own('leverage') && !Object.hasOwn(row, 'buyLeverage') && !Object.hasOwn(row, 'sellLeverage');
+          const independent = !Object.hasOwn(row, 'leverage') && own('buyLeverage') && own('sellLeverage');
+          if (!single && !independent) errors.push(`${prefix} ${path} single leverage or buyLeverage/sellLeverage pair missing`);
+        }
+      }
     }
   }
   return errors;

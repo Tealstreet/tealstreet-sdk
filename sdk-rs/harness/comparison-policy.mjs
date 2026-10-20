@@ -45,9 +45,9 @@ const tsExecutionId = (fill, venue) => {
 // implementation's evidence from the tape or promotes a Rust order id.
 export const projectFill = (fill, venue, impl = 'ts') => ({
   id: fill.orderId ?? fill.id ?? null,
-  symbol: fill.symbol,
-  side: fill.side,
-  amount: fill.amount,
+  symbol: fill.symbol ?? null,
+  side: fill.side ?? null,
+  amount: fill.amount ?? null,
   ...(comparesField(venue, 'fillPrice') ? { price: finiteOrNull(fill.price) } : {}),
   executionId: fill.executionId ?? (impl === 'ts' ? tsExecutionId(fill, venue) : null),
   fee: finiteOrNull(fill.fee),
@@ -80,25 +80,28 @@ export const flatPositionPnl = (positions) => positions
     positionMode: position.positionMode ?? null, realizedPnl: finiteOrNull(position.realizedPnl) }))
   .sort((a, b) => a.symbol.localeCompare(b.symbol) || String(a.side).localeCompare(String(b.side)) || String(a.positionMode).localeCompare(String(b.positionMode)));
 
+// Keep unavailable passthrough values explicit through JSON serialization.
+// Presence validation detects projection-key loss; null does not prove a fact
+// that neither production consumer supplied, and never substitutes for zero.
 /** The fields both implementations carry, in one shape. */
 export function normalizeAccount(account, venue, impl, venueName = venue.rust) {
   const order = (o) => ({
-    id: String(o.id),
+    id: o.id == null ? null : String(o.id),
     ...(comparesField(venueName, 'clientOrderId') ? { clientOrderId: o.clientOrderId ?? null } : {}),
-    symbol: o.symbol,
-    status: o.status,
-    type: o.type,
-    side: o.side,
-    price: o.price,
+    symbol: o.symbol ?? null,
+    status: o.status ?? null,
+    type: o.type ?? null,
+    side: o.side ?? null,
+    price: o.price ?? null,
     takeProfit: finiteOrNull(o.takeProfit),
     stopLoss: finiteOrNull(o.stopLoss),
     conditionalOrderPrice: finiteOrNull(o.extra?.conditionalOrderPrice ?? o.conditionalOrderPrice),
     parentId: o.parentId ?? null,
-    amount: o.amount,
-    filled: o.filled,
-    ...((venue.inverseNativeAmounts || venue.coinNativeAmounts) ? { remainingNative: o.extra?.remainingNative ?? (venue.coinNativeAmounts && impl === 'ts' ? o.remaining : undefined) } : {}),
+    amount: o.amount ?? null,
+    filled: o.filled ?? null,
+    ...((venue.inverseNativeAmounts || venue.coinNativeAmounts) ? { remainingNative: o.extra?.remainingNative ?? (venue.coinNativeAmounts && impl === 'ts' ? o.remaining : null) ?? null } : {}),
     ...(comparesField(venueName, 'clientOrderId') && o.type === 'limit' ? { timeInForce: o.timeInForce ?? null } : {}),
-    remaining: o.remaining,
+    remaining: o.remaining ?? null,
     reduceOnly: Boolean(o.reduceOnly),
     close: Boolean(o.close),
     trigger: o.tpTriggerType ?? o.slTriggerType ?? o.triggerType ?? null,
@@ -107,22 +110,22 @@ export function normalizeAccount(account, venue, impl, venueName = venue.rust) {
     rejectReason: o.extra?.rejectReason ?? o.rejectReason ?? venue.tsRejectReason?.(o) ?? null,
   });
   const position = (p) => ({
-    symbol: p.symbol,
-    side: p.side,
-    entryPrice: p.entryPrice,
-    contracts: p.contracts,
-    notional: p.notional,
-    ...((venue.inverseNativeAmounts || venue.coinNativeAmounts) ? { contractsNative: p.extra?.contractsNative ?? p.info?.contractsNative, unrealizedPnlNative: p.extra?.unrealizedPnlNative ?? (venue.coinNativeAmounts ? p.unrealizedPnl : undefined) } : {}),
-    leverage: p.leverage,
-    unrealizedPnl: p.unrealizedPnl,
+    symbol: p.symbol ?? null,
+    side: p.side ?? null,
+    entryPrice: p.entryPrice ?? null,
+    contracts: p.contracts ?? null,
+    notional: p.notional ?? null,
+    ...((venue.inverseNativeAmounts || venue.coinNativeAmounts) ? { contractsNative: p.extra?.contractsNative ?? p.info?.contractsNative ?? null, unrealizedPnlNative: p.extra?.unrealizedPnlNative ?? (venue.coinNativeAmounts ? p.unrealizedPnl : null) ?? null } : {}),
+    leverage: p.leverage ?? null,
+    unrealizedPnl: p.unrealizedPnl ?? null,
     realizedPnl: finiteOrNull(p.realizedPnl),
-    liquidationPrice: p.liquidationPrice,
+    liquidationPrice: p.liquidationPrice ?? null,
     marginType: p.marginType ?? null,
     positionMode: p.positionMode ?? null,
     marginSize: Number.isFinite(p.marginSize) ? p.marginSize : null,
     ...(venue.compareOptionTerms ? { option: p.option?.greeks ? { greeks: p.option.greeks } : null } : {}),
   });
-  const bySymbol = (a, b) => a.symbol.localeCompare(b.symbol) || String(a.id ?? '').localeCompare(String(b.id ?? ''));
+  const bySymbol = (a, b) => String(a.symbol ?? '').localeCompare(String(b.symbol ?? '')) || String(a.id ?? '').localeCompare(String(b.id ?? ''));
   return {
     hedged: account.hedged,
     balance: account.balance,
@@ -132,11 +135,11 @@ export function normalizeAccount(account, venue, impl, venueName = venue.rust) {
     flatPositionPnl: account.flatPositionPnl ?? flatPositionPnl(account.positions),
     settings: account.settings
       .map((s) => ({
-        symbol: s.symbol,
-        marginType: s.marginType,
+        symbol: s.symbol ?? null,
+        marginType: s.marginType ?? null,
         ...(venue.independentLeverage
-          ? { buyLeverage: s.buyLeverage, sellLeverage: s.sellLeverage }
-          : { leverage: s.leverage }),
+          ? { buyLeverage: s.buyLeverage ?? null, sellLeverage: s.sellLeverage ?? null }
+          : { leverage: s.leverage ?? null }),
       }))
       .sort(bySymbol),
     fills: account.fills.map((fill) => projectFill(fill, venueName, impl)),
