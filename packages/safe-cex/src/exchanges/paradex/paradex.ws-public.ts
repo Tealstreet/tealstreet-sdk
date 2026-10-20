@@ -1,10 +1,10 @@
 import throttle from 'lodash/throttle';
 
-import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker, timeframeToSeconds } from '../../types';
 import { BaseWebSocket } from '../base.ws';
 import { ParadexExchange } from './paradex.exchange';
 import { BASE_WS_URL } from './paradex.types';
+import { decodeParadexMessage } from './paradex.sbe';
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -53,6 +53,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
   private ohlcvCallbacks = new Map<string, Set<(candle: Candle) => void>>(); // Store callbacks for trade updates
   private ohlcvIntervals = new Map<string, number>(); // Store interval in ms for each subscription
   private ohlcvLastTradeAt = new Map<string, number>();
+  private ohlcvRevisions = new Map<string, number>();
   private ohlcvLastRecoveryAt = new Map<string, number>();
 
   messageHandlers: MessageHandlers = {
@@ -77,6 +78,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
   connectAndSubscribe = () => {
     if (!this.isDisposed) {
       this.ws = this.createWebsocket(this.connectUrl);
+      this.ws.binaryType = 'arraybuffer';
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
       this.ws.addEventListener('close', this.onClose);
@@ -105,7 +107,13 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
   onMessage = (event: MessageEvent) => {
     if (!this.isDisposed) {
       this.trackLastReceived();
-      const data = bigIntAsStringJsonParse(event.data);
+      let data: Data | null;
+      try {
+        data = decodeParadexMessage(event.data);
+      } catch (error) {
+        this.parent.log(`Invalid Paradex websocket frame: ${error}`, LogSeverity.Warning);
+        return;
+      }
       if (!data) return;
 
       // Handle JSON-RPC 2.0 format
@@ -138,8 +146,11 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
           const pendingSubscribe = this.pendingSubscribeRequests.get(data.id);
           if (pendingSubscribe) {
             this.pendingSubscribeRequests.delete(data.id);
-            if (data.error) {
-              this.retrySubscribeChannel(pendingSubscribe.channel, pendingSubscribe.attempt, data.error?.message);
+            if (data.error || data.result?.channel !== pendingSubscribe.channel) {
+              this.retrySubscribeChannel(
+                pendingSubscribe.channel, pendingSubscribe.attempt,
+                data.error?.message || 'missing or mismatched subscription acknowledgement',
+              );
             }
           }
           if (data.error) {
@@ -270,8 +281,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
     this.sendJsonRpcSubscription('subscribe', `trades.${symbol}`, attempt);
   };
 
-  private handleBBOUpdate = throttle(
-    (data: any) => {
+  private handleBBOUpdate = (data: any) => {
       try {
         const bboData = data?.data;
         if (!bboData) {
@@ -302,13 +312,9 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       } catch (err) {
         this.parent.log(`Error handling BBO update: ${err}`, LogSeverity.Error);
       }
-    },
-    100,
-    { leading: true, trailing: true },
-  );
+  };
 
-  private handleMarketSummaryUpdate = throttle(
-    (data: any) => {
+  private handleMarketSummaryUpdate = (data: any) => {
       try {
         const rawData = Array.isArray(data?.data) ? data.data : [data?.data || data];
         for (const summary of rawData) {
@@ -350,10 +356,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       } catch (err) {
         this.parent.log(`Error handling markets_summary update: ${err}`, LogSeverity.Error);
       }
-    },
-    100,
-    { leading: true, trailing: true },
-  );
+  };
 
   private clearOrderbooks = () => {
     this.orderbooks.forEach((state) => state.emit.cancel());
@@ -535,13 +538,14 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       if (!intervalMs) {
         continue;
       }
-      this.ohlcvLastTradeAt.set(pollKey, Date.now());
-
       // Get or create the current candle
       let currentCandle = this.lastCandleCache.get(pollKey);
 
       // Calculate the candle's timestamp (start of the interval period)
       const candleTimestamp = Math.floor(timestamp / intervalMs) * intervalMs;
+      if (currentCandle && currentCandle.timestamp > candleTimestamp) continue;
+      this.ohlcvLastTradeAt.set(pollKey, Date.now());
+      this.ohlcvRevisions.set(pollKey, (this.ohlcvRevisions.get(pollKey) || 0) + 1);
 
       // If we don't have a candle or it's a new candle period, initialize it
       if (!currentCandle || currentCandle.timestamp !== candleTimestamp) {
@@ -766,6 +770,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
         // Fetch last 2 candles (go back 3x interval to be safe)
         const from = now - intervalMs * 3;
 
+        const revision = this.ohlcvRevisions.get(pollKey) || 0;
         const candles = await this.parent.fetchOHLCV({
           symbol: opts.symbol,
           interval: opts.interval,
@@ -780,7 +785,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
           return;
         }
 
-        if (candles.length > 0) {
+        if (candles.length > 0 && revision === (this.ohlcvRevisions.get(pollKey) || 0)) {
           const latestCandle = candles[candles.length - 1];
           const previousCandle = this.lastCandleCache.get(pollKey);
 
@@ -827,6 +832,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
   };
 
   private cleanupOhlcvSubscription = (pollKey: string) => {
+    this.ohlcvRevisions.delete(pollKey);
     // Mark as inactive and bump the generation so an in-flight REST poll cannot
     // schedule itself again after a new listener has replaced this one.
     this.ohlcvPollingActive.set(pollKey, false);

@@ -1057,7 +1057,7 @@ export class ParadexExchange extends BaseExchange {
     const fromMilliseconds = normalizeToMilliseconds(from);
     const toMilliseconds = normalizeToMilliseconds(to);
 
-    const parseFillRows = (rows: Array<Record<string, any>>) =>
+    const parseFillRows = (rows: Array<Record<string, any>>, aggregateOrders = false) =>
       rows.reduce<Execution[]>((acc, row) => {
         const rowSymbol = String(row.market || row.symbol || '');
         if (rowSymbol !== market.symbol) {
@@ -1073,7 +1073,7 @@ export class ParadexExchange extends BaseExchange {
         const filledFromOrder =
           parseFloat(row.size || '0') - parseFloat(row.remaining_size || row.remainingSize || '0');
         const qty = parseFloat(
-          row.fill_size || row.filled_size || row.quantity || (filledFromOrder > 0 ? filledFromOrder : 0),
+          row.fill_size || row.filled_size || row.quantity || (aggregateOrders ? (filledFromOrder > 0 ? filledFromOrder : 0) : row.size || '0'),
         );
         if (!Number.isFinite(price) || !Number.isFinite(qty) || price <= 0 || qty <= 0) {
           return acc;
@@ -1171,14 +1171,14 @@ export class ParadexExchange extends BaseExchange {
       const fallbackRows = primaryRows.length > 0 ? [] : await fetchOrderFallbackRows();
       const deduped = new Map<string, Execution>();
 
-      for (const execution of [...parseFillRows(primaryRows), ...parseFillRows(fallbackRows)]) {
+      for (const execution of [...parseFillRows(primaryRows), ...parseFillRows(fallbackRows, true)]) {
         if (fromMilliseconds && execution.timestamp * 1000 < fromMilliseconds) {
           continue;
         }
         if (toMilliseconds && execution.timestamp * 1000 > toMilliseconds) {
           continue;
         }
-        const key = `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
+        const key = execution.id ?? `${execution.orderId || 'no-order'}:${execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
         deduped.set(key, execution);
       }
 

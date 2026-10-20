@@ -102,3 +102,31 @@ merge and create a fresh follow-up branch.
 - Removed unused first-port generic Stark typed-data/felt parsing helpers and
   their obsolete fixture; crypto now depends only on starknet-crypto for these
   primitives. Venue-specific fixed hashing preserves Paradex domain field order.
+
+### Reviewed data/auth checkpoint
+
+- Phase1 public and phase2 private/signing independent reviews PASS after fixes.
+  Native verification: 23 public +16 account +4 signing tests, plus6 unit tests
+  (SBE/price-band/tradingcorrelation). Phase3 trading currently12 tests pass;
+  phase4 queries7 tests pass; their independent reviews are still underway.
+- SBE schema1:2 is decoded directly into typed Rust state; JS/native hosts expose
+  explicit binary mode and borrowed ingress. The JS host suite passed36 tests;
+  the review also caught an older-engine physicalsocket leak and native fallback
+  health omission, nowfixed with additional regressions awaiting final checks.
+- Independent TS codec uses official Python-generated vectors across8 templates;
+  public/private null, enum, root/group/string bounds and rapidcrosssymbol updates
+  reviewed. Paired TS corrections retain full depth, every market's BBO/summary,
+  candle generation fences and final CLOSED statuses.
+- Privateauth preserves environmentconfiguration, exact SNIP12 domains and
+  deterministic decimalquantums. JWT queue singleflights and fails pending typed
+  operations explicitly; missingauth/subscription acks recover; serverstamps and
+  terminalposition/order fences block old REST/event resurrection. One fill emits
+  per executionID, retaining distinct economicallyidentical partials.
+- Shared maxSlippagePct input now survives deserialization. Paradex cappedmarket
+  uses a freshdepth5 read then constrained signed LIMIT/IOC; other venue builders
+  receive only a mechanical None default. No other venue behavior changed.
+- Proxy JWT formerly overwrote Paradex's venue Authorization when proxied. The
+  shared TS policy now uses Tealstreet-Authorization for Paradex, preserving both
+  credentials identically for the native resolvedplan and JS host.
+- No replay, performance, finalCI or PR/merge gate has been claimed yet. Harness
+  registration and live20second publicrecording are underway.

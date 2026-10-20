@@ -4,6 +4,7 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none.
 #[cfg(not(any(
+    feature = "paradex",
     feature = "bitrue",
     feature = "binance",
     feature = "blofin",
@@ -18,7 +19,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx or weex"
+    "safe-cex-wasm requires at least one venue feature: paradex, bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -47,6 +48,8 @@ use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOpt
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 #[cfg(feature = "okx")]
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
+#[cfg(feature = "paradex")]
+use safe_cex_venue_paradex::{Options as ParadexOptions, Paradex};
 #[cfg(feature = "weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 use serde::{Deserialize, Serialize};
@@ -87,6 +90,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 }
 
 #[cfg(any(
+    feature = "paradex",
     feature = "binance",
     feature = "blofin",
     feature = "bybit",
@@ -104,6 +108,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
     #[cfg(any(
+        feature = "paradex",
         feature = "binance",
         feature = "blofin",
         feature = "bybit",
@@ -118,8 +123,28 @@ struct EngineOptions {
     public_data_only: bool,
     #[serde(default)]
     key: Option<String>,
+    #[cfg(any(
+        feature = "binance",
+        feature = "blofin",
+        feature = "bybit",
+        feature = "cryptocom",
+        feature = "bingx",
+        feature = "mexc",
+        feature = "bitget",
+        feature = "bitrue",
+        feature = "backpack",
+        feature = "weex",
+        feature = "hyperliquid",
+        feature = "okx"
+    ))]
     #[serde(default)]
     secret: Option<String>,
+    #[cfg(feature = "paradex")]
+    #[serde(default)]
+    paradex_address: Option<String>,
+    #[cfg(feature = "paradex")]
+    #[serde(default)]
+    subkey_address: Option<String>,
     #[cfg(any(feature = "backpack", feature = "bitrue"))]
     #[serde(default)]
     recv_window: Option<f64>,
@@ -159,6 +184,8 @@ struct HyperliquidBuilder {
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
     WsConnect {
+        #[serde(skip_serializing_if = "is_false")]
+        binary: bool,
         socket: u32,
         url: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -219,11 +246,13 @@ fn encode(actions: &[Action]) -> String {
         .iter()
         .map(|action| match action {
             Action::WsConnect {
+                binary,
                 socket,
                 url,
                 channel,
                 context,
             } => ActionOut::WsConnect {
+                binary: *binary,
                 socket: socket.0,
                 url,
                 channel: channel.as_ref().map(socket_channel),
@@ -237,6 +266,7 @@ fn encode(actions: &[Action]) -> String {
                 channel,
                 context,
             } => ActionOut::WsConnect {
+                binary: false,
                 socket: socket.0,
                 url,
                 channel: channel.as_ref().map(socket_channel),
@@ -565,6 +595,7 @@ pub struct WasmEngine {
 #[wasm_bindgen]
 impl WasmEngine {
     #[cfg(any(
+        feature = "paradex",
         feature = "binance",
         feature = "blofin",
         feature = "bybit",
@@ -589,6 +620,14 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "paradex")]
+            "paradex" => Box::new(Engine::new(Paradex::new(ParadexOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                paradex_address: options.paradex_address,
+                subkey_address: options.subkey_address,
+            }))),
             #[cfg(feature = "bitrue")]
             "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
                 public_data_only: options.public_data_only,
@@ -741,6 +780,18 @@ impl WasmEngine {
         self.flush()
     }
 
+    #[wasm_bindgen(js_name = wsBinary)]
+    pub fn ws_binary(&mut self, socket: u32, data: &[u8], now: f64) -> String {
+        self.inner.handle(
+            now,
+            Event::WsBinary {
+                socket: SocketId(socket),
+                data,
+            },
+        );
+        self.flush()
+    }
+
     #[wasm_bindgen(js_name = wsClose)]
     pub fn ws_close(&mut self, socket: u32, code: u16, now: f64) -> String {
         let socket = SocketId(socket);
@@ -816,6 +867,10 @@ impl WasmEngine {
             .frame(now, market_only)
             .map(js_sys::Uint8Array::from)
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[cfg(test)]

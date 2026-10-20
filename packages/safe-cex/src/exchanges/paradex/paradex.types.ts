@@ -9,12 +9,12 @@ export const BASE_URL = {
 
 export const BASE_WS_URL = {
   public: {
-    livenet: 'wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false',
-    testnet: 'wss://ws.api.testnet.paradex.trade/v1?cancel-on-disconnect=false',
+    livenet: 'wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2',
+    testnet: 'wss://ws.api.testnet.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2',
   },
   private: {
-    livenet: 'wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false',
-    testnet: 'wss://ws.api.testnet.paradex.trade/v1?cancel-on-disconnect=false',
+    livenet: 'wss://ws.api.prod.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2',
+    testnet: 'wss://ws.api.testnet.paradex.trade/v1?cancel-on-disconnect=false&sbeSchemaId=1&sbeSchemaVersion=2',
   },
 };
 

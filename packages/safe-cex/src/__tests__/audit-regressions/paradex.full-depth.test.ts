@@ -142,4 +142,14 @@ describe('Paradex full-depth order books', () => {
     vi.advanceTimersByTime(100);
     expect(books.get(BTC)).toHaveLength(2);
   });
+
+  it.each([undefined, null, { channel: 'bbo.ETH-USD-PERP' }])('retries malformed or mismatched subscription acknowledgements: %j', (result) => {
+    const { ws, listen, send } = setup();
+    listen();
+    const request = JSON.parse(send.mock.calls[0][0] as string);
+    ws.onMessage({ data: JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) } as MessageEvent);
+    vi.advanceTimersByTime(1000);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(send.mock.calls[1][0] as string).params.channel).toBe(request.params.channel);
+  });
 });

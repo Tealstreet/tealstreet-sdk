@@ -281,6 +281,8 @@ pub struct Candle {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceOrderOpts {
+    #[serde(default)]
+    pub max_slippage_pct: Option<f64>,
     pub symbol: String,
     #[serde(rename = "type")]
     pub kind: OrderType,

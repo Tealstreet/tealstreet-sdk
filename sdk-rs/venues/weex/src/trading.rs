@@ -773,6 +773,7 @@ impl WeexFutures {
                         let conditional = o.kind == OrderType::Conditional;
                         let brackets = self.replacement_brackets(cx, &o)?;
                         let opts = PlaceOrderOpts {
+                            max_slippage_pct: None,
                             symbol: o.symbol.clone(),
                             kind: o.kind,
                             side: o.side,

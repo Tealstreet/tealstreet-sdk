@@ -27,7 +27,7 @@ The engine performs no I/O. It is a deterministic state machine:
 ```
 engine.handle(Event) -> appends Actions
 
-Event   = WsOpened | WsMessage(&str | &[u8]) | WsClosed
+Event   = WsOpened | WsMessage(&str) | WsBinary(&[u8]) | WsClosed
         | HttpResponse { id, status, body }
         | TimerFired(id) | Command(PlaceOrder | Cancel | Subscribe | ...)
         | Now(ms)
@@ -119,8 +119,10 @@ defined once in `sdk-rs/engine/src/wire.rs` and mirrored by the decoder in
 
 ### Crossing rules
 
-- A websocket frame crosses into the engine once, as text; an HTTP body once,
-  as bytes. Nothing else crosses per message.
+- A websocket frame crosses into the engine once, as text or borrowed binary
+  bytes for explicitly negotiated binary protocols; an HTTP body once, as bytes.
+  Nothing else crosses per message. Paradex negotiates SBE schema1 version2;
+  its typed codec lives in the venue, and hosts preserve the application bytes.
 - Frames cross out once per flush. A section appears only when its data
   changed; an idle flush writes no frame.
 - Logs and command results are rare and stay JSON.

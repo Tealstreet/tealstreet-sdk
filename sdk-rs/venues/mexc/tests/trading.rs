@@ -873,6 +873,7 @@ fn plan_stop_amend_keeps_latest_native_source_after_ws() {
     }
     e.drain_actions().for_each(drop);
     let opts = PlaceOrderOpts {
+        max_slippage_pct: None,
         symbol: "BTCUSDT".into(),
         kind: OrderType::StopLoss,
         side: OrderSide::Sell,

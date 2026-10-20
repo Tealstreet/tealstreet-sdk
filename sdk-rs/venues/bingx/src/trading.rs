@@ -881,6 +881,7 @@ impl Trading {
                 return Err("Replacement trigger would execute immediately".into());
             }
             let opts = PlaceOrderOpts {
+                max_slippage_pct: None,
                 symbol: o.symbol.clone(),
                 kind,
                 side: o.side,

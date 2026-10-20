@@ -948,3 +948,15 @@ describe('Paradex matches the production API factory adapter gate', () => {
     host.dispose?.();
   });
 });
+
+it('keeps the Paradex venue bearer separate from proxy authorization on both host plans', async () => {
+  const account = options({ publicDataOnly: false, tealstreetProxy: true, tealstreetTunnel: false });
+  const raw = makeRaw();
+  const routed = createEngineTransport('paradex', account, raw);
+  await routed.request({ method: 'GET', url: 'https://api.prod.paradex.trade/v1/account', headers: { Authorization: 'Bearer venue-jwt' } });
+  const config = mocks.adapter.mock.lastCall![0] as InternalAxiosRequestConfig;
+  expect(config.headers.get('Authorization')).toBe('Bearer venue-jwt');
+  expect(config.headers.get('Tealstreet-Authorization')).toBe('Bearer proxy-jwt');
+  expect(resolveEngineRoutingPlan('paradex', account, 'https://api.prod.paradex.trade/v1').http.authorizationHeader).toBe('Tealstreet-Authorization');
+  routed.dispose!();
+});

@@ -92,6 +92,8 @@ pub struct SocketContext {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     WsConnect {
+        /// Preserve application binary frames rather than decoding UTF-8.
+        binary: bool,
         socket: SocketId,
         url: String,
         channel: Option<SocketChannel>,
@@ -255,6 +257,10 @@ pub enum Event<'a> {
     WsOpened {
         socket: SocketId,
     },
+    WsBinary {
+        socket: SocketId,
+        data: &'a [u8],
+    },
     WsMessage {
         socket: SocketId,
         text: &'a str,
@@ -367,7 +373,7 @@ impl<P> Cx<'_, P> {
         url: impl Into<String>,
         channel: Option<SocketChannel>,
     ) -> SocketId {
-        self.connect_context(url, channel, None)
+        self.connect_context(url, channel, None, false)
     }
 
     pub fn connect_feed(
@@ -377,7 +383,21 @@ impl<P> Cx<'_, P> {
         feed: &'static str,
         recover: bool,
     ) -> SocketId {
-        self.connect_context(url, Some(channel), Some(SocketContext { feed, recover }))
+        self.connect_context(
+            url,
+            Some(channel),
+            Some(SocketContext { feed, recover }),
+            false,
+        )
+    }
+
+    /// Binary protocols still receive text control responses through on_message.
+    pub fn connect_binary_channel(
+        &mut self,
+        url: impl Into<String>,
+        channel: SocketChannel,
+    ) -> SocketId {
+        self.connect_context(url, Some(channel), None, true)
     }
 
     fn connect_context(
@@ -385,9 +405,11 @@ impl<P> Cx<'_, P> {
         url: impl Into<String>,
         channel: Option<SocketChannel>,
         context: Option<SocketContext>,
+        binary: bool,
     ) -> SocketId {
         let socket = SocketId(self.io.next());
         self.io.actions.push(Action::WsConnect {
+            binary,
             socket,
             url: url.into(),
             channel,
@@ -561,6 +583,7 @@ pub trait Venue {
 
     fn start(&mut self, cx: &mut Cx<'_, Self::Pending>);
     fn on_open(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId);
+    fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, text: &str);
     fn on_close(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, code: u16);
     fn on_response(
@@ -656,6 +679,7 @@ impl<V: Venue> Engine<V> {
         };
         match event {
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
+            Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
             Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
             Event::WsClosed { socket, code } => self.venue.on_close(&mut cx, socket, code),
             Event::HttpResponse { request, response } => {

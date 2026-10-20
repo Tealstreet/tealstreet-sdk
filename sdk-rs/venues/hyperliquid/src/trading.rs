@@ -197,6 +197,7 @@ impl Hyperliquid {
                     return;
                 }
                 let mut opts = PlaceOrderOpts {
+                    max_slippage_pct: None,
                     symbol: old.symbol.clone(),
                     kind: old.kind,
                     side: old.side,

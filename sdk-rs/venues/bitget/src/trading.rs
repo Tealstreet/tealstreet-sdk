@@ -1810,6 +1810,7 @@ fn fallback_plan(order: &Order) -> &'static str {
 }
 fn place_opts(order: &Order) -> PlaceOrderOpts {
     PlaceOrderOpts {
+        max_slippage_pct: None,
         symbol: order.symbol.clone(),
         kind: order.kind,
         side: order.side,

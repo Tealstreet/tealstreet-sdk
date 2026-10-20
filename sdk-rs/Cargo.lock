@@ -3598,7 +3598,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "starknet-core",
  "starknet-crypto",
  "zeroize",
 ]
@@ -3745,6 +3744,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-paradex"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+ "starknet-core",
+]
+
+[[package]]
 name = "safe-cex-venue-weex"
 version = "0.1.0"
 dependencies = [
@@ -3771,6 +3782,7 @@ dependencies = [
  "safe-cex-venue-hyperliquid",
  "safe-cex-venue-mexc",
  "safe-cex-venue-okx",
+ "safe-cex-venue-paradex",
  "safe-cex-venue-weex",
  "serde",
  "serde_json",

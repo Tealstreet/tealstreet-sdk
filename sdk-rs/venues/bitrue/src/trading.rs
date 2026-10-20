@@ -970,6 +970,7 @@ impl Bitrue {
                     return Err("Bitrue only amends resting limit orders".into());
                 }
                 let mut opts = PlaceOrderOpts {
+                    max_slippage_pct: None,
                     symbol: amend.order.symbol.clone(),
                     kind: amend.order.kind,
                     side: amend.order.side,

@@ -20,7 +20,6 @@ alloy-signer-local.workspace = true
 ed25519-dalek.workspace = true
 p256.workspace = true
 starknet-crypto.workspace = true
-starknet-core.workspace = true
 franklin-crypto.workspace = true
 zeroize.workspace = true
 

@@ -684,6 +684,7 @@ impl Okx {
             let replacement = self.plan_place(
                 cx,
                 vec![PlaceOrderOpts {
+                    max_slippage_pct: None,
                     symbol: o.symbol.clone(),
                     kind: o.kind,
                     side: o.side,
