@@ -510,23 +510,40 @@ ported. The linked inventory records exact callers and product constraints.
 The source audit found additional gates that must stay visible before default
 cutover or deletion:
 
-- `privateOnly` does not currently suppress Rust public sockets, and Rust does
-  not initialize/use the TS `externalPublicData` provider. Replace these with
-  explicit shared-public-feed policy and test private-worker/provider fan-out.
+- **Consumer-blockers implementation:** `privateOnly` and the pre-start
+  suppression hook now select native Public-role suppression. Explicit
+  direct/disabled/shared feed policy and transferred-port `RustPublicFeedProvider`
+  fan-out retain private metadata/settings, ingest public data natively, and
+  keep shared fields authoritative across local polling. Tests cover real
+  private workers, native snapshots, identity/catalog checks and disposal.
+  Rust rejects legacy TS `externalPublicData`; application/gateway owners must
+  migrate to the explicit policy before changing their account defaults.
 - Rust frames carry typed Polymarket prediction/holding metadata, reconstructed
   into its specific `info` fields; they do not carry arbitrary native `info`.
   Bybit's instrument classifier still lacks `info.symbolType`, so CLI TradFi
   preflight returns unknown and no longer enforces the existing refusal. Carry
   typed semantic classification
   through frames and test the real preflight before changing those defaults.
-- `safe-cex-server`'s `PublicExchangeFactory` creates without starting an
-  exchange, then calls `fetchMarkets`; Rust currently returns its store. Cold
-  starts are empty and forced refresh does not refresh native metadata. Define
-  and test explicit startup/refresh semantics before adopting this factory.
+- **Public factory lifecycle repaired:** a cache miss starts Rust before
+  reading metadata; a Redis hit remains a lazy metadata-only handle. Forced
+  refresh starts a replacement engine to re-fetch native metadata and swaps
+  `handle.exchange` after successful persistence. Failed refresh retains the
+  previous good engine/catalog. Callers re-read `handle.exchange` after refresh;
+  cold/concurrent/hour-rollover/disposal paths have native/unit coverage.
 - GRVT's Rust discovery retains `PERPETUAL` only, while the TS catalog mapper
   also accepts non-perpetual instrument kinds. Resolve retained Future/Call/Put
   product and semantic metadata coverage explicitly before deleting that TS
   path; perpetual fixtures and registration do not prove those products.
+
+The consumer-blockers phase also proves saved CFM account CLI reads through the
+real factory, MCP catalog/balance/positions/orders over its actual protocol,
+isolated compiled Bun CLI loading, and isolated packaged Node MCP loading with
+Rust artifacts and dependency notices. `EXCHANGE_ENGINE=rust` explicitly selects
+the MCP engine. Mobile has an explicit cached host-loader registration tested
+with the real browser WASM bytes and two saved accounts; **a Hermes/native-bridge
+binary and device integration remain unproved**. These are deterministic offline
+consumer/packaging proofs, not live account authentication or deployment claims.
+See [RUST_CONSUMER_BLOCKERS.md](RUST_CONSUMER_BLOCKERS.md) for checkpoints/gates.
 
 Deletion proceeds in separate, reviewable PRs:
 
