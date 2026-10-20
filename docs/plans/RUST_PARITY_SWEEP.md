@@ -419,3 +419,19 @@ than treating the original port boundary as a waiver.
 - Primary verification is complete. Transfer bindings ownership to the serial
   runner for remaining50replays,24feature builds,11venue controls and10incoming
   integration controls. Source stays frozen until its results are reviewed.
+
+
+### Final local gate completion
+
+- Serial runner106/106 steps PASS with frozen source:50replays,24feature builds,
+  11venue controls,10integration controls and537shared harness tests. No failure
+  or retry in this final sequence; independent aggregation audit PASS.
+- With the primary OKX7gates and1feature build:57planned local replays
+  (27public/30private),all25budgets PASS. Extra combined GRVTprivate PASS is
+  separate58th evidence. Largest module Paradex1,255,331bytes; ceiling remains
+  1,258,291. Detailed counts, sizes and public measurements are committed in
+  [RUST_PARITY_SWEEP_GATES.md](RUST_PARITY_SWEEP_GATES.md).
+- Bindings lease returned; no more local runs needed without a new source
+  change or review finding. Next: normal push, PR into feat/rust-rewrite,
+  independent adversarial reviews posted to PR, exact-head green CI, merge and
+  fresh follow-up branch. No live-key or separate phase9 gap is claimed closed.
