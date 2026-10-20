@@ -1,6 +1,6 @@
 //! Payload examples follow api.prod.paradex.trade/v1 and the official Python SDK.
 mod support;
-use safe_cex_engine::{Action, Command, Event, Response, SocketChannel};
+use safe_cex_engine::{Action, Command, Event, PublicFeedPolicy, Response, SocketChannel};
 use safe_cex_venue_paradex::Options;
 use support::*;
 const BTC: &str = "BTC-USD-PERP";
@@ -1152,4 +1152,47 @@ mod socket_checks;
 fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
     let h = Harness::new();
     socket_checks::flaps(h.e, h.public, h.now);
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut h = Harness::empty_with_policy(
+        Options {
+            public_data_only: true,
+            ..Options::default()
+        },
+        PublicFeedPolicy::Shared,
+    );
+    h.reply("/markets", MARKETS);
+    h.reply("summary", TICKERS);
+    assert_eq!(h.e.store().markets().len(), 2, "public startup completed");
+    let until = h.now + 600_000.;
+    let (mut timers, mut sockets, mut fired) = (Vec::new(), Vec::new(), 0);
+    loop {
+        for action in std::mem::take(&mut h.actions) {
+            match action {
+                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => timers.retain(|(t, _)| *t != timer),
+                Action::WsConnect { .. } | Action::WsClose { .. } => sockets.push(action),
+                _ => {}
+            }
+        }
+        let Some(&(timer, at)) = timers
+            .iter()
+            .filter(|(_, at)| *at <= until)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            break;
+        };
+        timers.retain(|(t, _)| *t != timer);
+        h.now = at;
+        h.e.handle(at, Event::TimerFired { timer });
+        h.collect();
+        fired += 1;
+    }
+    assert!(
+        sockets.is_empty(),
+        "no public connects or closes: {sockets:?}"
+    );
+    assert_eq!(fired, 0, "no supervision timers fire");
 }

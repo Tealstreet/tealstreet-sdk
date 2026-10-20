@@ -10,8 +10,8 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, LogLevel, Method, Query, Response, SocketChannel, SocketId,
-    TimerId, Venue,
+    Command, CommandId, Cx, Fill, LogLevel, Method, PublicFeedPolicy, Query, Response,
+    SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -238,6 +238,10 @@ impl KucoinSpot {
     fn bullet(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         let c = &mut self.sockets[channel];
         if c.token_pending || c.socket.is_some() || c.supervisor.is_waiting() {
+            return;
+        }
+        // Suppressed public feeds never open; bullets and supervision would only churn retries.
+        if channel == 0 && cx.public_feed_policy() != PublicFeedPolicy::Direct {
             return;
         }
         c.token_pending = true;
