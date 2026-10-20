@@ -1,6 +1,6 @@
 //! Private variants use documented Spot WS API and COIN-M account payloads.
 mod support;
-use safe_cex_engine::model::{MarginType, OrderStatus};
+use safe_cex_engine::model::{Balance, CurrencyBalance, MarginType, OrderStatus};
 use safe_cex_engine::{Event, Method};
 use safe_cex_venue_binance::{Options, Variant};
 use support::Harness;
@@ -127,7 +127,70 @@ fn spot_balance_events_are_partial_and_stale_snapshots_do_not_roll_them_back() {
     );
     h.reply(read.id, 200, "", ACCOUNT);
     assert_eq!(h.engine.store().balance().free, 1000.0);
+    assert_eq!(
+        h.engine.store().currency_balances(),
+        Some(
+            [
+                CurrencyBalance {
+                    currency: "BTC".into(),
+                    balance: Balance {
+                        free: 1.0,
+                        used: 0.5,
+                        total: 1.5,
+                        upnl: 0.0
+                    },
+                },
+                CurrencyBalance {
+                    currency: "USDT".into(),
+                    balance: Balance {
+                        free: 900.0,
+                        used: 10.0,
+                        total: 910.0,
+                        upnl: 0.0
+                    },
+                },
+            ]
+            .as_slice()
+        )
+    );
     assert!(h.has_request("/api/v3/account"));
+}
+
+#[test]
+fn spot_currencies_keep_native_slices_zero_rows_and_authoritative_snapshot_removals() {
+    let mut h = spot();
+    let expected = |currency: &str, free, used| CurrencyBalance {
+        currency: currency.into(),
+        balance: Balance {
+            free,
+            used,
+            total: free + used,
+            upnl: 0.0,
+        },
+    };
+    assert_eq!(
+        h.engine.store().currency_balances(),
+        Some([expected("BTC", 1.0, 0.5), expected("USDT", 1000.0, 20.0)].as_slice())
+    );
+    h.message("ws-api/v3", r#"{"subscriptionId":0,"event":{"e":"outboundAccountPosition","B":[{"a":"BTC","f":"0","l":"0"}]}}"#);
+    assert_eq!(
+        h.engine.store().currency_balances(),
+        Some([expected("BTC", 0.0, 0.0), expected("USDT", 1000.0, 20.0)].as_slice())
+    );
+    assert_eq!(h.engine.store().balance().total, 1020.0);
+    h.now += 30_000.0;
+    let health = h.timers.iter().find(|(_, at)| *at == 4000.0).unwrap().0;
+    h.event(Event::TimerFired { timer: health });
+    h.respond(
+        "/api/v3/account",
+        200,
+        r#"{"balances":[{"asset":"USDT","free":"0","locked":"0"}]}"#,
+    );
+    assert_eq!(
+        h.engine.store().currency_balances(),
+        Some([expected("USDT", 0.0, 0.0)].as_slice())
+    );
+    assert_eq!(h.engine.store().balance().total, 0.0);
 }
 #[test]
 fn spot_execution_uses_last_fill_price_and_terminal_status_before_reconciliation() {

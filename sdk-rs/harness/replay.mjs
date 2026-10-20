@@ -449,7 +449,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
       free: balance.free,
       total: balance.total,
       upnl: balance.upnl,
-      ...((venue.inverseNativeAmounts || venue.coinNativeAmounts || venue.compareCoins) ? { coins: balance.coins ?? {} } : {}),
+      ...((venue.inverseNativeAmounts || venue.coinNativeAmounts || venue.compareCoins || venue.compareBalanceCoins) ? { coins: balance.coins ?? {} } : {}),
       ...(venue.compareBalanceCurrencies ? { currencies: balance.currencies ?? {} } : {}),
     },
     orders: orderRows,
@@ -610,7 +610,7 @@ async function runTs() {
   const finalBooks = {};
   const started = exchange.start();
   const subscribed = (async () => {
-    while (!store.markets.length) await new Promise((r) => setTimeout(r, 1));
+    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange,store))) await new Promise((r) => setTimeout(r, 1));
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
@@ -665,8 +665,10 @@ async function runTs() {
           free: store.balance.free,
           total: store.balance.total,
           upnl: store.balance.upnl,
-          ...((venue.inverseNativeAmounts || venue.coinNativeAmounts || venue.compareCoins) ? { coins: store.balance.coins ?? {} } : {}),
-          ...(venue.compareBalanceCurrencies ? { currencies: store.balance.currencies ?? {} } : {}),
+          ...((venue.inverseNativeAmounts || venue.coinNativeAmounts || venue.compareCoins || venue.compareBalanceCoins) ? { coins: store.balance.coins ?? {} } : {}),
+          ...(venue.compareBalanceCurrencies ? {
+            currencies: venue.tsBalanceCurrencies?.(store.balance.currencies ?? {}) ?? store.balance.currencies ?? {},
+          } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.

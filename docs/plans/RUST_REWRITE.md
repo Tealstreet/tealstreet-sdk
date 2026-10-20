@@ -323,7 +323,8 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
-| Paradex, GRVT, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow | next, as lanes free up |
+| Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
+| Paradex, GRVT, ApeX Omni, Coinbase, Polymarket, BreakoutProp, TxFlow | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 

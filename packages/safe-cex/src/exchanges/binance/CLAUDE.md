@@ -18,7 +18,9 @@ batch before writes.
 
 Spot uses signed `userDataStream.subscribe.signature`, checks the matching
 subscription ACK and subscription ID, and checks `session.subscriptions` for
-liveness. It has coin balances and no derivative positions/settings. Spot
+liveness. It exposes native per-asset free/used/total currency balances alongside
+USD totals and coin amounts. Full snapshots replace assets; partial socket
+updates retain untouched assets and explicit zeros. It has no derivative positions/settings. Spot
 order identity is the native client ID. A cancel/replace preserves time in
 force but generates a new client ID. Spot/COIN-M cancellation replies must prove
 native identity, terminal status and cumulative quantity before replacement.

@@ -4,6 +4,7 @@ import { createHmac } from 'node:crypto';
 
 import { expect, it, vi } from 'vitest';
 
+import { BaseExchange } from '../../exchanges/base';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
@@ -276,6 +277,39 @@ it('preserves COIN-M USD contract placement units and coin wallet valuation thro
     ).rejects.toThrow();
     expect(t.requests).toHaveLength(before);
   } finally {
+    t.exchange.dispose();
+  }
+});
+
+it('preserves native Spot currency slices after snapshots and partial updates in worker and main stores', async () => {
+  const t = setup(true);
+  const mainStore = new DefaultStore();
+  const main = new BaseExchange('binancespot', { key: '', secret: '' }, mainStore);
+  try {
+    await t.exchange.start();
+    main.applyWorkerFrame(t.exchange.snapshotFrame()!);
+    for (const store of [t.store, mainStore]) {
+      expect(store.balance.currencies).toEqual({
+        BTC: { free: 1, used: 0, total: 1, upnl: 0 },
+        USDT: { free: 100, used: 20, total: 120, upnl: 0 },
+      });
+    }
+    t.privateEvent({ e: 'outboundAccountPosition', B: [{ a: 'BTC', f: '0.25', l: '0.05' }] });
+    await vi.waitFor(() =>
+      expect(t.store.balance.currencies?.BTC).toEqual({ free: 0.25, used: 0.05, total: 0.3, upnl: 0 }),
+    );
+    main.applyWorkerFrame(t.exchange.snapshotFrame()!);
+    for (const store of [t.store, mainStore]) {
+      expect(store.balance.currencies).toEqual({
+        BTC: { free: 0.25, used: 0.05, total: 0.3, upnl: 0 },
+        USDT: { free: 100, used: 20, total: 120, upnl: 0 },
+      });
+      expect(store.balance).toMatchObject({ free: 2600, used: 520, total: 3120, upnl: 0 });
+      expect(store.balance.coins?.BTC).toEqual({ base: 'BTC', amount: 0.3, notional: 3000 });
+    }
+    expect(t.errors).toEqual([]);
+  } finally {
+    main.dispose();
     t.exchange.dispose();
   }
 });

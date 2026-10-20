@@ -4,8 +4,8 @@ use crate::sign::Query;
 use crate::wire::*;
 use crate::{BinanceFutures, Channel, Pending};
 use safe_cex_engine::model::{
-    Balance, CoinBalance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType,
-    Position, PositionMode, PositionSide, RejectReason, StopTriggerType, TimeInForce,
+    Balance, CoinBalance, CurrencyBalance, MarginType, Order, OrderExtra, OrderSide, OrderStatus,
+    OrderType, Position, PositionMode, PositionSide, RejectReason, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
@@ -1860,6 +1860,7 @@ impl BinanceFutures {
     fn commit_spot_balance(&mut self, cx: &mut Cx<'_, Pending>) {
         let mut balance = Balance::default();
         let mut coins = Vec::with_capacity(self.account.spot_balances.len());
+        let mut currencies = Vec::with_capacity(self.account.spot_balances.len());
         for (asset, &(free, used)) in &self.account.spot_balances {
             let price = self.asset_usd_price(cx.store, asset);
             let total = free + used;
@@ -1871,9 +1872,20 @@ impl BinanceFutures {
                 amount: total,
                 notional: total * price,
             });
+            currencies.push(CurrencyBalance {
+                currency: asset.clone(),
+                balance: Balance {
+                    free,
+                    used,
+                    total,
+                    upnl: 0.0,
+                },
+            });
         }
         coins.sort_by(|a, b| a.base.cmp(&b.base));
+        currencies.sort_by(|a, b| a.currency.cmp(&b.currency));
         cx.store.set_coin_balances(coins);
+        cx.store.set_currency_balances(currencies);
         cx.store.set_balance(balance);
     }
     fn on_spot_order(&mut self, cx: &mut Cx<'_, Pending>, event: SpotEvent<'_>) {

@@ -228,3 +228,27 @@ before merging.
 PR: [#1326](https://github.com/Tealstreet/tealstreet-sdk/pull/1326), targeting
 `feat/rust-rewrite`. All local gates pass; phase findings and final adversarial
 reviews are being published. Merge remains conditional on green PR CI.
+
+
+### PR review round one and Kraken landing
+
+Published phase findings and Hyro evidence on [#1326](https://github.com/Tealstreet/tealstreet-sdk/pull/1326).
+Kraken `7da56dc8a5` landed while the PR opened; resolve its roster/replay conflicts,
+retaining all Binance coin/currency/native-unit flags and Kraken's scoped hooks.
+The independent account/trading review passes. Two other reviewers found:
+
+- P1: Spot omitted native per-asset currency slices after Aster introduced the
+  optional frame tail. A native test fails with actual `None`, and the strengthened
+  private gate fails with Rust currencies `{}` versus TS BTC free0.01/used0.001
+  and ETH/USDT rows. Sorted native currency rows now derive from the same cache;
+  zeros, full replacement/removal, partial updates and stale read fences are
+  regression-tested. Native99 and Clippy pass; the independent peer review passes.
+  Both worker/main real WASM assertions are prepared for the fresh build.
+- P2: generic generated-ID normalization could hide foreign HTTP query aliases.
+  The raw Binance validator now rejects unsupported Spot/COIN-M aliases before
+  matching while retaining genuine USD-M/PM native ID controls. A missing-throw
+  red proof and286 passing merged helper tests cover the correction.
+
+The Spot oracle compares every numeric currency field independently; it removes
+only TS's opaque per-currency `info`. These are Rust/integration findings, not
+new historical TS bug claims. Rebuilt gates and current-head CI remain required.

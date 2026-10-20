@@ -201,3 +201,34 @@ test('Spot filled-status correction refuses reused client IDs naming a different
   const unambiguous={orders:[{symbol:'BTCUSDT',id:'reused',status:'canceled'}]};
   fixBinanceFilledStatus(unambiguous,[records[0]],true);assert.equal(unambiguous.orders[0].status,'closed');
 });
+
+test('Binance raw validation rejects foreign Spot/COIN-M aliases before generic identity normalization', () => {
+  const signed = (path, fields, method = 'POST') => {
+    const query = new URLSearchParams({ ...fields, timestamp: String(Date.now()), recvWindow: '5000' }).toString();
+    const origin = path.startsWith('/dapi/') ? 'https://dapi.binance.com' : path.startsWith('/papi/') ? 'https://papi.binance.com' : path.startsWith('/fapi/') ? 'https://fapi.binance.com' : 'https://api.binance.com';
+    return { method, url: `${origin}${path}?${query}&signature=${hmac(query)}`, headers: { 'X-MBX-APIKEY': 'replay-key' } };
+  };
+  for (const path of ['/api/v3/order', '/dapi/v1/order']) {
+    for (const alias of ['c', 'clientOrderId', 'clientAlgoId', 'requestId']) {
+      const request = signed(path, { symbol: path.startsWith('/dapi/') ? 'BTCUSD_PERP' : 'BTCUSDT', quantity: '7', [alias]: 'foreign' });
+      assert.throws(() => validateBinanceRequest(request), /unsupported.*alias/i, `${path}: ${alias}`);
+    }
+  }
+  for (const [path, fields, method] of [
+    ['/api/v3/order', { symbol: 'BTCUSDT', newClientOrderId: 'native-placement' }],
+    ['/api/v3/order', { symbol: 'BTCUSDT', origClientOrderId: 'native-cancel' }, 'DELETE'],
+    ['/dapi/v1/order', { symbol: 'BTCUSD_PERP', newClientOrderId: 'native-placement' }],
+    ['/dapi/v1/order', { symbol: 'BTCUSD_PERP', orderId: '123' }, 'DELETE'],
+    ['/fapi/v1/algoOrder', { symbol: 'BTCUSDT', clientAlgoId: 'native-algo' }],
+    ['/papi/v1/um/conditional/order', { symbol: 'BTCUSDT', newClientStrategyId: 'native-strategy' }],
+  ]) assert.doesNotThrow(() => validateBinanceRequest(signed(path, fields, method)));
+});
+
+test('Spot currency oracle compares every native balance field without opaque info or value fallbacks', () => {
+  const venue = venueOf('binancespot');
+  assert.equal(venue.compareBalanceCurrencies, true);
+  const currencies = { BTC: { free: 0.01, used: 0.001, total: 0.011, upnl: 0, info: { asset: 'BTC', locked: '0.001' } } };
+  assert.deepEqual(venue.tsBalanceCurrencies(currencies), { BTC: { free: 0.01, used: 0.001, total: 0.011, upnl: 0 } });
+  assert.deepEqual(venue.tsBalanceCurrencies({ BTC: { free: 0 } }), { BTC: { free: 0, used: undefined, total: undefined, upnl: undefined } });
+  assert.deepEqual(currencies.BTC.info, { asset: 'BTC', locked: '0.001' });
+});

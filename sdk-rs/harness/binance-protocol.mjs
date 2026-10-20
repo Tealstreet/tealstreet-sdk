@@ -10,6 +10,12 @@ const publicPaths = /\/(?:exchangeInfo|ticker\/24hr|ticker\/bookTicker|premiumIn
 /** Validate the actual signed bytes before canonical request matching drops clocks. */
 export const validateBinanceRequest = ({ method, url, body, headers = {} }) => {
   const parsed = new URL(url);
+  // Generic identity matching omits several venues' generated IDs. Spot and
+  // COIN-M do not accept these aliases, so reject them before canonicalization.
+  // USD-M clientAlgoId and PM newClientStrategyId remain native controls.
+  if (/^\/(?:api\/v3|dapi\/v[12])\//.test(parsed.pathname) &&
+      ['c', 'clientOrderId', 'clientAlgoId', 'requestId'].some((key) => parsed.searchParams.has(key)))
+    throw new Error('Unsupported Binance Spot/COIN-M query alias');
   const fields = Object.fromEntries((Array.isArray(headers) ? headers : Object.entries(headers))
     .map(([key, value]) => [key.toLowerCase(), String(value)]));
   if (body !== undefined && body !== null && body !== '') throw new Error('Binance request parameters must be in the URL');

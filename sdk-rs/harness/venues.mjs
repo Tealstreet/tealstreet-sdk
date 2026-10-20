@@ -10,6 +10,8 @@ import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initial
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
 
+import {createKrakenRequestAudit,validateKrakenSocketMessage,validateKrakenSocketFrame,krakenRequestBody,krakenCommandResult} from './kraken-protocol.mjs';
+let krakenRequestAudit;
 let lighterVerifier;
 
 const root = '../../packages/safe-cex/src/exchanges';
@@ -511,6 +513,30 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  kraken: {
+    rust: 'kraken',
+    compareBalanceCoins:true,
+    productSubscriptions:true,
+    tsBooksReady:(exchange,store)=>Boolean(store.loaded.tickers&&exchange.publicWebsocket),
+    tsSettings:(exchange,store)=>store.markets.map(m=>{
+      const position=store.positions.find(p=>p.symbol===m.symbol&&p.contracts>0);
+      return {symbol:m.symbol,leverage:exchange.leverageSettings.get(m.symbol)??position?.leverage??m.limits.leverage.max,marginType:exchange.marginTypePreferences.get(m.symbol)??position?.marginType??'cross'};
+    }),
+    ts: {module: `${root}/kraken/kraken.exchange.ts`, className: 'KrakenExchange', name: 'kraken'},
+    replayCredentials: {key:'replay-key',secret:'cmVwbGF5LXNlY3JldA=='},
+    tsBooksSubscribed: (exchange,count) => Object.values(exchange.publicWebsocket.orderBookHandlers).filter(v=>v.length).length>=count,
+    isPrivateRecord: record=>record.type==='ws'&&/"(?:fills|open_orders|open_positions|challenge)"/.test(record.text??''),
+    initializeReplay(impl){krakenRequestAudit=createKrakenRequestAudit({strict:impl==='rust'});},
+    validateRequest: request=>krakenRequestAudit(request),
+    validateSocketMessage:validateKrakenSocketMessage,
+    validateSocketFrame:validateKrakenSocketFrame,
+    requestBody:krakenRequestBody,
+    commandResult:krakenCommandResult,
+    requestBodies:true,
+    compareFillPrices:true,
+    compareWriteOrder:true,
+    isWrite:method=>method!=='GET',
+  },
   asterdex: {
     initializeReplay: initializeAsterCrypto,
     rust: 'asterdex',
@@ -1059,7 +1085,14 @@ export const VENUES = {
     privateSocket: name === 'binancespot' ? '/ws-api/v3' : name === 'binancepm' ? '/pm/ws' : name === 'binanceinverse' ? '/ws/' : '/private/ws',
     volatileBodyFields: true,
     ...(name === 'binanceinverse' ? { coinNativeAmounts: true } : {}),
-    ...(name === 'binancespot' ? { compareFillPrices: true, compareCoins: true } : {}),
+    ...(name === 'binancespot' ? {
+      compareFillPrices: true,
+      compareCoins: true,
+      compareBalanceCurrencies: true,
+      // Wire currencies carry native numeric balances, without TS's opaque info.
+      tsBalanceCurrencies: (currencies) => Object.fromEntries(Object.entries(currencies).map(([asset, row]) =>
+        [asset, { free: row.free, used: row.used, total: row.total, upnl: row.upnl }])),
+    } : {}),
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
     ...(name === 'binancespot' ? {
       bootstrapPrivateFromTape: true,
