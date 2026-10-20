@@ -12,6 +12,7 @@ import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { setMainAcceptsFrames } from '../../webworker/frameForwarding';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 
 vi.mock('../../utils/virtualClock', () => ({
   virtualClock: { start: vi.fn(async () => undefined), getCurrentTimeMs: () => Date.now() },
@@ -93,6 +94,7 @@ class ScriptedEngine implements WasmEngineLike {
   includeEth = false;
   malformedSection = ScriptedEngine.malformedSection;
   completeBalanceOnEth = false;
+  capabilities = () => engineCapabilities('binance');
   omitSections: number[] = [];
   workingOrder = false;
   acceptedSharedSymbols = new Set<string>();

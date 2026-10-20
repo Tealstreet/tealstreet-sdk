@@ -177,7 +177,7 @@ fn candle_seconds_and_empty_stream_candles() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "SOL_USDC_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: None,
             from_ms: Some(1732182900123.0),
             to_ms: None,
@@ -198,7 +198,7 @@ fn candle_seconds_and_empty_stream_candles() {
         0.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "SOL_USDC_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.take_frame(0.0);
@@ -291,7 +291,7 @@ fn malformed_candle_never_enters_frame() {
         0.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "SOL_USDC_PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     e.take_frame(0.0);
@@ -435,12 +435,12 @@ fn failed_seed_reads_retry_independently_without_reopening_the_early_socket() {
     );
     let timer = actions
         .into_iter()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, .. } = a {
-                Some(timer)
-            } else {
-                None
-            }
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1000.0,
+            } => Some(timer),
+            _ => None,
         })
         .unwrap();
     e.handle(2000.0, Event::TimerFired { timer });

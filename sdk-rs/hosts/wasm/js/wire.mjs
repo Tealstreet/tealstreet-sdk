@@ -22,6 +22,7 @@ export const SECTION = {
   INSTRUMENT_CLASSIFICATIONS: 16,
   DERIVATIVE_PRODUCTS: 17,
   POSITION_GREEKS: 18,
+  CAPABILITIES: 19,
 };
 
 export const NONE = 0xffffffff;
@@ -40,6 +41,25 @@ export const MARKET_COLUMNS = [
   'maxLeverage', 'minPrice', 'contractSize', 'takerFee', 'makerFee',
 ];
 export const MARKET_FLAG = { ACTIVE: 1, INVERSE: 2, SPOT: 4, PERPETUAL: 8, EXPIRING: 16, READ_ONLY: 32 };
+// Bits 8..12 of a market's flags: how its order and position quantities are expressed.
+export const QUANTITY_UNITS = ['base', 'nativePlacement', 'inverseNative', 'contractCount', 'inverseContractSized'];
+export const marketQuantityUnits = (flags) => {
+  const units = QUANTITY_UNITS[(flags >>> 8) & 0xf];
+  if (!units) throw new Error(`unknown market quantity units ${(flags >>> 8) & 0xf}`);
+  return units;
+};
+// CAPABILITIES: a flag word (bit order below), then four-bit enum fields.
+const CAPABILITY_FLAGS = [
+  'clientOrderLookup', 'fillHistory', 'orderHistory', 'incomeHistory', 'fillsByOrderId', 'accountLeverage',
+  'accountMarginType', 'cancelWithSymbols', 'amendWithSymbol', 'orderBookQuery', 'options', 'accountTier',
+];
+const CAPABILITY_ENUMS = [
+  ['account', ['unsupported', 'query', 'afterLoad']],
+  ['cancelAll', ['eachOpenSymbol', 'eachPlacedSymbol', 'native']],
+  ['leverageQuery', ['settings', 'onRead', 'onMetadata']],
+  ['maxLeverage', ['market', 'query', 'rails', 'unsupported']],
+  ['quantityUnits', QUANTITY_UNITS],
+];
 export const LOADED_FLAG = { BALANCE: 1, ORDERS: 2, MARKETS: 4, TICKERS: 8, POSITIONS: 16 };
 export const STATUS_FLAG = { HEDGED: 1 };
 
@@ -486,6 +506,22 @@ export class Frame {
       });
     }
     return { used, free, total, upnl, ...(flags & 1 ? {} : { coins }), currencies };
+  }
+
+  /** The venue's capability record; snapshot frames only. */
+  capabilities() {
+    const section = this.first(SECTION.CAPABILITIES);
+    if (!section) return undefined;
+    requireEnd(section, section.offset + 8);
+    const [flags, enums] = new Uint32Array(this.buffer, section.offset, 2);
+    const record = {};
+    CAPABILITY_FLAGS.forEach((name, bit) => { record[name] = ((flags >>> bit) & 1) === 1; });
+    CAPABILITY_ENUMS.forEach(([name, values], field) => {
+      const value = values[(enums >>> (field * 4)) & 0xf];
+      if (value === undefined) throw new Error(`unknown capability ${name}`);
+      record[name] = value;
+    });
+    return record;
   }
 
   status() {

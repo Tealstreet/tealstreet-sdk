@@ -64,3 +64,25 @@ hand-roll windows, cursors and pages in their `history.rs`. History reads only.
   the oldest window's rows; windows now run newest first. Not changed: Bitget
   applies its limit as the page size only; the UTA private tape shows the TS
   reference also follows the cursor past the limit and returns every row.
+- Batch 3: `OffsetWalk` (row offsets or page numbers, advancing by rows
+  returned or a fixed page size, with page and offset budgets and opt-in
+  stalls). TxFlow and Backpack use it, each with a pin written and passing
+  first. TxFlow keeps its fixed 2000-row step: the TS reference also steps by
+  the page size, and no TxFlow contract shows short pages that report more.
+  Orderly and WOO stay hand-rolled: completion follows the server's total and
+  Orderly's budget spans its regular and algo stages, so the helper would only
+  grow special cases without fixing anything.
+- Batch 4: BloFin fills and income id-cursor paging use `CursorWalk` (pin
+  written first and unchanged; any repeated cursor now stalls, not only the
+  previous one). BloFin order history stays a single request, as in TS.
+  OKX, Kraken futures, Crypto.com and Hyperliquid stay hand-rolled: OKX
+  requires strictly decreasing 64-bit ids with a venue-specific failure
+  contract (a warning globally, an error for EEA composite reads), and the
+  others narrow by timestamp with tuned millisecond/nanosecond overlap and
+  saturation rules the helpers would not simplify.
+- Batch 5: Binance fills windows use the shared tiling, which also covers the
+  final millisecond the old split dropped when a range ended one past a window
+  boundary (regression failed first). A failed fills window keeps landing's
+  bridge contract (a command error before an empty success, pinned in
+  `queries_variants.rs`). WEEX's per-window truncation warnings and AsterDEX /
+  Phemex single reads are unchanged.

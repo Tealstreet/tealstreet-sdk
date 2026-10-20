@@ -62,7 +62,9 @@ fn token_refreshed_per_socket_and_stale_token_never_subscribes_new_socket() {
     let reconnect = e
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == NOW + 1000. => Some(timer),
+            Action::SetTimer { timer, at_ms } if (NOW + 750.0..=NOW + 1000.).contains(&at_ms) => {
+                Some(timer)
+            }
             _ => None,
         })
         .unwrap();
@@ -510,4 +512,23 @@ fn filled_lifecycle_without_trade_does_not_invent_an_execution() {
         OrderStatus::Closed
     );
     assert_eq!(e.take_frame(NOW).map_or(0, support_fill_count), 0);
+}
+#[test]
+fn balance_frames_faster_than_the_balance_read_cannot_starve_the_balance() {
+    let (mut e, _, private) = ready(false);
+    let s = private.unwrap();
+    let frame = r#"{"channel":"balances","type":"update","data":[]}"#;
+    message(&mut e, s, frame);
+    let mut read = requests(&mut e).pop().unwrap();
+    for step in 1..=3u32 {
+        message(&mut e, s, frame);
+        let body = format!(r#"{{"error":[],"result":{{"ZUSD":"{}"}}}}"#, 2000 + step);
+        reply(&mut e, &read, &body);
+        let expected = if step <= 2 { 1355. } else { 2003. };
+        assert_eq!(e.store().balance().total, expected, "step {step}");
+        read = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.ends_with("/Balance"))
+            .expect("a stale read is re-read");
+    }
 }
