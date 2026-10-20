@@ -325,6 +325,94 @@ impl CursorWalk {
     }
 }
 
+/// What an offset walk wants after a page.
+#[derive(Debug, PartialEq, Eq)]
+pub enum OffsetStep {
+    /// Request the next page at this row offset (also [`OffsetWalk::page`]).
+    More(u64),
+    Done,
+    Stalled(Stall),
+}
+
+/// Offset or page-number paging. The offset advances by the rows a page
+/// actually returned, so a venue that serves short pages skips nothing; a
+/// page that brings no rows or no new rows while the venue reports more
+/// cannot progress and stalls.
+pub struct OffsetWalk {
+    max_pages: u32,
+    max_offset: u64,
+    fixed_step: Option<u64>,
+    pages: u32,
+    offset: u64,
+}
+
+impl OffsetWalk {
+    pub fn new(max_pages: u32) -> Self {
+        Self {
+            max_pages,
+            max_offset: u64::MAX,
+            fixed_step: None,
+            pages: 0,
+            offset: 0,
+        }
+    }
+
+    /// Stall once the next offset would reach `max_offset`.
+    pub fn max_offset(mut self, max_offset: u64) -> Self {
+        self.max_offset = max_offset;
+        self
+    }
+
+    /// Advance by a fixed page size instead of the rows returned, for venues
+    /// whose contract serves full pages while they report more.
+    pub fn fixed_step(mut self, step: u64) -> Self {
+        self.fixed_step = Some(step);
+        self
+    }
+
+    /// Row offset of the page to request.
+    pub fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    /// One-based number of the page to request.
+    pub fn page(&self) -> u32 {
+        self.pages + 1
+    }
+
+    /// Starts another stage of the same read from its first page.
+    pub fn restart(&mut self) {
+        self.pages = 0;
+        self.offset = 0;
+    }
+
+    /// Records a page of `rows` (of which `fresh` were new) and whether the
+    /// venue reports more.
+    pub fn advance(&mut self, rows: usize, fresh: usize, more: bool) -> OffsetStep {
+        self.pages += 1;
+        if !more {
+            return OffsetStep::Done;
+        }
+        if rows == 0 {
+            return OffsetStep::Stalled(Stall::EmptyPage);
+        }
+        if fresh == 0 {
+            return OffsetStep::Stalled(Stall::NoNewRows);
+        }
+        if self.pages >= self.max_pages {
+            return OffsetStep::Stalled(Stall::PageBudget);
+        }
+        let next = self
+            .offset
+            .saturating_add(self.fixed_step.unwrap_or(rows as u64));
+        if next >= self.max_offset {
+            return OffsetStep::Stalled(Stall::PageBudget);
+        }
+        self.offset = next;
+        OffsetStep::More(next)
+    }
+}
+
 #[derive(PartialEq)]
 enum Direction {
     Ascending,
@@ -509,6 +597,42 @@ mod tests {
         assert!(windows(0.0, 10.0, 9.0, WindowOrder::OldestFirst, 1).is_none());
         assert!(windows(2.0, 1.0, 9.0, WindowOrder::OldestFirst, 10).is_none());
         assert!(windows(0.0, f64::NAN, 9.0, WindowOrder::OldestFirst, 10).is_none());
+    }
+
+    #[test]
+    fn offset_walk_advances_by_rows_returned_and_fails_closed() {
+        let mut walk = OffsetWalk::new(10);
+        assert_eq!((walk.offset(), walk.page()), (0, 1));
+        // A short page advances by what it returned, not the page size.
+        assert_eq!(walk.advance(3, 3, true), OffsetStep::More(3));
+        assert_eq!((walk.offset(), walk.page()), (3, 2));
+        assert_eq!(walk.advance(2, 2, false), OffsetStep::Done);
+        let mut walk = OffsetWalk::new(10);
+        assert_eq!(
+            walk.advance(0, 0, true),
+            OffsetStep::Stalled(Stall::EmptyPage)
+        );
+        let mut walk = OffsetWalk::new(10);
+        assert_eq!(
+            walk.advance(5, 0, true),
+            OffsetStep::Stalled(Stall::NoNewRows)
+        );
+        let mut walk = OffsetWalk::new(2);
+        assert_eq!(walk.advance(5, 5, true), OffsetStep::More(5));
+        assert_eq!(
+            walk.advance(5, 5, true),
+            OffsetStep::Stalled(Stall::PageBudget)
+        );
+        let mut walk = OffsetWalk::new(10).max_offset(8);
+        assert_eq!(walk.advance(5, 5, true), OffsetStep::More(5));
+        assert_eq!(
+            walk.advance(5, 5, true),
+            OffsetStep::Stalled(Stall::PageBudget)
+        );
+        walk.restart();
+        assert_eq!((walk.offset(), walk.page()), (0, 1));
+        let mut walk = OffsetWalk::new(10).fixed_step(100);
+        assert_eq!(walk.advance(3, 3, true), OffsetStep::More(100));
     }
 
     #[test]
