@@ -453,3 +453,30 @@ No confirmed highs.
 - Low: no credential check at start; ACCOUNT_UPDATE strict on `ep`/`cr`; fills
   history fails on one row and refuses >7 day windows; listen-key keepalive
   omits `listenKey` and tears down on failure; partial balance rows skipped.
+
+### Crypto.com
+Mostly matches TS.
+- Medium: per-coin balances (`position_balances`) dropped
+  (`cryptocom/src/account.rs:232`); caller client id refused on stop/TP orders
+  (`trading.rs:76`).
+- Low: one invalid order fails the whole batch; null string fields fail reads;
+  one bad instrument row stops startup.
+
+### Bitrue
+- High: orders refused on symbols with no account leverage data, and a fresh
+  account can never trade (`bitrue/src/trading.rs:363`, `account.rs:948`);
+  default margin to Cross and take leverage from a successful change, never
+  the market max. A cancel batch stops at its first failure and leaves the rest
+  live (`trading.rs:866,884`).
+- Medium: orders marked loaded only after every market's open-orders read
+  succeeds, one bad symbol blocks forever (`account.rs:382,487`); per-coin
+  balances dropped; max leverage stuck at 100 with silent clamping (no
+  leverage bracket read, `lib.rs:758`).
+- Low: one bad contract row blocks startup; stream stops misclassified;
+  snapshot starvation under load (revision discard, `account.rs:581,1310`);
+  malformed snapshot never sets loaded.
+
+### Cross-venue: per-coin balances and snapshot starvation
+- Per-coin balances missing on Bybit, Crypto.com, Bitrue; check every venue.
+- Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
+  check every venue that fences REST snapshots by stream revision.
