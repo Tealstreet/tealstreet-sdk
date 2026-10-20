@@ -1,0 +1,89 @@
+# GRVT Future/Call/Put product decision
+
+Branch `feat/rust-grvt-products`, from `origin/feat/rust-rewrite` at
+`bf1cf3c99a`. PR target `feat/rust-rewrite`; full auto, no stash/rebase/force
+push, no TS venue deletion. Follow `VENUE_PORT_BRIEF.md`.
+
+## Decision for Sam
+
+Retire the latent **mapper-only Future/Call/Put surface** from the Rust cutover
+parity requirements. Retain GRVT's supported `PERPETUAL` product. This is a
+supported-product decision, not a claim that GRVT's protocol cannot represent
+futures/options or that its generic TS order builder rejects those kinds.
+Keep TS implementations and public builder-wallet exports. Do not enable new
+products or default cutover as a consequence of this decision.
+
+TS `fetchMarkets()` posts `{}` to `/lite/v1/all_instruments`. The current
+[official Get All Instruments contract](https://api-docs.grvt.io/market_data_api/#get-all-instruments)
+defaults omitted **or empty** `k` to `PERPETUAL`. The TS mapper accepts any
+returned row, marking only `PERPETUAL` as perpetual, but never requests the
+other three kinds. Its ticker subscriptions follow that discovered catalog;
+book subscriptions resolve it by native ID. Its order builder can sign a
+synthetically injected non-perpetual market's hash/decimals, but that is latent
+generic dispatch, not current catalog-backed product coverage.
+
+The TS market snapshot retains only `ih/bd/qd`; kind, expiry, strike and
+settlement semantics are discarded. Symbol cancellation explicitly filters
+`PERPETUAL`, base and quote. Thus removing Rust's discovery filter and creating
+synthetic option fixtures would neither reproduce a currently exposed product
+nor establish a usable option lifecycle. No authenticated writes are needed to
+establish this boundary, and none are authorized or performed for this audit.
+
+## Dated public evidence
+
+Read-only HTTPS POSTs on 2026-10-20; both environments returned successful
+`r` arrays. Omitted `ia` includes inactive instruments according to the official
+contract. Counts are observations, not permanent exchange constraints.
+
+| Environment | Body | Result |
+| --- | --- | --- |
+| `market-data.grvt.io` | `{}` | 194 rows, all `PERPETUAL` |
+| `market-data.testnet.grvt.io` | `{}` | 202 rows, all `PERPETUAL` |
+| `market-data.grvt.io` | `{"k":["FUTURE","CALL","PUT"]}` | zero rows |
+| `market-data.testnet.grvt.io` | `{"k":["FUTURE","CALL","PUT"]}` | zero rows |
+
+Raw response SHA-256: production default
+`d118361d9375369c398c805d9b4a76b66423d22f8a198f348b414c3538941598`;
+testnet default `65d3db23982db91952c837ee2178d20d4b0543f8370d985117905ceed91ad87d`;
+both explicit non-perpetual responses
+`1f6931c925674dba9b7190945a6ee268271c9804dce70a73823092119ab4a106`
+(`{"r":[]}`). Public captures contain no credentials.
+
+## Plan and phase gates
+
+1. **Public discovery/data:** independently audit the decision above. Pin the
+   TS discovery body and distinguish synthetic mapper acceptance from actual
+   supported products. Exercise mixed-kind Rust catalogs, subscriptions,
+   ticker/book handling and refresh. Correct GRVT CLAUDE and phase-9 blocker
+   wording with this explicit retirement decision, rather than inventing typed
+   futures/options metadata for unexposed products. Test and sub-agent review.
+2. **Private data:** audit positions/orders/fills and account settings against
+   the retained product boundary; verify non-perpetual IDs cannot be aliased to
+   perpetuals. Add focused regressions if a boundary is unproved. Preserve
+   session, EIP-712 and stale-snapshot contracts. Test and sub-agent review.
+3. **Trading:** audit preflight, cancellation and replacement for unsupported
+   market identities. Prove rejection before writes for retired product IDs;
+   preserve valid perpetual lifecycle and native caller IDs. Test and review.
+4. **Queries:** audit symbol resolution and kind filters; prove unsupported
+   product queries cannot return another market's history. Test and review.
+5. **Gates/landing:** bans, fmt, strict native/Wasm Clippy, GRVT/engine tests,
+   package typecheck/lint/tests, harness/host/consumer tests, combined and
+   isolated Wasm as appropriate. Fresh 20-second GRVT two-book public capture
+   and gate, GRVT private gate, Binance public/private regressions. Record
+   numbers without threshold or oracle relaxation. Merge latest landing,
+   push/PR into `feat/rust-rewrite`, post independent code-correctness reviews,
+   fix/repeat, green CI merge, fresh follow-up branch.
+
+Future enablement is a separate product port: request explicit kinds, verify
+real listed ORDERBOOK instruments, preserve typed kind/expiry/strike/settlement
+metadata through frames and consumers, and prove data, signing, account and
+exact-instrument cancellation/replacement/history for each product. An enum,
+generic signing path or perpetual replay is insufficient. `STABLE_PERP` in the
+current upstream enum is likewise outside the existing TS discovery scope.
+
+## Progress
+
+- Discovery/source audit and public probes complete. Independent reviewer
+  confirmed the default-kind contract and dormant generic paths; no port of
+  Future/Call/Put is justified by current TS exposure.
+- Remaining phase verification and landing evidence will be recorded here.
