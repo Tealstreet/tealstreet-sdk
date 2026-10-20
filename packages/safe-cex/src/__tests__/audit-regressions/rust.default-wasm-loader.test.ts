@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const wasm = vi.hoisted(() => ({ loads: [] as string[], engines: [] as string[] }));
 
@@ -16,7 +17,9 @@ vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
 
       start = () => '';
       command = () => '';
-      takeFrame = () => undefined;
+      takeFrame = () => new Uint8Array(consumerFrame({
+        loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+      }));
       snapshotFrame = () => Uint8Array.of(1);
       wsOpen = () => '';
       wsMessage = () => '';

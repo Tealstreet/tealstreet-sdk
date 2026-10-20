@@ -435,7 +435,7 @@ impl Backpack {
             }
             Err(e) => {
                 r.invalid = true;
-                cx.log(safe_cex_engine::LogLevel::Error, e);
+                cx.command_error(r.command, e);
             }
             Ok(()) => {}
         }

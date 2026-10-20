@@ -377,6 +377,17 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         self.send(client, Outgoing::Text(text));
                     }
                 }
+                Notice::CommandProgress { command, receipts } => {
+                    if let Some(pending) = self.pending.get(&command)
+                        && let Some(client) = pending.client
+                    {
+                        let text = encode_notice(ServerNotice::CommandProgress {
+                            command: pending.original,
+                            receipts: &receipts,
+                        });
+                        self.send(client, Outgoing::Text(text));
+                    }
+                }
                 Notice::StartupFailed { error } => {
                     let text = encode_notice(ServerNotice::StartupFailed { detail: &error });
                     self.startup_failure = Some(text.clone());
@@ -384,6 +395,19 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 }
                 Notice::Deactivate => {
                     self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Deactivate)))
+                }
+                Notice::CommandError { command, message } => {
+                    if let Some(pending) = self.pending.get(&command)
+                        && let Some(client) = pending.client
+                    {
+                        self.send(
+                            client,
+                            Outgoing::Text(encode_notice(ServerNotice::CommandError {
+                                command: pending.original,
+                                message: &message,
+                            })),
+                        );
+                    }
                 }
                 Notice::Log { level, message } => {
                     self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Log {
@@ -710,6 +734,14 @@ fn command_id(command: &mut Command) -> Option<&mut u32> {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum ServerNotice<'a> {
+    CommandError {
+        command: u32,
+        message: &'a str,
+    },
+    CommandProgress {
+        command: u32,
+        receipts: &'a [safe_cex_engine::OrderIdentityReceipt],
+    },
     Done {
         command: u32,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -919,8 +951,25 @@ mod tests {
     impl Venue for Stub {
         type Pending = ();
         fn start(&mut self, _: &mut Cx<'_, ()>) {}
-        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
-        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_open(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId) {
+            cx.done(socket.0, Ok("[]".into()));
+        }
+        fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+            if let Some(command) = text.strip_prefix("error:") {
+                let command = command.parse().expect("error command");
+                cx.command_error(command, "placement rejected");
+                return;
+            }
+            let command: u32 = text.parse().expect("receipt command");
+            cx.command_progress(
+                command,
+                vec![safe_cex_engine::OrderIdentityReceipt {
+                    symbol: "BTC-USD".into(),
+                    kind: safe_cex_engine::OrderIdentityKind::ClientOrderId,
+                    identity: format!("native-{command}"),
+                }],
+            );
+        }
         fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
         fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
         fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
@@ -941,6 +990,185 @@ mod tests {
             mpsc::unbounded_channel().0
         }
         fn request(&self, _: HttpRequest, _: Events) {}
+    }
+
+    #[test]
+    fn command_errors_keep_original_client_id_and_cannot_leak_after_completion() {
+        let mut actor = Account::new(
+            Host::new(
+                Engine::new(Stub(Rc::new(RefCell::new(Vec::new())))),
+                NoTransport,
+            ),
+            ServerConfig::default(),
+        );
+        let mut receivers = Vec::new();
+        for client in [1, 2] {
+            let (outgoing, receiver) = mpsc::channel(8);
+            let (cancel, _) = watch::channel(false);
+            actor.peers.insert(
+                client,
+                Peer {
+                    outgoing,
+                    cancel,
+                    books: HashSet::new(),
+                    candles: HashSet::new(),
+                    tickers: None,
+                },
+            );
+            receivers.push(receiver);
+            actor.command(
+                client,
+                Command::FetchLeverage {
+                    command: 77,
+                    symbol: "BTC-USD".into(),
+                },
+            );
+        }
+        actor.host.engine.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "error:1",
+            },
+        );
+        actor.host.engine.handle(
+            1.,
+            Event::WsOpened {
+                socket: SocketId(1),
+            },
+        );
+        actor.execute();
+        let Ok(Outgoing::Text(message)) = receivers[0].try_recv() else {
+            panic!("command error")
+        };
+        assert_eq!(
+            message.as_ref(),
+            r#"{"type":"commandError","command":77,"message":"placement rejected"}"#
+        );
+        let Ok(Outgoing::Text(done)) = receivers[0].try_recv() else {
+            panic!("command done")
+        };
+        assert_eq!(
+            done.as_ref(),
+            r#"{"type":"done","command":77,"result":"[]"}"#
+        );
+        assert!(receivers[1].try_recv().is_err());
+        assert_eq!(actor.pending.len(), 1);
+        actor.host.engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "error:1",
+            },
+        );
+        actor.execute();
+        assert!(receivers[0].try_recv().is_err());
+        assert!(receivers[1].try_recv().is_err());
+    }
+
+    #[test]
+    fn command_receipts_keep_owner_mapping_until_done_and_never_reach_other_peers() {
+        let commands = Rc::new(RefCell::new(Vec::new()));
+        let mut actor = Account::new(
+            Host::new(Engine::new(Stub(commands)), NoTransport),
+            ServerConfig::default(),
+        );
+        let mut receivers = Vec::new();
+        for client in [1, 2] {
+            let (outgoing, receiver) = mpsc::channel(8);
+            let (cancel, _) = watch::channel(false);
+            actor.peers.insert(
+                client,
+                Peer {
+                    outgoing,
+                    cancel,
+                    books: HashSet::new(),
+                    candles: HashSet::new(),
+                    tickers: None,
+                },
+            );
+            receivers.push(receiver);
+            actor.command(
+                client,
+                Command::FetchLeverage {
+                    command: 77,
+                    symbol: "BTC-USD".into(),
+                },
+            );
+        }
+        assert_eq!(actor.pending.len(), 2);
+        for _ in 0..2 {
+            actor.host.engine.handle(
+                1.,
+                Event::WsMessage {
+                    socket: SocketId(0),
+                    text: "1",
+                },
+            );
+            actor.execute();
+            let Ok(Outgoing::Text(message)) = receivers[0].try_recv() else {
+                panic!("receipt")
+            };
+            assert_eq!(
+                message.as_ref(),
+                r#"{"type":"commandProgress","command":77,"receipts":[{"symbol":"BTC-USD","kind":"clientOrderId","identity":"native-1"}]}"#
+            );
+            assert!(receivers[1].try_recv().is_err());
+            assert_eq!(actor.pending.len(), 2, "progress must not complete routing");
+        }
+        actor.leave(1);
+        assert_eq!(actor.pending.get(&1).unwrap().client, None);
+        actor.host.engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "1",
+            },
+        );
+        actor.execute();
+        assert!(
+            receivers[1].try_recv().is_err(),
+            "departed owner's identity cannot migrate"
+        );
+        actor.host.engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "2",
+            },
+        );
+        actor.execute();
+        let Ok(Outgoing::Text(message)) = receivers[1].try_recv() else {
+            panic!("second owner receipt")
+        };
+        assert!(message.contains("native-2"));
+        actor.host.engine.handle(
+            3.,
+            Event::WsOpened {
+                socket: SocketId(2),
+            },
+        );
+        actor.execute();
+        let Ok(Outgoing::Text(message)) = receivers[1].try_recv() else {
+            panic!("done")
+        };
+        assert_eq!(
+            message.as_ref(),
+            r#"{"type":"done","command":77,"result":"[]"}"#
+        );
+        assert!(!actor.pending.contains_key(&2));
+        actor.host.engine.handle(
+            4.,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "2",
+            },
+        );
+        actor.execute();
+        assert!(
+            receivers[1].try_recv().is_err(),
+            "completion closes receipt routing"
+        );
     }
 
     #[tokio::test]

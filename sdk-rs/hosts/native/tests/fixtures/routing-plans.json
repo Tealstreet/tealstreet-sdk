@@ -1,5 +1,329 @@
 [
   {
+    "name": "bybit-brazil-product-public-sockets",
+    "exchange": "bybit",
+    "plan": {
+      "http": {
+        "mode": "direct",
+        "prefix": "",
+        "authorize": false,
+        "authorizationHeader": "Authorization",
+        "headers": {
+          "x-site-id": "BRA_BTL"
+        }
+      },
+      "ws": {
+        "public": {
+          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear"
+        },
+        "private": {
+          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private"
+        },
+        "business": {}
+      },
+      "wsHeaders": {
+        "Origin": "https://preview.tealstreet.io",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      },
+      "venueWsHeaders": {
+        "x-site-id": "BRA_BTL"
+      },
+      "socketChannels": [
+        {
+          "contains": "/business",
+          "channel": "business"
+        },
+        {
+          "contains": "/ws-futures",
+          "channel": "business"
+        },
+        {
+          "contains": "/private",
+          "channel": "private"
+        },
+        {
+          "contains": "/user",
+          "channel": "private"
+        },
+        {
+          "contains": "/account",
+          "channel": "private"
+        },
+        {
+          "contains": "listenKey=",
+          "channel": "private"
+        }
+      ],
+      "publicWsRoutes": [
+        {
+          "contains": "/v5/public/inverse",
+          "route": {
+            "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse"
+          }
+        },
+        {
+          "contains": "/v5/public/spot",
+          "route": {
+            "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot"
+          }
+        },
+        {
+          "contains": "/v5/public/option",
+          "route": {}
+        }
+      ]
+    },
+    "http": [
+      {
+        "request": {
+          "url": "https://api.bybit.com/fixture?signature=a%2Fb",
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "expected": {
+          "url": "https://api.bybit.com/fixture?signature=a%2Fb",
+          "prefix": "",
+          "mode": "direct",
+          "authorize": false,
+          "authorizationHeader": "Authorization",
+          "headers": {
+            "x-site-id": "BRA_BTL"
+          },
+          "tunnelUrl": null
+        }
+      }
+    ],
+    "sockets": [
+      {
+        "channel": "public",
+        "original": "wss://stream.bybit.com/v5/public/linear",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "public",
+        "original": "wss://stream.bybit.com/v5/public/inverse",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "public",
+        "original": "wss://stream.bybit.com/v5/public/spot",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          },
+          {
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+            }
+          }
+        ]
+      },
+      {
+        "channel": "public",
+        "original": "wss://stream.bybit.com/v5/public/option",
+        "headers": {
+          "X-Venue-Header": "keep"
+        },
+        "attempts": [
+          {
+            "url": "wss://stream.bybit.com/v5/public/option",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL"
+            }
+          },
+          {
+            "url": "wss://stream.bybit.com/v5/public/option",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL"
+            }
+          },
+          {
+            "url": "wss://stream.bybit.com/v5/public/option",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL"
+            }
+          },
+          {
+            "url": "wss://stream.bybit.com/v5/public/option",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL"
+            }
+          },
+          {
+            "url": "wss://stream.bybit.com/v5/public/option",
+            "relay": null,
+            "headers": {
+              "X-Venue-Header": "keep",
+              "x-site-id": "BRA_BTL"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
     "name": "kucoin-private-default-how",
     "exchange": "kucoin",
     "plan": {
@@ -3624,6 +3948,20 @@
           "contains": "listenKey=",
           "channel": "private"
         }
+      ],
+      "publicWsRoutes": [
+        {
+          "contains": "/v5/public/inverse",
+          "route": {}
+        },
+        {
+          "contains": "/v5/public/spot",
+          "route": {}
+        },
+        {
+          "contains": "/v5/public/option",
+          "route": {}
+        }
       ]
     },
     "http": [
@@ -3829,6 +4167,24 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "publicWsRoutes": [
+        {
+          "contains": "/v5/public/inverse",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse"
+          }
+        },
+        {
+          "contains": "/v5/public/spot",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot"
+          }
+        },
+        {
+          "contains": "/v5/public/option",
+          "route": {}
         }
       ]
     },
@@ -4054,6 +4410,24 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "publicWsRoutes": [
+        {
+          "contains": "/v5/public/inverse",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse"
+          }
+        },
+        {
+          "contains": "/v5/public/spot",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot"
+          }
+        },
+        {
+          "contains": "/v5/public/option",
+          "route": {}
         }
       ]
     },
@@ -4286,6 +4660,24 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "publicWsRoutes": [
+        {
+          "contains": "/v5/public/inverse",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse"
+          }
+        },
+        {
+          "contains": "/v5/public/spot",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot"
+          }
+        },
+        {
+          "contains": "/v5/public/option",
+          "route": {}
         }
       ]
     },
@@ -5432,6 +5824,24 @@
           "contains": "listenKey=",
           "channel": "private"
         }
+      ],
+      "publicWsRoutes": [
+        {
+          "contains": "/v5/public/inverse",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse"
+          }
+        },
+        {
+          "contains": "/v5/public/spot",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot"
+          }
+        },
+        {
+          "contains": "/v5/public/option",
+          "route": {}
+        }
       ]
     },
     "http": [
@@ -5656,6 +6066,24 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "publicWsRoutes": [
+        {
+          "contains": "/v5/public/inverse",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse"
+          }
+        },
+        {
+          "contains": "/v5/public/spot",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot"
+          }
+        },
+        {
+          "contains": "/v5/public/option",
+          "route": {}
         }
       ]
     },
@@ -5883,6 +6311,24 @@
           "contains": "listenKey=",
           "channel": "private"
         }
+      ],
+      "publicWsRoutes": [
+        {
+          "contains": "/v5/public/inverse",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse"
+          }
+        },
+        {
+          "contains": "/v5/public/spot",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot"
+          }
+        },
+        {
+          "contains": "/v5/public/option",
+          "route": {}
+        }
       ]
     },
     "http": [
@@ -6102,6 +6548,24 @@
           "contains": "listenKey=",
           "channel": "private"
         }
+      ],
+      "publicWsRoutes": [
+        {
+          "contains": "/v5/public/inverse",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse"
+          }
+        },
+        {
+          "contains": "/v5/public/spot",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot"
+          }
+        },
+        {
+          "contains": "/v5/public/option",
+          "route": {}
+        }
       ]
     },
     "http": [
@@ -6320,6 +6784,24 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "publicWsRoutes": [
+        {
+          "contains": "/v5/public/inverse",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/inverse"
+          }
+        },
+        {
+          "contains": "/v5/public/spot",
+          "route": {
+            "fallback": "wss://bybit-proxy-ja.tealstreet.io/v5/public/spot"
+          }
+        },
+        {
+          "contains": "/v5/public/option",
+          "route": {}
         }
       ]
     },
@@ -8677,6 +9159,24 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "publicWsRoutes": [
+        {
+          "contains": "/v5/public/inverse",
+          "route": {
+            "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse"
+          }
+        },
+        {
+          "contains": "/v5/public/spot",
+          "route": {
+            "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot"
+          }
+        },
+        {
+          "contains": "/v5/public/option",
+          "route": {}
         }
       ]
     },
