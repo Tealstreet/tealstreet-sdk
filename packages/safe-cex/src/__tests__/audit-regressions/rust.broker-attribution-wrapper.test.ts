@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -17,8 +18,9 @@ it.each([
 ] as const)('BloFin broker attribution preserves TS policy in %s with proxy=%s', async (environment, tealstreetProxy, attributed) => {
   vi.stubEnv('NODE_ENV', environment);
   const noop = () => '[]';
+  const nativeLoaded = { markets: true, tickers: true, balance: true, orders: true, positions: true };
   const engine: WasmEngineLike = {
-    start: noop, command: noop, takeFrame: () => undefined,
+    start: noop, command: noop, takeFrame: () => new Uint8Array(consumerFrame({ loaded: nativeLoaded })),
     snapshotFrame: () => new Uint8Array(), wsOpen: noop, wsMessage: noop,
     wsClose: noop, httpStart: noop, httpChunk: noop, httpEnd: noop,
     httpFailed: noop, timer: noop,
@@ -27,7 +29,7 @@ it.each([
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
   const store = new DefaultStore();
   installNativeStartupFrames(engine, store);
-  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  store.update({ loaded: nativeLoaded });
   const exchange = new RustEngineExchange('blofin', {
     key: 'fixture-key', secret: 'fixture-secret', passphrase: 'fixture-pass', tealstreetProxy,
   }, store);

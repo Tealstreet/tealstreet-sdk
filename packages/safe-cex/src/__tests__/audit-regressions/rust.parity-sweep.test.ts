@@ -11,6 +11,7 @@ import { OKXExchange } from '../../exchanges/okx/okx.exchange';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const exchanges: RustEngineExchange[] = [];
 const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => {
@@ -25,7 +26,9 @@ const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => 
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(verdict()) }]);
     },
-    takeFrame: () => undefined,
+    takeFrame: () => new Uint8Array(consumerFrame({
+      loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+    })),
     snapshotFrame: () => new Uint8Array(),
     wsOpen: empty,
     wsMessage: empty,
@@ -55,6 +58,20 @@ const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => 
 afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
 describe('Rust parity query forwarding', () => {
+  it('retains cancellation type and symbol alongside legacy IDs before reconciliation', async () => {
+    const { exchange, commands } = fixture('bybit');
+    await exchange.start();
+    const uncached = [
+      { id: 'new-limit', symbol: 'BTCUSDT', type: OrderType.Limit },
+      { id: 'new-stop', symbol: 'ETHUSDT', type: OrderType.StopLoss },
+    ] as Order[];
+    await exchange.cancelOrders(uncached);
+    expect(commands.map(({ command: _command, ...body }) => body)).toEqual([
+      { op: 'cancelOrders', ids: ['new-limit', 'new-stop'], orders: uncached },
+    ]);
+    expect(exchange.store.orders).toEqual([]);
+  });
+
   it.each<ExchangeName>(['binance', 'binancepm', 'okx', 'okxeu', 'okxdemo', 'okxeudemo', 'phemex'])(
     '%s preserves the native definitive lookup verdict',
     async (name) => {

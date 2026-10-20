@@ -679,7 +679,10 @@ impl Kucoin {
                             LogLevel::Warning,
                             format!("KuCoin skipped unmappable position {symbol}: {error}"),
                         );
-                        request.skipped_symbols.insert(symbol);
+                        // Stored positions carry the unified symbol, not the contract id.
+                        request
+                            .skipped_symbols
+                            .insert(self::symbol(cx.store, &symbol));
                     }
                     None => request.invalid = true,
                 },
@@ -707,6 +710,10 @@ impl Kucoin {
                             LogLevel::Warning,
                             format!("KuCoin skipped unmappable order {id}: {error}"),
                         );
+                        // The row also carried any attached TP/SL legs; keep them too.
+                        for suffix in ["__stop_loss", "__take_profit"] {
+                            request.skipped_orders.insert(format!("{id}{suffix}"));
+                        }
                         request.skipped_orders.insert(id);
                     }
                     _ => request.invalid = true,

@@ -643,7 +643,8 @@ fn unparseable_xperp_ticker_row_keeps_valid_swap_peers_and_logs_the_row() {
     reply(
         &mut e,
         &a,
-        &envelope(&ticker("BTC-USD-261225").replace(r#""last":"40000""#, r#""last":null"#)),
+        // A null quote now seeds zero; a non-string quote is still undecodable.
+        &envelope(&ticker("BTC-USD-261225").replace(r#""last":"40000""#, r#""last":40000"#)),
         4.0,
     );
     assert!(e.store().loaded().tickers);

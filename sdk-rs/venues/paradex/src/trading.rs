@@ -7,7 +7,9 @@ use crate::{
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
 use safe_cex_engine::url::encode;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response};
+use safe_cex_engine::{
+    Command, CommandId, Cx, LogLevel, Method, OrderIdentityKind, OrderIdentityReceipt, Response,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -32,11 +34,22 @@ struct Placement {
     #[serde(skip_serializing_if = "Option::is_none")]
     client_id: Option<String>,
 }
+fn placement_receipt(payload: &Placement) -> Option<OrderIdentityReceipt> {
+    payload
+        .client_id
+        .as_ref()
+        .map(|identity| OrderIdentityReceipt {
+            symbol: payload.market.clone(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity: identity.clone(),
+        })
+}
 #[derive(Clone)]
 enum Kind {
     Place {
         expected: Vec<Option<String>>,
-        child: bool,
+        /// The bracket leg this request places, `None` for an entry.
+        leg: Option<&'static str>,
         batch: bool,
     },
     Amend {
@@ -53,6 +66,7 @@ enum Kind {
     },
 }
 struct Operation {
+    receipts: Vec<OrderIdentityReceipt>,
     hash: Option<String>,
     method: Method,
     path: String,
@@ -81,11 +95,17 @@ struct Quote {
     fair: Option<f64>,
 }
 pub struct Request {
+    progress: Option<(CommandId, Vec<OrderIdentityReceipt>)>,
     hash: Option<String>,
     job: u64,
     kind: Kind,
 }
 impl Request {
+    pub(crate) fn report_progress(&self, cx: &mut Cx<'_, Pending>) {
+        if let Some((command, receipts)) = &self.progress {
+            cx.command_progress(*command, receipts.clone());
+        }
+    }
     pub(crate) fn take_signing_hash(&mut self) -> Option<String> {
         self.hash.take()
     }
@@ -130,6 +150,26 @@ fn native_batch(o: &PlaceOrderOpts) -> bool {
         && o.sl_trigger_type.is_none()
         && o.close != Some(true)
         && o.time_in_force != Some(TimeInForce::FillOrKill)
+}
+/// A wrong-side leg would trigger at once or never; reject it rather than place an unprotected entry.
+fn bracket_sides(o: &PlaceOrderOpts) -> Result<(), String> {
+    let Some(entry) = o.price else {
+        return Ok(());
+    };
+    let long = o.side == OrderSide::Buy;
+    for (leg, price, above) in [
+        ("take-profit", o.take_profit, long),
+        ("stop-loss", o.stop_loss, !long),
+    ] {
+        if let Some(price) = price.filter(|&p| if above { p <= entry } else { p >= entry }) {
+            let relation = if above { "above" } else { "below" };
+            let side = if long { "buy" } else { "sell" };
+            return Err(format!(
+                "Paradex {leg} {price} must be {relation} the {side} entry price {entry}"
+            ));
+        }
+    }
+    Ok(())
 }
 fn client_id() -> Result<String, String> {
     safe_cex_crypto::uuid::uuid().map(|id| format!("ts_{id}"))
@@ -270,21 +310,24 @@ fn place_operations(
             return Ok(());
         }
         let expected = chunk.iter().map(|p| p.client_id.clone()).collect();
+        let receipts = chunk.iter().filter_map(placement_receipt).collect();
         let body = serde_json::to_string(&*chunk).map_err(|e| e.to_string())?;
         operations.push_back(Operation {
+            receipts,
             hash: delegated.then(|| chunk[0].signature.clone()),
             method: Method::Post,
             path: "/orders/batch".into(),
             body: Some(body),
             kind: Kind::Place {
                 expected,
-                child: false,
+                leg: None,
                 batch: true,
             },
         });
         chunk.clear();
         Ok(())
     }
+    orders.iter().try_for_each(bracket_sides)?;
     for o in orders {
         let execution = if capped(o) {
             if !o.max_slippage_pct.is_some_and(f64::is_finite)
@@ -316,30 +359,20 @@ fn place_operations(
         let payload = prepare(o, signer, cx.now as u64, false, execution)?;
         let expected = vec![payload.client_id.clone()];
         operations.push_back(Operation {
+            receipts: placement_receipt(&payload).into_iter().collect(),
             hash: signer.is_delegated().then(|| payload.signature.clone()),
             method: Method::Post,
             path: "/orders".into(),
             body: Some(serde_json::to_string(&payload).map_err(|e| e.to_string())?),
             kind: Kind::Place {
                 expected,
-                child: false,
+                leg: None,
                 batch: false,
             },
         });
-        let brackets_valid = o.price.is_none_or(|entry| match o.side {
-            OrderSide::Buy => {
-                o.take_profit.is_none_or(|p| p > entry) && o.stop_loss.is_none_or(|p| p < entry)
-            }
-            OrderSide::Sell => {
-                o.take_profit.is_none_or(|p| p < entry) && o.stop_loss.is_none_or(|p| p > entry)
-            }
-        });
-        if !brackets_valid {
-            continue;
-        }
-        for (kind, price) in [
-            (OrderType::TakeProfit, o.take_profit),
-            (OrderType::StopLoss, o.stop_loss),
+        for (kind, leg, price) in [
+            (OrderType::TakeProfit, "take-profit", o.take_profit),
+            (OrderType::StopLoss, "stop-loss", o.stop_loss),
         ] {
             if let Some(price) = price {
                 if !positive(price) {
@@ -370,13 +403,14 @@ fn place_operations(
                     payload.signature_timestamp = signed.signature_timestamp;
                 }
                 operations.push_back(Operation {
+                    receipts: Vec::new(),
                     hash: signer.is_delegated().then(|| payload.signature.clone()),
                     method: Method::Post,
                     path: "/orders".into(),
                     body: Some(serde_json::to_string(&payload).map_err(|e| e.to_string())?),
                     kind: Kind::Place {
                         expected: vec![None],
-                        child: true,
+                        leg: Some(leg),
                         batch: false,
                     },
                 });
@@ -462,6 +496,7 @@ impl Trading {
                     let mut operations = VecDeque::new();
                     for chunk in ids.chunks(2) {
                         operations.push_back(Operation {
+                            receipts: Vec::new(),
                             hash: None,
                             method: Method::Delete,
                             path: if chunk.len() == 2 {
@@ -492,6 +527,7 @@ impl Trading {
                     .ok_or_else(|| "Paradex cancel-all requires a known nonempty market".to_owned())
                     .map(|market| {
                         VecDeque::from([Operation {
+                            receipts: Vec::new(),
                             hash: None,
                             method: Method::Delete,
                             path: format!("/orders?market={}", encode(&market.id)),
@@ -505,6 +541,7 @@ impl Trading {
             Command::FetchLeverage { command, symbol } => (
                 command,
                 Ok(VecDeque::from([Operation {
+                    receipts: Vec::new(),
                     hash: None,
                     method: Method::Get,
                     path: "/account/margin".into(),
@@ -546,6 +583,7 @@ impl Trading {
                         margin_type: &'static str,
                     }
                     Ok(VecDeque::from([Operation {
+                        receipts: Vec::new(),
                         hash: None,
                         method: Method::Post,
                         path: format!("/account/margin/{}", encode(&symbol)),
@@ -644,6 +682,7 @@ impl Trading {
                     Vec::new(),
                     None,
                     Pending::Trade(Request {
+                        progress: None,
                         hash: None,
                         job,
                         kind: Kind::Quotes(symbol),
@@ -695,6 +734,8 @@ impl Trading {
                 operation.body,
                 None,
                 Pending::Trade(Request {
+                    progress: (!operation.receipts.is_empty())
+                        .then_some((state.command, operation.receipts)),
                     hash: operation.hash,
                     job,
                     kind: operation.kind,
@@ -877,26 +918,35 @@ impl Trading {
         match result {
             Ok(ids) => job.results.extend(ids),
             Err(error) => {
-                if let Kind::Place {
-                    child, expected, ..
-                } = &request.kind
-                {
-                    cx.log(
-                        LogLevel::Error,
-                        if *child {
-                            format!("Paradex TP/SL placement failed: {error}")
-                        } else {
+                if let Kind::Place { leg, expected, .. } = &request.kind {
+                    let next_leg = match job.operations.front().map(|op| &op.kind) {
+                        Some(Kind::Place {
+                            leg: Some(next), ..
+                        }) => Some(*next),
+                        _ => None,
+                    };
+                    let message = match (leg, next_leg) {
+                        (Some(leg), Some(next)) => format!(
+                            "Paradex TP/SL {leg} placement failed: {error}; still placing the {next}"
+                        ),
+                        (Some(leg), None) => format!(
+                            "Paradex TP/SL {leg} placement failed: {error}; no other leg remains to send"
+                        ),
+                        (None, _) => {
                             format!("Paradex placement failed for client IDs {expected:?}: {error}")
-                        },
-                    );
-                    while job
-                        .operations
-                        .front()
-                        .is_some_and(|op| matches!(op.kind, Kind::Place { child: true, .. }))
-                    {
-                        job.operations.pop_front();
-                    }
-                    if !child {
+                        }
+                    };
+                    cx.log(LogLevel::Error, message);
+                    // A failed entry orphans its children; a failed child must not skip its
+                    // sibling, or a rejected TP would leave the position without its SL.
+                    if leg.is_none() {
+                        while job
+                            .operations
+                            .front()
+                            .is_some_and(|op| matches!(op.kind, Kind::Place { leg: Some(_), .. }))
+                        {
+                            job.operations.pop_front();
+                        }
                         job.errors.push(error);
                     }
                 } else {
@@ -1040,6 +1090,7 @@ impl Trading {
             signature_timestamp: u64,
         }
         Ok(VecDeque::from([Operation {
+            receipts: Vec::new(),
             hash: account
                 .credentials()
                 .filter(|c| c.is_delegated())

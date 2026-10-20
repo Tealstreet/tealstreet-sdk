@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// Positions and the wallet are re-read this often; the stream carries
 /// changes in between, so this only repairs what a dropped frame missed.
 const RECONCILE_INTERVAL_MS: f64 = 5_000.0;
+const FILL_REPAIR_GRACE_MS: f64 = 8_000.0;
 /// A failed order snapshot is retried this often until one succeeds.
 const ORDERS_RETRY_MS: f64 = 15_000.0;
 const ORDERS_PAGE_LIMIT: u32 = 50;
@@ -45,6 +46,16 @@ pub enum Request {
     Wallet {
         session: u32,
         epoch: u32,
+    },
+    /// Executions for one Demo reduce-only limit order whose stream events may never come.
+    FillRepair {
+        order_id: String,
+        symbol: String,
+        placed_at: f64,
+        session: u32,
+        cursor: Option<String>,
+        filled: f64,
+        pages: u8,
     },
 }
 
@@ -121,6 +132,8 @@ struct HyroSnapshot {
 pub struct AccountState {
     started: bool,
     unsupported_logged: HashSet<String>,
+    /// Demo reduce-only repair reads due: order id, symbol, placement time.
+    fill_repairs: HashMap<TimerId, (String, String, f64)>,
     /// A Hyro reconciliation read failed in transport or at the venue, not on content.
     hyro_transient: bool,
     hyro_transient_streak: u8,
@@ -1380,7 +1393,136 @@ impl BybitLinear {
         );
     }
 
+    /// TS repairs Demo's dropped order frames for reduce-only limits by asking for
+    /// that order's executions at 1s, 3s and just after the 8s placement grace.
+    pub(crate) fn schedule_fill_repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: &str,
+        symbol: &str,
+    ) {
+        if self.variant != crate::Variant::Demo {
+            return;
+        }
+        for delay in [1_000.0, 3_000.0, FILL_REPAIR_GRACE_MS + 250.0] {
+            let timer = cx.set_timer(delay);
+            self.account
+                .fill_repairs
+                .insert(timer, (id.to_owned(), symbol.to_owned(), cx.now));
+        }
+    }
+
+    fn request_fill_repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: String,
+        symbol: String,
+        placed_at: f64,
+    ) {
+        if cx.store.order(&id).is_none() {
+            return;
+        }
+        self.request_fill_page(cx, id, symbol, placed_at, None, 0.0, 0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn request_fill_page(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: String,
+        symbol: String,
+        placed_at: f64,
+        cursor: Option<String>,
+        filled: f64,
+        pages: u8,
+    ) {
+        let query = Query::new()
+            .str("category", self.paths.category)
+            .str("symbol", &symbol)
+            .str("orderId", &id)
+            .num("limit", 100.0)
+            .opt_str("cursor", cursor.as_deref());
+        self.send(
+            cx,
+            Rest::get("/v5/execution/list", query).signed(),
+            Then::Account(Request::FillRepair {
+                order_id: id,
+                symbol,
+                placed_at,
+                session: self.account.session_version,
+                cursor,
+                filled,
+                pages,
+            }),
+        );
+    }
+
+    /// Bybit returns a cursor even on a short page; walk it as TS does (20 pages).
+    #[allow(clippy::too_many_arguments)]
+    fn on_fill_repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: String,
+        symbol: String,
+        placed_at: f64,
+        cursor: Option<String>,
+        mut filled: f64,
+        pages: u8,
+        body: &str,
+    ) {
+        let Some(order) = cx.store.order(&id).cloned() else {
+            return;
+        };
+        let page = serde_json::from_str::<Listed<ExecutionRow>>(body)
+            .ok()
+            .and_then(|l| l.result);
+        let mut complete = false;
+        if let Some(page) = page {
+            filled += page
+                .list
+                .iter()
+                .filter(|e| e.order_id.as_ref() == id)
+                .map(|e| float_of(&e.exec_qty))
+                .filter(|q| q.is_finite() && *q > 0.0)
+                .sum::<f64>();
+            let next = page.next_page_cursor.filter(|c| !c.is_empty());
+            match next {
+                Some(next) if !page.list.is_empty() && cursor.as_ref() != Some(&next) => {
+                    if pages + 1 < 20 {
+                        self.request_fill_page(
+                            cx,
+                            id,
+                            symbol,
+                            placed_at,
+                            Some(next),
+                            filled,
+                            pages + 1,
+                        );
+                        return;
+                    }
+                }
+                _ => complete = true,
+            }
+        }
+        let target = order.amount.max(order.remaining + order.filled);
+        // Only a complete, readable walk can prove a full fill.
+        if complete && target > 0.0 && filled >= target - (target * 1e-8).max(1e-12) {
+            self.remember_terminal_order(&id);
+            let children = [format!("{id}__stop_loss"), format!("{id}__take_profit")];
+            cx.store.remove_orders(&[&id, &children[0], &children[1]]);
+            return;
+        }
+        if cx.now - placed_at >= FILL_REPAIR_GRACE_MS {
+            self.account.orders_follow_up |= self.account.orders.is_some();
+            self.fetch_orders(cx);
+        }
+    }
+
     pub(crate) fn on_account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some((id, symbol, placed_at)) = self.account.fill_repairs.remove(&timer) {
+            self.request_fill_repair(cx, id, symbol, placed_at);
+            return;
+        }
         if self.account.partial_stop_refresh == Some(timer) {
             self.account.partial_stop_refresh = None;
             if self.variant.is_hyro() {
@@ -1862,6 +2004,35 @@ impl BybitLinear {
             Err(error) => Err((*error).to_owned()),
         };
         match request {
+            Request::FillRepair {
+                order_id,
+                symbol,
+                placed_at,
+                session,
+                cursor,
+                filled,
+                pages,
+            } => {
+                if session != self.account.session_version {
+                    return;
+                }
+                match outcome {
+                    Ok(body) => self.on_fill_repair(
+                        cx, order_id, symbol, placed_at, cursor, filled, pages, body,
+                    ),
+                    Err(message) => {
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("Bybit fill check for order {order_id} failed: {message}"),
+                        );
+                        // After the grace a failed check still lets open orders correct the row.
+                        if cx.now - placed_at >= FILL_REPAIR_GRACE_MS {
+                            self.account.orders_follow_up |= self.account.orders.is_some();
+                            self.fetch_orders(cx);
+                        }
+                    }
+                }
+            }
             Request::AccountInfo => {
                 match outcome {
                     Ok(body) => {

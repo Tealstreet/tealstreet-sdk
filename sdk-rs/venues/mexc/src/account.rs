@@ -5,7 +5,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Clone, Copy, Default)]
 pub struct Rails {
@@ -1104,6 +1104,21 @@ impl MexcFutures {
                                 .or_else(|| s.assets.first());
                             cx.store
                                 .set_balance(chosen.map(|(_, b)| b.clone()).unwrap_or_default());
+                            // Duplicate rows keep the last one, as the TS reducer does.
+                            let currencies: BTreeMap<String, Balance> = s
+                                .assets
+                                .into_iter()
+                                .filter(|(currency, _)| !currency.is_empty())
+                                .collect();
+                            cx.store.set_currency_balances(
+                                currencies
+                                    .into_iter()
+                                    .map(|(currency, balance)| CurrencyBalance {
+                                        currency,
+                                        balance,
+                                    })
+                                    .collect(),
+                            );
                         }
                     }
                     Scope::Positions => {
@@ -1287,7 +1302,10 @@ impl MexcFutures {
     }
     pub fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         if let Request::Leverage { command, .. } = &request {
+            cx.command_error(*command, error);
             cx.done(*command, Err(error.into()));
+        } else {
+            cx.log(LogLevel::Error, error);
         }
         if let Request::Snapshot(s) = request {
             self.account.in_flight.remove(&s.scope);
@@ -1298,7 +1316,6 @@ impl MexcFutures {
                 self.account.staged.clear();
             }
         }
-        cx.log(LogLevel::Error, error);
         if self.account.poll.is_none() {
             self.account.poll = Some(cx.set_timer(2000.0));
         }

@@ -9,6 +9,7 @@ import { isBaseCapabilityFallback } from '../../exchanges/base';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const market: Market = {
   id: 'BTC-USDT', symbol: 'BTC-USDT', base: 'BTC', quote: 'USDT', active: true,
@@ -34,7 +35,9 @@ describe('KuCoin spot Rust SDK boundary', () => {
           : command.op === 'placeOrders' || command.op === 'amendOrderWithSymbol' ? ['native-id'] : null;
         return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result) }]);
       },
-      takeFrame: () => undefined, snapshotFrame: () => new Uint8Array(),
+      takeFrame: () => new Uint8Array(consumerFrame({
+        loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+      })), snapshotFrame: () => new Uint8Array(),
       wsOpen: noActions, wsMessage: noActions, wsClose: noActions,
       httpStart: noActions, httpChunk: noActions, httpEnd: noActions, httpFailed: noActions, timer: noActions,
     };
@@ -86,11 +89,11 @@ describe('KuCoin spot Rust SDK boundary', () => {
   it('keeps the supplied symbol when canceling or amending an uncached order', async () => {
     const { exchange, commands } = setup();
     await exchange.start();
-    const uncached = { id: 'lost-ack-id', symbol: 'BTC-USDT' } as Parameters<typeof exchange.cancelOrders>[0][number];
+    const uncached = { id: 'lost-ack-id', symbol: 'BTC-USDT', type: OrderType.Limit } as Parameters<typeof exchange.cancelOrders>[0][number];
     await exchange.cancelOrders([uncached]);
     await exchange.updateOrder({ order: uncached, update: { price: 101 } });
     expect(commands.map(({ command: _command, ...body }) => body)).toEqual([
-      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'lost-ack-id', symbol: 'BTC-USDT' }] },
+      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'lost-ack-id', symbol: 'BTC-USDT', type: OrderType.Limit }] },
       { op: 'amendOrderWithSymbol', id: 'lost-ack-id', symbol: 'BTC-USDT', price: 101 },
     ]);
   });

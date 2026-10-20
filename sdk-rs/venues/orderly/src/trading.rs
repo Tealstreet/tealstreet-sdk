@@ -1078,7 +1078,7 @@ impl Orderly {
                 self.trade_next(cx);
             }
             Err(e) => {
-                cx.log(LogLevel::Error, &e);
+                cx.command_error(id, &e);
                 cx.done(id, Err(e));
                 self.trade_queued(cx);
             }
@@ -1155,6 +1155,18 @@ impl Orderly {
         let credentials = self.account.credentials.as_ref().unwrap();
         match credentials.headers(step.method, &step.path, step.body.as_deref(), cx.now) {
             Ok(headers) => {
+                if let Effect::Place(order) = &step.effect
+                    && let Some(identity) = &order.client_order_id
+                {
+                    cx.command_progress(
+                        command,
+                        vec![OrderIdentityReceipt {
+                            symbol: order.symbol.clone(),
+                            kind: OrderIdentityKind::ClientOrderId,
+                            identity: identity.clone(),
+                        }],
+                    );
+                }
                 cx.request(
                     step.method,
                     format!("{}{}", self.rest(), step.path),
@@ -1553,7 +1565,7 @@ impl Orderly {
             }
             _ => {}
         }
-        cx.log(LogLevel::Error, error);
+        cx.command_error(request.command, error);
         let Some(job) = self
             .trading
             .active
