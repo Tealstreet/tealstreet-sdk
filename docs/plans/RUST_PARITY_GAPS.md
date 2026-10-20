@@ -456,3 +456,32 @@ Paradex remote signing alone still requires local signing or a payload signer
 for JWT acquisition. Credentialed Spot lifecycle smoke remains unavailable until
 its separate endpoint/sizing profile is reviewed; every mode refuses before
 credential access. No budget increase or transport-table duplication was needed.
+
+## CI follow-up: Bybit decimal throughput
+
+The evidence-only `2dfeb2668d` CI run hit two timing failures outside the scoped
+ports. A single bounded rerun passed BreakoutProp but repeated the HyroTrader
+steady-CPU miss: TS/Rust 7.3/7.6 ms initially, then both rounded to 7.4 ms.
+Parity, main CPU and memory passed. The identical runtime had passed the prior
+head; failures and rerun policy are documented on the PR. No further unchanged
+retry is planned. All other 37 checks passed.
+
+Bybit already uses opt-level 3, so a proposed duplicate compiler flag was
+rejected during plan review. Its numeric decoder fast-pathed short integers
+but sent decimal prices/quantities through the full parser. Extend that path
+to at most 15 unsigned ASCII digits and one decimal point: numerator and
+power-of-ten divisor are exact f64 integers, and a single division rounds the
+same rational as the standard parser. Signed zero, signs, exponents, long,
+malformed, non-ASCII and whitespace forms keep the original fallback. No
+request, trading, state or transport behavior changes.
+
+Independent mathematical and implementation audits pass. Bitwise differential
+coverage includes every decimal-point position at widths 1–16, 128 deterministic
+random mantissas per width, boundary values and existing fallback/signed-zero
+cases. All **124 Bybit native tests**, Clippy, fmt and bans pass. Preliminary
+standard public replay3 improves local Rust steady CPU from **3.693 to 3.205 ms**;
+main CPU remains below TS. The standard artifact shrinks from **958,115 to
+957,021 bytes** without a profile or budget change. Before retaining this fix,
+run all five Bybit-family public/private gates and refresh native/combined host
+verification on the committed source. The six earlier standalone builds exclude
+the Bybit crate, so their explicitly attributed evidence remains unchanged.
