@@ -86,4 +86,10 @@ current upstream enum is likewise outside the existing TS discovery scope.
 - Discovery/source audit and public probes complete. Independent reviewer
   confirmed the default-kind contract and dormant generic paths; no port of
   Future/Call/Put is justified by current TS exposure.
-- Remaining phase verification and landing evidence will be recorded here.
+- Public phase: TS discovery/injected-mapper regression **9 PASS**; Rust
+  public **12 PASS** and catalog refresh **3 PASS**. Independent review found
+  one missing subscription assertion; the test now captures initial sends and
+  proves only the retained perpetual gets a ticker selector. A mixed-kind
+  refresh also cannot enable retired products. Scope docs and the phase-9
+  inventory now link this decision; TS implementations/defaults are retained.
+- Private/trading/query phase verification and landing evidence follow.
