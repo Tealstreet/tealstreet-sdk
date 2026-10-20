@@ -225,3 +225,14 @@ auth-path/array cases were added; full rerun is required for the final head.
 - Remaining: final repository tests; Binance and Bitrue replays; feature-on
   Polymarket packaging replay; KuCoin Spot SDK/capture/public/private gates and
   futures gates; combined build/host SDK tests; PR reviews and green CI.
+
+- GRVT landing `5d7589f296` merged in `168a639673`; independent merge review
+  passes. Added explicit unsupported handling for the Spot-only amendment command
+  in GRVT's exhaustive command dispatcher, with peer review and workspace Clippy.
+  Its new harness baseline/async major-GC measurement is preserved, so previous
+  performance numbers are checkpoints: final replays are refreshed under it.
+  Paradex's post-merge standard artifact is byte-identical to the recorded SHA.
+- Post-GRVT typecheck 44 tasks, lint 28 tasks and harness 391 tests pass. Native
+  checks are completing. The repository rerun uses serial Turbo tasks and four
+  Vitest workers after two constructor/import timeout failures under parallel load;
+  assertions and timeouts are unchanged.
