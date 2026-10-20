@@ -129,6 +129,7 @@ const KNOWN_TS_FIXES = {
     'match executions deduplicate trade IDs and require their execution price',
     'failed and delayed REST snapshots preserve newer account state and terminal orders',
     'conditional orders and mixed bracket trigger references fail before writes instead of dropping fields',
+    'explicit protected-market slippage is rejected before batch I/O rather than silently dropped',
     'cancelSymbolOrders cancels the stop book too (reference signed transport fills this omission)',
     'open orders walk every numbered page; TS reads only its default first page',
     'socket readiness and subscriptions wait for welcome; TS sends on TCP open',
@@ -141,6 +142,20 @@ const KNOWN_TS_FIXES = {
     'immediate bracket replacement retains submitted protections before reconciliation',
     'cached book snapshot gaps retain the entire contiguous buffered suffix (TS reference fixed with a regression)',
   ],
+  // WOO repairs live in the TS reference itself; no result normalization:
+  // exact integer IDs; order-axis journal provenance; camel-case aliases;
+  // monotonic cumulative/terminal state and reconciled optimistic fill deltas;
+  // nested algo child executions and minimal terminal parent tombstones;
+  // execution-ID dedup and per-execution fills; atomic failed-page snapshots
+  // including malformed nested executable leaves;
+  // STOP direction/source and buy-trailing inference; exact tick splitting;
+  // sized protections, full-position trailing and sibling preservation;
+  // mandatory rounded amendment quantities; both-family cancellation;
+  // unsupported Conditional preflight; authoritative account hedge mode;
+  // clear synthetic flat marginSize when an authoritative holding reopens;
+  // paced, complete V1 income with signed fees and account aggregate scope.
+  // Rust additionally walks V3 fill time windows (TS still reads one page).
+  woo: [],
   // Paired TS fixes: contract-sized public volumes; private cumulative z/native
   // units, execution L prices, monotonic terminal state and ping timestamp echo.
   // Cancel native identities and protective defaults now match metadata. Rust

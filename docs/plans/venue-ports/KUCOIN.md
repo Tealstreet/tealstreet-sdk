@@ -580,3 +580,55 @@ inverse-frame unit1, fmt/bans/native+Wasm clippy and root typecheck44/lint28 pas
 The prior published head24edca0460 reached all23 green checks, but Bitget parity
 then conflicted. Publish this head and require complete new-head CI, including
 all30 replay gates and four dedicated integrations across13 venue jobs.
+
+### WOO landing integration plan
+
+Landing6945ee83b4 adds WOO (#1316) while fb4563a52b CI starts. Resolve
+shared harness/host conflicts through independent disjoint workers, preserving
+all strict KuCoin contracts and the 14-venue feature union. Keep WOO's audit
+connection hook, exact authentication and fallback/history behavior. Retain
+R12 in both frame receiver paths and Bitget inverse/collateral flags. Incoming
+crypto cleanup deletes the unused first-port HMAC-SHA512 facade.
+
+The common PlaceOrderOpts now includes protected-market maxSlippagePct. Set
+None for ordinary KuCoin replacements and reject explicitly requested protection
+for the whole batch before any I/O, since this port cannot honor that contract;
+add a focused Market/Limit batch regression with a specific slippage error.
+Independently review this adaptation and all conflict resolutions.
+
+Verify workspace fmt/bans/native+Wasm clippy/tests, harness, combined actual
+Wasm+host/wire, root typecheck/lint, and selective KuCoin/Binance/WOO public and
+private gates. Preserve all incoming Bitget parity checks in CI. Commit results
+and posted independent reviews; require full green final-head CI (14 venue jobs,
+32 public/private gates plus four dedicated Bitget integrations), merge and cut
+the fresh branch.
+
+### Fourteen-venue WOO integration checkpoint
+
+All six required/compatibility replays pass: KuCoin, Binance and incoming WOO
+public/private. Public three-run medians TS/Rust:
+
+| Venue | CPU ms | Steady CPU ms | Retained MB | Bundle bytes |
+| --- | ---: | ---: | ---: | ---: |
+| KuCoin | 1184.6 / 822.6 | 793.3 / 511.5 | 7.0 / 3.2 | 745,857 |
+| Binance | 261.7 / 134.1 | 150.9 / 60.8 | 4.2 / 2.2 | 752,597 |
+| WOO | 49.8 / 45.4 | 21.1 / 18.1 | 1.6 / 1.0 | 835,807 |
+
+All exact output/request/write/signature/socket audits remain enabled. Every
+bundle is below the unchanged1,258,291-byte limit. KuCoin public16,157frames/
+692markets/two books and private32frames/17commands pass. WOO private60frames/
+20commands pass. KuCoin and WOO each hit one initial TS memory-settling deadline
+before comparison; one unchanged retry each passed. No deadline, threshold or
+assertion was changed.
+
+Workspace1,099 tests (98 KuCoin), fmt/bans/native+Wasm clippy, harness181,
+combined actualWasm31, host/wire35 and root typecheck44/lint28 pass. Independent
+host/SDK, harness/audit and command-compatibility reviews pass, no outstanding
+P1/P2. Incoming unused HMAC-SHA512 facade cleanup is retained. Unsupported
+slippage protection is explicitly documented in KNOWN_TS_FIXES and regression
+tested before any batch I/O. R12 remains repaired in both hydration paths.
+
+Prior headfb4563a52b reached complete green CI before WOO landed. Publish this
+reviewed head and require all new-head checks green, including all32 replay
+gates and four Bitget ledger/trailing integrations across14venue jobs, before
+merging PR1312 into feat/rust-rewrite and cutting the follow-up branch.

@@ -103,6 +103,9 @@ fn positive(value: f64) -> bool {
 fn preflight(orders: &[PlaceOrderOpts]) -> Result<(), String> {
     let mut seen = HashSet::new();
     for order in orders {
+        if order.max_slippage_pct.is_some() {
+            return Err("KuCoin protected market-order slippage is not supported".into());
+        }
         if let Some(id) = &order.client_order_id {
             if id.is_empty()
                 || id.len() > 40
@@ -435,6 +438,7 @@ impl Kucoin {
                 price.or(Some(parent.price))
             },
             trigger_price: None,
+            max_slippage_pct: None,
             stop_loss: sl,
             take_profit: tp,
             reduce_only: Some(parent.reduce_only),

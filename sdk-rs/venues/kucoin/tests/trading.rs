@@ -233,6 +233,19 @@ fn caller_id_preflight_rejects_the_whole_batch_before_any_transport() {
     assert!(h.done(1).is_err());
 }
 #[test]
+fn unsupported_slippage_protection_rejects_the_entire_batch_before_transport() {
+    for kind in [OrderType::Market, OrderType::Limit] {
+        let mut h = Harness::new();
+        let mut protected = order();
+        protected.kind = kind;
+        protected.client_order_id = None;
+        protected.max_slippage_pct = Some(1.0);
+        place(&mut h, vec![order(), protected]);
+        assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(h.done(1).as_ref().unwrap_err().contains("slippage"));
+    }
+}
+#[test]
 fn late_batch_format_failure_sends_no_writes() {
     let mut h = Harness::new();
     let mut second = order();
