@@ -353,6 +353,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         self.send(client, Outgoing::Text(text));
                     }
                 }
+                Notice::StartupFailed { error } => {
+                    self.broadcast(Outgoing::Text(encode_notice(ServerNotice::StartupFailed {
+                        detail: &error,
+                    })))
+                }
                 Notice::Deactivate => {
                     self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Deactivate)))
                 }
@@ -699,6 +704,9 @@ enum ServerNotice<'a> {
         message: &'a str,
     },
     Deactivate,
+    StartupFailed {
+        detail: &'a VenueError,
+    },
 }
 fn encode_notice(notice: ServerNotice<'_>) -> Arc<str> {
     serde_json::to_string(&notice)

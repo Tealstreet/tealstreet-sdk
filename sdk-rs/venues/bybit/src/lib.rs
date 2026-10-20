@@ -19,6 +19,7 @@ use safe_cex_engine::model::{
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
 };
+use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
@@ -267,6 +268,11 @@ fn interval_code(interval: &str) -> Option<&'static str> {
 }
 
 /// Bybit's message for a rejected request, from any envelope or body.
+/// Definitive key rejections: invalid key, bad signature after the re-signed
+/// resend, IP not allowed, expired key. 10005 (permission) is left out: a key
+/// lacking only this read's scope may still trade.
+const CREDENTIAL_REJECTIONS: [i64; 4] = [10003, 10004, 10010, 33004];
+
 pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
     let status = serde_json::from_str::<Status>(response.body).ok();
     match status.as_ref().and_then(|s| s.ret_code) {
@@ -728,6 +734,25 @@ impl BybitLinear {
                 Then::Fees(HashMap::new()),
             );
         }
+    }
+
+    /// The signed startup fee read proved the key unusable; retrying cannot
+    /// fix it, so startup fails instead of waiting for an account that never loads.
+    fn reject_credentials(&mut self, cx: &mut Cx<'_, Pending>, code: i64, message: &str) {
+        let kind = match code {
+            33004 => ErrorKind::AuthExpired,
+            10010 => ErrorKind::AuthPermission,
+            _ => ErrorKind::AuthInvalid,
+        };
+        let text = format!("Bybit rejected the API key ({code}): {message}");
+        cx.log(LogLevel::Error, &text);
+        cx.startup_failed(
+            VenueError::new(text)
+                .kind(kind)
+                .venue_code(code.to_string())
+                .venue_message(message),
+        );
+        cx.deactivate();
     }
 
     /// A required startup list failed: try the missing ones again, backing off.
@@ -1283,6 +1308,14 @@ impl BybitLinear {
             }
             Then::Fees(fees) => {
                 self.startup.fees_in_flight = false;
+                let rejected = response
+                    .as_ref()
+                    .ok()
+                    .and_then(venue_error)
+                    .filter(|(code, _)| CREDENTIAL_REJECTIONS.contains(code));
+                if let Some((code, message)) = rejected {
+                    return self.reject_credentials(cx, code, &message);
+                }
                 if let Some(error) = failure {
                     cx.log(LogLevel::Warning, format!("Bybit fee rates: {error}"));
                 }

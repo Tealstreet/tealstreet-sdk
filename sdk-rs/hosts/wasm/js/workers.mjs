@@ -7,6 +7,7 @@
 //   -> { op: 'command', id, command }       any EngineHost command
 //   <- binary messages: flush frames (a snapshot first), read with wire.mjs
 //   <- { op: 'done', id, result } | { op: 'done', id, error } | { op: 'log', level, message }
+//      | { op: 'deactivate' } | { op: 'startupFailed', detail }
 // Credentials arrive with 'start' and live only in the object's memory.
 import { EngineHost, socketMessages } from './host.mjs';
 
@@ -218,6 +219,7 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
           {
             onFrame: (frame) => this.broadcast(frame),
             onDeactivate: () => this.broadcast(JSON.stringify({ op: 'deactivate' })),
+            onStartupFailed: (detail) => this.broadcast(JSON.stringify({ op: 'startupFailed', detail })),
             onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),
           },
         );

@@ -295,6 +295,9 @@ export class EngineHost {
       case 'deactivate':
         this.handlers.onDeactivate?.();
         break;
+      case 'startupFailed':
+        this.handlers.onStartupFailed?.(action.detail);
+        break;
       case 'log':
         this.handlers.onLog?.(action.level, action.message);
         break;

@@ -636,9 +636,13 @@ export class RustEngineExchange extends BaseExchange {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,
         onDeactivate: () => {
-          this.startupFailure = new Error(`${this.name} credentials were rejected`);
+          this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
           for (const wake of this.startupWaiters) wake();
           this.emitter.emit('deactivate');
+        },
+        onStartupFailed: (detail) => {
+          this.startupFailure ??= new Error(detail.message);
+          for (const wake of this.startupWaiters) wake();
         },
       },
     );
@@ -856,10 +860,6 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private receiveLog = (level: 'info' | 'warning' | 'error', message: string) => {
-    if (this.name === 'breakoutprop' && level === 'error' && message.startsWith('DXtrade startup failed:')) {
-      this.startupFailure = new Error(message);
-      for (const wake of this.startupWaiters) wake();
-    }
     if (level === 'error') this.emitAndLogError(message);
     else this.log(message, level === 'warning' ? LogSeverity.Warning : LogSeverity.Info);
   };
