@@ -263,3 +263,9 @@ Test drivers for Binance/Bybit/Bitget explicitly fail on unexpected Deactivate
 notices, retaining exhaustive checks after the shared lifecycle addition.
 Remaining: combined host/SDK WASM tests, workspace checks, all broker variants,
 mandatory Binance replay regressions, final landing refresh, PR reviews and CI.
+
+All14broker/network private gates now pass. Combined host32tests and SDK
+WASM40tests pass. Follow-up independent review closed prompt disposal of a
+never-settling WASM loader (49focused SDK tests plus typecheck/lint pass).
+Landing advanced tofc18c55874 with shared transport routing and Bitrue;
+merge that structure before final workspace/Binance regression checks.

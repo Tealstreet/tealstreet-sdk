@@ -205,7 +205,22 @@ export class RustEngineExchange extends BaseExchange {
         }
       }
     }
-    const { WasmEngine } = await loadWasmEngine();
+    const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
+      const disposed = () => {
+        if (!this.isDisposed) return;
+        this.startupWaiters.delete(disposed);
+        reject(new Error('Exchange disposed during startup'));
+      };
+      this.startupWaiters.add(disposed);
+      try {
+        void loadWasmEngine()
+          .then(resolve, reject)
+          .finally(() => this.startupWaiters.delete(disposed));
+      } catch (error) {
+        this.startupWaiters.delete(disposed);
+        reject(error);
+      }
+    });
     if (this.isDisposed) throw new Error('Exchange disposed during startup');
     const { key, secret, passphrase, testnet, applicationId, vault, hyperliquidBuilder, enableSpotMarkets } =
       this.options;

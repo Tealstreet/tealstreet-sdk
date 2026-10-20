@@ -69,6 +69,39 @@ afterEach(() => {
 });
 
 describe('Orderly Rust transport boundary', () => {
+  it('promptly rejects start and getAccount on disposal when the WASM loader never settles', async () => {
+    const { base } = createBase();
+    const load = vi.fn(() => new Promise<WasmEngineModule>(() => {}));
+    setWasmEngineLoader(load);
+    setRustEngineTransport(() => base);
+    const exchange = new RustEngineExchange('mode', options(undefined, { publicDataOnly: true }), new DefaultStore());
+    const startup = exchange.start();
+    expect(exchange.start()).toBe(startup);
+    const account = exchange.getAccount();
+    const settled = Promise.allSettled([startup, account]);
+    exchange.dispose();
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const results = await Promise.race([
+        settled,
+        new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => reject(new Error('Disposed startup did not settle promptly')), 100);
+        }),
+      ]);
+      expect(results).toEqual([
+        { status: 'rejected', reason: expect.objectContaining({ message: 'Exchange disposed during startup' }) },
+        { status: 'rejected', reason: expect.objectContaining({ message: 'Exchange disposed during startup' }) },
+      ]);
+      expect((exchange as unknown as { startupWaiters: Set<() => void> }).startupWaiters.size).toBe(0);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(base.connect).not.toHaveBeenCalled();
+      expect(base.request).not.toHaveBeenCalled();
+    } finally {
+      clearTimeout(deadline);
+      exchange.dispose();
+    }
+  });
+
   it('rejects startup disposed while the WASM loader is pending before constructing the engine', async () => {
     const { base } = createBase();
     const construct = vi.fn();
