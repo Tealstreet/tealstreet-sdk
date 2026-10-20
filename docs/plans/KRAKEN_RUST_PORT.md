@@ -224,3 +224,18 @@ Private proof is scripted documented traffic, not a funded live account. No
 credentials committed. All five phase reviews and the landing integration review
 accepted. Next: PR into feat/rust-rewrite, fresh local code-correctness reviews
 posted on the PR, address findings, green CI, merge, fresh follow-up branch.
+
+### PR #1323 code-correctness review
+
+Opened https://github.com/Tealstreet/tealstreet-sdk/pull/1323 into feat/rust-rewrite
+at f8037544e8 after all local gates passed. Three fresh independent adversarial
+code-correctness reviews posted on the PR. History/oracle review has no findings
+(18 history / 235 harness tests independently pass). Private review reproduced
+local ACK timestamps suppressing native fill progress. Public review reproduced
+omitted-zero funding and frozen 24-hour statistics; both TS defects also occur
+in Rust. Before/after regressions and follow-up reviews are in progress.
+
+CI secret scan flagged only the deterministic base64 replay fixture whose decoded
+value is the public literal replay-secret, paired with replay-key. Add an exact
+historical commit/path/rule/line fingerprint exception; no broad rule/path bypass.
+Both PR-range and initial-push-range local scans now pass (9 / 348 commits).
