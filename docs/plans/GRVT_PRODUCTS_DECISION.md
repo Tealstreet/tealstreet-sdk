@@ -103,4 +103,9 @@ current upstream enum is likewise outside the existing TS discovery scope.
   batches reject before writes, including symbol cancellation and leverage;
   unsupported IDs cannot cancel/amend a perpetual. A subsequent valid order
   still sends its exact perpetual instrument. **28 trading tests PASS**.
-- Query phase verification and landing evidence follow.
+- Query phase: independent audit accepted bounded exact-market resolution.
+  All five query shapes reject retired symbols before HTTP. Retired rows cannot
+  credit perpetual fills/funding; order history, client lookup and public trades
+  fail closed on an undiscovered product identity. **21 history tests PASS**.
+  No production defect or TS behavior change was needed in these phases.
+- Harness gates and landing evidence follow.
