@@ -11,6 +11,7 @@
     feature = "venue-blofin",
     feature = "venue-bybit",
     feature = "venue-cryptocom",
+    feature = "venue-hyperliquid",
     feature = "venue-mexc",
     feature = "venue-okx",
     feature = "venue-weex"
@@ -35,6 +36,8 @@ use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 #[cfg(feature = "venue-cryptocom")]
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
+#[cfg(feature = "venue-hyperliquid")]
+use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
 #[cfg(feature = "venue-mexc")]
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 #[cfg(feature = "venue-okx")]
@@ -92,6 +95,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "venue-blofin",
     feature = "venue-bybit",
     feature = "venue-cryptocom",
+    feature = "venue-hyperliquid",
     feature = "venue-mexc",
     feature = "venue-okx",
     feature = "venue-weex"
@@ -105,6 +109,7 @@ struct EngineOptions {
         feature = "venue-blofin",
         feature = "venue-bybit",
         feature = "venue-cryptocom",
+        feature = "venue-hyperliquid",
         feature = "venue-okx"
     ))]
     #[serde(default)]
@@ -126,9 +131,29 @@ struct EngineOptions {
     ))]
     #[serde(default)]
     passphrase: Option<String>,
+    #[cfg(feature = "venue-hyperliquid")]
+    #[serde(default)]
+    application_id: Option<String>,
+    #[cfg(feature = "venue-hyperliquid")]
+    #[serde(default)]
+    vault: Option<String>,
+    #[cfg(feature = "venue-hyperliquid")]
+    #[serde(default)]
+    hyperliquid_builder: Option<HyperliquidBuilder>,
+    #[cfg(feature = "venue-hyperliquid")]
+    #[serde(default)]
+    enable_spot_markets: bool,
     #[cfg(feature = "venue-weex")]
     #[serde(default)]
     private_ws_headers: bool,
+}
+
+#[cfg(feature = "venue-hyperliquid")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HyperliquidBuilder {
+    address: String,
+    fee_tenths_bps: u32,
 }
 
 #[derive(Serialize)]
@@ -390,6 +415,12 @@ enum CommandIn {
         command: u32,
         symbol: String,
     },
+    #[serde(rename_all = "camelCase")]
+    FindOrderByClientOrderId {
+        command: u32,
+        symbol: String,
+        client_order_id: String,
+    },
     FetchPublicTrades {
         command: u32,
         symbol: String,
@@ -413,6 +444,17 @@ enum CommandIn {
 impl From<CommandIn> for Command {
     fn from(command: CommandIn) -> Self {
         match command {
+            CommandIn::FindOrderByClientOrderId {
+                command,
+                symbol,
+                client_order_id,
+            } => Self::Query {
+                command,
+                query: Query::OrderByClientId {
+                    symbol,
+                    client_order_id,
+                },
+            },
             CommandIn::SetTickerSymbols { symbols } => Self::SetTickerSymbols { symbols },
             CommandIn::SubscribeOrderBook { symbol } => Self::SubscribeOrderBook { symbol },
             CommandIn::UnsubscribeOrderBook { symbol } => Self::UnsubscribeOrderBook { symbol },
@@ -565,6 +607,7 @@ impl WasmEngine {
         feature = "venue-blofin",
         feature = "venue-bybit",
         feature = "venue-cryptocom",
+        feature = "venue-hyperliquid",
         feature = "venue-mexc",
         feature = "venue-okx",
         feature = "venue-weex"
@@ -658,6 +701,26 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
             }))),
+            #[cfg(feature = "venue-hyperliquid")]
+            "hyperliquid" => {
+                if options.enable_spot_markets {
+                    return Err(JsError::new(
+                        "Rust Hyperliquid currently supports perpetual markets only",
+                    ));
+                }
+                Box::new(Engine::new(Hyperliquid::new(HyperliquidOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    vault: options.vault,
+                    builder: options.hyperliquid_builder.map(|b| Builder {
+                        b: b.address,
+                        f: b.fee_tenths_bps,
+                    }),
+                })))
+            }
             #[cfg(feature = "venue-okx")]
             "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
                 if !options.public_data_only
@@ -820,5 +883,14 @@ mod action_tests {
         assert_eq!(decoded[0].socket, 7);
         assert_eq!(decoded[0].text, text);
         assert!(encoded.capacity() <= encoded.len() + 128);
+    }
+    #[test]
+    fn forwards_leverage_metadata_command() {
+        let wire: CommandIn =
+            serde_json::from_str(r#"{"op":"fetchLeverage","command":17,"symbol":"BTCUSDT"}"#)
+                .unwrap();
+        assert!(
+            matches!(Command::from(wire), Command::FetchLeverage { command:17, symbol } if symbol == "BTCUSDT")
+        );
     }
 }

@@ -6,9 +6,9 @@ Work is full auto under VENUE_PORT_BRIEF Process: phase reviews, commits,
 public/private replay gates, PR to feat/rust-rewrite, adversarial reviews,
 green CI, merge and fresh follow-up branch. No stash/rebase/force push.
 
-## Nine-family checkpoint (Bitget integration follows)
+## Nine-family checkpoint (eleven-family integration follows)
 
-These checkpoint results precede the Bitget/host-dispatch integration.
+These checkpoint results precede the Bitget/host-dispatch and Hyperliquid integrations.
 All nine then-current public gates and all twelve private variants pass. The table
 uses TS/Rust **main-thread gate CPU** and retained-memory ratios (higher is
 better); eight families use three-run medians. MEXC uses the predeclared ten-pair
@@ -502,3 +502,47 @@ audited fixed ten-valid-pair AB/BA crossover, without a preliminary favorable-
 search cohort. Same upper-middle medians, quality-only entire-pair exclusions,
 max15 attempts and no result-directed extension. All public/state/egress/auth
 checks stay unchanged on both sides. Private13 run against rebuilt modules.
+
+### Eleven-family landing integration
+
+Quota-resume fetch merged landing `c5bc2c4adf9f9de175314a714556bdefb40dd475`,
+including Hyperliquid. Resolve to the nested landing structure, preserve the
+`venue-*` optional-feature packages, and adopt eleven independent CI replay
+jobs with fixed per-family budget checks. The default build emits every family
+separately for SDK/host verification; `--venue FAMILY` emits only that package.
+
+Phase review retains incoming exact request/write/signature contracts,
+Hyperliquid fetch-based reads and its signing options. Keep existing recorded
+cadence, bounded batching, strict legacy request matching, post-collection WASM
+measurement and real-time GC settling. Restore the signature hard failure and
+independently taped Bybit reject reason where incoming changes weakened them.
+New signed heap/buffer deltas represent net retained growth, with nonnegative
+absolute counters, exact arithmetic and nonnegative total still required; this
+is an accounting-version change, so remeasure both sides identically. It does
+not retroactively validate or replace the rejected nine-family cohort.
+
+Remaining phases: finish merge audits and commit; rebuild all eleven isolated
+modules and exact source-audited landing control (its original aggregate build
+now uses global opt=3); run workspace/SDK/host/harness checks and fourteen private
+variants; then collect ten three-run public comparison pairs, alternating before/after
+execution order by the fixed venue list (Binance, Bybit, OKX, Crypto.com, WEEX,
+BingX, BloFin, Backpack, Bitget, Hyperliquid), and the previously predeclared
+fixed MEXC crossover. Preserve all attempts without CPU-directed
+extension. Refresh OKX/Bybit diagnostics and publish eleven-family raw numbers.
+Finally run fresh adversarial PR reviews, post findings, fix, require green CI,
+merge into `feat/rust-rewrite` and cut a follow-up branch.
+
+Eleven-family merge audit:44 repository typecheck tasks,28 lint tasks and315
+SDK Hyperliquid-wrapper/client-order-ID tests pass. The new wrapper mock now
+implements the batch host contract. CI YAML and all eleven fixture registrations
+validate; independent feature-build review passes. Request-oracle review found
+newly global generated-ID/nonce stripping that could hide legacy-field changes;
+restore venue/path-scoped behavior and add counterexample regressions before
+refreshing the identical helper closure on both sides.
+
+Independent replay review also found transport-caught validator errors could
+disappear after startup: a failed signed GET or late websocket authentication
+validation might leave no outstanding write. Persist validator/send failures in
+the final authentication audit, preserve the original thrown error and avoid
+double counting nested checks. Counterexample tests require final failure even
+after a later successful read. This repairs the gate, not venue behavior.

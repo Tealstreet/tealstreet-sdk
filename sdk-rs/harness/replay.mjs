@@ -42,17 +42,22 @@ const bookSymbols = values.books.split(',').filter(Boolean);
 const metadata = records.find((record) => record.type === 'meta');
 let clockStart = performance.now();
 if (values.venue === 'mexc' && Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
+const config = records.find((record) => record.type === 'config') ?? {};
 const isPrivate =
-  metadata?.private ?? records.some(venue.isPrivateRecord ?? ((r) => r.url?.includes(venue.privateSocket)));
-const credentials = venue.replayCredentials ?? { key: 'replay-key', secret: 'replay-secret' };
-const PASSPHRASE = credentials.passphrase ?? 'replay-passphrase';
+  config.private ?? metadata?.private ?? records.some(venue.isPrivateRecord ?? ((r) => r.url?.includes(venue.privateSocket)));
+const replayOptions = {
+  ...venue.options,
+  ...(isPrivate
+    ? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', ...venue.replayCredentials }
+    : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }),
+  ...config.options,
+};
+const credentials = { key: replayOptions.key, secret: replayOptions.secret, passphrase: replayOptions.passphrase };
 const replayDeadline = realTimeout(() => {
   console.error('Replay exceeded its 120-second deadline');
   process.exit(1);
 }, 120000);
 replayDeadline.unref();
-const KEY = credentials.key;
-const SECRET = credentials.secret;
 
 const until = async (predicate, label) => withTimeout((async () => {
   while (!predicate()) await new Promise((resolve) => realTimeout(resolve, 5));
@@ -78,6 +83,7 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
     processCpuMs: (cpu.user + cpu.system) / 1000,
     wallMs,
     rssBytes: memory.rss,
+    heapBeforeBytes: heapBefore.heapUsed,
     heapUsedBytes: memory.heapUsed,
     heapRetainedBytes: memory.heapUsed - heapBefore.heapUsed,
     bufferRetainedBytes: memory.arrayBuffers - heapBefore.arrayBuffers,
@@ -127,7 +133,7 @@ async function runRust() {
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust);
-  const tape = createTape(records, venue, isPrivate, { impl: 'rust', books: bookSymbols, credentials, cadence: values.cadence });
+  const tape = createTape(records, venue, isPrivate, { impl: 'rust', books: bookSymbols, credentials, cadence: values.cadence, engineOptions: replayOptions });
   tape.cadence = values.cadence;
   const clock = values.venue === 'mexc' && !isPrivate ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
   clock?.install();
@@ -165,10 +171,7 @@ async function runRust() {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const options = {
-    ...venue.options,
-    ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }),
-  };
+  const options = replayOptions;
   const engine = new WasmEngine(venue.rust, JSON.stringify(options));
   if (process.env.RUST_MEMORY_TRACE) {
     let last = wasmMemoryBytes();
@@ -288,8 +291,10 @@ async function runRust() {
     frames,
     metrics,
     unserved: tape.unserved,
-    missingWrites: tape.unusedWrites,
-    unusedWrites: tape.unusedWrites,
+    requests: [...tape.requests].sort(),
+    writes: tape.writes,
+    missingWrites: tape.missingWrites,
+    unusedWrites: tape.missingWrites,
     protocolErrors: tape.audit?.errors() ?? [],
     invalidSignatures: tape.invalidSignatures,
     wsRequests: [...tape.sentRequests].sort(),
@@ -352,7 +357,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 }
 
 async function runTs() {
-  const tape = createTape(records, venue, isPrivate, { impl: 'ts', books: bookSymbols, credentials, cadence: values.cadence });
+  const tape = createTape(records, venue, isPrivate, { impl: 'ts', books: bookSymbols, credentials, cadence: values.cadence, engineOptions: replayOptions });
   tape.cadence = values.cadence;
   const clock = values.venue === 'mexc' && !isPrivate ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
   clock?.install();
@@ -400,6 +405,18 @@ async function runTs() {
     }
   }
   globalThis.WebSocket = TapeWebSocket;
+  // Hyperliquid's SDK uses fetch instead of the axios adapters below.
+  if (values.venue === 'hyperliquid') globalThis.fetch = async (input, init = {}) => {
+    const request = input instanceof Request ? input : undefined;
+    const method = init.method ?? request?.method ?? 'GET';
+    const requestBody = init.body ?? (request && !['GET', 'HEAD'].includes(method.toUpperCase()) ? await request.clone().text() : undefined);
+    const { status, body, headers = '' } = tape.respond(method, request?.url ?? String(input), requestBody);
+    const responseHeaders = headers.split('\n').filter(Boolean).map((line) => {
+      const colon = line.indexOf(':');
+      return [line.slice(0, colon).trim(), line.slice(colon + 1).trim()];
+    });
+    return new Response([204, 205, 304].includes(status) ? null : body, { status, headers: responseHeaders });
+  };
   // Header-capable Node sockets resolve `ws` directly instead of the global.
   const { createRequire } = await import('node:module');
   const require = createRequire(new URL('../../packages/safe-cex/src/exchanges/base.ws.ts', import.meta.url));
@@ -457,12 +474,7 @@ async function runTs() {
   const postStore = () => {
     if (!values['no-egress'] && state) mainStore.update(structuredClone(worker._prepareStorePayload(state)), true);
   };
-  const options = {
-    ...venue.options,
-    ...(isPrivate
-      ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE }
-      : { key: '', secret: '', publicDataOnly: true }),
-  };
+  const options = replayOptions;
   const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
   venue.configureTs?.(exchange);
   venue.prepareTs?.(exchange, TapeWebSocket);
@@ -555,8 +567,10 @@ async function runTs() {
     frames,
     metrics,
     unserved: tape.unserved,
-    missingWrites: tape.unusedWrites,
-    unusedWrites: tape.unusedWrites,
+    requests: [...tape.requests].sort(),
+    writes: tape.writes,
+    missingWrites: tape.missingWrites,
+    unusedWrites: tape.missingWrites,
     protocolErrors: tape.audit?.errors() ?? [],
     invalidSignatures: tape.invalidSignatures,
     wsRequests: [...tape.sentRequests].sort(),
@@ -586,6 +600,10 @@ async function runTsCommand(exchange, store, record) {
         ['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
       );
       const result = await exchange.updateOrder({ order, update });
+      if (values.venue === 'hyperliquid') {
+        const ids = result ?? [];
+        return ids.clientOrderId ? { orderIds: [...ids], clientOrderId: ids.clientOrderId } : ids;
+      }
       return ['mexc', 'backpack'].includes(values.venue) ? result ?? [] : result;
     }
     case 'setLeverage':
@@ -597,6 +615,8 @@ async function runTsCommand(exchange, store, record) {
     case 'setPositionMode':
       await exchange.changePositionMode(args.hedged);
       return [];
+    case 'findOrderByClientOrderId':
+      return exchange.findOrderByClientOrderId(args.symbol, args.clientOrderId);
     case 'fetchLeverage':
       return exchange.fetchLeverageForSymbol(args.symbol);
     case 'fetchFills':
@@ -675,6 +695,9 @@ writeFileSync(
     impl: values.impl,
     frames: result.frames,
     unserved: result.unserved,
+    requests: result.requests,
+    writes: result.writes,
+    writeCount: result.writes.length,
     missingWrites: result.missingWrites,
     unusedWrites: result.unusedWrites,
     protocolErrors: result.protocolErrors,

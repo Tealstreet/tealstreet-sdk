@@ -12,6 +12,7 @@ const aliases = {
   blofin: ['blofin'],
   bybit: ['bybit'],
   cryptocom: ['cryptocom'],
+  hyperliquid: ['hyperliquid'],
   mexc: ['mexc'],
   okx: ['okx', 'okxeu', 'okxdemo', 'okxeudemo'],
   weex: ['weex'],

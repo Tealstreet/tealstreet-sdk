@@ -6,7 +6,12 @@ const manifest = readFileSync(new URL('Cargo.toml', wasm), 'utf8');
 const families = [...manifest.matchAll(/^venue-([a-z0-9-]+) = /gm)].map((match) => match[1]).sort();
 const budgets = JSON.parse(readFileSync(new URL('wasm-budgets.json', import.meta.url), 'utf8'));
 assert.deepEqual(Object.keys(budgets).sort(), families, 'every WASM family requires its own size budget');
-for (const family of families) {
+const args = process.argv.slice(2);
+assert.ok(args.length === 0 || (args.length === 2 && args[0] === '--venue'),
+  'usage: check-wasm-sizes.mjs [--venue FAMILY]');
+const selected = args.length === 0 ? families : [args[1]];
+assert.ok(selected.every((family) => families.includes(family)), 'unknown WASM family');
+for (const family of selected) {
   const budget = budgets[family];
   assert.ok(Number.isSafeInteger(budget) && budget > 0, `invalid ${family} budget`);
   for (const target of ['web', 'node']) {

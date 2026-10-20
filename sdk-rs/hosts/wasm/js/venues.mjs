@@ -9,6 +9,7 @@ const families = Object.freeze({
   blofin: 'blofin',
   bybit: 'bybit',
   cryptocom: 'cryptocom',
+  hyperliquid: 'hyperliquid',
   mexc: 'mexc',
   okx: 'okx',
   okxeu: 'okx',

@@ -43,3 +43,33 @@ export function fixWeexConditionals(account, records) {
     }
   }
 }
+
+// BlofinMetadata.supportsPositionMargin is false, and its TS mapPositions omits
+// marginSize. Store merges can retain a zero-size placeholder's marginSize=0;
+// the unavailable field is null in the comparison, independently of Rust.
+export function fixBlofinAccount(account) {
+  for (const position of account.positions) {
+    if (position.marginSize === 0) position.marginSize = null;
+  }
+  if (account.positions.length === 0) {
+    account.balance.used = 0;
+    account.balance.upnl = 0;
+  }
+}
+
+// Bybit TS omits this native post-only rejection. Derive the correction from
+// the latest recorded order event so an incorrect engine result stays visible.
+export function fixBybitRejectReasons(account, records) {
+  const latest = new Map();
+  for (const record of records) {
+    if (record.type !== 'ws') continue;
+    const event = parse(record.text);
+    if (event.topic === 'order') for (const row of event.data) latest.set(String(row.orderId), row);
+  }
+  for (const order of account.orders) {
+    if (order.rejectReason === null && order.status === 'canceled'
+      && latest.get(order.id)?.rejectReason === 'EC_PostOnlyWillTakeLiquidity') {
+      order.rejectReason = 'PostOnly';
+    }
+  }
+}

@@ -24,6 +24,15 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 
 CI runs all of these (`.github/workflows/rust.yml`).
 
+From the repository root, `corepack yarn rust:build-wasm` builds separate browser/Workers
+and Node packages for every registered venue family. Use
+`corepack yarn rust:build-wasm --venue hyperliquid` to build only that family.
+Each package lives under `hosts/wasm/pkg/{web,node}/<family>/`; its constructor
+accepts only that family's venue names. Browser, Node and Workers loaders select
+by venue, and aliases share their family's module. The default Cargo features
+retain all registered venues for workspace checks. CI builds isolated modules
+and enforces each fixed budget from `harness/wasm-budgets.json`.
+
 ## Replay tapes
 
 From the repository root, `corepack yarn rust:test-harness` checks the tape
@@ -42,11 +51,6 @@ other venues preserve recorded message bursts. Private replay is paced after
 startup. Trimming keeps every HTTP anchor inside the
 selected time window so later depth resynchronizations remain reproducible.
 
-
-From the repository root, `corepack yarn rust:build-wasm` emits one browser and
-Node package per `venue-*` Cargo feature under `hosts/wasm/pkg/{web,node}/<family>`.
-The browser and Node loaders take a venue name; aliases share a family module.
-CI checks each family against `harness/wasm-budgets.json`.
 
 WebSocket batches preserve socket IDs and individual arrival times. JS partitions
 at roughly 64 KiB (oversized messages alone), retains at most 16 KiB scratch, and

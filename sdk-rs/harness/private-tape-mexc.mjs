@@ -274,6 +274,9 @@ http('POST', '/api/v1/private/order/cancel_all', null, envelope(null), { symbol:
 http('POST', '/api/v1/private/planorder/cancel_all', null, envelope(null), { symbol: 'BTC_USDT' });
 http('POST', '/api/v1/private/stoporder/cancel_all', null, envelope(null), { symbol: 'BTC_USDT' });
 ws(3100, 1, 'push.personal.order', { ...resting, state: 4 });
+// The denied-batch fallback waits 1500ms before its first regular submit,
+// delaying the later plan acknowledgement and scoped refresh beyond 3300ms.
+// The final pong observations below keep the tape alive through reconciliation.
 ws(3300, 1, 'push.personal.stop.order', { ...stop, state: 2 });
 
 // TS has no opening conditional/trailing implementation. A valid first leg

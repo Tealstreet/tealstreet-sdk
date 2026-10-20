@@ -97,6 +97,14 @@
     "./node/bitget": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/bitget/safe_cex_wasm.js"
+    },
+    "./web/hyperliquid": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/hyperliquid/safe_cex_wasm.js"
+    },
+    "./node/hyperliquid": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/hyperliquid/safe_cex_wasm.js"
     }
   },
   "scripts": {
