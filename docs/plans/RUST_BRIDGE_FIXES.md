@@ -642,3 +642,24 @@ including four new account-read controls. Host package passes 145 cases; selecte
 Binance WASM host passes 13. Core and selected wasm32 strict Clippy pass; API
 source independently reviewed PASS twice. These are core/host evidence, not a
 rebuilt combined artifact or actual SDK consumer acceptance yet.
+
+## Phase 4a SDK current-state plan and audit
+
+Use `host.accountSnapshot()` through one synchronous public
+`syncAccountState()` seam, applying/forwarding with the existing receiveFrame
+path. Before initial native readiness, private async reads await loaded native
+data; fail visibly on unsupported/dead/disposed engines rather than answering
+with a stale JS mirror. Each orders/positions/balance/position-mode read syncs
+the engine state; filtered reads keep their existing shapes. This is an engine
+read, not a network resync. Expose the harmless no-op Base seam so direct
+CLI/chaser store decisions can synchronize without importing the Rust class.
+
+Default cancel-all must derive its symbols from that native state. Retain
+existing venue-global empty-symbol cancellation for WOO, GRVT, KuCoin,
+Polymarket and Breakout. Bulk closes will use the same state seam and the
+established native-size rules (exact contractsNative, inverse notional divided
+by contract size, linear base quantity divided by contract size), not the
+published position quantity. Interrupted/unknown writes must not be retried.
+Verify before-flush changes, native empties clearing stale mirrors, filters,
+frame forwarding without fills/books replay, and wrong-size close regressions.
+Network completion/resync and getAccount identity queries remain separate.
