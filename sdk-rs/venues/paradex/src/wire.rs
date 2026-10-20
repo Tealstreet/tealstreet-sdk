@@ -26,7 +26,7 @@ fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
-pub struct Instrument<'a> {
+pub struct InstrumentIdentity<'a> {
     #[serde(borrow, alias = "symbol")]
     pub market: Str<'a>,
     #[serde(borrow)]
@@ -35,6 +35,13 @@ pub struct Instrument<'a> {
     pub asset_kind: Str<'a>,
     #[serde(borrow)]
     pub market_kind: Str<'a>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct Instrument<'a> {
+    #[serde(borrow, alias = "symbol")]
+    pub market: Str<'a>,
     #[serde(borrow)]
     pub base_currency: Str<'a>,
     #[serde(borrow)]

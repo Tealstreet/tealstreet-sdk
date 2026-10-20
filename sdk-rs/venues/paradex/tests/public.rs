@@ -717,3 +717,51 @@ fn idle_sbe_heartbeats_preserve_liveness_without_invalid_application_pings() {
             .any(|a| matches!(a, Action::WsClose { socket } if *socket == h.public))
     );
 }
+
+#[test]
+fn market_selection_precedes_numeric_decoding_of_irrelevant_instruments() {
+    let mut h = Harness::empty(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    h.reply("/markets", r#"{"results":[
+        {"symbol":"BTC-USD-PERP","asset_kind":"PERP","status":"ACTIVE","order_size_increment":"0.001","price_tick_size":"0.1"},
+        {"symbol":"BTC-USD-250101-100000-C","asset_kind":"OPTION","order_size_increment":"invalid","maker_fee":null},
+        {"market":"ETH-USD-250101-100000-P","market_kind":"OPTION","price_tick_size":"","base_currency":[]},
+        {"symbol":"CALL-C","step_size":"invalid"},
+        {"symbol":"PUT-P","taker_fee":null},
+        {"symbol":"USDC-USD-SPOT","asset_kind":"SPOT","delta1_cross_margin_params":{"imf_base":"invalid"}},
+        {"symbol":"OLD-USD-PERP","asset_kind":"PERP","status":"INACTIVE","max_slippage":null},
+        {"symbol":"EXPIRING-FUTURE","asset_kind":"FUTURE","min_notional":"invalid"},
+        {"market":"ETH-USD-PERP","asset_kind":"perp","step_size":"0.01","tick_size":"0.001"}
+    ]}"#);
+    assert!(h.e.store().loaded().markets);
+    assert_eq!(h.e.store().markets().len(), 2);
+    assert_eq!(h.e.store().market(BTC).unwrap().precision.amount, 0.001);
+    assert_eq!(
+        h.e.store().market("ETH-USD-PERP").unwrap().precision.price,
+        0.001
+    );
+    assert_eq!(h.pending.len(), 1);
+    assert!(h.pending[0].url.ends_with("summary?market=ALL"));
+}
+
+#[test]
+fn malformed_selected_perpetual_numbers_still_reject_the_entire_market_snapshot() {
+    for invalid in ["\"invalid\"", "null", "\"NaN\""] {
+        let mut h = Harness::empty(Options {
+            public_data_only: true,
+            ..Options::default()
+        });
+        h.reply("/markets", &format!(r#"{{"results":[
+            {{"symbol":"BTC-USD-PERP","asset_kind":"PERP","step_size":"0.001","price_bands_width":"5"}},
+            {{"symbol":"ETH-USD-PERP","asset_kind":"PERP","status":"ACTIVE","price_tick_size":{invalid}}}
+        ]}}"#));
+        assert!(!h.e.store().loaded().markets);
+        assert!(h.e.store().markets().is_empty());
+        assert!(h.pending.is_empty());
+        h.timer(h.now + 1_000.);
+        assert_eq!(h.pending.len(), 1);
+        assert!(h.pending[0].url.ends_with("/markets"));
+    }
+}

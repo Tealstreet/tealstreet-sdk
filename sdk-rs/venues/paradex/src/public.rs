@@ -610,68 +610,73 @@ impl Paradex {
                 rows,
                 bands,
                 invalid,
-            } => match serde_json::from_str::<Instrument<'_>>(item) {
-                Ok(m) => {
-                    let kind = m.asset_kind.to_ascii_uppercase();
-                    let option = kind.contains("OPTION")
-                        || m.market_kind.to_ascii_uppercase().contains("OPTION")
-                        || m.market.ends_with("-C")
-                        || m.market.ends_with("-P");
-                    if m.market.is_empty()
-                        || option
-                        || (!m.status.is_empty() && m.status != "ACTIVE")
-                        || !(kind.is_empty() || kind == "PERP" || m.market.ends_with("-PERP"))
-                    {
-                        return;
-                    }
-                    let imf = if m.delta1_cross_margin_params.imf_base.0 > 0. {
-                        m.delta1_cross_margin_params.imf_base.0
-                    } else {
-                        m.initial_margin_fraction.0
-                    };
-                    let band = [m.price_bands_width.0, m.max_slippage.0]
-                        .into_iter()
-                        .find(|n| *n > 0.);
-                    if let Some(band) = band {
-                        bands.insert(
-                            m.market.to_string(),
-                            if band > 1. { band / 100. } else { band },
-                        );
-                    }
-                    rows.push(Market {
-                        id: m.market.to_string(),
-                        symbol: m.market.into_owned(),
-                        pretty_symbol: None,
-                        base: m.base_currency.into_owned(),
-                        quote: m.quote_currency.into_owned(),
-                        active: true,
-                        precision: Precision {
-                            amount: m.step_size.0,
-                            price: m.tick_size.0,
-                        },
-                        limits: Limits {
-                            amount: MinMax {
-                                min: m.min_order_size.0,
-                                max: m.max_order_size.0,
-                            },
-                            leverage: MinMax {
-                                min: 1.,
-                                max: if imf > 0. { (1. / imf).floor() } else { 100. },
-                            },
-                            price: Some(Min { min: 0. }),
-                        },
-                        contract_size: Some(1.),
-                        is_expiring: None,
-                        is_inverse: None,
-                        is_spot: None,
-                        is_perpetual: None,
-                        is_read_only: None,
-                        taker_fee: Some(m.taker_fee.0),
-                        maker_fee: Some(m.maker_fee.0),
-                    });
+            } => {
+                let Ok(identity) = serde_json::from_str::<InstrumentIdentity<'_>>(item) else {
+                    *invalid = true;
+                    return;
+                };
+                let kind = identity.asset_kind.to_ascii_uppercase();
+                let option = kind.contains("OPTION")
+                    || identity.market_kind.to_ascii_uppercase().contains("OPTION")
+                    || identity.market.ends_with("-C")
+                    || identity.market.ends_with("-P");
+                if identity.market.is_empty()
+                    || option
+                    || (!identity.status.is_empty() && identity.status != "ACTIVE")
+                    || !(kind.is_empty() || kind == "PERP" || identity.market.ends_with("-PERP"))
+                {
+                    return;
                 }
-                Err(_) => *invalid = true,
-            },
+                let Ok(m) = serde_json::from_str::<Instrument<'_>>(item) else {
+                    *invalid = true;
+                    return;
+                };
+                let imf = if m.delta1_cross_margin_params.imf_base.0 > 0. {
+                    m.delta1_cross_margin_params.imf_base.0
+                } else {
+                    m.initial_margin_fraction.0
+                };
+                let band = [m.price_bands_width.0, m.max_slippage.0]
+                    .into_iter()
+                    .find(|n| *n > 0.);
+                if let Some(band) = band {
+                    bands.insert(
+                        m.market.to_string(),
+                        if band > 1. { band / 100. } else { band },
+                    );
+                }
+                rows.push(Market {
+                    id: m.market.to_string(),
+                    symbol: m.market.into_owned(),
+                    pretty_symbol: None,
+                    base: m.base_currency.into_owned(),
+                    quote: m.quote_currency.into_owned(),
+                    active: true,
+                    precision: Precision {
+                        amount: m.step_size.0,
+                        price: m.tick_size.0,
+                    },
+                    limits: Limits {
+                        amount: MinMax {
+                            min: m.min_order_size.0,
+                            max: m.max_order_size.0,
+                        },
+                        leverage: MinMax {
+                            min: 1.,
+                            max: if imf > 0. { (1. / imf).floor() } else { 100. },
+                        },
+                        price: Some(Min { min: 0. }),
+                    },
+                    contract_size: Some(1.),
+                    is_expiring: None,
+                    is_inverse: None,
+                    is_spot: None,
+                    is_perpetual: None,
+                    is_read_only: None,
+                    taker_fee: Some(m.taker_fee.0),
+                    maker_fee: Some(m.maker_fee.0),
+                });
+            }
             Request::Tickers { rows, invalid } => {
                 let Ok(identity) = serde_json::from_str::<MarketIdentity<'_>>(item) else {
                     *invalid = true;
