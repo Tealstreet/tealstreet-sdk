@@ -10,9 +10,9 @@ const BTC = 'BTC-USD-PERP', ETH = 'ETH-USD-PERP';
 const epoch = 1710000000000;
 const records = [{ t: 0, type: 'meta', epoch, private: true }];
 let time = 0, commands = 0;
-const http = (method, path, body, requestBody, afterCommand) => records.push({ t: 0, type: 'http', method, url: REST + path,
+const http = (method, path, body, requestBody, afterCommand, extra = {}) => records.push({ t: 0, type: 'http', method, url: REST + path,
   status: 200, body: JSON.stringify(body), ...(requestBody === undefined ? {} : { requestBody }),
-  ...(afterCommand === undefined ? {} : { afterCommand }) });
+  ...(afterCommand === undefined ? {} : { afterCommand }), ...extra });
 const ws = (channel, data) => records.push({ t: (time += 100), type: 'ws', url: SOCKET,
   text: JSON.stringify({ jsonrpc: '2.0', method: 'subscription', params: { channel, data } }) });
 const command = (body) => { commands++; records.push({ t: (time += 200), type: 'command', ...body }); };
@@ -85,7 +85,11 @@ command({ op: 'setMarginType', symbol: BTC, isolated: false });
 command({ op: 'setPositionMode', hedged: false });
 const from = epoch - 1000, to = epoch + 10000;
 command({ op: 'fetchFills', symbol: BTC, from, to, limit: 10 });
-http('GET', `/fills?market=${BTC}&page_size=10&end_at=${to}`, { results: [fill, fill, { ...fill, id: 'fill-3001-b', size: '0.003' }], next: '' });
+const fills = { results: [fill, fill, { ...fill, id: 'fill-3001-b', size: '0.003' }], next: '' };
+// Rust bounds fills by the start time too, so a sparse window cannot walk
+// older pages it then discards; TS sends only the end.
+http('GET', `/fills?market=${BTC}&page_size=10&end_at=${to}`, fills, undefined, undefined, { impl: 'ts' });
+http('GET', `/fills?market=${BTC}&page_size=10&start_at=${from}&end_at=${to}`, fills, undefined, undefined, { impl: 'rust' });
 const history = [order('3001', { type: 'MARKET', status: 'CLOSED', price: '', size: '0.005', remaining_size: '0', avg_fill_price: '50001', created_at: epoch + 1000 }),
   order('1001', { status: 'CLOSED', remaining_size: '0.005', cancel_reason: 'USER_CANCELED', avg_fill_price: '50000', created_at: epoch + 500 })];
 command({ op: 'fetchOrderHistory', symbol: BTC, from, to });
