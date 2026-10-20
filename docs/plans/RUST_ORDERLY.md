@@ -412,3 +412,22 @@ oracle. Public fixture is the committed live20s recording; private validation
 uses documented deterministic test payloads, not live credentials. Required
 remaining work: publish refreshed results, wait for all CI checks green, merge
 PR1318 into feat/rust-rewrite and cut a fresh branch from the updated landing.
+
+### Lighter landing refresh (1f08347267)
+
+Merged landing31ec401f60 after PR1319 landed during this PR's CI wait.
+Independent code-correctness review clears the feature/constructor/option and
+harness unions. Orderly venue, engine and shared host behavior are unchanged.
+Updated workspace native1167tests, bans/fmt/Clippy, WASM Clippy and repository
+44typecheck/28lint tasks pass. The repeated20ms Orderly routing test failure
+was queued socket opens consuming its routing deadline; the test now awaits
+those opens before starting routing assertions, retaining both negative20ms
+timeouts and every subscription/generation check. Full harness204tests pass.
+
+The focused SDK run confirms Orderly/Lighter/Hyperliquid/client-ID behavior;
+cold loader/metadata imports still hit local time budgets under contention.
+The loader's isolated3tests pass with a CLI30s timeout; metadata's four other
+checks pass while its explicit60s constructor sweep times out. Previous code
+headcb132db8b1 passed both general CI runs with default budgets. Final merged
+head CI remains mandatory. Rebuilt WASM/replay results will be posted on PR1318
+before merge; no later source change is planned beyond a concrete CI finding.

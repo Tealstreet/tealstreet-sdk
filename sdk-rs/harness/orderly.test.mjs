@@ -179,6 +179,7 @@ test('event/topic routing waits for the actual subscription on the requested soc
   const tape = new Tape([], venue, false, 20);
   const first = connect(tape),
     second = connect(tape);
+  await new Promise((resolve) => setImmediate(resolve));
   tape.send(second, '{"event":"subscribe","topic":"tickers"}');
   const text = '{"topic":"tickers","data":[]}';
   assert.equal(await tape.socketFor(publicUrl, text), second);
