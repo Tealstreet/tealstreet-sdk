@@ -865,7 +865,7 @@ impl Venue for Bitrue {
                 self.startup_retry.failed(cx, ());
             }
             Job::Account(r) => self.account_failed(cx, r, error),
-            Job::Trade(r) => self.trade_failed(cx, r, error),
+            Job::Trade(r) => self.trade_lost(cx, r, error),
             Job::History(r) => self.history_failed(cx, r, error),
         }
     }
