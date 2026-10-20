@@ -233,3 +233,17 @@ green final-head CI. No stash, rebase, force push or master changes.
   visibility/cancellation. Side-only placement is documented; omission of posSide
   in native GET responses is not established, so this is a defensive schema case,
   not claimed live exchange evidence.
+
+## Transport and Bitrue landing integration
+
+- Committed adversarial fixes0ea27d2e13; focused trading64 and independent
+  boundary6/private+history46 checks pass. Round2 reviewer cleared all fixes.
+- Landing advanced to fc18c55874 with transport PR1313 and Bitrue PR1314.
+  Merged as a9f4416f81. Kept incoming socket roles/feed recovery, twelve-venue
+  build/CI roster and workspace structure. Resolved append-only script and public
+  test conflicts by keeping both additions.
+- Independent engine/account and harness/host integration audits are running.
+  Final native/WASM, repository and replay gates are being rerun on this merge.
+- Earlier root tests hit unrelated Hyrotrader dynamic-import timeouts under Rust
+  compilation; no product/test timeout changes. Verify again with bounded test
+  concurrency before claiming the repository gate green.
