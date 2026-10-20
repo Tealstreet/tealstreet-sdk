@@ -1,5 +1,5 @@
 //! Borrowed account records and exact venue identifiers.
-use crate::public_wire::{number, optional_number_or_blank};
+use safe_cex_engine::de::{number, optional_number_or_blank};
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 use std::borrow::Cow;

@@ -151,9 +151,9 @@ fn verify_partner_catalogue_and_followup<V: Venue>(
         if request.url.ends_with("/allTickers") {
             saw_tickers = true;
             let tickers = if request.url.contains("/market/") {
-                r#"{"code":"200000","data":{"ticker":[]}}"#
+                r#"{"code":"200000","data":{"ticker":[{"symbol":"BTC-USDT","last":"100"}]}}"#
             } else {
-                r#"{"code":"200000","data":[]}"#
+                r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100"}]}"#
             };
             engine.handle(
                 1700000000123.0,

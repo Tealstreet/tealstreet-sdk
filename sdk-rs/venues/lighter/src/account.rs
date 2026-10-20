@@ -183,8 +183,10 @@ struct PositionWire<'a> {
         alias = "entry_price"
     )]
     avg_entry_price: Num,
+    #[serde(default, alias = "positionValue")]
+    position_value: Option<Num>,
     #[serde(default, alias = "unrealizedPnl")]
-    unrealized_pnl: Num,
+    unrealized_pnl: Option<Num>,
     #[serde(default, alias = "realizedPnl")]
     realized_pnl: Option<Num>,
     #[serde(default, alias = "initialLeverage", alias = "initial_leverage")]
@@ -853,7 +855,7 @@ impl Lighter {
     }
     fn position_row(
         &self,
-        cx: &Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         wire: PositionWire<'_>,
         market_hint: Option<&str>,
     ) -> Option<(Option<Position>, String, f64, MarginType)> {
@@ -971,17 +973,33 @@ impl Lighter {
                 }
             }
         }
+        let reported_pnl = wire.unrealized_pnl.map(|n| n.0);
+        let unrealized_pnl = reported_pnl
+            .or_else(|| {
+                cx.store
+                    .position(symbol)
+                    .filter(|prior| prior.side == side)
+                    .map(|prior| prior.unrealized_pnl)
+            })
+            .filter(|pnl| pnl.is_finite())
+            .unwrap_or(0.0);
+        if reported_pnl.is_none() {
+            cx.log(
+                LogLevel::Warning,
+                "Lighter position PnL unavailable; retaining prior valuation",
+            );
+        }
         Some((
             Some(Position {
                 id: symbol.into(),
                 symbol: symbol.into(),
                 side,
                 entry_price: entry,
-                notional: contracts * entry,
+                notional: wire.position_value.map_or(contracts * entry, |n| n.0.abs()),
                 leverage,
                 margin_type: Some(margin_type),
                 position_mode: Some(PositionMode::Oneway),
-                unrealized_pnl: wire.unrealized_pnl.0,
+                unrealized_pnl,
                 realized_pnl: wire.realized_pnl.map(|n| n.0),
                 contracts,
                 liquidation_price: liquidation,
@@ -995,7 +1013,7 @@ impl Lighter {
     }
     fn snapshot_row(
         &self,
-        cx: &Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         wire: AccountWire<'_>,
     ) -> Result<Snapshot, String> {
         if let Some(identity) = wire.index.as_ref()
@@ -1021,8 +1039,10 @@ impl Lighter {
             ..Snapshot::default()
         };
         if let Some(raw) = wire.positions {
+            let mut unmapped_owned = false;
             let mut invalid_limits = false;
             each_row(raw, |row: PositionWire<'_>, hint| {
+                let owned = row.size.as_ref().is_some_and(|n| n.0 != 0.0);
                 let symbol = if !row.symbol.is_empty() {
                     Some(row.symbol.as_ref())
                 } else {
@@ -1061,8 +1081,13 @@ impl Lighter {
                     if let Some(position) = position {
                         snapshot.positions.push(position);
                     }
+                } else if owned {
+                    unmapped_owned = true;
                 }
             })?;
+            if unmapped_owned {
+                return Err("Lighter owned position has unavailable market metadata".into());
+            }
             if invalid_limits {
                 return Err("Invalid Lighter market leverage limits".into());
             }
@@ -1098,16 +1123,20 @@ impl Lighter {
             &wire.market_id.0
         };
         let symbol = if !wire.symbol.is_empty() {
-            wire.symbol.as_ref()
+            Some(wire.symbol.as_ref())
         } else {
-            match self.symbol_for_id(market_id) {
-                Some(s) => s,
-                None => return Ok(None),
-            }
+            self.symbol_for_id(market_id)
         };
-        if cx.store.market(symbol).is_none() {
-            return Ok(None);
-        }
+        let Some(symbol) = symbol.filter(|symbol| cx.store.market(symbol).is_some()) else {
+            let status = normalized(&wire.status);
+            if matches!(status.as_str(), "FILLED" | "EXPIRED" | "REJECTED")
+                || status.starts_with("CANCELED")
+                || status.starts_with("CANCELLED")
+            {
+                return Ok(None);
+            }
+            return Err("Lighter working order has unavailable market metadata".into());
+        };
         let existing = cx
             .store
             .orders()
@@ -1418,20 +1447,17 @@ impl Lighter {
             });
         }
         {
-            let upnl = cx
-                .store
-                .positions()
-                .iter()
-                .map(|p| {
-                    cx.store.ticker(&p.symbol).map_or(0.0, |t| {
-                        if p.side == PositionSide::Long {
-                            (t.last - p.entry_price) * p.contracts
-                        } else {
-                            (p.entry_price - t.last) * p.contracts
-                        }
-                    })
-                })
-                .sum::<f64>();
+            let upnl = cx.store.positions().iter().try_fold(0.0, |sum, position| {
+                let value = sum + position.unrealized_pnl;
+                value.is_finite().then_some(value)
+            });
+            let Some(upnl) = upnl else {
+                cx.log(
+                    LogLevel::Warning,
+                    "Lighter position PnL invalid; preserving previous balance",
+                );
+                return;
+            };
             cx.store.set_balance(Balance {
                 total: snapshot.equity - upnl,
                 upnl,

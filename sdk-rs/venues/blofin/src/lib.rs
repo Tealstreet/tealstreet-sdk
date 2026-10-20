@@ -67,6 +67,8 @@ pub struct Blofin {
     account: account::Account,
     trading: trading::Trading,
     public: Connection,
+    startup: safe_cex_engine::startup::Backoff<bool>,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
     public_supervisor: Supervisor,
     books: HashMap<String, DepthState>,
     candles: HashMap<(String, String), CandleState>,
@@ -126,6 +128,8 @@ impl Blofin {
             account: account::Account::new(),
             trading: trading::Trading::default(),
             public: Connection::default(),
+            startup: Default::default(),
+            live_tickers: Default::default(),
             public_supervisor: Supervisor::new(Config {
                 connect_timeout_ms: 20_000.0,
                 idle_timeout_ms: 20_000.0,
@@ -166,7 +170,10 @@ impl Blofin {
         }
         self.public_supervisor.retry(cx);
     }
-    fn read(&self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
+    fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
+        if matches!(&pending, Pending::Tickers { .. }) {
+            self.live_tickers.begin();
+        }
         cx.request_streamed(
             Method::Get,
             format!("{}{path}", self.host()),
@@ -258,7 +265,7 @@ impl Blofin {
             );
         }
     }
-    fn ticker(&self, cx: &mut Cx<'_, Pending>, row: &Tick<'_>, funding: bool) {
+    fn ticker(&mut self, cx: &mut Cx<'_, Pending>, row: &Tick<'_>, funding: bool) {
         let Some(m) = cx.store.market_by_id(&row.inst_id) else {
             return;
         };
@@ -290,6 +297,12 @@ impl Blofin {
                 t.quote_volume = row.vol24h.0;
             }
         });
+        let mask = if funding {
+            (1 << 7) | (1 << 8)
+        } else {
+            ((1 << 7) - 1) | (1 << 9) | (1 << 10)
+        };
+        self.live_tickers.record(cx.store, &symbol, mask);
     }
     fn depth(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, message: &Message<'_>, d: &Depth) {
         if message.arg.channel == "books5" {
@@ -533,52 +546,76 @@ impl Venue for Blofin {
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Account(request) => self.account_item(cx, request, item),
-            Pending::Markets { rows, failed } => match serde_json::from_str::<Instrument<'_>>(item)
-            {
-                Ok(m)
-                    if m.inst_type.eq_ignore_ascii_case("SWAP")
-                        && m.contract_type.eq_ignore_ascii_case("linear") =>
-                {
-                    rows.push(Market {
-                        id: m.inst_id.to_string(),
-                        symbol: m.inst_id.trim_end_matches("-SWAP").replace('-', ""),
-                        pretty_symbol: None,
-                        base: m.base_currency.into_owned(),
-                        quote: m.quote_currency.into_owned(),
-                        active: m.state == "live",
-                        precision: Precision {
-                            amount: if m.lot_size.0 > 0.0 {
-                                m.lot_size.0
-                            } else {
-                                m.min_size.0
+            Pending::Markets { rows, failed } => {
+                match serde_json::from_str::<Instrument<'_>>(item) {
+                    Ok(m)
+                        if m.inst_type.eq_ignore_ascii_case("SWAP")
+                            && m.contract_type.eq_ignore_ascii_case("linear") =>
+                    {
+                        if m.inst_id.is_empty()
+                            || m.base_currency.is_empty()
+                            || m.quote_currency.is_empty()
+                            || [
+                                m.contract_value.0,
+                                m.min_size.0,
+                                m.tick_size.0,
+                                m.max_limit_size.0,
+                                m.max_market_size.0,
+                                m.max_leverage.0,
+                            ]
+                            .iter()
+                            .any(|number| !number.is_finite() || *number <= 0.0)
+                        {
+                            {
+                                *failed = true;
+                                safe_cex_engine::startup::skipped_row(cx);
+                            };
+                            return;
+                        }
+                        rows.push(Market {
+                            id: m.inst_id.to_string(),
+                            symbol: m.inst_id.trim_end_matches("-SWAP").replace('-', ""),
+                            pretty_symbol: None,
+                            base: m.base_currency.into_owned(),
+                            quote: m.quote_currency.into_owned(),
+                            active: m.state == "live",
+                            precision: Precision {
+                                amount: if m.lot_size.0 > 0.0 {
+                                    m.lot_size.0
+                                } else {
+                                    m.min_size.0
+                                },
+                                price: m.tick_size.0,
                             },
-                            price: m.tick_size.0,
-                        },
-                        limits: Limits {
-                            amount: MinMax {
-                                min: m.min_size.0 * m.contract_value.0,
-                                max: m.max_limit_size.0.min(m.max_market_size.0),
+                            limits: Limits {
+                                amount: MinMax {
+                                    min: m.min_size.0 * m.contract_value.0,
+                                    max: m.max_limit_size.0.min(m.max_market_size.0),
+                                },
+                                leverage: MinMax {
+                                    min: 1.0,
+                                    max: m.max_leverage.0,
+                                },
+                                price: None,
                             },
-                            leverage: MinMax {
-                                min: 1.0,
-                                max: m.max_leverage.0,
-                            },
-                            price: None,
-                        },
-                        contract_size: Some(m.contract_value.0),
-                        is_expiring: None,
-                        is_inverse: None,
-                        is_spot: None,
-                        is_perpetual: None,
-                        is_read_only: None,
-                        taker_fee: None,
-                        maker_fee: None,
-                    })
+                            contract_size: Some(m.contract_value.0),
+                            is_expiring: None,
+                            is_inverse: None,
+                            is_spot: None,
+                            is_perpetual: None,
+                            is_read_only: None,
+                            taker_fee: None,
+                            maker_fee: None,
+                        })
+                    }
+                    Ok(_) => {}
+                    Err(_) => {
+                        *failed = true;
+                        safe_cex_engine::startup::skipped_row(cx);
+                    }
                 }
-                Ok(_) => {}
-                Err(_) => *failed = true,
-            },
-            Pending::Tickers { rows, .. } => match serde_json::from_str::<Tick<'_>>(item) {
+            }
+            Pending::Tickers { rows, failed } => match serde_json::from_str::<Tick<'_>>(item) {
                 Ok(t) => {
                     if let Some(m) = cx.store.market_by_id(&t.inst_id) {
                         rows.push(Ticker {
@@ -589,17 +626,28 @@ impl Venue for Blofin {
                             last: t.last.0,
                             mark: t.last.0,
                             index: t.last.0,
-                            percentage: round_usd((t.last.0 - t.open24h.0) / t.open24h.0 * 100.0),
+                            percentage: if t.open24h.0 > 0.0 {
+                                round_usd((t.last.0 - t.open24h.0) / t.open24h.0 * 100.0)
+                            } else {
+                                0.0
+                            },
                             volume: t.vol_currency24h.0,
                             quote_volume: t.vol24h.0,
                             ..Ticker::default()
                         });
+                    } else {
+                        *failed = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                     }
                 }
-                Err(_) => cx.log(
-                    LogLevel::Error,
-                    "Malformed BloFin ticker row; omitted from initial tickers",
-                ),
+                Err(_) => {
+                    *failed = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                    cx.log(
+                        LogLevel::Error,
+                        "Malformed BloFin ticker row; omitted from initial tickers",
+                    );
+                }
             },
             Pending::Candles { rows, failed, .. } => {
                 match serde_json::from_str::<Vec<Number>>(item)
@@ -633,10 +681,8 @@ impl Venue for Blofin {
             return;
         }
         match pending {
-            Pending::Markets {
-                rows,
-                failed: false,
-            } => {
+            Pending::Markets { rows, failed } if !failed || !rows.is_empty() => {
+                self.startup.succeeded(cx, &true);
                 cx.store.set_markets(rows);
                 self.connect(cx);
                 self.read(
@@ -647,13 +693,12 @@ impl Venue for Blofin {
                         failed: false,
                     },
                 );
-            }
-            Pending::Tickers {
-                rows,
-                failed: false,
-            } => {
-                cx.store.set_tickers(rows);
                 self.private_start(cx);
+            }
+            Pending::Tickers { mut rows, failed } if !failed || !rows.is_empty() => {
+                self.startup.succeeded(cx, &false);
+                self.live_tickers.finish(cx.store, &mut rows);
+                cx.store.set_tickers(rows);
             }
             Pending::Candles {
                 command,
@@ -685,10 +730,26 @@ impl Venue for Blofin {
         if let Pending::Candles { command, .. } = pending {
             cx.done(command, Err(error.to_string()));
         } else {
-            cx.log(LogLevel::Error, format!("BloFin read failed: {error}"));
+            self.startup
+                .failed(cx, matches!(pending, Pending::Markets { .. }));
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(markets) = self.startup.on_timer(timer) {
+            if markets {
+                self.start(cx);
+            } else {
+                self.read(
+                    cx,
+                    "/api/v1/market/tickers",
+                    Pending::Tickers {
+                        rows: vec![],
+                        failed: false,
+                    },
+                );
+            }
+            return;
+        }
         if self.trading_timer(cx, timer) {
             return;
         }
