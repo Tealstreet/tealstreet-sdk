@@ -40,11 +40,8 @@ fn streams_nested_symbols_and_seeds_zero_tickers_before_socket() {
     assert!(e.drain_actions().any(|a|matches!(a,Action::WsConnect{channel:Some(SocketChannel::Public),url,..} if url.starts_with("wss://quote.omni.apex.exchange/realtime_public?v=2&timestamp=3&"))));
 }
 #[test]
-fn malformed_or_error_seed_does_not_commit_partial_markets() {
-    for body in [
-        MARKETS.replace("\"code\":0", "\"code\":20016"),
-        MARKETS.replace("\"tickSize\":\"0.1\"", "\"tickSize\":\"NaN\""),
-    ] {
+fn error_seed_does_not_commit_partial_markets() {
+    for body in [MARKETS.replace("\"code\":0", "\"code\":20016")] {
         let mut e = Engine::new(ApexOmni::new(Options {
             public_data_only: true,
             ..Default::default()

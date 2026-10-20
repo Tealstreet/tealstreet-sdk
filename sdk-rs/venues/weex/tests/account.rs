@@ -51,7 +51,7 @@ fn started(ws: bool) -> (Engine<WeexFutures>, Vec<Action>) {
     e.start(NOW);
     let actions: Vec<_> = e.drain_actions().collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let mut actions: Vec<_> = e.drain_actions().collect();
     response(
         &mut e,
         request(&actions, "24hr"),
@@ -64,7 +64,7 @@ fn started(ws: bool) -> (Engine<WeexFutures>, Vec<Action>) {
         200,
         r#"[{"symbol":"BTCUSDT","bidPrice":"89999","askPrice":"90001"}]"#,
     );
-    let actions = e.drain_actions().collect();
+    actions.extend(e.drain_actions());
     (e, actions)
 }
 fn complete(e: &mut Engine<WeexFutures>, actions: &[Action], normal: &str, algo: &str) {

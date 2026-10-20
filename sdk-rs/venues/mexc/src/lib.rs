@@ -67,8 +67,7 @@ pub struct MexcFutures {
     volume_units: HashMap<String, f64>,
     candles: HashMap<(String, String), u32>,
     next_book_generation: u32,
-    startup_retry: Option<TimerId>,
-    startup_attempts: u8,
+    discovery: safe_cex_engine::startup::Backoff<bool>,
     depth_paused_until: f64,
 }
 
@@ -93,8 +92,7 @@ impl MexcFutures {
             volume_units: HashMap::new(),
             candles: HashMap::new(),
             next_book_generation: 0,
-            startup_retry: None,
-            startup_attempts: 0,
+            discovery: Default::default(),
             depth_paused_until: 0.0,
         }
     }
@@ -346,18 +344,32 @@ impl MexcFutures {
     }
     fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.socket = Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Public));
-        self.account_start(cx);
         if self.options.public_data_only || self.options.key.as_ref().is_none_or(|s| s.is_empty()) {
             cx.store.set_orders(vec![]);
             cx.store.set_positions(vec![]);
             cx.store.set_balance(Default::default());
         }
     }
-    fn retry_startup(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.startup_retry.is_none() && self.startup_attempts < 3 {
-            self.startup_attempts += 1;
-            self.startup_retry = Some(cx.set_timer(1000.0 * f64::from(self.startup_attempts)));
-        }
+    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+        self.stream(
+            cx,
+            if tickers {
+                "/api/v1/contract/ticker"
+            } else {
+                "/api/v1/contract/detail"
+            },
+            if tickers {
+                Pending::Tickers {
+                    rows: vec![],
+                    failed: false,
+                }
+            } else {
+                Pending::Markets {
+                    rows: vec![],
+                    failed: false,
+                }
+            },
+        );
     }
     fn failure(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
@@ -376,7 +388,8 @@ impl MexcFutures {
             Pending::History(request) => self.query_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
                 cx.log(LogLevel::Error, error);
-                self.retry_startup(cx);
+                self.discovery
+                    .failed(cx, matches!(pending, Pending::Tickers { .. }));
             }
         }
     }
@@ -391,14 +404,7 @@ impl Venue for MexcFutures {
             cx.log(LogLevel::Error, error);
             return;
         }
-        self.stream(
-            cx,
-            "/api/v1/contract/detail",
-            Pending::Markets {
-                rows: vec![],
-                failed: false,
-            },
-        );
+        self.discovery_read(cx, false);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.private.socket == Some(socket) {
@@ -514,23 +520,25 @@ impl Venue for MexcFutures {
             Pending::Account(account::Request::Snapshot(snapshot)) => {
                 self.account_item(cx, snapshot, item)
             }
-            Pending::Markets { rows, failed } => match serde_json::from_str::<Contract<'_>>(item) {
-                Ok(raw) => {
-                    let unit = raw.vol_unit;
-                    if let Some(m) = Self::market(raw) {
-                        self.volume_units.insert(m.symbol.clone(), unit);
-                        rows.push(m);
+            Pending::Markets { rows, failed: _ } => {
+                match serde_json::from_str::<Contract<'_>>(item) {
+                    Ok(raw) => {
+                        let unit = raw.vol_unit;
+                        if let Some(m) = Self::market(raw) {
+                            self.volume_units.insert(m.symbol.clone(), unit);
+                            rows.push(m);
+                        }
                     }
+                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
                 }
-                Err(_) => *failed = true,
-            },
-            Pending::Tickers { rows, failed } => match serde_json::from_str::<Tick<'_>>(item) {
+            }
+            Pending::Tickers { rows, failed: _ } => match serde_json::from_str::<Tick<'_>>(item) {
                 Ok(raw) => {
                     if let Some(m) = cx.store.market_by_id(&raw.symbol) {
                         rows.push(Self::ticker(raw, m));
                     }
                 }
-                Err(_) => *failed = true,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
             _ => {}
         }
@@ -568,13 +576,14 @@ impl Venue for MexcFutures {
             Pending::Trade(_) => unreachable!(),
             Pending::History(request) => self.query_response(cx, request, response),
             Pending::Markets { rows, failed } => {
-                if failed {
+                if failed || rows.is_empty() {
                     cx.log(LogLevel::Error, "Malformed MEXC market list");
-                    self.retry_startup(cx);
+                    self.discovery.failed(cx, false);
                     return;
                 }
-                self.startup_attempts = 0;
+                self.discovery.succeeded(cx, &false);
                 cx.store.set_markets(rows);
+                self.account_start(cx);
                 self.stream(
                     cx,
                     "/api/v1/contract/ticker",
@@ -587,11 +596,11 @@ impl Venue for MexcFutures {
             Pending::Tickers { mut rows, failed } => {
                 if failed {
                     cx.log(LogLevel::Error, "Malformed MEXC ticker list");
-                    self.retry_startup(cx);
+                    self.discovery.failed(cx, true);
                     return;
                 }
                 rows.sort_by_key(|t| cx.store.market_index(&t.symbol));
-                self.startup_attempts = 0;
+                self.discovery.succeeded(cx, &true);
                 cx.store.set_tickers(rows);
                 self.public_ready(cx);
             }
@@ -678,27 +687,9 @@ impl Venue for MexcFutures {
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
-        if self.startup_retry == Some(timer) {
-            self.startup_retry = None;
-            if cx.store.loaded().markets {
-                self.stream(
-                    cx,
-                    "/api/v1/contract/ticker",
-                    Pending::Tickers {
-                        rows: vec![],
-                        failed: false,
-                    },
-                );
-            } else {
-                self.stream(
-                    cx,
-                    "/api/v1/contract/detail",
-                    Pending::Markets {
-                        rows: vec![],
-                        failed: false,
-                    },
-                );
-            }
+        if let Some(tickers) = self.discovery.on_timer(timer) {
+            self.discovery_read(cx, tickers);
+            return;
         }
         if self.public.reconnect == Some(timer) {
             self.public.reconnect = None;

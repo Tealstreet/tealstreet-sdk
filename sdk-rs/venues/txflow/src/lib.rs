@@ -105,7 +105,7 @@ pub struct TxFlow {
     ticker_queue: VecDeque<u32>,
     seed_tickers: Vec<Ticker>,
     ticker_timer: Option<TimerId>,
-    meta_timer: Option<TimerId>,
+    discovery: safe_cex_engine::startup::Backoff<Option<u32>>,
 }
 impl TxFlow {
     pub fn new(options: Options) -> Self {
@@ -125,7 +125,7 @@ impl TxFlow {
             ticker_queue: Default::default(),
             seed_tickers: Vec::new(),
             ticker_timer: None,
-            meta_timer: None,
+            discovery: Default::default(),
         }
     }
     pub(crate) fn rest(&self) -> &'static str {
@@ -191,21 +191,24 @@ impl TxFlow {
             },
         );
     }
+    fn ticker_request(&self, cx: &mut Cx<'_, Pending>, asset: u32) {
+        let id = cx.request(
+            Method::Post,
+            format!("{}/info", self.rest()),
+            vec![
+                ("Content-Type", "application/json".into()),
+                ("x-api-version", API_VERSION.into()),
+            ],
+            Some(format!(
+                "{{\"type\":\"activeAssetCtx\",\"coin\":\"{asset}\"}}"
+            )),
+            Pending::Ticker { asset },
+        );
+        cx.route_request(id, safe_cex_engine::RequestRoute::PublicCors);
+    }
     fn next_ticker(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(asset) = self.ticker_queue.pop_front() {
-            let id = cx.request(
-                Method::Post,
-                format!("{}/info", self.rest()),
-                vec![
-                    ("Content-Type", "application/json".into()),
-                    ("x-api-version", API_VERSION.into()),
-                ],
-                Some(format!(
-                    "{{\"type\":\"activeAssetCtx\",\"coin\":\"{asset}\"}}"
-                )),
-                Pending::Ticker { asset },
-            );
-            cx.route_request(id, safe_cex_engine::RequestRoute::PublicCors);
+            self.ticker_request(cx, asset);
         } else {
             cx.store.set_tickers(std::mem::take(&mut self.seed_tickers));
             self.open_sockets(cx);
@@ -861,7 +864,9 @@ impl Venue for TxFlow {
                     .retain(|symbol, _| self.assets.contains_key(symbol));
                 self.candles
                     .retain(|(symbol, _), _| self.assets.contains_key(symbol));
+                self.discovery.succeeded(cx, &None);
                 cx.store.set_markets(markets);
+                self.open_sockets(cx);
                 self.seed_tickers = tickers;
                 self.next_ticker(cx);
             }
@@ -878,7 +883,18 @@ impl Venue for TxFlow {
                             .find(|t| t.id == asset.to_string())
                         {
                             Self::ticker_update(ticker, reply.data, true);
+                        } else if let Some(symbol) = cx
+                            .store
+                            .markets()
+                            .iter()
+                            .find(|m| m.id == asset.to_string())
+                            .map(|m| m.symbol.clone())
+                        {
+                            cx.store.update_ticker(&symbol, |ticker| {
+                                Self::ticker_update(ticker, reply.data, true)
+                            });
                         }
+                        self.discovery.succeeded(cx, &Some(asset));
                     }
                     _ => {
                         self.on_request_failed(
@@ -910,9 +926,9 @@ impl Venue for TxFlow {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Meta { rows, valid } => match serde_json::from_str(item) {
+            Pending::Meta { rows, valid: _ } => match serde_json::from_str(item) {
                 Ok(row) => rows.push(row),
-                Err(_) => *valid = false,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
             Pending::Candles { rows, valid, .. } => match serde_json::from_str::<CandleRow>(item) {
                 Ok(row) => rows.push(row.candle()),
@@ -927,12 +943,12 @@ impl Venue for TxFlow {
         match pending {
             Pending::Meta { .. } => {
                 cx.log(LogLevel::Error, error);
-                self.meta_timer = Some(cx.set_timer(5000.0));
+                self.discovery.failed(cx, None);
             }
             Pending::Ticker { asset } => {
                 cx.log(LogLevel::Warning, error);
-                self.ticker_queue.push_front(asset);
-                self.ticker_timer = Some(cx.set_timer(5000.0));
+                self.discovery.failed(cx, Some(asset));
+                self.ticker_timer = Some(cx.set_timer(25.0));
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Account(request) => self.account_failed(cx, request, error),
@@ -943,9 +959,12 @@ impl Venue for TxFlow {
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
-        if self.meta_timer == Some(timer) {
-            self.meta_timer = None;
-            self.metadata(cx);
+        if let Some(asset) = self.discovery.on_timer(timer) {
+            if let Some(asset) = asset {
+                self.ticker_request(cx, asset);
+            } else {
+                self.metadata(cx);
+            }
         }
         if self.ticker_timer == Some(timer) {
             self.ticker_timer = None;

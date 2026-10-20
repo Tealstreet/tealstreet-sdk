@@ -11,7 +11,8 @@ pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
         Number(f64),
     }
     let n = match N::deserialize(d)? {
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
+        N::Text(s) => safe_cex_engine::startup::number_or_zero(&s)
+            .ok_or_else(|| serde::de::Error::custom("invalid public number"))?,
         N::Number(n) => n,
     };
     if n.is_finite() {

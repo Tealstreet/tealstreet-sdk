@@ -868,3 +868,13 @@ preflight boundary.
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `client_id` (single and native batch), rule 1-64 characters, in place of the generated `ts_…` ID. Close orders (`close: true`) are not an honorable shape.
+
+
+## Rust public discovery resilience
+
+Rust catalogue/ticker reads retry through the shared engine capped exponential
+backoff. A malformed typed public row is skipped with a warning while valid
+neighbours remain usable. Private account initialization starts once the usable
+catalogue is available, without waiting for REST ticker seeds. Account snapshots,
+mutation acknowledgements and signing validation retain their stricter rules.
+See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.

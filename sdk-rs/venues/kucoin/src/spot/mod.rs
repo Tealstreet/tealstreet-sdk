@@ -67,6 +67,7 @@ struct SpotBook {
 }
 pub struct KucoinSpot {
     options: Options,
+    discovery: safe_cex_engine::startup::Backoff<bool>,
     credentials: Option<sign::Credentials>,
     sockets: [Socket; 2],
     books: BTreeMap<String, SpotBook>,
@@ -104,6 +105,7 @@ impl KucoinSpot {
             .flatten();
         Self {
             options,
+            discovery: Default::default(),
             credentials,
             sockets: Default::default(),
             books: Default::default(),
@@ -121,6 +123,32 @@ impl KucoinSpot {
             fills: Default::default(),
             fill_order: Default::default(),
         }
+    }
+    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+        self.streamed(
+            cx,
+            if tickers {
+                "/api/v1/market/allTickers"
+            } else {
+                "/api/v2/symbols"
+            },
+            if tickers {
+                ArrayAt::Path(&["data", "ticker"])
+            } else {
+                ArrayAt::EnvelopeField("data")
+            },
+            if tickers {
+                Pending::Tickers {
+                    rows: vec![],
+                    invalid: false,
+                }
+            } else {
+                Pending::Markets {
+                    rows: vec![],
+                    invalid: false,
+                }
+            },
+        );
     }
     fn request(
         &self,
@@ -661,15 +689,7 @@ impl Venue for KucoinSpot {
             );
             return;
         }
-        self.streamed(
-            cx,
-            "/api/v2/symbols",
-            ArrayAt::EnvelopeField("data"),
-            Pending::Markets {
-                rows: vec![],
-                invalid: false,
-            },
-        );
+        self.discovery_read(cx, false);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if let Some(channel) = self.sockets.iter().position(|c| c.socket == Some(socket)) {
@@ -739,15 +759,16 @@ impl Venue for KucoinSpot {
             self.reconnect(cx, c);
         }
     }
-    fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Markets { rows, invalid } => match serde_json::from_str::<Instrument>(item) {
+            Pending::Markets { rows, invalid: _ } => match serde_json::from_str::<Instrument>(item)
+            {
                 Ok(r) => rows.push(r.market()),
-                Err(_) => *invalid = true,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
-            Pending::Tickers { rows, invalid } => match serde_json::from_str::<Price>(item) {
+            Pending::Tickers { rows, invalid: _ } => match serde_json::from_str::<Price>(item) {
                 Ok(r) => rows.push(r.ticker()),
-                Err(_) => *invalid = true,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
             Pending::Candles { rows, invalid, .. } => match candle(item) {
                 Ok(c) => rows.push(c),
@@ -768,38 +789,34 @@ impl Venue for KucoinSpot {
         };
         match pending {
             Pending::Markets { rows, invalid } => {
-                if invalid {
-                    cx.log(LogLevel::Error, "invalid KuCoin Spot markets");
+                if invalid || rows.is_empty() {
+                    self.discovery.failed(cx, false);
                     return;
                 }
+                self.discovery.succeeded(cx, &false);
                 cx.store.set_markets(rows);
                 self.fixed_settings(cx);
-                self.streamed(
-                    cx,
-                    "/api/v1/market/allTickers",
-                    ArrayAt::Path(&["data", "ticker"]),
-                    Pending::Tickers {
-                        rows: vec![],
-                        invalid: false,
-                    },
-                );
-            }
-            Pending::Tickers { mut rows, invalid } => {
-                if invalid {
-                    cx.log(LogLevel::Error, "invalid KuCoin Spot tickers");
-                    return;
-                }
-                rows.retain(|r| cx.store.market(&r.symbol).is_some());
-                cx.store.set_tickers(rows);
-                self.bullet(cx, 0);
+                self.discovery_read(cx, true);
                 if self.credentials.is_some() {
-                    self.bullet(cx, 1);
                     self.balance(cx);
                     self.orders(cx);
                     self.poll = Some(cx.set_timer(5000.0));
                 } else {
                     cx.store.set_orders(vec![]);
                     cx.store.set_balance(Balance::default());
+                }
+            }
+            Pending::Tickers { mut rows, invalid } => {
+                if invalid {
+                    self.discovery.failed(cx, true);
+                    return;
+                }
+                self.discovery.succeeded(cx, &true);
+                rows.retain(|r| cx.store.market(&r.symbol).is_some());
+                cx.store.set_tickers(rows);
+                self.bullet(cx, 0);
+                if self.credentials.is_some() {
+                    self.bullet(cx, 1);
                 }
             }
             Pending::Bullet(channel) => match serde_json::from_str::<Bullet>(data.get()) {
@@ -1070,11 +1087,16 @@ impl Venue for KucoinSpot {
             Pending::Candles { command, .. }
             | Pending::Fills(command)
             | Pending::Account(command) => cx.done(command, Err(error.into())),
-            _ => {}
+            Pending::Markets { .. } => self.discovery.failed(cx, false),
+            Pending::Tickers { .. } => self.discovery.failed(cx, true),
         }
         cx.log(LogLevel::Error, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(tickers) = self.discovery.on_timer(timer) {
+            self.discovery_read(cx, tickers);
+            return;
+        }
         for channel in 0..2 {
             let c = &mut self.sockets[channel];
             if c.reconnect == Some(timer) {

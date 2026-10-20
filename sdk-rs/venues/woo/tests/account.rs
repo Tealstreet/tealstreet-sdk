@@ -29,9 +29,11 @@ fn start() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let r = requests(&mut e).remove(0);
-    response(&mut e, &r, 20.0, TICKERS);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let mut early = e.drain_actions().collect::<Vec<_>>();
+    let ticker = early.iter().find_map(|a| match a { Action::Http(r) if r.url.contains("/public/futures") => Some(r.clone()), _ => None }).unwrap();
+    response(&mut e, &ticker, 20.0, TICKERS);
+    early.extend(e.drain_actions());
+    let actions = early;
     let socket = actions
         .iter()
         .find_map(|a| {
@@ -46,7 +48,7 @@ fn start() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
         .iter()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
-                (*at_ms == 2020.0).then_some(*timer)
+                (*at_ms == 2010.0).then_some(*timer)
             } else {
                 None
             }

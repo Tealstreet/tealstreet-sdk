@@ -129,6 +129,7 @@ pub struct Kucoin {
     candles: BTreeMap<(String, String), u32>,
     message_id: u64,
     book_generation: u64,
+    discovery: safe_cex_engine::startup::Backoff<bool>,
 }
 
 pub(crate) fn internal_symbol(id: &str) -> String {
@@ -226,6 +227,7 @@ impl Kucoin {
             candles: BTreeMap::new(),
             message_id: 0,
             book_generation: 0,
+            discovery: Default::default(),
         }
     }
     pub(crate) fn signed(
@@ -334,6 +336,28 @@ impl Kucoin {
                 pending,
             );
         }
+    }
+    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+        self.public(
+            cx,
+            if tickers {
+                "/api/v1/allTickers"
+            } else {
+                "/api/v1/contracts/active"
+            },
+            Some(ArrayAt::EnvelopeField("data")),
+            if tickers {
+                Pending::Tickers {
+                    rows: vec![],
+                    invalid: false,
+                }
+            } else {
+                Pending::Markets {
+                    rows: vec![],
+                    invalid: false,
+                }
+            },
+        );
     }
     fn launch(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.connections.is_empty() {
@@ -727,15 +751,7 @@ impl Venue for Kucoin {
             );
             return;
         }
-        self.public(
-            cx,
-            "/api/v1/contracts/active",
-            Some(ArrayAt::EnvelopeField("data")),
-            Pending::Markets {
-                rows: vec![],
-                invalid: false,
-            },
-        );
+        self.discovery_read(cx, false);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let Some(channel) = self
@@ -857,22 +873,25 @@ impl Venue for Kucoin {
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Funding(request) => self.funding_item(cx, request, item),
             Pending::Trade(request) => self.trading_item(cx, request, item),
-            Pending::Markets { rows, invalid } => match serde_json::from_str::<Instrument>(item) {
+            Pending::Markets { rows, invalid: _ } => match serde_json::from_str::<Instrument>(item)
+            {
                 Ok(row) => {
                     if let Some(m) = row.market() {
                         rows.push(m);
                     }
                 }
-                Err(_) => *invalid = true,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
-            Pending::Tickers { rows, invalid } => match serde_json::from_str::<TickerRow>(item) {
-                Ok(row) => {
-                    if let Some(m) = cx.store.market_by_id(row.symbol) {
-                        rows.push(row.ticker(m.symbol.clone()));
+            Pending::Tickers { rows, invalid: _ } => {
+                match serde_json::from_str::<TickerRow>(item) {
+                    Ok(row) => {
+                        if let Some(m) = cx.store.market_by_id(row.symbol) {
+                            rows.push(row.ticker(m.symbol.clone()));
+                        }
                     }
+                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
                 }
-                Err(_) => *invalid = true,
-            },
+            }
             Pending::Candles { rows, invalid, .. } => {
                 match serde_json::from_str::<Vec<Number>>(item)
                     .ok()
@@ -957,37 +976,24 @@ impl Venue for Kucoin {
                 }
             }
             Pending::Markets { rows, invalid } => {
-                if let Err(error) = success(status, body) {
-                    cx.log(LogLevel::Error, error);
-                } else if invalid {
-                    cx.log(LogLevel::Error, "invalid KuCoin market row");
+                if success(status, body).is_err() || invalid || rows.is_empty() {
+                    self.discovery.failed(cx, false);
                 } else {
+                    self.discovery.succeeded(cx, &false);
                     cx.store.set_markets(rows);
-                    self.books.retain(|symbol, _| {
-                        if cx.store.market(symbol).is_some() {
-                            true
-                        } else {
-                            cx.log(LogLevel::Error, format!("unknown KuCoin market {symbol}"));
-                            false
-                        }
-                    });
-                    self.public(
-                        cx,
-                        "/api/v1/allTickers",
-                        Some(ArrayAt::EnvelopeField("data")),
-                        Pending::Tickers {
-                            rows: vec![],
-                            invalid: false,
-                        },
-                    );
+                    self.books
+                        .retain(|symbol, _| cx.store.market(symbol).is_some());
+                    self.discovery_read(cx, true);
+                    if self.credentials.is_some() {
+                        self.account_start(cx);
+                    }
                 }
             }
             Pending::Tickers { rows, invalid } => {
-                if let Err(error) = success(status, body) {
-                    cx.log(LogLevel::Error, error);
-                } else if invalid {
-                    cx.log(LogLevel::Error, "invalid KuCoin ticker row");
+                if success(status, body).is_err() || invalid {
+                    self.discovery.failed(cx, true);
                 } else {
+                    self.discovery.succeeded(cx, &true);
                     cx.store.set_tickers(rows);
                     self.launch(cx);
                 }
@@ -1028,10 +1034,15 @@ impl Venue for Kucoin {
                 }
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
-            _ => cx.log(LogLevel::Error, error),
+            Pending::Markets { .. } => self.discovery.failed(cx, false),
+            Pending::Tickers { .. } => self.discovery.failed(cx, true),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(tickers) = self.discovery.on_timer(timer) {
+            self.discovery_read(cx, tickers);
+            return;
+        }
         if self.account_timer(cx, timer)
             || self.trading_timer(cx, timer)
             || self.history_timer(cx, timer)

@@ -2,7 +2,7 @@ use crate::{
     Pending,
     account::{Account, AmendTarget},
     sign::Credentials,
-    wire::Number,
+    wire::StrictNumber as Number,
 };
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;

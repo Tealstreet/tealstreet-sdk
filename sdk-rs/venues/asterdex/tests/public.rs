@@ -512,3 +512,30 @@ fn ticker_seed_retains_native_rows_without_active_market_metadata() {
     assert_eq!(h.engine.store().tickers().len(), 1);
     assert_eq!(h.engine.store().tickers()[0].symbol, "OLDUSDT");
 }
+
+#[test]
+fn catalogue_skips_bad_neighbor_and_account_starts_before_ticker_response() {
+    let mut h = Harness::start(Options {
+        key: Some("synthetic-key".into()),
+        secret: Some("synthetic-secret".into()),
+        ..Options::default()
+    });
+    h.reply("/time", 200, r#"{"serverTime":1700000000000}"#);
+    h.reply("/exchangeInfo", 200, &MARKETS.replacen("[", "[{},", 1));
+    assert_eq!(h.engine.store().markets().len(), 1);
+    assert!(h.requests.iter().any(|r| r.url.contains("/account")));
+    assert!(!h.engine.store().loaded().tickers);
+    h.reply("/leverageBracket", 200, "[]");
+    h.reply("/ticker/24hr", 503, "unavailable");
+    let (timer, at) = h
+        .timers
+        .iter()
+        .copied()
+        .find(|(_, at)| *at == h.now + 1000.)
+        .unwrap();
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    h.reply("/ticker/24hr", 200, &DAILY.replacen("[", "[{},", 1));
+    assert_eq!(h.engine.store().tickers().len(), 1);
+    assert_eq!(h.engine.store().tickers()[0].last, 4.000002);
+}

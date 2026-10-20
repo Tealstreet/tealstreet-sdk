@@ -40,6 +40,28 @@ pub fn timestamp(n: f64) -> f64 {
     }
 }
 
+// TS public mappers use toNumber(value, fallback); private financial rows remain strict.
+fn public_optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Input {
+        Number(f64),
+        Text(String),
+    }
+    match Option::<Input>::deserialize(d)? {
+        None => Ok(None),
+        Some(Input::Text(text)) if text.trim().is_empty() => Ok(None),
+        Some(Input::Text(text)) => safe_cex_engine::startup::number_or_zero(&text)
+            .map(Some)
+            .ok_or_else(|| serde::de::Error::custom("invalid public number")),
+        Some(Input::Number(value)) if value.is_finite() => Ok(Some(value)),
+        _ => Err(serde::de::Error::custom("invalid public number")),
+    }
+}
+fn public_number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    Ok(public_optional_number(d)?.unwrap_or(0.0))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Symbol<'a> {
@@ -52,27 +74,27 @@ pub struct Symbol<'a> {
     #[serde(borrow)]
     pub margin_asset: Str<'a>,
     pub forward_contract_flag: Option<bool>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "public_optional_number")]
     pub price_precision: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "public_optional_number")]
     pub quantity_precision: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "public_optional_number")]
     pub quote_precision: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "public_optional_number")]
     pub base_asset_precision: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "public_optional_number")]
     pub min_order_size: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "public_optional_number")]
     pub max_order_size: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "public_optional_number")]
     pub min_leverage: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "public_optional_number")]
     pub max_leverage: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "public_optional_number")]
     pub contract_val: Option<f64>,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "public_number")]
     pub maker_fee_rate: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "public_number")]
     pub taker_fee_rate: f64,
 }
 impl Symbol<'_> {
@@ -126,29 +148,29 @@ impl Symbol<'_> {
 pub struct Daily<'a> {
     #[serde(borrow)]
     pub symbol: Str<'a>,
-    #[serde(alias = "c", deserialize_with = "number")]
+    #[serde(alias = "c", deserialize_with = "public_number")]
     pub last_price: f64,
-    #[serde(alias = "o", deserialize_with = "number")]
+    #[serde(alias = "o", deserialize_with = "public_number")]
     pub open_price: f64,
-    #[serde(alias = "m", deserialize_with = "optional_number")]
+    #[serde(alias = "m", deserialize_with = "public_optional_number")]
     pub mark_price: Option<f64>,
-    #[serde(alias = "i", deserialize_with = "optional_number")]
+    #[serde(alias = "i", deserialize_with = "public_optional_number")]
     pub index_price: Option<f64>,
-    #[serde(alias = "P", deserialize_with = "optional_number")]
+    #[serde(alias = "P", deserialize_with = "public_optional_number")]
     pub price_change_percent: Option<f64>,
-    #[serde(alias = "v", deserialize_with = "number")]
+    #[serde(alias = "v", deserialize_with = "public_number")]
     pub volume: f64,
-    #[serde(alias = "q", deserialize_with = "number")]
+    #[serde(alias = "q", deserialize_with = "public_number")]
     pub quote_volume: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "public_number")]
     pub open_interest: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "public_number")]
     pub funding_rate: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "public_number")]
     pub funding_time: f64,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "public_optional_number")]
     pub bid_price: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "public_optional_number")]
     pub ask_price: Option<f64>,
 }
 impl Daily<'_> {
@@ -190,10 +212,10 @@ pub fn percentage(p: f64) -> f64 {
 pub struct BookTicker<'a> {
     #[serde(borrow)]
     pub symbol: Str<'a>,
-    #[serde(deserialize_with = "number")]
-    pub bid_price: f64,
-    #[serde(deserialize_with = "number")]
-    pub ask_price: f64,
+    #[serde(default, deserialize_with = "public_optional_number")]
+    pub bid_price: Option<f64>,
+    #[serde(default, deserialize_with = "public_optional_number")]
+    pub ask_price: Option<f64>,
 }
 #[derive(Deserialize)]
 pub struct Level(

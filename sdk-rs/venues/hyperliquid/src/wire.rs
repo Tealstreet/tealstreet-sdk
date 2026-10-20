@@ -32,8 +32,9 @@ pub struct Envelope<'a> {
     pub data: &'a serde_json::value::RawValue,
 }
 #[derive(Deserialize)]
-pub struct Meta {
-    pub universe: Vec<Instrument>,
+pub struct Meta<'a> {
+    #[serde(borrow)]
+    pub universe: Vec<&'a serde_json::value::RawValue>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -340,8 +341,8 @@ pub struct UserEvents<'a> {
 
 #[derive(Deserialize)]
 pub struct SpotMeta {
-    pub universe: Vec<SpotMarket>,
-    pub tokens: Vec<SpotToken>,
+    pub universe: Vec<safe_cex_engine::startup::Row<SpotMarket>>,
+    pub tokens: Vec<safe_cex_engine::startup::Row<SpotToken>>,
 }
 #[derive(Deserialize)]
 pub struct SpotMarket {

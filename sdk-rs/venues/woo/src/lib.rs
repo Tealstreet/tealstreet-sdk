@@ -93,8 +93,7 @@ pub struct Woo {
     candles: HashMap<(String, String), CandleState>,
     generation: u64,
     funding: Option<TimerId>,
-    seed_retry: Option<(TimerId, bool)>,
-    seed_attempts: u32,
+    seed_backoff: safe_cex_engine::startup::Backoff<bool>,
     price_ranges: HashMap<String, f64>,
     ticker_indexes: HashMap<String, u32>,
 }
@@ -211,8 +210,7 @@ impl Woo {
             candles: HashMap::new(),
             generation: 0,
             funding: None,
-            seed_retry: None,
-            seed_attempts: 0,
+            seed_backoff: Default::default(),
             price_ranges: HashMap::new(),
             ticker_indexes: HashMap::new(),
         }
@@ -248,7 +246,7 @@ impl Woo {
             pending,
         );
     }
-    fn apply_ticks(&self, cx: &mut Cx<'_, Pending>, topic: &str, rows: Vec<Tick<'_>>) {
+    fn apply_ticks(&mut self, cx: &mut Cx<'_, Pending>, topic: &str, rows: Vec<Tick<'_>>) {
         #[derive(Clone, Copy)]
         enum Kind {
             Tickers,
@@ -264,8 +262,19 @@ impl Woo {
             if !row.symbol.starts_with("PERP_") {
                 continue;
             }
-            let Some(&index) = self.ticker_indexes.get(row.symbol.as_ref()) else {
-                continue;
+            let index = match self.ticker_indexes.get(row.symbol.as_ref()).copied() {
+                Some(index) => index,
+                None => {
+                    let supplied = match kind {
+                        Kind::Tickers => row.close.is_some() || row.volume.is_some() || row.amount.is_some(),
+                        Kind::Bbos => row.bid.is_some() || row.ask.is_some(),
+                        Kind::Marks => row.price.is_some(),
+                    };
+                    if !supplied { continue; }
+                    let Some(index) = cx.store.ensure_ticker(&compact(&row.symbol)) else { continue; };
+                    self.ticker_indexes.insert(row.symbol.to_string(), index);
+                    index
+                }
             };
             let Some(t) = cx.store.tickers().get(index as usize) else {
                 continue;
@@ -726,7 +735,11 @@ impl Venue for Woo {
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Trade(_) => (),
             Pending::Account(request) => self.account_item(cx, request, item),
-            Pending::Markets { rows, ranges, bad } => {
+            Pending::Markets {
+                rows,
+                ranges,
+                bad: _,
+            } => {
                 let raw = match serde_json::from_str::<Instrument<'_>>(item) {
                     Ok(raw) => raw,
                     Err(_) => {
@@ -735,7 +748,7 @@ impl Venue for Woo {
                         {
                             return;
                         }
-                        *bad = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                 };
@@ -751,7 +764,7 @@ impl Venue for Woo {
                     || raw.base_min <= 0.0
                     || raw.base_max < raw.base_min
                 {
-                    *bad = true;
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 }
                 let symbol = compact(&raw.symbol);
@@ -796,7 +809,11 @@ impl Venue for Woo {
                     maker_fee: None,
                 });
             }
-            Pending::Tickers { rows, indexes, bad } => {
+            Pending::Tickers {
+                rows,
+                indexes,
+                bad: _,
+            } => {
                 let raw = match serde_json::from_str::<Statistics<'_>>(item) {
                     Ok(raw) => raw,
                     Err(_) => {
@@ -805,7 +822,7 @@ impl Venue for Woo {
                         {
                             return;
                         }
-                        *bad = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                 };
@@ -814,7 +831,7 @@ impl Venue for Woo {
                     return;
                 };
                 if raw.open <= 0.0 || raw.close <= 0.0 {
-                    *bad = true;
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 }
                 indexes.insert(raw.symbol.to_string(), rows.len() as u32);
@@ -895,7 +912,16 @@ impl Venue for Woo {
                 }
                 self.price_ranges = ranges;
                 cx.store.set_markets(rows);
-                self.seed_attempts = 0;
+                self.seed_backoff.succeeded(cx, &false);
+                if self.options.public_data_only
+                    || self.options.key.as_deref().is_none_or(str::is_empty)
+                {
+                    cx.store.set_balance(Default::default());
+                    cx.store.set_positions(Vec::new());
+                    cx.store.set_orders(Vec::new());
+                } else {
+                    self.account_start(cx);
+                }
                 self.seed(cx, true);
             }
             Pending::Tickers { rows, indexes, bad } => {
@@ -913,18 +939,9 @@ impl Venue for Woo {
                 }
                 self.ticker_indexes = indexes;
                 cx.store.set_tickers(rows);
-                self.seed_attempts = 0;
+                self.seed_backoff.succeeded(cx, &true);
                 self.connect_public(cx);
                 self.funding = Some(cx.set_timer(60_000.0));
-                if self.options.public_data_only
-                    || self.options.key.as_deref().is_none_or(str::is_empty)
-                {
-                    cx.store.set_balance(Default::default());
-                    cx.store.set_positions(Vec::new());
-                    cx.store.set_orders(Vec::new());
-                } else {
-                    self.account_start(cx);
-                }
             }
             Pending::Funding { rows } => {
                 for (symbol, rate, time) in rows {
@@ -1004,14 +1021,9 @@ impl Venue for Woo {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
-                self.seed_attempts += 1;
                 cx.log(LogLevel::Error, error);
-                if self.seed_attempts <= 3 {
-                    self.seed_retry = Some((
-                        cx.set_timer(1000.0 * self.seed_attempts as f64),
-                        matches!(pending, Pending::Tickers { .. }),
-                    ));
-                }
+                self.seed_backoff
+                    .failed(cx, matches!(pending, Pending::Tickers { .. }));
             }
             Pending::Depth { symbol, generation } => {
                 if self
@@ -1033,8 +1045,7 @@ impl Venue for Woo {
         if self.account_timer(cx, timer) {
             return;
         }
-        if self.seed_retry.is_some_and(|(t, _)| t == timer) {
-            let (_, tickers) = self.seed_retry.take().unwrap();
+        if let Some(tickers) = self.seed_backoff.on_timer(timer) {
             self.seed(cx, tickers);
             return;
         }

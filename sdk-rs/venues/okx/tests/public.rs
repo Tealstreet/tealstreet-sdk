@@ -275,7 +275,7 @@ fn variants_use_entity_hosts_and_demo_header() {
 }
 
 #[test]
-fn incomplete_known_ticker_never_becomes_authoritative_zero() {
+fn blank_optional_ticker_numbers_are_zero_like_the_ts_mapper() {
     let mut e = Engine::new(Okx::new(Options::default()));
     e.start(0.0);
     let request = actions(&mut e).remove(0);
@@ -287,7 +287,12 @@ fn incomplete_known_ticker_never_becomes_authoritative_zero() {
         &envelope(r#"{"instId":"BTC-USDT-SWAP"}"#),
         2.0,
     );
-    assert!(!e.store().loaded().tickers);
+    assert!(e.store().loaded().tickers);
+    let ticker = e.store().ticker("BTCUSDT").unwrap();
+    assert_eq!(
+        (ticker.bid, ticker.ask, ticker.last, ticker.volume),
+        (0., 0., 0., 0.)
+    );
 }
 
 #[test]
@@ -483,7 +488,9 @@ fn price_channels_follow_last_duplicate_symbol_in_reordered_ticker_seed() {
         ),
         (15.0, 16.0, 17.0, 0.002, 1800.0, 4.0, 5.0)
     );
-    assert_eq!(e.store().tickers().len(), 3);
+    assert_eq!(e.store().tickers().len(), 4);
+    assert_eq!(e.store().ticker("SOLUSDT").unwrap().mark, 99.0);
+    assert!(e.store().ticker("UNKNOWN").is_none());
     assert_eq!(
         e.store().tickers()[1].mark,
         40000.0,

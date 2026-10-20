@@ -95,20 +95,37 @@ pub fn check(response: &safe_cex_engine::Response<'_>) -> Result<(), String> {
         Err(format!("Bitrue {}: {}", e.code, e.msg))
     }
 }
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(transparent)]
+pub struct PublicNumber(#[serde(deserialize_with = "public_number")] pub f64);
+fn public_number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum N<'a> {
+        Number(f64),
+        Text(#[serde(borrow)] Cow<'a, str>),
+    }
+    let n = match N::deserialize(d)? {
+        N::Number(n) => Some(n).filter(|n| n.is_finite()),
+        N::Text(s) => safe_cex_engine::startup::number_or_zero(&s),
+    };
+    n.ok_or_else(|| serde::de::Error::custom("invalid public number"))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Contract<'a> {
     #[serde(borrow)]
     pub symbol: Str<'a>,
     pub price_precision: u32,
-    pub multiplier: Number,
-    pub min_order_volume: Number,
-    pub max_market_volume: Number,
+    pub multiplier: PublicNumber,
+    pub min_order_volume: PublicNumber,
+    pub max_market_volume: PublicNumber,
     #[serde(default)]
-    pub max_limit_volume: Number,
+    pub max_limit_volume: PublicNumber,
     #[serde(default)]
-    pub min_order_money: Number,
-    pub status: Number,
+    pub min_order_money: PublicNumber,
+    pub status: PublicNumber,
 }
 fn present_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Number>, D::Error> {
     Number::deserialize(d).map(Some)

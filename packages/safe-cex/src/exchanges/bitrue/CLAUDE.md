@@ -644,3 +644,13 @@ value, cumulative fills, current execution size/price, and timestamp-echo pong.
 The Rust candle-history reader rejects a malformed timestamp anywhere in a
 response before applying the requested time window. It never reports a partial
 or empty successful history by silently dropping malformed rows.
+
+
+## Rust public discovery resilience
+
+Rust catalogue/ticker reads retry through the shared engine capped exponential
+backoff. A malformed typed public row is skipped with a warning while valid
+neighbours remain usable. Private account initialization starts once the usable
+catalogue is available, without waiting for REST ticker seeds. Account snapshots,
+mutation acknowledgements and signing validation retain their stricter rules.
+See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.

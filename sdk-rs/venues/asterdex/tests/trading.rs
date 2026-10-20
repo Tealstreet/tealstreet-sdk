@@ -549,7 +549,11 @@ fn documented_algo_capacity_rejects_new_stop_but_allows_cancel_replace_at_limit(
         .store_mut()
         .set_orders(vec![order("283194212", OrderType::StopLoss)]);
     h.place(json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":1,"triggerPrice":9200}));
-    assert!(!h.requests.iter().any(|r| r.method == Method::Post));
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.contains("/order?"))
+    );
     assert!(h.result(1).is_err());
     h.command(Command::AmendOrder {
         command: 2,

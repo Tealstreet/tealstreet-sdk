@@ -67,12 +67,14 @@ fn engine_with_socket(mode: &str) -> (Engine<PhemexPerpetuals>, SocketId) {
     }));
     e.start(0.);
     let a: Vec<_> = e.drain_actions().collect();
-    let a = raw(&mut e, &requests(&a)[0], PRODUCTS);
-    let a = raw(&mut e, &requests(&a)[0], DAILY);
+    let mut a = raw(&mut e, &requests(&a)[0], PRODUCTS);
+    let ticker = requests(&a).into_iter().find(|r| r.url.contains("24hr/all")).unwrap();
+    a.extend(raw(&mut e, &ticker, DAILY));
+    a.retain(|action| !matches!(action, Action::Http(r) if r.url.contains("24hr/all")));
     let socket = a
         .iter()
         .filter_map(|a| {
-            if let Action::WsConnect { socket, .. } = a {
+            if let Action::WsConnect { socket, channel: Some(safe_cex_engine::SocketChannel::Private), .. } = a {
                 Some(*socket)
             } else {
                 None

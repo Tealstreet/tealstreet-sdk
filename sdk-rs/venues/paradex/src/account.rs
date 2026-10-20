@@ -2,7 +2,7 @@
 use crate::{
     Options, Pending,
     sign::{Credentials, SystemConfig},
-    wire::Number,
+    wire::StrictNumber as Number,
 };
 use alloy_primitives::U256;
 use safe_cex_engine::model::{

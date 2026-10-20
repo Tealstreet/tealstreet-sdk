@@ -209,6 +209,7 @@ pub struct BinanceFutures {
     snapshot_generation: u64,
     candles: HashMap<(String, String), u32>,
     ticker_seed: TickerSeed,
+    discovery: safe_cex_engine::startup::Backoff<u8>,
     /// Depth snapshots are paused until this time after a 418 or 429.
     rest_paused_until: f64,
     /// Background account reads pause until this time near the weight limit.
@@ -253,6 +254,7 @@ impl BinanceFutures {
             snapshot_generation: 0,
             candles: HashMap::new(),
             ticker_seed: TickerSeed::default(),
+            discovery: Default::default(),
             rest_paused_until: 0.0,
             background_paused_until: 0.0,
             account: account::AccountState::default(),
@@ -605,7 +607,7 @@ impl BinanceFutures {
         markets: Vec<Market>,
         response: Response<'_>,
     ) {
-        if response.status != 200 {
+        if response.status != 200 || markets.is_empty() {
             cx.log(
                 LogLevel::Error,
                 format!(
@@ -613,6 +615,7 @@ impl BinanceFutures {
                     response.status, response.body
                 ),
             );
+            self.discovery.failed(cx, 0);
             return;
         }
         self.ticker_seed = TickerSeed {
@@ -629,6 +632,10 @@ impl BinanceFutures {
             failed: false,
         };
         cx.store.set_markets(markets);
+        self.discovery.succeeded(cx, &0);
+        if self.credentials.is_some() {
+            self.start_account(cx);
+        }
         if self.credentials.is_some() && !self.is_spot() {
             self.request_leverage_brackets(cx);
         }
@@ -682,8 +689,10 @@ impl BinanceFutures {
         };
         if let Some(failure) = failure {
             cx.log(LogLevel::Error, format!("Binance tickers: {failure}"));
-            self.ticker_seed.failed = true;
+            self.discovery.failed(cx, from);
+            return;
         }
+        self.discovery.succeeded(cx, &from);
         self.ticker_seed.finished |= from;
         self.try_seed_tickers(cx);
     }
@@ -716,9 +725,7 @@ impl BinanceFutures {
             ),
         );
         cx.store.set_tickers(tickers);
-        if self.credentials.is_some() {
-            self.start_account(cx);
-        } else {
+        if self.credentials.is_none() {
             cx.store.set_orders(Vec::new());
             cx.store.set_positions(Vec::new());
             cx.store.set_balance(Default::default());
@@ -1288,20 +1295,27 @@ impl Venue for BinanceFutures {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::ExchangeInfo(markets) => {
-                if let Ok(m) = serde_json::from_str::<SymbolInfo>(item)
-                    && (self.is_spot()
-                        || if self.is_inverse() {
-                            m.contract_type == "PERPETUAL" && m.status == "TRADING"
-                        } else {
-                            matches!(&*m.contract_type, "PERPETUAL" | "TRADIFI_PERPETUAL")
-                                && matches!(&*m.margin_asset, "USDT" | "USDC")
-                        })
+                let Ok(m) = serde_json::from_str::<SymbolInfo>(item) else {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    return;
+                };
+                if self.is_spot()
+                    || if self.is_inverse() {
+                        m.contract_type == "PERPETUAL" && m.status == "TRADING"
+                    } else {
+                        matches!(&*m.contract_type, "PERPETUAL" | "TRADIFI_PERPETUAL")
+                            && matches!(&*m.margin_asset, "USDT" | "USDC")
+                    }
                 {
                     markets.push(market_from_wire(&m, self.options.variant));
                 }
             }
             Pending::Daily => {
-                if let Ok(d) = serde_json::from_str::<Daily>(item) {
+                let Ok(d) = serde_json::from_str::<Daily>(item) else {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    return;
+                };
+                {
                     let inverse = self.is_inverse();
                     let spot = self.is_spot();
                     self.seed(cx, &d.symbol, source::DAILY, |t| {
@@ -1323,7 +1337,11 @@ impl Venue for BinanceFutures {
                 }
             }
             Pending::BookTickers => {
-                if let Ok(b) = serde_json::from_str::<BookTickerRest>(item) {
+                let Ok(b) = serde_json::from_str::<BookTickerRest>(item) else {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    return;
+                };
+                {
                     self.seed(cx, &b.symbol, source::BOOK, |t| {
                         t.bid = num::parse(&b.bid_price);
                         t.ask = num::parse(&b.ask_price);
@@ -1331,7 +1349,11 @@ impl Venue for BinanceFutures {
                 }
             }
             Pending::PremiumIndex => {
-                if let Ok(p) = serde_json::from_str::<PremiumIndex>(item) {
+                let Ok(p) = serde_json::from_str::<PremiumIndex>(item) else {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    return;
+                };
+                {
                     self.seed(cx, &p.symbol, source::PREMIUM, |t| {
                         t.mark = num::parse(&p.mark_price);
                         t.index = num::parse(&p.index_price);
@@ -1361,19 +1383,44 @@ impl Venue for BinanceFutures {
                 }
             }
             Pending::Account(request) => self.on_account_failed(cx, request, error),
+            Pending::ExchangeInfo(_) => self.discovery.failed(cx, 0),
             Pending::Daily => self.source_finished(cx, source::DAILY, Err(error)),
             Pending::BookTickers => self.source_finished(cx, source::BOOK, Err(error)),
             Pending::PremiumIndex => self.source_finished(cx, source::PREMIUM, Err(error)),
             Pending::Trade(request) => self.on_trade_response(cx, request, Err(error)),
             Pending::History(request) => self.on_history_response(cx, request, Err(error)),
-            _ => cx.log(
-                LogLevel::Error,
-                format!("Binance startup request failed: {error}"),
-            ),
         }
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(source) = self.discovery.on_timer(timer) {
+            match source {
+                0 => self.get_streamed(
+                    cx,
+                    self.paths.exchange_info,
+                    ArrayAt::Field("symbols"),
+                    Pending::ExchangeInfo(Vec::new()),
+                ),
+                source::DAILY => {
+                    self.get_streamed(cx, self.paths.daily, ArrayAt::Root, Pending::Daily)
+                }
+                source::BOOK => self.get_streamed(
+                    cx,
+                    self.paths.book_tickers,
+                    ArrayAt::Root,
+                    Pending::BookTickers,
+                ),
+                source::PREMIUM => self.get_streamed(
+                    cx,
+                    self.paths.premium_index,
+                    ArrayAt::Root,
+                    Pending::PremiumIndex,
+                ),
+                _ => unreachable!(),
+            }
+            return;
+        }
+
         for state in self.books.values_mut() {
             if matches!(state.sync, Sync::Cooldown(t) if t == timer) {
                 state.sync = Sync::Idle;

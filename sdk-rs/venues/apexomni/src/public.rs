@@ -60,7 +60,7 @@ pub struct Public {
     ping_at: f64,
     watchdog: Option<TimerId>,
     reconnect: Option<TimerId>,
-    seed_retry: Option<TimerId>,
+    seed_retry: safe_cex_engine::startup::Backoff<()>,
     attempts: u32,
 }
 impl Public {
@@ -159,23 +159,23 @@ impl ApexOmni {
             ])),
         ) {
             cx.log(LogLevel::Error, error);
-            self.public.seed_retry = Some(cx.set_timer(1000.0));
+            self.public.seed_retry.failed(cx, ());
         }
     }
     pub(crate) fn public_item(
         &mut self,
-        _cx: &mut Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         request: &mut Request,
         item: &str,
     ) {
         if let Request::Markets {
             rows,
             contracts,
-            bad,
+            bad: _,
         } = request
         {
             let Ok(raw) = serde_json::from_str::<wire::Contract<'_>>(item) else {
-                *bad = true;
+                safe_cex_engine::startup::skipped_row(cx);
                 return;
             };
             if !raw.enable_trade {
@@ -195,7 +195,7 @@ impl ApexOmni {
                 || raw.l2_pair_id > u16::MAX as f64
                 || raw.l2_pair_id.fract() != 0.0
             {
-                *bad = true;
+                safe_cex_engine::startup::skipped_row(cx);
                 return;
             }
             contracts.insert(
@@ -277,6 +277,7 @@ impl ApexOmni {
                         ..Default::default()
                     })
                     .collect();
+                self.public.seed_retry.succeeded(cx, &());
                 self.contracts = contracts;
                 cx.store.set_markets(rows);
                 cx.store.set_tickers(tickers);
@@ -330,9 +331,7 @@ impl ApexOmni {
         match request {
             Request::Markets { .. } => {
                 cx.log(LogLevel::Error, format!("ApeX markets: {error}"));
-                if self.public.seed_retry.is_none() {
-                    self.public.seed_retry = Some(cx.set_timer(1000.0));
-                }
+                self.public.seed_retry.failed(cx, ());
             }
             Request::Candles { command, .. } => cx.done(command, Err(error.to_owned())),
         }
@@ -429,8 +428,7 @@ impl ApexOmni {
         true
     }
     pub(crate) fn public_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.public.seed_retry == Some(timer) {
-            self.public.seed_retry = None;
+        if self.public.seed_retry.on_timer(timer).is_some() {
             self.start_public(cx);
             return true;
         }

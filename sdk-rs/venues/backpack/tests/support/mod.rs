@@ -80,24 +80,18 @@ fn ready_snapshot(
         200,
         r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"},{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"0.001","priceIncrement":"0.1"}]"#,
     );
-    for r in requests(&mut e) {
-        reply(
-            &mut e,
-            &r,
-            200,
-            if r.url.contains("tickers") {
-                r#"[{"symbol":"SOL_USDC_PERP","lastPrice":"141","priceChangePercent":"0.01","volume":"10","quoteVolume":"1410"}]"#
-            } else {
-                "[]"
-            },
-        );
-    }
     let mut private = None;
     for _ in 0..6 {
         let actions: Vec<_> = e.drain_actions().collect();
         for a in actions {
             match a {
                 Action::Http(r) => {
+                    if r.url.contains("/tickers") || r.url.contains("/markPrices") {
+                        reply(&mut e, &r, 200, if r.url.contains("/tickers") {
+                            r#"[{"symbol":"SOL_USDC_PERP","lastPrice":"141","priceChangePercent":"0.01","volume":"10","quoteVolume":"1410"}]"#
+                        } else { "[]" });
+                        continue;
+                    }
                     let body = if r.url.ends_with("/account") {
                         r#"{"leverageLimit":"10"}"#
                     } else if r.url.ends_with("/position") {
@@ -125,7 +119,7 @@ fn ready_snapshot(
                         body,
                     );
                 }
-                Action::WsConnect { socket, .. } => private = Some(socket),
+                Action::WsConnect { socket, channel: Some(safe_cex_engine::SocketChannel::Private), .. } => private = Some(socket),
                 _ => {}
             }
         }

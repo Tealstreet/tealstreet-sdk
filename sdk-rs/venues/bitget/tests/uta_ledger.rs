@@ -264,8 +264,8 @@ fn usdc_category_does_not_relabel_returned_currency() {
         product: Product::Usdc,
         ..Options::default()
     });
-    h.respond("/contracts", 200, support::CONTRACTS);
-    h.respond("/tickers", 200, support::TICKERS);
+    h.respond("/contracts", 200, &support::CONTRACTS.replace("USDT", "USDC"));
+    h.respond("/tickers", 200, &support::TICKERS.replace("USDT", "USDC"));
     h.respond(
         "/account/settings",
         200,

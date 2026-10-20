@@ -124,7 +124,7 @@ impl Venue for Paradex {
         match pending {
             Pending::Public(request) => {
                 self.public_response(cx, request, response);
-                if cx.store.loaded().tickers {
+                if cx.store.loaded().markets {
                     self.account.start(cx);
                 }
             }

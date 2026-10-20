@@ -23,9 +23,10 @@ fn startup() -> (
     e.start(0.0);
     let a = actions(&mut e).remove(0);
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = actions(&mut e).remove(0);
+    let mut initial = actions(&mut e);
+    let a = initial.remove(0);
     reply(&mut e, &a, &envelope(TICKER), 2.0);
-    let initial = actions(&mut e);
+    initial.extend(actions(&mut e));
     let business = initial
         .iter()
         .find_map(|a| match a {

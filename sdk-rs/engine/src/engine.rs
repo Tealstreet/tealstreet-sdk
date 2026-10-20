@@ -2361,3 +2361,71 @@ mod signing_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+    use crate::startup::{Backoff, number_or_zero};
+
+    #[test]
+    fn discovery_backoff_caps_deduplicates_and_resets_independent_reads() {
+        let mut io = Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.0,
+            store: &mut store,
+            io: &mut io,
+        };
+        let mut retry = Backoff::default();
+        for expected in [1000., 2000., 4000., 8000., 16000., 30000., 30000.] {
+            retry.failed(&mut cx, "markets");
+            retry.failed(&mut cx, "markets");
+            let timers: Vec<_> = cx
+                .io
+                .actions
+                .drain(..)
+                .filter_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(timers.len(), 1);
+            assert_eq!(timers[0].1, expected);
+            assert_eq!(retry.on_timer(timers[0].0), Some("markets"));
+            assert_eq!(retry.on_timer(timers[0].0), None);
+        }
+        retry.failed(&mut cx, "tickers");
+        retry.succeeded(&mut cx, &"markets");
+        retry.failed(&mut cx, "markets");
+        let timers: Vec<_> = cx
+            .io
+            .actions
+            .drain(..)
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timers.len(), 2);
+        assert!(timers.iter().all(|(_, at)| *at == 1000.));
+        retry.succeeded(&mut cx, &"tickers");
+        assert_eq!(retry.on_timer(timers[0].0), None);
+        assert!(
+            cx.io
+                .actions
+                .iter()
+                .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == timers[0].0))
+        );
+    }
+
+    #[test]
+    fn public_blank_coercion_rejects_nonfinite_or_garbage_numbers() {
+        for blank in ["", " ", "\t"] {
+            assert_eq!(number_or_zero(blank), Some(0.));
+        }
+        assert_eq!(number_or_zero("-2.5"), Some(-2.5));
+        for bad in ["NaN", "inf", "oops", "1x"] {
+            assert_eq!(number_or_zero(bad), None);
+        }
+    }
+}

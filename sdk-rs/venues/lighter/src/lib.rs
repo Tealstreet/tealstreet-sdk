@@ -142,7 +142,7 @@ pub struct Lighter {
     ticker_revision: u64,
     ticker_sources: HashMap<String, u64>,
     ticker_in_flight: bool,
-    ticker_retry_at: f64,
+    startup: safe_cex_engine::startup::Backoff<bool>,
     poll: Option<TimerId>,
 }
 pub fn interval_ms(interval: &str) -> Option<f64> {
@@ -176,7 +176,7 @@ impl Lighter {
             ticker_revision: 0,
             ticker_sources: HashMap::new(),
             ticker_in_flight: false,
-            ticker_retry_at: 0.0,
+            startup: Default::default(),
             poll: None,
         }
     }
@@ -254,7 +254,7 @@ impl Lighter {
         }
     }
     fn ticker_seed(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.ticker_in_flight || cx.now < self.ticker_retry_at {
+        if self.ticker_in_flight || self.startup.waiting(&false) {
             return;
         }
         self.ticker_in_flight = true;
@@ -585,9 +585,10 @@ impl Lighter {
             Pending::Markets {
                 fallback: false, ..
             } => self.markets(cx, true),
+            Pending::Markets { fallback: true, .. } => self.startup.failed(cx, true),
             Pending::Tickers { .. } => {
                 self.ticker_in_flight = false;
-                self.ticker_retry_at = cx.now + 3_000.0;
+                self.startup.failed(cx, false);
             }
             Pending::Depth {
                 symbol, generation, ..
@@ -618,7 +619,6 @@ impl Lighter {
                     s.in_flight = false;
                 }
             }
-            _ => cx.log(LogLevel::Error, error),
         }
     }
 }
@@ -837,7 +837,7 @@ impl Venue for Lighter {
             Pending::Markets {
                 rows,
                 metadata,
-                failed,
+                failed: _,
                 ..
             } => match serde_json::from_str::<Instrument<'_>>(item) {
                 Ok(m) => {
@@ -859,7 +859,7 @@ impl Venue for Lighter {
                         || m.market_id == 255.0
                         || m.market_id.fract() != 0.0
                     {
-                        *failed = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                     let fraction = m
@@ -930,67 +930,67 @@ impl Venue for Lighter {
                         maker_fee: None,
                     });
                 }
-                Err(_) => *failed = true,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
-            Pending::Tickers { rows, failed, .. } => {
-                match serde_json::from_str::<Stats<'_>>(item) {
-                    Ok(stats) => {
-                        let id = stats.market_id.map(|v| format!("{v:.0}"));
-                        if let Some(symbol) = self
-                            .symbol_for_id(id.as_deref().unwrap_or(""))
-                            .or_else(|| cx.store.ticker(&stats.symbol).map(|t| t.symbol.as_str()))
-                        {
-                            let mut ticker = cx.store.ticker(symbol).cloned().unwrap();
-                            if let Some(v) = stats.mark_price {
+            Pending::Tickers {
+                rows, failed: _, ..
+            } => match serde_json::from_str::<Stats<'_>>(item) {
+                Ok(stats) => {
+                    let id = stats.market_id.map(|v| format!("{v:.0}"));
+                    if let Some(symbol) = self
+                        .symbol_for_id(id.as_deref().unwrap_or(""))
+                        .or_else(|| cx.store.ticker(&stats.symbol).map(|t| t.symbol.as_str()))
+                    {
+                        let mut ticker = cx.store.ticker(symbol).cloned().unwrap();
+                        if let Some(v) = stats.mark_price {
+                            ticker.mark = v;
+                        }
+                        if let Some(v) = stats.index_price {
+                            ticker.index = v;
+                            if stats.mark_price.is_none() {
                                 ticker.mark = v;
                             }
-                            if let Some(v) = stats.index_price {
-                                ticker.index = v;
-                                if stats.mark_price.is_none() {
-                                    ticker.mark = v;
-                                }
-                            }
-                            if let Some(v) = stats.last_trade_price {
-                                ticker.last = v;
-                            }
-                            if let Some(v) = stats
-                                .best_bid_price
-                                .as_ref()
-                                .or(stats.b.as_ref())
-                                .and_then(BestPrice::price)
-                            {
-                                ticker.bid = v;
-                            }
-                            if let Some(v) = stats
-                                .best_ask_price
-                                .as_ref()
-                                .or(stats.a.as_ref())
-                                .and_then(BestPrice::price)
-                            {
-                                ticker.ask = v;
-                            }
-                            if let Some(v) = stats.open_interest {
-                                ticker.open_interest = v;
-                            }
-                            if let Some(v) = stats.current_funding_rate.or(stats.funding_rate) {
-                                ticker.funding_rate =
-                                    if v == 0.0012 { 0.0001 } else { v * 8.0 / 100.0 };
-                            }
-                            if let Some(v) = stats.daily_base_token_volume {
-                                ticker.volume = v;
-                            }
-                            if let Some(v) = stats.daily_quote_token_volume {
-                                ticker.quote_volume = v;
-                            }
-                            if let Some(v) = stats.daily_price_change {
-                                ticker.percentage = v;
-                            }
-                            rows.push((symbol.into(), ticker));
                         }
+                        if let Some(v) = stats.last_trade_price {
+                            ticker.last = v;
+                        }
+                        if let Some(v) = stats
+                            .best_bid_price
+                            .as_ref()
+                            .or(stats.b.as_ref())
+                            .and_then(BestPrice::price)
+                        {
+                            ticker.bid = v;
+                        }
+                        if let Some(v) = stats
+                            .best_ask_price
+                            .as_ref()
+                            .or(stats.a.as_ref())
+                            .and_then(BestPrice::price)
+                        {
+                            ticker.ask = v;
+                        }
+                        if let Some(v) = stats.open_interest {
+                            ticker.open_interest = v;
+                        }
+                        if let Some(v) = stats.current_funding_rate.or(stats.funding_rate) {
+                            ticker.funding_rate =
+                                if v == 0.0012 { 0.0001 } else { v * 8.0 / 100.0 };
+                        }
+                        if let Some(v) = stats.daily_base_token_volume {
+                            ticker.volume = v;
+                        }
+                        if let Some(v) = stats.daily_quote_token_volume {
+                            ticker.quote_volume = v;
+                        }
+                        if let Some(v) = stats.daily_price_change {
+                            ticker.percentage = v;
+                        }
+                        rows.push((symbol.into(), ticker));
                     }
-                    Err(_) => *failed = true,
                 }
-            }
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
+            },
             Pending::Candles { rows, failed, .. } => {
                 match serde_json::from_str::<CandleRow>(item) {
                     Ok(row) => rows.push(row.candle()),
@@ -1046,6 +1046,7 @@ impl Venue for Lighter {
                     );
                     return;
                 }
+                self.startup.succeeded(cx, &true);
                 self.symbols = rows
                     .iter()
                     .map(|m| (m.id.clone(), m.symbol.clone()))
@@ -1071,7 +1072,7 @@ impl Venue for Lighter {
                 revision,
             } => {
                 self.ticker_in_flight = false;
-                self.ticker_retry_at = cx.now + 3_000.0;
+                self.startup.succeeded(cx, &false);
                 if !failed {
                     for (symbol, ticker) in rows {
                         if self.ticker_sources.get(&symbol).copied().unwrap_or(0) <= revision {
@@ -1191,6 +1192,14 @@ impl Venue for Lighter {
         self.public_failed(cx, pending, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(markets) = self.startup.on_timer(timer) {
+            if markets {
+                self.markets(cx, false);
+            } else {
+                self.ticker_seed(cx);
+            }
+            return;
+        }
         if self.account_timer(cx, timer) || self.trade_timer(cx, timer) {
             return;
         }

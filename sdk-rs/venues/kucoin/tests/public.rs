@@ -803,7 +803,7 @@ fn missing_welcome_reconnects_even_if_an_early_pong_arrives() {
 }
 
 #[test]
-fn private_snapshot_starts_only_once_after_private_welcome() {
+fn private_snapshot_starts_before_ticker_and_private_welcome_and_is_not_duplicated() {
     let mut e = Engine::new(Kucoin::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
@@ -817,12 +817,10 @@ fn private_snapshot_starts_only_once_after_private_welcome() {
         &r,
         &format!(r#"{{"code":"200000","data":[{MARKET}]}}"#),
     );
-    let r = requests(&mut e).remove(0);
-    answer(
-        &mut e,
-        &r,
-        r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100"}]}"#,
-    );
+    let early = requests(&mut e);
+    assert!(early.iter().any(|r| r.url.contains("/positions")), "REST account snapshot must start before any ticker reply or private welcome");
+    let r = early.iter().find(|r| r.url.contains("/allTickers")).unwrap();
+    answer(&mut e, r, r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100"}]}"#);
     let tokens = requests(&mut e);
     assert_eq!(tokens.len(), 3);
     assert!(tokens.iter().all(|r| r.url.contains("/bullet-")));
@@ -846,11 +844,7 @@ fn private_snapshot_starts_only_once_after_private_welcome() {
     assert!(!e.has_actions());
     welcome(&mut e, socket);
     let actions = e.drain_actions().collect::<Vec<_>>();
-    assert!(
-        actions
-            .iter()
-            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/positions")))
-    );
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(r) if r.url.contains("/positions"))), "welcome must not duplicate in-flight REST snapshots");
     assert_eq!(
         actions
             .iter()

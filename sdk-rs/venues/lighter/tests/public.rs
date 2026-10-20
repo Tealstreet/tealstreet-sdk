@@ -355,3 +355,45 @@ fn empty_quotes_and_bad_market_rows_do_not_drop_other_market_statistics() {
     assert_eq!(e.store().ticker("BTC").unwrap().mark, 200.0);
     assert_eq!(e.store().ticker("BTC").unwrap().funding_rate, 0.0001);
 }
+
+#[test]
+fn primary_and_fallback_catalogues_retry_with_backoff_then_keep_valid_neighbors() {
+    let mut e = Engine::new(Lighter::new(Options::default()));
+    e.start(0.);
+    for delay in [1000., 2000., 4000.] {
+        for _ in 0..2 {
+            let id = e
+                .drain_actions()
+                .find_map(|a| match a {
+                    Action::Http(r) => Some(r.id),
+                    _ => None,
+                })
+                .unwrap();
+            reply(
+                &mut e,
+                id,
+                r#"{"code":500,"message":"temporarily unavailable"}"#,
+            );
+        }
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(at, 1000. + delay);
+        e.handle(at, Event::TimerFired { timer });
+        assert!(!e.store().loaded().markets);
+    }
+    let id = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r.id),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut e, id, &MARKETS.replacen("[", "[{},", 1));
+    assert_eq!(e.store().markets().len(), 2);
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
+}

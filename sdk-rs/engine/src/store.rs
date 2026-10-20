@@ -307,9 +307,33 @@ impl Store {
             .map(|slot| self.ticker_by_symbol[slot])
     }
 
+    /// Recover a catalogue ticker omitted by a malformed seed when live data arrives.
+    /// This does not claim that the REST ticker seed succeeded.
+    pub fn ensure_ticker(&mut self, symbol: &str) -> Option<u32> {
+        if let Some(index) = self.ticker_index(symbol) {
+            return Some(index);
+        }
+        let market = self.market(symbol)?;
+        let ticker = Ticker {
+            id: market.id.clone(),
+            symbol: market.symbol.clone(),
+            ..Ticker::default()
+        };
+        let slot = self
+            .ticker_by_symbol
+            .binary_search_by(|&index| self.tickers[index as usize].symbol.as_str().cmp(symbol))
+            .unwrap_err();
+        let index = self.tickers.len() as u32;
+        self.tickers.push(ticker);
+        self.ticker_masks.push(0);
+        self.ticker_by_symbol.insert(slot, index);
+        self.changes.tickers_replaced = true;
+        Some(index)
+    }
+
     /// Mutate ticker values, keeping its symbol identity; changed fields go out as deltas.
     pub fn update_ticker(&mut self, symbol: &str, update: impl FnOnce(&mut Ticker)) {
-        let Some(index) = self.ticker_index(symbol) else {
+        let Some(index) = self.ensure_ticker(symbol) else {
             return;
         };
         self.update_ticker_at(index, update);
@@ -1067,6 +1091,25 @@ mod tests {
             symbol: symbol.into(),
             ..Ticker::default()
         }
+    }
+
+    #[test]
+    fn live_ticker_recovers_a_skipped_seed_row_without_claiming_seed_success() {
+        let mut store = Store::default();
+        store.set_markets(vec![market("BBB"), market("AAA")]);
+        assert!(!store.loaded().tickers);
+        store.update_ticker("BBB", |ticker| ticker.last = 12.0);
+        assert!(!store.loaded().tickers);
+        assert_eq!(store.ticker("BBB").unwrap().last, 12.0);
+        assert!(store.changes.tickers_replaced);
+        let index = store.ensure_ticker("BBB").unwrap();
+        assert_eq!(index, store.ensure_ticker("BBB").unwrap());
+        store.update_ticker("AAA", |ticker| ticker.bid = 11.0);
+        assert_eq!(store.ticker("AAA").unwrap().bid, 11.0);
+        assert_eq!(store.ticker("BBB").unwrap().last, 12.0);
+        store.update_ticker("UNKNOWN", |ticker| ticker.last = 100.0);
+        assert!(store.ticker("UNKNOWN").is_none());
+        assert_eq!(store.tickers().len(), 2);
     }
 
     fn market(symbol: &str) -> Market {

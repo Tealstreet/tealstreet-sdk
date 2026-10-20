@@ -47,7 +47,7 @@ pub enum Pending {
     Meta {
         dex: String,
         offset: u32,
-        instruments: Vec<Instrument>,
+        instruments: Vec<Option<Instrument>>,
         markets: Vec<Market>,
         tickers: Vec<Ticker>,
         valid: bool,
@@ -95,7 +95,7 @@ pub struct Hyperliquid {
     coins: HashMap<String, String>,
     dex_queue: std::collections::VecDeque<(String, u32)>,
     dex_names: Vec<String>,
-    meta_retries: HashMap<TimerId, (String, u32, u8)>,
+    startup: safe_cex_engine::startup::Backoff<(String, u32)>,
 }
 impl Hyperliquid {
     pub fn new(options: Options) -> Self {
@@ -112,7 +112,7 @@ impl Hyperliquid {
             coins: HashMap::new(),
             dex_queue: Default::default(),
             dex_names: Vec::new(),
-            meta_retries: HashMap::new(),
+            startup: Default::default(),
         }
     }
     pub fn new_spot(mut options: Options) -> Self {
@@ -490,17 +490,22 @@ fn price_decimals(price: f64, size: i32) -> i32 {
     (6 - size).min(significant.max(0))
 }
 fn market_rows(
+    cx: &mut Cx<'_, Pending>,
     dex: &str,
-    instruments: &[Instrument],
+    instruments: &[Option<Instrument>],
     raw: &str,
     markets: &mut Vec<Market>,
     tickers: &mut Vec<Ticker>,
 ) -> bool {
     let mut i = 0;
-    json::each::<AssetCtx>(raw, |ctx| {
+    json::each::<&serde_json::value::RawValue>(raw, |row| {
         let index = i;
         i += 1;
-        let Some(meta) = instruments.get(index) else {
+        let Some(meta) = instruments.get(index).and_then(Option::as_ref) else {
+            return;
+        };
+        let Ok(ctx) = serde_json::from_str::<AssetCtx>(row.get()) else {
+            safe_cex_engine::startup::skipped_row(cx);
             return;
         };
         let Some(price) = ctx.mid_px.filter(|p| p.is_finite() && *p > 0.0) else {
@@ -590,27 +595,47 @@ fn market_rows(
 }
 
 fn spot_rows(
+    cx: &mut Cx<'_, Pending>,
     meta: &SpotMeta,
     raw: &str,
     markets: &mut Vec<Market>,
     tickers: &mut Vec<Ticker>,
 ) -> bool {
-    let Ok(contexts) = serde_json::from_str::<Vec<SpotCtx>>(raw) else {
+    let Ok(contexts) = serde_json::from_str::<Vec<safe_cex_engine::startup::Row<SpotCtx>>>(raw)
+    else {
         return false;
     };
-    let positional =
-        contexts.len() == meta.universe.len() && contexts.iter().all(|c| c.coin.is_empty());
+    let positional = contexts.len() == meta.universe.len()
+        && contexts
+            .iter()
+            .filter_map(|row| row.0.as_ref())
+            .all(|c| c.coin.is_empty());
+    for row in &contexts {
+        if row.0.is_none() {
+            safe_cex_engine::startup::skipped_row(cx);
+        }
+    }
     for (position, native) in meta.universe.iter().enumerate() {
+        let Some(native) = &native.0 else {
+            safe_cex_engine::startup::skipped_row(cx);
+            continue;
+        };
         let Some(ctx) = contexts
             .iter()
+            .filter_map(|row| row.0.as_ref())
             .find(|c| c.coin == native.name)
-            .or_else(|| positional.then(|| contexts.get(position)).flatten())
+            .or_else(|| {
+                positional
+                    .then(|| contexts.get(position).and_then(|row| row.0.as_ref()))
+                    .flatten()
+            })
         else {
             continue;
         };
         let Some(token) = meta
             .tokens
             .iter()
+            .filter_map(|row| row.0.as_ref())
             .find(|t| Some(&t.index) == native.tokens.first())
         else {
             continue;
@@ -618,6 +643,7 @@ fn spot_rows(
         let Some(quote) = meta
             .tokens
             .iter()
+            .filter_map(|row| row.0.as_ref())
             .find(|t| Some(&t.index) == native.tokens.get(1))
         else {
             continue;
@@ -833,7 +859,7 @@ impl Venue for Hyperliquid {
                     return;
                 }
                 if let Some(meta) = meta {
-                    for native in meta.universe {
+                    for native in meta.universe.into_iter().filter_map(|row| row.0) {
                         if let Some(m) = markets.iter().find(|m| m.id == native.name) {
                             self.assets.insert(m.symbol.clone(), 10_000 + native.index);
                             if let Some(token) = native.tokens.first() {
@@ -853,6 +879,7 @@ impl Venue for Hyperliquid {
                         }
                     }
                 }
+                self.startup.succeeded(cx, &(String::new(), 0));
                 cx.store.set_markets(markets);
                 cx.store.set_tickers(tickers);
                 self.next_dex(cx);
@@ -893,8 +920,12 @@ impl Venue for Hyperliquid {
                     );
                     return;
                 }
+                self.startup.succeeded(cx, &(dex.clone(), offset));
                 if valid {
                     for (index, meta) in instruments.iter().enumerate() {
+                        let Some(meta) = meta else {
+                            continue;
+                        };
                         let id = if dex.is_empty() || meta.name.contains(':') {
                             meta.name.clone()
                         } else {
@@ -958,13 +989,20 @@ impl Venue for Hyperliquid {
             } => {
                 match *stage {
                     0 => match serde_json::from_str::<SpotMeta>(item) {
-                        Ok(value) => *meta = Some(value),
+                        Ok(value) => {
+                            for token in &value.tokens {
+                                if token.0.is_none() {
+                                    safe_cex_engine::startup::skipped_row(_cx);
+                                }
+                            }
+                            *meta = Some(value);
+                        }
                         Err(_) => *valid = false,
                     },
                     1 => {
                         *valid &= meta
                             .as_ref()
-                            .is_some_and(|meta| spot_rows(meta, item, markets, tickers))
+                            .is_some_and(|meta| spot_rows(_cx, meta, item, markets, tickers))
                     }
                     _ => *valid = false,
                 }
@@ -984,10 +1022,22 @@ impl Venue for Hyperliquid {
             } => {
                 match *stage {
                     0 => match serde_json::from_str::<Meta>(item) {
-                        Ok(meta) => *instruments = meta.universe,
+                        Ok(meta) => {
+                            *instruments = meta
+                                .universe
+                                .into_iter()
+                                .map(|row| {
+                                    let parsed = serde_json::from_str::<Instrument>(row.get()).ok();
+                                    if parsed.is_none() {
+                                        safe_cex_engine::startup::skipped_row(_cx);
+                                    }
+                                    parsed
+                                })
+                                .collect();
+                        }
                         Err(_) => *valid = false,
                     },
-                    1 => *valid &= market_rows(dex, instruments, item, markets, tickers),
+                    1 => *valid &= market_rows(_cx, dex, instruments, item, markets, tickers),
                     _ => *valid = false,
                 }
                 *stage = stage.saturating_add(1);
@@ -1013,12 +1063,7 @@ impl Venue for Hyperliquid {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::SpotMeta { attempt, .. } if attempt < 2 => {
-                let timer = cx.set_timer(500.0 * f64::from(attempt + 1));
-                self.meta_retries
-                    .insert(timer, (String::new(), 0, attempt + 1));
-                cx.log(LogLevel::Warning, error);
-            }
+            Pending::SpotMeta { .. } => self.startup.failed(cx, (String::new(), 0)),
             Pending::Account(request) => {
                 let builder = matches!(request, account::Request::Builder);
                 self.account_failed(cx, request, error);
@@ -1030,32 +1075,25 @@ impl Venue for Hyperliquid {
             Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Dexs { .. } => self.next_dex(cx),
-            Pending::Meta {
-                dex,
-                offset,
-                attempt,
-                ..
-            } if attempt < 2 => {
-                let timer = cx.set_timer(500.0 * f64::from(attempt + 1));
-                self.meta_retries.insert(timer, (dex, offset, attempt + 1));
-                cx.log(LogLevel::Warning, error);
+            Pending::Meta { dex, offset, .. } => {
+                let optional = !dex.is_empty();
+                self.startup.failed(cx, (dex, offset));
+                if optional {
+                    self.next_dex(cx);
+                }
             }
-            Pending::Meta { dex, .. } if !dex.is_empty() => {
-                cx.log(LogLevel::Warning, error);
-                self.next_dex(cx);
-            }
-            _ => cx.log(LogLevel::Error, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
-        if let Some((dex, offset, attempt)) = self.meta_retries.remove(&timer) {
+        if let Some((dex, offset)) = self.startup.on_timer(timer) {
             if self.spot {
-                self.spot_meta_attempt(cx, attempt);
+                self.spot_meta(cx);
             } else {
-                self.meta_attempt(cx, dex, offset, attempt);
+                self.meta(cx, dex, offset);
             }
+            return;
         }
         if self.connection.reconnect == Some(timer) {
             self.connection.reconnect = None;

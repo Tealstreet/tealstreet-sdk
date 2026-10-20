@@ -43,7 +43,7 @@ pub(crate) struct Public {
     next_rpc: u64,
     subscriptions: HashMap<u64, Subscription>,
     retries: Vec<(TimerId, String, u8)>,
-    seed_retry: Option<(TimerId, bool)>,
+    seed_retry: safe_cex_engine::startup::Backoff<bool>,
     pub(crate) books: HashMap<String, BookState>,
     pub(crate) price_bands: HashMap<String, f64>,
     candles: HashMap<(String, String), CandleState>,
@@ -609,10 +609,10 @@ impl Paradex {
             Request::Markets {
                 rows,
                 bands,
-                invalid,
+                invalid: _,
             } => {
                 let Ok(identity) = serde_json::from_str::<InstrumentIdentity<'_>>(item) else {
-                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 };
                 let kind = identity.asset_kind.to_ascii_uppercase();
@@ -628,7 +628,7 @@ impl Paradex {
                     return;
                 }
                 let Ok(m) = serde_json::from_str::<Instrument<'_>>(item) else {
-                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 };
                 let imf = if m.delta1_cross_margin_params.imf_base.0 > 0. {
@@ -677,9 +677,9 @@ impl Paradex {
                     maker_fee: Some(m.maker_fee.0),
                 });
             }
-            Request::Tickers { rows, invalid } => {
+            Request::Tickers { rows, invalid: _ } => {
                 let Ok(identity) = serde_json::from_str::<MarketIdentity<'_>>(item) else {
-                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 };
                 if !identity.symbol.ends_with("-PERP")
@@ -711,7 +711,7 @@ impl Paradex {
                             });
                         }
                     }
-                    Err(_) => *invalid = true,
+                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
                 }
             }
             Request::Candles { rows, invalid, .. } => {
@@ -741,6 +741,7 @@ impl Paradex {
                 bands,
                 invalid: false,
             } => {
+                self.public.seed_retry.succeeded(cx, &true);
                 self.public.price_bands = bands;
                 cx.store.set_markets(rows);
                 self.public
@@ -776,14 +777,15 @@ impl Paradex {
                         false,
                     );
                 }
+                self.public_connect(cx);
                 self.public_seed(cx, false);
             }
             Request::Tickers {
                 rows,
                 invalid: false,
             } => {
+                self.public.seed_retry.succeeded(cx, &false);
                 cx.store.set_tickers(rows);
-                self.public_connect(cx);
                 if self.options.public_data_only
                     || self.options.key.as_ref().is_none_or(String::is_empty)
                 {
@@ -856,9 +858,7 @@ impl Paradex {
             Request::Markets { .. } | Request::Tickers { .. } => {
                 let markets = matches!(request, Request::Markets { .. });
                 cx.log(LogLevel::Warning, error);
-                if self.public.seed_retry.is_none() {
-                    self.public.seed_retry = Some((cx.set_timer(1_000.), markets));
-                }
+                self.public.seed_retry.failed(cx, markets);
             }
             Request::Candles {
                 target,
@@ -997,8 +997,7 @@ impl Paradex {
         }
     }
     pub(crate) fn public_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.public.seed_retry.is_some_and(|(t, _)| t == timer) {
-            let (_, markets) = self.public.seed_retry.take().unwrap();
+        if let Some(markets) = self.public.seed_retry.on_timer(timer) {
             self.public_seed(cx, markets);
             return true;
         }
@@ -1252,7 +1251,11 @@ mod tests {
             })
             .unwrap();
         failed.handle(0.,Event::HttpResponse{request:id,response:Response{status:200,headers:"",body:r#"{"results":[{"symbol":"BTC-USD-PERP","asset_kind":"PERP","price_bands_width":"5"},{"symbol":"ETH-USD-PERP","step_size":"invalid"}]}"#}});
-        assert!(!failed.store().loaded().markets);
-        assert!(failed.venue().public.price_bands.is_empty());
+        assert!(failed.store().loaded().markets);
+        assert_eq!(failed.store().markets().len(), 1);
+        assert_eq!(
+            failed.venue().public.price_bands.get("BTC-USD-PERP"),
+            Some(&0.05)
+        );
     }
 }

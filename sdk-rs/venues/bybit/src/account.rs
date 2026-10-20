@@ -1086,7 +1086,7 @@ impl BybitLinear {
     }
 
     pub(crate) fn try_start_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if !self.tickers_ready
+        if !self.catalog_ready
             || !self.startup.account_info
             || std::mem::replace(&mut self.account.started, true)
         {

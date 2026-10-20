@@ -8,6 +8,7 @@ pub mod model;
 pub mod num;
 pub mod paging;
 pub mod public_feed;
+pub mod startup;
 pub mod store;
 pub mod wire;
 

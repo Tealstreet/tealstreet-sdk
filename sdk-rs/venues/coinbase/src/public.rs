@@ -63,7 +63,7 @@ pub(crate) struct Public {
     reconnect: Option<TimerId>,
     sequence: Option<u64>,
     poll: Option<TimerId>,
-    retry: Option<TimerId>,
+    retry: safe_cex_engine::startup::Backoff<()>,
     kind: Option<ProductKind>,
     pub books: HashMap<String, Depth>,
     candles: HashMap<(String, String), (u32, Option<Candle>)>,
@@ -558,7 +558,7 @@ impl Coinbase {
     }
     pub(crate) fn public_item(
         &mut self,
-        _cx: &mut Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         pending: &mut Request,
         item: &str,
     ) {
@@ -566,7 +566,7 @@ impl Coinbase {
             Request::Instruments {
                 markets,
                 tickers,
-                invalid,
+                invalid: _,
                 ..
             } => match serde_json::from_str::<Instrument>(item) {
                 Ok(row) => {
@@ -574,7 +574,7 @@ impl Coinbase {
                         return;
                     }
                     if row.base_increment <= 0. || row.quote_increment <= 0. {
-                        *invalid = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                     let symbol = format!("{}-INTX", row.symbol);
@@ -612,7 +612,7 @@ impl Coinbase {
                         .iter()
                         .any(|n| *n < 0.)
                         {
-                            *invalid = true;
+                            safe_cex_engine::startup::skipped_row(cx);
                             return;
                         }
                         tickers.push(Ticker {
@@ -641,12 +641,12 @@ impl Coinbase {
                         });
                     }
                 }
-                Err(_) => *invalid = true,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
             Request::Products {
                 markets,
                 tickers,
-                invalid,
+                invalid: _,
                 kind,
                 ..
             } => match serde_json::from_str::<Product>(item) {
@@ -655,7 +655,7 @@ impl Coinbase {
                     if (row.product_type == "FUTURE" && !future)
                         || (row.product_type == "SPOT" && future)
                     {
-                        *invalid = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                     let spot = row.product_type == "SPOT" && !future;
@@ -685,7 +685,7 @@ impl Coinbase {
                     });
                     let Some(contract) = contract.filter(|n| n.is_finite() && *n > 0.) else {
                         if !expiring {
-                            *invalid = true;
+                            safe_cex_engine::startup::skipped_row(cx);
                         }
                         return;
                     };
@@ -694,7 +694,7 @@ impl Coinbase {
                         || row.base_min_size < 0.
                         || row.base_max_size < row.base_min_size
                     {
-                        *invalid = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                     let base = row
@@ -757,7 +757,7 @@ impl Coinbase {
                         ..Ticker::default()
                     });
                 }
-                Err(_) => *invalid = true,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
             Request::Candles { rows, invalid, .. } | Request::Daily { rows, invalid, .. } => {
                 match serde_json::from_str::<CandleRow>(item)
@@ -824,6 +824,7 @@ impl Coinbase {
                     );
                     return;
                 }
+                self.public.retry.succeeded(cx, &());
                 if initial {
                     cx.store.set_markets(markets);
                     cx.store.set_tickers(tickers);
@@ -932,6 +933,7 @@ impl Coinbase {
                     );
                     return;
                 }
+                self.public.retry.succeeded(cx, &());
                 for ticker in &tickers {
                     self.public.products.insert(
                         ticker.symbol.clone(),
@@ -1058,9 +1060,10 @@ impl Coinbase {
             }
             _ => {
                 cx.log(LogLevel::Warning, error);
-                if self.public.retry.is_none() {
-                    self.public.retry = Some(cx.set_timer(1000.));
+                if let Some(timer) = self.public.poll.take() {
+                    cx.clear_timer(timer);
                 }
+                self.public.retry.failed(cx, ());
             }
         }
     }
@@ -1098,7 +1101,8 @@ impl Coinbase {
             }
             return true;
         }
-        if self.public.poll == Some(timer) || self.public.retry == Some(timer) {
+        let retry = self.public.retry.on_timer(timer).is_some();
+        if self.public.poll == Some(timer) || retry {
             if self.public.poll == Some(timer) {
                 self.public.poll = None;
                 // Initial private reconciliation scans every working status and
@@ -1107,9 +1111,6 @@ impl Coinbase {
                     self.public.poll = Some(cx.set_timer(self.public_poll_interval()));
                     return true;
                 }
-            }
-            if self.public.retry == Some(timer) {
-                self.public.retry = None;
             }
             match self.public.kind.unwrap_or(ProductKind::Intx) {
                 ProductKind::Intx => {

@@ -295,3 +295,52 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
         Action::Notice(safe_cex_engine::Notice::CommandDone { result: Err(_), .. })
     )));
 }
+
+#[test]
+fn malformed_nested_rows_keep_positional_native_asset_mapping_and_valid_peers() {
+    let mut e = Engine::new(Hyperliquid::new(Options::default()));
+    e.start(0.);
+    let id = request(&mut e);
+    response(
+        &mut e,
+        id,
+        r#"[{"universe":[{}, {"name":"BTC","szDecimals":5}, {"name":"ETH","szDecimals":4}]},[{"midPx":"999"},{"midPx":"100","markPx":"100"},{"midPx":"bad"}]]"#,
+    );
+    assert_eq!(e.store().markets().len(), 1);
+    assert_eq!(e.store().markets()[0].id, "BTC");
+    assert_eq!(e.store().tickers()[0].last, 100.);
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
+}
+
+#[test]
+fn base_metadata_failure_keeps_backing_off_until_a_valid_read_arrives() {
+    let mut e = Engine::new(Hyperliquid::new(Options::default()));
+    e.start(0.);
+    for delay in [1000., 2000., 4000., 8000., 16000., 30000., 30000.] {
+        let id = request(&mut e);
+        e.handle(
+            1000.,
+            Event::HttpFailed {
+                request: id,
+                error: "offline",
+            },
+        );
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(at, 1000. + delay);
+        e.handle(at, Event::TimerFired { timer });
+        assert!(!e.store().loaded().markets);
+    }
+    let id = request(&mut e);
+    response(
+        &mut e,
+        id,
+        r#"[{"universe":[{"name":"BTC","szDecimals":5}]},[{"midPx":"100"}]]"#,
+    );
+    assert_eq!(e.store().markets().len(), 1);
+}

@@ -140,7 +140,6 @@ fn independent_book_subscribers_and_reconnect_restore_interest() {
 fn failed_or_malformed_market_lists_do_not_load_and_retry() {
     for body in [
         r#"{"error":"UNAVAILABLE","message":"try later","results":[]}"#,
-        r#"{"results":[{"symbol":"BTC-USD-PERP","step_size":"invalid"}]}"#,
         r#"{"message":"missing list"}"#,
     ] {
         let mut h = Harness::empty(Options {
@@ -747,7 +746,7 @@ fn market_selection_precedes_numeric_decoding_of_irrelevant_instruments() {
 }
 
 #[test]
-fn malformed_selected_perpetual_numbers_still_reject_the_entire_market_snapshot() {
+fn malformed_selected_perpetual_numbers_skip_only_the_bad_market_row() {
     for invalid in ["\"invalid\"", "null", "\"NaN\""] {
         let mut h = Harness::empty(Options {
             public_data_only: true,
@@ -757,12 +756,11 @@ fn malformed_selected_perpetual_numbers_still_reject_the_entire_market_snapshot(
             {{"symbol":"BTC-USD-PERP","asset_kind":"PERP","step_size":"0.001","price_bands_width":"5"}},
             {{"symbol":"ETH-USD-PERP","asset_kind":"PERP","status":"ACTIVE","price_tick_size":{invalid}}}
         ]}}"#));
-        assert!(!h.e.store().loaded().markets);
-        assert!(h.e.store().markets().is_empty());
-        assert!(h.pending.is_empty());
-        h.timer(h.now + 1_000.);
+        assert!(h.e.store().loaded().markets);
+        assert_eq!(h.e.store().markets().len(), 1);
+        assert_eq!(h.e.store().markets()[0].symbol, "BTC-USD-PERP");
         assert_eq!(h.pending.len(), 1);
-        assert!(h.pending[0].url.ends_with("/markets"));
+        assert!(h.pending[0].url.ends_with("summary?market=ALL"));
     }
 }
 

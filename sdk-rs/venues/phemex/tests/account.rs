@@ -55,9 +55,9 @@ fn started() -> (Engine<PhemexPerpetuals>, Vec<Action>, SocketId) {
     e.start(NOW);
     let a: Vec<_> = e.drain_actions().collect();
     response(&mut e, NOW, request(&a, "products").id, 200, PRODUCTS);
-    let a: Vec<_> = e.drain_actions().collect();
+    let mut a: Vec<_> = e.drain_actions().collect();
     response(&mut e, NOW, request(&a, "24hr/all").id, 200, DAILY);
-    let a: Vec<_> = e.drain_actions().collect();
+    a.extend(e.drain_actions());
     let socket = a
         .iter()
         .filter_map(|a| {

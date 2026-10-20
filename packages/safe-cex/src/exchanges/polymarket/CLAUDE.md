@@ -170,3 +170,13 @@ server's available horizon depends on fidelity and is not all-history coverage.
 An upper-only bound requires `from`, and `from` must be at least 1000ms because
 the endpoint treats `startTs=0` as absent. These unsupported requests reject
 before transport rather than silently omitting older requested data.
+
+
+## Rust public discovery resilience
+
+Rust catalogue/ticker reads retry through the shared engine capped exponential
+backoff. A malformed typed public row is skipped with a warning while valid
+neighbours remain usable. Private account initialization starts once the usable
+catalogue is available, without waiting for REST ticker seeds. Account snapshots,
+mutation acknowledgements and signing validation retain their stricter rules.
+See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.

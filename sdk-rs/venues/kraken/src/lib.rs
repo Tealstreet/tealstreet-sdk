@@ -71,6 +71,7 @@ struct CandleState {
 }
 pub struct Kraken {
     options: Options,
+    discovery: safe_cex_engine::startup::Backoff<bool>,
     signer: Option<sign::Signer>,
     read_signer: Option<sign::Signer>,
     account: account::Account,
@@ -103,6 +104,7 @@ impl Kraken {
             .and_then(|r| sign::Signer::new(&r.secret).ok());
         Self {
             options,
+            discovery: Default::default(),
             read_signer,
             signer,
             account: account::Account::default(),
@@ -355,8 +357,14 @@ impl Kraken {
     }
     fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Markets { .. } => self.markets_in_flight = false,
-            Pending::Tickers { .. } => self.ticker_in_flight = false,
+            Pending::Markets { .. } => {
+                self.markets_in_flight = false;
+                self.discovery.failed(cx, false);
+            }
+            Pending::Tickers { .. } => {
+                self.ticker_in_flight = false;
+                self.discovery.failed(cx, true);
+            }
             Pending::Candles {
                 command,
                 symbol,
@@ -535,106 +543,65 @@ impl Venue for Kraken {
             Pending::Account(r) => self.account_item(cx, r, item),
             Pending::History(r) => self.history_item(cx, r, item),
             Pending::Trade(_) => {}
-            Pending::Markets { rows, failed } => match serde_json::from_str::<Instrument<'_>>(item)
-            {
-                Ok(m) => {
-                    if !m.symbol.starts_with("PF_") || m.tradeable == Some(false) {
-                        return;
-                    }
-                    let decimals = m.contract_value_trade_precision.unwrap_or(0.0);
-                    if !(-18.0..=18.0).contains(&decimals) || decimals.fract() != 0.0 {
-                        *failed = true;
-                        return;
-                    }
-                    rows.push(Market {
-                        id: format!(
-                            "{}/{}",
-                            m.base,
-                            if m.quote.is_empty() { "USD" } else { &m.quote }
-                        ),
-                        symbol: m.symbol.to_string(),
-                        pretty_symbol: Some(m.symbol[3..].into()),
-                        base: m.base.to_string(),
-                        quote: if m.quote.is_empty() {
-                            "USD".into()
-                        } else {
-                            m.quote.to_string()
-                        },
-                        active: m.status != "cancel_only",
-                        precision: Precision {
-                            amount: 10f64.powi(-(decimals as i32)),
-                            price: m.tick_size.filter(|n| *n > 0.0).unwrap_or(0.01),
-                        },
-                        limits: Limits {
-                            amount: MinMax {
-                                min: 0.0,
-                                max: 9_007_199_254_740_991.0,
-                            },
-                            leverage: MinMax {
-                                min: 1.0,
-                                max: m
-                                    .margin_levels
-                                    .first()
-                                    .filter(|m| m.initial_margin > 0.0)
-                                    .map_or(100.0, |m| (1.0 / m.initial_margin).floor()),
-                            },
-                            price: None,
-                        },
-                        contract_size: Some(m.contract_size.filter(|n| *n > 0.0).unwrap_or(1.0)),
-                        is_expiring: Some(m.last_trading_time.is_some()),
-                        is_inverse: Some(m.contract_type == "inverse"),
-                        is_spot: Some(false),
-                        is_perpetual: None,
-                        is_read_only: None,
-                        taker_fee: None,
-                        maker_fee: None,
-                    });
-                }
-                Err(error) => {
-                    *failed = true;
-                    cx.log(
-                        LogLevel::Warning,
-                        format!("Kraken invalid public row: {error}"),
-                    );
-                }
-            },
-            Pending::Tickers { rows, failed, .. } => {
-                match serde_json::from_str::<RestTicker<'_>>(item) {
-                    Ok(row) => {
-                        if let Some(m) = cx.store.market(&row.symbol) {
-                            let last = row.last.filter(|v| *v > 0.0).unwrap_or(row.mark_price);
-                            rows.push(Ticker {
-                                id: m.id.clone(),
-                                symbol: m.symbol.clone(),
-                                bid: row.bid.unwrap_or(0.0),
-                                ask: row.ask.unwrap_or(0.0),
-                                last,
-                                mark: if row.mark_price > 0.0 {
-                                    row.mark_price
-                                } else {
-                                    last
-                                },
-                                index: if row.index_price > 0.0 {
-                                    row.index_price
-                                } else {
-                                    last
-                                },
-                                percentage: row.change24h,
-                                funding_rate: if last > 0.0 {
-                                    row.funding_rate / last
-                                } else {
-                                    0.0
-                                },
-                                open_interest: row.open_interest,
-                                funding_time: 0.0,
-                                volume: row.vol24h,
-                                quote_volume: row.volume_quote,
-                                ..Ticker::default()
-                            });
+            Pending::Markets { rows, failed: _ } => {
+                match serde_json::from_str::<Instrument<'_>>(item) {
+                    Ok(m) => {
+                        if !m.symbol.starts_with("PF_") || m.tradeable == Some(false) {
+                            return;
                         }
+                        let decimals = m.contract_value_trade_precision.unwrap_or(0.0);
+                        if !(-18.0..=18.0).contains(&decimals) || decimals.fract() != 0.0 {
+                            safe_cex_engine::startup::skipped_row(cx);
+                            return;
+                        }
+                        rows.push(Market {
+                            id: format!(
+                                "{}/{}",
+                                m.base,
+                                if m.quote.is_empty() { "USD" } else { &m.quote }
+                            ),
+                            symbol: m.symbol.to_string(),
+                            pretty_symbol: Some(m.symbol[3..].into()),
+                            base: m.base.to_string(),
+                            quote: if m.quote.is_empty() {
+                                "USD".into()
+                            } else {
+                                m.quote.to_string()
+                            },
+                            active: m.status != "cancel_only",
+                            precision: Precision {
+                                amount: 10f64.powi(-(decimals as i32)),
+                                price: m.tick_size.filter(|n| *n > 0.0).unwrap_or(0.01),
+                            },
+                            limits: Limits {
+                                amount: MinMax {
+                                    min: 0.0,
+                                    max: 9_007_199_254_740_991.0,
+                                },
+                                leverage: MinMax {
+                                    min: 1.0,
+                                    max: m
+                                        .margin_levels
+                                        .first()
+                                        .filter(|m| m.initial_margin > 0.0)
+                                        .map_or(100.0, |m| (1.0 / m.initial_margin).floor()),
+                                },
+                                price: None,
+                            },
+                            contract_size: Some(
+                                m.contract_size.filter(|n| *n > 0.0).unwrap_or(1.0),
+                            ),
+                            is_expiring: Some(m.last_trading_time.is_some()),
+                            is_inverse: Some(m.contract_type == "inverse"),
+                            is_spot: Some(false),
+                            is_perpetual: None,
+                            is_read_only: None,
+                            taker_fee: None,
+                            maker_fee: None,
+                        });
                     }
                     Err(error) => {
-                        *failed = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                         cx.log(
                             LogLevel::Warning,
                             format!("Kraken invalid public row: {error}"),
@@ -642,6 +609,50 @@ impl Venue for Kraken {
                     }
                 }
             }
+            Pending::Tickers {
+                rows, failed: _, ..
+            } => match serde_json::from_str::<RestTicker<'_>>(item) {
+                Ok(row) => {
+                    if let Some(m) = cx.store.market(&row.symbol) {
+                        let last = row.last.filter(|v| *v > 0.0).unwrap_or(row.mark_price);
+                        rows.push(Ticker {
+                            id: m.id.clone(),
+                            symbol: m.symbol.clone(),
+                            bid: row.bid.unwrap_or(0.0),
+                            ask: row.ask.unwrap_or(0.0),
+                            last,
+                            mark: if row.mark_price > 0.0 {
+                                row.mark_price
+                            } else {
+                                last
+                            },
+                            index: if row.index_price > 0.0 {
+                                row.index_price
+                            } else {
+                                last
+                            },
+                            percentage: row.change24h,
+                            funding_rate: if last > 0.0 {
+                                row.funding_rate / last
+                            } else {
+                                0.0
+                            },
+                            open_interest: row.open_interest,
+                            funding_time: 0.0,
+                            volume: row.vol24h,
+                            quote_volume: row.volume_quote,
+                            ..Ticker::default()
+                        });
+                    }
+                }
+                Err(error) => {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    cx.log(
+                        LogLevel::Warning,
+                        format!("Kraken invalid public row: {error}"),
+                    );
+                }
+            },
             Pending::Candles { rows, failed, .. } => {
                 match serde_json::from_str::<CandleRow>(item) {
                     Ok(row) => rows.push(row.candle()),
@@ -682,15 +693,26 @@ impl Venue for Kraken {
             Pending::Markets { rows, failed } => {
                 self.markets_in_flight = false;
                 if failed || rows.is_empty() {
+                    self.discovery.failed(cx, false);
                     cx.log(LogLevel::Warning, "Invalid Kraken markets");
                     return;
                 }
                 let mut seen = HashSet::new();
-                if rows.iter().any(|m| !seen.insert(&m.symbol)) {
-                    cx.log(LogLevel::Warning, "Duplicate Kraken market");
-                    return;
-                }
+                let rows = rows
+                    .into_iter()
+                    .filter(|m| {
+                        if seen.insert(m.symbol.clone()) {
+                            true
+                        } else {
+                            safe_cex_engine::startup::skipped_row(cx);
+                            false
+                        }
+                    })
+                    .collect();
+                self.discovery.succeeded(cx, &false);
                 cx.store.set_markets(rows);
+                self.connect(cx);
+                self.account_start(cx);
                 self.tickers_request(cx);
             }
             Pending::Tickers {
@@ -699,14 +721,14 @@ impl Venue for Kraken {
                 revision,
             } => {
                 self.ticker_in_flight = false;
-                if failed || rows.is_empty() {
+                if failed {
+                    self.discovery.failed(cx, true);
                     cx.log(LogLevel::Warning, "Invalid Kraken tickers");
                     return;
                 }
+                self.discovery.succeeded(cx, &true);
                 if !cx.store.loaded().tickers {
                     cx.store.set_tickers(rows);
-                    self.connect(cx);
-                    self.account_start(cx);
                 } else {
                     for row in rows {
                         if self.ticker_sources.get(&row.symbol).copied().unwrap_or(0) <= revision {
@@ -799,6 +821,14 @@ impl Venue for Kraken {
         if self.account_timer(cx, timer) {
             return;
         }
+        if let Some(tickers) = self.discovery.on_timer(timer) {
+            if tickers {
+                self.tickers_request(cx);
+            } else {
+                self.markets_request(cx);
+            }
+            return;
+        }
         if self.public.reconnect == Some(timer) {
             self.public.reconnect = None;
             self.connect(cx);
@@ -821,11 +851,6 @@ impl Venue for Kraken {
         }
         if self.poll == Some(timer) {
             self.poll = None;
-            if !cx.store.loaded().markets {
-                self.markets_request(cx);
-            } else if !cx.store.loaded().tickers {
-                self.tickers_request(cx);
-            }
             let stale: Vec<_> = self
                 .books
                 .iter()

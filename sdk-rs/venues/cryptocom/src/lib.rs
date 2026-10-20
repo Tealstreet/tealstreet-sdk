@@ -63,6 +63,7 @@ pub struct Cryptocom {
     rest: &'static str,
     sockets: [Connection; 2],
     watchdog: Option<TimerId>,
+    discovery: safe_cex_engine::startup::Backoff<bool>,
     subscriptions: BTreeMap<String, u32>,
     indexes: HashMap<String, String>,
     books: HashMap<String, BookState>,
@@ -101,6 +102,28 @@ pub(crate) fn encode(value: &str) -> String {
 }
 
 impl Cryptocom {
+    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+        self.get(
+            cx,
+            if tickers {
+                "/public/get-tickers"
+            } else {
+                "/public/get-instruments"
+            },
+            if tickers {
+                Pending::Tickers {
+                    rows: vec![],
+                    invalid: false,
+                }
+            } else {
+                Pending::Markets {
+                    rows: vec![],
+                    indexes: HashMap::new(),
+                    invalid: false,
+                }
+            },
+        );
+    }
     pub fn new(options: Options) -> Self {
         let credentials = if options.public_data_only {
             None
@@ -128,6 +151,7 @@ impl Cryptocom {
             options,
             sockets: Default::default(),
             watchdog: None,
+            discovery: Default::default(),
             subscriptions: BTreeMap::new(),
             indexes: HashMap::new(),
             books: HashMap::new(),
@@ -343,15 +367,7 @@ impl Venue for Cryptocom {
             cx.log(LogLevel::Error, error);
             return;
         }
-        self.get(
-            cx,
-            "/public/get-instruments",
-            Pending::Markets {
-                rows: vec![],
-                indexes: HashMap::new(),
-                invalid: false,
-            },
-        );
+        self.discovery_read(cx, false);
         self.watchdog = Some(cx.set_timer(5_000.0));
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -439,7 +455,7 @@ impl Venue for Cryptocom {
             Pending::Markets {
                 rows,
                 indexes,
-                invalid,
+                invalid: _,
             } => match serde_json::from_str::<Instrument>(item) {
                 Ok(row) => {
                     if let Some(market) = row.market() {
@@ -447,13 +463,13 @@ impl Venue for Cryptocom {
                         rows.push(market);
                     }
                 }
-                Err(_) => *invalid = true,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
-            Pending::Tickers { rows, invalid } => {
+            Pending::Tickers { rows, invalid: _ } => {
                 // Spot rows may contain null prices; they are outside this venue.
                 match serde_json::from_str::<TickerName>(item) {
                     Ok(name) if cx.store.market(name.i).is_none() => {}
-                    Err(_) => *invalid = true,
+                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
                     Ok(_) => match serde_json::from_str::<TickerRow>(item) {
                         Ok(row) => {
                             let mut ticker = Ticker {
@@ -464,7 +480,7 @@ impl Venue for Cryptocom {
                             row.apply(&mut ticker);
                             rows.push(ticker);
                         }
-                        Err(_) => *invalid = true,
+                        Err(_) => safe_cex_engine::startup::skipped_row(cx),
                     },
                 }
             }
@@ -516,29 +532,15 @@ impl Venue for Cryptocom {
                 indexes,
                 invalid,
             } => {
-                if invalid {
+                if invalid || rows.is_empty() {
                     cx.log(LogLevel::Error, "invalid instrument row");
+                    self.discovery.failed(cx, false);
                     return;
                 }
                 self.indexes = indexes;
                 cx.store.set_markets(rows);
-                self.get(
-                    cx,
-                    "/public/get-tickers",
-                    Pending::Tickers {
-                        rows: vec![],
-                        invalid: false,
-                    },
-                );
-            }
-            Pending::Tickers { rows, invalid } => {
-                if invalid {
-                    cx.log(LogLevel::Error, "invalid ticker row");
-                    return;
-                }
-                cx.store.set_tickers(rows);
-                self.market_channels(cx);
-                self.connect(cx, 0);
+                self.discovery.succeeded(cx, &false);
+                self.discovery_read(cx, true);
                 if self.credentials.is_some() {
                     self.private_start(cx);
                 } else {
@@ -546,6 +548,16 @@ impl Venue for Cryptocom {
                     cx.store.set_positions(vec![]);
                     cx.store.set_orders(vec![]);
                 }
+            }
+            Pending::Tickers { rows, invalid } => {
+                if invalid {
+                    self.discovery.failed(cx, true);
+                    return;
+                }
+                self.discovery.succeeded(cx, &true);
+                cx.store.set_tickers(rows);
+                self.market_channels(cx);
+                self.connect(cx, 0);
             }
             Pending::Candles {
                 command,
@@ -567,10 +579,15 @@ impl Venue for Cryptocom {
             Pending::History(request) => self.history_failed(cx, request, error, true),
             Pending::Account(request) => self.account_failed(cx, request, error, true),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
-            _ => cx.log(LogLevel::Error, error),
+            Pending::Markets { .. } => self.discovery.failed(cx, false),
+            Pending::Tickers { .. } => self.discovery.failed(cx, true),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(tickers) = self.discovery.on_timer(timer) {
+            self.discovery_read(cx, tickers);
+            return;
+        }
         if let Some(request) = self.history.waiting.remove(&timer) {
             self.history_request(cx, request);
             return;

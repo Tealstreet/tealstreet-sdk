@@ -136,6 +136,7 @@ pub enum TickerField {
 }
 
 impl TickerRow<'_> {
+    pub fn has_values(&self) -> bool { self.present != 0 }
     pub fn value(&self, field: TickerField) -> Option<f64> {
         let index = field as usize;
         (self.present & (1 << index) != 0).then(|| self.values[index])

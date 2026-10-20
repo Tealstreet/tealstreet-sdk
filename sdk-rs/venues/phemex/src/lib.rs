@@ -82,6 +82,7 @@ pub struct PhemexPerpetuals {
     generation: u64,
     native_symbols: HashMap<String, String>,
     startup_retry: Option<TimerId>,
+    discovery: safe_cex_engine::startup::Backoff<bool>,
     paused_until: f64,
     account: account::State,
     trading: trading::State,
@@ -113,12 +114,24 @@ impl PhemexPerpetuals {
             generation: 0,
             native_symbols: HashMap::new(),
             startup_retry: None,
+            discovery: Default::default(),
             paused_until: 0.,
             account: account::State::default(),
             trading: trading::State::default(),
             history: history::State::default(),
             income: income::State::default(),
         }
+    }
+    fn discovery_tickers(&self, cx: &mut Cx<'_, Pending>) {
+        self.request(
+            cx,
+            Method::Get,
+            "/md/v3/ticker/24hr/all",
+            "",
+            None,
+            Pending::Tickers(vec![], false),
+            Some(ArrayAt::Field("result")),
+        );
     }
     fn native_symbol<'a>(&'a self, symbol: &'a str) -> &'a str {
         self.native_symbols
@@ -306,12 +319,8 @@ impl PhemexPerpetuals {
                 }
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
-            Pending::Markets(..) | Pending::Tickers(..) => {
-                cx.log(LogLevel::Warning, format!("Phemex public startup: {error}"));
-                if self.startup_retry.is_none() {
-                    self.startup_retry = Some(cx.set_timer(2_000.));
-                }
-            }
+            Pending::Markets(..) => self.discovery.failed(cx, false),
+            Pending::Tickers(..) => self.discovery.failed(cx, true),
         }
     }
 }
@@ -495,10 +504,10 @@ impl Venue for PhemexPerpetuals {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, p: &mut Pending, item: &str) {
         match p {
-            Pending::Markets(rows, invalid) => {
+            Pending::Markets(rows, _) => {
                 if let Ok(r) = serde_json::from_str::<Product<'_>>(item) {
                     if r.supported() && !r.valid() {
-                        *invalid = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                     let native = r.symbol.to_string();
@@ -507,16 +516,16 @@ impl Venue for PhemexPerpetuals {
                         rows.push(m)
                     }
                 } else {
-                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
                 }
             }
-            Pending::Tickers(rows, invalid) => {
+            Pending::Tickers(rows, _) => {
                 if let Ok(r) = serde_json::from_str::<Daily<'_>>(item) {
                     if let Some(m) = cx.store.market(&r.symbol.to_ascii_uppercase()) {
                         rows.push(r.ticker(m.id.clone()))
                     }
                 } else {
-                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
                 }
             }
             Pending::Candles { rows, invalid, .. } => {
@@ -560,21 +569,19 @@ impl Venue for PhemexPerpetuals {
                 self.fail(cx, bad, "malformed public response row")
             }
             Pending::Markets(rows, false) => {
+                if rows.is_empty() {
+                    self.discovery.failed(cx, false);
+                    return;
+                }
                 cx.store.set_markets(rows);
-                self.request(
-                    cx,
-                    Method::Get,
-                    "/md/v3/ticker/24hr/all",
-                    "",
-                    None,
-                    Pending::Tickers(vec![], false),
-                    Some(ArrayAt::Field("result")),
-                );
+                self.discovery.succeeded(cx, &false);
+                self.start_account(cx);
+                self.discovery_tickers(cx);
             }
             Pending::Tickers(rows, false) => {
+                self.discovery.succeeded(cx, &true);
                 cx.store.set_tickers(rows);
                 self.connect_public(cx);
-                self.start_account(cx);
             }
             Pending::Depth { symbol, generation } => {
                 let Some(b) = self.books.get_mut(&symbol) else {
@@ -622,6 +629,14 @@ impl Venue for PhemexPerpetuals {
         self.fail(cx, p, error)
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(tickers) = self.discovery.on_timer(timer) {
+            if tickers {
+                self.discovery_tickers(cx);
+            } else {
+                self.start(cx);
+            }
+            return;
+        }
         if self.account_timer(cx, timer)
             || self.history_timer(cx, timer)
             || self.income_timer(cx, timer)

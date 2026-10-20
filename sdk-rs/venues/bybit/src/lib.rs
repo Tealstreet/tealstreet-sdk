@@ -38,8 +38,6 @@ const RESUBSCRIBE_DELAY_MS: f64 = 100.0;
 const TOPICS_PER_SUBSCRIBE: usize = 10;
 const SUBSCRIBE_PACE_MS: f64 = 10.0;
 const MARKETS_PAGE_LIMIT: u32 = 1000;
-const STARTUP_RETRY_MIN_MS: f64 = 1_000.0;
-const STARTUP_RETRY_MAX_MS: f64 = 60_000.0;
 const PRELAUNCH_STARTUP_GRACE_MS: f64 = 1_500.0;
 const MARKETS_PATH: &[&str] = &["result", "list"];
 
@@ -203,8 +201,7 @@ struct Startup {
     account_info: bool,
     option_tickers_pending: HashSet<String>,
     option_tickers: HashMap<String, Vec<Ticker>>,
-    retry_ms: f64,
-    retry: Option<TimerId>,
+    backoff: safe_cex_engine::startup::Backoff<()>,
 }
 
 struct ProductState {
@@ -322,7 +319,6 @@ impl BybitLinear {
                         category,
                         public: Connection::new(),
                         startup: Startup {
-                            retry_ms: STARTUP_RETRY_MIN_MS,
                             prelaunch: (category == Category::Option).then(Vec::new),
                             fees: (category == Category::Option).then(HashMap::new),
                             ..Startup::default()
@@ -367,7 +363,6 @@ impl BybitLinear {
             book_levels: BookLevels::default(),
             candles: HashMap::new(),
             startup: Startup {
-                retry_ms: STARTUP_RETRY_MIN_MS,
                 prelaunch: options.variant.is_spot().then(Vec::new),
                 fees: (options.variant.is_spot() || options.variant.is_hyro()).then(HashMap::new),
                 ..Startup::default()
@@ -684,7 +679,6 @@ impl BybitLinear {
     }
 
     fn request_startup(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.startup.retry = None;
         if !self.startup.markets_loaded
             && self.startup.trading.is_none()
             && !self.startup.trading_in_flight
@@ -736,12 +730,7 @@ impl BybitLinear {
             LogLevel::Error,
             format!("Failed to fetch Bybit {what}: {error}"),
         );
-        if self.startup.retry.is_some() {
-            return;
-        }
-        let delay = self.startup.retry_ms;
-        self.startup.retry_ms = (delay * 2.0).min(STARTUP_RETRY_MAX_MS);
-        self.startup.retry = Some(cx.set_timer(delay));
+        self.startup.backoff.failed(cx, ());
     }
 
     fn on_markets(
@@ -893,6 +882,7 @@ impl BybitLinear {
             let category = self.category;
             for other in self.categories() {
                 self.select_category(other);
+                self.try_start_account(cx);
                 self.try_load_tickers(cx);
             }
             self.select_category(category);
@@ -943,6 +933,7 @@ impl BybitLinear {
             return;
         };
         self.startup.tickers_loaded = true;
+        self.startup.backoff.succeeded(cx, &());
         let tickers: Vec<Ticker> = rows
             .into_iter()
             .filter_map(|mut ticker| {
@@ -1216,15 +1207,23 @@ impl BybitLinear {
     }
 }
 
-fn on_item_public(then: &mut Then, item: &str, variant: Variant, category: Category) {
+fn on_item_public(
+    cx: &mut Cx<'_, Pending>,
+    then: &mut Then,
+    item: &str,
+    variant: Variant,
+    category: Category,
+) {
     {
         match then {
             Then::Markets { markets, .. } => {
-                if let Ok(m) = serde_json::from_str::<Instrument>(item)
-                    && (!variant.is_hyro()
-                        || (m.quote_coin == "USDT"
-                            && (m.contract_type.is_empty()
-                                || m.contract_type == "LinearPerpetual")))
+                let Ok(m) = serde_json::from_str::<Instrument>(item) else {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    return;
+                };
+                if (!variant.is_hyro()
+                    || (m.quote_coin == "USDT"
+                        && (m.contract_type.is_empty() || m.contract_type == "LinearPerpetual")))
                     && (category != Category::Option
                         || (m.status == "Trading" && derivative_from_wire(&m, category).is_some()))
                 {
@@ -1240,7 +1239,11 @@ fn on_item_public(then: &mut Then, item: &str, variant: Variant, category: Categ
                 }
             }
             Then::Tickers(tickers) | Then::OptionSeed { tickers, .. } => {
-                if let Ok(t) = serde_json::from_str::<TickerRow>(item) {
+                let Ok(t) = serde_json::from_str::<TickerRow>(item) else {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    return;
+                };
+                {
                     tickers.push(ticker_from_rest(
                         &t,
                         variant == Variant::Linear && category == Category::Inverse,
@@ -1575,7 +1578,7 @@ impl BybitLinear {
         if self.public.outbox_timer == Some(timer) {
             self.drain_outbox(cx);
         }
-        if self.startup.retry == Some(timer) {
+        if self.startup.backoff.on_timer(timer).is_some() {
             self.request_startup(cx);
         }
         if self.startup.prelaunch_grace == Some(timer) {
@@ -1755,7 +1758,7 @@ impl Venue for BybitLinear {
                         self.derivatives.insert(row.symbol.to_string(), product);
                     }
                 }
-                on_item_public(then, item, self.variant, self.category)
+                on_item_public(cx, then, item, self.variant, self.category)
             }
         }
     }

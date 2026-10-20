@@ -23,6 +23,25 @@ impl<'de> Deserialize<'de> for Number {
         Ok(Self(n))
     }
 }
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PublicNumber(pub f64);
+impl<'de> Deserialize<'de> for PublicNumber {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Input<'a> {
+            N(f64),
+            S(#[serde(borrow)] Cow<'a, str>),
+        }
+        let value = match Input::deserialize(d)? {
+            Input::N(n) => Some(n).filter(|n| n.is_finite()),
+            Input::S(s) => safe_cex_engine::startup::number_or_zero(&s),
+        };
+        value
+            .map(Self)
+            .ok_or_else(|| serde::de::Error::custom("invalid public number"))
+    }
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Gamma<'a> {
@@ -46,8 +65,8 @@ pub struct Gamma<'a> {
     pub closed: bool,
     pub enable_order_book: Option<bool>,
     pub accepting_orders: Option<bool>,
-    pub order_price_min_tick_size: Option<Number>,
-    pub order_min_size: Option<Number>,
+    pub order_price_min_tick_size: Option<PublicNumber>,
+    pub order_min_size: Option<PublicNumber>,
     pub neg_risk: Option<bool>,
 }
 #[derive(Deserialize)]

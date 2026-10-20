@@ -61,7 +61,8 @@ fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
         );
     }
     assert!(e.store().loaded().markets);
-    let a = actions(&mut e).remove(0);
+    let mut out = actions(&mut e);
+    let a = out.remove(0);
     assert!(is_get(&a, "tickers?instType=SWAP"));
     reply(&mut e, &a, &rows(&[TICKER, &ticker("BTC-USD-SWAP")]), 3.0);
     if eea {
@@ -75,7 +76,7 @@ fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
             4.0,
         );
     }
-    let out = actions(&mut e);
+    out.extend(actions(&mut e));
     (e, out)
 }
 fn private_catalog() -> (Engine<Okx>, SocketId, Vec<Action>) {
@@ -321,7 +322,7 @@ fn inverse_and_xperp_writes_keep_native_lots_and_exact_instrument_identity() {
     assert!(body.contains(r#""clOrdId":"CallerX""#));
 }
 #[test]
-fn failed_xperp_catalog_never_publishes_only_the_swap_half() {
+fn malformed_xperp_catalogue_row_does_not_discard_valid_swaps() {
     let mut e = Engine::new(Okx::new(Options {
         eea: true,
         ..Options::default()
@@ -338,14 +339,12 @@ fn failed_xperp_catalog_never_publishes_only_the_swap_half() {
         ),
         2.0,
     );
-    assert!(!e.store().loaded().markets);
-    assert!(e.store().markets().is_empty());
-    assert!(
-        !actions(&mut e)
-            .iter()
-            .any(|a| matches!(a, Action::WsConnect { .. } | Action::Http(_)))
-    );
+    assert!(e.store().loaded().markets);
+    assert_eq!(e.store().markets().len(), 1);
+    assert!(e.store().market("BTCUSDT").is_some());
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
 }
+
 #[test]
 fn failed_later_product_position_refresh_keeps_both_previous_products() {
     let (mut e, _, out) = private_catalog();
@@ -512,7 +511,7 @@ fn blank_untraded_xperp_ticker_fields_do_not_abort_other_seeded_markets() {
     );
 }
 #[test]
-fn malformed_xperp_seed_remains_atomic_despite_permitted_blank_values() {
+fn malformed_xperp_ticker_keeps_valid_swap_peers_and_logs_the_row() {
     for bad in [
         r#""last":"NaN""#,
         r#""last":"Infinity""#,
@@ -537,13 +536,10 @@ fn malformed_xperp_seed_remains_atomic_despite_permitted_blank_values() {
             &envelope(&ticker("BTC-USD-261225").replace(r#""last":"40000""#, bad)),
             4.0,
         );
-        assert!(!e.store().loaded().tickers, "{bad}");
-        assert!(e.store().tickers().is_empty(), "partial SWAP seed leaked");
-        assert!(
-            !actions(&mut e)
-                .iter()
-                .any(|a| matches!(a, Action::WsConnect { .. } | Action::Http(_)))
-        );
+        assert!(e.store().loaded().tickers, "{bad}");
+        assert_eq!(e.store().tickers().len(), 1);
+        assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 40000.0);
+        assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
     }
 }
 
@@ -882,7 +878,8 @@ mod product_semantics {
                 1.5,
             );
         }
-        let request = actions(&mut e).remove(0);
+        let mut initial = actions(&mut e);
+        let request = initial.remove(0);
         reply(
             &mut e,
             &request,
@@ -894,7 +891,7 @@ mod product_semantics {
             let request = actions(&mut e).remove(0);
             reply(&mut e, &request, &envelope(&ticker("BTC-USD-UM")), 2.5);
         }
-        let initial = actions(&mut e);
+        initial.extend(actions(&mut e));
         (e, initial)
     }
     fn socket(initial: &[Action], suffix: &str) -> SocketId {
@@ -1429,7 +1426,7 @@ mod product_semantics {
     }
 
     #[test]
-    fn supplied_invalid_or_wholly_absent_caps_never_publish_a_partial_catalog() {
+    fn invalid_cap_rows_are_skipped_without_discarding_valid_catalogue_peers() {
         let native: serde_json::Value =
             serde_json::from_str(include_str!("fixtures/crml-preopen.json")).unwrap();
         for value in ["malformed", "-1", "NaN", "inf", "0"] {
@@ -1444,8 +1441,9 @@ mod product_semantics {
                 &envelope(&format!("{INVERSE},{row}")),
                 1.0,
             );
-            assert!(!e.store().loaded().markets, "{value}");
-            assert!(e.store().markets().is_empty());
+            assert!(e.store().loaded().markets, "{value}");
+            assert_eq!(e.store().markets().len(), 1);
+            assert_eq!(e.store().markets()[0].id, "BTC-USD-SWAP");
         }
         let mut row = native;
         for key in [

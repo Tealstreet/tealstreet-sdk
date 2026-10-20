@@ -93,7 +93,7 @@ struct BookState {
     snapshot: Option<(String, TimerId)>,
     retry: Option<TimerId>,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Seed {
     Markets,
     Tickers,
@@ -105,8 +105,7 @@ pub struct Orderly {
     books: HashMap<String, BookState>,
     candles: HashMap<(String, String), u32>,
     native: HashMap<String, String>,
-    seed_retry: Option<(TimerId, Seed)>,
-    seed_attempts: u32,
+    seed_backoff: safe_cex_engine::startup::Backoff<Seed>,
     generation: u64,
     account: account::Account,
     trading: trading::Trading,
@@ -121,8 +120,7 @@ impl Orderly {
             books: HashMap::new(),
             candles: HashMap::new(),
             native: HashMap::new(),
-            seed_retry: None,
-            seed_attempts: 0,
+            seed_backoff: Default::default(),
             generation: 0,
             account: account::Account::default(),
             trading: trading::Trading::default(),
@@ -201,12 +199,7 @@ impl Orderly {
     }
     fn retry_seed(&mut self, cx: &mut Cx<'_, Pending>, kind: Seed, error: &str) {
         cx.log(LogLevel::Warning, error);
-        if self.seed_retry.is_none() {
-            let t =
-                cx.set_timer((1000.0 * 2f64.powi(self.seed_attempts.min(5) as i32)).min(30000.0));
-            self.seed_attempts = self.seed_attempts.saturating_add(1);
-            self.seed_retry = Some((t, kind));
-        }
+        self.seed_backoff.failed(cx, kind);
     }
     fn subscribe(&self, cx: &mut Cx<'_, Pending>, topic: &str, add: bool) {
         if !self.public.open {
@@ -668,6 +661,9 @@ impl Venue for Orderly {
                         };
                     };
                     let s = format!("{base}{settlement}");
+                    if rows.iter().any(|market| market.symbol == s) {
+                        return Err("Orderly duplicate public market identity".into());
+                    }
                     if r.base_tick <= 0.0
                         || r.quote_tick <= 0.0
                         || r.base_min < 0.0
@@ -760,9 +756,11 @@ impl Venue for Orderly {
         })();
         if let Err(e) = result {
             match pending {
-                Pending::Markets { invalid, .. }
-                | Pending::Tickers { invalid, .. }
-                | Pending::Candles { invalid, .. } => *invalid = true,
+                Pending::Markets { .. } | Pending::Tickers { .. } => {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    return;
+                }
+                Pending::Candles { invalid, .. } => *invalid = true,
                 Pending::Account(_) | Pending::Trade(_) | Pending::History(_) => unreachable!(),
             }
             cx.log(LogLevel::Error, e);
@@ -791,6 +789,10 @@ impl Venue for Orderly {
                 rows,
                 invalid: false,
             } => {
+                if rows.is_empty() {
+                    self.seed_backoff.failed(cx, Seed::Markets);
+                    return;
+                }
                 let mut native = HashMap::new();
                 for m in &rows {
                     let Some(settlement) = m.symbol.strip_prefix(&m.base) else {
@@ -811,7 +813,8 @@ impl Venue for Orderly {
                 }
                 self.native = native;
                 cx.store.set_markets(rows);
-                self.seed_attempts = 0;
+                self.seed_backoff.succeeded(cx, &Seed::Markets);
+                self.account_start(cx);
                 self.seed(cx, Seed::Tickers);
             }
             Pending::Tickers {
@@ -819,10 +822,9 @@ impl Venue for Orderly {
                 invalid: false,
             } => {
                 cx.store.set_tickers(rows);
-                self.seed_attempts = 0;
+                self.seed_backoff.succeeded(cx, &Seed::Tickers);
                 self.connect_public(cx);
                 self.funding_start(cx);
-                self.account_start(cx);
             }
             Pending::Candles {
                 command,
@@ -859,10 +861,7 @@ impl Venue for Orderly {
         if self.account_timer(cx, timer) {
             return;
         }
-        if let Some((t, kind)) = self.seed_retry
-            && t == timer
-        {
-            self.seed_retry = None;
+        if let Some(kind) = self.seed_backoff.on_timer(timer) {
             self.seed(cx, kind);
             return;
         }

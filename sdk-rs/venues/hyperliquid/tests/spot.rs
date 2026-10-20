@@ -632,7 +632,7 @@ fn fill_during_amend_cancel_stops_the_replacement_and_deduplicates_executions() 
     assert!(e.store().positions().iter().all(|p| p.contracts == 0.0));
 }
 #[test]
-fn spot_metadata_failures_retry_three_reads_without_committing_partial_markets() {
+fn spot_metadata_failures_keep_retrying_without_committing_partial_markets() {
     let mut e = Engine::new(Hyperliquid::new_spot(Options {
         public_data_only: true,
         ..Options::default()
@@ -659,16 +659,12 @@ fn spot_metadata_failures_retry_three_reads_without_committing_partial_markets()
                 None
             }
         });
-        if attempt < 2 {
-            e.handle(
-                3000.0,
-                Event::TimerFired {
-                    timer: timer.unwrap(),
-                },
-            );
-        } else {
-            assert!(timer.is_none());
-        }
+        e.handle(
+            3000.0 + f64::from(attempt) * 30000.0,
+            Event::TimerFired {
+                timer: timer.unwrap(),
+            },
+        );
     }
 }
 

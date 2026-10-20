@@ -633,9 +633,11 @@ fn positional_engine() -> TestEngine {
     e.start(0.0);
     let r = requests(&mut e).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let r = requests(&mut e).remove(0);
-    response(&mut e, &r, 20.0, TICKERS);
-    let a: Vec<_> = e.drain_actions().collect();
+    let mut early = e.drain_actions().collect::<Vec<_>>();
+    let ticker = early.iter().find_map(|a| match a { Action::Http(r) if r.url.contains("/public/futures") => Some(r.clone()), _ => None }).unwrap();
+    response(&mut e, &ticker, 20.0, TICKERS);
+    early.extend(e.drain_actions());
+    let a = early;
     let regular = a
         .iter()
         .find_map(|a| {

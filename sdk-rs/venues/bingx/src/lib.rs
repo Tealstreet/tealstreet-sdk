@@ -48,7 +48,7 @@ pub enum Pending {
     },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum List {
     Markets,
     Daily,
@@ -85,8 +85,7 @@ pub struct Bingx {
     seed_index: Vec<Option<usize>>,
     seed_reported: Vec<bool>,
     sequence: u64,
-    retries: HashMap<TimerId, List>,
-    failures: [u32; 3],
+    retries: safe_cex_engine::startup::Backoff<List>,
 }
 
 impl Bingx {
@@ -121,8 +120,7 @@ impl Bingx {
             seed_index: Vec::new(),
             seed_reported: Vec::new(),
             sequence: 0,
-            retries: HashMap::new(),
-            failures: [0; 3],
+            retries: Default::default(),
         }
     }
 
@@ -135,14 +133,7 @@ impl Bingx {
     }
 
     fn retry_list(&mut self, cx: &mut Cx<'_, Pending>, kind: List) {
-        let slot = match kind {
-            List::Markets => 0,
-            List::Daily => 1,
-            List::Premium => 2,
-        };
-        let delay = (1000. * 2f64.powi(self.failures[slot].min(5) as i32)).min(30_000.);
-        self.failures[slot] += 1;
-        self.retries.insert(cx.set_timer(delay), kind);
+        self.retries.failed(cx, kind);
     }
 
     fn read(&self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
@@ -253,9 +244,15 @@ impl Bingx {
                     let Some(market) = cx.store.market_index_by_id(&row.symbol) else {
                         return;
                     };
-                    let Some(ticker) = self.seed_index.get(market as usize).copied().flatten()
-                    else {
-                        return;
+                    let ticker = match self.seed_index.get(market as usize).copied().flatten() {
+                        Some(ticker) => ticker,
+                        None => {
+                            let symbol = cx.store.markets()[market as usize].symbol.clone();
+                            let Some(ticker) = cx.store.ensure_ticker(&symbol) else { return; };
+                            self.seed_index.resize(cx.store.markets().len(), None);
+                            self.seed_index[market as usize] = Some(ticker as usize);
+                            ticker as usize
+                        }
                     };
                     let step = cx.store.markets()[market as usize].precision.price;
                     cx.store.update_ticker_at(ticker as u32, |t| {
@@ -486,7 +483,7 @@ impl Venue for Bingx {
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history.on_item(cx, request, item),
-            Pending::Markets { rows, valid } => {
+            Pending::Markets { rows, valid: _ } => {
                 if rows.len() == rows.capacity() {
                     rows.reserve_exact(128)
                 }
@@ -526,10 +523,10 @@ impl Venue for Bingx {
                         taker_fee: None,
                         maker_fee: None,
                     }),
-                    Err(_) => *valid = false,
+                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
                 }
             }
-            Pending::Daily { rows, valid } => match serde_json::from_str::<Daily<'_>>(item) {
+            Pending::Daily { rows, valid: _ } => match serde_json::from_str::<Daily<'_>>(item) {
                 Ok(d) => {
                     if let Some(m) = cx.store.market_by_id(&d.symbol) {
                         let (bid, ask) = touch(d.last_price, m.precision.price);
@@ -546,9 +543,9 @@ impl Venue for Bingx {
                         })
                     }
                 }
-                Err(_) => *valid = false,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
-            Pending::Premium { valid } => match serde_json::from_str::<Premium<'_>>(item) {
+            Pending::Premium { valid: _ } => match serde_json::from_str::<Premium<'_>>(item) {
                 Ok(p) => {
                     let index = cx
                         .store
@@ -563,7 +560,7 @@ impl Venue for Bingx {
                         self.seed_reported[i] = true
                     }
                 }
-                Err(_) => *valid = false,
+                Err(_) => safe_cex_engine::startup::skipped_row(cx),
             },
             Pending::Candles { rows, valid, .. } => match serde_json::from_str::<Kline>(item) {
                 Ok(k) => rows.push(k.into()),
@@ -613,8 +610,16 @@ impl Venue for Bingx {
                 mut rows,
                 valid: true,
             } => {
+                if rows.is_empty() {
+                    self.retries.failed(cx, List::Markets);
+                    return;
+                }
                 rows.shrink_to_fit();
+                self.retries.succeeded(cx, &List::Markets);
                 cx.store.set_markets(rows);
+                if let Some(c) = &self.credentials {
+                    self.account.start(cx, c);
+                }
                 self.connect(cx);
                 self.read(
                     cx,
@@ -626,6 +631,7 @@ impl Venue for Bingx {
                 )
             }
             Pending::Daily { rows, valid: true } => {
+                self.retries.succeeded(cx, &List::Daily);
                 self.seed_index = vec![None; cx.store.markets().len()];
                 for (i, ticker) in rows.iter().enumerate() {
                     if let Some(index) = cx.store.market_index(&ticker.symbol) {
@@ -637,6 +643,7 @@ impl Venue for Bingx {
                 self.read(cx, paths::PREMIUM, Pending::Premium { valid: true })
             }
             Pending::Premium { valid: true } => {
+                self.retries.succeeded(cx, &List::Premium);
                 let reported = std::mem::take(&mut self.seed_reported);
                 let mut index = 0;
                 self.seed.retain(|_| {
@@ -652,9 +659,6 @@ impl Venue for Bingx {
                     }
                 }
                 cx.store.set_tickers(rows);
-                if let Some(c) = &self.credentials {
-                    self.account.start(cx, c);
-                }
             }
             Pending::Candles {
                 command,
@@ -702,7 +706,7 @@ impl Venue for Bingx {
             }
             return;
         }
-        if let Some(kind) = self.retries.remove(&timer) {
+        if let Some(kind) = self.retries.on_timer(timer) {
             let (path, pending) = match kind {
                 List::Markets => (
                     paths::MARKETS,

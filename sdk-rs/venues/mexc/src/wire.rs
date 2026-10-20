@@ -22,6 +22,28 @@ pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     }
 }
 
+// TS public mappers use toNumber(value, fallback); private financial rows remain strict.
+fn public_optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Input {
+        Number(f64),
+        Text(String),
+    }
+    match Option::<Input>::deserialize(d)? {
+        None => Ok(None),
+        Some(Input::Text(text)) if text.trim().is_empty() => Ok(None),
+        Some(Input::Text(text)) => safe_cex_engine::startup::number_or_zero(&text)
+            .map(Some)
+            .ok_or_else(|| serde::de::Error::custom("invalid public number")),
+        Some(Input::Number(value)) if value.is_finite() => Ok(Some(value)),
+        _ => Err(serde::de::Error::custom("invalid public number")),
+    }
+}
+fn public_number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    Ok(public_optional_number(d)?.unwrap_or(0.0))
+}
+
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
     pub success: Option<bool>,
@@ -98,27 +120,27 @@ pub struct Contract<'a> {
 pub struct Tick<'a> {
     #[serde(borrow, default)]
     pub symbol: Str<'a>,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "public_number")]
     pub last_price: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "public_number")]
     pub fair_price: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "public_number")]
     pub index_price: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "public_number")]
     pub bid1: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "public_number")]
     pub ask1: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "public_number")]
     pub rise_fall_rate: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "public_number")]
     pub hold_vol: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "public_number")]
     pub funding_rate: f64,
-    #[serde(default, alias = "nextSettleTime", deserialize_with = "number")]
+    #[serde(default, alias = "nextSettleTime", deserialize_with = "public_number")]
     pub funding_time: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "public_number")]
     pub volume24: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "public_number")]
     pub amount24: f64,
 }
 

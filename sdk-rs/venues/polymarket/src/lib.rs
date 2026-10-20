@@ -103,8 +103,7 @@ pub struct Polymarket {
     candle_timer: Option<TimerId>,
     seed_tickers: Vec<Ticker>,
     seeded_tokens: HashSet<String>,
-    public_retry: Option<(TimerId, Option<usize>)>,
-    public_attempts: u8,
+    public_retry: safe_cex_engine::startup::Backoff<Option<usize>>,
     quote_times: HashMap<String, f64>,
     trade_times: HashMap<String, f64>,
     tick_times: HashMap<String, f64>,
@@ -158,8 +157,7 @@ impl Polymarket {
             candle_timer: None,
             seed_tickers: vec![],
             seeded_tokens: Default::default(),
-            public_retry: None,
-            public_attempts: 0,
+            public_retry: Default::default(),
             quote_times: Default::default(),
             trade_times: Default::default(),
             tick_times: Default::default(),
@@ -219,8 +217,7 @@ impl Polymarket {
                 .collect();
             self.seeded_tokens.clear();
             cx.store.set_tickers(rows);
-            self.public_attempts = 0;
-            self.public_ready(cx);
+
             return;
         }
         #[derive(Serialize)]
@@ -690,10 +687,12 @@ impl Venue for Polymarket {
                         LogLevel::Error,
                         "Invalid Polymarket market page; preserving previous snapshot",
                     );
+                    self.public_retry.failed(cx, None);
                     return;
                 }
                 if count > GAMMA_PAGE {
                     cx.log(LogLevel::Error, "Oversized Polymarket Gamma page");
+                    self.public_retry.failed(cx, None);
                     return;
                 }
                 #[derive(Deserialize)]
@@ -704,10 +703,12 @@ impl Venue for Polymarket {
                 }
                 let Ok(page) = serde_json::from_str::<Page>(response.body) else {
                     cx.log(LogLevel::Error, "Invalid Polymarket keyset envelope");
+                    self.public_retry.failed(cx, None);
                     return;
                 };
                 if !page.markets.is_empty() {
                     cx.log(LogLevel::Error, "Unstreamed Polymarket market page");
+                    self.public_retry.failed(cx, None);
                     return;
                 }
                 if let Some(cursor) = page.next_cursor {
@@ -716,6 +717,7 @@ impl Venue for Polymarket {
                         || !self.market_cursors.insert(cursor.to_string())
                     {
                         cx.log(LogLevel::Error, "Polymarket market cursor did not advance");
+                        self.public_retry.failed(cx, None);
                         return;
                     }
                     self.markets(cx, Some(cursor.into_owned()), rows, metadata);
@@ -726,8 +728,10 @@ impl Venue for Polymarket {
                         LogLevel::Error,
                         "Polymarket market page is missing its next cursor",
                     );
+                    self.public_retry.failed(cx, None);
                     return;
                 }
+                self.public_retry.succeeded(cx, &None);
                 cx.store.set_markets(rows);
                 cx.store.set_prediction_markets(metadata);
                 let tickers = cx
@@ -741,13 +745,22 @@ impl Venue for Polymarket {
                     })
                     .collect();
                 self.seed_tickers = tickers;
+                self.public_ready(cx);
                 self.midpoints(cx, 0);
             }
             Pending::Midpoints { offset } => {
-                match serde_json::from_str::<HashMap<String, Number>>(response.body) {
+                match serde_json::from_str::<HashMap<String, &serde_json::value::RawValue>>(
+                    response.body,
+                ) {
                     Ok(prices) => {
-                        for (id, p) in prices {
+                        for (id, raw) in prices {
+                            let Ok(p) = serde_json::from_str::<wire::PublicNumber>(raw.get())
+                            else {
+                                safe_cex_engine::startup::skipped_row(cx);
+                                continue;
+                            };
                             if !(0.0..=1.0).contains(&p.0) {
+                                safe_cex_engine::startup::skipped_row(cx);
                                 continue;
                             }
                             if let Some(i) = cx.store.market_index_by_id(&id)
@@ -771,6 +784,7 @@ impl Venue for Polymarket {
                         return;
                     }
                 }
+                self.public_retry.succeeded(cx, &Some(offset));
                 self.midpoints(cx, offset + 100);
             }
             Pending::Candles {
@@ -819,19 +833,19 @@ impl Venue for Polymarket {
             }
         }
     }
-    fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Account(request) => self.account_item(_cx, request, item),
+            Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets {
                 count,
                 rows,
                 metadata,
-                invalid,
+                invalid: _,
                 ..
             } => {
                 *count += 1;
                 let Ok(gm) = serde_json::from_str::<Gamma>(item) else {
-                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 };
                 let Some((ids, outcomes)) =
@@ -843,9 +857,11 @@ impl Venue for Polymarket {
                     serde_json::from_str::<Vec<String>>(ids),
                     serde_json::from_str::<Vec<String>>(outcomes),
                 ) else {
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 };
                 if ids.len() != outcomes.len() {
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 }
                 let tick = gm.order_price_min_tick_size.map_or(0.01, |n| n.0);
@@ -947,22 +963,15 @@ impl Venue for Polymarket {
             _ => None,
         };
         cx.log(LogLevel::Error, error);
-        if let Some(offset) = retry
-            && self.public_attempts < 3
-        {
-            self.public_attempts += 1;
-            self.public_retry = Some((
-                cx.set_timer(f64::from(self.public_attempts) * 1000.0),
-                offset,
-            ));
+        if let Some(offset) = retry {
+            self.public_retry.failed(cx, offset);
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if self.account_timer(cx, timer) {
             return;
         }
-        if self.public_retry.as_ref().is_some_and(|(t, _)| *t == timer) {
-            let (_, offset) = self.public_retry.take().expect("matching retry");
+        if let Some(offset) = self.public_retry.on_timer(timer) {
             if let Some(offset) = offset {
                 self.midpoints(cx, offset);
             } else {

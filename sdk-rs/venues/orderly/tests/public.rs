@@ -647,7 +647,7 @@ fn funding_subscribes_per_market_and_parses_documented_single_object() {
 }
 
 #[test]
-fn malformed_quotes_empty_broker_suffixes_and_duplicate_markets_fail_seed() {
+fn malformed_quotes_empty_broker_suffixes_and_duplicates_preserve_valid_peers() {
     for natives in [
         vec!["PERP_XLM_USDT"],
         vec!["PERP_XLM_USDC_"],
@@ -664,9 +664,11 @@ fn malformed_quotes_empty_broker_suffixes_and_duplicate_markets_fail_seed() {
         let mut rows = vec![market_row("PERP_BTC_USDC")];
         rows.extend(natives.into_iter().map(market_row));
         reply(&mut e, &r, &rows_envelope(&rows));
-        assert!(e.store().markets().is_empty());
-        assert!(!e.store().loaded().markets);
-        assert!(!actions(&mut e).iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(e.store().loaded().markets);
+        assert!(e.store().market("BTCUSDC").is_some());
+        let identities = e.store().markets().iter().map(|m| &m.symbol).collect::<std::collections::HashSet<_>>();
+        assert_eq!(identities.len(), e.store().markets().len());
+        assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Http(_))));
     }
 }
 
