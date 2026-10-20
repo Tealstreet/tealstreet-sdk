@@ -654,3 +654,18 @@ neighbours remain usable. Private account initialization starts once the usable
 catalogue is available, without waiting for REST ticker seeds. Account snapshots,
 mutation acknowledgements and signing validation retain their stricter rules.
 See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.
+
+## Rust startup valuation
+
+Rust derives position UPnL only from a finite positive public last price. Before
+quotes arrive, it preserves the matching side's prior valuation and warns; new
+exposure stays visible with unavailable UPnL represented as zero. A later valid
+quote and private account poll recover valuation. Native contracts, entry,
+liquidation and account equity/free/used remain authoritative.
+
+`sumOpenRealizedAmount` is realized money, not UPnL. Rust sums validated position
+UPnL within each collateral account instead. An unmappable position invalidates
+the whole private account snapshot, retaining prior state rather than publishing
+a partial aggregate. Per-row private snapshot tolerance is a separate phase.
+`tests/startup_valuation.rs` pins zero/non-finite quote recovery, side changes,
+partial-snapshot refusal and a realized-PnL sentinel that must never become UPnL.

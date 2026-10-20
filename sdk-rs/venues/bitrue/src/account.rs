@@ -72,6 +72,7 @@ pub struct Snapshot {
     positions: Vec<Position>,
     settings: Vec<(String, MarketSetting)>,
     invalid: bool,
+    valuation_pending: bool,
 }
 #[derive(Default)]
 pub struct Account {
@@ -149,8 +150,8 @@ struct Coin<'a> {
     total_cost: Number,
     #[serde(default)]
     sum_maintenance_margin: Option<Number>,
-    #[serde(default)]
-    sum_open_realized_amount: Number,
+    #[serde(default, rename = "sumOpenRealizedAmount")]
+    _sum_open_realized_amount: Number,
     #[serde(borrow)]
     position_vos: Option<Vec<ContractPositions<'a>>>,
 }
@@ -912,7 +913,7 @@ impl Bitrue {
             return Ok(());
         }
         let groups = coin.position_vos.ok_or(())?;
-        let balance = Balance {
+        let mut balance = Balance {
             total: coin.total_equity.0,
             free: coin.account_normal.0,
             used: (coin.total_equity.0 - coin.account_normal.0)
@@ -921,15 +922,15 @@ impl Bitrue {
                 .max(coin.total_cost.0)
                 .max(coin.sum_maintenance_margin.map_or(0.0, |n| n.0))
                 .max(0.0),
-            upnl: coin.sum_open_realized_amount.0,
+            upnl: 0.0,
         };
-        data.balances.insert(coin.margin_coin.to_string(), balance);
+        let first_position = data.positions.len();
         for group in groups {
             if group.contract_name.is_empty() {
                 return Err(());
             }
             let Some(market) = cx.store.market(&group.contract_name) else {
-                continue;
+                return Err(());
             };
             for row in group.positions {
                 let side = match &*row.side {
@@ -968,14 +969,34 @@ impl Bitrue {
                     .store
                     .positions()
                     .iter()
-                    .find(|p| p.symbol == market.symbol);
+                    .find(|p| p.symbol == market.symbol && p.side == side);
                 let liquidation = [row.force_liquidation_price, row.reduce_price]
                     .into_iter()
                     .flatten()
                     .map(|n| n.0)
                     .find(|n| *n > 0.0)
                     .unwrap_or_else(|| existing.map_or(0.0, |p| p.liquidation_price));
-                let last = cx.store.ticker(&market.symbol).map_or(0.0, |t| t.last);
+                let unrealized_pnl = cx
+                    .store
+                    .ticker(&market.symbol)
+                    .map(|ticker| ticker.last)
+                    .filter(|last| last.is_finite() && *last > 0.0)
+                    .map(|last| {
+                        (if side == PositionSide::Long {
+                            1.0
+                        } else {
+                            -1.0
+                        }) * (last - row.open_price.0)
+                            * row.volume.0
+                    })
+                    .filter(|value| value.is_finite())
+                    .unwrap_or_else(|| {
+                        data.valuation_pending = true;
+                        existing.map_or(0.0, |p| p.unrealized_pnl)
+                    });
+                if !unrealized_pnl.is_finite() {
+                    return Err(());
+                }
                 data.positions.push(Position {
                     id: market.symbol.clone(),
                     symbol: market.symbol.clone(),
@@ -985,12 +1006,7 @@ impl Bitrue {
                     leverage: row.leverage_level.0,
                     margin_type: Some(margin_type),
                     position_mode: Some(PositionMode::Oneway),
-                    unrealized_pnl: (if side == PositionSide::Long {
-                        1.0
-                    } else {
-                        -1.0
-                    }) * (last - row.open_price.0)
-                        * row.volume.0,
+                    unrealized_pnl,
                     realized_pnl: None,
                     contracts: row.volume.0,
                     liquidation_price: liquidation,
@@ -999,6 +1015,13 @@ impl Bitrue {
                 });
             }
         }
+        balance.upnl = data.positions[first_position..]
+            .iter()
+            .try_fold(0.0, |sum, p| {
+                let value = sum + p.unrealized_pnl;
+                value.is_finite().then_some(value).ok_or(())
+            })?;
+        data.balances.insert(coin.margin_coin.to_string(), balance);
         Ok(())
     }
     fn map_rest_order(
@@ -1308,6 +1331,12 @@ impl Bitrue {
                         "Malformed Bitrue account snapshot; retaining previous state",
                     );
                 } else if revision == self.account.settings_revision {
+                    if data.valuation_pending {
+                        cx.log(
+                            LogLevel::Warning,
+                            "Bitrue ticker price unavailable; retaining prior position valuation",
+                        );
+                    }
                     let closed: Vec<String> = cx
                         .store
                         .positions()

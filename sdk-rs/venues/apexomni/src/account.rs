@@ -429,6 +429,11 @@ impl ApexOmni {
         if !leverage.is_finite() {
             return Err("invalid position leverage".into());
         }
+        let unrealized_pnl = raw
+            .unrealised_pnl
+            .or_else(|| store.position(&id).map(|p| p.unrealized_pnl))
+            .filter(|value| value.is_finite())
+            .unwrap_or(0.0);
         Ok(Some(Position {
             id,
             symbol: market.symbol.clone(),
@@ -438,7 +443,7 @@ impl ApexOmni {
             leverage,
             margin_type: Some(MarginType::Cross),
             position_mode: Some(PositionMode::Hedged),
-            unrealized_pnl: raw.unrealised_pnl.unwrap_or(0.0),
+            unrealized_pnl,
             realized_pnl: Some(raw.cur_realised_pnl.or(raw.realized_pnl).unwrap_or(0.0)),
             contracts,
             liquidation_price: raw.liq_price.unwrap_or(0.0),
@@ -738,8 +743,15 @@ impl ApexOmni {
             Request::Positions { rows, bad, .. } => {
                 match serde_json::from_str::<wire::PositionRow<'_>>(item)
                     .map_err(|e| e.to_string())
-                    .and_then(|raw| self.map_position(cx.store, &raw, cx.now))
-                {
+                    .and_then(|raw| {
+                        if raw.size.is_some_and(|size| size > 0.0) && raw.unrealised_pnl.is_none() {
+                            cx.log(
+                                LogLevel::Warning,
+                                "ApeX position PnL unavailable; retaining prior valuation",
+                            );
+                        }
+                        self.map_position(cx.store, &raw, cx.now)
+                    }) {
                     Ok(Some(row)) => rows.push(row),
                     Ok(None) => {}
                     Err(_) => *bad = true,
@@ -882,22 +894,17 @@ impl ApexOmni {
                     );
                     return;
                 };
-                let upnl: f64 = cx
-                    .store
-                    .positions()
-                    .iter()
-                    .filter_map(|p| {
-                        cx.store.ticker(&p.symbol).map(|t| {
-                            (t.last - p.entry_price)
-                                * p.contracts
-                                * if p.side == PositionSide::Long {
-                                    1.0
-                                } else {
-                                    -1.0
-                                }
-                        })
-                    })
-                    .sum();
+                let upnl = cx.store.positions().iter().try_fold(0.0, |sum, p| {
+                    let value = sum + p.unrealized_pnl;
+                    value.is_finite().then_some(value)
+                });
+                let Some(upnl) = upnl else {
+                    cx.log(
+                        LogLevel::Warning,
+                        "ApeX position PnL invalid; retaining previous balance",
+                    );
+                    return;
+                };
                 cx.store.set_balance(Balance {
                     total: balance.total_equity_value - upnl,
                     used: balance.maintenance_margin,
@@ -1160,6 +1167,12 @@ impl ApexOmni {
         if let Some(positions) = contents.positions {
             let mut rows = cx.store.positions().to_vec();
             for raw in positions {
+                if raw.size.is_some_and(|size| size > 0.0) && raw.unrealised_pnl.is_none() {
+                    cx.log(
+                        LogLevel::Warning,
+                        "ApeX position PnL unavailable; retaining prior valuation",
+                    );
+                }
                 if let Ok(Some(mut position)) = self.map_position(cx.store, &raw, cx.now) {
                     if let Some((_, at, leverage)) =
                         self.account.leverage_versions.get(&position.symbol)

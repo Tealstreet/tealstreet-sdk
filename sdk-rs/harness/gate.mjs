@@ -341,6 +341,8 @@ const KNOWN_TS_FIXES = {
   // both bracket siblings preserved during parent cancel/replace amendments.
   // Price-only amendments keep the observed residual quantity; invalid/no-op
   // amendments reject before cancellation and filled sources are not replaced.
+  // Rust balance UPnL uses reported private position PnL, preserving prior
+  // valuation when omitted; zero/unavailable public quotes cannot create losses.
   apexomni: [],
   kraken: {
     output: fixKrakenOutput,
@@ -436,6 +438,8 @@ const KNOWN_TS_FIXES = {
   // Fresh TS private rows now retain native/cached TIF and default to GTC,
   // matching REST and client-ID lookup without normalizing command results.
   // Rust rejects malformed candle timestamps instead of returning partial history.
+  // Rust refuses zero/non-finite ticker-derived position losses and aggregates
+  // position UPnL instead of treating sumOpenRealizedAmount as unrealized money.
   bitrue() {},
   bitget: {
     // Each correction is covered by documented-payload Rust tests. Normal
