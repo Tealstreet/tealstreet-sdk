@@ -685,3 +685,21 @@ remote-close FIFO (local close still cancels decoding), with two counterexamples
 Typecheck first run found only the incoming Lighter WasmEngineLike mock lacking
 wsMessages; add the method and rerun. Full14release builds and fresh pinned
 control are in progress under heavy shared-host load; no CPU samples taken.
+
+
+Fourteen-family integration follow-up:44 repository typecheck and28 lint tasks
+pass. First concurrent full-repository test run retained four5s timeouts in the
+unchanged Hyro configuration suite (6904 other tests passed); isolated Hyro10/10
+passes without changing its timeout. A full package-serialized rerun passes all
+27 repository test tasks. All18 private tapes regenerate; private gates underway.
+
+Adversarial audit of the predeclared crossover driver found failures that could
+be mislabeled as memory-quality exclusions, failed-side metadata lost on JSON
+parse errors, a checked-but-not-selected Node executable, and reused PID output
+directories capable of overwriting retained evidence. Tighten the classifier to
+exact error shapes, persist side skeletons before launch and parsing failures
+with paths, pin the launcher Node, and atomically create gate output directories.
+The latter is a helper-only source update:216 harness tests pass, including a
+sentinel counterexample proving a reused process directory leaves prior output
+untouched. Refresh the same gate helper into the original control before final
+input fingerprints. No crossover samples have been collected.

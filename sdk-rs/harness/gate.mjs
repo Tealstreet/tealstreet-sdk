@@ -27,7 +27,8 @@ const { values } = parseArgs({
 const tapeBytes = readFileSync(values.tape);
 const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes).toString('utf8').trim().split('\n').map(JSON.parse);
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
-mkdirSync(outDir, { recursive: true });
+mkdirSync('sdk-rs/harness/out', { recursive: true });
+mkdirSync(outDir);
 const records = tapeRecords;
 
 const replay = (impl, run) => {
