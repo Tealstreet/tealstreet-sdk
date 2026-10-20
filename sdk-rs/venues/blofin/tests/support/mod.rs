@@ -6,6 +6,8 @@ pub struct Harness {
     pub e: Engine<Blofin>,
     pub pending: Vec<HttpRequest>,
     pub actions: Vec<Action>,
+    /// Structured failures; `actions` holds their legacy `CommandDone` text.
+    pub failures: Vec<safe_cex_engine::VenueError>,
     pub private: SocketId,
     pub tick: TimerId,
 }
@@ -41,6 +43,7 @@ impl Harness {
             e,
             pending: vec![],
             actions: vec![],
+            failures: vec![],
             private: SocketId(0),
             tick: TimerId(0),
         };
@@ -113,6 +116,16 @@ impl Harness {
                 {
                     receipts.extend(actual.clone());
                 }
+                let a = match a {
+                    Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {
+                        self.failures.push(error.clone());
+                        Action::Notice(safe_cex_engine::Notice::CommandDone {
+                            command,
+                            result: Err(error.legacy_text()),
+                        })
+                    }
+                    a => a,
+                };
                 self.actions.push(a);
             }
         }

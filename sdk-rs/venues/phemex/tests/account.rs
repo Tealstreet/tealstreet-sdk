@@ -702,7 +702,8 @@ fn incomplete_fill_blocks_amend_until_same_order_cumulative_update() {
     assert!(requests(&actions).is_empty());
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(Notice::CommandDone { result: Err(_), .. })
+        Action::Notice(Notice::CommandFailed { error, .. })
+            if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
     )));
     let cumulative = order("PartiallyFilled", 3)
         .replace("\"cumQty\":\"0\"", "\"cumQty\":\"0.1\"")
