@@ -910,6 +910,11 @@ fn queued_reduce_only_revalidates_position_before_dispatch() {
     );
     assert!(s.done(17).is_ok());
     assert!(s.done(18).is_err());
+    // Refused at dispatch: Coinbase received nothing.
+    assert!(
+        s.outcomes
+            .contains(&(18, Some(safe_cex_engine::Outcome::NotSent)))
+    );
 }
 
 #[test]

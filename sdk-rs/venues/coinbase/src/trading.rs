@@ -1400,13 +1400,24 @@ impl Coinbase {
     ) {
         self.private_after_write(cx);
         self.placement_unresolved(cx, &request.step);
-        self.trading_finish_error(
-            cx,
-            request.command,
-            unknown(format!(
-                "Coinbase write outcome requires reconciliation: {error}"
-            )),
-        );
+        let error = unknown(format!(
+            "Coinbase write outcome requires reconciliation: {error}"
+        ));
+        self.trading_finish_error(cx, request.command, error.kind(ErrorKind::Network));
+    }
+
+    /// Refused at dispatch (signing or a dispatch-time check): Coinbase received nothing.
+    /// Reservation bookkeeping is kept as for a lost write; the key may belong to another request.
+    pub(crate) fn trading_unsent(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+    ) {
+        self.private_after_write(cx);
+        self.placement_unresolved(cx, &request.step);
+        let error = format!("Coinbase write outcome requires reconciliation: {error}");
+        self.trading_finish_error(cx, request.command, not_sent(error));
     }
 
     pub(crate) fn trading_response(
@@ -1508,11 +1519,17 @@ impl Coinbase {
                 if !result.success {
                     self.trading.reductions.remove(&payload.client_order_id);
                     self.private_placement_finished(&payload.client_order_id);
-                    // `success: false` is Coinbase's documented refusal: no order was created.
-                    return Err(rejected(placement_rejection(
-                        result.error_response,
-                        result.failure_reason,
-                    )));
+                    // `success: false` is Coinbase's documented refusal: no order was created,
+                    // except a duplicate client ID, which may name a live order.
+                    let duplicate = result.error_response.as_ref().is_some_and(|e| {
+                        e.new_order_failure_reason.as_deref() == Some("DUPLICATE_CLIENT_ORDER_ID")
+                    });
+                    let message = placement_rejection(result.error_response, result.failure_reason);
+                    return Err(if duplicate {
+                        VenueError::new(message)
+                    } else {
+                        rejected(message)
+                    });
                 }
                 let id = if let Some(created) = result.success_response {
                     if created
@@ -1644,17 +1661,24 @@ impl Coinbase {
                     unknown("Coinbase edit response omitted documented success/errors")
                 })?;
                 if !result.success || !result.errors.is_empty() {
+                    // Only `success: false` documents that the edit was not placed.
+                    let refused = !result.success;
                     let reasons: Vec<_> = result
                         .errors
                         .into_iter()
                         .flat_map(|e| [e.edit_failure_reason, e.preview_failure_reason])
                         .flatten()
                         .collect();
-                    return Err(rejected(if reasons.is_empty() {
+                    let message = if reasons.is_empty() {
                         "Coinbase edit rejected".to_owned()
                     } else {
                         reasons.join(", ")
-                    }));
+                    };
+                    return Err(if refused {
+                        rejected(message)
+                    } else {
+                        VenueError::new(message)
+                    });
                 }
                 self.private_after_write(cx);
                 Ok(Some(payload.order_id.clone()))
