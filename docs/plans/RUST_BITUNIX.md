@@ -2651,3 +2651,20 @@ a distinct supported-runtime compatibility check on the final combined artifact
 all remaining sequential release replays under Node 22. No deadline/threshold
 changes or hidden replacement of failed Node 24 evidence. Exact-head CI remains
 the required final lifecycle and complete profile validation before merge.
+
+
+CI-runtime compatibility phase passes at final reviewed source: Node v22.23.3
+completes all 440 compiled SDK cases, 95 host tests, sixteen product/CLI checks,
+frame-wire and native WebSocket session-adapter integrations, and all nine
+scripted lifecycle cases. The same combined WASM artifact is used; no Rust or
+memory-policy change. Latest successful lifecycle log is
+/tmp/bitunix-node22-live-smoke.log (nine pass, zero failed/skipped); the failed
+Node 24 preconstructor attempt remains explicitly preserved above. No output or
+timing is cherry-picked from that failure. Runtime switch was declared before
+verification and matches both CI workflows' checked-in Node 22 pin.
+
+Begin quiet sequential /tmp/bitunix-node22-gates.sh with all owned compilation,
+helper, consumer and diagnostic jobs finished. Rebuild each selected module and
+check the original 1,258,291-byte limit, public three-run CPU/memory/correctness
+and private correctness, starting with the causally audited fresh KuCoin tape.
+Keep every result and diagnose any failure before a bounded correction.
