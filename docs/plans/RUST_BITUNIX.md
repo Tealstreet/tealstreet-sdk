@@ -1139,3 +1139,31 @@ valid write consumes once.391helpers and6independent production constructor/
 socket/credential regressions PASS; remaining review clear/diminishing returns.
 Root44typecheck/28lint tasks PASS. Kraken release module885,370bytes built;
 public/private artifact gates next, thenApeX.
+
+Kraken unchanged rebuilt gates PASS: private49frames/2markets/13commands;
+three-run public9,641frames/207markets/tickers/2books, all32intermediate
+events/full depth exact. TS/Rust main2425.9/426.9ms, steady1832.8/277.0ms,
+retained2.1/1.9MB, peak175.2/9.4MB; module885,370/1,258,291bytes.
+ApeX build/gates next.
+
+ApeX unchanged rebuilt gates PASS: private50frames/23commands; three-run
+public51frames/89markets/tickers/2books. TS/Rust main95.8/49.7ms, steady
+63.0/12.8ms, retained3.7/2.1MB, peak30.2/5.1MB; module1,004,067/1,258,291bytes.
+Both newvenues fully pass artifact gates; checkpoint before nextlanding.
+
+### Next landing: Paradex
+
+Fetched origin1f9e9a5206(PR1320). Phase plan: merge preserving nestedworkspace
+and all21factories; native binary ingress defaultsfalse, keeps engine frame
+validation/reservation guards, accepts provenunused crypto cleanup and adds
+four explicitbinary:false patterns. Hosts layer rawbinary into ourbounded
+ordered decoder, preserve close/disposal andgzip/zlib text; retainBitunix in
+secretfeaturecfg and add exactParadex account/CID/routing policy. Harness
+layers binary frames/waitmarkers onto strictbackbone, actualsocket closed
+readiness, route/type/caller-valid generatedIDs and scoped rawsignaturefields.
+Plan reviews identify unsignedclient_id masking and timestamp-dropping ACK
+normalization as concrete risks to resolve. No TS publicratebudget exists.
+Independent phase reviews, fullnative/SDK/harness checks, public/private
+artifact gates and unchanged1,258,291sizecap required. Expected21venues/
+25public/43private+priorparitycases; all31registered CI checks green before
+merge. PriorParadex sizeheadroom~18KB warrants directmeasurement.
