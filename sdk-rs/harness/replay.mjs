@@ -932,6 +932,7 @@ async function runTsCommand(exchange, store, record, { candleListeners, candleUp
     case 'findOrderByClientOrderId':
       return exchange.findOrderByClientOrderId(args.symbol, args.clientOrderId);
     case 'fetchLeverage': return exchange.fetchLeverageForSymbol(args.symbol);
+    case 'fetchMaxLeverage': return exchange.fetchSymbolMaxLeverage(args.symbol);
     case 'fetchStpMode': return exchange.fetchStpMode();
     case 'setStpMode': await exchange.changeStpMode(args.mode); return [];
     case 'getAccount':

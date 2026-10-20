@@ -15,6 +15,7 @@ import { memoryMetricErrors } from './memory.mjs';
 import { fixWeexConditionals, fixLighterFills, fixLighterCommands, fixKrakenOutput, fixPhemexAccount } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
+import { withMexcMiniTickerSubscription } from './mexc-mini-subscription.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
 import { venueOf } from './venues.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
@@ -557,6 +558,12 @@ KNOWN_TS_FIXES.kucoin = [
   ];
 // Fresh TS private rows retain native/cached TIF and default to GTC, matching
 // REST and client-ID lookup; command results remain compared without repair.
+// Confirmed leverage survives flat/empty account metadata; TS clears that
+// rail and blocks fresh-account orders. Native regression tests cover this
+// correction; no account values or command results are normalized here.
+// Flat rows may omit leverage until explicitly set; balance still commits.
+// Cancellation continues after failures, including child fallbacks after a
+// failed parent, and reports each failed ID. TS stops subsequent chunks.
 KNOWN_TS_FIXES.bitrue = [];
 KNOWN_TS_FIXES.bitget = {
   // Each correction is covered by documented-payload Rust tests. Normal
@@ -722,6 +729,14 @@ for (let run = 0; run < runs; run++) {
   // the linear feed; malformed supplied option WS Greeks coerced to zero
   // instead of retaining proven position/Greek state. Dedicated API tests compare
   // options terms/queries/signing, and assert native option depth25 separately.
+  if (values.venue === 'mexc') {
+    // The official sub.tickers sparse all-contract feed prevents stale prices
+    // past the first 100 detailed subscriptions. Add that exact expected TS
+    // subscription; prices and Rust output remain independently compared.
+    ts.subscriptions = withMexcMiniTickerSubscription(ts.subscriptions);
+    // A singleton skips TS placeOrders' market-maker batch probe; its exact
+    // rejected TS-only attempt is declared in the tape, not normalized away.
+  }
   if (venue.family === 'bybit') {
     if (ts.account) {
       const rest = tape.find((record) => record.type === 'config')?.options?.endpoints?.rest

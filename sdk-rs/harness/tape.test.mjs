@@ -949,6 +949,21 @@ test('BloFin typed request matching preserves nested caller IDs and single-use w
   assert.equal(tape.missingWrites, 0);
 });
 
+test('BloFin login clock must be integer milliseconds bound to its signature', () => {
+  const venue = venueOf('blofin');
+  const now = 1700000000000;
+  const socket = { url: 'wss://openapi.blofin.com/ws/private' };
+  const login = (timestamp) => JSON.stringify({ op: 'login', args: [{
+    apiKey: 'replay-key', passphrase: 'replay-passphrase', timestamp, nonce: 'replay-nonce',
+    sign: Buffer.from(createHmac('sha256', 'replay-secret')
+      .update(`/users/self/verifyGET${timestamp}replay-nonce`).digest('hex')).toString('base64'),
+  }] });
+  assert.doesNotThrow(() => venue.validateSocketMessage(socket, login(now), now));
+  assert.throws(() => venue.validateSocketMessage(socket, login(now + 0.5), now), /invalid BloFin socket login/);
+  assert.throws(() => venue.validateSocketMessage(socket, login('1700000000000.0'), now), /invalid BloFin socket login/);
+  assert.throws(() => venue.validateSocketMessage(socket, login(now).replace('replay-nonce', 'changed'), now), /signature/);
+});
+
 test('BloFin socket request comparison preserves credentials and native topics', () => {
   const tape = new Tape([], venueOf('blofin'));
   const route = 'wss://openapi.blofin.com/ws/private';
