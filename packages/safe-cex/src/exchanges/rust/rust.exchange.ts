@@ -344,8 +344,10 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   // History axes the engine lacks take the branded base fallbacks, which
-  // `exchange.capabilities` reports absent.
-  private adoptCapabilities(capabilities: EngineCapabilities) {
+  // `exchange.capabilities` reports absent. A main-thread mirror adopts the
+  // record from the worker's snapshot frame; the record never changes.
+  protected override adoptEngineCapabilities(capabilities: EngineCapabilities) {
+    if (this.capabilityRecord) return;
     this.capabilityRecord = capabilities;
     if (!capabilities.fillHistory)
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
@@ -391,13 +393,7 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
-    this.applier = new FrameApplier(
-      store,
-      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
-      this.name === 'bitgetinverse',
-      ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
-      this.name === 'binanceinverse',
-    );
+    this.applier = new FrameApplier(store);
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     if (this.name === 'breakoutprop') {
       this.stopPollingConfig = subscribeTickIntervalMultipliers(() => {
@@ -700,7 +696,7 @@ export class RustEngineExchange extends BaseExchange {
       { commandTimeoutMs: this.commandTimeoutMs },
     );
     try {
-      this.adoptCapabilities(host.capabilities());
+      this.adoptEngineCapabilities(host.capabilities());
     } catch (error) {
       host.dispose();
       throw error;
