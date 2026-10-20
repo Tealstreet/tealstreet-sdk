@@ -3,6 +3,9 @@
 Branch: `feat/rust-coinbase`, based on `origin/feat/rust-rewrite`.
 Spec: `RUST_REWRITE.md`; process and acceptance: `VENUE_PORT_BRIEF.md`.
 
+Implementation and local acceptance are complete. Final landing and exact-head
+CI evidence are recorded on [PR #1325](https://github.com/Tealstreet/tealstreet-sdk/pull/1325).
+
 ## Scope and boundaries
 
 One `safe-cex-venue-coinbase` crate serves `coinbase` and `coinbasespot`.
@@ -399,3 +402,26 @@ its two tasks. Correctness findings/fixes and clear re-review are posted on PR13
 Kraken landing7da56dc8a5 arrived during these replays. Integrating its registration
 changes before final combined-build controls and exact-head CI; Coinbase venue,
 crypto and engine source stay unchanged by this merge.
+
+
+### Final local acceptance
+
+Latest Kraken registration merge is reviewed clear. All mandatory venue gates
+pass; no outstanding code-correctness P1/P2 remains. Coinbase venue/engine/crypto
+behavior is unchanged by this registration merge. Bans, formatting, native/WASM
+Clippy,113 venue tests and the added native WASM host compilation pass. Shared
+workspace acceptance checkpoint:1596 tests/135 suites; the latest CI also checks
+the newly landed Kraken crate. Latest harness296, real combined SDK/WASM82 and
+JS host53 pass; root typecheck44/lint28/uncached tests27 tasks pass, including
+7009 safe-cex cases in each test task.
+
+All eight product/algorithm private replays pass, and the default Coinbase
+private replay passes again on the8070228byte combined build. Binance controls
+also pass: public873 frames/917 markets/783 tickers/three books, three runs,
+TS/Rust main185.4/89.5ms, steady98.8/26.1ms, retained19.6/3.4MB; generated private
+control passes. Coinbase public and selected-size metrics are recorded above.
+Fifteen explicit TS corrections remain bounded by documented-input oracles;
+request, signature, economic and caller-ID checks remain enabled. Independent
+review reports/findings/fixes are posted on PR1325. Merge requires all checks at
+its exact final head to pass. No live private authentication or retired INTX
+availability is claimed; inactive Starbase remains outside activation.

@@ -322,7 +322,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
-| Coinbase (CFM, spot, legacy INTX; coinbasespot) | implemented; [PR #1325](https://github.com/Tealstreet/tealstreet-sdk/pull/1325), all local gates pass; native JWT and measurements in [RUST_COINBASE.md](RUST_COINBASE.md) |
+| Coinbase (CFM, spot, legacy INTX; coinbasespot) | ported; [PR #1325](https://github.com/Tealstreet/tealstreet-sdk/pull/1325), all local gates and correctness reviews pass; native JWT and measurements in [RUST_COINBASE.md](RUST_COINBASE.md) |
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
 | Paradex, GRVT, ApeX Omni, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
