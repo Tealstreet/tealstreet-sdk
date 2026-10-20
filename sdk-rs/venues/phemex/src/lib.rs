@@ -304,7 +304,7 @@ impl PhemexPerpetuals {
         match pending {
             Pending::Account(r) => self.account_failed(cx, r, error),
             Pending::Orders(r) => self.orders_read_failed(cx, r, error),
-            Pending::Trade(r) => self.trade_failed(cx, r, error),
+            Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Late),
             Pending::History(r) => self.history_failed(cx, r, error),
             Pending::Income(r) => self.income_failed(cx, r, error),
             Pending::Depth { symbol, generation } => {

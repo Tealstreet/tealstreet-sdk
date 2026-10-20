@@ -41,7 +41,13 @@ pub struct OrdersRead {
 struct Reconcile {
     generation: u64,
     reading: bool,
+    not_before: f64,
+    failures: u32,
+    incomplete: u32,
+    abandoned: bool,
 }
+/// Reads with rows this engine cannot map before giving up on a symbol.
+const INCOMPLETE_READS: u32 = 3;
 #[derive(Deserialize)]
 struct OrdersEnvelope<'a> {
     code: i64,
@@ -91,8 +97,7 @@ pub struct State {
     uncertain_fills: HashMap<String, u64>,
     uncertainty_overflow: bool,
     reconcile: HashMap<String, Reconcile>,
-    reconcile_retry: Option<TimerId>,
-    reconcile_failures: u32,
+    reconcile_timer: Option<TimerId>,
 }
 impl State {
     pub fn apply_settings(
@@ -970,29 +975,47 @@ impl PhemexPerpetuals {
         }
         true
     }
-    /// Placements on `symbols` ended with an unknown outcome; read their open orders.
-    pub(crate) fn orders_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Vec<String>) {
+    /// Placements on `symbols` ended with an unknown outcome; read their open
+    /// orders no earlier than `not_before`.
+    pub(crate) fn orders_uncertain(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbols: Vec<String>,
+        not_before: f64,
+    ) {
         for symbol in symbols {
-            self.account.reconcile.entry(symbol).or_default().generation += 1;
+            let entry = self.account.reconcile.entry(symbol).or_default();
+            entry.generation += 1;
+            entry.not_before = entry.not_before.max(not_before);
+            entry.incomplete = 0;
+            entry.abandoned = false;
         }
         self.orders_reconcile(cx);
     }
-    /// Starts each owed read once no placement on that symbol is in flight.
+    /// Starts each owed read once it is due and no placement on that symbol is in flight.
     pub(crate) fn orders_reconcile(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.reconcile_retry.is_some() || self.credentials.is_none() {
+        if self.credentials.is_none() {
             return;
         }
-        if cx.now < self.paused_until {
-            self.account.reconcile_retry = Some(cx.set_timer(self.paused_until - cx.now));
-            return;
+        if let Some(timer) = self.account.reconcile_timer.take() {
+            cx.clear_timer(timer);
         }
-        let due: Vec<_> = self
-            .account
-            .reconcile
-            .iter()
-            .filter(|(symbol, read)| !read.reading && !self.trading.placing(symbol))
-            .map(|(symbol, read)| (symbol.clone(), read.generation))
-            .collect();
+        let mut due = Vec::new();
+        let mut wake: Option<f64> = None;
+        for (symbol, read) in &self.account.reconcile {
+            if read.reading || read.abandoned || self.trading.placing(symbol) {
+                continue;
+            }
+            let at = read.not_before.max(self.paused_until);
+            if at <= cx.now {
+                due.push((symbol.clone(), read.generation));
+            } else {
+                wake = Some(wake.map_or(at, |wake| wake.min(at)));
+            }
+        }
+        if let Some(at) = wake {
+            self.account.reconcile_timer = Some(cx.set_timer(at - cx.now));
+        }
         for (symbol, generation) in due {
             if let Some(read) = self.account.reconcile.get_mut(&symbol) {
                 read.reading = true;
@@ -1076,10 +1099,8 @@ impl PhemexPerpetuals {
                 continue;
             }
             // The private stream stays authoritative for every order it already reported.
-            let floor = self.account.terminal_floor;
             if cx.store.order(&row.order_id).is_some()
                 || self.account.terminals.contains_key(row.order_id.as_ref())
-                || floor > 0 && row.version() <= floor
             {
                 continue;
             }
@@ -1087,12 +1108,31 @@ impl PhemexPerpetuals {
         }
         let symbol = read.symbol.clone();
         if !complete {
-            self.orders_read_failed(cx, read, "incomplete open-order read");
+            let Some(entry) = self.account.reconcile.get_mut(&symbol) else {
+                return;
+            };
+            entry.incomplete += 1;
+            if entry.incomplete < INCOMPLETE_READS {
+                self.orders_read_failed(cx, read, "incomplete open-order read");
+                return;
+            }
+            // Retrying cannot fix a row this engine cannot map, and skipping it
+            // could hide the lost placement; stay fenced and say so once.
+            entry.reading = false;
+            entry.abandoned = true;
+            cx.log(
+                LogLevel::Error,
+                format!(
+                    "Phemex {symbol} open orders include rows this engine cannot read; \
+                     cancel-all for {symbol} stays refused, cancel those orders individually"
+                ),
+            );
+            self.orders_reconcile(cx);
             return;
         }
-        self.account.reconcile_failures = 0;
         if let Some(entry) = self.account.reconcile.get_mut(&symbol) {
             entry.reading = false;
+            entry.failures = 0;
         }
         if !self.trading.placing(&symbol) {
             cx.orders_reconciled(Some(&symbol));
@@ -1115,8 +1155,10 @@ impl PhemexPerpetuals {
     ) {
         if let Some(entry) = self.account.reconcile.get_mut(&read.symbol) {
             entry.reading = false;
+            entry.failures = entry.failures.saturating_add(1);
+            let wait = 2_000. * 2f64.powi(entry.failures.min(5) as i32 - 1);
+            entry.not_before = entry.not_before.max(cx.now + wait);
         }
-        self.account.reconcile_failures = self.account.reconcile_failures.saturating_add(1);
         // Keep the cause, never the response body.
         let cause = error.split_once(": ").map_or(error, |(cause, _)| cause);
         cx.log(
@@ -1126,10 +1168,7 @@ impl PhemexPerpetuals {
                 read.symbol
             ),
         );
-        if self.account.reconcile_retry.is_none() {
-            let wait = 2_000. * 2f64.powi(self.account.reconcile_failures.min(5) as i32 - 1);
-            self.account.reconcile_retry = Some(cx.set_timer(wait.max(self.paused_until - cx.now)));
-        }
+        self.orders_reconcile(cx);
     }
     fn account_fill(&mut self, cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>, version: u64) {
         let id = row.execution_id.as_ref();
@@ -1209,8 +1248,8 @@ impl PhemexPerpetuals {
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.reconcile_retry == Some(timer) {
-            self.account.reconcile_retry = None;
+        if self.account.reconcile_timer == Some(timer) {
+            self.account.reconcile_timer = None;
             self.orders_reconcile(cx);
             return true;
         }

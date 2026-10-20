@@ -40,7 +40,20 @@ pub struct Request {
     command: CommandId,
     call: Call,
     revision: u64,
+    /// Phemex refuses this write once its signed expiry passes (ms, client clock).
+    signed_until: f64,
 }
+/// How a failed write ended, which decides when its open orders are read.
+pub(crate) enum Outcome {
+    /// The venue proved no order was created; no read is owed.
+    Rejected,
+    /// The venue answered without proving the outcome; read now.
+    Unknown,
+    /// No usable answer (transport, non-2xx): the write may still land.
+    Late,
+}
+/// Margin for the client clock running ahead of Phemex's when bounding a late write.
+const CLOCK_SKEW_MS: f64 = 5_000.;
 struct Step {
     method: Method,
     path: &'static str,
@@ -1017,7 +1030,7 @@ impl PhemexPerpetuals {
                 "Phemex requests are rate limited; mutation was not sent".into(),
             );
             // Earlier steps of this batch were sent, so the batch outcome is open.
-            self.orders_uncertain(cx, job.placing);
+            self.orders_uncertain(cx, job.placing, cx.now);
             return;
         }
         if let Some(g) = &step.replacement
@@ -1054,6 +1067,7 @@ impl PhemexPerpetuals {
                 command: id,
                 call: step.call,
                 revision,
+                signed_until: crate::sign::Credentials::expiry(cx.now) as f64 * 1000.,
             }),
             None,
         );
@@ -1065,6 +1079,7 @@ impl PhemexPerpetuals {
         request: Request,
         response: Response<'_>,
     ) {
+        let mut resolved = false;
         let result = (|| {
             if !(200..300).contains(&response.status) {
                 return Err(format!("Phemex HTTP {}", response.status));
@@ -1093,6 +1108,7 @@ impl PhemexPerpetuals {
                     )
                 {
                     cx.placement_resolved(request.command);
+                    resolved = true;
                 }
                 return Err(format!("Phemex {} {}", env.code, env.msg));
             }
@@ -1154,6 +1170,7 @@ impl PhemexPerpetuals {
                             && native(&identity.order_id)? == identity.order_id
                         {
                             cx.placement_resolved(request.command);
+                            resolved = true;
                         }
                         return Err(format!(
                             "Phemex order rejected: bizError {}",
@@ -1350,7 +1367,14 @@ impl PhemexPerpetuals {
                 self.account_refresh(cx);
                 self.trade_next(cx, request.command);
             }
-            Err(error) => self.trade_failed(cx, request, error),
+            Err(error) => {
+                let outcome = if resolved {
+                    Outcome::Rejected
+                } else {
+                    Outcome::Unknown
+                };
+                self.trade_failed(cx, request, error, outcome)
+            }
         }
     }
 
@@ -1359,6 +1383,7 @@ impl PhemexPerpetuals {
         cx: &mut Cx<'_, Pending>,
         request: Request,
         error: impl Into<String>,
+        outcome: Outcome,
     ) {
         match &request.call {
             Call::Place { order, .. } => cx.store.remove_orders(&[order.id.as_str()]),
@@ -1379,6 +1404,15 @@ impl PhemexPerpetuals {
         self.account_refresh(cx);
         reject(cx, request.command, error.into());
         // Read only after `reject` raises the fence, so the read postdates the failure.
-        self.orders_uncertain(cx, job.map(|job| job.placing).unwrap_or_default());
+        // A late write cannot land after its signed expiry, so read once that passes.
+        let (symbols, not_before) = match outcome {
+            Outcome::Rejected => (vec![], cx.now),
+            Outcome::Unknown => (job.map(|job| job.placing).unwrap_or_default(), cx.now),
+            Outcome::Late => (
+                job.map(|job| job.placing).unwrap_or_default(),
+                request.signed_until + CLOCK_SKEW_MS,
+            ),
+        };
+        self.orders_uncertain(cx, symbols, not_before);
     }
 }
