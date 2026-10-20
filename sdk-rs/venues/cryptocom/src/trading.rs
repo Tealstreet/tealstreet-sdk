@@ -561,14 +561,13 @@ fn classify(message: String, status: Option<u16>, code: Option<i64>) -> VenueErr
         };
     };
     let error = error.venue_code(code.to_string());
+    // Exchange v1 reason codes only; codes from other API versions stay unset.
     match code {
-        10002 | 10007 | 40101 | 40102 => rejected(error, ErrorKind::AuthInvalid),
-        10003 | 40103 | 40104 => rejected(error, ErrorKind::AuthPermission),
-        10006 | 42901 => rejected(error, ErrorKind::RateLimited),
-        10001 | 40801 | 50001 => error.outcome(Outcome::Unknown),
-        10004 | 20002 | 30003..=30025 | 306 | 308 | 309 | 40401 => {
-            rejected(error, ErrorKind::Rejected)
-        }
+        40101 | 40102 => rejected(error, ErrorKind::AuthInvalid),
+        40103 | 40104 => rejected(error, ErrorKind::AuthPermission),
+        42901 => rejected(error, ErrorKind::RateLimited),
+        40801 | 50001 => error.outcome(Outcome::Unknown),
+        306 | 308 | 309 | 40401 => rejected(error, ErrorKind::Rejected),
         _ => error,
     }
 }
