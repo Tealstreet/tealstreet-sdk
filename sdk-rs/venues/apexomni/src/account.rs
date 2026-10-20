@@ -1,0 +1,1416 @@
+//! Atomic private snapshots, socket healing and execution identity.
+use crate::{ApexOmni, Pending, private_wire as wire, sign};
+use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::model::{
+    Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
+    PositionMode, PositionSide, StopTriggerType, TimeInForce,
+};
+use safe_cex_engine::store::Store;
+use safe_cex_engine::{
+    Command, CommandId, Cx, Fill, LogLevel, Response, SocketChannel, SocketId, TimerId,
+};
+use serde::Serialize;
+use std::collections::{HashMap, HashSet, VecDeque};
+
+pub enum Request {
+    Identity {
+        command: CommandId,
+    },
+    Positions {
+        generation: Option<u64>,
+        revision: u64,
+        rows: Vec<Position>,
+        bad: bool,
+    },
+    Orders {
+        generation: Option<u64>,
+        revision: u64,
+        rows: Vec<Order>,
+        bad: bool,
+    },
+    Balance,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Account;
+
+    #[test]
+    fn retiring_order_guards_bounds_memory_and_invalidates_preexisting_reads() {
+        let mut account = Account::default();
+        account.note_cancel("first-terminal");
+        let read_revision = account.revision;
+        for index in 0..8192 {
+            account.note_cancel(&format!("terminal-{index}"));
+        }
+        assert_eq!(account.order_queue.len(), 8192);
+        assert_eq!(account.order_versions.len(), 8192);
+        assert_eq!(account.terminal.len(), 8192);
+        assert!(!account.terminal.contains_key("first-terminal"));
+        assert!(read_revision < account.snapshot_floor);
+        assert_eq!(account.snapshot_floor, account.revision);
+    }
+}
+impl Request {
+    pub(crate) fn reset(&mut self) {
+        match self {
+            Self::Positions { rows, bad, .. } => {
+                rows.clear();
+                *bad = false;
+            }
+            Self::Orders { rows, bad, .. } => {
+                rows.clear();
+                *bad = false;
+            }
+            Self::Balance | Self::Identity { .. } => {}
+        }
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Execution {
+    #[serde(skip)]
+    pub(crate) identity: String,
+    pub timestamp: f64,
+    #[serde(skip)]
+    pub(crate) timestamp_ms: f64,
+    pub symbol: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_id: Option<String>,
+    pub price: f64,
+    pub qty: f64,
+    pub side: OrderSide,
+    pub commission: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commission_asset: Option<String>,
+    #[serde(skip)]
+    synthetic: bool,
+}
+
+struct Snapshot {
+    generation: u64,
+    revision: u64,
+    positions: Option<Vec<Position>>,
+    orders: Option<Vec<Order>>,
+    metadata: Option<(String, String, String)>,
+}
+
+#[derive(Default)]
+struct Progress {
+    topic: f64,
+    reported: f64,
+    synthetic: f64,
+    fee: f64,
+    at: f64,
+}
+
+#[derive(Default)]
+pub struct Account {
+    pub(crate) account_id: String,
+    pub(crate) maker_fee: String,
+    pub(crate) taker_fee: String,
+    pub(crate) initialized: bool,
+    pub(crate) recent_executions: Vec<Execution>,
+    started: bool,
+    socket: Option<SocketId>,
+    open: bool,
+    opened_at: f64,
+    received: f64,
+    ping_at: f64,
+    watchdog: Option<TimerId>,
+    reconnect: Option<TimerId>,
+    attempts: u32,
+    tick: Option<TimerId>,
+    orders_heal: Option<TimerId>,
+    positions_heal: Option<TimerId>,
+    balance_pending: bool,
+    positions_pending: bool,
+    orders_pending: bool,
+    snapshot: Option<Snapshot>,
+    generation: u64,
+    revision: u64,
+    position_versions: HashMap<String, (u64, f64, Position)>,
+    leverage_versions: HashMap<String, (u64, f64, f64)>,
+    order_versions: HashMap<String, u64>,
+    order_queue: VecDeque<(String, u64)>,
+    snapshot_floor: u64,
+    terminal: HashMap<String, (u64, OrderStatus)>,
+    seen: HashSet<String>,
+    seen_queue: VecDeque<String>,
+    progress: HashMap<String, Progress>,
+}
+
+impl Account {
+    pub(crate) fn note_leverage(&mut self, symbol: &str, leverage: f64, now: f64) {
+        self.revision += 1;
+        self.leverage_versions
+            .insert(symbol.to_owned(), (self.revision, now, leverage));
+    }
+    pub(crate) fn note_cancel(&mut self, id: &str) {
+        self.record_order(id, Some(OrderStatus::Canceled));
+    }
+
+    fn record_order(&mut self, id: &str, terminal: Option<OrderStatus>) {
+        self.revision += 1;
+        self.order_versions.insert(id.to_owned(), self.revision);
+        if let Some(status) = terminal {
+            self.terminal.insert(id.to_owned(), (self.revision, status));
+        }
+        self.order_queue.push_back((id.to_owned(), self.revision));
+        if self.order_queue.len() > 8192
+            && let Some((old, revision)) = self.order_queue.pop_front()
+            && self.order_versions.get(&old) == Some(&revision)
+        {
+            self.order_versions.remove(&old);
+            self.terminal.remove(&old);
+            // Reads predating retired guards cannot become authoritative.
+            self.snapshot_floor = self.revision;
+        }
+    }
+
+    fn prune_progress(&mut self) {
+        if self.progress.len() > 4096
+            && let Some(old) = self
+                .progress
+                .iter()
+                .min_by(|a, b| a.1.at.total_cmp(&b.1.at))
+                .map(|(id, _)| id.clone())
+        {
+            self.progress.remove(&old);
+        }
+    }
+
+    fn remember(&mut self, key: String) -> bool {
+        if !self.seen.insert(key.clone()) {
+            return false;
+        }
+        self.seen_queue.push_back(key);
+        if self.seen_queue.len() > 8192
+            && let Some(old) = self.seen_queue.pop_front()
+        {
+            self.seen.remove(&old);
+        }
+        true
+    }
+
+    fn cache(&mut self, execution: Execution) {
+        self.recent_executions.insert(0, execution);
+        self.recent_executions
+            .sort_by(|a, b| b.timestamp_ms.total_cmp(&a.timestamp_ms));
+        self.recent_executions.truncate(500);
+    }
+}
+
+pub(crate) fn execution_milliseconds(time: f64) -> f64 {
+    if time > 1e12 { time } else { time * 1000.0 }
+}
+
+pub(crate) fn side(value: &str) -> Option<OrderSide> {
+    match value.to_ascii_uppercase().as_str() {
+        "BUY" | "B" | "LONG" => Some(OrderSide::Buy),
+        "SELL" | "S" | "SHORT" => Some(OrderSide::Sell),
+        _ => None,
+    }
+}
+fn trigger(value: &str) -> Option<StopTriggerType> {
+    match value {
+        "INDEX" => Some(StopTriggerType::IndexPrice),
+        "MARKET" => Some(StopTriggerType::LastPrice),
+        _ => None,
+    }
+}
+fn position_id(symbol: &str, side: PositionSide) -> String {
+    format!(
+        "{symbol}:{}",
+        if side == PositionSide::Long {
+            "long"
+        } else {
+            "short"
+        }
+    )
+}
+fn base_id(id: &str) -> &str {
+    id.strip_suffix("__stop_loss")
+        .or_else(|| id.strip_suffix("__take_profit"))
+        .unwrap_or(id)
+}
+
+pub(crate) fn map_order(
+    store: &Store,
+    raw: &wire::OrderRow<'_>,
+    now: f64,
+) -> Result<Vec<Order>, String> {
+    if raw.symbol.trim().is_empty() || raw.id.trim().is_empty() {
+        return Err("missing order symbol or ID".into());
+    }
+    let Some(market) = store
+        .market_by_id(&raw.symbol)
+        .or_else(|| store.market(&raw.symbol))
+    else {
+        return Ok(vec![]);
+    };
+    let status = match raw.status.as_ref() {
+        "PENDING" | "OPEN" | "UNTRIGGERED" => OrderStatus::Open,
+        "FILLED" | "EXPIRED" => OrderStatus::Closed,
+        "CANCELED" => OrderStatus::Canceled,
+        _ => return Err("unknown order status".into()),
+    };
+    let kind = match raw.kind.as_ref() {
+        "LIMIT" => OrderType::Limit,
+        "MARKET" => OrderType::Market,
+        "STOP_LIMIT" | "STOP_MARKET" => OrderType::StopLoss,
+        "TAKE_PROFIT_LIMIT" | "TAKE_PROFIT_MARKET" => OrderType::TakeProfit,
+        _ => return Err("unknown order type".into()),
+    };
+    let side = side(&raw.side).ok_or("unknown order side")?;
+    let amount = raw.size.ok_or("missing order size")?;
+    let filled = raw.cum_success_fill_size.unwrap_or(0.0);
+    let price = raw
+        .trigger_price
+        .filter(|n| *n > 0.0)
+        .or(raw.price)
+        .ok_or("missing order price")?;
+    if raw.id.is_empty() || amount < 0.0 || filled < 0.0 || filled > amount || price < 0.0 {
+        return Err("invalid order quantities".into());
+    }
+    let time_in_force = if raw.post_only {
+        Some(TimeInForce::PostOnly)
+    } else {
+        match raw.time_in_force.as_ref() {
+            "GOOD_TIL_CANCEL" => Some(TimeInForce::GoodTillCancel),
+            "IMMEDIATE_OR_CANCEL" => Some(TimeInForce::ImmediateOrCancel),
+            "FILL_OR_KILL" => Some(TimeInForce::FillOrKill),
+            "POST_ONLY" => Some(TimeInForce::PostOnly),
+            _ => None,
+        }
+    };
+    let client_order_id = if !raw.client_order_id.is_empty() {
+        Some(raw.client_order_id.to_string())
+    } else if !raw.client_id.is_empty() {
+        Some(raw.client_id.to_string())
+    } else {
+        None
+    };
+    let order = Order {
+        id: raw.id.clone(),
+        parent_id: None,
+        status,
+        symbol: market.symbol.clone(),
+        kind,
+        side,
+        price,
+        amount,
+        filled,
+        remaining: amount - filled,
+        reduce_only: raw.reduce_only,
+        close: None,
+        client_order_id,
+        time_in_force,
+        last_update: now,
+        trigger_type: if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
+            trigger(&raw.trigger_price_type)
+        } else {
+            None
+        },
+        take_profit: None,
+        stop_loss: None,
+        extra: Some(OrderExtra {
+            sl_trigger_type: if kind == OrderType::StopLoss {
+                trigger(&raw.trigger_price_type)
+            } else {
+                None
+            },
+            tp_trigger_type: if kind == OrderType::TakeProfit {
+                trigger(&raw.trigger_price_type)
+            } else {
+                None
+            },
+            ..Default::default()
+        }),
+    };
+    let mut rows = vec![order];
+    for (leg, kind, suffix) in [
+        (
+            raw.open_sl_params.as_ref().or(raw.open_sl_param.as_ref()),
+            OrderType::StopLoss,
+            "__stop_loss",
+        ),
+        (
+            raw.open_tp_params.as_ref().or(raw.open_tp_param.as_ref()),
+            OrderType::TakeProfit,
+            "__take_profit",
+        ),
+    ] {
+        if let Some(leg) = leg
+            && let Some(price) = leg.trigger_price.filter(|n| *n > 0.0)
+        {
+            let mut child = rows[0].clone();
+            child.id = format!("{}{suffix}", raw.id);
+            child.parent_id = Some(raw.id.clone());
+            child.kind = kind;
+            child.side = side.opposite();
+            child.price = price;
+            child.filled = 0.0;
+            child.remaining = amount;
+            child.trigger_type = trigger(&leg.trigger_price_type);
+            child.extra = Some(OrderExtra {
+                sl_trigger_type: if kind == OrderType::StopLoss {
+                    child.trigger_type
+                } else {
+                    None
+                },
+                tp_trigger_type: if kind == OrderType::TakeProfit {
+                    child.trigger_type
+                } else {
+                    None
+                },
+                ..Default::default()
+            });
+            rows.push(child);
+        }
+    }
+    Ok(rows)
+}
+
+impl ApexOmni {
+    fn map_position(
+        &self,
+        store: &Store,
+        raw: &wire::PositionRow<'_>,
+        now: f64,
+    ) -> Result<Option<Position>, String> {
+        if raw.symbol.trim().is_empty() {
+            return Err("missing position symbol".into());
+        }
+        let Some(market) = store
+            .market_by_id(&raw.symbol)
+            .or_else(|| store.market(&raw.symbol))
+        else {
+            return Ok(None);
+        };
+        let side = match raw.side.as_ref() {
+            "LONG" => PositionSide::Long,
+            "SHORT" => PositionSide::Short,
+            _ => return Err("unknown position side".into()),
+        };
+        let id = position_id(&market.symbol, side);
+        let contracts = raw.size.ok_or("missing position size")?;
+        let entry_price = raw
+            .avg_price
+            .filter(|n| *n != 0.0)
+            .or(raw.entry_price)
+            .unwrap_or(0.0);
+        if contracts < 0.0 || entry_price < 0.0 || !(contracts * entry_price).is_finite() {
+            return Err("invalid position quantities".into());
+        }
+        let rate = raw
+            .custom_imr
+            .filter(|n| *n > 0.0)
+            .or(raw.custom_initial_margin_rate.filter(|n| *n > 0.0));
+        let leverage = rate
+            .map(|r| 1.0 / r)
+            .or_else(|| store.position(&id).map(|p| p.leverage))
+            .or_else(|| {
+                store
+                    .setting(&market.symbol)
+                    .and_then(|setting| match side {
+                        PositionSide::Long => setting.buy_leverage,
+                        PositionSide::Short => setting.sell_leverage,
+                    })
+            })
+            .unwrap_or_else(|| {
+                self.contracts
+                    .get(&market.symbol)
+                    .map(|c| 1.0 / c.default_initial_margin_rate)
+                    .unwrap_or(0.0)
+            })
+            .round();
+        if !leverage.is_finite() {
+            return Err("invalid position leverage".into());
+        }
+        Ok(Some(Position {
+            id,
+            symbol: market.symbol.clone(),
+            side,
+            entry_price,
+            notional: contracts * entry_price,
+            leverage,
+            margin_type: Some(MarginType::Cross),
+            position_mode: Some(PositionMode::Hedged),
+            unrealized_pnl: raw.unrealised_pnl.unwrap_or(0.0),
+            realized_pnl: Some(raw.cur_realised_pnl.or(raw.realized_pnl).unwrap_or(0.0)),
+            contracts,
+            liquidation_price: raw.liq_price.unwrap_or(0.0),
+            margin_size: None,
+            last_update: Some(now),
+        }))
+    }
+
+    fn placeholders(&self, store: &Store, positions: &mut Vec<Position>) {
+        for market in store.markets() {
+            let default_leverage = self
+                .contracts
+                .get(&market.symbol)
+                .map(|c| 1.0 / c.initial_margin_rate)
+                .filter(|n| n.is_finite() && *n > 0.0)
+                .unwrap_or(10.0);
+            for side in [PositionSide::Long, PositionSide::Short] {
+                let leverage = store
+                    .setting(&market.symbol)
+                    .and_then(|setting| match side {
+                        PositionSide::Long => setting.buy_leverage,
+                        PositionSide::Short => setting.sell_leverage,
+                    })
+                    .filter(|leverage| leverage.is_finite() && *leverage > 0.0)
+                    .unwrap_or(default_leverage);
+                let id = position_id(&market.symbol, side);
+                if !positions.iter().any(|p| p.id == id) {
+                    positions.push(Position {
+                        id,
+                        symbol: market.symbol.clone(),
+                        side,
+                        entry_price: 0.0,
+                        notional: 0.0,
+                        leverage,
+                        margin_type: Some(MarginType::Cross),
+                        position_mode: Some(PositionMode::Hedged),
+                        unrealized_pnl: 0.0,
+                        realized_pnl: None,
+                        contracts: 0.0,
+                        liquidation_price: 0.0,
+                        margin_size: None,
+                        last_update: None,
+                    });
+                }
+            }
+        }
+    }
+
+    pub(crate) fn start_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.started {
+            return;
+        }
+        self.account.started = true;
+        if self.options.public_data_only
+            || self.options.key.as_ref().is_none_or(String::is_empty)
+            || self.options.secret.as_ref().is_none_or(String::is_empty)
+        {
+            cx.store.set_positions(vec![]);
+            cx.store.set_orders(vec![]);
+            cx.store.set_balance(Balance::default());
+            return;
+        }
+        if let Err(error) = sign::validate_seed(self.options.omni_key_seed.as_deref().unwrap_or(""))
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
+        if self
+            .options
+            .passphrase
+            .as_ref()
+            .is_none_or(String::is_empty)
+        {
+            cx.log(
+                LogLevel::Error,
+                "ApeX private account requires an API passphrase",
+            );
+            return;
+        }
+        cx.store.set_hedged(true);
+        self.connect_private(cx);
+        self.refresh_account(cx);
+        self.account.tick = Some(cx.set_timer(self.tick_interval()));
+    }
+
+    fn tick_interval(&self) -> f64 {
+        self.options
+            .tick_interval_ms
+            .filter(|n| n.is_finite() && *n > 0.0)
+            .unwrap_or(2000.0)
+    }
+
+    fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        let host = if self.options.testnet {
+            "qa-quote.omni.apex.exchange"
+        } else {
+            "quote.omni.apex.exchange"
+        };
+        self.account.generation += 1;
+        self.account.socket = Some(cx.connect_channel(
+            format!(
+                "wss://{host}/realtime_private?v=2&timestamp={}&requestId=rust-{}",
+                cx.now as u64, self.account.generation
+            ),
+            SocketChannel::Private,
+        ));
+        self.account.received = cx.now;
+        if let Some(timer) = self.account.watchdog.take() {
+            cx.clear_timer(timer);
+        }
+        self.account.watchdog = Some(cx.set_timer(5000.0));
+    }
+
+    pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
+        if self.account.socket != Some(socket) {
+            return false;
+        }
+        let login = match sign::ws_login(&self.options, cx.now) {
+            Ok(login) => login,
+            Err(error) => {
+                cx.log(LogLevel::Error, error);
+                cx.close(socket);
+                self.account_close(cx, socket);
+                return true;
+            }
+        };
+        self.account.open = true;
+        self.account.opened_at = cx.now;
+        self.account.received = cx.now;
+        self.account.attempts = 0;
+        if let Some(timer) = self.account.watchdog.take() {
+            cx.clear_timer(timer);
+        }
+        cx.send(socket, login);
+        cx.send(
+            socket,
+            r#"{"op":"subscribe","args":["ws_zk_accounts_v3","ws_user_v1","ws_notify_v1"]}"#,
+        );
+        cx.send(socket, r#"{"op":"ping"}"#);
+        self.account.ping_at = cx.now;
+        self.account.watchdog = Some(cx.set_timer(5000.0));
+        self.refresh_account(cx);
+        true
+    }
+
+    pub(crate) fn account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
+        if self.account.socket != Some(socket) {
+            return false;
+        }
+        self.account.socket = None;
+        self.account.open = false;
+        if let Some(timer) = self.account.watchdog.take() {
+            cx.clear_timer(timer);
+        }
+        if self.account.reconnect.is_none() {
+            self.account.attempts = self.account.attempts.saturating_add(1);
+            self.account.reconnect = Some(cx.set_timer(
+                (1000.0 * 2f64.powi(self.account.attempts.min(5) as i32 - 1)).min(30_000.0),
+            ));
+        }
+        true
+    }
+
+    pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.account.reconnect == Some(timer) {
+            self.account.reconnect = None;
+            self.connect_private(cx);
+            return true;
+        }
+        if self.account.tick == Some(timer) {
+            self.account.tick = None;
+            self.refresh_account(cx);
+            self.account.tick = Some(cx.set_timer(self.tick_interval()));
+            return true;
+        }
+        if self.account.orders_heal == Some(timer) {
+            self.account.orders_heal = None;
+            self.heal_orders(cx);
+            return true;
+        }
+        if self.account.positions_heal == Some(timer) {
+            self.account.positions_heal = None;
+            self.refresh_positions(cx);
+            return true;
+        }
+        if self.account.watchdog != Some(timer) {
+            return false;
+        }
+        self.account.watchdog = None;
+        if let Some(socket) = self.account.socket {
+            if cx.now - self.account.received >= 30_000.0 {
+                cx.close(socket);
+                self.account_close(cx, socket);
+            } else {
+                cx.send(socket, r#"{"op":"ping"}"#);
+                self.account.ping_at = cx.now;
+                self.account.watchdog = Some(cx.set_timer(5000.0));
+            }
+        }
+        true
+    }
+
+    pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.snapshot.is_some()
+            || self.account.positions_pending
+            || self.account.orders_pending
+        {
+            return;
+        }
+        self.account.generation += 1;
+        let generation = self.account.generation;
+        self.account.snapshot = Some(Snapshot {
+            generation,
+            revision: self.account.revision,
+            positions: None,
+            orders: None,
+            metadata: None,
+        });
+        self.request_positions(cx, Some(generation));
+        self.request_orders(cx, Some(generation));
+    }
+
+    pub(crate) fn refresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.positions_pending {
+            self.request_positions(cx, None);
+        }
+    }
+    pub(crate) fn heal_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.orders_pending {
+            self.request_orders(cx, None);
+        }
+    }
+
+    fn request_positions(&mut self, cx: &mut Cx<'_, Pending>, generation: Option<u64>) {
+        self.account.positions_pending = true;
+        let pending = Request::Positions {
+            generation,
+            revision: self.account.revision,
+            rows: vec![],
+            bad: false,
+        };
+        if let Err(error) = self.signed(
+            cx,
+            sign::Request::get("/v3/account", vec![]),
+            Pending::Account(pending),
+            Some(ArrayAt::Path(&["data", "positions"])),
+        ) {
+            self.account.positions_pending = false;
+            self.account.snapshot = None;
+            cx.log(LogLevel::Error, error);
+        }
+    }
+
+    fn request_orders(&mut self, cx: &mut Cx<'_, Pending>, generation: Option<u64>) {
+        self.account.orders_pending = true;
+        let pending = Request::Orders {
+            generation,
+            revision: self.account.revision,
+            rows: vec![],
+            bad: false,
+        };
+        if let Err(error) = self.signed(
+            cx,
+            sign::Request::get("/v3/open-orders", vec![]),
+            Pending::Account(pending),
+            Some(ArrayAt::Field("data")),
+        ) {
+            self.account.orders_pending = false;
+            self.account.snapshot = None;
+            cx.log(LogLevel::Error, error);
+        }
+    }
+
+    fn request_balance(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.balance_pending {
+            return;
+        }
+        self.account.balance_pending = true;
+        if let Err(error) = self.signed(
+            cx,
+            sign::Request::get("/v3/account-balance", vec![]),
+            Pending::Account(Request::Balance),
+            None,
+        ) {
+            self.account.balance_pending = false;
+            cx.log(LogLevel::Error, error);
+        }
+    }
+
+    pub(crate) fn account_item(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &mut Request,
+        item: &str,
+    ) {
+        match request {
+            Request::Positions { rows, bad, .. } => {
+                match serde_json::from_str::<wire::PositionRow<'_>>(item)
+                    .map_err(|e| e.to_string())
+                    .and_then(|raw| self.map_position(cx.store, &raw, cx.now))
+                {
+                    Ok(Some(row)) => rows.push(row),
+                    Ok(None) => {}
+                    Err(_) => *bad = true,
+                }
+            }
+            Request::Orders { rows, bad, .. } => {
+                match serde_json::from_str::<wire::OrderRow<'_>>(item)
+                    .map_err(|e| e.to_string())
+                    .and_then(|raw| map_order(cx.store, &raw, cx.now))
+                {
+                    Ok(mapped) => rows.extend(mapped),
+                    Err(_) => *bad = true,
+                }
+            }
+            Request::Balance | Request::Identity { .. } => {}
+        }
+    }
+
+    pub(crate) fn account_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Response<'_>,
+    ) {
+        let data = serde_json::from_str::<wire::Envelope<'_>>(response.body)
+            .ok()
+            .map(|e| e.data);
+        match request {
+            Request::Identity { command } => {
+                let id = data
+                    .and_then(|data| serde_json::from_str::<wire::Identity>(data.get()).ok())
+                    .map(|identity| identity.id)
+                    .filter(|id| !id.is_empty());
+                match id {
+                    Some(id) => {
+                        #[derive(Serialize)]
+                        #[serde(rename_all = "camelCase")]
+                        struct Identity {
+                            user_id: String,
+                            affiliate_id: Option<String>,
+                        }
+                        cx.done(
+                            command,
+                            serde_json::to_string(&Identity {
+                                user_id: id,
+                                affiliate_id: None,
+                            })
+                            .map_err(|e| e.to_string()),
+                        );
+                    }
+                    None => cx.done(
+                        command,
+                        Err("ApeX account identity payload missing or invalid".into()),
+                    ),
+                }
+            }
+            Request::Positions {
+                generation,
+                revision,
+                rows,
+                bad,
+            } => {
+                self.account.positions_pending = false;
+                let metadata = data
+                    .and_then(|data| serde_json::from_str::<wire::Metadata<'_>>(data.get()).ok());
+                let Some(metadata) = metadata
+                    .filter(|m| !bad && m.positions.get().starts_with('[') && !m.id.is_empty())
+                else {
+                    self.snapshot_failed(cx, generation, "invalid account snapshot");
+                    return;
+                };
+                let fees = metadata
+                    .contract_account
+                    .map(|f| (f.maker_fee_rate, f.taker_fee_rate))
+                    .unwrap_or_else(|| {
+                        (
+                            self.account.maker_fee.clone(),
+                            self.account.taker_fee.clone(),
+                        )
+                    });
+                if let Some(generation) = generation {
+                    if let Some(snapshot) = self
+                        .account
+                        .snapshot
+                        .as_mut()
+                        .filter(|s| s.generation == generation)
+                    {
+                        snapshot.positions = Some(rows);
+                        snapshot.metadata = Some((metadata.id, fees.0, fees.1));
+                    }
+                    self.commit_snapshot(cx);
+                } else {
+                    self.commit_positions(cx, rows, revision);
+                    self.account.account_id = metadata.id;
+                    self.account.maker_fee = fees.0;
+                    self.account.taker_fee = fees.1;
+                }
+            }
+            Request::Orders {
+                generation,
+                revision,
+                rows,
+                bad,
+            } => {
+                self.account.orders_pending = false;
+                if revision < self.account.snapshot_floor {
+                    self.snapshot_failed(
+                        cx,
+                        generation,
+                        "order snapshot predates retired terminal guards",
+                    );
+                    return;
+                }
+                if bad || !data.is_some_and(|data| data.get().starts_with('[')) {
+                    self.snapshot_failed(cx, generation, "invalid orders snapshot");
+                    return;
+                }
+                if let Some(generation) = generation {
+                    if let Some(snapshot) = self
+                        .account
+                        .snapshot
+                        .as_mut()
+                        .filter(|s| s.generation == generation)
+                    {
+                        snapshot.orders = Some(rows);
+                    }
+                    self.commit_snapshot(cx);
+                } else {
+                    self.commit_orders(cx, rows, revision);
+                }
+            }
+            Request::Balance => {
+                self.account.balance_pending = false;
+                let Some(balance) =
+                    data.and_then(|data| serde_json::from_str::<wire::BalanceRow>(data.get()).ok())
+                else {
+                    cx.log(
+                        LogLevel::Warning,
+                        "ApeX balance payload missing or invalid; keeping last balance",
+                    );
+                    return;
+                };
+                let upnl: f64 = cx
+                    .store
+                    .positions()
+                    .iter()
+                    .filter_map(|p| {
+                        cx.store.ticker(&p.symbol).map(|t| {
+                            (t.last - p.entry_price)
+                                * p.contracts
+                                * if p.side == PositionSide::Long {
+                                    1.0
+                                } else {
+                                    -1.0
+                                }
+                        })
+                    })
+                    .sum();
+                cx.store.set_balance(Balance {
+                    total: balance.total_equity_value - upnl,
+                    used: balance.maintenance_margin,
+                    free: balance.total_equity_value - balance.initial_margin,
+                    upnl,
+                });
+            }
+        }
+    }
+
+    fn snapshot_failed(&mut self, cx: &mut Cx<'_, Pending>, generation: Option<u64>, error: &str) {
+        if generation.is_some_and(|generation| {
+            self.account
+                .snapshot
+                .as_ref()
+                .is_some_and(|s| s.generation == generation)
+        }) {
+            self.account.snapshot = None;
+        }
+        cx.log(
+            LogLevel::Warning,
+            format!("ApeX private reconciliation: {error}; retaining last state"),
+        );
+    }
+
+    pub(crate) fn account_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+    ) {
+        let generation = match request {
+            Request::Identity { command } => {
+                cx.done(command, Err(error.to_owned()));
+                return;
+            }
+            Request::Positions { generation, .. } => {
+                self.account.positions_pending = false;
+                generation
+            }
+            Request::Orders { generation, .. } => {
+                self.account.orders_pending = false;
+                generation
+            }
+            Request::Balance => {
+                self.account.balance_pending = false;
+                None
+            }
+        };
+        self.snapshot_failed(cx, generation, error);
+    }
+
+    fn commit_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self
+            .account
+            .snapshot
+            .as_ref()
+            .is_some_and(|s| s.positions.is_some() && s.orders.is_some())
+        {
+            return;
+        }
+        let snapshot = self.account.snapshot.take().expect("complete snapshot");
+        if snapshot.revision < self.account.snapshot_floor {
+            cx.log(
+                LogLevel::Warning,
+                "ApeX snapshot predates retired terminal guards; retaining last state",
+            );
+            return;
+        }
+        self.commit_positions(
+            cx,
+            snapshot.positions.expect("positions"),
+            snapshot.revision,
+        );
+        self.commit_orders(cx, snapshot.orders.expect("orders"), snapshot.revision);
+        if let Some((id, maker, taker)) = snapshot.metadata {
+            self.account.account_id = id;
+            self.account.maker_fee = maker;
+            self.account.taker_fee = taker;
+        }
+        self.account.initialized = true;
+        self.request_balance(cx);
+    }
+
+    fn commit_positions(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut rows: Vec<Position>,
+        revision: u64,
+    ) {
+        for row in &mut rows {
+            if let Some((version, at, last)) = self.account.position_versions.get(&row.id)
+                && (*version > revision || cx.now - at < 1000.0)
+            {
+                *row = cx.store.position(&row.id).unwrap_or(last).clone();
+            }
+        }
+        for current in cx.store.positions() {
+            if !rows.iter().any(|row| row.id == current.id)
+                && self
+                    .account
+                    .position_versions
+                    .get(&current.id)
+                    .is_some_and(|(version, at, _)| *version > revision || cx.now - at < 1000.0)
+            {
+                rows.push(current.clone());
+            }
+        }
+        self.placeholders(cx.store, &mut rows);
+        for row in &mut rows {
+            if let Some((version, at, leverage)) = self.account.leverage_versions.get(&row.symbol)
+                && (*version > revision || cx.now - at < 5000.0)
+            {
+                row.leverage = *leverage;
+            }
+        }
+        Self::apply_positions(cx, rows);
+    }
+
+    fn apply_positions(cx: &mut Cx<'_, Pending>, rows: Vec<Position>) {
+        let mut symbols = HashSet::new();
+        for position in &rows {
+            let first = symbols.insert(&position.symbol);
+            cx.store.update_setting(&position.symbol, |setting| {
+                if first {
+                    setting.leverage = position.leverage;
+                }
+                setting.margin_type = Some(MarginType::Cross);
+                match position.side {
+                    PositionSide::Long => setting.buy_leverage = Some(position.leverage),
+                    PositionSide::Short => setting.sell_leverage = Some(position.leverage),
+                }
+            });
+        }
+        cx.store.set_positions(
+            rows.into_iter()
+                .filter(|position| position.contracts > 0.0)
+                .collect(),
+        );
+    }
+
+    fn commit_orders(&mut self, cx: &mut Cx<'_, Pending>, mut rows: Vec<Order>, revision: u64) {
+        rows.retain(|row| !self.account.terminal.contains_key(base_id(&row.id)));
+        for current in cx.store.orders() {
+            if self
+                .account
+                .order_versions
+                .get(base_id(&current.id))
+                .is_some_and(|version| *version > revision)
+            {
+                rows.retain(|o| o.id != current.id);
+                if current.status != OrderStatus::Canceled {
+                    rows.push(current.clone());
+                }
+            }
+        }
+        cx.store.set_orders(rows);
+    }
+
+    pub(crate) fn note_cancel(&mut self, cx: &mut Cx<'_, Pending>, ids: &[String]) {
+        let mut remove = vec![];
+        for id in ids {
+            let id = base_id(id);
+            self.account.note_cancel(id);
+            remove.extend([
+                id.to_owned(),
+                format!("{id}__stop_loss"),
+                format!("{id}__take_profit"),
+            ]);
+        }
+        cx.store
+            .remove_orders(&remove.iter().map(String::as_str).collect::<Vec<_>>());
+    }
+
+    pub(crate) fn account_command(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: Command,
+    ) -> Result<(), Command> {
+        let Command::FetchAccount { command } = command else {
+            return Err(command);
+        };
+        if self.options.public_data_only
+            || self.options.key.as_ref().is_none_or(String::is_empty)
+            || self.options.secret.as_ref().is_none_or(String::is_empty)
+        {
+            cx.done(
+                command,
+                Err("ApeX account identity requires API credentials".into()),
+            );
+            return Ok(());
+        }
+        if let Err(error) = self.signed(
+            cx,
+            sign::Request::get("/v3/account", vec![]),
+            Pending::Account(Request::Identity { command }),
+            None,
+        ) {
+            cx.done(command, Err(error));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn account_message(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        socket: SocketId,
+        text: &str,
+    ) -> bool {
+        if self.account.socket != Some(socket) {
+            return false;
+        }
+        self.account.received = cx.now;
+        let Ok(message) = serde_json::from_str::<wire::Message<'_>>(text) else {
+            return true;
+        };
+        if message.op == "ping" || message.ping.is_some() {
+            let args = message
+                .args
+                .map(|args| args.get())
+                .filter(|args| args.starts_with('[') && *args != "[]")
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!(r#"["{}"]"#, cx.now as u64));
+            cx.send(socket, format!(r#"{{"op":"pong","args":{args}}}"#));
+        }
+        if message.op == "pong" || message.ret_msg == "pong" || message.pong.is_some() {
+            cx.store
+                .set_latency(((cx.now - self.account.ping_at).max(0.0) / 2.0).round());
+        }
+        if message.success == Some(false) {
+            cx.log(
+                LogLevel::Warning,
+                format!("ApeX private socket rejected request: {}", message.ret_msg),
+            );
+        }
+        if message.topic != "ws_zk_accounts_v3" {
+            return true;
+        }
+        let Some(contents) = message.contents else {
+            return true;
+        };
+        let snapshot = message.kind == "snapshot";
+        if let Some(fills) = contents.fills {
+            for fill in fills {
+                self.account_fill(cx, &fill, snapshot);
+            }
+        }
+        if let Some(orders) = contents.orders {
+            let canceled = orders.iter().any(|o| o.status == "CANCELED");
+            for raw in orders {
+                self.account_order(cx, &raw, snapshot);
+            }
+            if !canceled {
+                if let Some(timer) = self.account.orders_heal.take() {
+                    cx.clear_timer(timer);
+                }
+                self.account.orders_heal = Some(cx.set_timer(1000.0));
+            }
+        }
+        if let Some(positions) = contents.positions {
+            let mut rows = cx.store.positions().to_vec();
+            for raw in positions {
+                if let Ok(Some(mut position)) = self.map_position(cx.store, &raw, cx.now) {
+                    if let Some((_, at, leverage)) =
+                        self.account.leverage_versions.get(&position.symbol)
+                        && cx.now - at < 5000.0
+                    {
+                        position.leverage = *leverage;
+                    }
+                    self.account.revision += 1;
+                    self.account.position_versions.insert(
+                        position.id.clone(),
+                        (self.account.revision, cx.now, position.clone()),
+                    );
+                    if let Some(current) = rows.iter_mut().find(|row| row.id == position.id) {
+                        *current = position;
+                    } else {
+                        rows.push(position);
+                    }
+                }
+            }
+            self.placeholders(cx.store, &mut rows);
+            Self::apply_positions(cx, rows);
+            if let Some(timer) = self.account.positions_heal.take() {
+                cx.clear_timer(timer);
+            }
+            self.account.positions_heal = Some(cx.set_timer(1000.0));
+        }
+        true
+    }
+
+    fn account_fill(&mut self, cx: &mut Cx<'_, Pending>, raw: &wire::FillRow<'_>, snapshot: bool) {
+        let Some(market) = cx
+            .store
+            .market_by_id(&raw.symbol)
+            .or_else(|| cx.store.market(&raw.symbol))
+        else {
+            return;
+        };
+        let (Some(side), Some(price), Some(qty), Some(time)) = (
+            side(&raw.side),
+            raw.price,
+            raw.size,
+            raw.created_at.or(raw.updated_at),
+        ) else {
+            return;
+        };
+        if price <= 0.0 || qty <= 0.0 || time <= 0.0 {
+            return;
+        }
+        let id = if !raw.id.is_empty() {
+            Some(raw.id.clone())
+        } else if !raw.match_fill_id.is_empty() {
+            Some(raw.match_fill_id.clone())
+        } else {
+            None
+        };
+        let key = id
+            .as_ref()
+            .map(|id| format!("fill:{id}"))
+            .unwrap_or_else(|| format!("fill:{}:{time}:{price}:{qty}:{side:?}", raw.order_id));
+        if !self.account.remember(key.clone()) {
+            return;
+        }
+        let symbol = market.symbol.clone();
+        let asset = if !raw.token.is_empty() {
+            raw.token.to_string()
+        } else if !raw.fee_currency.is_empty() {
+            raw.fee_currency.to_string()
+        } else {
+            market.quote.clone()
+        };
+        let progress = self
+            .account
+            .progress
+            .entry(raw.order_id.clone())
+            .or_default();
+        let covered = progress.synthetic.min(qty);
+        progress.synthetic -= covered;
+        progress.topic += qty;
+        progress.at = cx.now;
+        let mut remaining = covered;
+        for execution in &mut self.account.recent_executions {
+            if execution.synthetic
+                && execution.order_id.as_deref() == Some(raw.order_id.as_str())
+                && remaining > 0.0
+            {
+                let reduction = execution.qty.min(remaining);
+                execution.commission *= (execution.qty - reduction) / execution.qty;
+                execution.qty -= reduction;
+                remaining -= reduction;
+            }
+        }
+        self.account
+            .recent_executions
+            .retain(|execution| execution.qty > 0.0);
+        if !snapshot {
+            self.trading_fill_progress(&raw.order_id, qty, execution_milliseconds(time));
+        }
+        self.account.cache(Execution {
+            identity: key,
+            timestamp: if time > 1e12 {
+                (time / 1000.0).floor()
+            } else {
+                time.floor()
+            },
+            timestamp_ms: execution_milliseconds(time),
+            symbol: symbol.clone(),
+            order_id: (!raw.order_id.is_empty()).then(|| raw.order_id.clone()),
+            price,
+            qty,
+            side,
+            commission: raw.fee.unwrap_or(0.0).abs(),
+            commission_asset: Some(asset),
+            synthetic: false,
+        });
+        if !snapshot {
+            cx.fill(Fill {
+                order_id: raw.order_id.clone(),
+                symbol,
+                side,
+                price,
+                amount: qty,
+            });
+        }
+        self.account.prune_progress();
+    }
+
+    fn account_order(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        raw: &wire::OrderRow<'_>,
+        snapshot: bool,
+    ) {
+        let Ok(rows) = map_order(cx.store, raw, cx.now) else {
+            return;
+        };
+        let Some(order) = rows.first() else {
+            return;
+        };
+        if raw.status == "FILLED"
+            && raw.price.unwrap_or(0.0) <= 0.0
+            && raw.size.unwrap_or(0.0) <= 0.0
+        {
+            return;
+        }
+        self.trading_order_progress(
+            &raw.id,
+            raw.cum_success_fill_size.unwrap_or(0.0),
+            matches!(raw.status.as_ref(), "FILLED" | "EXPIRED"),
+            raw.updated_at
+                .or(raw.updated_time)
+                .map(execution_milliseconds)
+                .unwrap_or(cx.now),
+        );
+        if self.account.terminal.contains_key(&raw.id) {
+            return;
+        }
+        self.account.record_order(
+            &raw.id,
+            matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
+                .then_some(order.status),
+        );
+        let cumulative = raw.cum_success_fill_size.unwrap_or(0.0);
+        let progress = self.account.progress.entry(raw.id.clone()).or_default();
+        let delta = (cumulative - progress.reported.max(progress.topic)).max(0.0);
+        let fee = raw.cum_success_fill_fee.unwrap_or(0.0);
+        let fee_delta = (fee - progress.fee).max(0.0);
+        progress.reported = progress.reported.max(cumulative);
+        progress.fee = fee;
+        progress.at = cx.now;
+        if snapshot {
+            progress.topic = progress.topic.max(cumulative);
+        } else if delta > 0.0 {
+            progress.synthetic += delta;
+        }
+        if !snapshot && delta > 0.0 {
+            let price = raw
+                .latest_match_fill_price
+                .filter(|n| *n > 0.0)
+                .or(raw.average_price.filter(|n| *n > 0.0))
+                .or(raw.price)
+                .unwrap_or(0.0);
+            if price > 0.0 {
+                let time = raw
+                    .updated_at
+                    .or(raw.updated_time)
+                    .or(raw.created_at)
+                    .unwrap_or(cx.now);
+                self.account.cache(Execution {
+                    identity: format!("order:{}:{cumulative}:{time}", raw.id),
+                    timestamp: if time > 1e12 {
+                        (time / 1000.0).floor()
+                    } else {
+                        time.floor()
+                    },
+                    timestamp_ms: execution_milliseconds(time),
+                    symbol: order.symbol.clone(),
+                    order_id: Some(raw.id.clone()),
+                    price,
+                    qty: delta,
+                    side: order.side,
+                    commission: fee_delta,
+                    commission_asset: cx.store.market(&order.symbol).map(|m| m.quote.clone()),
+                    synthetic: true,
+                });
+            }
+        }
+        match order.status {
+            OrderStatus::Canceled => {
+                self.account.terminal.insert(
+                    raw.id.clone(),
+                    (self.account.revision, OrderStatus::Canceled),
+                );
+                let ids = [
+                    raw.id.clone(),
+                    format!("{}__stop_loss", raw.id),
+                    format!("{}__take_profit", raw.id),
+                ];
+                cx.store
+                    .remove_orders(&ids.iter().map(String::as_str).collect::<Vec<_>>());
+                if !snapshot
+                    && cx.now - self.account.opened_at > 5000.0
+                    && raw.updated_at.is_some_and(|at| cx.now - at <= 5000.0)
+                    && !matches!(
+                        raw.cancel_reason.as_ref(),
+                        "" | "UNKNOWN_ORDER_CANCEL_REASON" | "INTERNAL_FAILED" | "USER_CANCELED"
+                    )
+                {
+                    cx.log(LogLevel::Error, raw.cancel_reason.as_ref());
+                }
+            }
+            OrderStatus::Closed => {
+                self.account
+                    .terminal
+                    .insert(raw.id.clone(), (self.account.revision, OrderStatus::Closed));
+                for id in [
+                    raw.id.clone(),
+                    format!("{}__stop_loss", raw.id),
+                    format!("{}__take_profit", raw.id),
+                ] {
+                    cx.store.set_order_status(&id, OrderStatus::Closed);
+                }
+                for row in rows {
+                    cx.store.upsert_order(row);
+                }
+            }
+            _ => {
+                for row in rows {
+                    cx.store.upsert_order(row);
+                }
+            }
+        }
+        self.account.prune_progress();
+    }
+}
