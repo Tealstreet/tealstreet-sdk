@@ -362,7 +362,12 @@ const KNOWN_TS_FIXES = {
   // placeholder quote Rust uses reported position PnL (TS prices it at 0).
   // TS logs native login rejection and has no auth-completion deadline.
   // Native failure regressions verify closure/backoff without altering replay output.
-  apexomni: ['Close rejected private logins and bound missing login ACK/account-stream readiness independently of pongs; preserve immediate subscriptions.'],
+  apexomni: [
+    'Close rejected private logins and bound missing login ACK/account-stream readiness independently of pongs; preserve immediate subscriptions.',
+    // Private tape: real quote 60000 == entry 60000 and native unrealisedPnl 0,
+    // yet TS shows balance 1300 / upnl -300 at startup checkpoints 0-2.
+    'Never price positions at an all-zero placeholder ticker: TS fabricates a startup loss (balance total/upnl) until its next balance fetch.',
+  ],
   // TS only reports public/auth errors; heartbeat responses can mask missing auth.
   cryptocom: ['Close rejected private authentication and enforce an independent auth deadline while preserving server heartbeat replies.'],
   kraken: {
