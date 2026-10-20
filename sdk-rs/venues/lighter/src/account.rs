@@ -1855,7 +1855,7 @@ impl Lighter {
                 } else {
                     trade.bid_id.0.as_ref()
                 };
-                if order.is_empty() || timestamp <= 0.0 {
+                if order.is_empty() || timestamp <= 0.0 || timestamp > cx.now + 1000.0 {
                     return;
                 }
                 let symbol = symbol.to_owned();
@@ -1870,13 +1870,11 @@ impl Lighter {
                         self.account.seen_fills.remove(&id);
                     }
                 }
+                // Subscription history is baseline; delayed update executions remain live.
                 if frame.kind.starts_with("subscribed") {
                     return;
                 }
                 self.trade_execution_observed(order, timestamp);
-                if cx.now - timestamp > 5000.0 || timestamp > cx.now + 1000.0 {
-                    return;
-                }
                 cx.fill(Fill {
                     order_id: order.into(),
                     symbol,

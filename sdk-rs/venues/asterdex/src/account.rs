@@ -38,6 +38,9 @@ pub struct AccountState {
     last_event: f64,
     executions: HashSet<(String, u64)>,
     execution_order: VecDeque<(String, u64)>,
+    execution_fills: HashMap<String, f64>,
+    execution_fill_order: VecDeque<String>,
+    orders_seeded: bool,
     pub terminal: HashMap<String, (f64, Order)>,
     canceled_ids: HashMap<String, f64>,
     native_order_times: HashMap<String, f64>,
@@ -57,6 +60,23 @@ enum ModeLoad {
     Unrequested,
     Loading,
     Known,
+}
+
+impl AccountState {
+    fn execution_progress(&mut self, id: &str, filled: f64) -> f64 {
+        let previous = self.execution_fills.get(id).copied().unwrap_or(0.0);
+        if !self.execution_fills.contains_key(id) {
+            self.execution_fill_order.push_back(id.to_owned());
+        }
+        self.execution_fills
+            .insert(id.to_owned(), filled.max(previous));
+        while self.execution_fill_order.len() > 10_000 {
+            if let Some(old) = self.execution_fill_order.pop_front() {
+                self.execution_fills.remove(&old);
+            }
+        }
+        previous
+    }
 }
 
 pub enum Request {
@@ -817,7 +837,14 @@ impl AsterDex {
                         self.account
                             .order_position_sides
                             .retain(|id, _| rows.iter().any(|o| &o.id == id));
+                        if !self.account.orders_seeded {
+                            for order in &rows {
+                                self.account.execution_progress(&order.id, order.filled);
+                            }
+                            self.account.orders_seeded = true;
+                        }
                         cx.store.set_orders(rows);
+                        cx.orders_reconciled(None);
                     }
                 }
             }
@@ -1035,6 +1062,19 @@ impl AsterDex {
                 });
             }
         }
+        // REST progress describes order state, not executions already delivered to the caller.
+        if let (Some((price, qty)), Some(filled)) = (fill, finite(&o.z)) {
+            let execution_previous = self.account.execution_progress(&id, filled);
+            if execution.is_none() && filled > execution_previous {
+                cx.fill(Fill {
+                    order_id: id.clone(),
+                    symbol: o.s.to_string(),
+                    side: order_side(&o.side),
+                    price,
+                    amount: qty.min(filled - execution_previous),
+                });
+            }
+        }
         // Liquidation/ADL rows have no order model; their executions are delivered above.
         let Some(kind) = o.ot.as_deref().or(o.o.as_deref()).and_then(order_type) else {
             return;
@@ -1110,18 +1150,6 @@ impl AsterDex {
         }
         if status != OrderStatus::Open {
             self.account.terminal.insert(id.clone(), (cx.now, order));
-        }
-        if execution.is_none()
-            && filled > previous_filled
-            && let Some((price, qty)) = fill
-        {
-            cx.fill(Fill {
-                order_id: id,
-                symbol: o.s.to_string(),
-                side: order_side(&o.side),
-                price,
-                amount: qty,
-            });
         }
         if let Some(t) = self.account.orders_timer.take() {
             cx.clear_timer(t);
