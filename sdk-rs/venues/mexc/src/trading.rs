@@ -341,9 +341,16 @@ impl MexcFutures {
                 stop_loss_type: Option<u8>,
             }
             let take = opts.kind == OrderType::TakeProfit;
+            let vol = num::adjust(
+                p.contracts / m.contract_size.unwrap_or(1.0),
+                self.volume_units.get(&opts.symbol).copied().unwrap_or(1.0),
+            );
+            if !vol.is_finite() || vol <= 0.0 {
+                return Err("MEXC full-position stop requires a positive native volume".into());
+            }
             let body = json(&Stop {
                 position_id,
-                vol: p.contracts / m.contract_size.unwrap_or(1.0),
+                vol,
                 loss_trend: if take {
                     1
                 } else {
@@ -636,8 +643,9 @@ impl MexcFutures {
         };
         let (command, steps, gap) = match command {
             Command::PlaceOrders { command, orders } => {
-                let result = self.place_steps(cx, orders, true);
-                (command, result, 1500.0)
+                let multiple = orders.len() > 1;
+                let result = self.place_steps(cx, orders, multiple);
+                (command, result, if multiple { 1500.0 } else { 450.0 })
             }
             Command::CancelOrders { command, ids } => (command, self.cancel_steps(cx, &ids), 0.0),
             Command::AmendOrder {
