@@ -133,3 +133,11 @@ Selected browser and Node WASM are both 1,051,446 bytes, below 1,258,291.
 The TS book-readiness predicate waits for the startup-created socket after
 ticker seeding, preserving listeners across startup; the live replay exercises
 this lifecycle. Hyperliquid and Binance final gates remain pending.
+
+- Final auth review: Hyperliquid spot rejects malformed or mismatched local
+  API-wallet credentials before I/O; missing credentials keep public mode and
+  main-wallet/vault read identity remains independent. SDK validation waits for
+  native startup before accepting retained balance flags and preserves startup
+  rejection/disposal errors. Native crate 87 tests (29 spot), strict Clippy and
+  formatting pass; independent review reran 29 native spot tests and 47 SDK
+  wrapper/validation tests, all passing with no open findings.

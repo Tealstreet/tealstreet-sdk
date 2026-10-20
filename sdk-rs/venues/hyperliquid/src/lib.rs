@@ -115,7 +115,9 @@ impl Hyperliquid {
             meta_retries: HashMap::new(),
         }
     }
-    pub fn new_spot(options: Options) -> Self {
+    pub fn new_spot(mut options: Options) -> Self {
+        options.public_data_only |= options.key.as_deref().is_none_or(str::is_empty)
+            || options.secret.as_deref().is_none_or(str::is_empty);
         Self {
             spot: true,
             ..Self::new(options)
@@ -693,6 +695,25 @@ fn spot_rows(
 impl Venue for Hyperliquid {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.spot && !self.options.public_data_only {
+            let matches_wallet = self
+                .options
+                .secret
+                .as_deref()
+                .zip(self.options.key.as_deref())
+                .is_some_and(|(secret, key)| {
+                    safe_cex_crypto::ethereum::private_key_address(secret)
+                        .is_ok_and(|wallet| wallet.eq_ignore_ascii_case(key))
+                });
+            if !matches_wallet {
+                cx.log(
+                    LogLevel::Error,
+                    "Hyperliquid spot invalid private key & wallet address pair",
+                );
+                cx.deactivate();
+                return;
+            }
+        }
         if self.spot {
             self.spot_meta(cx);
         } else {

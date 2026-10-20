@@ -880,3 +880,107 @@ fn cyclic_quote_paths_do_not_multiply_prices_or_block_independent_stable_exits()
             .all(|currency| currency.balance.total == 1.0)
     );
 }
+
+const TEST_SECRET: &str = "0x0123456789012345678901234567890123456789012345678901234567890123";
+const TEST_WALLET: &str = "0x14791697260e4c9a71f18484c9f997b308e59325";
+#[test]
+fn invalid_spot_local_credentials_reject_before_io_and_loaded_state() {
+    for (secret, key) in [
+        ("not-a-private-key", TEST_WALLET),
+        (TEST_SECRET, "0x0000000000000000000000000000000000000001"),
+        (TEST_SECRET, "invalid-wallet"),
+        (" ", TEST_WALLET),
+    ] {
+        let mut e = Engine::new(Hyperliquid::new_spot(Options {
+            secret: Some(secret.into()),
+            key: Some(key.into()),
+            application_id: Some(TEST_WALLET.into()),
+            ..Options::default()
+        }));
+        e.start(1000.0);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+        );
+        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("wallet address pair"))));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+        );
+        assert!(!e.store().loaded().balance);
+        assert!(!e.store().loaded().markets);
+    }
+}
+#[test]
+fn spot_local_signer_identity_is_separate_from_main_wallet_and_vault() {
+    let mut e = Engine::new(Hyperliquid::new_spot(Options {
+        secret: Some(TEST_SECRET.into()),
+        key: Some(TEST_WALLET.to_uppercase()),
+        application_id: Some("0x0000000000000000000000000000000000000002".into()),
+        vault: Some("0x0000000000000000000000000000000000000003".into()),
+        ..Options::default()
+    }));
+    e.start(1000.0);
+    let request = take_http(&mut e);
+    support::reply(&mut e, &request, 200, META);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+    );
+    let r = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let read: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    assert_eq!(read["type"], "spotClearinghouseState");
+    assert_eq!(read["user"], "0x0000000000000000000000000000000000000003");
+}
+#[test]
+fn absent_spot_local_credentials_and_explicit_public_mode_stay_public() {
+    for options in [
+        Options::default(),
+        Options {
+            key: Some(TEST_WALLET.into()),
+            secret: Some(String::new()),
+            application_id: Some(TEST_WALLET.into()),
+            ..Options::default()
+        },
+        Options {
+            public_data_only: true,
+            key: Some("bad-wallet".into()),
+            secret: Some("bad-secret".into()),
+            application_id: Some(TEST_WALLET.into()),
+            ..Options::default()
+        },
+    ] {
+        let mut e = Engine::new(Hyperliquid::new_spot(options));
+        e.start(1000.0);
+        let r = take_http(&mut e);
+        support::reply(&mut e, &r, 200, META);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::Deactivate) | Action::Http(_)))
+        );
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::WsConnect {
+                channel: Some(safe_cex_engine::SocketChannel::Public),
+                ..
+            }
+        )));
+        assert!(e.store().loaded().balance);
+    }
+}

@@ -644,6 +644,7 @@ export class RustEngineExchange extends BaseExchange {
   validateAccount = (): Promise<ValidateAccountResult> =>
     new Promise((resolve) => {
       let settled = false;
+      let started = false;
       const finish = (result: ValidateAccountResult) => {
         if (settled) return;
         settled = true;
@@ -655,13 +656,15 @@ export class RustEngineExchange extends BaseExchange {
       const onError = (message: unknown) =>
         finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
       const loaded = () => {
-        if (this.store.loaded.balance || (this.name === 'breakoutprop' && this.isPublicDataOnly && this.store.loaded.markets && this.store.loaded.tickers)) finish({ error: '', balance: this.store.balance });
+        if (this.startupFailure) return finish({ error: this.startupFailure.message });
+        if (this.isDisposed) return finish({ error: 'Exchange disposed during account validation' });
+        if (started && (this.store.loaded.balance || (this.name === 'breakoutprop' && this.isPublicDataOnly && this.store.loaded.markets && this.store.loaded.tickers))) finish({ error: '', balance: this.store.balance });
       };
       this.emitter.on('error', onError);
       const unsubscribe = this.store.subscribe(loaded);
       const timeout = setTimeout(() => finish({ error: 'Timed out validating the account' }), 15_000);
       loaded();
-      if (!this.host || !this.startup) this.start().catch((error) => onError(String(error?.message ?? error)));
+      if (!settled) this.start().then(() => { started = true; loaded(); }, (error) => onError(String(error?.message ?? error)));
     });
 
   private command = <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
