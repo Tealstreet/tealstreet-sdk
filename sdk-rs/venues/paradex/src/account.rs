@@ -405,45 +405,20 @@ impl Account {
         self.queue.push_back(request);
         self.refresh(cx);
     }
-    fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, request: Queued) {
-        let signing = if self.options.payload_signer
-            && matches!(request.method, Method::Post | Method::Put)
-            && request.path.starts_with("/orders")
-        {
-            #[derive(Deserialize)]
-            struct Signed {
-                signature: String,
-            }
-            let signature = match request.body.as_deref().and_then(|body| {
-                if body.starts_with('[') {
-                    serde_json::from_str::<[Signed; 1]>(body)
-                        .ok()
-                        .map(|[row]| row.signature)
-                } else {
-                    serde_json::from_str::<Signed>(body)
-                        .ok()
-                        .map(|row| row.signature)
-                }
-            }) {
-                Some(signature) => signature,
-                _ => {
-                    self.failed.push((
-                        request.pending,
-                        "Invalid delegated Paradex order body".into(),
-                    ));
-                    return;
-                }
-            };
-            self.credentials
-                .as_ref()
-                .and_then(|c| c.payload_request(&signature))
-                .map(|payload| {
-                    let field = format!(
-                        "\"signature\":{}",
-                        serde_json::to_string(&signature).expect("string serializable")
-                    );
-                    (payload, SignatureTarget::JsonField(field))
-                })
+    fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, mut request: Queued) {
+        let signing = if let Pending::Trade(trade) = &mut request.pending {
+            trade.take_signing_hash().and_then(|signature| {
+                self.credentials
+                    .as_ref()?
+                    .payload_request(&signature)
+                    .map(|payload| {
+                        let field = format!(
+                            "\"signature\":{}",
+                            serde_json::to_string(&signature).expect("string serializable")
+                        );
+                        (payload, SignatureTarget::JsonField(field))
+                    })
+            })
         } else {
             None
         };

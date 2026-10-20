@@ -1179,14 +1179,18 @@ fn apply_signature(
             let Some(body) = http.body.as_mut() else {
                 return Err("Missing delegated signature body");
             };
-            if body.matches(field).count() != 1 {
+            let Some(index) = body.find(field) else {
+                return Err("Missing delegated signature field");
+            };
+            let end = index + field.len();
+            if body[end..].contains(field) {
                 return Err("Ambiguous delegated signature field");
             }
             let replacement = format!(
                 "\"signature\":{}",
                 serde_json::to_string(signature).expect("string serializable")
             );
-            *body = body.replacen(field, &replacement, 1);
+            body.replace_range(index..end, &replacement);
         }
     }
     for (name, value) in headers {

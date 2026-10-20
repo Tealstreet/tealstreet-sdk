@@ -251,3 +251,156 @@ fn malformed_signer_headers_fail_before_http_and_preserve_account_readiness() {
     });
     let _ = signing(&mut h);
 }
+
+#[test]
+fn each_bracket_write_gets_its_own_delegated_hash_signature_and_headers() {
+    let mut h = loaded();
+    let mut opts = order(OrderType::Limit);
+    opts.take_profit = Some(110.);
+    opts.stop_loss = Some(90.);
+    h.command(Command::PlaceOrders {
+        command: 6,
+        orders: vec![opts],
+    });
+    let mut hashes = std::collections::HashSet::new();
+    for (id, kind) in [
+        ("entry", "LIMIT"),
+        ("tp", "TAKE_PROFIT_MARKET"),
+        ("sl", "STOP_LOSS_MARKET"),
+    ] {
+        assert!(h.pending.is_empty());
+        let (request, payload) = signing(&mut h);
+        assert!(hashes.insert(payload.payload));
+        signed(&mut h, request);
+        let write = h.take("/orders");
+        #[derive(serde::Deserialize)]
+        struct Body {
+            #[serde(rename = "type")]
+            kind: String,
+            client_id: Option<String>,
+            signature: String,
+        }
+        let body: Body = serde_json::from_str(write.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body.kind, kind);
+        assert_eq!(body.signature, "opaque signer answer \"quoted\"");
+        assert!(
+            write
+                .signer_headers
+                .iter()
+                .any(|(key, value)| key == "X-Signer-Header" && value == "delegation-proof")
+        );
+        let ack = match body.client_id {
+            Some(client) => format!(r#"{{"id":"{id}","client_id":"{client}"}}"#),
+            None => format!(r#"{{"id":"{id}"}}"#),
+        };
+        h.respond(write, 200, &ack);
+    }
+    assert_eq!(h.result(6), Ok(r#"["entry","tp","sl"]"#));
+}
+
+#[test]
+fn a_delegated_amendment_binds_the_stable_venue_id_and_rolls_back_unsent_failures() {
+    let mut h = loaded();
+    let socket = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket });
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket,
+            text: r#"{"jsonrpc":"2.0","id":0,"result":{}}"#,
+        },
+    );
+    const ROW: &str = r#"{"id":"123","market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN","side":"BUY","size":"2","remaining_size":"2","price":"99","flags":[],"instruction":"GTC","created_at":1700000000000,"last_updated_at":1700000000000}"#;
+    let text = format!(
+        r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"orders.ALL","data":{ROW}}}}}"#
+    );
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket,
+            text: &text,
+        },
+    );
+    h.collect();
+    h.command(Command::AmendOrder {
+        command: 7,
+        id: "123".into(),
+        price: Some(101.),
+        amount: None,
+    });
+    let (id, _) = signing(&mut h);
+    h.e.handle(
+        h.now,
+        Event::PayloadSignFailed {
+            request: id,
+            error: "signer refused",
+        },
+    );
+    h.collect();
+    assert!(h.result(7).is_err());
+    assert!(h.pending.is_empty());
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket,
+            text: &text,
+        },
+    );
+    h.collect();
+    h.command(Command::AmendOrder {
+        command: 8,
+        id: "123".into(),
+        price: Some(102.),
+        amount: None,
+    });
+    let (id, payload) = signing(&mut h);
+    let config = safe_cex_venue_paradex::sign::SystemConfig {
+        starknet_chain_id: "PRIVATE_SN_PARACLEAR_MAINNET".into(),
+        l1_chain_id: None,
+        paraclear_account_hash: None,
+        paraclear_account_proxy_hash: None,
+    };
+    let signer = safe_cex_venue_paradex::sign::Credentials::delegated(
+        "opaque-public-subkey",
+        "0x123",
+        "0x456",
+        &config,
+    )
+    .unwrap();
+    assert_eq!(
+        payload.payload,
+        signer
+            .modify(
+                h.now as u64,
+                "BTC-USD-PERP",
+                "BUY",
+                "LIMIT",
+                "2",
+                "102",
+                "123"
+            )
+            .unwrap()
+            .signature
+    );
+    signed(&mut h, id);
+    let write = h.take("/orders/123");
+    assert_eq!(write.method, safe_cex_engine::Method::Put);
+    assert!(
+        write
+            .body
+            .as_deref()
+            .unwrap()
+            .contains(r#""signature":"opaque signer answer \"quoted\"""#)
+    );
+}
