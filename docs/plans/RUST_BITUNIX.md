@@ -2030,3 +2030,23 @@ startup/late-frame matrix rerun PASS48/48 on unchanged artifact (32.95s);
 other379 compiled cases already passed. All owned jobs finished. Merge this
 reviewed phase, then fresh feature-isolated new spot/parent gates, Bitunix/
 Binance four-mode controls and unfinished GRVT/Lighter/Coinbase controls.
+
+40f204 isolated batch stops on parent Hyperliquid public TS StartupFrameDelivery
+timeout; private26frames PASS, module1042985bytes valid. Failedlog
+/tmp/bitunix-f4-hyperliquid-public.log retained; no retries or source changes.
+Exact trace/tmp/bitunix-hyperliq-dispatch-trace.log proves missing native rate
+budget: TS meta dispatch0/complete573, fees1000/complete2244, perpDexs2000;
+next HIP3 request must wait3000. Captured native HIP3 replies952..2146 and
+OPEN2351 precede TS socket construction. AtOPEN, TS sockets=[],holds0,
+work0,startupBlockedfalse, next protocoltimer3000. No generic ownership leak;
+strict prefix ceiling correctly refuses future work before recorded open.
+
+Native audit/plan next: inspect exact TS per-endpoint weights/FIFO/dispatch
+and public/private/spot scopes, native info/exchange callsites and existing
+budget patterns. Correct missing production pacing as a typed state machine,
+including dispatch-time auth and stale/expired queued-job fences; no JS
+emulation, TS limiter shortcut or harness timeline/threshold change. Add
+fail-before pacing and queued-job controls, preserve all90HL cases/spotmode,
+independent audit, rebuild and NEW actual live public recording after corrected
+native pacing. Preserve obsolete capture as evidence; never retime/pad it.
+Final release gates/PR push/CI/merge remain outstanding.
