@@ -231,10 +231,22 @@ export class Tape {
       true,
       impl,
     );
-    this.frames = this.records.filter(
-      (r) => r.type === 'ws' || r.type === 'command' || r.type === 'close' || r.type === 'open',
-    );
+    this.frames = this.records.filter((r) => (r.type === 'ws' || r.type === 'command' || r.type === 'close' || r.type === 'open' || r.type === 'wait') && !this.venue.skipFrame?.(r));
+    if (this.frames.some((frame) => frame.type === 'wait' && (!Number.isFinite(frame.t) || frame.t < 0)))
+      throw new Error('Invalid replay wait timestamp');
+    this.lifecycleStreams = new Map();
+    this.lifecycleSockets = new Map();
+    if (this.venue.subscriptionRouting) for (const frame of this.frames) {
+      if (frame.type !== 'ws' || frame.socket === undefined) continue;
+      const data = frame.binary === undefined ? frame.text : Uint8Array.from(Buffer.from(frame.binary, 'base64'));
+      const stream = this.venue.streamOf?.(data);
+      if (!stream) continue;
+      const key = `${canonicalUrl(frame.url, this.callerIds, this.venue)} ${frame.socket}`;
+      if (!this.lifecycleStreams.has(key)) this.lifecycleStreams.set(key, new Set());
+      this.lifecycleStreams.get(key).add(stream);
+    }
     this.startupDelivered = new Set();
+
     this.open = new Map();
     this.waiters = [];
     this.commandIndex = 0;
@@ -411,7 +423,7 @@ export class Tape {
       // Bootstrap only the first recorded frame for this exact connection. A
       // business frame or close before welcome must keep startup fail-closed.
       if (!socket.closed && !this.playing && this.venue.startupMessage) {
-        const frame = this.frames.find((record) => record.type !== 'open' && record.type !== 'command'
+        const frame = this.frames.find((record) => record.type !== 'open' && record.type !== 'command' && record.type !== 'wait'
           && !this.startupDelivered.has(record) && canonicalUrl(record.url, this.callerIds, this.venue) === key
           && (record.socket === undefined || record.socket === socket.ordinal));
         if (frame?.type === 'ws' && this.venue.startupMessage(frame)) {
@@ -467,11 +479,18 @@ export class Tape {
       if (message.method === 'SUBSCRIBE') socket.subscriptions.add(topic);
       if (message.method === 'UNSUBSCRIBE') socket.subscriptions.delete(topic);
     }
+    if (typeof message?.params?.channel === 'string') {
+      if (message.method === 'subscribe') socket.subscriptions.add(message.params.channel);
+      if (message.method === 'unsubscribe') socket.subscriptions.delete(message.params.channel);
+    }
     this.venue.onSocketSend?.(socket, text);
     // Authentication may classify a shared-URL socket after its open callback.
     this.waiters = this.waiters.filter((waiter) => !waiter());
     this.sent(socket.url, text);
     this.audit?.sent(socket.url, text, socket.generation);
+    for (const reply of this.venue.socketReplies?.(socket.url, message) ?? []) {
+      setImmediate(() => { if (!socket.closed) this.deliver(socket, reply); });
+    }
     const compared = this.venue.marketFilter && Array.isArray(message?.params)
       ? { ...message, params: message.params.filter((topic) => topic.startsWith('account.') || this.venue.marketFilter({ symbol: topic.split('.').at(-1) })) } : text;
     for (const key of subscriptionKeys(socket.url, compared, this.callerIds, this.venue)) {
@@ -580,7 +599,7 @@ export class Tape {
     // A failed verifier remains fatal at the final replay check.
     if (this.invalidSignatures) throw new Error(`${this.invalidSignatures} invalid replay signature(s)`);
     const missing = this.responses.unusedWrites();
-    if (missing) throw new Error(`${missing} taped write(s) were not sent`);
+    if (missing) throw new Error(`${missing} taped write(s) were not sent; command results: ${JSON.stringify(this.results)}`);
   }
 
   close(socket, code = 1000) {
@@ -627,9 +646,17 @@ export class Tape {
 
   async socketFor(url, text, ordinal, openingOnly = false) {
     if (typeof text === 'number') { ordinal = text; text = undefined; }
+    const key = canonicalUrl(url, this.callerIds, this.venue);
     const stream = !openingOnly && text && this.venue.streamOf?.(text);
+    const lifecycleKey = ordinal === undefined ? undefined : `${key} ${ordinal}`;
+    const streams = !openingOnly && this.venue.subscriptionRouting && lifecycleKey
+      ? this.lifecycleStreams.get(lifecycleKey) : undefined;
+    const bound = !openingOnly && lifecycleKey && this.lifecycleSockets.get(lifecycleKey);
+    if (this.venue.subscriptionRouting && !stream && bound && !bound.closed) return bound;
+    if (!openingOnly && (stream || streams?.size) && this.venue.subscriptionRouting) ordinal = undefined;
+    const subscribed = (socket, target) => [...socket.subscriptions].some((topic) => target === topic || target.startsWith(`${topic}.`));
     const active = () => this.sockets(url, ordinal).filter((socket) =>
-      (!stream || [...socket.subscriptions].some((topic) => stream === topic || stream.startsWith(`${topic}.`)))
+      (stream ? subscribed(socket, stream) : !streams?.size || [...streams].some((target) => subscribed(socket, target)))
       && (openingOnly || ordinal !== undefined || text === undefined || !this.venue.socketMatches
         || this.venue.socketMatches(socket, text)));
     if (!active().length) {
@@ -647,7 +674,11 @@ export class Tape {
         this.waiters = this.waiters.filter((entry) => entry !== waiter);
       }
     }
-    if (openingOnly || stream || ordinal !== undefined || this.venue.socketMatches || this.venue.rust !== 'hyperliquid') return active().at(-1);
+    if (openingOnly || stream || ordinal !== undefined || this.venue.socketMatches || this.venue.rust !== 'hyperliquid') {
+      const socket = active().at(-1);
+      if (!openingOnly && this.venue.subscriptionRouting && lifecycleKey) this.lifecycleSockets.set(lifecycleKey, socket);
+      return socket;
+    }
     // Legacy tapes without a stream discriminator deliver to every listener,
     // including Hyperliquid's separate public/private listeners on one URL.
     return {
@@ -662,7 +693,7 @@ export class Tape {
 
   deliver(socket, text) {
     if (text === undefined && socket.text !== undefined) return this.deliverFrame(socket);
-    if ((this.venue.validateLogin || this.venue.validateSubscriptions) && text.trimStart().startsWith('{')) {
+    if ((this.venue.validateLogin || this.venue.validateSubscriptions) && typeof text === 'string' && text.trimStart().startsWith('{')) {
       const message = JSON.parse(text);
       if (
         this.venue.validateLogin &&
@@ -681,8 +712,8 @@ export class Tape {
     if (frame.type === 'close' && frame.socket === undefined && this.venue.socketMatches && this.sockets(frame.url).length > 1) {
       throw new Error('Ambiguous close on a shared public/private endpoint');
     }
-    const latest = await this.socketFor(frame.url, frame.text, frame.socket);
-    let text = frame.text;
+    let text = frame.binary === undefined ? frame.text : Uint8Array.from(Buffer.from(frame.binary, 'base64'));
+    const latest = await this.socketFor(frame.url, text, frame.socket);
     if (this.venue.bootstrapPrivateFromTape && frame.type === 'ws') {
       const message = JSON.parse(text);
       if (message.req_id === '@latest') {
@@ -726,7 +757,7 @@ export class Tape {
    * waits until its time after the account is ready.
    */
   async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
-    const first = this.frames.find((frame) => frame.url);
+    const first = this.frames.find((frame) => frame.url && frame.type !== 'wait');
     const startupDeadline = performance.now() + this.timeoutMs;
     await within((async () => {
       // Fence only the first physical socket; a later command may create the
@@ -765,10 +796,21 @@ export class Tape {
           ? clock.wait(ready(true), 'account readiness', this.timeoutMs)
           : withTimeout(ready(true), 'account readiness', this.timeoutMs));
         this.commandIndex++;
-        this.results.push(await (clock ? clock.wait(runCommand(frame), `command ${frame.op}`, this.timeoutMs) : withTimeout(runCommand(frame), `command ${frame.op}`, this.timeoutMs)).then((ids) => ({ ok: ids }), (error) => {
-          if (error instanceof ReplayTimeout || String(error?.message).startsWith('replay timeout:')) throw error;
-          return { error: String(error?.message ?? error) };
-        }));
+        this.results.push(
+          await (
+            clock
+              ? clock.wait(runCommand(frame), `command ${frame.op}`, this.timeoutMs)
+              : withTimeout(runCommand(frame), `command ${frame.op}`, this.timeoutMs)
+          ).then(
+            (ids) => ({ ok: ids }),
+            (error) => {
+              if (error instanceof ReplayTimeout || String(error?.message).startsWith('replay timeout:')) throw error;
+              return { error: String(error?.message ?? error) };
+            },
+          ),
+        );
+      } else if (frame.type === 'wait') {
+        // Observe timers at this explicit horizon without inventing socket traffic.
       } else if (this.startupDelivered.has(frame)) {
         // Still advance tape time, frame count and tick callbacks below.
       } else {

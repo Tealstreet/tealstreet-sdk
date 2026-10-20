@@ -8,6 +8,7 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+paradex = ["dep:safe-cex-venue-paradex"]
 apexomni = ["dep:safe-cex-venue-apexomni"]
 kraken = ["dep:safe-cex-venue-kraken"]
 asterdex = ["dep:safe-cex-venue-asterdex"]
@@ -22,6 +23,7 @@ bingx = ["dep:safe-cex-venue-bingx"]
 weex = ["dep:safe-cex-venue-weex"]
 phemex = ["dep:safe-cex-venue-phemex"]
 default = [
+    "paradex",
     "apexomni",
     "kraken",
     "asterdex",
@@ -52,6 +54,7 @@ okx = ["dep:safe-cex-venue-okx"]
 orderly = ["dep:safe-cex-venue-orderly"]
 
 [dependencies]
+safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }
 safe-cex-venue-apexomni = { path = "../../venues/apexomni", optional = true }
 safe-cex-venue-kraken = { path = "../../venues/kraken", optional = true }
 safe-cex-venue-asterdex = { path = "../../venues/asterdex", optional = true }

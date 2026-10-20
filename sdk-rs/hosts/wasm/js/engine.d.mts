@@ -11,6 +11,7 @@ export class WasmEngine implements WasmEngineLike {
   wsMessage(socket: number, text: string, now: number): string;
   wsMessageActions(socket: number, text: string, now: number): string | undefined;
   wsMessageBytes(socket: number, bytes: Uint8Array, now: number): string | undefined;
+  wsBinary(socket: number, data: Uint8Array, now: number): string;
   wsClose(socket: number, code: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;
   httpChunk(request: number, data: Uint8Array, now: number): string;

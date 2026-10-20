@@ -1,25 +1,5 @@
-//! Starknet SNIP-12 typed-data hashing and Stark-curve signing (Paradex).
-use starknet_core::types::{Felt, TypedData};
-
-pub fn parse_felt(input: &str) -> Result<Felt, String> {
-    let parsed = if let Some(hex) = input
-        .strip_prefix("0x")
-        .or_else(|| input.strip_prefix("0X"))
-    {
-        Felt::from_hex(&format!("0x{hex}"))
-    } else {
-        Felt::from_dec_str(input)
-    };
-    parsed.map_err(|error| format!("invalid felt {input:?}: {error}"))
-}
-
-/// Hash SNIP-12 typed data (revision 0 or 1) for an account address.
-pub fn hash_typed_data(raw: &str, address: &Felt) -> Result<Felt, String> {
-    let typed: TypedData = serde_json::from_str(raw).map_err(|error| error.to_string())?;
-    typed
-        .message_hash(*address)
-        .map_err(|error| error.to_string())
-}
+//! Stark-curve public keys and deterministic signing.
+use starknet_crypto::Felt;
 
 pub fn public_key(private_key: &Felt) -> Felt {
     starknet_crypto::get_public_key(private_key)
@@ -55,18 +35,6 @@ mod tests {
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
-    struct TypedCase {
-        raw: String,
-        address: String,
-        key: String,
-        hash: String,
-        public_key: String,
-        r: String,
-        s: String,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
     struct SignCase {
         key: String,
         public_key: String,
@@ -76,22 +44,7 @@ mod tests {
     }
 
     fn felt(text: &str) -> Felt {
-        parse_felt(text).unwrap()
-    }
-
-    #[test]
-    fn typed_data_hashes_and_signatures_match_starknet_js() {
-        let fixture: Fixture<TypedCase> =
-            serde_json::from_str(include_str!("../tests/fixtures/starknet/typed-data.json"))
-                .unwrap();
-        assert!(!fixture.cases.is_empty());
-        for case in fixture.cases {
-            let hash = hash_typed_data(&case.raw, &felt(&case.address)).unwrap();
-            assert_eq!(hash, felt(&case.hash), "{}", case.raw);
-            let key = felt(&case.key);
-            assert_eq!(public_key(&key), felt(&case.public_key));
-            assert_eq!(sign(&hash, &key).unwrap(), (felt(&case.r), felt(&case.s)));
-        }
+        Felt::from_hex(text).unwrap()
     }
 
     #[test]
