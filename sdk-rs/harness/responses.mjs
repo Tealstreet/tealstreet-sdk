@@ -56,7 +56,7 @@ export class Responses {
     let responseBody = record.body;
     if (/"\$(clientAlgoId|newClientOrderId|client_id)"/.test(responseBody)) {
       const wireBody = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
-      const sent = typeof wireBody === 'string' ? parseEcho(wireBody) : wireBody;
+      const sent = typeof wireBody === 'string' && wireBody.length ? parseEcho(wireBody) : wireBody;
       responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId|client_id)"/g, (_, field) =>
         stringify(sent?.[field] ?? new URL(url).searchParams.get(field)),
       );

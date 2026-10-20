@@ -33,6 +33,32 @@ test('Binance REST verifies original bytes, header, clock and unsigned public/li
   assert.throws(() => validateBinanceRequest({...request,url:'https://papi.binance.com/papi/v1/listenKey?signature=bad'}));
 });
 
+test('Binance testnet listen-key requests require fresh signed bytes while production stays unsigned', () => {
+  const profiles = [
+    ['https://demo-fapi.binance.com/fapi/v1/listenKey', 'https://fapi.binance.com/fapi/v1/listenKey'],
+    ['https://demo-fapi.binance.com/papi/v1/listenKey', 'https://papi.binance.com/papi/v1/listenKey'],
+    ['https://demo-dapi.binance.com/dapi/v1/listenKey', 'https://dapi.binance.com/dapi/v1/listenKey'],
+  ];
+  const headers = { 'X-MBX-APIKEY': 'replay-key' };
+  for (const [testnet, production] of profiles) for (const method of ['POST', 'PUT']) {
+    const signed = (query) => ({ method, headers, url: `${testnet}?${query}&signature=${hmac(query)}` });
+    const query = `timestamp=${Date.now()}&recvWindow=20000`;
+    const request = signed(query);
+    assert.doesNotThrow(() => validateBinanceRequest(request));
+    for (const bad of [
+      { ...request, url: `${testnet}?${query}&signature=${'0'.repeat(64)}` },
+      { ...request, url: `${testnet}?${query}` },
+      signed(`timestamp=${Date.now() - 60001}&recvWindow=20000`),
+      signed(`timestamp=${Date.now()}&recvWindow=60001`),
+      signed(`${query}&timestamp=${Date.now()}`),
+      { ...request, headers: {} },
+      { method, headers, url: testnet },
+      { ...request, url: request.url.replace(testnet, production) },
+    ]) assert.throws(() => validateBinanceRequest(bad));
+    assert.doesNotThrow(() => validateBinanceRequest({ method, headers, url: production }));
+  }
+});
+
 test('Spot signature and raw-method oracle rejects each independent corruption', () => {
   for (const corrupt of [
     (m) => {m.params.signature = '0'.repeat(64);}, (m) => {m.params.apiKey = 'wrong';},
@@ -185,11 +211,13 @@ test('filled-status TS correction is pinned to explicit native input identity an
 
 test('Binance generated ACK IDs echo the matched signed query without weakening mutation identity', () => {
   const url='https://dapi.binance.com/dapi/v1/order';
-  const venue={requestKey:venueOf('binanceinverse').requestKey};
-  const tape=new Tape([{type:'http',method:'POST',url:url+'?symbol=BTCUSD_PERP&quantity=7',status:200,body:'{"orderId":123,"clientOrderId":"$newClientOrderId"}'}],venue);
-  assert.equal(tape.respond('POST',url+'?symbol=BTCUSD_PERP&quantity=8&newClientOrderId=generated').status,599);
-  assert.deepEqual(JSON.parse(tape.respond('POST',url+'?symbol=BTCUSD_PERP&quantity=7&newClientOrderId=generated').body),{orderId:123,clientOrderId:'generated'});
-  assert.equal(tape.respond('POST',url+'?symbol=BTCUSD_PERP&quantity=7&newClientOrderId=generated').status,599);
+  for (const body of [undefined, null, '']) {
+    const venue={requestKey:venueOf('binanceinverse').requestKey};
+    const tape=new Tape([{type:'http',method:'POST',url:url+'?symbol=BTCUSD_PERP&quantity=7',status:200,body:'{"orderId":123,"clientOrderId":"$newClientOrderId"}'}],venue);
+    assert.equal(tape.respond('POST',url+'?symbol=BTCUSD_PERP&quantity=8&newClientOrderId=generated',body).status,599);
+    assert.deepEqual(JSON.parse(tape.respond('POST',url+'?symbol=BTCUSD_PERP&quantity=7&newClientOrderId=generated',body).body),{orderId:123,clientOrderId:'generated'});
+    assert.equal(tape.respond('POST',url+'?symbol=BTCUSD_PERP&quantity=7&newClientOrderId=generated',body).status,599);
+  }
 });
 
 

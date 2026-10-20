@@ -45,3 +45,9 @@ work; Bitget-only tape parsing is already in landing. Keep the larger batching,
 allocation and per-family build changes on this branch. The focused PR must
 pass its local checks, adversarial reviews and CI; it does not complete the
 full engine performance task or its final all-venue comparison.
+
+Latest landing smoke merge resolved. Preserve incoming signed-smoke bootstrap,
+authentication, redaction and result assertions with the performance branch's
+clock, exact-ID and opt-in request indexes. Empty-body query-ID acknowledgements
+had a focused RED/GREEN regression (1 passed); full checks remain pending.
+All performance WIP is committed before switching to the focused replay branch.

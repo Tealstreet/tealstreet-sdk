@@ -24,7 +24,10 @@ export const validateBinanceRequest = ({ method, url, body, headers = {} }) => {
     return;
   }
   if (fields['x-mbx-apikey'] !== 'replay-key') throw new Error('Invalid Binance API key');
-  if (parsed.pathname.endsWith('/listenKey') && ['POST', 'PUT'].includes(method)) {
+  // The engine and TS sign demo listen-key requests; production uses only
+  // the API-key header. Demo requests share the full timestamp/HMAC checks.
+  const signedListenKey = ['https://demo-fapi.binance.com', 'https://demo-dapi.binance.com'].includes(parsed.origin);
+  if (parsed.pathname.endsWith('/listenKey') && ['POST', 'PUT'].includes(method) && !signedListenKey) {
     if (parsed.searchParams.has('signature')) throw new Error('Binance live listen-key request was signed');
     return;
   }
