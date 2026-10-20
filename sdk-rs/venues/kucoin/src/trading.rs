@@ -1,9 +1,11 @@
 //! Preflighted write plans; a lost response never resends a mutation.
-use crate::wire::{Envelope, Number};
+use crate::wire::{Envelope, Number, not_sent, write_failure};
 use crate::{Kucoin, Pending, api_symbol, encode};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, TimerId, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, TimerId, VenueError, num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -47,9 +49,29 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     deadline: f64,
-    error: Option<String>,
+    error: Option<VenueError>,
     keep_going: bool,
     metadata_started: HashSet<String>,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
+}
+impl Job {
+    /// Keeps the first failure's text. An Unknown leg makes the whole command
+    /// Unknown with its details; legs that disagree otherwise leave it unset.
+    fn record(&mut self, error: VenueError) {
+        match &mut self.error {
+            None => self.error = Some(error),
+            Some(first) if first.outcome == Some(Outcome::Unknown) => {}
+            Some(first) if error.outcome == Some(Outcome::Unknown) => {
+                first.outcome = error.outcome;
+                first.kind = error.kind;
+                first.venue_code = error.venue_code;
+                first.venue_message = error.venue_message;
+            }
+            Some(first) if first.outcome != error.outcome => first.outcome = None,
+            Some(_) => {}
+        }
+    }
 }
 #[derive(Default)]
 pub struct Trading {
@@ -641,11 +663,14 @@ impl Kucoin {
             _ => Ok(()),
         };
         if let Err(error) = validation {
-            cx.done(id, Err(error));
+            cx.fail(id, not_sent(error));
             return;
         }
         if self.credentials.is_none() {
-            cx.done(id, Err("KuCoin credentials are required".into()));
+            cx.fail(
+                id,
+                not_sent("KuCoin credentials are required").kind(ErrorKind::AuthInvalid),
+            );
             return;
         }
         self.trading.jobs.insert(
@@ -658,6 +683,7 @@ impl Kucoin {
                 deadline: cx.now + 10_000.0,
                 error: None,
                 metadata_started: HashSet::new(),
+                effective: false,
             },
         );
         self.trading.queue.push_back(id);
@@ -725,7 +751,7 @@ impl Kucoin {
                 let job = self.trading.jobs.get_mut(&command).unwrap();
                 match plan {
                     Ok(steps) => job.steps = steps,
-                    Err(error) => job.error = Some(error),
+                    Err(error) => job.error = Some(not_sent(error)),
                 }
             }
             let job = self.trading.jobs.get_mut(&command).unwrap();
@@ -744,13 +770,17 @@ impl Kucoin {
                 return;
             }
             let job = self.trading.jobs.remove(&command).unwrap();
-            cx.done(
-                command,
-                match job.error {
-                    Some(e) => Err(e),
-                    None => Ok(json(&job.ids)),
-                },
-            );
+            match job.error {
+                None => cx.done(command, Ok(json(&job.ids))),
+                Some(mut error) => {
+                    if (job.effective || !job.ids.is_empty())
+                        && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                    {
+                        error.outcome = None;
+                    }
+                    cx.fail(command, error);
+                }
+            }
         }
     }
 
@@ -769,7 +799,7 @@ impl Kucoin {
             let error = "KuCoin newer fills invalidated cancellation proof";
             cx.command_error(request.command, error);
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
-            job.error = Some(error.into());
+            job.error = Some(not_sent(error));
             job.steps.clear();
             self.trading.active = false;
             self.trading.queue.push_front(request.command);
@@ -1037,6 +1067,17 @@ impl Kucoin {
                 }
                 Ok(())
             });
+        let read = request.step.method == Method::Get;
+        match &result {
+            Ok(()) if !read => {
+                self.trading
+                    .jobs
+                    .get_mut(&request.command)
+                    .unwrap()
+                    .effective = true;
+            }
+            _ => {}
+        }
         if let Err(error) = result {
             if let Call::ConfirmCancel(mut replacement) = request.step.call
                 && replacement.read_retries < 2
@@ -1055,8 +1096,13 @@ impl Kucoin {
                 return;
             }
             cx.command_error(request.command, &error);
+            let mut error = write_failure(status, body, error);
+            // Reads (cancel proof, position check) precede a write that was never sent.
+            if read {
+                error.outcome = Some(Outcome::NotSent);
+            }
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
-            job.error.get_or_insert(error);
+            job.record(error);
             if !job.keep_going {
                 job.steps.clear();
             }
