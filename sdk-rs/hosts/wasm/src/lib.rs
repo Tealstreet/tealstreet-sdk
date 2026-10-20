@@ -155,6 +155,8 @@ struct EngineOptions {
         feature = "backpack",
         feature = "weex",
         feature = "hyperliquid",
+        feature = "lighter",
+        feature = "woo",
         feature = "okx"
     ))]
     #[serde(default)]
