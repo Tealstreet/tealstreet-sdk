@@ -209,3 +209,14 @@ Root tests passed all 7,803 SDK unit cases, but the parallel test-ci copy timed
 out on Bybit's dynamic-import capability check (7,802/7,803). That unchanged
 32-case file passed in isolation; rerun the root test gate after heavy builds,
 without increasing timeouts. Do not count that root gate green yet.
+
+Merged artifacts: release combined Wasm, native/wasm32 workspace Clippy and
+format checks passed. Actual Wasm SDK passed444/444; Lighter full crate
+passed119 cases/16 targets after the independently reviewed native-account
+assertions. Bitget passed178 cases/18 targets and strict Clippy. Two Phemex
+host fixtures discarded private actions before ticker seeding; their drivers
+now retain all effects and answer the exact endpoint. Real compiled host
+tests passed76/76. Full harness initially hit its unchanged5s TxFlow child
+process timeout during heavy builds; the complete rerun passed592/592 without
+changing tests or timeouts. Final private/public matrices, root test rerun,
+consumer checks and native workspace completion remain pending.

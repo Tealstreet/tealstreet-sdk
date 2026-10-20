@@ -17,15 +17,23 @@ test('WASM optional string and byte actions preserve UTF-8 validation and authen
   const setup = () => {
     const engine = new WasmEngine('phemex', JSON.stringify({ key: 'test-key', secret: 'test-secret' }));
     engines.push(engine);
-    const reply = (request, body) => {
-      engine.httpStart(request, 200, '', now);
-      engine.httpChunk(request, encoder.encode(body), now);
-      return actions(engine.httpEnd(request, now));
+    const pending = actions(engine.start(now));
+    const reply = (path, body) => {
+      const index = pending.findIndex((action) => action.op === 'http' && new URL(action.url).pathname === path);
+      assert.ok(index >= 0, `pending request for ${path}`);
+      const [{ request }] = pending.splice(index, 1);
+      pending.push(...actions(engine.httpStart(request, 200, '', now)));
+      pending.push(...actions(engine.httpChunk(request, encoder.encode(body), now)));
+      pending.push(...actions(engine.httpEnd(request, now)));
     };
-    let pending = actions(engine.start(now));
-    pending = reply(pending.find((action) => action.op === 'http').request, products);
-    pending = reply(pending.find((action) => action.op === 'http').request, tickers);
-    const socket = pending.filter((action) => action.op === 'wsConnect').at(-1).socket;
+    reply('/public/products', products);
+    const privateConnects = pending.filter((action) => action.op === 'wsConnect' && action.channel === 'private');
+    assert.equal(privateConnects.length, 1, 'private authentication starts as soon as markets load');
+    assert.ok(pending.some((action) => action.op === 'http' && action.url.includes('/g-accounts/accountPositions')));
+    assert.ok(!pending.some((action) => action.op === 'wsConnect' && action.channel === 'public'));
+    reply('/md/v3/ticker/24hr/all', tickers);
+    assert.equal(pending.filter((action) => action.op === 'wsConnect' && action.channel === 'private').length, 1);
+    const socket = privateConnects[0].socket;
     const auth = actions(engine.wsOpen(socket, now));
     assert.ok(auth.some((action) => action.op === 'wsSend' && JSON.parse(action.text).method === 'user.auth'));
     return { engine, socket };
