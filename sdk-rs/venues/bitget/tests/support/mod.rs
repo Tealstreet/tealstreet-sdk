@@ -103,6 +103,9 @@ impl Harness {
                     self.command_notices.push((command, "done"));
                     self.done.push((command, result))
                 }
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.done.push((command, Err(error.legacy_text())))
+                }
                 Action::Notice(Notice::Log { message, .. }) => self.logs.push(message),
                 Action::Notice(Notice::Deactivate) => {
                     panic!("unexpected Bitget account deactivation")

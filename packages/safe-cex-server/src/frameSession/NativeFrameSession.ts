@@ -65,7 +65,7 @@ function validateNotice(text: string): void {
       )) return;
       break;
     case 'done':
-      if (keys(value, ['type', 'command', 'result', 'error']) && uint32(value.command) && ((typeof value.result === 'string' && !('error' in value)) || (typeof value.error === 'string' && !('result' in value)))) return;
+      if (keys(value, ['type', 'command', 'result', 'error', 'detail']) && uint32(value.command) && ((typeof value.result === 'string' && !('error' in value) && !('detail' in value)) || (typeof value.error === 'string' && !('result' in value) && (!('detail' in value) || record(value.detail))))) return;
       break;
     case 'error':
       if (keys(value, ['type', 'command', 'error']) && typeof value.error === 'string' && (!('command' in value) || uint32(value.command))) return;

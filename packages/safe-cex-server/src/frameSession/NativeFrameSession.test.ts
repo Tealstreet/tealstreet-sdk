@@ -97,6 +97,11 @@ describe('NativeFrameSession', () => {
     socket.message(done);
     await microtasks();
     expect(sink.onNotice).toHaveBeenLastCalledWith(done);
+    const failed = '{"type":"done","command":5,"error":"leg 2 rejected","detail":{"message":"leg 2 rejected","partial":{"orderIds":["a"],"total":2,"failedIndex":1}}}';
+    socket.message(failed);
+    await microtasks();
+    expect(sink.onNotice).toHaveBeenLastCalledWith(failed);
+    expect(session.ready).toBe(true);
     session.close();
   });
 
@@ -357,6 +362,8 @@ describe('NativeFrameSession', () => {
     '{"type":"done","command":4294967296,"result":"[]"}',
     '{"type":"done","command":"1","result":"[]"}',
     '{"type":"done","command":1,"result":[]}',
+    '{"type":"done","command":1,"result":"[]","detail":{"message":"x"}}',
+    '{"type":"done","command":1,"error":"x","detail":"x"}',
     '{"type":"error","error":4}',
     '{"type":"error","command":null,"error":"bad"}',
     '{"type":"log","level":"warn","message":"bad"}',
