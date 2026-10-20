@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { subscriptionKeys } from './requests.mjs';
 import { gunzipSync } from 'node:zlib';
-import { fixBlofinAccount, fixWeexConditionals } from './known-ts-fixes.mjs';
+import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { venueOf } from './venues.mjs';
 import { memoryMetricErrors } from './memory.mjs';
@@ -118,6 +118,27 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  lighter: {
+    fills: fixLighterFills,
+    commands: fixLighterCommands,
+    // Native tests pin these defects without rewriting account or trading output.
+    notes: [
+      'Emit one execution by native trade ID; TS emits both the filled order and the execution.',
+      'Keep valid live executions during the initial five-second notification guard and inherit by-market execution identity.',
+      'Read execution history from trades, not cumulative inactive orders; preserve exact IDs and timestamp range units.',
+      'Convert native venue/integrator fee rate ticks to signed quote fees and rebates; retain venue-reported account-side PnL.',
+      'Validate integrator approval expiry and both runtime fee caps before attributed order submission.',
+      'Keep known orders after definite cancel rejections, and normalize official hyphenated terminal statuses and time-in-force.',
+      'Use engine socket watchdogs rather than a lifetime close-loop cap.',
+      'Preserve account and open orders after failed, malformed, or capped reads.',
+      'Fence delayed REST snapshots, fills, and acknowledgements behind newer private state.',
+      'Require a nonempty transaction hash for every batch item; TS accepts missing batch acknowledgements.',
+      'Reject book nonce gaps and pre-gap REST recovery snapshots.',
+      'Reject API key index 255, the query-all sentinel, for signing.',
+      'Support the full official int16 market domain; TS leverage still rejects active IDs above 254.',
+      'Acknowledge retaining the only supported net position mode; TS inherits an unsupported method.',
+    ],
+  },
   // WOO repairs live in the TS reference itself; no result normalization:
   // exact integer IDs; order-axis journal provenance; camel-case aliases;
   // monotonic cumulative/terminal state and reconciled optimistic fill deltas;
@@ -513,6 +534,10 @@ for (let run = 0; run < runs; run++) {
     if (values.venue === 'bybit') KNOWN_TS_FIXES.bybit(ts.account, rust.account, ts);
     if (values.venue === 'weex') KNOWN_TS_FIXES.weex(ts.account);
     if (values.venue === 'bingx') KNOWN_TS_FIXES.bingx(ts.account, rust.account);
+    if (values.venue === 'lighter') {
+      KNOWN_TS_FIXES.lighter.fills(ts.account, tapeRecords);
+      KNOWN_TS_FIXES.lighter.commands(ts.commands, tapeRecords);
+    }
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
       const left = JSON.stringify(ts.account[field]);
       const right = JSON.stringify(rust.account[field]);

@@ -108,6 +108,7 @@ const NOT_HONORING: Array<[string, ExchangeCtor]> = [
   ['kraken', KrakenExchange],
   ['krakenspot', KrakenSpotExchange],
   ['lighter', LighterExchange],
+  ['lighter', RustEngineExchange],
   ['mexc', MexcExchange],
   ['polymarket', PolymarketExchange],
 ];
