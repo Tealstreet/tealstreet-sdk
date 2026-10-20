@@ -25,6 +25,9 @@ export class EngineHost {
     this.requests = new Map();
     this.nextCommand = 1;
     this.disposed = false;
+    this.wsEncoder = undefined;
+    this.wsScratch = undefined;
+    this.wsScratchBusy = false;
   }
 
   start() {
@@ -82,6 +85,7 @@ export class EngineHost {
     for (const socket of this.sockets.values()) socket.close();
     for (const handle of this.timers.values()) this.transport.clearTimeout(handle);
     this.sockets.clear();
+    this.wsScratch = undefined;
     this.timers.clear();
     this.transport.dispose?.();
   }
@@ -148,6 +152,8 @@ export class EngineHost {
     switch (action.op) {
       case 'wsConnect': {
         const id = action.socket;
+        const wsMessageBytes = typeof engine.wsMessageBytes === 'function' ? engine.wsMessageBytes : undefined;
+        const wsMessage = typeof engine.wsMessageActions === 'function' ? engine.wsMessageActions : engine.wsMessage;
         if (action.headers?.length && !transport.webSocketHeaders) {
           this.handlers.onLog?.('warning', 'WebSocket upgrade headers unavailable; continuing REST reconciliation');
           transport.setTimeout(() => {
@@ -156,13 +162,50 @@ export class EngineHost {
           break;
         }
         const socket = transport.connect(action.url, {
+          binary: action.binary === true,
           channel: action.channel,
           context: action.context,
           headers: action.headers && Object.fromEntries(action.headers),
           onOpen: () => { if (!this.disposed) this.run(engine.wsOpen(id, transport.now())); },
-          onMessage: (text) => { if (!this.disposed) this.run(engine.wsMessage(id, text, transport.now())); },
-          onClose: (code) => {
+          onMessage: (text) => {
             if (this.disposed) return;
+            if (!wsMessageBytes) {
+              this.run(wsMessage.call(engine, id, text, transport.now()));
+              return;
+            }
+            // UTF-8 needs at most three bytes per UTF-16 unit, including lone
+            // surrogates. Keep one small buffer; large or reentrant messages own theirs.
+            const scratch = text.length <= 1365 && !this.wsScratchBusy;
+            if (scratch) this.wsScratchBusy = true;
+            let actions;
+            try {
+              const encoder = this.wsEncoder ??= new TextEncoder();
+              let bytes;
+              if (scratch && typeof encoder.encodeInto === 'function') {
+                const buffer = this.wsScratch ??= new Uint8Array(4096);
+                const { read, written } = encoder.encodeInto(text, buffer);
+                bytes = read === text.length ? buffer.subarray(0, written) : encoder.encode(text);
+              } else {
+                bytes = encoder.encode(text);
+              }
+              actions = wsMessageBytes.call(engine, id, bytes, transport.now());
+            } finally {
+              if (scratch) this.wsScratchBusy = false;
+            }
+            this.run(actions);
+          },
+          onBinary: (data) => {
+            if (this.disposed || !this.sockets.has(id)) return;
+            if (engine.wsBinary) this.run(engine.wsBinary(id, data, transport.now()));
+            else {
+              const active = this.sockets.get(id);
+              this.sockets.delete(id);
+              active.close();
+              this.run(engine.wsClose(id, 1003, transport.now()));
+            }
+          },
+          onClose: (code) => {
+            if (this.disposed || !this.sockets.has(id)) return;
             this.sockets.delete(id);
             this.run(engine.wsClose(id, code ?? 1006, transport.now()));
           },
@@ -247,13 +290,14 @@ async function* chunks(stream) {
 }
 
 /** Decode binary feeds in arrival order while leaving text feeds synchronous. */
-export const socketMessages = (onMessage, onError) => {
+export const socketMessages = (onMessage, onError, binary = false) => {
   let pending;
   const decode = async (data) => {
     if (typeof data === 'string') return data;
     const bytes = data instanceof Blob ? new Uint8Array(await data.arrayBuffer())
       : data instanceof ArrayBuffer ? new Uint8Array(data)
       : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    if (binary) return bytes;
     const format = bytes[0] === 0x1f && bytes[1] === 0x8b ? 'gzip'
       : bytes[0] === 0x78 ? 'deflate' : undefined;
     if (!format) return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -283,14 +327,16 @@ export const nativeTransport = () => {
   WebSocket: webSocketHeaders ? Socket : undefined,
   webSocketHeaders,
   now: () => Date.now(),
-  connect(url, { headers = {}, onOpen, onMessage, onClose }) {
+  connect(url, { headers = {}, binary = false, onOpen, onMessage, onBinary, onClose }) {
     if (Object.keys(headers).length && !webSocketHeaders) throw new Error('WebSocket upgrade headers unavailable');
     const ws = webSocketHeaders ? new Socket(url, { headers: { 'User-Agent': 'Tealstreet', ...headers } }) : new Socket(url);
     let closed = false;
     const reportClose = (code) => { if (!closed) { closed = true; onClose(code); } };
     ws.addEventListener('error', () => reportClose(1006));
     ws.addEventListener('open', () => { if (!closed) onOpen(); });
-    const receive = socketMessages((text) => { if (!closed) onMessage(text); }, () => ws.close());
+    const receive = socketMessages((data) => {
+      if (!closed) { if (typeof data === 'string') onMessage(data); else onBinary?.(data); }
+    }, () => ws.close(), binary);
     ws.addEventListener('message', (event) => receive(event.data));
     ws.addEventListener('close', (event) => reportClose(event.code));
     return { send: (text) => ws.send(text), close: () => ws.close() };

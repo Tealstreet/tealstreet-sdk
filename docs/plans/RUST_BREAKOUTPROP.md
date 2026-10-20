@@ -170,3 +170,22 @@ verification.
 - Final native crate result after the account/trading follow-ups: 100/100 pass;
   workspace formatting passes. Pre-landing checks are being refreshed against
   the fetched landing head `1f9e9a5206` before final artifact/replay measurements.
+- Landing integration uses actual merge parent `45d7a3fb98` (Phemex joined
+  Paradex/ApeX/Kraken while the shared remote ref advanced). Conflict resolutions
+  retain incoming layout, binary transport, async readiness, Phemex and every
+  venue registration, and Breakout polling/auth/control behavior. A selected
+  feature cfg omission for `secret` was repaired. Harness 357/357 and four-venue
+  wrapper integration 41/41 pass; selected Breakout WASM cargo check passes.
+- Independent merged-source correctness review is clear against ours
+  `9e079ad3e5` and incoming `45d7a3fb98`; no unresolved conflicts or weakened
+  response validation, economic comparisons, CPU or memory gates.
+- Merged selected Breakout WASM: 640,088 bytes (budget 1,258,291), SHA-256
+  `f3d483da4e453eef384817602c356b9df791b8425a26db11b97b604d8577b2d8`.
+  Compiled integration 4/4 pass. Documented private replay PASS: 5 markets,
+  5 tickers, 24 timeline records; main CPU TS 98.4/Rust 45.5 ms and retained
+  TS 15.3/Rust 0.9 MB (private performance informational).
+- Documented public replay PASS (3 runs): 5 markets, 5 tickers, 2 books,
+  15 timeline records; median main CPU TS 28.5/Rust 23.6 ms (1.20x), steady
+  TS 12.0/Rust 10.4 ms (1.15x), retained TS 14.1/Rust 0.8 MB (17.14x),
+  Rust linear memory 0.3 MB. This is the explicitly scripted fixture, not the
+  required live capture. Root typecheck 44/44 and lint 28/28 pass after merge.

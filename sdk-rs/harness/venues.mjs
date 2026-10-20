@@ -1,15 +1,19 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
+import { APEX_SEED, apexWireBody, createApexSocketAudit, prepareApexReplay, prepareApexTs, validateApexRequest } from './apexomni-protocol.mjs';
 import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
 import { breakoutprop } from './breakoutprop-requests.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
+import { paradexProtocol } from './paradex-protocol.mjs';
 import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
 
+import {createKrakenRequestAudit,validateKrakenSocketMessage,validateKrakenSocketFrame,krakenRequestBody,krakenCommandResult} from './kraken-protocol.mjs';
+let krakenRequestAudit;
 let lighterVerifier;
 
 const root = '../../packages/safe-cex/src/exchanges';
@@ -512,6 +516,137 @@ export const mexcRequestUrl = (url) => {
 
 export const VENUES = {
   breakoutprop,
+  phemex: {
+    rust: 'phemex',
+    phemexProtocol: true,
+    tsReplaySettled: (exchange, count) => Object.values(exchange.publicWebsocket.orderBookInnerState).filter((s) => s.isSnapshotLoaded).length >= count,
+    ts: { module: `${root}/phemex/phemex.exchange.ts`, className: 'PhemexExchange', name: 'phemex' },
+    matchRequestBody: true,
+    compareFillPrices: true,
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.topics).filter((t) => t.startsWith('orderbook_p.subscribe')).length >= count,
+    isPrivateRecord: (r) => r.type === 'ws' && /"(accounts_p|positions_p|orders_p)"/.test(r.text),
+    generatedQueryId: (name, value) => name === 'clOrdID' && value.startsWith('Tealstreet_'),
+    bootstrapFrame: (r) => r.bootstrap === true,
+    onSocketSend(socket, text) { if (JSON.parse(text).method === 'user.auth') socket.private = true; },
+    socketMatches: (socket, text) => Boolean(socket.private) === (JSON.parse(text).id === 999 || /"(accounts_p|positions_p|orders_p)"/.test(text)),
+    pingReply(text) { const m = JSON.parse(text); return m.method === 'server.ping' ? JSON.stringify({ id: m.id, result: 'pong', error: null }) : null; },
+    validateRequest({ url, body = '', headers = {} }) {
+      const parsed = new URL(url);
+      const get = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
+      const expiry = get('x-phemex-request-expiry');
+      if (!expiry && !parsed.pathname.startsWith('/g-') && !parsed.pathname.startsWith('/api-data/g-futures/')) return;
+      const query = decodeURIComponent(parsed.search.slice(1).replace(/\+/g, '%20'));
+      const expected = createHmac('sha256', 'replay-secret').update(parsed.pathname + query + expiry + (body || '')).digest('hex');
+      if (get('x-phemex-access-token') !== 'replay-key' || get('x-phemex-request-signature') !== expected || !Number.isSafeInteger(Number(expiry)) || Math.abs(Number(expiry) - Date.now() / 1000 - 60) > 5) throw new Error(`invalid Phemex request: ${parsed.pathname}`);
+    },
+    createSocketAudit(_impl, { isPrivate, books }) {
+      const failures = [], topics = new Set(), sockets = new Map();
+      const socket = (url, generation = 1) => {
+        const key = `${url} ${generation}`;
+        if (!sockets.has(key)) sockets.set(key, { private: false, auth: false, acknowledged: false, subscribed: false, closed: false });
+        return sockets.get(key);
+      };
+      return {
+        connected(url, generation) { socket(url, generation); },
+        closed(url, generation) { socket(url, generation).closed = true; },
+        sent(url, text, generation) {
+          const m = JSON.parse(text), state = socket(url, generation);
+          if (m.method === 'user.auth') {
+            state.private = true;
+            state.acknowledged = false;
+            state.subscribed = false;
+            const [kind, key, sig, expiry] = m.params ?? [];
+            state.auth = !state.closed && m.id === 999 && kind === 'API' && key === 'replay-key' && Number.isSafeInteger(expiry) && Math.abs(expiry - Date.now() / 1000 - 60) < 5 && sig === createHmac('sha256', 'replay-secret').update(key + expiry).digest('hex');
+            if (!state.auth) failures.push('invalid Phemex WS auth');
+          }
+          if (m.method === 'orderbook_p.subscribe' && (m.params?.length !== 3 || m.params[1] !== false || m.params[2] !== 0)) failures.push('Phemex books require full depth0 at20ms');
+          if (m.method === 'aop_p.subscribe') {
+            state.private = true;
+            if (state.closed || !state.acknowledged) failures.push('Phemex private subscribe preceded auth acknowledgement');
+            else state.subscribed = true;
+          }
+          if (m.method?.endsWith('.subscribe')) topics.add(m.method + ':' + (m.params?.[0] ?? ''));
+        },
+        received(url, text, generation) {
+          const m = JSON.parse(text), state = socket(url, generation);
+          if (m.id !== 999 || state.closed) return;
+          state.acknowledged = false;
+          if (!state.auth) failures.push('Phemex auth ACK without request');
+          else if (m.error != null || m.result?.status !== 'success') failures.push('Phemex auth ACK did not confirm success');
+          else state.acknowledged = true;
+        },
+        ready() {
+          const privateSockets = [...sockets.values()].filter((state) => state.private && !state.closed);
+          return topics.has('perp_market24h_pack_p.subscribe:') && books.every((s) => topics.has('orderbook_p.subscribe:' + s)) && (!isPrivate || privateSockets.length > 0 && privateSockets.every((state) => state.acknowledged && state.subscribed));
+        },
+        errors() { return failures; },
+      };
+    },
+  },
+
+  paradex: {
+    ...paradexProtocol,
+    rust: 'paradex',
+    ts: { module: `${root}/paradex/paradex.exchange.ts`, className: 'ParadexExchange', name: 'paradex' },
+    // Effective position leverage differs from configured cross-margin leverage.
+    tsSettings: (exchange, store) => store.markets.map(({ symbol }) => ({
+      symbol, marginType: 'cross', leverage: exchange.leverageSettings.get(symbol) ?? 10,
+    })),
+    tsBooksSubscribed: (exchange, count) => exchange.publicWebsocket.orderbookCallbacks.size >= count,
+  },
+  apexomni: {
+    rust: 'apexomni',
+    ts: { module: `${root}/apexomni/apexomni.exchange.ts`, className: 'ApexOmniExchange', name: 'apexomni' },
+    privateSocket: '/realtime_private',
+    replayCredentials: { omniKeySeed: APEX_SEED },
+    publicOptions: { passphrase: '' },
+    recordOptions: { publicDataOnly: true, key: '', secret: '' },
+    prepareReplay: prepareApexReplay,
+    prepareTs: prepareApexTs,
+    wireBody: apexWireBody,
+    matchRequestBody: true,
+    generatedId: () => false,
+    generatedBodyId: (key) => ['clientId', 'clientOrderId', 'tpClientOrderId', 'slClientOrderId', 'expiration', 'tpExpiration', 'slExpiration', 'tpSignature', 'slSignature'].includes(key),
+    compareWriteOrder: true,
+    compareFillPrices: true,
+    compareClientIds: true,
+    subscriptionGenerations: true,
+    createSocketAudit: createApexSocketAudit,
+    validateRequest: validateApexRequest,
+    independentLeverage: true,
+    tsSettings: (_exchange, store) => store.markets.map((market) => ({
+      symbol: market.symbol,
+      marginType: 'cross',
+      buyLeverage: store.positions.find((position) => position.symbol === market.symbol && position.side === 'long')?.leverage ?? 0,
+      sellLeverage: store.positions.find((position) => position.symbol === market.symbol && position.side === 'short')?.leverage ?? 0,
+    })),
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderBook200.H.')).length >= count,
+    isWrite: (method) => method !== 'GET',
+  },
+  kraken: {
+    rust: 'kraken',
+    compareBalanceCoins:true,
+    productSubscriptions:true,
+    tsBooksReady:(exchange,store)=>Boolean(store.loaded.tickers&&exchange.publicWebsocket),
+    tsSettings:(exchange,store)=>store.markets.map(m=>{
+      const position=store.positions.find(p=>p.symbol===m.symbol&&p.contracts>0);
+      return {symbol:m.symbol,leverage:exchange.leverageSettings.get(m.symbol)??position?.leverage??m.limits.leverage.max,marginType:exchange.marginTypePreferences.get(m.symbol)??position?.marginType??'cross'};
+    }),
+    ts: {module: `${root}/kraken/kraken.exchange.ts`, className: 'KrakenExchange', name: 'kraken'},
+    replayCredentials: {key:'replay-key',secret:'cmVwbGF5LXNlY3JldA=='},
+    tsBooksSubscribed: (exchange,count) => Object.values(exchange.publicWebsocket.orderBookHandlers).filter(v=>v.length).length>=count,
+    isPrivateRecord: record=>record.type==='ws'&&/"(?:fills|open_orders|open_positions|challenge)"/.test(record.text??''),
+    initializeReplay(impl){krakenRequestAudit=createKrakenRequestAudit({strict:impl==='rust'});},
+    validateRequest: request=>krakenRequestAudit(request),
+    validateSocketMessage:validateKrakenSocketMessage,
+    validateSocketFrame:validateKrakenSocketFrame,
+    requestBody:krakenRequestBody,
+    commandResult:krakenCommandResult,
+    requestBodies:true,
+    compareFillPrices:true,
+    compareWriteOrder:true,
+    isWrite:method=>method!=='GET',
+  },
   asterdex: {
     initializeReplay: initializeAsterCrypto,
     rust: 'asterdex',

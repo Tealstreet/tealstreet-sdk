@@ -22,7 +22,7 @@ export interface Transport {
   now(): number;
   connect(
     url: string,
-    handlers: { context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
+    handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
   ): Socket;
   request(request: {
     method: string;
@@ -54,7 +54,12 @@ export interface WasmEngineLike {
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
-  wsMessage(socket: number, text: string, now: number): string | undefined;
+  wsMessage(socket: number, text: string, now: number): string;
+  /** Optional fast entry: undefined means no actions; legacy engines remain supported. */
+  wsMessageActions?(socket: number, text: string, now: number): string | undefined;
+  /** Optional UTF-8 entry; invalid bytes are ignored without changing engine state. */
+  wsMessageBytes?(socket: number, bytes: Uint8Array, now: number): string | undefined;
+  wsBinary?(socket: number, data: Uint8Array, now: number): string;
   wsClose(socket: number, code: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;
   httpChunk(request: number, data: Uint8Array, now: number): string;
@@ -78,3 +83,6 @@ export function nativeTransport(): Transport;
 
 /** Ordered text and gzip/deflate binary WebSocket message decoding. */
 export function socketMessages(onMessage: (text: string) => void, onError: (error: unknown) => void): (data: string | Blob | ArrayBuffer | ArrayBufferView) => void;
+
+/** Preserve binary application frames when explicitly requested by the venue. */
+export function socketMessages(onMessage: (data: string | Uint8Array) => void, onError: (error: unknown) => void, binary: boolean | undefined): (data: string | Blob | ArrayBuffer | ArrayBufferView) => void;

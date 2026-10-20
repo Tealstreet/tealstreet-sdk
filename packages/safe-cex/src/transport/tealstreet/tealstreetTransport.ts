@@ -32,7 +32,8 @@ export const TEALSTREET_REST_HEADERS = {
 };
 
 export const proxyAuthorizationHeader = (exchange: ExchangeName): string =>
-  exchange === 'grvt' || exchange === 'mexc' || exchange === 'breakoutprop' ? 'Tealstreet-Authorization' : 'Authorization';
+  exchange === 'grvt' || exchange === 'mexc' || exchange === 'paradex' || exchange === 'breakoutprop'
+    ? 'Tealstreet-Authorization' : 'Authorization';
 
 const isTealstreetWebSocketUrl = (url: string): boolean => {
   try {

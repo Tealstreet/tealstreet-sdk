@@ -361,6 +361,15 @@ describe('RustEngineExchange', () => {
     vi.restoreAllMocks();
   });
 
+  it('rejects malformed Kraken signing credentials before account startup can hang', async () => {
+    setWasmEngineLoader(loadNodeEngine);
+    const tape = recordedTransport();
+    setRustEngineTransport(() => tape.transport);
+    exchange = new RustEngineExchange('kraken', { key: 'fixture-key', secret: 'invalid base64!' }, new DefaultStore());
+    await expect(exchange.start()).rejects.toThrow(/base64/);
+    expect(tape.requests).toEqual([]);
+  });
+
   it('skips private metadata refresh for an implicitly public-only MEXC shell', async () => {
     exchange = new RustEngineExchange('mexc', { key: '', secret: '' }, new DefaultStore());
     expect(exchange.isPublicDataOnly).toBe(true);
@@ -765,34 +774,52 @@ describe('RustEngineExchange', () => {
     }
   });
 
-  it('returns no outbound action payload for ticker updates and preserves socket errors', async () => {
-    const tape = bybitTransport();
-    const { WasmEngine } = await loadNodeEngine();
-    const outputs: Array<string | undefined> = [];
-    setWasmEngineLoader(async () => ({
-      WasmEngine: class extends WasmEngine {
-        wsMessage(socket: number, text: string, now: number) {
-          const output = super.wsMessage(socket, text, now);
-          outputs.push(output);
-          return output;
-        }
-      },
-    }));
-    setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
-    exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, store);
-    const errors: string[] = [];
-    exchange.emitter.on('error', (message: string) => errors.push(message));
-    await exchange.start();
-    await until(() => tape.sockets.has('/v5/public/linear'));
-    const socket = tape.sockets.get('/v5/public/linear')!;
-    socket(JSON.stringify({ topic: 'tickers.BTCUSDT', type: 'delta', data: { symbol: 'BTCUSDT', lastPrice: '90001' } }));
-    expect(outputs).toEqual([undefined]);
-    await until(() => store.tickersBySymbol.BTCUSDT.last === 90001);
-    socket(JSON.stringify({ success: false, op: 'subscribe', ret_msg: 'topic rejected' }));
-    expect(JSON.parse(outputs[1]!)).toEqual([{ op: 'log', level: 'error', message: '[WS]subscribe:topic rejected' }]);
-    expect(errors).toEqual([expect.stringContaining('[WS]subscribe:topic rejected')]);
-  });
+  it.each(['bytes', 'legacy'] as const)(
+    'returns no outbound action payload for ticker updates and preserves socket errors (%s)',
+    async (entry) => {
+      const tape = bybitTransport();
+      const { WasmEngine } = await loadNodeEngine();
+      const outputs: Array<string | undefined> = [];
+      setWasmEngineLoader(async () => ({
+        WasmEngine: class extends WasmEngine {
+          constructor(venue: string, options: string) {
+            super(venue, options);
+            if (entry === 'legacy') {
+              // An older engine exposes only the original string entry point.
+              Object.defineProperty(this, 'wsMessageBytes', { value: undefined });
+              Object.defineProperty(this, 'wsMessageActions', { value: undefined });
+            }
+          }
+          wsMessage(socket: number, text: string, now: number) {
+            const output = super.wsMessage(socket, text, now);
+            outputs.push(output);
+            return output;
+          }
+          wsMessageBytes(socket: number, bytes: Uint8Array, now: number) {
+            const output = super.wsMessageBytes!(socket, bytes, now);
+            outputs.push(output);
+            return output;
+          }
+        },
+      }));
+      setRustEngineTransport(() => tape.transport);
+      const store = new DefaultStore();
+      exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, store);
+      const errors: string[] = [];
+      exchange.emitter.on('error', (message: string) => errors.push(message));
+      await exchange.start();
+      await until(() => tape.sockets.has('/v5/public/linear'));
+      const socket = tape.sockets.get('/v5/public/linear')!;
+      socket(
+        JSON.stringify({ topic: 'tickers.BTCUSDT', type: 'delta', data: { symbol: 'BTCUSDT', lastPrice: '90001' } }),
+      );
+      expect(outputs).toEqual([entry === 'bytes' ? undefined : '']);
+      await until(() => store.tickersBySymbol.BTCUSDT.last === 90001);
+      socket(JSON.stringify({ success: false, op: 'subscribe', ret_msg: 'topic rejected' }));
+      expect(JSON.parse(outputs[1]!)).toEqual([{ op: 'log', level: 'error', message: '[WS]subscribe:topic rejected' }]);
+      expect(errors).toEqual([expect.stringContaining('[WS]subscribe:topic rejected')]);
+    },
+  );
 
   it('honors Bybit client IDs through the inherited helpers and finds streamed orders', async () => {
     const tape = bybitTransport();

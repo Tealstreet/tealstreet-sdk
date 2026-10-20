@@ -10,7 +10,7 @@ import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { parseRequestJson } from './request-json.mjs';
-import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands } from './known-ts-fixes.mjs';
+import { fixBlofinAccount, fixWeexConditionals, fixPhemexAccount, fixLighterFills, fixLighterCommands, fixKrakenOutput } from './known-ts-fixes.mjs';
 import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
@@ -166,6 +166,65 @@ const KNOWN_TS_FIXES = {
       'Send the standard If-Match precondition on cancellation; retain ACK identity for immediate cancellation.',
       'Reject silently ignored attached protections, unsupported trigger sources, close flags and maxSlippagePct before any batch write.',
       'Reject unsafe amendments after partial fills or competing order changes.',
+    ],
+  },
+  phemex(ts) {
+    // Independent execution/cumulative-size/flat-settings oracle from taped venue rows.
+    if (ts.account) fixPhemexAccount(ts.account, tapeRecords);
+    // Phemex zero-open ticker changes remain finite.
+    for (const ticker of ts.tickers) if (ticker.percentage === null) ticker.percentage = 0;
+    // TS recovery reads missing/unknown affected sides and preserves nonzero
+    // full-snapshot rows while recovering the other hedged leg.
+    // Native tests also guard exact row versions/absence fences, confirmed
+    // cancellation finality, preserved trigger sources and exact split lots.
+  },
+  // Paired production fixes, compared without rewriting either replay result:
+  // preserve full-depth incremental books; verify subscription acknowledgements;
+  // fence polled candles against newer trades and reject older trade buckets;
+  // apply every per-market BBO/summary update; emit unique private executions;
+  // clear closed positions and classify CLOSED orders without reopening them;
+  // negotiate/decode mandatory SBE 1:2; use RFC6455 rather than invalid JSON
+  // heartbeats and accept the documented auth node identity; preserve
+  // venue JWT Authorization beside Tealstreet-Authorization on routed requests;
+  // preserve native client IDs and canonical time-in-force; derive account UPnL
+  // from positions; support idempotent cross-margin/one-way mode settings;
+  // validate public-trade query windows and deduplicate native fill IDs/quantity.
+  // Walk empty history cursor pages and keep polled candle buckets/volume monotonic.
+  // Rust also fences lagging order-repair rows with native timestamps/exact fill
+  // quanta and retains exact accepted/ambiguous amendment targets after ACKs;
+  // adversarial native tests cover this without rewriting TS replay output.
+  paradex() {},
+  // ApeX repairs are in the TS reference; output is compared without rewriting:
+  // continuous book sequences and atomic invalid depth updates; top-level ping
+  // detection avoids answering echoed ping acknowledgements; stable original
+  // payloads for legacy HMAC across form transforms; canonical hedged position
+  // IDs; failure-safe private snapshots and required row identifiers;
+  // documented realizedPnl aliases; raw-millisecond history bounds/order;
+  // one fill per genuine execution, isolated synthetic replay identity;
+  // distinct equal executions preserved in REST/WS history; exact tick splitting;
+  // both bracket siblings preserved during parent cancel/replace amendments.
+  // Price-only amendments keep the observed residual quantity; invalid/no-op
+  // amendments reject before cancellation and filled sources are not replaced.
+  apexomni: [],
+  kraken: {
+    output: fixKrakenOutput,
+    fixes: [
+      'Retain full depth, reject sequence gaps/stale snapshots, unsubscribe unused books.',
+      'Full native ticker statistics stay live; omitted relative funding resets zero instead of retaining a stale rate.',
+      'Negative instrument quantity precision is a positive power-of-ten step; TS clamps it to 0.1.',
+      'Deduplicate native execution IDs; suppress historical fills snapshots.',
+      'Use monotonic nonces beyond 1000 same-millisecond requests and clock regression.',
+      'Use documented index triggerSignal (TS sends stale spot enum).',
+      'Keep accepted settings and newer socket state across delayed reads/write ACKs.',
+      'Replace partially executed protective orders with remaining size and stop on raced fills.',
+      'Reject missing/contradictory semantic ACKs and failed/incomplete reads explicitly.',
+      'Keep exact native milliseconds for fill filters/cursors before seconds output.',
+      'Count raw ledger rows for pagination rather than mapped cash components.',
+      'One-way mode is an accepted no-op; TS inherits an unimplemented setter.',
+      'Use valid authenticated feeds and REST balance instead of invalid account_balances.',
+      'Preserve absent position margin allocation instead of TS base-store synthetic zero.',
+      'Map native post/ioc/fok orders as limits and reject unsupported opening conditional shapes before a write.',
+      'Keep initialized event-driven private feeds alive while bounding retained execution and terminal identities.',
     ],
   },
   asterdex: {
@@ -636,6 +695,7 @@ const fixCryptocomAccount = (account) => {
 for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
+
   if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
   // Every request must match a taped one: an unserved request sent different parameters.
   for (const impl of ['ts', 'rust']) {
@@ -662,6 +722,7 @@ for (let run = 0; run < runs; run++) {
       ? KNOWN_TS_FIXES.bybit
       : undefined);
   if (typeof fix === 'function') fix(ts, rust);
+  if (values.venue === 'kraken') KNOWN_TS_FIXES.kraken.output(ts, tapeRecords);
   if (JSON.stringify(ts.wsRequests) !== JSON.stringify(rust.wsRequests))
     differences.push(
       `websocket requests differ: ts=${JSON.stringify(ts.wsRequests)} rust=${JSON.stringify(rust.wsRequests)}`,

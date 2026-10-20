@@ -103,6 +103,7 @@ const normalize = (value, callerIds, root = true, options = {}) => {
 const canonicalParams = (params, callerIds, options = {}) => new URLSearchParams([...params]
   .filter(([key]) => !URL_VOLATILE.has(key) && !options.volatileQueryFields?.includes(key))
   .filter(([key, value]) => !CLIENT_IDS.has(key) || callerIds.has(value))
+  .filter(([key, value]) => callerIds.has(value) || !options.generatedQueryId?.(key, value))
   .map(([key, value]) => {
     if (CLIENT_IDS.has(key)) return [key, value];
     if (!/^[\[{]/.test(value.trimStart())) return [key, value];
@@ -118,11 +119,12 @@ export const canonicalUrl = (url, callerIds = new Set(), options = {}) => {
 
 export const requestKey = (method, url, body, callerIds = new Set(), options = {}) => {
   if (options.requestOptions) options = { ...options, ...options.requestOptions(method, new URL(url)) };
+  body = options.wireBody?.(body, { method, url, callerIds }) ?? body;
   const prefix = `${method.toUpperCase()} ${canonicalUrl(options.requestUrl?.(url, method) ?? url, callerIds, options)}`;
   if (body == null || body === '') return prefix;
   if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
   if (body instanceof URLSearchParams) {
-    if (!options.requestBody) return `${prefix} ${canonicalParams(body, callerIds)}`;
+    if (!options.requestBody) return `${prefix} ${canonicalParams(body, callerIds, options)}`;
     body = Object.fromEntries(body);
   }
   let parsed;
@@ -131,7 +133,7 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
   } catch {
     if (typeof body === 'string' && body.includes('=')) {
       const form = new URLSearchParams(body);
-      if (!options.requestBody) return `${prefix} ${canonicalParams(form, callerIds)}`;
+      if (!options.requestBody) return `${prefix} ${canonicalParams(form, callerIds, options)}`;
       parsed = Object.fromEntries(form);
     } else {
       return `${prefix} ${body}`;
@@ -165,6 +167,10 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
   catch { return `WS ${canonicalUrl(url, callerIds, options)} ${text}`; }
+  if (options.socketMessage) {
+    message = options.socketMessage(message);
+    if (message === undefined) return undefined;
+  }
   message = options.subscriptionMessage?.(message) ?? message;
   const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '').toLowerCase();
   if (options.bitrueProtocol) {
@@ -176,11 +182,17 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   }
   if (options.bingxProtocol && (message?.ping !== undefined || message?.pong !== undefined)) return undefined;
   if (options.cryptoProtocol && method === 'public/respond-heartbeat') return undefined;
+  if (options.phemexProtocol && ['server.ping', 'server.pong'].includes(method)) return undefined;
   if (['ping', 'pong', 'heartbeat'].includes(method)) return undefined;
   if (message && typeof message === 'object') {
     message = { ...message };
     delete message.id;
     delete message.req_id;
+    // Phemex's independent socket audit validates these clocks and HMAC bytes.
+    // Keep the API kind/key exact while comparing fresh connection signatures.
+    if (options.phemexProtocol && method === 'user.auth' && Array.isArray(message.params) && message.params.length === 4) {
+      message.params = [message.params[0], message.params[1], '<signature>', '<expiry>'];
+    }
     // KuCoin TS disables public acknowledgements while Rust requests them.
     // The audit independently checks token identity and privateChannel.
     if (options.rust === 'kucoin') delete message.response;
@@ -198,12 +210,14 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     // OKX login signatures and clocks are checked against credentials by Tape;
     // the outbound identity retains API key and passphrase for comparison.
     if (method === 'login' && Array.isArray(message.args)) {
-      message.args = message.args.map((arg) => ({
-        ...arg,
-        timestamp: '<timestamp>',
-        sign: '<signature>',
-        ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}),
-      }));
+      message.args = message.args.map((arg) => {
+        const nested = typeof arg === 'string';
+        const payload = nested ? parseJson(arg) : arg;
+        const normalized = { ...payload, timestamp: '<timestamp>', sign: '<signature>',
+          ...(nested && 'signature' in payload ? { signature: '<signature>' } : {}),
+          ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}) };
+        return nested ? JSON.stringify(normalized) : normalized;
+      });
     }
     if (options.wooProtocol && method === 'auth' && message.params) {
       message.params = { ...message.params, timestamp: '<timestamp>', sign: '<signature>' };
@@ -245,6 +259,7 @@ export const subscriptionKeys = (url, text, callerIds = new Set(), options = {})
         subscriptionKey(url, { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options),
       );
     }
+    if (options.productSubscriptions && Array.isArray(message.product_ids)) return message.product_ids.map((product) => subscriptionKey(url, {...message,product_ids:[product]},callerIds,options));
     const field = Array.isArray(message.params) ? 'params' : Array.isArray(message.args) ? 'args' : undefined;
     if (field)
       return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds, options));

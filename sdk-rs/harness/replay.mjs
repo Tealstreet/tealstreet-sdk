@@ -91,6 +91,7 @@ const options = {
     : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }),
   ...config.options,
 };
+await venue.prepareReplay?.({ isPrivate, options });
 await venue.initializeReplay?.(values.impl, options);
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
@@ -195,9 +196,9 @@ async function runRust() {
   const transport = {
     now: () => Date.now(),
     webSocketHeaders: true,
-    connect: (url, { headers, onOpen, onMessage, onClose }) => {
+    connect: (url, { headers, onOpen, onMessage, onBinary, onClose }) => {
       venue.validateSocket?.(url, headers);
-      const socket = tape.connect(url, onOpen, onMessage, onClose);
+      const socket = tape.connect(url, onOpen, (data) => typeof data === 'string' ? onMessage(data) : onBinary?.(data), onClose);
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
     },
     request: async ({ method, url, body: requestBody, headers, signal }) => {
@@ -220,7 +221,8 @@ async function runRust() {
   const engine = new WasmEngine(venue.rust, JSON.stringify(options));
   if (process.env.RUST_MEMORY_TRACE) {
     let last = wasmMemoryBytes();
-    for (const method of ['start', 'httpStart', 'httpChunk', 'httpEnd', 'wsMessage', 'takeFrame']) {
+    for (const method of ['start', 'httpStart', 'httpChunk', 'httpEnd', 'wsMessage', 'wsMessageActions', 'wsMessageBytes', 'takeFrame']) {
+      if (typeof engine[method] !== 'function') continue;
       const original = engine[method].bind(engine);
       engine[method] = (...args) => {
         const result = original(...args);
@@ -346,6 +348,8 @@ const commandArgs = ({ t, type, expected, ...args }) => args;
 async function tsCommand(exchange, store, record) {
   const { op, ...args } = commandArgs(record);
   switch (op) {
+    case 'getAccount':
+      return exchange.getAccount();
     case 'placeOrders':
       return exchange.placeOrders(args.orders);
     case 'cancelOrders':
@@ -448,7 +452,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
       free: balance.free,
       total: balance.total,
       upnl: balance.upnl,
-      ...(venue.inverseNativeAmounts ? { coins: balance.coins ?? {} } : {}),
+      ...((venue.inverseNativeAmounts || venue.compareBalanceCoins) ? { coins: balance.coins ?? {} } : {}),
       ...(venue.compareBalanceCurrencies ? { currencies: balance.currencies ?? {} } : {}),
     },
     orders: orderRows,
@@ -517,7 +521,8 @@ async function runTs() {
     const requestBody =
       init.body ??
       (request && !['GET', 'HEAD'].includes(method.toUpperCase()) ? await request.clone().text() : undefined);
-    const { status, body } = tape.respond(method, request?.url ?? String(input), requestBody);
+    const headers = Object.fromEntries(new Headers(init.headers ?? request?.headers).entries());
+    const { status, body } = tape.respond(method, request?.url ?? String(input), requestBody, headers);
     return new Response([204, 205, 304].includes(status) ? null : body, { status });
   };
   // Header-capable Node sockets resolve `ws` directly instead of the global.
@@ -569,6 +574,7 @@ async function runTs() {
     return response;
   };
   const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
+  await venue.loadTs?.({ isPrivate });
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
@@ -601,7 +607,7 @@ async function runTs() {
     });
   });
   venue.configureTs?.(exchange);
-  venue.prepareTs?.(exchange, TapeWebSocket);
+  await venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
@@ -609,7 +615,7 @@ async function runTs() {
   const finalBooks = {};
   const started = exchange.start();
   const subscribed = (async () => {
-    while (!store.markets.length) await new Promise((r) => setTimeout(r, 1));
+    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange,store))) await new Promise((r) => realTimeout(r, 1));
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
@@ -627,7 +633,7 @@ async function runTs() {
     },
     async (accountReady) => {
       await (accountReady || venue.polling ? Promise.all([started, subscribed]) : subscribed);
-      venue.prepareTsReady?.(exchange, { isPrivate });
+      await venue.prepareTsReady?.(exchange, { isPrivate });
       await until(() => venue.tsBooksSubscribed(exchange, bookSymbols.length), 'TS book subscriptions');
       const loaded = () =>
         accountReady ? Object.values(store.loaded).every(Boolean) : store.loaded.markets && store.loaded.tickers;
@@ -638,6 +644,7 @@ async function runTs() {
     clock,
   );
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
+  if (venue.tsReplaySettled) await until(() => venue.tsReplaySettled(exchange, bookSymbols.length), 'TS pending book snapshots');
   await within(venue.settleTs?.(exchange, { isPrivate, clock }) ?? Promise.resolve(), 15_000, 'TS pending venue reads');
   await settle();
   tape.assertWritesConsumed();
@@ -663,7 +670,7 @@ async function runTs() {
           free: store.balance.free,
           total: store.balance.total,
           upnl: store.balance.upnl,
-          ...(venue.inverseNativeAmounts ? { coins: store.balance.coins ?? {} } : {}),
+          ...((venue.inverseNativeAmounts || venue.compareBalanceCoins) ? { coins: store.balance.coins ?? {} } : {}),
           ...(venue.compareBalanceCurrencies ? { currencies: store.balance.currencies ?? {} } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),

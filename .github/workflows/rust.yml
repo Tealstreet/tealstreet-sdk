@@ -108,6 +108,9 @@ jobs:
           - venue: breakoutprop
             books: BTCUSD,ETHUSD
             private_script: rust:private-tape-breakoutprop
+          - venue: apexomni
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-apexomni
           - venue: asterdex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-asterdex
@@ -150,6 +153,12 @@ jobs:
           - venue: weex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape:weex
+          - venue: phemex
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape:phemex
+          - venue: kraken
+            books: PF_XBTUSD,PF_ETHUSD
+            private_script: rust:private-tape-kraken
           - venue: lighter
             books: ETH,BTC
             private_script: rust:private-tape-lighter
@@ -159,6 +168,9 @@ jobs:
           - venue: hyperliquid
             books: BTC-PERP,ETH-PERP
             private_script: rust:private-tape-hyperliquid
+          - venue: paradex
+            books: BTC-USD-PERP,ETH-USD-PERP
+            private_script: rust:private-tape-paradex
     env:
       WASM_BINDGEN_VERSION: 0.2.129
       # Budget per single-venue browser bundle.
