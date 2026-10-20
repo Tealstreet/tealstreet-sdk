@@ -25,6 +25,7 @@ import { memoryMetricErrors } from './memory.mjs';
 import { fixBinanceSpotFills, fixBinanceFilledStatus } from './binance-protocol.mjs';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
+import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -41,6 +42,10 @@ const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeB
   .trim()
   .split('\n')
   .map(JSON.parse);
+const smokeResult = assertLiveSmokeComplete(tapeRecords);
+// The runner subscribes exactly its selected market. Reproduce that feed set
+// rather than the public benchmark's default three symbols.
+if (smokeResult) values.books = smokeResult.symbol;
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 
@@ -69,7 +74,11 @@ const replay = (impl, run) => {
   });
   if (result.status !== 0)
     throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
-  return JSON.parse(readFileSync(out, 'utf8'));
+  const output = JSON.parse(readFileSync(out, 'utf8'));
+  if (smokeResult && (!Array.isArray(output.commands) || output.commands.length !== smokeResult.commands.length ||
+      output.commands.some((result) => !result || !Object.hasOwn(result, 'ok') || Object.hasOwn(result, 'error'))))
+    throw new Error(`${impl} live-smoke replay did not successfully complete every lifecycle command`);
+  return output;
 };
 
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
@@ -554,6 +563,9 @@ const KNOWN_TS_FIXES = {
   ],
 
   binance: (ts, rust) => {
+    // KNOWN_TS_FIXES: one-way leverage writes used hedge IDs, leaving the cache
+    // stale and skipping restoration; rejected writes were swallowed. Reference
+    // setter and deterministic regression are fixed, so no output adjustment.
     for (const position of ts.account?.positions ?? []) {
       const fixed = rust.account.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
       if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
