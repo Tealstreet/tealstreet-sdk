@@ -159,7 +159,7 @@ export class EngineHost {
         controller.abort();
         this.run(this.engine.payloadSignFailed(id, String(error?.message ?? error), this.transport.now()));
       } else {
-        this.run(this.engine.payloadSigned(id, result.signature, JSON.stringify(Object.entries(result.headers ?? {})), this.transport.now()));
+        this.run(this.engine.payloadSigned(id, result.signature, result.headers, this.transport.now()));
       }
     };
     const timer = this.transport.setTimeout(() => finish(new Error('Payload signing timed out')), action.timeoutMs);
@@ -170,11 +170,20 @@ export class EngineHost {
       return this.transport.signPayload(action.payload, { signal: controller.signal });
     }).then((result) => {
       if (this.disposed || controller.signal.aborted) return;
-      if (!result || typeof result.signature !== 'string'
-        || (result.headers !== undefined && (!result.headers || typeof result.headers !== 'object' || Array.isArray(result.headers)
-          || Object.values(result.headers).some((value) => typeof value !== 'string')))) {
+      const signature = result?.signature;
+      const record = result?.headers;
+      if (typeof signature !== 'string'
+        || (record !== undefined && (!record || typeof record !== 'object' || Array.isArray(record)))) {
         finish(new Error('Invalid payload signer result'));
-      } else finish(undefined, result);
+        return;
+      }
+      const headers = Object.entries(record ?? {});
+      if (headers.some(([name, value]) => !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)
+        || typeof value !== 'string' || /[\r\n]/.test(value))) {
+        finish(new Error('Invalid payload signer header'));
+        return;
+      }
+      finish(undefined, { signature, headers: headers.map(([name, value]) => `${name}:${value}`).join('\n') });
     }).catch((error) => finish(new Error(String(error?.message ?? error))));
   }
 

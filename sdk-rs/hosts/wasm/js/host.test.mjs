@@ -531,7 +531,7 @@ test('delegated signing crosses back as an event before HTTP and forwards the op
   const calls = [];
   const engine = {
     payloadSigned(id, signature, headers, now) {
-      calls.push(['signed', id, signature, Object.fromEntries(JSON.parse(headers)), now]);
+      calls.push(['signed', id, signature, headers, now]);
       return JSON.stringify([{ op: 'http', request: id, method: 'POST', url: 'https://venue.test/order', headers: [], body: signature }]);
     },
     httpStart: () => '', httpChunk: () => '', httpEnd: () => '',
@@ -549,7 +549,7 @@ test('delegated signing crosses back as an event before HTTP and forwards the op
   assert.equal(calls.length, 0);
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(calls[0], ['sign', payload, false]);
-  assert.deepEqual(calls[1], ['signed', 7, 'opaque answer', { 'X-Proof': 'proof' }, 100]);
+  assert.deepEqual(calls[1], ['signed', 7, 'opaque answer', 'X-Proof:proof', 100]);
   assert.equal(calls[2][0], 'http');
   assert.equal(calls[2][1].body, 'opaque answer');
   assert.equal(host.signings.size, 0);
@@ -612,7 +612,51 @@ test('missing, rejected and malformed delegated signers fail without making HTTP
     host.execute({ op: 'signPayload', request: 10, payload: {}, timeoutMs: 1000 });
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(failures.length, 1);
-    assert.match(failures[0][1], /not configured|denied|Invalid payload signer result/);
+    assert.match(failures[0][1], /not configured|denied|Invalid payload signer (result|header)/);
+    assert.equal(host.signings.size, 0);
+    host.dispose();
+  }
+});
+
+test('delegated header lines preserve empty values, colons and surrounding whitespace', async () => {
+  for (const [headers, expected] of [
+    [undefined, ''],
+    [{}, ''],
+    [{ 'X-Empty': '', 'X-Exact': '  a:b:c \t' }, 'X-Empty:\nX-Exact:  a:b:c \t'],
+  ]) {
+    const received = [];
+    const host = new EngineHost({ payloadSigned: (_id, _signature, lines) => (received.push(lines), '') }, {
+      now: () => 0, setTimeout, clearTimeout,
+      signPayload: () => ({ signature: 'opaque', headers }),
+    });
+    host.execute({ op: 'signPayload', request: 11, payload: {}, timeoutMs: 1000 });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(received, [expected]);
+    host.dispose();
+  }
+});
+
+test('delegated header names and CR/LF fail before encoding or making HTTP requests', async () => {
+  for (const headers of [
+    { 'X-Proof': 'valid\nInjected: value' },
+    { 'X-Proof': 'valid\rInjected: value' },
+    { 'X-Proof\nInjected': 'value' },
+    { 'X-Proof\rInjected': 'value' },
+    { 'Invalid Header': 'value' },
+    { '': 'value' },
+  ]) {
+    const failures = [];
+    const host = new EngineHost({
+      payloadSigned() { assert.fail('invalid headers must never enter WASM as lines'); },
+      payloadSignFailed: (_id, error) => (failures.push(error), ''),
+    }, {
+      now: () => 0, setTimeout, clearTimeout,
+      signPayload: () => ({ signature: 'opaque', headers }),
+      request() { assert.fail('invalid headers must never reach HTTP'); },
+    });
+    host.execute({ op: 'signPayload', request: 12, payload: {}, timeoutMs: 1000 });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(failures, ['Invalid payload signer header']);
     assert.equal(host.signings.size, 0);
     host.dispose();
   }

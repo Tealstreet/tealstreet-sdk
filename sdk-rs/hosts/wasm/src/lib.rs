@@ -1248,8 +1248,8 @@ impl WasmEngine {
         now: f64,
     ) -> String {
         let request = RequestId(request);
-        match serde_json::from_str::<Vec<(String, String)>>(headers) {
-            Ok(headers) => self.inner.handle(
+        match payload_headers(headers) {
+            Some(headers) => self.inner.handle(
                 now,
                 Event::PayloadSigned {
                     request,
@@ -1257,7 +1257,7 @@ impl WasmEngine {
                     headers,
                 },
             ),
-            Err(_) => self.inner.handle(
+            None => self.inner.handle(
                 now,
                 Event::PayloadSignFailed {
                     request,
@@ -1315,6 +1315,17 @@ impl WasmEngine {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
+    let mut headers = Vec::new();
+    if !text.is_empty() {
+        for line in text.split('\n') {
+            let (name, value) = line.split_once(':')?;
+            headers.push((name.into(), value.into()));
+        }
+    }
+    Some(headers)
 }
 
 #[cfg(test)]
@@ -1380,6 +1391,21 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn delegated_header_lines_preserve_value_bytes_and_reject_malformed_lines() {
+        assert_eq!(payload_headers(""), Some(vec![]));
+        assert_eq!(
+            payload_headers("X-Empty:\nX-Exact:  a:b:c \t"),
+            Some(vec![
+                ("X-Empty".into(), String::new()),
+                ("X-Exact".into(), "  a:b:c \t".into()),
+            ])
+        );
+        for invalid in ["missing-colon", "\n", "X-Proof:a\n", "X-Proof:a\ninvalid"] {
+            assert_eq!(payload_headers(invalid), None);
+        }
+    }
 
     #[test]
     fn amendment_symbol_context_is_preserved_for_spot_builds() {

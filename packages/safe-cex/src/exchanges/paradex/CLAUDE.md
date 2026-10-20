@@ -114,6 +114,11 @@ fetch path. `remoteSigner` remains the TS API-client adapter contract: by itself
 it cannot replace JWT's StarkNet signing; use a local key or `payloadSigner` for
 that step.
 
+The JS host validates signer header names and rejects CR/LF before encoding
+`name:value` lines for WASM. Values keep their exact bytes, including colons and
+surrounding whitespace; empty values and no headers are valid. The core also
+validates delegated headers for native callers before issuing HTTP.
+
 **Order Signing** (`paradex.sdk.ts:242-340`):
 
 1. Generate `signature_timestamp` as `Date.now()` (milliseconds, used as nonce)

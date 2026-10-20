@@ -18,6 +18,7 @@ it.each([false, true])(
     const errors: unknown[] = [];
     let legacyControls = 0;
     let binaryEntry = '';
+    let invalidHeader = false;
     const response = (body: unknown) => ({ status: 200, body: new TextEncoder().encode(JSON.stringify(body)) });
     const transport: Transport = {
       now: () => vector.now,
@@ -104,6 +105,8 @@ it.each([false, true])(
             signature: `opaque signer answer ${signatures.length}`,
             headers: {
               'X-Signer-Proof': `proof-${signatures.length}`,
+              'X-Exact': invalidHeader ? 'proof\r\nInjected: value' : '  proof:with:colons  ',
+              'X-Empty': '',
               'PARADEX-STARKNET-ACCOUNT': 'cannot-overwrite-account',
             },
           };
@@ -134,6 +137,8 @@ it.each([false, true])(
       expect(auth.headers['PARADEX-STARKNET-SIGNATURE']).toBe('opaque signer answer 1');
       expect(auth.headers['PARADEX-STARKNET-ACCOUNT']).toBe(vector.address);
       expect(auth.headers['X-Signer-Proof']).toBe('proof-1');
+      expect(auth.headers['X-Exact']).toBe('  proof:with:colons  ');
+      expect(auth.headers['X-Empty']).toBe('');
       await expect(
         exchange.placeOrder({
           symbol: 'BTC-USD-PERP',
@@ -148,9 +153,25 @@ it.each([false, true])(
       expect(JSON.parse(placed.body!)[0].signature).toBe('opaque signer answer 2');
       expect(placed.headers.Authorization).toBe('Bearer delegated-jwt');
       expect(placed.headers['X-Signer-Proof']).toBe('proof-2');
+      expect(placed.headers['X-Exact']).toBe('  proof:with:colons  ');
+      expect(placed.headers['X-Empty']).toBe('');
       expect(errors).toEqual([]);
       expect(binaryEntry).toBe('function');
       if (forceLegacy) expect(legacyControls).toBeGreaterThan(0);
+      if (forceLegacy) {
+        invalidHeader = true;
+        const before = requests.length;
+        await expect(
+          exchange.placeOrder({
+            symbol: 'BTC-USD-PERP',
+            type: OrderType.Limit,
+            side: OrderSide.Buy,
+            amount: 0.00000999,
+            price: 0.00000999,
+          }),
+        ).rejects.toThrow('Invalid payload signer header');
+        expect(requests.length).toBe(before);
+      }
     } finally {
       exchange.dispose();
     }
