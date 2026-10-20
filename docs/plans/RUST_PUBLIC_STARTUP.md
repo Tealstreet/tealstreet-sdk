@@ -263,3 +263,15 @@ REST/JSON tests cover funded startup, CLOSED removal, null/empty and mixed bad
 required-size snapshot preservation. Full Paradex passes128 cases/nine targets
 and strict Clippy. Combined release Wasm and full integrated gates are running;
 the earlier complete checkpoint is not proof for these newer artifacts.
+
+Actual Wasm SDK tests exposed a first-zero-balance hole: native Store marked
+balance loaded but suppressed BALANCE because its value equalled the initial
+zero. Publish the first validated balance once; later unchanged zero remains
+silent. Native and actual-Wasm regressions failed before the fix, independent
+source review passed, engine108 cases and strengthened BloFin2/2 real-Wasm
+cases pass after rebuilding. This preserves decoded startup proof and never
+fabricates funding. Final all-source gates continue against this artifact.
+
+Owner wind-down: finish this public-startup PR/reviews/green CI/merge, then stop
+without starting the planned private-row/ticker/app-payload follow-up. Record
+all unmerged assignment items with file locations in the requested aimux handoff.

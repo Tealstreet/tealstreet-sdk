@@ -1,5 +1,6 @@
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 
+import { Frame, LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
 import { expect, it } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
@@ -97,10 +98,29 @@ it.each([false, true])('preserves BloFin broker gate, range units, flat leverage
     store,
   );
   const main = new BaseExchange('blofin', { key: '', secret: '' }, new DefaultStore());
-  exchange.onFrame = (frame) => main.applyWorkerFrame(frame.slice(0));
+  const nativeLoaded: number[] = [];
+  const nativeBalances: Array<{ used: number; free: number; total: number; upnl: number }> = [];
+  exchange.onFrame = (buffer) => {
+    const frame = new Frame(buffer);
+    const status = frame.status();
+    if (status) nativeLoaded.push(status.loaded);
+    const balance = frame.balance();
+    if (balance) nativeBalances.push({ used: balance.used, free: balance.free, total: balance.total, upnl: balance.upnl });
+    main.applyWorkerFrame(buffer.slice(0));
+  };
   try {
-    await exchange.start();
+    const startup = exchange.start();
+    // Keep rejection observed if a readiness assertion fails before awaiting it.
+    void startup.catch(() => {});
+    const privateFlags = LOADED_FLAG.MARKETS | LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS;
+    await expect.poll(() => nativeLoaded.some((loaded) => (loaded & privateFlags) === privateFlags)).toBe(true);
+    // This fixture is intentionally a real zero wallet. A STATUS bit cannot
+    // stand in for the first explicitly decoded all-zero BALANCE section.
+    expect(nativeBalances).toContainEqual({ used: 0, free: 0, total: 0, upnl: 0 });
+    await startup;
     for (const current of [store, main.store]) {
+      expect(current.loaded.balance).toBe(true);
+      expect(current.balance).toEqual({ used: 0, free: 0, total: 0, upnl: 0 });
       expect(current.orders.find((order) => order.id === 'native-order')).toMatchObject({
         amount: 0.004, filled: 0.003, remaining: 0.001,
         extra: { remainingNative: 1, filledInPlacementUnits: 3 },

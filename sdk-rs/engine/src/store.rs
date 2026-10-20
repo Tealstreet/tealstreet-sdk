@@ -535,7 +535,7 @@ impl Store {
     }
 
     pub fn set_balance(&mut self, balance: Balance) {
-        if balance != self.balance {
+        if !self.loaded.balance || balance != self.balance {
             self.balance = balance;
             self.changes.balance = true;
         }
@@ -1534,6 +1534,31 @@ mod tests {
         let mut writer = FrameWriter::new(vec![], 0.0);
         store.write(&pending, &mut writer);
         writer.finish()
+    }
+
+    #[test]
+    fn first_validated_zero_balance_is_published_once_with_loaded_status() {
+        let mut store = Store::default();
+        assert!(!store.loaded().balance);
+        assert!(
+            crate::wire::sections(&balance_frame(&mut store))
+                .next()
+                .is_none()
+        );
+        store.set_balance(Balance::default());
+        assert!(store.loaded().balance);
+        let frame = balance_frame(&mut store);
+        let (_, payload) = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::BALANCE)
+            .expect("the first validated balance needs numeric evidence even when zero");
+        assert_eq!(&payload[..32], &[0_u8; 32]);
+        assert!(crate::wire::sections(&frame).any(|(kind, _)| kind == section::STATUS));
+        store.set_balance(Balance::default());
+        assert!(
+            crate::wire::sections(&balance_frame(&mut store))
+                .next()
+                .is_none()
+        );
     }
 
     #[test]
