@@ -361,3 +361,342 @@ fn malformed_live_or_buffered_deltas_invalidate_before_advancing_the_anchor() {
         }
     }
 }
+
+#[test]
+fn all_market_prices_and_selected_ticker_details_survive_reconnect() {
+    let mut e = Engine::new(MexcFutures::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.handle(
+        0.0,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["COIN104USDT".into(), "COIN104USDT".into(), "UNKNOWN".into()],
+        }),
+    );
+    e.start(0.0);
+    let request = requests(&mut e).remove(0);
+    let template: serde_json::Value = serde_json::from_str(MARKETS).unwrap();
+    let markets: Vec<_> = (0..105)
+        .map(|i| {
+            let mut row = template["data"][0].clone();
+            row["symbol"] = format!("COIN{i}_USDT").into();
+            row["baseCoin"] = format!("COIN{i}").into();
+            row
+        })
+        .collect();
+    response(
+        &mut e,
+        &request,
+        &serde_json::json!({"success":true,"code":0,"data":markets}).to_string(),
+    );
+    let request = requests(&mut e).remove(0);
+    let template: serde_json::Value = serde_json::from_str(TICKERS).unwrap();
+    let tickers: Vec<_> = (0..105)
+        .map(|i| {
+            let mut row = template["data"][0].clone();
+            row["symbol"] = format!("COIN{i}_USDT").into();
+            row
+        })
+        .collect();
+    response(
+        &mut e,
+        &request,
+        &serde_json::json!({"success":true,"code":0,"data":tickers}).to_string(),
+    );
+    let socket = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::WsConnect { socket, .. } = a {
+                Some(socket)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(100.0, Event::WsOpened { socket });
+    let sent: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| {
+            if let Action::WsSend { text, .. } = a {
+                Some(text)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(sent.iter().filter(|s| s.contains("sub.tickers")).count(), 1);
+    assert_eq!(
+        sent.iter().filter(|s| s.contains("COIN104_USDT")).count(),
+        1
+    );
+    assert!(!sent.iter().any(|s| s.contains("COIN0_USDT")));
+    let before = e.store().ticker("COIN103USDT").unwrap().clone();
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.tickers","data":[{"symbol":"COIN102_USDT","lastPrice":"bad"},{"symbol":"COIN103_USDT","lastPrice":"61000","fairPrice":"62000","riseFallRate":0.02,"volume24":200},{"symbol":"COIN104_USDT","lastPrice":63000,"fairPrice":null,"volume24":null}]}"#,
+    );
+    let ticker = e.store().ticker("COIN103USDT").unwrap();
+    assert_eq!(ticker.last, 61000.0);
+    assert_eq!(ticker.mark, 62000.0);
+    assert_eq!(ticker.percentage, 2.0);
+    assert_eq!(ticker.volume, 0.02);
+    assert!((ticker.open_interest - 62000.0).abs() < 1e-8);
+    assert_eq!(ticker.index, before.index);
+    assert_eq!(ticker.bid, before.bid);
+    assert_eq!(ticker.ask, before.ask);
+    assert_eq!(ticker.quote_volume, before.quote_volume);
+    assert_eq!(ticker.funding_rate, before.funding_rate);
+    assert_eq!(e.store().ticker("COIN104USDT").unwrap().mark, before.mark);
+    assert_eq!(
+        e.store().ticker("COIN104USDT").unwrap().volume,
+        before.volume
+    );
+    e.handle(
+        300.0,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["COIN101USDT".into()],
+        }),
+    );
+    let sent: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| {
+            if let Action::WsSend { text, .. } = a {
+                Some(text)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(sent.len(), 2);
+    assert!(
+        sent.iter()
+            .any(|s| s.contains("unsub.ticker") && s.contains("COIN104_USDT"))
+    );
+    assert!(
+        sent.iter()
+            .any(|s| s.contains("sub.ticker") && s.contains("COIN101_USDT"))
+    );
+    e.handle(
+        400.0,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["COIN101USDT".into(), "COIN101USDT".into()],
+        }),
+    );
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::WsSend { .. }))
+    );
+    e.handle(500.0, Event::WsClosed { socket, code: 1006 });
+    let timer = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, .. } = a {
+                Some(timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(1500.0, Event::TimerFired { timer });
+    let new_socket = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::WsConnect { socket, .. } = a {
+                Some(socket)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(1500.0, Event::WsOpened { socket: new_socket });
+    let sent: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| {
+            if let Action::WsSend { text, .. } = a {
+                Some(text)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(sent.iter().filter(|s| s.contains("sub.tickers")).count(), 1);
+    assert_eq!(
+        sent.iter().filter(|s| s.contains("COIN101_USDT")).count(),
+        1
+    );
+    assert!(!sent.iter().any(|s| s.contains("COIN104_USDT")));
+
+    // Explicit interests beyond 100 markets keep their detailed subscriptions;
+    // unknown and duplicate symbols do not create extra subscriptions.
+    let mut symbols = vec!["UNKNOWN".into(), "COIN104USDT".into(), "COIN104USDT".into()];
+    symbols.extend((0..105).map(|i| format!("COIN{i}USDT")));
+    e.handle(
+        1600.0,
+        Event::Command(Command::SetTickerSymbols { symbols }),
+    );
+    let selected: Vec<serde_json::Value> = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::WsSend { text, .. } => serde_json::from_str(&text).ok(),
+            _ => None,
+        })
+        .filter(|value: &serde_json::Value| value["method"] == "sub.ticker")
+        .collect();
+    assert_eq!(selected.len(), 104);
+    assert_eq!(selected[0]["param"]["symbol"], "COIN104_USDT");
+    assert_eq!(selected[103]["param"]["symbol"], "COIN103_USDT");
+    e.handle(
+        1700.0,
+        Event::WsClosed {
+            socket: new_socket,
+            code: 1006,
+        },
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(2700.0, Event::TimerFired { timer });
+    let socket = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(2700.0, Event::WsOpened { socket });
+    let selected_after_reconnect: Vec<serde_json::Value> = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::WsSend { text, .. } => serde_json::from_str(&text).ok(),
+            _ => None,
+        })
+        .filter(|value: &serde_json::Value| value["method"] == "sub.ticker")
+        .collect();
+    assert_eq!(selected_after_reconnect.len(), 105);
+    assert_eq!(
+        selected_after_reconnect[0]["param"]["symbol"],
+        "COIN104_USDT"
+    );
+    let ids: std::collections::BTreeSet<_> = selected_after_reconnect
+        .iter()
+        .map(|row| row["param"]["symbol"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 105);
+    assert!(ids.contains("COIN101_USDT"));
+}
+
+#[test]
+fn clearing_ticker_selection_restores_default_details_without_duplicate_subscribes() {
+    let (mut e, _) = started();
+    e.drain_actions().for_each(drop);
+    e.handle(
+        200.0,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["UNKNOWN".into()],
+        }),
+    );
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::WsSend{text,..} if text.contains("unsub.ticker")))
+    );
+    e.handle(
+        300.0,
+        Event::Command(Command::SetTickerSymbols { symbols: vec![] }),
+    );
+    assert!(e.drain_actions().any(|a| matches!(a, Action::WsSend{text,..} if text.contains("sub.ticker") && text.contains("BTC_USDT"))));
+    e.handle(
+        400.0,
+        Event::Command(Command::SetTickerSymbols { symbols: vec![] }),
+    );
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::WsSend { .. }))
+    );
+}
+
+#[test]
+fn invalid_mini_ticker_prices_and_volumes_preserve_the_previous_row() {
+    let (mut e, socket) = started();
+    let before = e.store().ticker("BTCUSDT").unwrap().clone();
+    for invalid in [
+        r#""lastPrice":-1"#,
+        r#""fairPrice":-1"#,
+        r#""indexPrice":-1"#,
+        r#""volume24":-1"#,
+        r#""amount24":-1"#,
+        r#""lastPrice":"NaN""#,
+    ] {
+        ws(
+            &mut e,
+            socket,
+            &format!(r#"{{"channel":"push.tickers","data":[{{"symbol":"BTC_USDT",{invalid}}}]}}"#),
+        );
+        let actual = e.store().ticker("BTCUSDT").unwrap();
+        assert_eq!(actual.last, before.last);
+        assert_eq!(actual.mark, before.mark);
+        assert_eq!(actual.volume, before.volume);
+        assert_eq!(actual.quote_volume, before.quote_volume);
+    }
+}
+
+#[test]
+fn mini_ticker_zero_unavailable_prices_preserve_quotes_and_apply_valid_fields() {
+    let (mut e, socket) = started();
+    let before = e.store().ticker("BTCUSDT").unwrap().clone();
+    e.drain_actions().for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.tickers","data":[{"symbol":"BTC_USDT","lastPrice":0,"fairPrice":62000,"indexPrice":"61900","volume24":0,"amount24":0}]}"#,
+    );
+    let ticker = e.store().ticker("BTCUSDT").unwrap();
+    assert_eq!(ticker.last, before.last);
+    assert_eq!(ticker.mark, 62000.0);
+    assert_eq!(ticker.index, 61900.0);
+    assert_eq!(ticker.volume, 0.0);
+    assert_eq!(ticker.quote_volume, 0.0);
+    assert_eq!(ticker.funding_rate, before.funding_rate);
+    assert!((ticker.open_interest - 62000.0).abs() < 1e-8);
+    for missing in ["0", "null"] {
+        ws(
+            &mut e,
+            socket,
+            &format!(
+                r#"{{"channel":"push.tickers","data":[{{"symbol":"BTC_USDT","lastPrice":63000,"fairPrice":{missing},"indexPrice":{missing}}}]}}"#
+            ),
+        );
+        let ticker = e.store().ticker("BTCUSDT").unwrap();
+        assert_eq!(ticker.last, 63000.0);
+        assert_eq!(ticker.mark, 62000.0);
+        assert_eq!(ticker.index, 61900.0);
+    }
+    assert!(
+        !e.drain_actions()
+            .any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { .. })))
+    );
+}
+
+#[test]
+fn mini_ticker_unknown_inactive_symbols_are_ignored_without_warning() {
+    let (mut e, socket) = started();
+    let before = e.store().ticker("BTCUSDT").unwrap().clone();
+    e.drain_actions().for_each(drop);
+    // The all-market feed includes inactive/unloaded symbols and their sentinels.
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.tickers","data":[{"symbol":"INACTIVE_USDT","lastPrice":0,"fairPrice":0,"indexPrice":0,"volume24":0},{"symbol":"UNKNOWN_USDT","lastPrice":"NaN"}]}"#,
+    );
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, before.last);
+    assert_eq!(e.store().tickers().len(), 1);
+    assert!(
+        !e.drain_actions()
+            .any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { .. })))
+    );
+}

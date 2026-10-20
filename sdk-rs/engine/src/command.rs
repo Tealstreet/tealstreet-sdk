@@ -124,6 +124,10 @@ enum CommandIn {
         command: u32,
         symbol: String,
     },
+    FetchMaxLeverage {
+        command: u32,
+        symbol: String,
+    },
     #[serde(rename_all = "camelCase")]
     FetchFills {
         command: u32,
@@ -295,6 +299,9 @@ impl From<CommandIn> for Command {
             #[cfg(feature = "command-asterdex")]
             CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
+            CommandIn::FetchMaxLeverage { command, symbol } => {
+                Self::FetchMaxLeverage { command, symbol }
+            }
             CommandIn::FetchFills {
                 command,
                 symbol,
@@ -614,6 +621,21 @@ mod tests {
             assert!(decode_host_input(json).is_err());
             assert!(decode_command(json).is_err());
         }
+    }
+
+    #[test]
+    fn maximum_leverage_read_is_distinct_from_current_account_leverage() {
+        let json = r#"{"op":"fetchMaxLeverage","command":82,"symbol":"E-BTC-USDT"}"#;
+        let expected = Command::FetchMaxLeverage {
+            command: 82,
+            symbol: "E-BTC-USDT".into(),
+        };
+        assert_eq!(decode_command(json).unwrap(), expected);
+        assert_eq!(
+            decode_host_input(json).unwrap(),
+            HostInput::Command(expected)
+        );
+        assert!(decode_command(r#"{"op":"fetchMaxLeverage","command":82}"#).is_err());
     }
 
     fn assert_subscription_decoders_match(json: &str) {
