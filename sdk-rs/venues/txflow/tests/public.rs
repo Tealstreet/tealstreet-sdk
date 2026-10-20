@@ -500,39 +500,25 @@ fn candle_query_validates_and_streams_documented_envelope() {
 
 #[test]
 fn ping_is_periodic_despite_public_pushes_and_watchdog_recovers() {
-    let (mut e, node, _) = ready();
-    e.handle(2000.0, Event::WsOpened { socket: node });
-    let timer = e
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::SetTimer {
-                timer,
-                at_ms: 12000.0,
-            } = a
-            {
-                Some(timer)
-            } else {
-                None
-            }
-        })
-        .unwrap();
+    let (mut e, node, _, pending) = ready_with_timers(TICKER);
     message(&mut e, node, 11999.0, r#"{"method":"PONG"}"#);
-    e.handle(12000.0, Event::TimerFired { timer });
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let mut actions = Vec::new();
+    for (timer, at) in pending.into_iter().filter(|(_, at)| *at == 12000.0) {
+        e.handle(at, Event::TimerFired { timer });
+        actions.extend(e.drain_actions());
+    }
     assert!(actions.iter().any(
         |a| matches!(a,Action::WsSend{socket,text}if *socket==node&&text=="{\"method\":\"ping\"}")
     ));
-    let next = actions
-        .into_iter()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, .. } = a {
-                Some(timer)
-            } else {
-                None
-            }
-        })
-        .unwrap();
-    e.handle(50000.0, Event::TimerFired { timer: next });
+    for next in actions.into_iter().filter_map(|a| {
+        if let Action::SetTimer { timer, .. } = a {
+            Some(timer)
+        } else {
+            None
+        }
+    }) {
+        e.handle(50000.0, Event::TimerFired { timer: next });
+    }
     assert!(
         e.drain_actions()
             .any(|a| matches!(a,Action::WsClose{socket}if socket==node))
@@ -854,18 +840,7 @@ fn subscription_fifo_sends_one_frame_per_150ms_and_paces_unsubscribe() {
 
 #[test]
 fn subscription_backlog_is_bounded_and_never_holds_up_heartbeat() {
-    let (mut e, _, api) = ready();
-    e.handle(3000.0, Event::WsOpened { socket: api });
-    let ping = e
-        .drain_actions()
-        .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 13000.0,
-            } => Some(timer),
-            _ => None,
-        })
-        .unwrap();
+    let (mut e, _, api, pending) = ready_with_timers(TICKER);
     for _ in 0..100 {
         for add in [true, false] {
             let command = if add {
@@ -883,7 +858,9 @@ fn subscription_backlog_is_bounded_and_never_holds_up_heartbeat() {
         }
     }
     e.drain_actions().for_each(drop);
-    e.handle(13000.0, Event::TimerFired { timer: ping });
+    for (timer, at) in pending.into_iter().filter(|(_, at)| *at == 12000.0) {
+        e.handle(at, Event::TimerFired { timer });
+    }
     assert!(e.drain_actions().any(|a| matches!(a, Action::WsSend { socket, text } if socket == api && text == r#"{"method":"ping"}"#)));
     for _ in 0..2050 {
         for add in [true, false] {
@@ -983,7 +960,10 @@ fn socket_rate_limit_discards_old_queue_and_restores_current_intents_on_reconnec
                 _ => None,
             })
             .unwrap();
-        assert_eq!(at, 4001.0);
+        assert!(
+            (3751.0..=4001.0).contains(&at),
+            "jittered first retry: {at}"
+        );
         e.handle(at, Event::TimerFired { timer });
         let replacement = e
             .drain_actions()
