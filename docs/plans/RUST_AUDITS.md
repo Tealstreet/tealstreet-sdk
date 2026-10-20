@@ -402,3 +402,18 @@ Normal inputs send the same requests as TS; the risk is resilience.
   empty account (`lib.rs:148`).
 - Low: isolated leverage sets both sides; index triggers rejected; fill without
   `id` dropped; income row without asset fails the page; fetchLeverage returns max.
+
+### Coinbase (already defaults to Rust)
+- High: one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
+  site) rejects every snapshot and blocks all trading incl. cancel
+  (`coinbase/src/account.rs:336,1577,1842`, `trading.rs:1028`); a failed
+  placement leaves a reservation that breaks cancel-symbol for the session
+  (`trading.rs:1109,1283,1164`); CLI market orders with GTC rejected
+  (`trading.rs:264`, `cli-core/.../BaseBuySellCommand.ts:368`); browser-side
+  `signWsAuth`/HTTP signing lost (decision 2).
+- Medium: reduce-only capacity counts protective stops against TPs and spot
+  reduce-only always rejected (`trading.rs:654,676`); portfolio probe stalls on
+  404/other non-2xx (`account.rs:1322,1687`); one bad CFM position row rejects
+  the snapshot (`account.rs:1246`).
+- Low: CFM `upnl` and spot `total` sources differ (equity double-count risk);
+  OHLCV honours `from`; placement errors lose Coinbase's message.
