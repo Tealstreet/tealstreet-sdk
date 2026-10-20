@@ -432,6 +432,10 @@ impl KrakenSpot {
                 total += holding.balance.total * rate;
             }
         }
+        // Each warning repeats only after its condition has cleared.
+        if !unsupported {
+            self.account.wallet_valuation_warnings &= !2;
+        }
         if unsupported && self.account.wallet_valuation_warnings & 2 == 0 {
             self.account.wallet_valuation_warnings |= 2;
             cx.log(LogLevel::Warning,
@@ -446,6 +450,7 @@ impl KrakenSpot {
             return;
         }
         self.account.wallet_valuation_pending = false;
+        self.account.wallet_valuation_warnings &= !1;
         cx.store.set_balance(Balance {
             total,
             free: total,
@@ -479,7 +484,6 @@ impl KrakenSpot {
         if revision == self.account.balance_revision {
             cx.store.set_currency_balances(currencies);
             self.account.wallet_valuation_pending = true;
-            self.account.wallet_valuation_warnings = 0;
             self.revalue_pending_balances(cx);
         }
         Ok(())

@@ -12,6 +12,7 @@ struct Wallet {
     balance: HttpRequest,
     warnings: Vec<String>,
     metadata_retry: Option<(safe_cex_engine::TimerId, f64)>,
+    poll: (safe_cex_engine::TimerId, f64),
 }
 impl Wallet {
     fn pending() -> Self {
@@ -47,6 +48,15 @@ impl Wallet {
             Action::SetTimer { timer, at_ms } if *at_ms == NOW + 1000. => Some((*timer, *at_ms)),
             _ => None,
         });
+        let poll = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 10_000. => {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .unwrap();
         let ticker = take("Ticker");
         let balance = take("Balance");
         engine.handle(NOW, Event::WsOpened { socket: public });
@@ -58,6 +68,7 @@ impl Wallet {
             balance,
             warnings: vec![],
             metadata_retry,
+            poll,
         }
     }
     fn recover_metadata(&mut self, body: &str) -> Vec<Action> {
@@ -373,4 +384,26 @@ fn malformed_native_pair_identity_cannot_prove_funded_asset_is_unsupported() {
         wallet.live(r#"[{"symbol":"BTC/USD","last":110}]"#);
         assert_eq!(wallet.engine.store().balance().total, 220.);
     }
+}
+
+#[test]
+fn unpriceable_wallet_warns_once_across_balance_polls() {
+    let mut wallet = Wallet::pending();
+    wallet.tickers(&TICKERS.replace(r#""c":["50","1"]"#, r#""c":["0","1"]"#));
+    wallet.native(BALANCE);
+    let (timer, at_ms) = wallet.poll;
+    wallet.engine.handle(at_ms, Event::TimerFired { timer });
+    let balance = requests(&mut wallet.engine)
+        .into_iter()
+        .find(|request| request.url.ends_with("Balance"))
+        .unwrap();
+    reply_at(&mut wallet.engine, at_ms, &balance, BALANCE);
+    wallet.collect();
+    assert!(!wallet.engine.store().loaded().balance);
+    let warnings = wallet
+        .warnings
+        .iter()
+        .filter(|w| w.contains("awaits a valid quote"))
+        .count();
+    assert_eq!(warnings, 1);
 }
