@@ -15,6 +15,9 @@ export const SECTION: {
   PREDICTION_MARKETS: 13;
   PREDICTION_HOLDINGS: 14;
   BOOK_DELTA: 15;
+  INSTRUMENT_CLASSIFICATIONS: 16;
+  DERIVATIVE_PRODUCTS: 17;
+  POSITION_GREEKS: 18;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -65,6 +68,34 @@ export type MarketTable = { count: number; flags: Uint32Array } & Columns<Market
   base(i: number): string;
   quote(i: number): string;
 };
+export interface InstrumentClassificationTable {
+  count: number;
+  market: Uint32Array;
+  symbolType(i: number): string | undefined;
+  marketRegion(i: number): string | undefined;
+  underlyingTicker(i: number): string | undefined;
+}
+export interface DerivativeProductTable {
+  count: number;
+  market: Uint32Array;
+  kind: Uint32Array;
+  expiry: Float64Array;
+  strike: Float64Array;
+  underlying(i: number): string;
+  settleAsset(i: number): string | undefined;
+  premiumAsset(i: number): string | undefined;
+  style(i: number): string | undefined;
+  settlement(i: number): string | undefined;
+}
+export interface PositionGreekTable {
+  count: number;
+  delta: Float64Array;
+  gamma: Float64Array;
+  vega: Float64Array;
+  theta: Float64Array;
+  positionId(i: number): string;
+  units(i: number): string;
+}
 export interface PredictionMarketTable {
   count: number;
   market: Uint32Array;
@@ -106,6 +137,7 @@ export interface CandleRows {
 export type OrderTable = { count: number; market: Uint32Array; enums: Uint32Array } & Columns<OrderColumn> & {
   /** Optional trailing column; absent in legacy frames, NaN for rows without native units. */
   remainingNative?: Float64Array;
+  filledInPlacementUnits?: Float64Array;
   id(i: number): string;
   clientOrderId(i: number): string | undefined;
   parentId(i: number): string | undefined;
@@ -152,6 +184,9 @@ export class Frame {
   string(index: number): string | undefined;
   markets(): MarketTable | undefined;
   predictionMarkets(): PredictionMarketTable | undefined;
+  instrumentClassifications(): InstrumentClassificationTable | undefined;
+  derivativeProducts(): DerivativeProductTable | undefined;
+  positionGreeks(): PositionGreekTable | undefined;
   predictionHoldings(): PredictionHoldingTable | undefined;
   tickers(): TickerTable | undefined;
   tickerDeltas(): Float64Array | undefined;

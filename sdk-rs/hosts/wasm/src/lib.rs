@@ -179,6 +179,12 @@ struct KucoinExtra {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[cfg(feature = "bybit")]
+    #[serde(default)]
+    enable_inverse_markets: bool,
+    #[cfg(feature = "bybit")]
+    #[serde(default)]
+    enable_option_markets: bool,
     #[cfg(feature = "coinbase")]
     #[serde(default)]
     spot_only: bool,
@@ -825,6 +831,8 @@ impl WasmEngine {
             #[cfg(feature = "bybit")]
             "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
                 let options = BybitOptions {
+                    enable_inverse_markets: options.enable_inverse_markets,
+                    enable_option_markets: options.enable_option_markets,
                     variant: match venue {
                         "bybitinverse" => BybitVariant::Inverse,
                         "bybitspot" => BybitVariant::Spot,
@@ -1025,6 +1033,32 @@ impl WasmEngine {
     }
 
     pub fn command(&mut self, command_json: &str, now: f64) -> Result<String, JsError> {
+        #[cfg(feature = "cold-subscriptions")]
+        {
+            if let Some(command) = safe_cex_engine::command::decode_subscription(command_json)? {
+                self.inner.handle(now, Event::Command(command));
+                return Ok(self.flush());
+            }
+            self.other_command(command_json, now)
+        }
+        #[cfg(not(feature = "cold-subscriptions"))]
+        {
+            let event = match safe_cex_engine::command::decode_host_input(command_json)? {
+                safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
+                safe_cex_engine::command::HostInput::TickIntervalChanged { interval_ms } => {
+                    Event::TickIntervalChanged { interval_ms }
+                }
+            };
+            self.inner.handle(now, event);
+            Ok(self.flush())
+        }
+    }
+
+    // Keep cold decoding and dispatch together: returning the large command enum
+    // across this boundary would copy every variant into the startup path.
+    #[cfg(feature = "cold-subscriptions")]
+    #[inline(never)]
+    fn other_command(&mut self, command_json: &str, now: f64) -> Result<String, JsError> {
         let event = match safe_cex_engine::command::decode_host_input(command_json)? {
             safe_cex_engine::command::HostInput::Command(command) => Event::Command(command),
             safe_cex_engine::command::HostInput::TickIntervalChanged { interval_ms } => {
@@ -1067,6 +1101,74 @@ fn is_false(value: &bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn host_commands_dispatch_once_and_flush_once_with_original_clock() {
+        use safe_cex_engine::command::HostInput;
+        use std::cell::{Cell, RefCell};
+        use std::rc::Rc;
+
+        struct Commands {
+            events: Rc<RefCell<Vec<(f64, HostInput)>>>,
+            drains: Rc<Cell<usize>>,
+        }
+        impl AnyEngine for Commands {
+            fn account_id(&self) -> Option<String> {
+                None
+            }
+            fn start(&mut self, _: f64) {}
+            fn handle(&mut self, now: f64, event: Event<'_>) {
+                let input = match event {
+                    Event::Command(command) => HostInput::Command(command),
+                    Event::TickIntervalChanged { interval_ms } => {
+                        HostInput::TickIntervalChanged { interval_ms }
+                    }
+                    _ => panic!("command boundary"),
+                };
+                self.events.borrow_mut().push((now, input));
+            }
+            fn drain(&mut self) -> Vec<Action> {
+                self.drains.set(self.drains.get() + 1);
+                Vec::new()
+            }
+            fn frame(&mut self, _: f64, _: bool) -> Option<&[u8]> {
+                None
+            }
+            fn snapshot(&mut self, _: f64) -> &[u8] {
+                &[]
+            }
+        }
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let drains = Rc::new(Cell::new(0));
+        let mut engine = WasmEngine {
+            inner: Box::new(Commands {
+                events: Rc::clone(&events),
+                drains: Rc::clone(&drains),
+            }),
+        };
+        let commands = [
+            r#"{"op":"subscribeOrderBook","symbol":"BTCUSDT"}"#,
+            r#"{"op":"unsubscribeOrderBook","symbol":"BTCUSDT"}"#,
+            r#"{"op":"subscribeCandles","symbol":"BTCUSDT","interval":"1m"}"#,
+            r#"{"op":"unsubscribeCandles","symbol":"BTCUSDT","interval":"1m"}"#,
+            r#"{"op":"setTickerSymbols","symbols":["BTCUSDT"]}"#,
+            r#"{"op":"setTickInterval","interval":2000}"#,
+            r#"{"op":"setTickInterval","interval":null}"#,
+        ];
+        for (index, json) in commands.iter().enumerate() {
+            let now = index as f64 + 0.5;
+            assert_eq!(engine.command(json, now).unwrap(), "");
+            assert_eq!(drains.get(), index + 1);
+            assert_eq!(events.borrow().len(), index + 1);
+            assert_eq!(
+                events.borrow()[index],
+                (
+                    now,
+                    safe_cex_engine::command::decode_host_input(json).unwrap()
+                )
+            );
+        }
+    }
+
     #[test]
     fn account_command_aliases_share_the_engine_read() {
         for (op, enabled) in [

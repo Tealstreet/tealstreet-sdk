@@ -11,7 +11,7 @@ import { FrameApplier } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 
 const align8 = (n: number) => Math.ceil(n / 8) * 8;
-type OrderRow = { id: string; parentId?: string; amount: number; filled: number; remaining: number; native?: number; enums?: number };
+type OrderRow = { id: string; parentId?: string; amount: number; filled: number; remaining: number; native?: number; filledNative?: number; enums?: number };
 
 // Independent encoder of the documented format-1 layout. The optional native
 // tail must not change offsets in the original seven-column ORDERS table.
@@ -36,6 +36,7 @@ const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], po
     orders.map((o) => o.remaining), orders.map(() => 1234), orders.map(() => NaN), orders.map(() => NaN),
   ];
   if (native) columns.push(orders.map((o) => o.native ?? NaN));
+  if (orders.some((o) => o.filledNative !== undefined)) columns.push(orders.map((o) => o.filledNative ?? NaN));
   table(7, [
     orders.length,
     ...orders.flatMap((o) => [ref(o.id), 0xffffffff, ref(o.parentId)]),
@@ -70,6 +71,26 @@ const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], po
 };
 
 describe('Rust frames preserve inverse native units', () => {
+  it('keeps exact OKX inverse fills/counts and does not label USD PnL as native coin PnL', () => {
+    const value = fixture({
+      contractSize: 100,
+      native: true,
+      positions: true,
+      orders: [{ id: 'inverse-okx', amount: 7, filled: 0.004321, remaining: 0.008765, native: 5, filledNative: 2 }],
+    });
+    expect(value.orders()!.filledInPlacementUnits![0]).toBe(2);
+    const worker = new DefaultStore();
+    new FrameApplier(worker, true).apply(value);
+    const main = new DefaultStore();
+    const exchange = new BaseExchange('okx', { key: '', secret: '' }, main);
+    exchange.applyWorkerFrame(value.buffer);
+    for (const store of [worker, main]) {
+      expect(store.orders[0]).toMatchObject({ amount: 7, extra: { remainingNative: 5, remainingNotional: 500, filledInPlacementUnits: 2 } });
+      expect(store.positions[0].extra).toEqual({ contractsNative: 10 });
+    }
+    exchange.dispose();
+  });
+
   it('converts COIN-M USD notionals to native contract counts in worker and main stores', () => {
     const value = fixture({
       contractSize: 100,

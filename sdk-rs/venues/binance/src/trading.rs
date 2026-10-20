@@ -1153,6 +1153,7 @@ impl BinanceFutures {
             max_slippage_pct: None,
             bybit_bbo: None,
             bybit_slippage_tolerance_ticks: None,
+            implied_volatility: None,
             close: Some(order.close.unwrap_or(false)),
             stp_mode: None,
         };

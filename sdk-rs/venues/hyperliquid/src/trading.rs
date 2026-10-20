@@ -247,6 +247,7 @@ impl Hyperliquid {
                     max_slippage_pct: None,
                     bybit_bbo: None,
                     bybit_slippage_tolerance_ticks: None,
+                    implied_volatility: None,
                 };
                 if opts.kind == OrderType::TakeProfit
                     && let Some(t) = cx.store.ticker(&opts.symbol)

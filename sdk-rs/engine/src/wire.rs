@@ -35,6 +35,10 @@ pub mod section {
     /// Absolute changed book levels: market, bid count, ask count, reserved,
     /// then f64 [price, amount] rows. Zero amount deletes that level.
     pub const BOOK_DELTA: u16 = 15;
+    /// Native semantic instrument labels, indexed by the current market table.
+    pub const INSTRUMENT_CLASSIFICATIONS: u16 = 16;
+    pub const DERIVATIVE_PRODUCTS: u16 = 17;
+    pub const POSITION_GREEKS: u16 = 18;
 }
 
 /// Optional footer after legacy currency columns; little-endian bytes `BCM1`.

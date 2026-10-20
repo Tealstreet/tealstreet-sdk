@@ -531,6 +531,16 @@ KNOWN_TS_FIXES.okx = [
   'standalone cancellation continues remaining batches after per-row failures',
   'new account equity survives delayed snapshots and local balance ticks',
   'acknowledged leverage survives failed post-write snapshots',
+  // Position pushes carry a slice, not whole-account maintenance margin.
+  'partial position pushes and account equity updates retain full native IMR, converted PnL and open-order reserve through the next tick',
+  // TS finite coercion hides malformed risk; isolated native IMR may be absent.
+  'malformed or overflowing native risk cannot become zero; isolated position pushes use reported margin when IMR is unavailable',
+  'untraded EEA X-Perp empty last/open seeds initialize to zero and stream updates retain proven trade/percentage instead of NaN',
+  // Phase-9: inverse contracts convert at native mark/execution reference;
+  // EEA history scopes by native product rather than hardcoded SWAP.
+  'EEA historical orders and income query retained FUTURES X-Perps as well as SWAP',
+  'composite income limits apply after joining newest whole native bill groups',
+  'composite capped or stalled product histories fail explicitly as incomplete',
 ];
 // KNOWN_TS_FIXES: the history composite-key map drops distinct executions
 // with equal order/time/price/size/side. Reconstruct only that specific loss
@@ -635,6 +645,12 @@ for (let run = 0; run < runs; run++) {
   if (venue.family === 'orderly') fixOrderly(ts, tape);
   if (venue.family === 'orderly' && !equal(ts.requests, rust.requests))
     differences.push(`requests differ: ts=${JSON.stringify(ts.requests)} rust=${JSON.stringify(rust.requests)}`);
+  // Phase-9 native regressions additionally correct TS: account-wide history
+  // limits before joining newer inverse/options sources; ignored IV on ordinary
+  // derivatives; generic option tickers omitted and option books routed through
+  // the linear feed; malformed supplied option WS Greeks coerced to zero
+  // instead of retaining proven position/Greek state. Dedicated API tests compare
+  // options terms/queries/signing, and assert native option depth25 separately.
   if (venue.family === 'bybit') {
     if (ts.account) {
       const rest = tape.find((record) => record.type === 'config')?.options?.endpoints?.rest
