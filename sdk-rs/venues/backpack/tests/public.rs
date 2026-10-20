@@ -425,7 +425,13 @@ fn failed_seed_reads_retry_independently_without_reopening_the_early_socket() {
     assert!(
         !actions
             .iter()
-            .any(|a| matches!(a, Action::WsConnect { .. }))
+            .any(|a| matches!(a, Action::WsConnect { .. })),
+        "the public socket opened with the catalogue"
+    );
+    let ticker = &e.store().tickers()[0];
+    assert_eq!(
+        (ticker.last, ticker.mark, ticker.funding_rate),
+        (141.0, 141.0, 0.0)
     );
     let timer = actions
         .into_iter()
@@ -444,9 +450,88 @@ fn failed_seed_reads_retry_independently_without_reopening_the_early_socket() {
         &marks,
         r#"[{"symbol":"SOL_USDC_PERP","markPrice":"140","indexPrice":"139","fundingRate":"0.001","nextFundingTimestamp":1000}]"#,
     );
-    assert_eq!(e.store().tickers()[0].last, 141.0);
+    let ticker = &e.store().tickers()[0];
+    assert_eq!(
+        (ticker.last, ticker.mark, ticker.index, ticker.funding_rate),
+        (141.0, 140.0, 139.0, 0.001)
+    );
     assert!(
         !e.drain_actions()
             .any(|a| matches!(a, Action::WsConnect { .. }))
     );
+}
+
+#[test]
+fn malformed_market_ticker_and_mark_rows_are_skipped_without_blocking_startup() {
+    let mut e = Engine::new(Backpack::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.start(0.0);
+    let markets = http(&mut e, "markets");
+    reply(
+        &mut e,
+        &markets,
+        r#"[{"symbol":"BAD_USDC_PERP","marketType":null},{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"},{"symbol":"ETH_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"}]"#,
+    );
+    let mut logs = vec![];
+    let mut socket = None;
+    let mut requests = vec![];
+    for a in e.drain_actions() {
+        match a {
+            Action::Http(r) => requests.push(r),
+            Action::WsConnect { socket: s, .. } => socket = Some(s),
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
+            _ => {}
+        }
+    }
+    assert_eq!(e.store().markets().len(), 2);
+    for r in requests {
+        if r.url.contains("tickers") {
+            reply(
+                &mut e,
+                &r,
+                r#"[{"symbol":"ETH_USDC_PERP","lastPrice":null,"priceChangePercent":"0","volume":"0","quoteVolume":"0"},{"symbol":"SOL_USDC_PERP","lastPrice":"141","priceChangePercent":"0.05","volume":"10","quoteVolume":"1410"}]"#,
+            );
+        } else {
+            reply(
+                &mut e,
+                &r,
+                r#"[{"symbol":"ETH_USDC_PERP","markPrice":"1","indexPrice":"1","fundingRate":null,"nextFundingTimestamp":1000},{"symbol":"SOL_USDC_PERP","markPrice":"140","indexPrice":"139","fundingRate":"0.001","nextFundingTimestamp":1000}]"#,
+            );
+        }
+        logs.extend(e.drain_actions().filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => Some(message),
+            Action::WsConnect { socket: s, .. } => {
+                socket = Some(s);
+                None
+            }
+            _ => None,
+        }));
+    }
+    let socket = socket.expect("public socket starts");
+    assert!(
+        logs.iter()
+            .any(|l| l == "Skipped 1 malformed Backpack ticker rows: ETH_USDC_PERP")
+    );
+    assert!(
+        logs.iter()
+            .any(|l| l == "Skipped 1 malformed Backpack mark price rows: ETH_USDC_PERP")
+    );
+    let tickers = e.store().tickers();
+    assert_eq!(tickers.len(), 2);
+    let eth = tickers
+        .iter()
+        .find(|t| t.symbol == "ETH_USDC_PERP")
+        .unwrap();
+    assert_eq!((eth.last, eth.mark), (0.0, 0.0));
+    let sol = tickers
+        .iter()
+        .find(|t| t.symbol == "SOL_USDC_PERP")
+        .unwrap();
+    assert_eq!(sol.mark, 140.0);
+    e.handle(1.0, Event::WsOpened { socket });
+    let text = r#"{"stream":"ticker.ETH_USDC_PERP","data":{"s":"ETH_USDC_PERP","o":"2000","c":"2100","v":"1","V":"2100"}}"#;
+    e.handle(2.0, Event::WsMessage { socket, text });
+    assert_eq!(e.store().ticker("ETH_USDC_PERP").unwrap().last, 2100.0);
 }

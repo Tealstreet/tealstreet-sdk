@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Event};
+use safe_cex_engine::{Action, Event, Notice};
 use support::*;
 
 #[test]
@@ -19,6 +19,41 @@ fn startup_signs_reads_and_populates_global_settings() {
             Some(safe_cex_engine::model::MarginType::Cross)
         );
     }
+}
+#[test]
+fn account_rows_on_a_skipped_market_are_reported_once_per_symbol() {
+    let markets = MARKETS.replace(
+        r#"{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"0.001""#,
+        r#"{"symbol":"BTC_USDC_PERP","marketType":"PERP","quantityIncrement":"bogus""#,
+    );
+    let btc_position = POSITIONS.replace("SOL_USDC_PERP", "BTC_USDC_PERP");
+    let btc_order = format!("[{}]", ORDER.replace("SOL_USDC_PERP", "BTC_USDC_PERP"));
+    let (mut e, socket, logs) = ready_catalogue(&markets, &btc_position, &btc_order);
+    assert!(e.store().market("BTC_USDC_PERP").is_none());
+    assert!(e.store().positions().is_empty());
+    let reports = logs
+        .iter()
+        .filter(|l| l.starts_with("Backpack account data for BTC_USDC_PERP is hidden"))
+        .count();
+    assert_eq!(reports, 1, "{logs:?}");
+    e.handle(1000.0, Event::WsOpened { socket });
+    e.drain_actions().for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        "account.positionUpdate",
+        &LONG.replace("SOL_USDC_PERP", "BTC_USDC_PERP"),
+    );
+    let logs: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Log { message, .. }) if message.contains("BTC_USDC_PERP") => {
+                Some(message)
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(logs.is_empty(), "already reported during startup: {logs:?}");
 }
 #[test]
 fn private_auth_is_single_subscription_and_watchdog_is_armed() {

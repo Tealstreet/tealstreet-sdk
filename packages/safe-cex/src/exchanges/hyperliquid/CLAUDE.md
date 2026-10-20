@@ -31,6 +31,15 @@ market metadata or account settings. Shared quote changes invoke native account
 revaluation so UPNL and available margin follow provider prices. This does not
 add spot support to Rust.
 
+## Rust margin settings and standalone spot orders
+
+HIP-3 assets get no `activeAssetData` subscription (channel limit), so the Rust
+engine's startup settings seed is what leverage/margin writes start from. Assets
+with `onlyIsolated` or `marginMode: strictIsolated | noCross` seed isolated, and
+every seed caps leverage at the market maximum. Cross on such an asset is refused
+before signing. The standalone `hyperliquidspot` engine ignores `orderUpdates`, so
+it reads `frontendOpenOrders` at startup, on each order refresh and every 10 s.
+
 ## File Structure
 
 ### Core Perpetual Futures

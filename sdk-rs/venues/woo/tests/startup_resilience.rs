@@ -187,7 +187,7 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
 }
 
 #[test]
-fn valid_live_ticker_recovers_a_catalogue_market_missing_from_the_rest_seed() {
+fn live_ticker_never_creates_a_catalogue_market_missing_from_the_rest_seed() {
     let mut engine = public_engine();
     engine.start(0.0);
     let catalogue = engine
@@ -220,19 +220,12 @@ fn valid_live_ticker_recovers_a_catalogue_market_missing_from_the_rest_seed() {
         .unwrap();
     engine.handle(0.0, Event::WsOpened { socket });
     engine.drain_actions().for_each(drop);
-    engine.handle(1.0, Event::WsMessage { socket, text: r###"{"topic":"tickers","data":[{"symbol":"PERP_ETH_USDT","close":201},{"symbol":"PERP_UNKNOWN_USDT","close":999}]}"### });
-    assert_eq!(engine.store().ticker("ETHUSDT").unwrap().last, 201.0);
+    engine.handle(1.0, Event::WsMessage { socket, text: r###"{"topic":"tickers","data":[{"symbol":"PERP_ETH_USDT","close":201},{"symbol":"PERP_BTC_USDT","close":60001},{"symbol":"PERP_UNKNOWN_USDT","close":999}]}"### });
+    // Like TS, live data only updates rows the REST ticker seed listed.
+    assert!(engine.store().ticker("ETHUSDT").is_none());
     assert!(engine.store().ticker("UNKNOWN").is_none());
-    engine.handle(2.0, Event::WsMessage { socket, text: r###"{"topic":"tickers","data":[{"symbol":"PERP_ETH_USDT","close":201},{"symbol":"PERP_UNKNOWN_USDT","close":999}]}"### });
-    assert_eq!(
-        engine
-            .store()
-            .tickers()
-            .iter()
-            .filter(|t| t.symbol == "ETHUSDT")
-            .count(),
-        1
-    );
+    assert_eq!(engine.store().ticker("BTCUSDT").unwrap().last, 60001.0);
+    assert_eq!(engine.store().tickers().len(), 1);
 }
 
 #[test]

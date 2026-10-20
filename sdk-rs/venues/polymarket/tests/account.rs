@@ -23,6 +23,9 @@ impl H {
         Self::with_seed(options, true)
     }
     fn with_seed(options: Options, seed: bool) -> Self {
+        Self::with_catalogue(options, MARKETS, seed)
+    }
+    fn with_catalogue(options: Options, markets: &str, seed: bool) -> Self {
         let mut h = Self {
             e: Engine::new(Polymarket::new(options)),
             now: 1_700_000_000_000.0,
@@ -36,7 +39,7 @@ impl H {
         };
         h.e.start(h.now);
         h.collect();
-        h.response("/markets", 200, MARKETS);
+        h.response("/markets", 200, markets);
         if seed {
             h.response("/midpoints", 200, r#"{"1":"0.5","2":"0.5"}"#);
         }
@@ -325,6 +328,91 @@ fn malformed_money_and_missing_holding_identity_fail_closed() {
     assert_eq!(h.e.store().positions()[0].contracts, 10.0);
 }
 #[test]
+fn malformed_position_row_keeps_its_known_holding_while_other_rows_commit() {
+    for bad in [
+        r#"{"asset":"1","size":"NaN","avgPrice":0.5}"#,
+        r#"{"asset":"1","size":4,"avgPrice":2}"#,
+    ] {
+        let mut h = H::new();
+        h.initial();
+        h.poll();
+        h.response(
+            "/positions",
+            200,
+            &format!(r#"[{bad},{{"asset":"2","size":3,"avgPrice":0.4,"curPrice":0.5}}]"#),
+        );
+        let positions = h.e.store().positions();
+        assert_eq!(positions.len(), 2, "{bad}");
+        let known = positions
+            .iter()
+            .find(|p| p.symbol == "election-Yes")
+            .unwrap();
+        assert_eq!(known.contracts, 10.0);
+        let fresh = positions
+            .iter()
+            .find(|p| p.symbol == "election-No")
+            .unwrap();
+        assert_eq!(fresh.contracts, 3.0);
+        let holdings = h.e.store().prediction_holdings().unwrap();
+        assert_eq!(holdings.len(), 2);
+        assert!(holdings.iter().any(|h| h.market == 0 && h.redeemable));
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"1","allowances":{}}"#,
+        );
+        h.response("/data/orders", 200, r#"{"data":[],"next_cursor":"LTE="}"#);
+        h.poll();
+        h.response("/positions", 200, "[]");
+        assert!(h.e.store().positions().is_empty());
+    }
+}
+#[test]
+fn unusable_current_price_still_commits_the_fresh_holding_size() {
+    for cur in ["7", r#""bogus""#, "null", r#"{"x":1}"#] {
+        let mut h = H::new();
+        h.initial();
+        h.poll();
+        h.response(
+            "/positions",
+            200,
+            &format!(r#"[{{"asset":"1","size":4,"avgPrice":0.25,"curPrice":{cur}}}]"#),
+        );
+        let p = &h.e.store().positions()[0];
+        assert_eq!(p.contracts, 4.0, "{cur}");
+        // Ticker midpoint 0.5 stands in for the unusable quote.
+        assert_eq!(p.notional, 2.0, "{cur}");
+        assert_eq!(p.unrealized_pnl, 1.0, "{cur}");
+    }
+}
+#[test]
+fn holdings_on_unloaded_markets_are_logged_once_per_asset() {
+    let mut h = H::new();
+    h.initial();
+    let unlisted =
+        r#"[{"asset":"77","size":3,"avgPrice":0.5},{"asset":"78","size":0,"avgPrice":0.5}]"#;
+    for _ in 0..2 {
+        h.poll();
+        h.response(
+            "/balance-allowance",
+            200,
+            r#"{"balance":"1","allowances":{}}"#,
+        );
+        h.response("/data/orders", 200, r#"{"data":[],"next_cursor":"LTE="}"#);
+        h.response("/positions", 200, unlisted);
+    }
+    let reports: Vec<_> = h
+        .logs
+        .iter()
+        .filter(|l| l.contains("has no loaded market"))
+        .collect();
+    assert_eq!(
+        reports,
+        ["Polymarket holding 77 has no loaded market; not shown"]
+    );
+    assert!(h.e.store().positions().is_empty());
+}
+#[test]
 fn cursor_orders_commit_atomically_and_cycles_fail_closed() {
     let mut h = H::new();
     h.initial();
@@ -542,28 +630,59 @@ fn authoritative_empty_orders_cannot_be_reopened_by_older_live_event() {
 
 #[test]
 fn unknown_owned_token_is_visible_failure_and_retains_previous_holdings() {
-    let mut h = H::new();
-    h.initial();
-    let before = h.e.store().positions().to_vec();
-    h.poll();
+    // The catalogue skipped a malformed row, so an unlisted token may belong to it.
+    let catalogue = format!(
+        r#"[{},{{"slug":"skipped-market"}}]"#,
+        &MARKETS[1..MARKETS.len() - 1]
+    );
+    let skipped_catalogue = || {
+        H::with_catalogue(
+            Options {
+                key: Some(KEY.into()),
+                polymarket: Some(PolymarketOptions {
+                    api_key: Some("api".into()),
+                    api_secret: Some("c2VjcmV0".into()),
+                    api_passphrase: Some("pass".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            &catalogue,
+            true,
+        )
+    };
+    for unknown in [
+        r#""asset":"unknown","slug":"skipped-market""#,
+        r#""asset":"unknown""#,
+    ] {
+        let owned = POSITIONS.replace("\"asset\":\"1\"", unknown);
+        let mut h = skipped_catalogue();
+        h.initial();
+        let before = h.e.store().positions().to_vec();
+        h.poll();
+        h.response("/positions", 200, &owned);
+        assert_eq!(h.e.store().positions(), before, "{unknown}");
+        let mut h = skipped_catalogue();
+        h.response("/positions", 200, &owned);
+        assert!(!h.e.store().loaded().positions, "{unknown}");
+        assert!(
+            h.logs
+                .iter()
+                .any(|message| message.contains("owned holding has unavailable market metadata"))
+        );
+    }
+    // A slug the catalogue did not skip is an unlisted (e.g. closed) market, as in TS.
+    let mut h = skipped_catalogue();
     h.response(
         "/positions",
         200,
-        &POSITIONS.replace("\"asset\":\"1\"", "\"asset\":\"unknown\""),
+        &POSITIONS.replace(
+            "\"asset\":\"1\"",
+            r#""asset":"unknown","slug":"closed-market""#,
+        ),
     );
-    assert_eq!(h.e.store().positions(), before);
-    let mut h = H::new();
-    h.response(
-        "/positions",
-        200,
-        &POSITIONS.replace("\"asset\":\"1\"", "\"asset\":\"unknown\""),
-    );
-    assert!(!h.e.store().loaded().positions);
-    assert!(
-        h.logs
-            .iter()
-            .any(|message| message.contains("owned holding has unavailable market metadata"))
-    );
+    assert!(h.e.store().loaded().positions);
+    assert!(h.e.store().positions().is_empty());
 }
 
 #[test]

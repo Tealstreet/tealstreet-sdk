@@ -183,8 +183,11 @@ See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regress
 
 ### Rust partial-catalogue account safety
 
-An owned Data API holding with unavailable token metadata fails visibly and
-preserves the prior snapshot. A documented `slug` outside an explicit
+An owned Data API holding whose market the catalogue walk skipped as malformed
+(or an unidentifiable skipped row) fails visibly and preserves the prior
+snapshot. A holding on a market discovery does not list at all (e.g. a resolved,
+`closed` market) is skipped with a one-time log, as TS does, so redeemable
+positions cannot block loading. A documented `slug` outside an explicit
 `marketSlugs` selection remains intentionally out of scope. Missing `curPrice`
 requires an observed positive last price or an actual last-trade observation;
 a BBO-only row's default zero is not a price. Explicit native `curPrice: 0`

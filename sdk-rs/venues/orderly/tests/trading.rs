@@ -12,12 +12,14 @@ fn place(e: &mut Driver, command: u32, json: &str) {
 
 fn done(out: Vec<Action>, id: u32) -> Result<String, String> {
     out.into_iter()
-        .find_map(|a| {
-            if let Action::Notice(Notice::CommandDone { command, result }) = a {
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone { command, result }) => {
                 (command == id).then_some(result)
-            } else {
-                None
             }
+            Action::Notice(Notice::CommandFailed { command, error }) => {
+                (command == id).then(|| Err(error.legacy_text()))
+            }
+            _ => None,
         })
         .expect("command completion")
 }

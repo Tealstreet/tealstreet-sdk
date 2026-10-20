@@ -31,6 +31,9 @@ fn request(actions: &[Action], path: &str) -> HttpRequest {
         .unwrap_or_else(|| panic!("missing scripted request {path}"))
 }
 fn pending() -> (Engine<Woo>, HttpRequest, TimerId, TimerId) {
+    pending_with(CATALOGUE)
+}
+fn pending_with(catalogue: &str) -> (Engine<Woo>, HttpRequest, TimerId, TimerId) {
     let mut e = Engine::new(Woo::new(Options {
         testnet: true,
         key: Some("scripted-key".into()),
@@ -39,8 +42,8 @@ fn pending() -> (Engine<Woo>, HttpRequest, TimerId, TimerId) {
         ..Default::default()
     }));
     e.start(0.0);
-    let catalogue = request(&e.drain_actions().collect::<Vec<_>>(), "/public/info");
-    reply(&mut e, &catalogue, 0.0, CATALOGUE);
+    let catalogue_request = request(&e.drain_actions().collect::<Vec<_>>(), "/public/info");
+    reply(&mut e, &catalogue_request, 0.0, catalogue);
     let early = e.drain_actions().collect::<Vec<_>>();
     let info = request(&early, "/v3/accountinfo");
     let ticker = request(&early, "/public/futures");
@@ -161,8 +164,10 @@ fn ticker_recovery_immediately_reconciles_a_previously_unpriced_position() {
 
 #[test]
 fn owned_position_outside_partial_catalogue_cannot_clear_a_snapshot() {
+    // The catalogue skipped PERP_MISSING_USDT, so the holding may belong to it.
+    let catalogue = CATALOGUE.replace("]}", r#",{"symbol":"PERP_MISSING_USDT"}]}"#);
     for previous in [false, true] {
-        let (mut e, positions, _, poll) = pending();
+        let (mut e, positions, _, poll) = pending_with(&catalogue);
         let request = if previous {
             reply(&mut e, &positions, 0.0, NATIVE);
             e.drain_actions().for_each(drop);

@@ -32,12 +32,12 @@ pub enum Pending {
     Markets {
         rows: Vec<Market>,
         ranges: HashMap<String, f64>,
-        bad: bool,
+        skipped: account::Skipped,
     },
     Tickers {
         rows: Vec<Ticker>,
         indexes: HashMap<String, u32>,
-        bad: bool,
+        skipped: account::Skipped,
     },
     Funding {
         rows: Vec<(String, f64, f64)>,
@@ -94,6 +94,8 @@ pub struct Woo {
     generation: u64,
     funding: Option<TimerId>,
     seed_backoff: safe_cex_engine::startup::Backoff<bool>,
+    skipped_markets: std::collections::HashSet<String>,
+    skipped_anonymous: bool,
     price_ranges: HashMap<String, f64>,
     ticker_indexes: HashMap<String, u32>,
 }
@@ -211,6 +213,8 @@ impl Woo {
             generation: 0,
             funding: None,
             seed_backoff: Default::default(),
+            skipped_markets: Default::default(),
+            skipped_anonymous: false,
             price_ranges: HashMap::new(),
             ticker_indexes: HashMap::new(),
         }
@@ -225,7 +229,7 @@ impl Woo {
                 Pending::Tickers {
                     indexes: HashMap::new(),
                     rows: Vec::new(),
-                    bad: false,
+                    skipped: Default::default(),
                 },
             )
         } else {
@@ -234,7 +238,7 @@ impl Woo {
                 Pending::Markets {
                     rows: Vec::new(),
                     ranges: HashMap::new(),
-                    bad: false,
+                    skipped: Default::default(),
                 },
             )
         };
@@ -246,7 +250,7 @@ impl Woo {
             pending,
         );
     }
-    fn apply_ticks(&mut self, cx: &mut Cx<'_, Pending>, topic: &str, rows: Vec<Tick<'_>>) {
+    fn apply_ticks(&self, cx: &mut Cx<'_, Pending>, topic: &str, rows: Vec<Tick<'_>>) {
         #[derive(Clone, Copy)]
         enum Kind {
             Tickers,
@@ -262,25 +266,9 @@ impl Woo {
             if !row.symbol.starts_with("PERP_") {
                 continue;
             }
-            let index = match self.ticker_indexes.get(row.symbol.as_ref()).copied() {
-                Some(index) => index,
-                None => {
-                    let supplied = match kind {
-                        Kind::Tickers => {
-                            row.close.is_some() || row.volume.is_some() || row.amount.is_some()
-                        }
-                        Kind::Bbos => row.bid.is_some() || row.ask.is_some(),
-                        Kind::Marks => row.price.is_some(),
-                    };
-                    if !supplied {
-                        continue;
-                    }
-                    let Some(index) = cx.store.ensure_ticker(&compact(&row.symbol)) else {
-                        continue;
-                    };
-                    self.ticker_indexes.insert(row.symbol.to_string(), index);
-                    index
-                }
+            // Like TS, live data only updates rows the REST ticker seed listed.
+            let Some(&index) = self.ticker_indexes.get(row.symbol.as_ref()) else {
+                continue;
             };
             let Some(t) = cx.store.tickers().get(index as usize) else {
                 continue;
@@ -754,17 +742,22 @@ impl Venue for Woo {
             Pending::Markets {
                 rows,
                 ranges,
-                bad: _,
+                skipped,
             } => {
                 let raw = match serde_json::from_str::<Instrument<'_>>(item) {
                     Ok(raw) => raw,
                     Err(_) => {
-                        if serde_json::from_str::<Symbol<'_>>(item)
-                            .is_ok_and(|s| !s.symbol.starts_with("PERP_"))
-                        {
-                            return;
+                        match serde_json::from_str::<Symbol<'_>>(item) {
+                            Ok(s) if !s.symbol.starts_with("PERP_") => (),
+                            Ok(s) => {
+                                skipped.add(Some(&s.symbol));
+                                safe_cex_engine::startup::skipped_row(cx);
+                            }
+                            Err(_) => {
+                                skipped.add(None);
+                                safe_cex_engine::startup::skipped_row(cx);
+                            }
                         }
-                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                 };
@@ -780,6 +773,7 @@ impl Venue for Woo {
                     || raw.base_min <= 0.0
                     || raw.base_max < raw.base_min
                 {
+                    skipped.add(Some(&raw.symbol));
                     safe_cex_engine::startup::skipped_row(cx);
                     return;
                 }
@@ -828,17 +822,22 @@ impl Venue for Woo {
             Pending::Tickers {
                 rows,
                 indexes,
-                bad: _,
+                skipped,
             } => {
                 let raw = match serde_json::from_str::<Statistics<'_>>(item) {
                     Ok(raw) => raw,
                     Err(_) => {
-                        if serde_json::from_str::<Symbol<'_>>(item)
-                            .is_ok_and(|s| cx.store.market(&compact(&s.symbol)).is_none())
-                        {
-                            return;
+                        match serde_json::from_str::<Symbol<'_>>(item) {
+                            Ok(s) if cx.store.market(&compact(&s.symbol)).is_none() => (),
+                            Ok(s) => {
+                                skipped.add(Some(&s.symbol));
+                                safe_cex_engine::startup::skipped_row(cx);
+                            }
+                            Err(_) => {
+                                skipped.add(None);
+                                safe_cex_engine::startup::skipped_row(cx);
+                            }
                         }
-                        safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
                 };
@@ -846,7 +845,8 @@ impl Venue for Woo {
                 let Some(m) = cx.store.market(&symbol) else {
                     return;
                 };
-                if raw.open <= 0.0 || raw.close <= 0.0 {
+                if raw.close <= 0.0 {
+                    skipped.add(Some(&raw.symbol));
                     safe_cex_engine::startup::skipped_row(cx);
                     return;
                 }
@@ -859,8 +859,11 @@ impl Venue for Woo {
                     last: raw.close,
                     mark: raw.mark_price,
                     index: raw.index_price.unwrap_or(f64::NAN),
-                    percentage: num::round_half_up((raw.close - raw.open) / raw.open * 10000.0)
-                        / 100.0,
+                    percentage: if raw.open > 0.0 {
+                        num::round_half_up((raw.close - raw.open) / raw.open * 10000.0) / 100.0
+                    } else {
+                        0.0
+                    },
                     open_interest: raw.open_interest,
                     funding_rate: raw.last_funding_rate,
                     funding_time: raw.next_funding_time,
@@ -913,20 +916,29 @@ impl Venue for Woo {
         match pending {
             Pending::History(_) | Pending::Trade(_) => unreachable!(),
             Pending::Account(_) => unreachable!(),
-            Pending::Markets { rows, ranges, bad } => {
-                if bad || rows.is_empty() {
+            Pending::Markets {
+                rows,
+                ranges,
+                skipped,
+            } => {
+                if let Some(text) = skipped.summary("markets") {
+                    cx.log(LogLevel::Warning, text);
+                }
+                if rows.is_empty() {
                     self.on_request_failed(
                         cx,
                         Pending::Markets {
                             rows: vec![],
                             ranges: HashMap::new(),
-                            bad: false,
+                            skipped: Default::default(),
                         },
                         "Invalid WOO markets",
                     );
                     return;
                 }
                 self.price_ranges = ranges;
+                self.skipped_markets = skipped.ids().iter().cloned().collect();
+                self.skipped_anonymous = skipped.anonymous();
                 cx.store.set_markets(rows);
                 self.seed_backoff.succeeded(cx, &false);
                 if self.options.public_data_only
@@ -940,14 +952,21 @@ impl Venue for Woo {
                 }
                 self.seed(cx, true);
             }
-            Pending::Tickers { rows, indexes, bad } => {
-                if bad || rows.is_empty() {
+            Pending::Tickers {
+                rows,
+                indexes,
+                skipped,
+            } => {
+                if let Some(text) = skipped.summary("tickers") {
+                    cx.log(LogLevel::Warning, text);
+                }
+                if rows.is_empty() {
                     self.on_request_failed(
                         cx,
                         Pending::Tickers {
                             indexes: HashMap::new(),
                             rows: vec![],
-                            bad: false,
+                            skipped: Default::default(),
                         },
                         "Invalid WOO tickers",
                     );

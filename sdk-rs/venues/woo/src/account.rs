@@ -21,6 +21,7 @@ pub enum Request {
     Positions {
         revision: u64,
         rows: Vec<Position>,
+        skipped: Skipped,
         bad: bool,
     },
     Orders {
@@ -29,6 +30,7 @@ pub enum Request {
         page: u32,
         rows: Vec<Order>,
         classifications: Vec<(String, bool)>,
+        skipped: Skipped,
         bad: bool,
     },
     Leverage {
@@ -36,6 +38,88 @@ pub enum Request {
         command: Option<CommandId>,
         revision: u64,
     },
+}
+/// Rows a snapshot could not map; known ids keep their stored copy.
+#[derive(Default)]
+pub struct Skipped {
+    ids: Vec<String>,
+    anonymous: usize,
+}
+impl Skipped {
+    pub(crate) fn add(&mut self, id: Option<&str>) {
+        match id.filter(|id| !id.is_empty()) {
+            Some(id) if !self.ids.iter().any(|known| known == id) => self.ids.push(id.into()),
+            Some(_) => (),
+            None => self.anonymous += 1,
+        }
+    }
+    pub(crate) fn ids(&self) -> &[String] {
+        &self.ids
+    }
+    pub(crate) fn anonymous(&self) -> bool {
+        self.anonymous > 0
+    }
+    pub(crate) fn summary(&self, kind: &str) -> Option<String> {
+        (!self.ids.is_empty() || self.anonymous > 0).then(|| {
+            format!(
+                "WOO {kind}: skipped {} unmappable row(s) [{}]",
+                self.ids.len() + self.anonymous,
+                self.ids.join(", ")
+            )
+        })
+    }
+}
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct RowIds<'a> {
+    #[serde(borrow)]
+    symbol: Str<'a>,
+    #[serde(deserialize_with = "id")]
+    order_id: String,
+    #[serde(deserialize_with = "id", rename = "orderId")]
+    order_id_camel: String,
+    #[serde(deserialize_with = "id", alias = "algoOrderId")]
+    algo_order_id: String,
+    #[serde(deserialize_with = "id")]
+    id: String,
+    #[serde(borrow, rename = "childOrders")]
+    children: Option<Vec<RowIds<'a>>>,
+    #[serde(borrow)]
+    holding: Option<Lenient<'a>>,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Lenient<'a> {
+    Number(f64),
+    Text(#[serde(borrow)] Str<'a>),
+    Other(serde::de::IgnoredAny),
+}
+impl Lenient<'_> {
+    fn number(&self) -> Option<f64> {
+        match self {
+            Lenient::Number(n) => Some(*n),
+            Lenient::Text(s) => s.parse().ok(),
+            Lenient::Other(_) => None,
+        }
+        .filter(|n| n.is_finite())
+    }
+}
+impl RowIds<'_> {
+    fn key(&self, algo: bool) -> &str {
+        [
+            if algo {
+                &self.algo_order_id
+            } else {
+                &self.order_id
+            },
+            &self.order_id,
+            &self.order_id_camel,
+            &self.id,
+        ]
+        .into_iter()
+        .find(|id| !id.is_empty())
+        .map_or("", String::as_str)
+    }
 }
 #[derive(Clone, Default)]
 pub(crate) struct AlgoMeta {
@@ -47,6 +131,7 @@ struct OrdersJoin {
     regular: Vec<Order>,
     algo: Vec<Order>,
     classifications: Vec<(String, bool)>,
+    skipped: Vec<String>,
     regular_done: bool,
     algo_done: bool,
 }
@@ -78,6 +163,8 @@ pub struct Account {
     refresh: Option<TimerId>,
     refresh_attempt: u32,
     pub(crate) algos: HashMap<String, AlgoMeta>,
+    skip_logged: HashMap<&'static str, String>,
+    hidden: std::collections::HashSet<String>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -251,6 +338,56 @@ fn trigger(s: &str) -> Option<StopTriggerType> {
         _ => None,
     }
 }
+fn holding_side(holding: f64) -> PositionSide {
+    if holding > 0.0 {
+        PositionSide::Long
+    } else {
+        PositionSide::Short
+    }
+}
+// Algo children may omit side, status and reduceOnly that the parent carries.
+fn leaf_side<'r>(r: &'r OrderRow<'_>, parent: Option<&'r OrderRow<'_>>) -> &'r str {
+    match parent {
+        Some(p) if r.side.is_empty() => &p.side,
+        _ => &r.side,
+    }
+}
+fn leaf_status<'r>(r: &'r OrderRow<'_>, algo: bool, parent: Option<&'r OrderRow<'_>>) -> &'r str {
+    if !algo {
+        return &r.status;
+    }
+    match parent {
+        // A filled parent cancels the sibling that never executed.
+        Some(p)
+            if r.algo_status.is_empty()
+                && p.algo_status == "FILLED"
+                && r.total_executed.or(r.executed).unwrap_or(0.0) <= 0.0 =>
+        {
+            "CANCELLED"
+        }
+        Some(p) if r.algo_status.is_empty() => &p.algo_status,
+        _ => &r.algo_status,
+    }
+}
+fn row_id<'r>(r: &'r OrderRow<'_>, algo: bool) -> &'r str {
+    let regular = if r.order_id.is_empty() {
+        &r.order_id_camel
+    } else {
+        &r.order_id
+    };
+    [
+        if algo { &r.algo_order_id } else { regular },
+        regular,
+        &r.id,
+    ]
+    .into_iter()
+    .find(|id| !id.is_empty())
+    .map_or("", String::as_str)
+}
+fn leaf_reduce_only(r: &OrderRow<'_>, parent: Option<&OrderRow<'_>>) -> Option<bool> {
+    r.reduce_only.or_else(|| parent.and_then(|p| p.reduce_only))
+}
+
 impl Account {
     pub(crate) fn new() -> Self {
         Self {
@@ -266,6 +403,32 @@ impl Account {
 }
 
 impl Woo {
+    fn account_skipped(&mut self, cx: &mut Cx<'_, Pending>, kind: &'static str, s: &Skipped) {
+        match s.summary(kind) {
+            Some(text) if self.account.skip_logged.get(kind) != Some(&text) => {
+                cx.log(LogLevel::Warning, text.clone());
+                self.account.skip_logged.insert(kind, text);
+            }
+            Some(_) => (),
+            None => {
+                self.account.skip_logged.remove(kind);
+            }
+        }
+    }
+    /// Whether exposure on an unlisted native symbol could belong to a skipped catalogue row.
+    fn catalogue_may_list(&self, native: &str) -> bool {
+        native.starts_with("PERP_")
+            && (self.skipped_anonymous || self.skipped_markets.contains(native))
+    }
+    // Exposure the store cannot show must be visible once, not every poll.
+    fn account_hidden(&mut self, cx: &mut Cx<'_, Pending>, kind: &str, symbol: &str) {
+        if self.account.hidden.insert(format!("{kind}:{symbol}")) {
+            cx.log(
+                LogLevel::Warning,
+                format!("WOO {kind} on {symbol} cannot be shown: market or ticker unavailable"),
+            );
+        }
+    }
     pub(crate) fn account_revision(&self, key: &str) -> u64 {
         self.account.versions.get(key).copied().unwrap_or(0)
     }
@@ -406,6 +569,7 @@ impl Woo {
         let req = Request::Positions {
             revision: self.account.revision,
             rows: vec![],
+            skipped: Skipped::default(),
             bad: false,
         };
         match self.signed(
@@ -441,6 +605,7 @@ impl Woo {
             page,
             rows: vec![],
             classifications: vec![],
+            skipped: Skipped::default(),
             bad: false,
         };
         match self.signed(
@@ -480,6 +645,7 @@ impl Woo {
             regular: vec![],
             algo: vec![],
             classifications: vec![],
+            skipped: vec![],
             regular_done: false,
             algo_done: false,
         });
@@ -598,21 +764,7 @@ impl Woo {
         algo: bool,
         parent: Option<&OrderRow<'_>>,
     ) -> Option<Order> {
-        let regular_id = if r.order_id.is_empty() {
-            &r.order_id_camel
-        } else {
-            &r.order_id
-        };
-        let id = if algo { &r.algo_order_id } else { regular_id };
-        let id = if id.is_empty() {
-            if regular_id.is_empty() {
-                &r.id
-            } else {
-                regular_id
-            }
-        } else {
-            id
-        };
+        let id = row_id(r, algo);
         if id.is_empty() {
             return None;
         }
@@ -644,7 +796,7 @@ impl Woo {
                     return None;
                 }
                 Some(
-                    if match side(&r.side)? {
+                    if match side(leaf_side(r, parent))? {
                         OrderSide::Sell => price > reference,
                         OrderSide::Buy => price < reference,
                     } {
@@ -694,7 +846,9 @@ impl Woo {
         let price = if algo {
             r.trigger_price.filter(|v| *v > 0.0).or_else(|| {
                 r.extreme_price.zip(r.callback_value).map(|(a, b)| {
-                    if side(&r.side).or_else(|| old.map(|o| o.side)) == Some(OrderSide::Buy) {
+                    if side(leaf_side(r, parent)).or_else(|| old.map(|o| o.side))
+                        == Some(OrderSide::Buy)
+                    {
                         a + b
                     } else {
                         a - b
@@ -712,19 +866,17 @@ impl Woo {
             ..Default::default()
         });
         Some(Order {
-            id: id.clone(),
+            id: id.into(),
             parent_id,
-            status: terminal(if algo { &r.algo_status } else { &r.status })
-                .unwrap_or(OrderStatus::Open),
+            status: terminal(leaf_status(r, algo, parent)).unwrap_or(OrderStatus::Open),
             symbol,
             kind,
-            side: side(&r.side).or_else(|| old.map(|o| o.side))?,
+            side: side(leaf_side(r, parent)).or_else(|| old.map(|o| o.side))?,
             price,
             amount: quantity,
             filled,
             remaining: (quantity - filled).max(0.0),
-            reduce_only: r
-                .reduce_only
+            reduce_only: leaf_reduce_only(r, parent)
                 .unwrap_or_else(|| old.is_some_and(|o| o.reduce_only)),
             close: None,
             client_order_id: r
@@ -751,27 +903,55 @@ impl Woo {
     }
     pub(crate) fn account_item(&mut self, cx: &mut Cx<'_, Pending>, req: &mut Request, item: &str) {
         match req {
-            Request::Positions { rows, bad, .. } => {
+            Request::Positions {
+                rows, skipped, bad, ..
+            } => {
                 let Ok(r) = serde_json::from_str::<PositionRow<'_>>(item) else {
-                    *bad = true;
+                    match serde_json::from_str::<RowIds<'_>>(item) {
+                        Ok(ids) if !ids.symbol.is_empty() => {
+                            let symbol = compact(&ids.symbol);
+                            let holding = ids.holding.as_ref().and_then(Lenient::number);
+                            if holding == Some(0.0) {
+                                return;
+                            }
+                            if cx.store.market(&symbol).is_none() {
+                                if self.catalogue_may_list(&ids.symbol) {
+                                    *bad = true;
+                                }
+                                return;
+                            }
+                            // An unreadable side keeps every stored leg of the symbol.
+                            let key = holding.map_or_else(
+                                || symbol.clone(),
+                                |h| position_id(&symbol, holding_side(h), cx.store.hedged()),
+                            );
+                            skipped.add(Some(&key));
+                        }
+                        _ => skipped.add(None),
+                    }
                     return;
                 };
                 let symbol = compact(&r.symbol);
+                if r.holding == 0.0 {
+                    return;
+                }
                 if cx.store.market(&symbol).is_none() {
-                    if r.holding != 0.0 {
+                    // Only exposure that may sit on a skipped catalogue row is ambiguous.
+                    if self.catalogue_may_list(&r.symbol) {
                         *bad = true;
                         cx.log(
                             LogLevel::Warning,
                             "WOO owned position market unavailable; preserving previous snapshot",
                         );
+                    } else if r.symbol.starts_with("PERP_") {
+                        self.account_hidden(cx, "position", &r.symbol);
                     }
                     return;
                 }
-                if r.holding == 0.0 {
-                    return;
-                }
+                let side = holding_side(r.holding);
+                let hedged = cx.store.hedged();
                 if r.average_open_price <= 0.0 || r.leverage <= 0.0 {
-                    *bad = true;
+                    skipped.add(Some(&position_id(&symbol, side, hedged)));
                     return;
                 }
                 // The private response publishes its own mark. Public startup may
@@ -788,13 +968,7 @@ impl Woo {
                     cx.log(LogLevel::Error, "WOO position mark unavailable; preserving previous positions and valuation");
                     return;
                 };
-                let side = if r.holding > 0.0 {
-                    PositionSide::Long
-                } else {
-                    PositionSide::Short
-                };
                 let contracts = r.holding.abs();
-                let hedged = cx.store.hedged();
                 rows.push(Position {
                     id: position_id(&symbol, side, hedged),
                     symbol,
@@ -823,12 +997,21 @@ impl Woo {
             Request::Orders {
                 rows,
                 classifications,
+                skipped,
                 bad,
                 algo,
                 ..
             } => {
                 let Ok(r) = serde_json::from_str::<OrderRow<'_>>(item) else {
-                    *bad = true;
+                    match serde_json::from_str::<RowIds<'_>>(item) {
+                        Ok(ids) => match ids.children.as_deref().filter(|_| *algo) {
+                            Some(children) => {
+                                children.iter().for_each(|c| skipped.add(Some(c.key(true))));
+                            }
+                            None => skipped.add(Some(ids.key(*algo))),
+                        },
+                        Err(_) => skipped.add(None),
+                    }
                     return;
                 };
                 let candidates: Vec<_> = if *algo {
@@ -857,17 +1040,23 @@ impl Woo {
                             &leaf.status
                         })
                         .is_some();
-                        let native = if leaf.symbol.is_empty() {
-                            parent.map_or("", |p| p.symbol.as_ref())
+                        let raw = if leaf.symbol.is_empty() {
+                            parent.map_or("", |p| &p.symbol)
                         } else {
-                            leaf.symbol.as_ref()
+                            &leaf.symbol
                         };
-                        if native.starts_with("PERP_") && supported && !terminal {
+                        if raw.starts_with("PERP_")
+                            && supported
+                            && !terminal
+                            && self.catalogue_may_list(raw)
+                        {
                             *bad = true;
                             cx.log(
                                 LogLevel::Warning,
                                 "WOO working order market unavailable; preserving previous orders",
                             );
+                        } else if raw.starts_with("PERP_") {
+                            self.account_hidden(cx, "order", raw);
                         }
                         continue;
                     }
@@ -884,25 +1073,26 @@ impl Woo {
                             leaf.extreme_price
                                 .zip(leaf.callback_value)
                                 .is_none_or(|(a, b)| {
-                                    let price = if side(&leaf.side) == Some(OrderSide::Buy) {
-                                        a + b
-                                    } else {
-                                        a - b
-                                    };
+                                    let price =
+                                        if side(leaf_side(leaf, parent)) == Some(OrderSide::Buy) {
+                                            a + b
+                                        } else {
+                                            a - b
+                                        };
                                     a <= 0.0 || b <= 0.0 || !price.is_finite() || price <= 0.0
                                 })
                         } else {
                             leaf.trigger_price.is_none_or(|v| v <= 0.0)
                         }
                     {
-                        *bad = true;
+                        skipped.add(Some(row_id(leaf, *algo)));
                         continue;
                     }
                     if !leaf.order_id.is_empty()
                         && !leaf.order_id_camel.is_empty()
                         && leaf.order_id != leaf.order_id_camel
                     {
-                        *bad = true;
+                        skipped.add(Some(row_id(leaf, *algo)));
                         continue;
                     }
                     if leaf
@@ -914,7 +1104,7 @@ impl Woo {
                             .or(leaf.executed)
                             .is_some_and(|n| n < 0.0)
                     {
-                        *bad = true;
+                        skipped.add(Some(row_id(leaf, *algo)));
                         continue;
                     }
                     if let Some(order) = self.account_map_order(cx, leaf, *algo, parent) {
@@ -926,7 +1116,7 @@ impl Woo {
                         }
                         rows.push(order);
                     } else {
-                        *bad = true;
+                        skipped.add(Some(row_id(leaf, *algo)));
                     }
                 }
             }
@@ -1003,9 +1193,11 @@ impl Woo {
             Request::Positions {
                 revision,
                 mut rows,
+                skipped,
                 bad,
             } => {
                 self.account.positions_pending = false;
+                self.account_skipped(cx, "positions", &skipped);
                 if bad {
                     cx.log(LogLevel::Error, "Invalid WOO positions page");
                     return;
@@ -1083,6 +1275,17 @@ impl Woo {
                     self.account_stamp(&symbol);
                     cx.store.update_setting(&symbol, |s| *s = setting);
                 }
+                let kept: Vec<_> = cx
+                    .store
+                    .positions()
+                    .iter()
+                    .filter(|p| {
+                        (skipped.ids.contains(&p.id) || skipped.ids.contains(&p.symbol))
+                            && !rows.iter().any(|r| r.id == p.id)
+                    })
+                    .cloned()
+                    .collect();
+                rows.extend(kept);
                 cx.store.set_positions(rows);
                 self.account_balance_pnl(cx);
                 self.account_metadata(cx);
@@ -1096,6 +1299,7 @@ impl Woo {
                 page,
                 rows,
                 classifications,
+                skipped,
                 bad,
             } => {
                 if self
@@ -1111,6 +1315,11 @@ impl Woo {
                     cx.log(LogLevel::Error, "Invalid WOO open-order page");
                     return;
                 }
+                self.account_skipped(
+                    cx,
+                    if algo { "algo orders" } else { "open orders" },
+                    &skipped,
+                );
                 let Ok(meta) = serde_json::from_str::<Page>(response.body) else {
                     self.account.orders = None;
                     cx.log(LogLevel::Error, "Invalid WOO open-order envelope");
@@ -1141,7 +1350,9 @@ impl Woo {
                         dest.push(row);
                     }
                 }
-                let added = dest.len() != before;
+                let added =
+                    dest.len() != before || skipped.ids.iter().any(|id| !join.skipped.contains(id));
+                join.skipped.extend(skipped.ids);
                 join.classifications
                     .extend(dest[before..].iter().filter_map(|row| {
                         classifications
@@ -1172,6 +1383,13 @@ impl Woo {
                     }
                     let mut combined = join.regular;
                     combined.extend(join.algo);
+                    for id in &join.skipped {
+                        if let Some(old) = cx.store.order(id)
+                            && !combined.iter().any(|r| &r.id == id)
+                        {
+                            combined.push(old.clone());
+                        }
+                    }
                     for old in cx.store.orders() {
                         if self.account_revision(&old.id) > join.revision {
                             combined.retain(|r| r.id != old.id);
@@ -1402,11 +1620,7 @@ impl Woo {
         algo: bool,
         parent: Option<&OrderRow<'_>>,
     ) {
-        let status = if algo {
-            r.algo_status.as_ref()
-        } else {
-            r.status.as_ref()
-        };
+        let status = leaf_status(r, algo, parent);
         let Some(mut order) = self.account_map_order(cx, r, algo, parent) else {
             if let Some(status) = terminal(status) {
                 let regular_id = if r.order_id.is_empty() {
@@ -1436,11 +1650,6 @@ impl Woo {
                 }
             }
             return;
-        };
-        let status = if algo {
-            r.algo_status.as_ref()
-        } else {
-            r.status.as_ref()
         };
         if algo {
             let positional = self.account_classification(&order.id, r, parent);

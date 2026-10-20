@@ -122,7 +122,7 @@ fn unmappable_owned_position_cannot_replace_a_funded_snapshot_with_empty() {
     assert!(
         h.logs
             .iter()
-            .any(|s| s.contains("invalid account snapshot"))
+            .any(|s| s.contains("skipped malformed position rows (UNKNOWN)"))
     );
 }
 
@@ -139,5 +139,9 @@ fn unmappable_owned_order_cannot_clear_the_existing_order_snapshot() {
     h.reply("/v3/account", &account(Some(4.0)));
     h.reply("/v3/open-orders", &known.replace("BTC-USDT", "UNKNOWN"));
     assert_eq!(h.engine.store().orders(), before);
-    assert!(h.logs.iter().any(|s| s.contains("invalid orders snapshot")));
+    assert!(
+        h.logs
+            .iter()
+            .any(|s| s.contains("skipped malformed order rows (owned)"))
+    );
 }

@@ -1177,3 +1177,370 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         );
     }
 }
+
+fn query_result(
+    h: &mut Harness,
+    command: u32,
+    query: Query,
+    path: &str,
+    bodies: &[&str],
+) -> String {
+    h.command(Command::Query { command, query });
+    for body in bodies {
+        let request = h.take(path);
+        h.reply(request.id, 200, body);
+    }
+    h.result(command).unwrap().clone().unwrap()
+}
+
+#[test]
+fn rest_fills_exclude_funding_settlement_and_invalid_rows() {
+    let mut h = ready();
+    let row = |id: &str, kind: &str, side: &str, price: &str, qty: &str, time: &str| {
+        format!(
+            r#"{{"symbol":"BTCUSDT","orderId":"o-{id}","execId":"{id}","side":"{side}","execPrice":"{price}","execQty":"{qty}","execType":"{kind}","execFee":"0.1","execTime":"{time}"}}"#
+        )
+    };
+    let rows = [
+        row("t1", "Trade", "Buy", "100", "1", "1672282722429"),
+        row("t2", "AdlTrade", "Sell", "101", "2", "1672282722430"),
+        row("t3", "BustTrade", "Buy", "102", "3", "1672282722431"),
+        row("f1", "Funding", "Buy", "100", "1", "1672282722432"),
+        row("f2", " settle ", "Buy", "100", "1", "1672282722433"),
+        row("f3", "SETTLEMENT", "Buy", "100", "1", "1672282722434"),
+        row("f4", "Delivery", "Buy", "100", "1", "1672282722435"),
+        row("f5", "SessionSettlePnL", "Buy", "100", "1", "1672282722436"),
+        row("b1", "Trade", "", "100", "1", "1672282722437"),
+        row("b2", "Trade", "Buy", "0", "1", "1672282722438"),
+        row("b3", "Trade", "Buy", "100", "", "1672282722439"),
+        row("b4", "Trade", "Buy", "100", "1", ""),
+    ];
+    let body = format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"","category":"linear","list":[{}]}}}}"#,
+        rows.join(",")
+    );
+    let result = query_result(
+        &mut h,
+        31,
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(100),
+        },
+        "/v5/execution/list",
+        &[&body],
+    );
+    let mut ids: Vec<String> = serde_json::from_str::<Vec<serde_json::Value>>(&result)
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().to_owned())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, ["t1", "t2", "t3"], "{result}");
+}
+
+#[test]
+fn same_timestamp_hedge_funding_legs_both_survive_and_page_repeats_collapse() {
+    let mut h = ready();
+    let leg = |id: &str, side: &str, size: &str, funding: &str| {
+        format!(
+            r#"{{"id":"{id}","symbol":"BTCUSDT","side":"{side}","size":"{size}","funding":"{funding}","fee":"0","cashFlow":"0","transactionTime":"1672128000000","type":"SETTLEMENT","currency":"USDT","category":"linear"}}"#
+        )
+    };
+    // Legacy rows reuse one id; sides and signed sizes tell the legs apart.
+    let long = leg("592324_BTCUSDT_1", "Buy", "2", "-0.5");
+    let short = leg("592324_BTCUSDT_1", "Sell", "-2", "-0.5");
+    let page1 = format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"c2","list":[{long},{short}]}}}}"#
+    );
+    let page2 = format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"","list":[{short}]}}}}"#
+    );
+    let result = query_result(
+        &mut h,
+        32,
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: Some(1672120000000.0),
+            to_ms: Some(1672130000000.0),
+            limit: None,
+        },
+        "/v5/account/transaction-log",
+        &[&page1, &page2],
+    );
+    let rows = serde_json::from_str::<Vec<serde_json::Value>>(&result).unwrap();
+    assert_eq!(rows.len(), 2, "{result}");
+    let total: f64 = rows.iter().map(|r| r["income"].as_f64().unwrap()).sum();
+    assert_eq!(total, -1.0);
+    assert_ne!(rows[0]["tranId"], rows[1]["tranId"]);
+}
+
+#[test]
+fn omitted_order_history_limit_reads_every_page_instead_of_fifty() {
+    let mut h = ready();
+    let page = |from: usize, cursor: &str| {
+        let rows: Vec<String> = (from..from + 50)
+            .map(|i| format!(r#"{{"orderId":"o{i}","symbol":"BTCUSDT","side":"Buy","orderType":"Limit","orderStatus":"Filled","qty":"1","cumExecQty":"1","price":"100","createdTime":"{}"}}"#, 1672000000000u64 + i as u64))
+            .collect();
+        format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"{cursor}","list":[{}]}}}}"#,
+            rows.join(",")
+        )
+    };
+    let (first, second) = (page(0, "next"), page(50, ""));
+    h.command(Command::Query {
+        command: 33,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    });
+    let request = h.take("/v5/order/history");
+    assert!(request.url.contains("limit=50"), "{}", request.url);
+    h.reply(request.id, 200, &first);
+    let request = h.take("/v5/order/history");
+    assert!(request.url.contains("cursor=next"));
+    h.reply(request.id, 200, &second);
+    let rows =
+        serde_json::from_str::<Vec<serde_json::Value>>(h.result(33).unwrap().as_ref().unwrap())
+            .unwrap();
+    assert_eq!(rows.len(), 100);
+    let explicit = query_result(
+        &mut h,
+        34,
+        Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(3),
+        },
+        "/v5/order/history",
+        &[&page(0, "")],
+    );
+    assert_eq!(
+        serde_json::from_str::<Vec<serde_json::Value>>(&explicit)
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+fn coins(h: &Harness) -> Vec<(String, f64, f64)> {
+    let mut coins: Vec<_> = h
+        .engine
+        .store()
+        .coin_balances()
+        .unwrap_or_default()
+        .iter()
+        .map(|c| (c.base.clone(), c.amount, c.notional))
+        .collect();
+    coins.sort_by(|a, b| a.0.cmp(&b.0));
+    coins
+}
+
+#[test]
+fn per_coin_holdings_follow_rest_snapshots_and_merge_stream_pushes() {
+    let mut h = ready();
+    assert_eq!(coins(&h), [("USDT".to_owned(), 1010.5, 1010.5)]);
+    let push = |coin: &str, equity: &str, wallet: &str, usd: &str| {
+        format!(
+            r#"{{"topic":"wallet","id":"w","creationTime":1,"data":[{{"accountType":"UNIFIED","totalEquity":"1010.5","totalWalletBalance":"1000.5","totalMarginBalance":"1010.5","totalAvailableBalance":"915.5","totalInitialMargin":"95","totalMaintenanceMargin":"5","coin":[{{"coin":"{coin}","equity":"{equity}","walletBalance":"{wallet}","usdValue":"{usd}"}}]}}]}}"#
+        )
+    };
+    h.message("/v5/private", &push("BTC", "0.5", "0.4", "30000"));
+    assert_eq!(
+        coins(&h),
+        [
+            ("BTC".to_owned(), 0.5, 30000.0),
+            ("USDT".to_owned(), 1010.5, 1010.5)
+        ]
+    );
+    // Missing equity falls back to wallet balance, missing USD value to the amount.
+    h.message("/v5/private", &push("ETH", "", "2", ""));
+    assert!(coins(&h).contains(&("ETH".to_owned(), 2.0, 2.0)));
+    h.message("/v5/private", &push("BTC", "0", "0", "0"));
+    assert!(coins(&h).contains(&("BTC".to_owned(), 0.0, 0.0)));
+    // A failed periodic REST read keeps holdings; a full one replaces them.
+    h.requests.clear();
+    h.advance(5_000.0);
+    h.respond("/v5/account/wallet-balance", 500, "upstream");
+    assert_eq!(coins(&h).len(), 3);
+    h.requests.clear();
+    h.advance(5_000.0);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert_eq!(coins(&h), [("USDT".to_owned(), 1010.5, 1010.5)]);
+}
+
+#[test]
+fn stale_classic_metadata_retries_the_unified_wallet_once() {
+    let mut h = Harness::started(credentials());
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond(
+        "/v5/account/info",
+        200,
+        &support::ACCOUNT_INFO.replace("\"unifiedMarginStatus\":4", "\"unifiedMarginStatus\":1"),
+    );
+    h.load_public();
+    let refused = r#"{"retCode":10001,"retMsg":"accountType only support UNIFIED.","result":{},"retExtInfo":{},"time":1}"#;
+    h.respond(
+        "/v5/account/wallet-balance?accountType=CONTRACT",
+        200,
+        refused,
+    );
+    let retry = h.take("/v5/account/wallet-balance");
+    assert!(retry.url.ends_with("accountType=UNIFIED"), "{}", retry.url);
+    h.reply(retry.id, 200, WALLET);
+    assert_eq!(h.engine.store().balance().free, 915.5);
+    // A later refusal on UNIFIED is reported, not retried in a loop.
+    h.requests.clear();
+    h.advance(5_000.0);
+    h.respond(
+        "/v5/account/wallet-balance?accountType=UNIFIED",
+        200,
+        refused,
+    );
+    assert!(!h.has_request("/v5/account/wallet-balance"));
+    assert_eq!(h.engine.store().balance().free, 915.5);
+}
+
+#[test]
+fn ordinary_wallet_errors_do_not_switch_account_type() {
+    let mut h = Harness::started(credentials());
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond(
+        "/v5/account/info",
+        200,
+        &support::ACCOUNT_INFO.replace("\"unifiedMarginStatus\":4", "\"unifiedMarginStatus\":1"),
+    );
+    h.load_public();
+    h.respond(
+        "/v5/account/wallet-balance?accountType=CONTRACT",
+        200,
+        r#"{"retCode":10006,"retMsg":"Too many visits!","result":{},"retExtInfo":{},"time":1}"#,
+    );
+    assert!(!h.has_request("/v5/account/wallet-balance"));
+    h.requests.clear();
+    h.advance(5_000.0);
+    assert!(h.has_request("/v5/account/wallet-balance?accountType=CONTRACT"));
+}
+
+#[test]
+fn an_unsupported_order_type_keeps_its_last_state_without_starving_other_orders() {
+    let mut h = ready();
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    let row = |id: &str, kind: &str| {
+        let list = OPEN_ORDERS.split("\"list\":[").nth(1).unwrap();
+        let row = &list[..list.find("}],").unwrap() + 1];
+        row.replace(ORDER_ID, id).replace(
+            "\"orderType\":\"Limit\"",
+            &format!("\"orderType\":\"{kind}\""),
+        )
+    };
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe"}"#,
+    );
+    let page = format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"list":[{},{},{}],"nextPageCursor":"","category":"linear"}}}}"#,
+        row(ORDER_ID, "FutureType"),
+        row("new-1", "Limit"),
+        row("unseen-2", "FutureType"),
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDT",
+        200,
+        &page,
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+    assert!(
+        h.engine.store().order("new-1").is_some(),
+        "healthy order starved"
+    );
+    assert!(
+        h.engine.store().order(ORDER_ID).is_some(),
+        "known exposure erased"
+    );
+    assert!(h.engine.store().order("unseen-2").is_none());
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m.contains("unseen-2") && m.contains("not shown"))
+    );
+    assert!(
+        h.logs
+            .iter()
+            .any(|m| m.contains(ORDER_ID) && m.contains("last known state"))
+    );
+}
+
+#[test]
+fn a_malformed_order_row_still_preserves_the_whole_last_good_snapshot() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe"}"#,
+    );
+    let list = OPEN_ORDERS.split("\"list\":[").nth(1).unwrap();
+    let good = &list[..list.find("}],").unwrap() + 1];
+    let bad = good
+        .replace(ORDER_ID, "bad-1")
+        .replace("\"qty\":\"0.10\"", "\"qty\":\"NaN\"");
+    let page = format!(
+        r#"{{"retCode":0,"retMsg":"OK","result":{{"list":[{},{}],"nextPageCursor":"","category":"linear"}}}}"#,
+        good.replace(ORDER_ID, "new-1"),
+        bad,
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDT",
+        200,
+        &page,
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    assert!(h.engine.store().order("new-1").is_none());
+}
+
+#[test]
+fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
+    let mut h = ready();
+    h.command(Command::Query {
+        command: 35,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    });
+    for page in 0..20 {
+        let rows: Vec<String> = (page * 50..page * 50 + 50)
+            .map(|i| format!(r#"{{"orderId":"o{i}","symbol":"BTCUSDT","side":"Buy","orderType":"Limit","orderStatus":"Cancelled","qty":"1","cumExecQty":"0","price":"100","createdTime":"{}"}}"#, 1672000000000u64 + i as u64))
+            .collect();
+        let body = format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"c{}","list":[{}]}}}}"#,
+            page + 1,
+            rows.join(",")
+        );
+        let request = h.take("/v5/order/history");
+        h.reply(request.id, 200, &body);
+    }
+    assert!(!h.has_request("/v5/order/history"));
+    let rows =
+        serde_json::from_str::<Vec<serde_json::Value>>(h.result(35).unwrap().as_ref().unwrap())
+            .unwrap();
+    assert_eq!(rows.len(), 1000);
+    assert!(h.logs.iter().any(|m| m.contains("page limit")));
+}

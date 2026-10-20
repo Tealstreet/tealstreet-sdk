@@ -54,7 +54,7 @@ pub enum Pending {
         count: usize,
         rows: Vec<Market>,
         metadata: Vec<PredictionMarket>,
-        invalid: bool,
+        skipped: Vec<String>,
     },
     Midpoints {
         offset: usize,
@@ -111,6 +111,8 @@ pub struct Polymarket {
     market_ids: HashSet<String>,
     market_cursors: HashSet<String>,
     market_symbols: HashSet<String>,
+    walk_skipped_slugs: HashSet<String>,
+    skipped_slugs: HashSet<String>,
     candles: BTreeMap<(String, String), CandleSubscription>,
     candle_timer: Option<TimerId>,
     seed_tickers: Vec<Ticker>,
@@ -167,6 +169,8 @@ impl Polymarket {
             market_ids: Default::default(),
             market_cursors: Default::default(),
             market_symbols: Default::default(),
+            walk_skipped_slugs: Default::default(),
+            skipped_slugs: Default::default(),
             connections: Default::default(),
             books: Default::default(),
             candles: Default::default(),
@@ -224,9 +228,19 @@ impl Polymarket {
                 count: 0,
                 rows,
                 metadata,
-                invalid: false,
+                skipped: vec![],
             },
         );
+    }
+    fn markets_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+        cx.log(LogLevel::Warning, error);
+        self.public_retry.failed(cx, None);
+    }
+    /// Whether an unlisted owned token could belong to a skipped catalogue row.
+    pub(crate) fn catalogue_may_hold(&self, slug: &str) -> bool {
+        self.skipped_slugs.contains(slug)
+            || self.skipped_slugs.contains("unknown")
+            || (slug.is_empty() && !self.skipped_slugs.is_empty())
     }
     fn flush_midpoints(&mut self, cx: &mut Cx<'_, Pending>) {
         let accepted: Vec<_> = std::mem::take(&mut self.seed_tickers)
@@ -736,19 +750,21 @@ impl Venue for Polymarket {
                 count,
                 rows,
                 metadata,
-                invalid,
+                skipped,
             } => {
-                if invalid {
+                if !skipped.is_empty() {
                     cx.log(
                         LogLevel::Warning,
-                        "Invalid Polymarket market page; preserving previous snapshot",
+                        format!(
+                            "Skipped {} malformed Polymarket market rows: {}",
+                            skipped.len(),
+                            skipped.join(", ")
+                        ),
                     );
-                    self.public_retry.failed(cx, None);
-                    return;
+                    self.walk_skipped_slugs.extend(skipped);
                 }
                 if count > GAMMA_PAGE {
-                    cx.log(LogLevel::Warning, "Oversized Polymarket Gamma page");
-                    self.public_retry.failed(cx, None);
+                    self.markets_failed(cx, "Oversized Polymarket Gamma page");
                     return;
                 }
                 #[derive(Deserialize)]
@@ -758,13 +774,11 @@ impl Venue for Polymarket {
                     next_cursor: Option<std::borrow::Cow<'a, str>>,
                 }
                 let Ok(page) = serde_json::from_str::<Page>(response.body) else {
-                    cx.log(LogLevel::Warning, "Invalid Polymarket keyset envelope");
-                    self.public_retry.failed(cx, None);
+                    self.markets_failed(cx, "Invalid Polymarket keyset envelope");
                     return;
                 };
                 if !page.markets.is_empty() {
-                    cx.log(LogLevel::Warning, "Unstreamed Polymarket market page");
-                    self.public_retry.failed(cx, None);
+                    self.markets_failed(cx, "Unstreamed Polymarket market page");
                     return;
                 }
                 if let Some(cursor) = page.next_cursor {
@@ -772,22 +786,14 @@ impl Venue for Polymarket {
                         || self.market_cursors.len() >= 10000
                         || !self.market_cursors.insert(cursor.to_string())
                     {
-                        cx.log(
-                            LogLevel::Warning,
-                            "Polymarket market cursor did not advance",
-                        );
-                        self.public_retry.failed(cx, None);
+                        self.markets_failed(cx, "Polymarket market cursor did not advance");
                         return;
                     }
                     self.markets(cx, Some(cursor.into_owned()), rows, metadata);
                     return;
                 }
                 if count == GAMMA_PAGE {
-                    cx.log(
-                        LogLevel::Warning,
-                        "Polymarket market page is missing its next cursor",
-                    );
-                    self.public_retry.failed(cx, None);
+                    self.markets_failed(cx, "Polymarket market page is missing its next cursor");
                     return;
                 }
                 if rows.is_empty() {
@@ -796,6 +802,7 @@ impl Venue for Polymarket {
                     return;
                 }
                 self.public_retry.succeeded(cx, &None);
+                self.skipped_slugs = std::mem::take(&mut self.walk_skipped_slugs);
                 cx.store.set_markets(rows);
                 cx.store.set_prediction_markets(metadata);
                 let tickers = cx
@@ -952,12 +959,22 @@ impl Venue for Polymarket {
                 count,
                 rows,
                 metadata,
-                ..
+                skipped,
             } => {
                 *count += 1;
-                let Ok(gm) = serde_json::from_str::<Gamma>(item) else {
-                    safe_cex_engine::startup::skipped_row(cx);
-                    return;
+                let gm = match serde_json::from_str::<Gamma>(item) {
+                    Ok(gm) => gm,
+                    Err(_) => {
+                        #[derive(Deserialize)]
+                        struct Slug<'a> {
+                            #[serde(borrow)]
+                            slug: std::borrow::Cow<'a, str>,
+                        }
+                        let slug = serde_json::from_str::<Slug>(item).ok();
+                        skipped.push(slug.map_or_else(|| "unknown".into(), |s| s.slug.into()));
+                        safe_cex_engine::startup::skipped_row(cx);
+                        return;
+                    }
                 };
                 let Some((ids, outcomes)) =
                     gm.clob_token_ids.as_deref().zip(gm.outcomes.as_deref())
@@ -968,10 +985,12 @@ impl Venue for Polymarket {
                     serde_json::from_str::<Vec<String>>(ids),
                     serde_json::from_str::<Vec<String>>(outcomes),
                 ) else {
+                    skipped.push(gm.slug.to_string());
                     safe_cex_engine::startup::skipped_row(cx);
                     return;
                 };
                 if ids.len() != outcomes.len() {
+                    skipped.push(gm.slug.to_string());
                     safe_cex_engine::startup::skipped_row(cx);
                     return;
                 }
@@ -994,9 +1013,9 @@ impl Venue for Polymarket {
                         market,
                         condition_id: gm.condition_id.to_string(),
                         outcome: outcome.clone(),
-                        question: gm.question.to_string(),
-                        description: gm.description.to_string(),
-                        end_date: gm.end_date.to_string(),
+                        question: gm.question.as_deref().unwrap_or_default().into(),
+                        description: gm.description.as_deref().unwrap_or_default().into(),
+                        end_date: gm.end_date.as_deref().unwrap_or_default().into(),
                         slug: gm.slug.to_string(),
                         tick_size: tick,
                         neg_risk: gm.neg_risk.unwrap_or(false),
@@ -1007,8 +1026,8 @@ impl Venue for Polymarket {
                         pretty_symbol: None,
                         base: gm.slug.to_string(),
                         quote: "pUSD".into(),
-                        active: gm.active
-                            && !gm.closed
+                        active: gm.active == Some(true)
+                            && gm.closed != Some(true)
                             && gm.enable_order_book != Some(false)
                             && gm.accepting_orders != Some(false),
                         precision: Precision {
@@ -1104,6 +1123,7 @@ impl Venue for Polymarket {
                 self.market_ids.clear();
                 self.market_symbols.clear();
                 self.market_cursors.clear();
+                self.walk_skipped_slugs.clear();
                 self.markets(cx, None, vec![], vec![]);
             }
             return;
@@ -1166,6 +1186,9 @@ impl Venue for Polymarket {
                 );
             }
             Command::SetTickerSymbols { .. } => {}
+            Command::Venue { command, .. } => {
+                safe_cex_engine::unsupported_venue_action(cx, command)
+            }
             Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
             Command::UnsubscribeOrderBook { symbol } => {
                 if let Some(state) = self.books.get_mut(&symbol) {
