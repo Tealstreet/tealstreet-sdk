@@ -339,6 +339,14 @@ Bandwidth is measured with a deterministic two-book fixture, without a load
 test. Report depth per side, number of changed levels, flush cadence, full and
 delta SCXF bytes, WebSocket framing and initial/resync snapshots separately;
 compression and TCP/TLS/IP overhead are not inferred from payload bytes.
+The deterministic Rust writer/JS reader check (`yarn rust:test-frame-wire`)
+measures two books with 1,000 levels **per side**, changing ten levels per side
+per book at four flushes/second: full SCXF frames are 96,064 bytes and deltas
+704 bytes, a 99.267% payload reduction (384,256 versus 2,816 B/s). With one
+unmasked WebSocket message per frame the totals are 384,296 versus 2,832 B/s.
+A book-only initial/resync snapshot still costs 96,064 bytes; market and account
+sections add their current serialized size. Change counts and cadence are
+fixture assumptions, not a live-feed bandwidth forecast.
 
 ### 7. CI — Binance, Bybit, Backpack, OKX, Crypto.com, WEEX and BingX
 

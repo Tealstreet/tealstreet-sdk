@@ -29,9 +29,8 @@ compile_error!(
     "safe-cex-wasm requires at least one venue feature: apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, woo or weex"
 );
 
-use safe_cex_engine::model::{CancelOrderRef, PlaceOrderOpts, StpMode};
 use safe_cex_engine::{
-    Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
+    Action, Engine, Event, LogLevel, Notice, RequestId, SocketId, TimerId, Venue,
 };
 #[cfg(feature = "apexomni")]
 use safe_cex_venue_apexomni::{ApexOmni, Options as ApexOmniOptions};
@@ -409,307 +408,6 @@ fn encode(actions: &[Action]) -> String {
     serde_json::to_string(&out).unwrap_or_default()
 }
 
-/// Commands as JavaScript sends them.
-#[derive(Deserialize)]
-#[serde(tag = "op", rename_all = "camelCase")]
-enum CommandIn {
-    GetAccount {
-        command: u32,
-    },
-    SetTickerSymbols {
-        symbols: Vec<String>,
-    },
-    SubscribeOrderBook {
-        symbol: String,
-    },
-    UnsubscribeOrderBook {
-        symbol: String,
-    },
-    SubscribeCandles {
-        symbol: String,
-        interval: String,
-    },
-    UnsubscribeCandles {
-        symbol: String,
-        interval: String,
-    },
-    PlaceOrders {
-        command: u32,
-        orders: Vec<PlaceOrderOpts>,
-    },
-    CancelOrders {
-        command: u32,
-        ids: Vec<String>,
-    },
-    CancelOrdersWithSymbols {
-        command: u32,
-        orders: Vec<CancelOrderRef>,
-    },
-    AmendOrder {
-        command: u32,
-        id: String,
-        #[serde(default)]
-        price: Option<f64>,
-        #[serde(default)]
-        amount: Option<f64>,
-    },
-    CancelSymbolOrders {
-        command: u32,
-        symbol: String,
-    },
-    #[serde(rename_all = "camelCase")]
-    SetLeverage {
-        command: u32,
-        symbol: String,
-        leverage: f64,
-    },
-    SetMarginType {
-        command: u32,
-        symbol: String,
-        isolated: bool,
-    },
-    SetPositionMode {
-        command: u32,
-        hedged: bool,
-    },
-    FetchStpMode {
-        command: u32,
-    },
-    FetchAccount {
-        command: u32,
-    },
-    FetchOrderBook {
-        command: u32,
-        symbol: String,
-        #[serde(default)]
-        limit: Option<u32>,
-    },
-    SetStpMode {
-        command: u32,
-        mode: StpMode,
-    },
-    FetchLeverage {
-        command: u32,
-        symbol: String,
-    },
-    #[serde(rename_all = "camelCase")]
-    FetchFills {
-        command: u32,
-        #[serde(default)]
-        symbol: Option<String>,
-        #[serde(default)]
-        order_id: Option<String>,
-        #[serde(default)]
-        from: Option<f64>,
-        #[serde(default)]
-        to: Option<f64>,
-        #[serde(default)]
-        limit: Option<u32>,
-    },
-    FetchOrderHistory {
-        command: u32,
-        #[serde(default)]
-        symbol: Option<String>,
-        #[serde(default)]
-        from: Option<f64>,
-        #[serde(default)]
-        to: Option<f64>,
-        #[serde(default)]
-        limit: Option<u32>,
-    },
-    #[serde(rename_all = "camelCase")]
-    FetchIncome {
-        command: u32,
-        #[serde(default)]
-        symbol: Option<String>,
-        #[serde(default)]
-        income_type: Option<String>,
-        #[serde(default)]
-        from: Option<f64>,
-        #[serde(default)]
-        to: Option<f64>,
-        #[serde(default)]
-        limit: Option<u32>,
-    },
-    #[serde(rename_all = "camelCase")]
-    FindOrderByClientOrderId {
-        command: u32,
-        symbol: String,
-        client_order_id: String,
-    },
-    FetchPublicTrades {
-        command: u32,
-        symbol: String,
-        #[serde(default)]
-        limit: Option<u32>,
-    },
-    #[serde(rename_all = "camelCase")]
-    FetchCandles {
-        command: u32,
-        symbol: String,
-        interval: String,
-        #[serde(default)]
-        limit: Option<u32>,
-        #[serde(default)]
-        from: Option<f64>,
-        #[serde(default)]
-        to: Option<f64>,
-    },
-}
-
-impl From<CommandIn> for Command {
-    fn from(command: CommandIn) -> Self {
-        match command {
-            CommandIn::GetAccount { command } => Self::FetchAccount { command },
-            CommandIn::FindOrderByClientOrderId {
-                command,
-                symbol,
-                client_order_id,
-            } => Self::Query {
-                command,
-                query: Query::OrderByClientId {
-                    symbol,
-                    client_order_id,
-                },
-            },
-            CommandIn::SetTickerSymbols { symbols } => Self::SetTickerSymbols { symbols },
-            CommandIn::SubscribeOrderBook { symbol } => Self::SubscribeOrderBook { symbol },
-            CommandIn::UnsubscribeOrderBook { symbol } => Self::UnsubscribeOrderBook { symbol },
-            CommandIn::SubscribeCandles { symbol, interval } => {
-                Self::SubscribeCandles { symbol, interval }
-            }
-            CommandIn::UnsubscribeCandles { symbol, interval } => {
-                Self::UnsubscribeCandles { symbol, interval }
-            }
-            CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
-            CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
-            CommandIn::CancelOrdersWithSymbols { command, orders } => {
-                Self::CancelOrdersWithSymbols { command, orders }
-            }
-            CommandIn::AmendOrder {
-                command,
-                id,
-                price,
-                amount,
-            } => Self::AmendOrder {
-                command,
-                id,
-                price,
-                amount,
-            },
-            CommandIn::SetMarginType {
-                command,
-                symbol,
-                isolated,
-            } => Self::SetMarginType {
-                command,
-                symbol,
-                isolated,
-            },
-            CommandIn::SetPositionMode { command, hedged } => {
-                Self::SetPositionMode { command, hedged }
-            }
-            CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
-            CommandIn::FetchAccount { command } => Self::FetchAccount { command },
-            CommandIn::FetchOrderBook {
-                command,
-                symbol,
-                limit,
-            } => Self::FetchOrderBook {
-                command,
-                symbol,
-                limit,
-            },
-            CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
-            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
-            CommandIn::FetchFills {
-                command,
-                symbol,
-                order_id,
-                from,
-                to,
-                limit,
-            } => Self::Query {
-                command,
-                query: Query::Fills {
-                    symbol,
-                    order_id,
-                    from_ms: from,
-                    to_ms: to,
-                    limit,
-                },
-            },
-            CommandIn::FetchOrderHistory {
-                command,
-                symbol,
-                from,
-                to,
-                limit,
-            } => Self::Query {
-                command,
-                query: Query::OrderHistory {
-                    symbol,
-                    from_ms: from,
-                    to_ms: to,
-                    limit,
-                },
-            },
-            CommandIn::FetchIncome {
-                command,
-                symbol,
-                income_type,
-                from,
-                to,
-                limit,
-            } => Self::Query {
-                command,
-                query: Query::Income {
-                    symbol,
-                    kind: income_type,
-                    from_ms: from,
-                    to_ms: to,
-                    limit,
-                },
-            },
-            CommandIn::FetchPublicTrades {
-                command,
-                symbol,
-                limit,
-            } => Self::Query {
-                command,
-                query: Query::PublicTrades { symbol, limit },
-            },
-            CommandIn::CancelSymbolOrders { command, symbol } => {
-                Self::CancelSymbolOrders { command, symbol }
-            }
-            CommandIn::SetLeverage {
-                command,
-                symbol,
-                leverage,
-            } => Self::SetLeverage {
-                command,
-                symbol,
-                leverage,
-            },
-            CommandIn::FetchCandles {
-                command,
-                symbol,
-                interval,
-                limit,
-                from,
-                to,
-            } => Self::FetchCandles {
-                command,
-                symbol,
-                interval,
-                limit,
-                from_ms: from,
-                to_ms: to,
-            },
-        }
-    }
-}
-
 /// Bytes of WebAssembly linear memory currently reserved by this module.
 #[wasm_bindgen(js_name = wasmMemoryBytes)]
 pub fn wasm_memory_bytes() -> f64 {
@@ -1074,8 +772,8 @@ impl WasmEngine {
     }
 
     pub fn command(&mut self, command_json: &str, now: f64) -> Result<String, JsError> {
-        let command: CommandIn = serde_json::from_str(command_json)?;
-        self.inner.handle(now, Event::Command(command.into()));
+        let command = safe_cex_engine::command::decode_command(command_json)?;
+        self.inner.handle(now, Event::Command(command));
         Ok(self.flush())
     }
 
@@ -1105,12 +803,11 @@ mod tests {
     #[test]
     fn account_command_aliases_share_the_engine_read() {
         for op in ["getAccount", "fetchAccount"] {
-            let wire: CommandIn =
-                serde_json::from_str(&format!(r#"{{"op":"{op}","command":77}}"#)).unwrap();
-            assert!(matches!(
-                Command::from(wire),
-                Command::FetchAccount { command: 77 }
-            ));
+            let wire = safe_cex_engine::command::decode_command(&format!(
+                r#"{{"op":"{op}","command":77}}"#
+            ))
+            .unwrap();
+            assert!(matches!(wire, Command::FetchAccount { command: 77 }));
         }
     }
 
@@ -1149,25 +846,28 @@ mod tests {
     }
 
     use super::*;
+    use safe_cex_engine::Command;
+    use safe_cex_engine::model::CancelOrderRef;
 
     #[test]
     fn cancellation_with_symbols_preserves_caller_identity() {
-        let wire: CommandIn = serde_json::from_str(
+        let wire = safe_cex_engine::command::decode_command(
             r#"{"op":"cancelOrdersWithSymbols","command":19,"orders":[{"id":"22542179","symbol":"BTCUSDT"}]}"#,
         ).unwrap();
         assert!(
-            matches!(Command::from(wire), Command::CancelOrdersWithSymbols { command: 19, orders }
+            matches!(wire, Command::CancelOrdersWithSymbols { command: 19, orders }
             if orders == vec![CancelOrderRef { id: "22542179".into(), symbol: "BTCUSDT".into() }])
         );
     }
 
     #[test]
     fn forwards_leverage_metadata_command() {
-        let wire: CommandIn =
-            serde_json::from_str(r#"{"op":"fetchLeverage","command":17,"symbol":"BTCUSDT"}"#)
-                .unwrap();
+        let wire = safe_cex_engine::command::decode_command(
+            r#"{"op":"fetchLeverage","command":17,"symbol":"BTCUSDT"}"#,
+        )
+        .unwrap();
         assert!(matches!(
-            Command::from(wire),
+            wire,
             Command::FetchLeverage { command: 17, symbol } if symbol == "BTCUSDT"
         ));
     }

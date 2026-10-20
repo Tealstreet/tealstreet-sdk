@@ -6,12 +6,14 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 mod routing;
+mod server;
 mod transport;
 
 pub use routing::{
     HttpRoute, HttpRouteMode, ProxyTokenFuture, ProxyTokenProvider, RoutingPlan, SocketChannel,
     SocketChannelRule, WsRoute, WsRoutes,
 };
+pub use server::{FrameServer, ServerConfig};
 pub use transport::{NetworkTransport, Transport};
 
 use safe_cex_engine::{
@@ -104,10 +106,16 @@ impl<V: Venue, T: Transport> Host<V, T> {
         if let Some(frame) = self.engine.take_frame((self.clock)()) {
             on_frame(frame);
         }
-        for timer in self.timers.values() {
+        self.stop();
+        self.engine
+    }
+
+    fn stop(&mut self) {
+        self.inbox.close();
+        self.sockets.clear();
+        for (_, timer) in self.timers.drain() {
             timer.abort();
         }
-        self.engine
     }
 
     fn dispatch(&mut self, event: HostEvent) {
@@ -214,7 +222,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
                         tokio::time::sleep(Duration::from_secs_f64(delay / 1000.0)).await;
                         let _ = events.send(HostEvent::Timer(timer));
                     });
-                    self.timers.insert(timer, handle.abort_handle());
+                    if let Some(previous) = self.timers.insert(timer, handle.abort_handle()) {
+                        previous.abort();
+                    }
                 }
                 Action::ClearTimer { timer } => {
                     if let Some(handle) = self.timers.remove(&timer) {

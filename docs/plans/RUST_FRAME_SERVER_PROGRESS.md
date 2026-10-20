@@ -97,3 +97,35 @@ branch from origin/feat/rust-rewrite. Record actual gate numbers and limitations
   TCP/TLS/IP overhead and workload-dependent change counts; not measured here.
   Reproduce with `corepack yarn -s rust:test-frame-wire` or
   `cargo run -p safe-cex-engine --example book_bandwidth` from sdk-rs.
+
+### Phase 2 acceptance
+
+- Added generic FrameServer/ServerConfig, heterogeneous preconfigured account
+  actors, a Binance executable example and protocol/lifecycle documentation.
+  Account engines run independently of client connections. Browser subprotocol
+  and native Authorization authentication are checked before upgrade; query
+  tokens and account creation are rejected.
+- Shared the complete existing WASM command decoder with the native host.
+  Independent review compared the moved enum and conversion byte-for-byte.
+  Internal IDs isolate concurrent clients, preserve orphan reservations until
+  completion, and never wrap or retry potentially submitted writes.
+- Implemented atomic flush-before-snapshot joins, reference-counted interest,
+  fair event selection, bounded subscriptions/commands/queues, slow-peer
+  cancellation, and limits on both text and binary outputs. Ping flushes and
+  socket operations have deadlines. Account RAII cleanup stops timers and
+  transport tasks even when serving is aborted; upstream send/flush/close waits
+  are cancelable and bounded.
+- Independent phase review (frame_engine) and root audit found and fixed event
+  starvation, subscription growth, detached transport tasks and cancellation,
+  plus a race in the late-join regression itself. Consumer interoperability
+  review (frame_consumers) also passes. No unresolved correctness findings.
+- Verification: 48 native-host tests (12 unit, one host, 23 routing, 12 real
+  loopback), native/WASM all-target clippy, examples and fmt pass. Loopback
+  coverage includes authentication, browser negotiation, same/different-account
+  result isolation, snapshot/reversion/reconnect ordering, shared subscriptions,
+  orphan capacity, malformed/oversized input and snapshots, Ping, incomplete
+  upgrade shutdown and abrupt serving-future abort. Deterministic unit tests
+  prove queue overflow cancels a peer and releases its last subscriptions.
+- Broad TS acceptance: root typecheck 44 tasks, lint 28 tasks, tests 27 tasks;
+  both SDK runners pass 7,108 tests across 484 files, and server adapters pass
+  27 tests in each runner. No dependency or lockfile additions were needed.
