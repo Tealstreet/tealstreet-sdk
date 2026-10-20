@@ -581,7 +581,9 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   its executions still emit, the store keeps its copy).
 - Medium: one bad public row stops startup; one bad position row freezes a
   currency slice (`account.rs:286`); no fallback read when a symbol's mode or
-  leverage context is uncached (`trading.rs:229,713`).
+  leverage context is uncached (`trading.rs:229,713`) — re-verified as low
+  impact: `accountPositions` (size-0 rows included) reconciles every 2 s, so the
+  gap is the first cycle; TS also refuses a symbol that read omits.
 - Low: cancel batch refused on one uncached id; index triggers refused; daily
   candle `to`; no 1 s REST resync after terminal events.
 - Confirm (TS bugs Rust fixed): filled from cumQty with exec dedupe; WS-closed
