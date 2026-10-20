@@ -575,6 +575,10 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Err(error) = self.options.validate() {
@@ -1026,7 +1030,6 @@ impl Venue for TxFlow {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, l)| l.time.is_some())
                 .map(|(symbol, ladder)| (symbol.as_str(), &ladder.book)),
         )
     }

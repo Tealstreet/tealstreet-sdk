@@ -22,6 +22,7 @@ import {
 import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
 import { fixCoinbase, COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
+import { fixBitrue, BITRUE_TS_FIXES } from './known-ts-fixes-bitrue.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 import { fixBinanceSpotFills, fixBinanceFilledStatus } from './binance-protocol.mjs';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
@@ -181,6 +182,10 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // Binance/OKX also bypass cached client-ID hits with secondary credentials:
 // that cache may contain another account's orders. TS and Rust both query
 // the primary account; native tests retain PM's canonical client-ID identity.
+// Audit corrections are exercised by native interleaving regressions, never
+// rewritten into the replay result: Kraken Spot verifies raw-decimal CRC32;
+// WOO validates prevTs and clears invalid books during recovery; Backpack
+// preserves positions after an unqualified 404 rather than committing [].
 const KNOWN_TS_FIXES = {
   // KuCoin Spot: emit each native execution once even across replay, preserve
   // newer private state across stale REST snapshots, and retain good orders
@@ -359,6 +364,7 @@ const KNOWN_TS_FIXES = {
     output: fixKrakenOutput,
     fixes: [
       'Retain full depth, reject sequence gaps/stale snapshots, unsubscribe unused books.',
+      'Validate Kraken Spot top-ten CRC32 using original decimal tokens; TS ignores checksum.',
       'Full native ticker statistics stay live; omitted relative funding resets zero instead of retaining a stale rate.',
       'Negative instrument quantity precision is a positive power-of-ten step; TS clamps it to 0.1.',
       'Deduplicate native execution IDs; suppress historical fills snapshots.',
@@ -439,7 +445,10 @@ const KNOWN_TS_FIXES = {
   // paced, complete V1 income with signed fees and account aggregate scope.
   // Rust additionally walks V3 fill time windows (TS still reads one page).
   // TS only emits an error for auth.success=false; transport pongs are not auth.
-  woo: ['Close rejected private authentication and bound pending authentication independently of pongs.'],
+  woo: [
+    'Validate prevTs continuity and clear resync books; TS accepts unbridged depth deltas.',
+    'Close rejected private authentication and bound pending authentication independently of pongs.',
+  ],
   // Paired TS fixes: contract-sized public volumes; private cumulative z/native
   // units, execution L prices, monotonic terminal state and ping timestamp echo.
   // Cancel native identities and protective defaults now match metadata. Rust
@@ -451,13 +460,17 @@ const KNOWN_TS_FIXES = {
   // Fresh TS private rows now retain native/cached TIF and default to GTC,
   // matching REST and client-ID lookup without normalizing command results.
   // Rust rejects malformed candle timestamps instead of returning partial history.
-  bitrue() {
+  bitrue(ts) {
     // Confirmed leverage survives flat/empty account metadata; TS clears that
     // rail and blocks fresh-account orders. Native regression tests cover this
     // correction; no account values or command results are normalized here.
     // Flat rows may omit leverage until explicitly set; balance still commits.
     // Cancellation continues after failures, including child fallbacks after a
     // failed parent, and reports each failed ID. TS stops subsequent chunks.
+    // TS assigns a cumulative gap to the last native L and drops an older l/L
+    // execution. Only the exact private fixture and exact legacy TS fills may be
+    // corrected; the independent l/L table never reads or changes Rust output.
+    fixBitrue(ts, tapeRecords);
   },
   bitget: {
     // Each correction is covered by documented-payload Rust tests. Normal
@@ -1133,6 +1146,8 @@ if (venue.family === 'orderly')
   console.log(
     `(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`,
   );
+if (values.venue === 'bitrue' && isPrivate)
+  console.log(`(documented Bitrue corrections: ${BITRUE_TS_FIXES.length}; exact fixture and TS baseline checked)`);
 if (values.venue.startsWith('okx'))
   console.log(
     `(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`,

@@ -76,6 +76,10 @@ impl Coinbase {
     }
 }
 impl Venue for Coinbase {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn account_id(&self) -> Option<&str> {
         self.account.portfolio_id.as_deref()
@@ -148,12 +152,6 @@ impl Venue for Coinbase {
             .map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.public
-                .books
-                .iter()
-                .filter(|(_, b)| b.live)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.public.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }

@@ -21,6 +21,16 @@ hyphen. IDs on split orders, brackets or conditional orders fail before any
 write, because the native API cannot preserve the caller's requested identity
 across those operations. Native order IDs remain exact decimal strings.
 
+Standalone stop-loss and take-profit orders accept the app's `triggerPrice`
+when it equals `price`; differing trigger and execution prices and opening
+conditional orders remain unsupported. Replacing full-position protection
+rebuilds only proven `POSITIONAL_TP_SL` / `CLOSE_POSITION` siblings, retaining
+the opposite leg. External trailing stops and quantity-based `TP_SL` orders
+remain independent and are neither canceled nor rewritten. Mixed or contradictory
+parents fail before any write. SDK `cancelAllOrders`
+uses both native account-wide DELETE paths for every broker, including when
+the latest SDK store frame has no orders.
+
 The shared SDK engine transport preserves signed request bytes through direct
 requests, REST proxies and the raw HTTP-over-WebSocket adapter. Intermediary
 authorization may add headers but cannot change signed bytes or venue headers.

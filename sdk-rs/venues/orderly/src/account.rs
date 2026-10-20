@@ -112,6 +112,7 @@ pub struct Account {
     pub order_revisions: [u64; 2],
     pub settings_revision: u64,
     pub proofs: HashMap<String, Proof>,
+    pub uncertain_placements: HashSet<String>,
     // A confirmed POST of our typed full-position payload is also provenance
     // when a later child-only stream omits immutable parent/type fields.
     pub created_pairs: HashMap<String, (String, OrderSide, MarginType)>,
@@ -142,6 +143,7 @@ impl Default for Account {
             order_revisions: [0; 2],
             settings_revision: 0,
             proofs: HashMap::new(),
+            uncertain_placements: HashSet::new(),
             created_pairs: HashMap::new(),
             authenticated: false,
             inflight: [false; 4],
@@ -393,6 +395,14 @@ impl Orderly {
                 }
             }
         }
+    }
+    pub(crate) fn account_after_uncertain_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.positions_revision += 1;
+        for revision in &mut self.account.order_revisions {
+            *revision += 1;
+        }
+        self.account.inflight[1..].fill(false);
+        self.account_poll(cx, true);
     }
     fn account_read(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         let path = match &request {
@@ -988,6 +998,10 @@ impl Orderly {
                 self.account.loaded[i] = true;
                 if algo {
                     self.account.algo_snapshots += 1;
+                } else {
+                    for id in self.account.uncertain_placements.drain() {
+                        cx.store.remove_orders(&[&id]);
+                    }
                 }
                 let mut combined: Vec<_> = cx
                     .store

@@ -1,5 +1,6 @@
 //! Kraken Spot has separate REST authentication and v2 sockets from futures.
 mod account;
+mod book;
 mod trading;
 mod wire;
 use crate::{Options, sign};
@@ -39,6 +40,7 @@ struct Connection {
 #[derive(Default)]
 struct DepthState {
     book: Book,
+    checksum: book::Checksum,
     synced: bool,
     subscribers: u32,
 }
@@ -425,17 +427,19 @@ impl Venue for KrakenSpot {
                     if d.bids
                         .iter()
                         .chain(&d.asks)
-                        .any(|l| l.price <= 0. || l.qty < 0.)
+                        .any(|l| l.price.value <= 0. || l.qty.value < 0.)
                     {
                         return;
                     }
                     if snapshot {
                         state.book.clear();
+                        state.checksum.clear();
                         state.synced = true
                     }
                     for (side, levels) in [(BookSide::Bids, d.bids), (BookSide::Asks, d.asks)] {
                         for l in levels {
-                            state.book.apply(side, l.price, l.qty)
+                            state.checksum.apply(side, &l);
+                            state.book.apply(side, l.price.value, l.qty.value)
                         }
                     }
                     // Kraken drops levels that leave subscribed depth without explicit zero updates.
@@ -449,6 +453,16 @@ impl Venue for KrakenSpot {
                             let levels = levels[..100].to_vec();
                             state.book.load_sorted_owned(side, levels);
                         }
+                    }
+                    if !state.checksum.matches(&state.book, d.checksum) {
+                        state.book.clear();
+                        state.checksum.clear();
+                        state.synced = false;
+                        cx.book_changed(symbol);
+                        let symbols = [symbol.to_owned()];
+                        self.subscribe(cx, "unsubscribe", "book", &symbols, None);
+                        self.subscribe(cx, "subscribe", "book", &symbols, None);
+                        return;
                     }
                     cx.book_changed(symbol);
                 });
@@ -496,6 +510,7 @@ impl Venue for KrakenSpot {
         }
         for (symbol, s) in &mut self.books {
             s.book.clear();
+            s.checksum.clear();
             s.synced = false;
             cx.book_changed(symbol);
         }
@@ -738,11 +753,6 @@ impl Venue for KrakenSpot {
         self.books.get(symbol).filter(|s| s.synced).map(|s| &s.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, s)| s.synced)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
