@@ -794,14 +794,15 @@ This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeO
 ## Rust engine
 
 `engine: 'rust'` selects `sdk-rs/venues/lighter` for both `lighter` and
-`lighter-robinhood` perpetuals, preserving their deployment profiles. The Rust
-host forwards Application ID, API key index, integrator index (as exact decimal
-text), and `extra.lighterStopSlippagePct`. Missing API key index, or neither a
-local secret nor `remoteSigner`, starts public-only data. A remote signer without
-a local secret enables unsigned account snapshots and polling; it does not
-provide transaction signing or a private socket. Caller client order IDs are
-refused on every shape and across the entire batch before any engine
-command/write.
+`lighter-robinhood` perpetuals, with deployment-local hosts, quote currency and
+signing chain. The Rust host forwards Application ID, API key index, integrator
+index (as exact decimal text), `remoteSigner`, `extra.lighterSignerProvider`,
+and `extra.lighterStopSlippagePct`. Missing API key index, or neither a local
+secret nor `remoteSigner`, starts public-only data. A remote signer without a
+local secret enables unsigned account snapshots and polling; it does not
+provide transaction signing or a private socket. Remote-only native writes fail
+when the signer is unavailable. Caller client order IDs are refused on every
+shape and across the entire batch before any engine command/write.
 
 Both sockets use engine timers for handshake, idle and reconnect watchdogs.
 Private fills come exclusively from execution records, deduplicated by native
@@ -823,3 +824,14 @@ preimages, builder fp5 aggregation, auth and the new high market IDs. Unused
 first-port grouped-order/approval signer surfaces and their unused 32-byte hash
 helpers are removed; the exchange places bracket siblings sequentially as TS
 currently does. Deliberate TS fixes are listed in the port plan and replay gate.
+
+Shared public-feed snapshots revalue loaded native positions with the current
+positive normalized mark, then last price, using the direct ticker handler's
+PnL formula. The ticker mapper copies index into mark when mark is absent;
+an explicit zero mark falls through to last. These are cumulative ticker
+snapshots, so the fallback uses current native fields rather than which
+optional fields appeared in a venue delta.
+Public quotes do not mark private datasets loaded and do not change balance;
+the next authenticated account snapshot calculates balance with the current
+provider last price. Later native REST ticker seeds cannot replace provider
+quotes and reapply position valuations after restoration.

@@ -50,12 +50,22 @@ describe('readConfig', () => {
     expect(readConfig(signerEnv).options.enableInverseMarkets).toBe(false);
   });
 
-  it('turns polling off', () => {
-    expect(readConfig(signerEnv).options.extra?.tickInterval).toBe(Number.POSITIVE_INFINITY);
+  it('opts into Rust explicitly without changing the default when unset', () => {
+    expect(readConfig({ ...signerEnv, EXCHANGE_ENGINE: 'rust' }).options.engine).toBe('rust');
+    expect(readConfig(signerEnv).options.engine).toBeUndefined();
+  });
+
+  it('accepts the registered TxFlow Rust testnet adapter', () => {
+    const config = readConfig({ EXCHANGE: 'txflow', EXCHANGE_ENGINE: 'rust', EXCHANGE_TESTNET: 'true' });
+    expect(config.exchange).toBe('txflow');
+    expect(config.options.engine).toBe('rust');
+    expect(config.options.testnet).toBe(true);
   });
 
   it.each([
     [{ EXCHANGE: 'nope' }, 'EXCHANGE must be one of'],
+    [{ ...signerEnv, EXCHANGE_ENGINE: 'typo' }, 'EXCHANGE_ENGINE must be rust'],
+    [{ EXCHANGE: 'bitunix', EXCHANGE_ENGINE: 'rust' }, 'EXCHANGE_ENGINE=rust is not available on bitunix'],
     [{ ...signerEnv, EXCHANGE_SIGNER_SIGNATURE: '' }, 'must be set together'],
     [{ ...signerEnv, EXCHANGE_API_SECRET: 'secret' }, 'set one'],
     [{ EXCHANGE: 'bybit', EXCHANGE_TESTNET: 'yes' }, 'EXCHANGE_TESTNET'],
