@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { consumerFrame } from '../cutover/consumerFrame';
 
 const running: RustEngineExchange[] = [];
 
@@ -21,7 +22,11 @@ const fixture = (name: ExchangeName) => {
       const result = command.op === 'fetchLeverage' ? { buyLeverage: 25, sellLeverage: 25 } : [];
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result) }]);
     },
-    takeFrame: () => undefined,
+    // Startup waits for native readiness flags, not the JS store's loaded state.
+    takeFrame: () =>
+      new Uint8Array(
+        consumerFrame({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } }),
+      ),
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions,
     wsMessage: noActions,

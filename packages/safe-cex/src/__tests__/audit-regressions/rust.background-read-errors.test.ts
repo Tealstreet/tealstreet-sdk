@@ -1,3 +1,5 @@
+import type { ExchangeName } from '../../types';
+
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
@@ -9,7 +11,7 @@ import { DefaultStore } from '../../store/store.base';
 const accounts: RustEngineExchange[] = [];
 afterEach(() => accounts.splice(0).forEach((exchange) => exchange.dispose()));
 
-const rejecting = (name: string) => {
+const rejecting = (name: ExchangeName) => {
   const exchange = new RustEngineExchange(name, { key: 'key', secret: 'secret' }, new DefaultStore());
   accounts.push(exchange);
   const command = vi.fn().mockRejectedValue(new Error('leverage unavailable'));
