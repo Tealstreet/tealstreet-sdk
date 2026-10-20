@@ -949,7 +949,9 @@ that native lot count instead of the published base position quantity.
 The Rust futures venue keeps symbol cancellation on `/api/v3/orders?symbol=…`,
 preserving that symbol's separate TP/SL stop book. Only account-wide cancellation
 (the empty-symbol engine command) deletes both `/api/v3/orders` and
-`/api/v1/stopOrders`. The replay harness uses the TS symbol method unchanged.
+`/api/v1/stopOrders`. The Rust SDK overrides `cancelAllOrders()` to dispatch that
+account-wide command even when the local store is empty; it must not inherit the
+base class's per-symbol loop. The replay harness uses the TS symbol method unchanged.
 
 Futures cancellation by native order ID does not require a symbol. Rust sends
 uncached IDs directly to `/api/v1/orders/{id}` and continues later IDs even when

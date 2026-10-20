@@ -62,6 +62,8 @@ terminal-order rule, cancel-all behavior, retry policy, or automatic order
 replacement changes.
 
 KuCoin addendum: symbol cancellation preserves the separate stop book; only the
-empty-symbol account-wide command deletes it. Regressions cover both scopes,
+empty-symbol account-wide command deletes it. The Rust SDK routes true
+`cancelAllOrders()` to that command even with no stored orders, while
+`cancelSymbolOrders(symbol)` retains symbol scope. Regressions cover both scopes,
 stop-book failure reporting, uncached-ID direct dispatch followed by a known ID
 on both successful and rejected responses, and rejection of empty identities.
