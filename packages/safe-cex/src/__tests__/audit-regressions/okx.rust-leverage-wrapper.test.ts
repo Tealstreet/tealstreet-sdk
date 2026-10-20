@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
 const running: RustEngineExchange[] = [];
 
@@ -38,6 +39,7 @@ const fixture = (name: ExchangeName) => {
     }) as unknown as WasmEngineModule['WasmEngine'],
   }));
   const store = new DefaultStore();
+  installNativeStartupFrames(engine, store);
   store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
   const exchange = new RustEngineExchange(name, { key: 'k', secret: 's', passphrase: 'p' }, store);
   running.push(exchange);
