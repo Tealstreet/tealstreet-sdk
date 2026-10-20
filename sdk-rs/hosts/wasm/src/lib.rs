@@ -1458,30 +1458,14 @@ mod tests {
 
     #[test]
     fn account_command_aliases_share_the_engine_read() {
-        for (op, enabled) in [
-            (
-                "getAccount",
-                cfg!(any(feature = "apexomni", feature = "kucoinspot")),
-            ),
-            (
-                "fetchAccount",
-                cfg!(any(feature = "asterdex", feature = "polymarket")),
-            ),
-        ] {
+        for op in ["getAccount", "fetchAccount"] {
             let parsed = safe_cex_engine::command::decode_command(&format!(
                 r#"{{"op":"{op}","command":77}}"#
             ));
-            if enabled {
-                assert!(matches!(
-                    parsed.unwrap(),
-                    Command::FetchAccount { command: 77 }
-                ));
-            } else {
-                assert!(
-                    parsed.is_err(),
-                    "{op} must reject without its venue feature"
-                );
-            }
+            assert!(matches!(
+                parsed.unwrap(),
+                Command::FetchAccount { command: 77 }
+            ));
         }
     }
 

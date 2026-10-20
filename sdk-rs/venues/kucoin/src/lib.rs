@@ -2,6 +2,7 @@
 mod account;
 mod funding;
 mod history;
+mod identity;
 pub mod sign;
 #[cfg(feature = "spot")]
 pub mod spot;
@@ -35,6 +36,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    Identity(CommandId),
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
@@ -886,9 +888,14 @@ impl Venue for Kucoin {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Identity(command) = pending {
+            self.identity_response(cx, command, response);
+            return;
+        }
         let status = response.status;
         let body = response.body;
         match pending {
+            Pending::Identity(_) => unreachable!(),
             Pending::Account(request) => self.account_response(cx, request, status, body),
             Pending::Trade(request) => self.trading_response(cx, request, status, body),
             Pending::History(request) => self.history_response(cx, request, status, body),
@@ -1011,6 +1018,10 @@ impl Venue for Kucoin {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::Identity(command) = pending {
+            self.identity_failed(cx, command, error);
+            return;
+        }
         match pending {
             Pending::Account(request) => self.account_response(cx, request, 0, error),
             Pending::Trade(request) => self.trading_response(cx, request, 0, error),
@@ -1071,6 +1082,10 @@ impl Venue for Kucoin {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         match command {
             Command::SetTickerSymbols { .. } => {}
             Command::FetchLeverage { command, .. } => {

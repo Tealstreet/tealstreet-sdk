@@ -880,3 +880,21 @@ prove all completion/error paths, no context reuse after duplicate/failure,
 mixed credentials and partial permissions, callback/dead/dispose fences and
 initial/changed/Infinity/server-multiplier policy. The foundation does not claim
 all venue classifiers exist; those must be tagged and verified by native slice.
+
+## Phase 4d identity batch 2 checkpoint
+
+Binance USD-M/PM, four Bybit products including demo, three Bitget products,
+and Kucoin Futures now have dedicated native identity continuations. They
+preserve selected read signing, broker/passphrase/clock retry behavior and exact
+numeric IDs without running account reducers. Binance Spot/Coin-M and Hyro keep
+their explicit unsupported identity behavior. Empty secondary passphrases reject
+before private I/O; omitted passphrases retain native fallback. Both getAccount
+and fetchAccount now decode without unrelated feature flags, including a
+standalone Backpack WASM build. Independent parser and venue reviews PASS.
+
+605 native tests in 45 nonempty suites PASS (49 including empty suites);
+19 final focused controls overlap that total. Strict Clippy, fmt, bans and diff
+checks PASS. Default-core command parser and standalone Backpack host alias
+controls PASS. Logs: /tmp/bridge-identity-batch2-*.log and
+/tmp/bridge-identity-parser-*.log. SDK routing and rebuilt-WASM identity proof
+remain pending; these receipts cover native implementation and feature graphs.

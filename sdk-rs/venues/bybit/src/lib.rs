@@ -2,6 +2,7 @@
 mod account;
 mod history;
 mod hyro;
+mod identity;
 mod options;
 mod paths;
 mod sign;
@@ -106,6 +107,7 @@ impl Rest {
 /// What to do with a response. Startup lists and klines stream in element by
 /// element (see `Cx::request_streamed`); their continuations collect the rows.
 pub enum Then {
+    Identity(CommandId),
     Markets {
         prelaunch: bool,
         markets: Vec<Market>,
@@ -1278,6 +1280,7 @@ impl BybitLinear {
             Err(error) => Some((*error).to_owned()),
         };
         match then {
+            Then::Identity(command) => self.identity_response(cx, command, response),
             Then::Markets { prelaunch, markets } => {
                 self.on_markets(cx, prelaunch, markets, response)
             }
@@ -1780,6 +1783,10 @@ impl Venue for BybitLinear {
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         let symbol = match &command {
             Command::SubscribeOrderBook { symbol }
             | Command::UnsubscribeOrderBook { symbol }

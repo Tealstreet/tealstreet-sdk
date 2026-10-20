@@ -131,6 +131,13 @@ fn newly_shared_unsupported_commands_complete_without_reads_writes_or_store_muta
                 limit: Some(5),
             },
         ] {
+            // USD-M/PM now have real identity reads, covered in identity.rs.
+            // Spot/Coin-M retain the no-I/O unsupported contract here.
+            if matches!(command, Command::FetchAccount { .. })
+                && matches!(variant, Variant::UsdM | Variant::PortfolioMargin)
+            {
+                continue;
+            }
             let mut h = ready(variant);
             let before = h.engine.snapshot_frame(h.now).to_vec();
             h.event(Event::Command(command));
