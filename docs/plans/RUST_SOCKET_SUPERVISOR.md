@@ -241,20 +241,13 @@ Frozen inputs, thresholds and normalizers remain unchanged. Investigation
 includes the original captures and four independent official public HTTP
 responses; no authenticated live connectivity is claimed.
 
-## Remaining migration inventory
+## Migration inventory (complete)
 
-These retain their current venue-owned supervision for a follow-up; this lane
-does not claim that every venue now uses the shared module:
-
-- Public ApeX Omni, Bitget, BloFin, MEXC and WOO.
-- Private Phemex and Coinbase.
-- Binance (all products), Bybit (all products), Backpack, Hyperliquid (including
-  spot), Kraken (including spot), Lighter (including Robinhood), OKX, Orderly
-  brokers, TxFlow and WEEX.
-
-BreakoutProp uses polling rather than a venue WebSocket and needs no socket
-supervisor migration. Native mandatory-pong/subscription/session state remains
-venue-owned even on migrated feeds.
+Every venue WebSocket now runs under `engine::socket::Supervisor`; the
+follow-up below moved the remaining venue-owned supervision. BreakoutProp
+uses polling rather than a venue WebSocket and needs no socket supervisor.
+Native mandatory-pong/subscription/session state remains venue-owned even on
+migrated feeds.
 
 ### Follow-up migration plan (lane `claude-sockets`)
 
@@ -266,10 +259,19 @@ transport open no longer resets backoff (stable ready traffic does), and
 delays gain the shared deterministic 0.75-1.0 jitter. Every venue gets
 reconnect/resubscribe/flap regressions.
 
-1. Public ApeX Omni, Bitget, BloFin, MEXC, WOO.
-2. Private Phemex and Coinbase; Binance; Bybit.
-3. Backpack, Hyperliquid, Kraken, Lighter.
-4. OKX, Orderly brokers, TxFlow, WEEX.
+1. Public ApeX Omni, Bitget, BloFin, MEXC, WOO: #1385.
+2. Private Phemex and Coinbase; Binance; Bybit: #1406.
+3. Backpack, Hyperliquid, Kraken, Lighter: #1423.
+4. OKX, Orderly brokers, TxFlow, WEEX, plus the suppressed-feed gate below.
+
+Suppressed public feeds: under a non-Direct `PublicFeedPolicy` the engine
+hands back placeholder `SocketId(0)`, which never opens. Supervising it
+looped connect-timeout/retry forever (and cleared books or re-fetched tokens
+on some venues), so public `connecting()` runs only under `Direct`, on every
+venue, with a per-venue regression. Stage-chained auth (Kraken futures, Bybit
+Hyro), heartbeat-ack probes (Binance spot), payload-staleness recovery
+(Lighter, Orderly, Coinbase snapshot stall) and listen-key/token acquisition
+stay venue-owned on top of the supervisor.
 
 
 ## Published PR integration and adversarial review

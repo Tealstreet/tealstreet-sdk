@@ -9,7 +9,8 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -306,7 +307,10 @@ impl Grvt {
         }
         self.public.socket = Some(cx.connect_channel(self.public_url(), SocketChannel::Public));
         self.public.last_received = cx.now;
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
     }
     fn subscribe(&mut self, cx: &mut Cx<'_, Pending>, stream: &str, selector: &str, remove: bool) {
         if !self.public.open {
@@ -414,7 +418,10 @@ impl Grvt {
         };
         c.socket = Some(cx.connect_feed(url, SocketChannel::Public, feed, false));
         c.last_received = cx.now;
-        c.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            c.supervisor.connecting(cx);
+        }
     }
     fn candle_subscription(
         &mut self,
