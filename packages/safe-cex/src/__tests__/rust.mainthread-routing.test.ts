@@ -163,4 +163,12 @@ describe('main-thread Rust trading routing', () => {
     expect(main.hasStarted).toBe(false);
     expect(construct).not.toHaveBeenCalled();
   });
+
+  it('leaves a mirror store to worker frames instead of syncing a local engine', () => {
+    setWasmEngineLoader(() => new Promise(() => {}));
+    main = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+    main.on('callMethod', () => {});
+    expect(() => main!.syncAccountState()).not.toThrow();
+    expect(main.hasStarted).toBe(false);
+  });
 });

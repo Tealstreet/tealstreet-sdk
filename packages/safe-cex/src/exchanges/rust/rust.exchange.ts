@@ -1617,6 +1617,8 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Read native account state without consuming deltas or requesting network reconciliation. */
   override syncAccountState = (): void => {
+    // A bridged mirror's store is kept current by the worker's frames.
+    if (this.routesToWorker) return;
     this.assertEngineAlive();
     if (!this.host) throw new Error('Rust engine is not started');
     if (!(this.nativeLoaded & LOADED_FLAG.MARKETS)) throw new Error('Native market catalog is not ready');

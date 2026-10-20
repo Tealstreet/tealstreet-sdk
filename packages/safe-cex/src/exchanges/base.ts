@@ -284,9 +284,16 @@ export const WORKER_OPTIONAL_METHODS = [
   'changeAccountTier',
   'fetchAccountTier',
   'fetchEngineCapabilities',
+  // Rust native account reads; a main-thread mirror asks the worker's engine.
+  'fetchPositions',
+  'fetchBalance',
+  'fetchPositionMode',
 ] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
+  'fetchPositions',
+  'fetchBalance',
+  'fetchPositionMode',
   'findOrderByClientOrderId',
   'fetchPublicTrades',
   'fetchOHLCV',
