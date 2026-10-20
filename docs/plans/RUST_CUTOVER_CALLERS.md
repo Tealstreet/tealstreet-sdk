@@ -7,11 +7,11 @@ phase-9 decision and gate results live in [RUST_REWRITE.md](RUST_REWRITE.md).
 
 ## What is ready, and what is still a deletion blocker
 
-The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **47**.
+The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **48**.
 The two registries currently default **9 names** to `RustEngineExchange`:
 `coinbase`, `coinbasespot`, and Orderly's `tealstreet-dex`, `kodiakfi`, `mode`,
 `salsadex`, `what`, `woofi`, plus testnet-only `txflow`. They default the other **40 names** to TypeScript,
-including **38 names with an available Rust adapter**. Registration in
+including **39 names with an available Rust adapter**. Registration in
 `RUST_VENUES` proves the adapter exists; it does not prove every optional product,
 credential mode, consumer, or live deployment is ready to delete.
 
@@ -43,7 +43,7 @@ of saved accounts.
 | `bitrue` | Yes | TS default; futures adapter; no spot coverage inferred. |
 | `cryptocom` | Yes | TS default; preserve optional account/product gates before switching creation defaults. |
 | `kucoin` | Yes | TS default; futures adapter, native contract-unit and broker configuration gates. |
-| `kucoinspot` | No | TS required; futures coverage cannot substitute for saved spot accounts. |
+| `kucoinspot` | Yes | TS default; opt-in native HF Spot in the KuCoin crate. Preserve native Spot IDs/base units, trade-account currency balances, broker/passphrase and secondary-read routing, caller-context amendments/cancels and fixed Spot settings. Futures coverage is a separate profile; see [scope and evidence](venue-ports/KUCOIN_SPOT.md). |
 | `hyperliquid` | Yes | TS default; perps/HIP-3 adapter. Public builder/agent utilities and `hyperliquid.cloid` still have callers. |
 | `hyperliquidspot` | Yes | TS default; distinct spot product in the existing Hyperliquid crate. Native spot identities, balances, signing, live public/documented private gates and native worker/late-consumer checks pass ([RUST_SPOT_PRODUCTS.md](RUST_SPOT_PRODUCTS.md)); no combined perps/spot account claim. Preserve wallet/builder/agent and cloid helper callers before deletion. |
 | `kraken` | Yes | TS default; futures adapter. |
@@ -60,8 +60,8 @@ of saved accounts.
 | `breakoutprop` | Yes | TS default, legacy DXtrade only and disabled in production/preview (`enabledInDev: true`); authenticated REST polling, no venue WebSocket or anonymous public feed. Username/password and exact FULL_TRADING account selection are required even for public-data-only reads; `supportsChaser: false` remains enforced by metadata. LIMIT/MARKET/last-price STOP, GTC, reduce-only as CLOSE, confirmed zero-fill cancel-replace; caller IDs, attached brackets/close-all and leverage/margin/mode changes unsupported. One-way/cross account model, native lot IDs and explicitly estimated margin/PnL; quote-derived books/live candles are synthetic. Generic fills/order/income history remain branded inert fallbacks, public trades unsupported; internal cancel history proof is not a history-query implementation. Public fixture is documented/scripted under the recorded waiver, with live credential capture/connectivity still unverified; read [RUST_BREAKOUTPROP.md](RUST_BREAKOUTPROP.md). |
 | `bitunix` | None | TS required. Roster work-in-progress is not a registered Rust adapter; an explicit port or supported-product retirement decision remains necessary. |
 
-The 2 names absent from `RUST_VENUES` are exactly `bitunix`, `kucoinspot`.
-Do not silently route them through another family's adapter.
+The sole name absent from `RUST_VENUES` is `bitunix`.
+Do not silently route it through another family's adapter.
 
 Native consumer proof includes both WebSocket venues and HTTP-polling venues.
 BreakoutProp starts the actual Rust engine with documented DXtrade session/
@@ -95,7 +95,33 @@ registry defaults or claiming broader product support:
   update-ID/notification contract. This helper is now an additional dependency
   of the base shell that must survive its eventual extraction.
 
-## Product readiness and remaining source-proven deletion blockers
+## Consumer-blockers follow-up
+
+Native feed ownership and public-factory lifecycle are implemented on
+`feat/rust-consumer-blockers`; no TS venue/default is deleted or changed.
+
+| Caller boundary | Current proof / required integration |
+| --- | --- |
+| `ExchangeWorker` private-only / shared public data | Native Public-role suppression including retries and public-topic guards on multiplexed account sockets; one running public Rust provider fans typed public data into two private `ExchangeWorker` instances over transferred ports. Catalog/contract and typed semantic identity, native snapshots, private-state isolation, subscriptions and disposal are tested, including unchanged-seed readiness and frame-forwarded public sources. Existing TS `externalPublicData` callers must adopt `publicFeed`/`RustPublicFeedProvider`; legacy gateway config is rejected on Rust, never silently ignored. |
+| `safe-cex-server` `PublicExchangeFactory` | Cold native metadata startup, lazy Redis cache hits, forced native refetch/replacement and failed-refresh preservation are explicit; handle identity stays stable but callers re-read `handle.exchange` after refresh. A bounded startup deadline aborts stuck metadata transports; cache fallback revives a fresh lazy engine. Native product/environment profiles isolate current/latest cache and lock keys, including registry-default Rust venues. Native and unit tests cover concurrent refresh, delayed cache reads, hour rollover and disposal. |
+| Saved-account CLI | Actual saved CFM config/factory/start and CLI account formatter run on native state; compiled Bun executable embeds real WASM and starts outside the repository. Offline routing fixture is not a proxy/live-auth claim. |
+| MCP | Actual protocol reads native catalog, balance, positions and orders; native public feeds keep store-only ticker reads current (proved through Binance protocol calls); native REST polling remains active (proved through BreakoutProp protocol calls); explicit `EXCHANGE_ENGINE=rust`; packaged isolated Node artifact owns its CJS/WASM bytes and Rust dependency notices. No fallback on an explicit unsupported engine selection. |
+| Native host | Trusted host-only typed public ingress; loopback frame-server proof and command-client rejection prevent private sections entering the public seam. No deployment change. |
+| Mobile | Awaited `setReactNativeRustEngineLoader` caches host initialization; real browser-module bytes drive two saved account stores under Node. A Bun subprocess loads the actual native registry and Rust class without global WebAssembly/TextEncoder/TextDecoder during import, then initializes real bytes and reads the native catalog. Frame/host I/O still requires codec globals. Hermes/JSI bridge implementation, mobile binary packaging and device verification remain open. |
+
+The shared policy retains each native venue's own metadata/account overlays and
+private reconciliation. It does not generalize product coverage, signing modes,
+arbitrary `market.info`, or hosted deployments. Provider/catalog failure stops
+receiving accounts; it never silently opens account public sockets. See
+[RUST_CONSUMER_BLOCKERS.md](RUST_CONSUMER_BLOCKERS.md).
+
+Additional [rewrite audit findings](RUST_AUDITS.md) remain cutover gates.
+The consumer repairs and offline proofs do not settle downstream engine delivery,
+hosted keyless signing, a Hermes/native bridge, full live private parity or the
+production shadow/canary evidence. Keep these separate from the repaired startup,
+shared-feed and package-loading boundaries documented here.
+
+## Source-proven deletion blockers and repaired boundaries
 
 The Polymarket landing adds typed prediction sections to
 `sdk-rs/engine/src/model.rs`, `sdk-rs/engine/src/wire.rs` and the WASM reader.
@@ -107,17 +133,17 @@ typed metadata exception, not an arbitrary native JSON `info` bridge. The
 classification and retained Bybit/OKX product coverage, with actual consumer and
 native fixture proofs. It retains TS venues and registry defaults.
 
-The table distinguishes those closed source gaps from remaining blockers in
-existing supported caller paths. Passing generic conformance or documented
-private fixtures does not certify live private connectivity, a saved-account
-migration, shared-public policy or public-factory lifecycle behavior.
+The table records current boundaries after both follow-ups. Repaired engine
+seams and product fixtures do not migrate old application configuration or
+certify live private connectivity. Passing baseline conformance does not make
+those TS paths deletable.
 
 | Existing path / exact source | Current status and user-visible effect | Required replacement and proof before deletion |
 | --- | --- | --- |
-| `packages/safe-cex/src/webworker/ExchangeWorker.ts`; `exchanges/base.ts` (`isPrivateOnly`, `disablePublicWebsockets`); `exchanges/rust/rust.exchange.ts` (`createHost`, `startEngine`), all relative to `packages/safe-cex/src/` | `privateOnly` suppresses legacy public socket objects by patching their `connectAndSubscribe`. Rust has no such objects, forwards no `privateOnly` option, and starts the engine's public channels anyway. Shared-public accounts open duplicate public feeds instead of honoring their configured mode. | Add an explicit engine/host public-feed policy and feed shared markets/tickers into the private engine with stable identity; suppress only public I/O while preserving required private market metadata. Verify private startup/order sizing and zero public connects for `privateOnly`, including reconnects and every feed role. Do not equate keyless `publicDataOnly` with `privateOnly`. |
-| `packages/safe-cex/src/exchanges/base.ts` (`initExternalPublicData`); `exchanges/external-public-data.ts`, `exchanges/in-process-public-data.ts`; `exchanges/rust/rust.exchange.ts` (`startEngine`, `listenOrderBook`, `listenOHLCV`) | Rust's start override never initializes `externalPublicData`; its book/candle overrides subscribe through engine commands instead of the inherited external provider. Gateway and in-process source configuration is ignored, and the Rust public streams run instead. Existing account-specific shared-market overlays are also not established by this startup path. | Implement the same external-provider lifecycle, public-feed suppression, book/candle subscription routing, loaded-state gating and account market overlay for Rust, or migrate these callers to an explicitly equivalent engine feed-input API. Test both gateway and in-process variants, initial state, reconnect, disposal and account overlays before changing defaults. |
+| `packages/safe-cex/src/webworker/ExchangeWorker.ts`; `exchanges/base.ts`; `exchanges/rust/rust.exchange.ts` | **Repaired:** private-only and the legacy pre-start hook select native disabled policy. Public-role sockets/retries are suppressed; private/business roles and metadata REST stay local. | Preserve typed native policy and role/reconnect tests. Shared data must enter native state; `publicDataOnly` remains distinct from `privateOnly`. |
+| `packages/safe-cex/src/exchanges/base.ts` (`initExternalPublicData`); TS provider modules; `exchanges/rust/publicFeed.ts` | **Explicit replacement implemented:** worker-safe shared-public-feed ports ingest typed tickers/books/candles natively and retain account metadata/overlays. Legacy TS `externalPublicData` rejects with migration guidance on Rust. | Application/gateway callers must adopt `RustPublicFeedProvider` and transferred `publicFeed` ports before their default cutover. Provider identity/catalog/readiness/disposal and private fan-out are tested; this does not claim an existing deployed gateway was migrated. |
 | `sdk-rs/venues/bybit/src/lib.rs`; `sdk-rs/engine/src/model.rs`, `wire.rs`; `packages/safe-cex/src/store/frameApplier.ts`; `packages/cli-core/src/order/prepareCliOrder.ts` | **Metadata gap closed in documented native fixtures:** optional typed classifications preserve native `symbolType`, `marketRegion` and `underlyingTicker` across actual Rust discovery, worker application, transferred buffers and main application. | The real `prepareCliOrder` refuses stock/ETF/commodity/FX; explicitly empty and `innovation` crypto pass, absent and unknown new labels remain unknown. Preserve this regression and minimal typed metadata when migrating defaults/readers; this is not an arbitrary native JSON bridge or live TradFi/private connectivity proof. [Evidence](RUST_PRODUCT_SEMANTICS.md). |
-| `packages/safe-cex-server/src/publicExchange/PublicExchangeFactory.ts` (`getOrCreateHandle`, `refreshMarketsForCurrentBucket`); `packages/safe-cex/src/exchanges/rust/rust.exchange.ts` (`fetchMarkets`) | The public factory constructs an exchange without calling `start`, then calls `fetchMarkets` for a cold cache or forced refresh. Rust's override only returns `store.markets`; it neither starts discovery nor requests a fresh snapshot. A cold Rust default (already Coinbase/Orderly/TxFlow) can therefore return/cache an empty list, and a forced refresh can return old cached rows without any venue fetch. | Provide a lazy, disposal-safe real market-read command in the Rust adapter, or explicitly start/discover at factory creation and add a separate fresh-fetch command for forced refresh. Preserve cache/lock/stale-fallback semantics. Prove cold uncached fetch, warm cache, changed venue markets on force refresh, errors retaining last-known-good state, and disposal. Merely calling `start` once does not fix forced refresh. |
+| `packages/safe-cex-server/src/publicExchange/PublicExchangeFactory.ts`; Rust adapter `fetchMarkets` | **Repaired:** cache miss explicitly starts Rust; Redis hits remain lazy. Forced refresh starts a replacement native engine and publishes it after successful cache persistence. | Preserve cache/lock/fallback semantics and native cold/refetch/error/disposal/hour-rollover regressions. Re-read `handle.exchange` after refresh; cached metadata does not prove a live engine/feed has started. |
 | `sdk-rs/venues/okx/src/{lib,account,trading,history}.rs`; `packages/safe-cex/src/store/frameApplier.ts`; OKX TS reference family | **Product filter gap closed:** global linear/inverse swaps and EU X-Perp `FUTURES` retain native instrument/type/underlying metadata. EU uses account-scoped discovery for authenticated accounts and joins its product feeds, reconciliation and supported histories. | Keep actual inverse quantity/position/PnL/margin/ledger fixtures, native placement/chaser bridge, all four host/demo profiles and USD-M/PM control gates. Private documented fixtures and source/unit proofs do not certify live private units or connectivity. External-public overlays and default/deletion migration remain separate blockers. [Evidence](RUST_PRODUCT_SEMANTICS.md). |
 | `packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts`; `exchanges/rust/rust.exchange.ts` option forwarding; `sdk-rs/venues/bybit/` category states | **Combined-product gap closed for the `bybit` linear profile:** saved flags are forwarded and all four inverse/options combinations retain independent public categories and shared private-account reconciliation. Typed option terms, quote/position/account Greeks, chain/expiries and native option order sizing/caller IDs are explicit. | Actual TS/native WASM fixtures compare discovery, private read categories, option APIs and price/limit-IV order payloads; Rust option seeds and depth-25 books have native protocol/frame proofs because TS generic tickers/sockets omit or misroute that product. Unsupported option controls/settings/queries fail explicitly; standalone demo/inverse/spot/Hyro keep their narrower profiles. Preserve external-public policy and live combined/private validation boundaries; do not infer default/deletion readiness. [Evidence](RUST_PRODUCT_SEMANTICS.md). |
 | `sdk-rs/venues/grvt/src/lib.rs` (`on_item` catalog filter); `packages/safe-cex/src/exchanges/grvt/grvt.exchange.ts` (`fetchMarkets` catalog mapping), `packages/safe-cex/src/exchanges/grvt/CLAUDE.md` | Product gap resolved by [explicit retirement decision](GRVT_PRODUCTS_DECISION.md): TS posts `{}` and the official API defaults to `PERPETUAL`. Its generic mapper accepts injected Future/Call/Put rows but drops semantic metadata and cannot correctly cancel their symbols; explicit public non-perpetual catalogs were empty on production/testnet. | Retire only the unexposed mapper-only paths from cutover parity. Preserve TS, public exports and all other consumer/dependency gates. Any future enablement needs real listings, typed kind/expiry/strike/settlement metadata through frames/consumers and complete product lifecycle evidence; generic dispatch and perpetual replay do not prove it. |
@@ -147,7 +173,7 @@ so deleting that base first would also delete its working adapter.
 | `packages/safe-cex/src/webworker/handlers/CallMethodHandler.ts` | Runtime `CallableMethodsInWorker` allowlist | Extract allowlist independently of implementation; preserve strict method dispatch. |
 | `packages/safe-cex/src/safeCexAxiosCreate.ts` | TS venue Axios signing/retry/stats helpers accept `BaseExchange` | Remove only after all TS API factories and reference harness use cease. Rust requests go through engine transport; preserve shared Axios use outside this module if any. |
 | `packages/safe-cex/src/createApiWithSecondaryKey.ts` | TS primary/secondary API construction | Retire after every TS venue/reference dependency is gone; prove Rust secondary-key routing first. |
-| `packages/safe-cex-server/src/publicExchange/PublicExchangeFactory.ts` | Creates public exchange and reads/refreshes/hydrates markets; return type `BaseExchange` | Keep public factory/cache/lock API; **currently blocked** by unstarted cold reads and store-only `fetchMarkets`; implement lazy discovery and authoritative forced refresh as detailed above, plus the neutral interface. |
+| `packages/safe-cex-server/src/publicExchange/PublicExchangeFactory.ts` | Creates public exchange and reads/refreshes/hydrates markets; return type `BaseExchange` | Keep tested native startup/replacement and cache/lock API; re-read `handle.exchange` after refresh. Extract the neutral interface before deleting BaseExchange. |
 | `packages/cli-core/src/commands/trading/ChaseCommand.ts` | Exchange type for shared chaser and book subscription | Neutral interface; preserve store-native units and cancellation. |
 | `packages/cli-core/src/worker-host/router.ts` | Routes CLI commands to a live exchange | Keep worker adapter and structural `ExchangeLike` API. |
 | `packages/exchange-mcp/src/server.ts` | `createExchange` then start/lifecycle; Exchange type | Same factory API, Rust loader/transport, neutral interface. |
@@ -770,7 +796,7 @@ Appendix B), 10 Orderly audit files, three Coinbase reference subclasses/socket
 types and eight Orderly reference broker subclasses/socket types. Appendix B
 now names all 32 exact class targets, adding the 30 previously absent callers
 and extending the existing two client-ID entries. These counts are test/reference
-source counts for that checkpoint; the current runtime totals are 49 names / 47 Rust aliases.
+source counts for that checkpoint; the current runtime totals are 49 names / 48 Rust aliases.
 
 That checkpoint's Coinbase/Orderly frozen-module graph below additionally includes signing/API/type/
 utility imports: **79 static imports in 40 caller files** at this review

@@ -1,5 +1,6 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./env.d.ts" />
+import type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
 import type { TransportProvider } from './transport/types';
 import type { ChaserOrigin } from './webworker/chaserOrder/ChaserOrderOptions';
 import type { TwapInstance } from './webworker/twap/TwapInstance';
@@ -136,6 +137,8 @@ export type ExchangeOptions = {
   /** Run this account on the Rust engine when its venue has one (`RUST_VENUES`). */
   readonly engine?: 'rust';
   readonly privateOnly?: boolean;
+  /** Rust live public-feed ownership. Shared ports must be explicitly transferred to workers. */
+  readonly publicFeed?: RustPublicFeedPolicy;
   readonly tealstreetProxy?: boolean;
   // tunnel (http over websocket)
   readonly tealstreetTunnel?: boolean;
