@@ -125,7 +125,8 @@ once the engine exists.
 The web builds a second `RustEngineExchange` on the main thread; the worker's
 instance owns the engine. An instance with a `callMethod` listener (the host's
 worker bridge) forwards the `WORKER_FORWARDED_METHODS` in `exchanges/base.ts`
-(trading, nuke, client-ID lookup, public trades) whole through
+(trading, nuke, client-ID lookup, public trades, candles, history axes; plus
+`fetchHistoricalPositions` by name) whole through
 `callMethodInWorker`, so preflight, placement scopes and nuke retries run
 against the worker's state and report there once. This holds even if a
 main-thread read (`fetchMarkets` during warm start) started a local engine; the
@@ -141,7 +142,8 @@ asks the worker (`fetchEngineCapabilities`), and once the mirror store reports
 markets loaded it adopts that record automatically. Capability-defined methods
 (Lighter `changeAccountTier`/`fetchAccountTier`, history fallbacks) then exist on
 the mirror, and the tier methods forward to the worker
-(`WORKER_OPTIONAL_METHODS`). A failed load retries after 30 seconds.
+(`WORKER_OPTIONAL_METHODS`). A failed load retries after 30 seconds. Branded
+capability fallbacks are never wrapped, so `capabilities` keeps reporting them.
 
 ## Rust engine failure
 

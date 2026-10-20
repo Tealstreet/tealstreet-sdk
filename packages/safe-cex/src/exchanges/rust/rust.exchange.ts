@@ -59,6 +59,7 @@ import {
 } from '../asterdex/asterdex.types';
 import {
   BaseExchange,
+  CAPABILITY_METHODS,
   type ExchangeCapabilities,
   markBaseCapabilityFallback,
   WORKER_FORWARDED_METHODS,
@@ -781,9 +782,20 @@ export class RustEngineExchange extends BaseExchange {
     (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
 
   private forwardToWorker() {
-    for (const method of WORKER_FORWARDED_METHODS) {
+    // A branded fallback answers locally; wrapping it would hide the brand `capabilities` reads.
+    const capabilities = this.capabilities;
+    const inert = new Set<string>(
+      Object.entries(CAPABILITY_METHODS)
+        .filter(([capability]) => !capabilities[capability as keyof ExchangeCapabilities])
+        .map(([, method]) => method),
+    );
+    const methods = [...WORKER_FORWARDED_METHODS, 'fetchHistoricalPositions' as const];
+    for (const method of methods) {
+      if (inert.has(method)) continue;
       const local = this[method] as (...args: unknown[]) => Promise<unknown>;
-      (this as Record<WorkerForwardedMethod, unknown>)[method] = async (...args: unknown[]) => {
+      (this as Record<WorkerForwardedMethod | 'fetchHistoricalPositions', unknown>)[method] = async (
+        ...args: unknown[]
+      ) => {
         if (!this.routesToWorker) return local(...args);
         const result = await this.callWorker(method, ...args);
         // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.

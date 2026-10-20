@@ -114,4 +114,31 @@ describe('main-thread Rust trading routing', () => {
     expect(main.hasStarted).toBe(false);
     expect(loader).not.toHaveBeenCalled();
   });
+
+  it('forwards main-thread candle and journal reads to the worker', async () => {
+    main = new RustEngineExchange('kraken', { key: 'k', secret: 's' }, new DefaultStore());
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    main.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
+      calls.push({ method: event.method, args: event.args });
+      queueMicrotask(() =>
+        main!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: [] }),
+      );
+    });
+    const window = { from: 1, to: 2 };
+    await main.fetchOHLCV({ symbol: 'PF_XBTUSD', interval: '1m', from: 1, to: 2 });
+    await main.fetchHistoricalFills(window);
+    await main.fetchHistoricalOrders(window);
+    await main.fetchIncomeHistory({ startTime: 1, endTime: 2 });
+    await main.fetchIncomeHistoryRange(1, 2);
+    await main.fetchHistoricalPositions!({ ...window, account: 'a' });
+    expect(calls.map(({ method }) => method)).toEqual([
+      'fetchOHLCV',
+      'fetchHistoricalFills',
+      'fetchHistoricalOrders',
+      'fetchIncomeHistory',
+      'fetchIncomeHistoryRange',
+      'fetchHistoricalPositions',
+    ]);
+    expect(main.hasStarted).toBe(false);
+  });
 });

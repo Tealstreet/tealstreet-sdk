@@ -265,6 +265,11 @@ export const WORKER_FORWARDED_METHODS = [
   'nukePositions',
   'nukeOrders',
   'fetchPublicTrades',
+  'fetchOHLCV',
+  'fetchHistoricalFills',
+  'fetchHistoricalOrders',
+  'fetchIncomeHistory',
+  'fetchIncomeHistoryRange',
 ] as const;
 
 export type WorkerForwardedMethod = (typeof WORKER_FORWARDED_METHODS)[number];
@@ -273,11 +278,22 @@ export type WorkerForwardedMethod = (typeof WORKER_FORWARDED_METHODS)[number];
  * Methods only some exchanges define (Rust capability-adopted ones), forwarded
  * by name; the worker rejects them where its exchange lacks the method.
  */
-export const WORKER_OPTIONAL_METHODS = ['changeAccountTier', 'fetchAccountTier', 'fetchEngineCapabilities'] as const;
+export const WORKER_OPTIONAL_METHODS = [
+  'fetchHistoricalPositions',
+  'changeAccountTier',
+  'fetchAccountTier',
+  'fetchEngineCapabilities',
+] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'findOrderByClientOrderId',
   'fetchPublicTrades',
+  'fetchOHLCV',
+  'fetchHistoricalFills',
+  'fetchHistoricalOrders',
+  'fetchIncomeHistory',
+  'fetchIncomeHistoryRange',
+  'fetchHistoricalPositions',
   'fetchAccountTier',
   'fetchEngineCapabilities',
 ]);
