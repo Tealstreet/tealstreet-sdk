@@ -112,6 +112,7 @@ struct Job {
     collect_ids: bool,
     internal: bool,
     replaces: Option<String>,
+    amendment: Option<f64>,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -422,11 +423,16 @@ impl Backpack {
                     if matches!(old.status, OrderStatus::Closed | OrderStatus::Canceled) {
                         return Err("Backpack cannot amend a terminal order".into());
                     }
+                    if amount.unwrap_or(old.amount) <= old.filled {
+                        return Err(
+                            "Backpack amended total must exceed the already filled quantity".into(),
+                        );
+                    }
                     let o = PlaceOrderOpts {
                         symbol: old.symbol.clone(),
                         kind: old.kind,
                         side: old.side,
-                        amount: amount.unwrap_or(old.amount),
+                        amount: (amount.unwrap_or(old.amount) - old.filled).max(0.0),
                         price: Some(
                             old.extra
                                 .as_ref()
@@ -496,6 +502,14 @@ impl Backpack {
         }
         match plan {
             Ok((steps, collect_ids)) => {
+                let amendment = if collect_ids {
+                    steps.first().and_then(|step| match step {
+                        Step::Cancel { id, .. } => cx.store.order(id).map(|o| o.filled),
+                        _ => None,
+                    })
+                } else {
+                    None
+                };
                 self.trading.jobs.insert(
                     u64::from(id),
                     Job {
@@ -504,6 +518,7 @@ impl Backpack {
                         collect_ids,
                         internal: false,
                         replaces: None,
+                        amendment,
                     },
                 );
                 self.run_trade(cx, u64::from(id));
@@ -741,6 +756,72 @@ impl Backpack {
                     }
                 }
                 Step::Cancel { id, .. } => {
+                    if let Some(baseline) = self
+                        .trading
+                        .jobs
+                        .get(&request.command)
+                        .and_then(|job| job.amendment.as_ref())
+                    {
+                        #[derive(Deserialize)]
+                        #[serde(rename_all = "camelCase")]
+                        struct Canceled<'a> {
+                            id: &'a str,
+                            status: &'a str,
+                            executed_quantity: crate::wire::Number,
+                        }
+                        let proof: Canceled<'_> = serde_json::from_str(response.body).map_err(
+                            |_| "Backpack amend requires a complete cancel acknowledgement",
+                        )?;
+                        if proof.id != id
+                            || !matches!(proof.status, "Cancelled" | "Filled")
+                            || !proof.executed_quantity.0.is_finite()
+                            || proof.executed_quantity.0 < *baseline
+                        {
+                            return Err(
+                                "Backpack amend cancel acknowledgement is not definitive".into()
+                            );
+                        }
+                        let filled = proof
+                            .executed_quantity
+                            .0
+                            .max(cx.store.order(id).map_or(*baseline, |o| o.filled));
+                        let extra = filled - baseline;
+                        let job = self.trading.jobs.get_mut(&request.command).unwrap();
+                        if extra > 0.0 {
+                            let mut exhausted = false;
+                            for step in &mut job.steps {
+                                if let Step::Place { order, .. } = step {
+                                    let value = order
+                                        .quantity
+                                        .as_mut()
+                                        .or(order.trigger_quantity.as_mut())
+                                        .ok_or("Backpack amend replacement quantity missing")?;
+                                    let market = cx
+                                        .store
+                                        .market(&order.symbol)
+                                        .ok_or("Backpack amend market missing")?;
+                                    let remaining = num::adjust(
+                                        value.parse::<f64>().map_err(|e| e.to_string())? - extra,
+                                        market.precision.amount,
+                                    );
+                                    if remaining <= 0.0 {
+                                        exhausted = true;
+                                        break;
+                                    }
+                                    if remaining < market.limits.amount.min {
+                                        return Err(
+                                            "Backpack amend remainder is below market minimum"
+                                                .into(),
+                                        );
+                                    }
+                                    *value = num::format(remaining);
+                                }
+                            }
+                            if exhausted {
+                                job.steps.clear();
+                            }
+                        }
+                    }
                     self.account.orders_revision += 1;
                     self.finish_cancel(id);
                     let unchanged = request
@@ -905,6 +986,7 @@ impl Backpack {
                 collect_ids: false,
                 internal: true,
                 replaces: Some(repair.old_id),
+                amendment: None,
             },
         );
         self.run_trade(cx, command);
