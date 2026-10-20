@@ -1228,7 +1228,6 @@ export class RustEngineExchange extends BaseExchange {
       )
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
-        this.host?.flush();
         const cached = this.store.fetchedLeverage[symbol];
         if (
           !cached ||

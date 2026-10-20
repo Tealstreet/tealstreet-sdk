@@ -279,6 +279,24 @@ steady 14.503 → 12.333 ms; retained memory is effectively unchanged. Canonical
 Hyperliquid Spot gate passes: TS/Rust main 56.1/49.8 ms, steady 20.9/16.4 ms,
 retained 18.9/6.1 MB. Exact-head CI and final combined verification follow.
 
+Wire integration checkpoint: the rebuilt `2ebdda7c1c` source passes all twelve
+affected-venue local gates and 2,820 native CI test executions. Both general CI
+runs and 34/35 Rust jobs pass; the bounded Bybit retry still misses Hyro steady
+CPU (TS/Rust 3.4/3.9 ms, main 26.2/22.8 ms passes). Its canonical standalone
+control passes main 22.560/19.865 and steady 4.177/3.142 ms, whereas combined
+main 33.5/34.3 and steady 10.5/11.6 ms fail. Same-combined-WASM reader controls
+match every nonmetric output: current reader beats the landed reader in all
+three pairs, with variable steady medians 4.286/6.846 ms. Steady-window profiling
+does not support another wire change; no speculative hot-path edit is retained.
+Merged landing `5f84b3e21d` in `6c8823dbcf`, including its Bybit numeric ticker
+decoder, broker/cancellation and side-aware leverage repairs. Independent engine
+integration review passes. Wrapper review caught overlapping leverage flushes;
+the existing regression fails before removing the redundant branch flush and
+passes afterwards (58 recovery/contract/leverage tests). Incoming broker/scope
+tests pass 19/19; integrated engine lib tests pass 99/99, SDK typecheck and scoped
+lint pass. Sole leverage ownership and coherent snapshots remain intact.
+Fresh combined gates and exact-head CI are required before merging PR #1345.
+
 ## Security
 
 - Workers Durable Object has no client auth and serves the first client's account
