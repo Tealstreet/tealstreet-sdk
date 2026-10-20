@@ -2,6 +2,7 @@ use crate::{Paradex, Pending, wire::*};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, Min, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
 };
@@ -36,10 +37,7 @@ pub enum CandleTarget {
 pub(crate) struct Public {
     socket: Option<SocketId>,
     open: bool,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    received: f64,
-    attempts: u32,
+    supervisor: Supervisor,
     next_rpc: u64,
     subscriptions: HashMap<u64, Subscription>,
     retries: Vec<(TimerId, String, u8)>,
@@ -158,12 +156,11 @@ impl Paradex {
         );
     }
     fn public_connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.public.socket.is_some() {
+        if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
             return;
         }
         self.public.socket = Some(cx.connect_binary_channel(self.ws(), SocketChannel::Public));
-        self.public.received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(5_000.));
+        self.public.supervisor.connecting(cx);
     }
     fn public_subscribe(
         &mut self,
@@ -239,8 +236,7 @@ impl Paradex {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.received = cx.now;
+        self.public.supervisor.opened(cx);
         // RFC6455 ping/pong is handled by the host; idle SBE heartbeats feed the watchdog.
         let symbols: Vec<_> = cx
             .store
@@ -275,19 +271,13 @@ impl Paradex {
         for (timer, _, _) in self.public.retries.drain(..) {
             cx.clear_timer(timer);
         }
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
         for state in self.public.books.values_mut() {
             state.book.clear();
             state.sequence = None;
             state.initialized = false;
             state.received = cx.now;
         }
-        self.public.attempts = self.public.attempts.saturating_add(1);
-        self.public.reconnect = Some(cx.set_timer(f64::from(
-            (1_000u32 << self.public.attempts.saturating_sub(1).min(5)).min(30_000),
-        )));
+        self.public.supervisor.retry(cx);
     }
     pub(crate) fn public_message(
         &mut self,
@@ -302,7 +292,7 @@ impl Paradex {
             return;
         };
         if message.kind == "pong" || message.kind == "ping" {
-            self.public.received = cx.now;
+            self.public.supervisor.received(cx.now);
             return;
         }
         if message.jsonrpc != "2.0" {
@@ -317,7 +307,7 @@ impl Paradex {
                         .is_some_and(|r| r.channel == sub.channel)
             });
             if valid && let Some(sub) = self.public.subscriptions.remove(&id) {
-                self.public.received = cx.now;
+                self.public.supervisor.received(cx.now);
                 if let Some(error) = message.error {
                     cx.log(
                         LogLevel::Warning,
@@ -384,7 +374,7 @@ impl Paradex {
                 let symbol = row.market.to_string();
                 self.public_depth(cx, &symbol, row);
             }
-            Ok(crate::sbe::Public::Heartbeat) => self.public.received = cx.now,
+            Ok(crate::sbe::Public::Heartbeat) => self.public.supervisor.received(cx.now),
             Ok(crate::sbe::Public::Other) => {}
             Err(error) => {
                 cx.log(LogLevel::Warning, error);
@@ -397,7 +387,7 @@ impl Paradex {
         } else {
             &row.market
         };
-        self.public.received = cx.now;
+        self.public.supervisor.received(cx.now);
         cx.store.update_ticker(symbol, |t| {
             if row.bid_price.0 > 0. {
                 t.bid = row.bid_price.0;
@@ -411,7 +401,7 @@ impl Paradex {
         });
     }
     fn public_summary(&mut self, cx: &mut Cx<'_, Pending>, row: &Tick<'_>) {
-        self.public.received = cx.now;
+        self.public.supervisor.received(cx.now);
         cx.store.update_ticker(&row.symbol, |t| {
             if row.bid.0 > 0. {
                 t.bid = row.bid.0;
@@ -450,7 +440,7 @@ impl Paradex {
         if row.price.0 <= 0. || row.size.0 < 0. {
             return;
         }
-        self.public.received = cx.now;
+        self.public.supervisor.received(cx.now);
         cx.store.update_ticker(symbol, |t| {
             t.last = row.price.0;
             t.mark = row.price.0;
@@ -536,7 +526,7 @@ impl Paradex {
         state.sequence = Some(sequence);
         state.initialized = true;
         state.received = cx.now;
-        self.public.received = cx.now;
+        self.public.supervisor.received(cx.now);
         if let (Some(bid), Some(ask)) = (state.book.best_bid(), state.book.best_ask()) {
             cx.store.update_ticker(symbol, |t| {
                 t.bid = bid;
@@ -1001,11 +991,6 @@ impl Paradex {
             self.public_seed(cx, markets);
             return true;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.public_connect(cx);
-            return true;
-        }
         if let Some(i) = self.public.retries.iter().position(|(t, _, _)| *t == timer) {
             let (_, channel, attempt) = self.public.retries.swap_remove(i);
             if self.interested(cx, &channel) {
@@ -1013,11 +998,17 @@ impl Paradex {
             }
             return true;
         }
-        if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.received >= 60_000. {
-                self.public_recover(cx);
-                return true;
+        if self.public.supervisor.owns_timer(timer) {
+            match self.public.supervisor.on_timer(cx, timer) {
+                SocketTick::Reconnect => {
+                    self.public_connect(cx);
+                    return true;
+                }
+                SocketTick::TimedOut(_) => {
+                    self.public_recover(cx);
+                    return true;
+                }
+                _ => {}
             }
             let expired: Vec<_> = self
                 .public
@@ -1047,7 +1038,6 @@ impl Paradex {
                 }
                 self.public_book_resync(cx, &symbol);
             }
-            self.public.watchdog = Some(cx.set_timer(5_000.));
             return true;
         }
         if let Some((symbol, interval, generation, revision)) =

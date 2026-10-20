@@ -524,3 +524,13 @@ fn authoritative_empty_orders_cannot_be_reopened_by_older_live_event() {
         "old LIVE notification reopened an order absent from authoritative snapshot"
     );
 }
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn user_supervisor_bounds_handshake_and_backs_off_without_changing_subscriptions() {
+    let mut h = H::new();
+    let socket = h.private.unwrap();
+    h.event(Event::WsOpened { socket });
+    socket_checks::flaps(h.e, socket, h.now);
+}

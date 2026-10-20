@@ -332,10 +332,9 @@ fn missed_pong_closes_socket_and_gets_a_fresh_bullet() {
     let timer = actions
         .iter()
         .find_map(|a| {
-            if let Action::SetTimer {
-                timer,
-                at_ms: 11000.0,
-            } = a
+            if let Action::SetTimer { timer, at_ms } = a
+                && *at_ms > 10000.0
+                && *at_ms <= 11000.0
             {
                 Some(*timer)
             } else {
@@ -598,10 +597,7 @@ fn disconnect_cancels_pending_book_retry() {
     let reconnect = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1003.0,
-            } => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms > 3.0 && *at_ms <= 1003.0 => Some(*timer),
             _ => None,
         })
         .unwrap();
@@ -716,6 +712,10 @@ fn awaiting_welcome() -> (Engine<Kucoin>, SocketId, safe_cex_engine::TimerId) {
         })
         .unwrap();
     e.handle(1.0, Event::WsOpened { socket });
+    assert!(
+        e.drain_actions()
+            .all(|a| matches!(a, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+    );
     (e, socket, timer)
 }
 
@@ -789,10 +789,9 @@ fn missing_welcome_reconnects_even_if_an_early_pong_arrives() {
     let timer = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 11000.0,
-            } => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms > 10000.0 && *at_ms <= 11000.0 => {
+                Some(*timer)
+            }
             _ => None,
         })
         .unwrap();
@@ -843,7 +842,10 @@ fn private_snapshot_starts_only_once_after_private_welcome() {
         })
         .unwrap();
     e.handle(1.0, Event::WsOpened { socket });
-    assert!(!e.has_actions());
+    assert!(
+        e.drain_actions()
+            .all(|a| matches!(a, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+    );
     welcome(&mut e, socket);
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(
@@ -883,6 +885,66 @@ fn direct_leverage_query_rejects_without_requests_before_and_after_start() {
         })] if *id == command && error == "KuCoin leverage query is unsupported")
         );
     }
+}
+
+#[test]
+fn bullet_failures_back_off_and_timed_out_token_responses_cannot_connect() {
+    let (mut e, tokens) = seeded(1);
+    let request = &tokens[0];
+    e.handle(
+        1.0,
+        Event::HttpFailed {
+            request: request.id,
+            error: "offline",
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let (timer, at) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    assert!((750.0..=1000.0).contains(&(at - 1.0)));
+    e.handle(at, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let pending = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(pending.method, safe_cex_engine::Method::Post);
+    assert!(pending.url.ends_with("/bullet-public"));
+    let watch = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at + 10_000.0, Event::TimerFired { timer: watch });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let (_, retry_at) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    assert!((1500.0..=2000.0).contains(&(retry_at - at - 10_000.0)));
+    answer(
+        &mut e,
+        pending,
+        r#"{"code":"200000","data":{"token":"retired","instanceServers":[{"endpoint":"wss://example.test","pingInterval":18000,"pingTimeout":10000}]}}"#,
+    );
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::WsConnect { .. } | Action::Http(_)))
+    );
 }
 
 #[test]
