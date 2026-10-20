@@ -156,6 +156,9 @@ const KNOWN_TS_FIXES = {
   },
   // Independent documented payload oracle; paired public spot reference repairs
   // leave the real TS Store/worker serialization and measured CPU/memory intact.
+  // Also known TS defects: a batch_cancel result with success:false still marks
+  // the order canceled, and a paced census can apply a pre-cancel page with no
+  // terminal fence. Checkpoints compare raw output, so those paths stay declared.
   coinbase: (ts) => fixCoinbase(ts, tapeRecords),
   coinbasespot: (ts) => fixCoinbase(ts, tapeRecords),
   phemex(ts) {

@@ -590,7 +590,7 @@ test('websocket normalization handles mutable URL objects and repeated invalid U
   for (let i = 0; i < 2; i++) assert.throws(() => tape.sockets('invalid URL'), /Invalid URL/);
 });
 
-test('staged reads advance only after their command and preserve response headers', () => {
+test('staged reads advance only after their command write is acknowledged and preserve response headers', () => {
   const early = { ...record('GET'), body: 'early' };
   const later = { ...record('GET'), body: 'later', afterCommand: 1, headers: 'x-stage: later' };
   const write = { ...record('POST', { quantity: '2' }), afterCommand: 1 };
@@ -599,9 +599,30 @@ test('staged reads advance only after their command and preserve response header
   assert.equal(tape.respond('POST', URL, write.requestBody).status, 599);
   assert.equal(tape.missingWrites, 1);
   tape.commandIndex = 1;
-  assert.deepEqual(tape.respond('GET', URL), { status: 200, headers: 'x-stage: later', body: 'later' });
+  // A poll between command start and its acknowledgement still sees the prior state.
+  assert.equal(tape.respond('GET', URL).body, 'early');
   assert.equal(tape.respond('POST', URL, write.requestBody).status, 200);
+  assert.deepEqual(tape.respond('GET', URL), { status: 200, headers: 'x-stage: later', body: 'later' });
   tape.assertWritesConsumed();
+});
+
+test('a staged command without an acknowledged write opens its reads once it settles', () => {
+  const early = { ...record('GET'), body: 'early' };
+  const later = { ...record('GET'), body: 'later', afterCommand: 1 };
+  const write = { ...record('POST', { quantity: '2' }), afterCommand: 1 };
+  const tape = new Tape([early, later, write], {}, false);
+  tape.commandIndex = 1;
+  assert.equal(tape.respond('GET', URL).body, 'early');
+  tape.settledCommands = 1;
+  assert.equal(tape.respond('GET', URL).body, 'later');
+});
+
+test('reads of a stage without staged writes open at command start, as before', () => {
+  const early = { ...record('GET'), body: 'early' };
+  const later = { ...record('GET'), body: 'later', afterCommand: 1 };
+  const tape = new Tape([early, later], {}, false);
+  tape.commandIndex = 1;
+  assert.equal(tape.respond('GET', URL).body, 'later');
 });
 
 test('OKX generated IDs normalize without weakening caller IDs or wire types', () => {

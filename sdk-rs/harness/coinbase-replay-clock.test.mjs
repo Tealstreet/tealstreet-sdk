@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPrivateKey, createPublicKey, verify } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { COINBASE_ES256_REPLAY } from './coinbase-protocol.mjs';
 import { continuousReplayStartup, deterministicReplay, frozenReplayStartup } from './polling.mjs';
 import { ReplayClock, Tape } from './tape.mjs';
@@ -91,4 +93,24 @@ test('Coinbase TS ES256 replay signing settles in the calling turn and remains v
     delete subtle.importKey;
     delete subtle.sign;
   }
+});
+
+// The real TS reference signer, loaded the way replay loads it (tsx), settles
+// its second JWT before any macrotask and the JWT verifies independently.
+test('the TS reference ES256 signer settles in microtasks once replay installs the synchronous signer', () => {
+  const script = `
+    const { installSynchronousEs256, COINBASE_ES256_REPLAY, verifyCoinbaseJwt } = await import(${JSON.stringify(new URL('./coinbase-protocol.mjs', import.meta.url).href)});
+    installSynchronousEs256();
+    const { sign } = await import(${JSON.stringify(new URL('../../packages/safe-cex/src/__tests__/reference/coinbase/coinbase.utils.ts', import.meta.url).href)});
+    const { key, secret } = COINBASE_ES256_REPLAY;
+    await sign(key, secret, 'GET api.coinbase.com/api/v3/brokerage/accounts');
+    const token = await Promise.race([sign(key, secret, 'GET api.coinbase.com/api/v3/brokerage/accounts'),
+      new Promise((resolve) => setImmediate(() => resolve('macrotask')))]);
+    console.log(JSON.stringify({ token, valid: verifyCoinbaseJwt(token, { method: 'GET', path: '/api/v3/brokerage/accounts', algorithm: 'ES256' }) }));`;
+  const run = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script],
+    { encoding: 'utf8', cwd: fileURLToPath(new URL('../..', import.meta.url)) });
+  assert.equal(run.status, 0, run.stderr);
+  const { token, valid } = JSON.parse(run.stdout.trim().split('\n').at(-1));
+  assert.notEqual(token, 'macrotask');
+  assert.equal(valid, true);
 });

@@ -326,13 +326,17 @@ export class Tape {
             this.keyFor(record.method, record.url, record.requestBody),
           );
         }
-    this.expectedWrites = records
-      .filter(
-        (record) =>
-          record.type === 'http' &&
-          (venue.isWrite?.(record.method, record.url) ?? isWriteRequest(record.method, record.url)),
-      )
-      .map((record) => this.keyFor(record.method, record.url, record.requestBody));
+    const writeRecords = records.filter(
+      (record) =>
+        record.type === 'http' &&
+        (venue.isWrite?.(record.method, record.url) ?? isWriteRequest(record.method, record.url)),
+    );
+    this.expectedWrites = writeRecords.map((record) => this.keyFor(record.method, record.url, record.requestBody));
+    // A read staged after command N shows its outcome, so it waits until one of
+    // that command's staged writes is acknowledged or the command settles.
+    // Unstaged writes cannot be attributed to a command and gate nothing.
+    this.unacknowledgedStages = new Set(writeRecords.map((record) => record.afterCommand ?? 0).filter((stage) => stage > 0));
+    this.settledCommands = 0;
     this.publicTickers = this.venue.publicTickers?.(this.records) ?? [];
     this.requestAudit = this.auditEnabled ? this.venue.createRequestAudit?.(impl, { isPrivate: this.isPrivate }) : undefined;
     this.audit = this.auditEnabled ? this.venue.createSocketAudit?.(impl, {
@@ -535,11 +539,12 @@ export class Tape {
       return { status: 599, body: '' };
     }
     const elapsed = this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time;
+    const stage = this.responses.isWrite(method, url) ? this.commandIndex : this.readStage();
     const unservedBefore = this.responses.unserved;
     let response;
     try {
       response = this.bitget || (this.auditEnabled && this.venue.validateMatchedRequest) || this.selectedPollingResponses
-        ? this.responses.respond(method, url, body, this.commandIndex, (record) => {
+        ? this.responses.respond(method, url, body, stage, (record) => {
           this.validateBitgetMatch(record, method, url, body);
           if (this.auditEnabled) this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
           if (this.selectedPollingResponses && !this.responses.isWrite(method, url)) {
@@ -548,13 +553,16 @@ export class Tape {
             this.pollingFence?.matched(actualKey, record);
           }
         }, elapsed, headers)
-        : this.responses.respond(method, url, body, this.commandIndex, elapsed, headers);
+        : this.responses.respond(method, url, body, stage, elapsed, headers);
     } catch (error) {
       this.pollingFence?.reject(error);
       throw error;
     }
     if (this.responses.unserved !== unservedBefore) this.pollingFence?.reject(new Error('Polling replay sent an unmatched HTTP request'));
-    if (this.responses.isWrite(method, url) && response.status !== 599) this.expectedWrites.shift();
+    if (this.responses.isWrite(method, url) && response.status !== 599) {
+      this.expectedWrites.shift();
+      this.unacknowledgedStages.delete(this.responses.served.afterCommand);
+    }
     try {
       this.requestAudit?.response({ method, url, body, headers, response });
     } catch (error) {
@@ -570,7 +578,7 @@ export class Tape {
     const targets = new Map();
     for (const [key, queue] of this.responses.queues) {
       if (!this.polledRequestKeys.has(key) || !queue.length || this.responses.isWrite(queue[0].method, queue[0].url)) continue;
-      const target = selectResponse([...queue], this.time, { commandIndex: this.commandIndex });
+      const target = selectResponse([...queue], this.time, { commandIndex: this.readStage() });
       if (target && (target.availableAt !== undefined || target.effectiveAt !== undefined || target.availableAfter !== undefined)
           && !this.selectedPollingResponses.has(target)) targets.set(key, target);
     }
@@ -603,6 +611,11 @@ export class Tape {
     } finally {
       this.pollingFence = undefined;
     }
+  }
+
+  readStage() {
+    const command = this.commandIndex;
+    return command > this.settledCommands && this.unacknowledgedStages.has(command) ? command - 1 : command;
   }
 
   connect(url, onOpen, onMessage, onClose) {
@@ -1036,6 +1049,7 @@ export class Tape {
             },
           ),
         );
+        this.settledCommands = this.commandIndex;
       } else if (frame.type === 'wait' || frame.type === 'http') {
         // Advance explicit horizons; real requests select HTTP responses.
       } else if (this.startupDelivered.has(frame)) {

@@ -73,6 +73,7 @@ export class Responses {
         JSON.stringify(path.split('.').reduce((value, key) => value?.[key], sent) ?? null));
     }
     if (onMatch && candidates.length !== queue.length) queue.splice(queue.indexOf(record), 1);
+    this.served = record;
     return { status: record.status, headers: record.headers ?? '', body: responseBody };
   }
   unusedWrites() {
