@@ -130,6 +130,196 @@ fn private_auth_tracks_the_matching_rpc_and_subscribes_each_required_channel() {
     );
 }
 #[test]
+fn defaulted_optional_position_numbers_do_not_block_funded_rest_startup() {
+    for (configured_leverage, optional) in [
+        (None, "\"\""),
+        (Some(20.), "\"\""),
+        (None, "null"),
+        (Some(20.), "null"),
+    ] {
+        let (mut h, _) = seed();
+        h.reply("/auth/", r#"{"jwt_token":"jwt-first"}"#);
+        let configs = configured_leverage.map_or_else(
+            || r#"{"configs":[]}"#.to_string(),
+            |leverage| {
+                format!(r#"{{"configs":[{{"market":"BTC-USD-PERP","leverage":{leverage}}}]}}"#)
+            },
+        );
+        h.reply("/account/margin", &configs);
+        let row = POSITION.replace(
+            r#""last_updated_at":1700000000000"#,
+            &format!(r#""last_updated_at":1700000000000,"leverage":{optional},"liquidation_price":{optional}"#),
+        );
+        h.reply("/positions", &format!(r#"{{"results":[{row}]}}"#));
+        h.reply(
+            "/account",
+            r#"{"total_collateral":"1000","free_collateral":"800","initial_margin_requirement":"200"}"#,
+        );
+        assert!(h.e.store().loaded().positions);
+        assert!(h.e.store().loaded().balance);
+        let position = &h.e.store().positions()[0];
+        assert_eq!((position.contracts, position.entry_price), (2., 100.));
+        assert_eq!(position.unrealized_pnl, 4.);
+        assert_eq!(position.leverage, configured_leverage.unwrap_or(10.));
+        assert_eq!(position.liquidation_price, 0.);
+        let balance = h.e.store().balance();
+        assert_eq!(
+            (balance.total, balance.free, balance.used, balance.upnl),
+            (1000., 800., 200., 4.)
+        );
+    }
+}
+
+#[test]
+fn defaulted_optional_position_numbers_are_accepted_on_private_json_updates() {
+    for optional in ["\"\"", "null"] {
+        let (mut h, socket) = loaded();
+        authenticate(&mut h, socket);
+        let mut row: serde_json::Value = serde_json::from_str(POSITION).unwrap();
+        row["size"] = serde_json::json!("3");
+        row["unrealized_pnl"] = serde_json::json!("7");
+        row["last_updated_at"] = serde_json::json!(1700000001000_u64);
+        row["leverage"] = serde_json::from_str(optional).unwrap();
+        row["liquidation_price"] = serde_json::from_str(optional).unwrap();
+        message(
+            &mut h,
+            socket,
+            &format!(
+                r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"positions","data":{row}}}}}"#
+            ),
+        );
+        let position = &h.e.store().positions()[0];
+        assert_eq!((position.contracts, position.unrealized_pnl), (3., 7.));
+        assert_eq!((position.leverage, position.liquidation_price), (20., 0.));
+        assert_eq!(h.e.store().balance().upnl, 7.);
+    }
+}
+
+#[test]
+fn optional_position_defaults_do_not_relax_other_private_numbers() {
+    for (field, value) in [
+        ("leverage", "\"bad\""),
+        ("liquidation_price", "\"NaN\""),
+        ("size", "null"),
+        ("unrealized_pnl", "null"),
+        ("liquidation_price", "true"),
+        ("leverage", "\" \""),
+        ("size", "\"\""),
+        ("unrealized_pnl", "\"\""),
+        ("average_entry_price", "\"\""),
+    ] {
+        let (mut h, socket) = loaded();
+        authenticate(&mut h, socket);
+        let positions = h.e.store().positions().to_vec();
+        let balance = h.e.store().balance().clone();
+        let mut row: serde_json::Value = serde_json::from_str(POSITION).unwrap();
+        row[field] = serde_json::from_str(value).unwrap();
+        row["last_updated_at"] = serde_json::json!(1700000001000_u64);
+        h.timer(h.now + 10_000.);
+        h.reply("/positions", &format!(r#"{{"results":[{row}]}}"#));
+        assert_eq!(h.e.store().positions(), positions, "REST {field}={value}");
+        message(
+            &mut h,
+            socket,
+            &format!(
+                r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"positions","data":{row}}}}}"#
+            ),
+        );
+        assert_eq!(h.e.store().positions(), positions, "WS {field}={value}");
+        assert_eq!(h.e.store().balance(), &balance);
+    }
+}
+
+#[test]
+fn closed_positions_with_defaulted_optional_fields_remove_existing_exposure() {
+    for (websocket, optional) in [
+        (false, "\"\""),
+        (true, "\"\""),
+        (false, "null"),
+        (true, "null"),
+    ] {
+        let (mut h, socket) = loaded();
+        authenticate(&mut h, socket);
+        assert_eq!(h.e.store().positions()[0].contracts, 2.);
+        let row = format!(
+            r#"{{"market":"BTC-USD-PERP","status":"CLOSED","size":"0","leverage":{optional},"liquidation_price":{optional},"last_updated_at":1700000001000}}"#
+        );
+        if websocket {
+            message(
+                &mut h,
+                socket,
+                &format!(
+                    r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"positions","data":{row}}}}}"#
+                ),
+            );
+        } else {
+            h.timer(h.now + 10_000.);
+            h.reply("/positions", &format!(r#"{{"results":[{row}]}}"#));
+        }
+        assert!(h.e.store().positions().is_empty(), "WS={websocket}");
+        assert!(h.e.store().loaded().positions);
+        assert_eq!(h.e.store().balance().upnl, 0.);
+    }
+}
+
+#[test]
+fn malformed_required_size_in_mixed_snapshot_preserves_complete_positions() {
+    for (malformed_first, size) in [
+        (false, "\"\""),
+        (true, "\"\""),
+        (false, "null"),
+        (true, "null"),
+    ] {
+        let (mut h, socket) = loaded();
+        authenticate(&mut h, socket);
+        let eth = POSITION.replace("BTC-USD-PERP", "ETH-USD-PERP");
+        message(
+            &mut h,
+            socket,
+            &format!(
+                r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"positions","data":{eth}}}}}"#
+            ),
+        );
+        assert_eq!(h.e.store().positions().len(), 2);
+        let positions = h.e.store().positions().to_vec();
+        let balance = h.e.store().balance().clone();
+        let valid = POSITION.replace(r#""size":"2""#, r#""size":"9""#);
+        let malformed = eth.replace(r#""size":"2""#, &format!(r#""size":{size}"#));
+        let rows = if malformed_first {
+            format!("{malformed},{valid}")
+        } else {
+            format!("{valid},{malformed}")
+        };
+        h.timer(h.now + 10_000.);
+        h.reply("/positions", &format!(r#"{{"results":[{rows}]}}"#));
+        assert_eq!(h.e.store().positions(), positions);
+        assert_eq!(h.e.store().balance(), &balance);
+        assert!(h.e.store().loaded().positions);
+    }
+}
+
+#[test]
+fn blank_required_account_margin_remains_invalid_on_rest_and_json_updates() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    let balance = h.e.store().balance().clone();
+    h.timer(h.now + 10_000.);
+    h.reply("/positions", &format!(r#"{{"results":[{POSITION}]}}"#));
+    let row =
+        r#"{"total_collateral":"2000","free_collateral":"1800","initial_margin_requirement":""}"#;
+    h.reply("/account", row);
+    assert_eq!(h.e.store().balance(), &balance);
+    message(
+        &mut h,
+        socket,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"balance_events","data":{row}}}}}"#
+        ),
+    );
+    assert_eq!(h.e.store().balance(), &balance);
+}
+
+#[test]
 fn malformed_and_failed_snapshots_preserve_last_known_good_state() {
     let (mut h, _) = loaded();
     let balance = h.e.store().balance().clone();

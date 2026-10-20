@@ -1827,6 +1827,28 @@ struct Margin<'a> {
     market: &'a str,
     leverage: Number,
 }
+
+fn optional_position_number<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Number, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OptionalNumber<'a> {
+        Value(Number),
+        Text(#[serde(borrow)] &'a str),
+        Null(()),
+    }
+    // TS applies `parseFloat(value || '0')` to these two optional fields.
+    // Keep every nonempty value on the strict private numeric contract.
+    match OptionalNumber::deserialize(deserializer)? {
+        OptionalNumber::Value(number) => Ok(number),
+        OptionalNumber::Text("") | OptionalNumber::Null(()) => Ok(Number(0.)),
+        OptionalNumber::Text(_) => {
+            Err(serde::de::Error::custom("invalid optional position number"))
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct PositionRow<'a> {
     #[serde(borrow)]
@@ -1842,9 +1864,9 @@ struct PositionRow<'a> {
     unrealized_pnl: Number,
     #[serde(default)]
     realized_positional_pnl: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "optional_position_number")]
     leverage: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "optional_position_number")]
     liquidation_price: Number,
     #[serde(default)]
     last_updated_at: Number,

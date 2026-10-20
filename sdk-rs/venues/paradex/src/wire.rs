@@ -45,6 +45,12 @@ fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     }
 }
 
+fn summary_number<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
+    // Summary fields use TS's `value || '0'`; do not widen instrument,
+    // depth, signed quantity or private numeric parsing.
+    Ok(Option::<Number>::deserialize(d)?.unwrap_or_default())
+}
+
 #[derive(Deserialize, Default)]
 #[serde(default)]
 pub struct InstrumentIdentity<'a> {
@@ -98,18 +104,31 @@ pub struct MarketIdentity<'a> {
 pub struct Tick<'a> {
     #[serde(borrow, alias = "market")]
     pub symbol: Str<'a>,
+    #[serde(deserialize_with = "summary_number")]
     pub bid: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub ask: Number,
-    #[serde(alias = "last_price", alias = "last")]
+    #[serde(
+        alias = "last_price",
+        alias = "last",
+        deserialize_with = "summary_number"
+    )]
     pub last_traded_price: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub mark_price: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub underlying_price: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub oracle_price: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub index_price: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub price_change_rate_24h: Number,
-    #[serde(alias = "volume")]
+    #[serde(alias = "volume", deserialize_with = "summary_number")]
     pub volume_24h: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub open_interest: Number,
+    #[serde(deserialize_with = "summary_number")]
     pub funding_rate: Number,
 }
 #[derive(Deserialize, Default)]

@@ -25,14 +25,15 @@ import type {
 } from '../../types';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
 import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
+import type { EngineSnapshot } from '../base';
 
 import bs58 from 'bs58';
 
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
-import { Frame } from '@tealstreet/safe-cex-wasm/wire';
+import { Frame, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
-import { FrameApplier } from '../../store/frameApplier';
+import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
@@ -62,7 +63,7 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { paradexSigningTransport } from './paradex.signing';
-import { hasSharedTickerValues, RustPublicFeedClient, rustPublicFeedIdentity } from './publicFeed';
+import { RustPublicFeedClient, rustPublicFeedIdentity } from './publicFeed';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
@@ -255,6 +256,7 @@ export class RustEngineExchange extends BaseExchange {
   private sharedPublicFeed?: RustPublicFeedClient;
   private requestSharedSnapshot = false;
   private sharedNativeSymbols = new Set<string>();
+  private sharedValidatedMarkets?: Store['markets'];
   private sharedPublicReady = false;
   private readonly publicFeedObservers = new Set<{ updated(catalogChanged: boolean): void; closed(): void }>();
 
@@ -656,7 +658,7 @@ export class RustEngineExchange extends BaseExchange {
           const wasReady = this.sharedPublicReady;
           if (
             this.requestSharedSnapshot &&
-            update.tickers?.some((ticker) => this.store.marketsBySymbol[ticker.symbol] && hasSharedTickerValues(ticker))
+            update.tickers?.some((ticker) => this.store.marketsBySymbol[ticker.symbol] && TICKER_FIELDS.some((field) => Number.isFinite(ticker[field])))
           )
             this.sharedPublicReady = true;
           this.host?.flush();
@@ -708,7 +710,21 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   /** The whole current state as one frame, for a consumer that starts late. */
-  snapshotFrame = () => this.host?.snapshot();
+  snapshotFrame = () => {
+    this.host?.flush();
+    return this.host?.snapshot();
+  };
+
+  fetchEngineSnapshot = async (): Promise<EngineSnapshot> => this.captureEngineSnapshot();
+
+  private captureEngineSnapshot(): EngineSnapshot {
+    const frame = this.snapshotFrame();
+    if (!frame) throw new Error('Engine has not started');
+    const fetchedLeverage: Record<string, FetchedLeverage> = {};
+    for (const symbol of Object.keys(this.store.fetchedLeverage))
+      fetchedLeverage[symbol] = { ...this.store.fetchedLeverage[symbol] };
+    return { frame, fetchedLeverage };
+  }
 
   /** A late shared subscriber receives the current native book without waiting for a trade. */
   snapshotOrderBook = (symbol: string): OrderBook | undefined => {
@@ -721,65 +737,132 @@ export class RustEngineExchange extends BaseExchange {
   updateSymbolMetadata = async (symbol: string) => {
     if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
-    this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: rails } });
+    this.applier.applyLeverage(symbol, rails);
   };
 
-  private receiveFrame = (buffer: ArrayBuffer) => {
-    const frame = new Frame(buffer);
-    this.applier.apply(frame, !this.onFrame);
-    if (frame.markets() || frame.tickers() || frame.tickerDeltas()) {
-      for (const observer of this.publicFeedObservers) observer.updated(Boolean(frame.markets()));
+  private frameRecoveryPending = false;
+
+  private receiveFrame = (buffer: ArrayBuffer) => this.applyEngineFrame(buffer, true);
+
+  private applyEngineFrame(buffer: ArrayBuffer, recover: boolean) {
+    let frame: Frame;
+    try {
+      frame = new Frame(buffer);
+    } catch (error) {
+      this.applier.invalidateMarketIdentity();
+      console.error('Invalid engine frame', error);
+      if (recover) this.recoverEngineFrame();
+      return;
     }
-    if (this.sharedPublicFeed && this.store.loaded.markets && (frame.markets() || !this.requestSharedSnapshot)) {
+    const previousMarkets = this.store.markets;
+    let needsSnapshot = false;
+    try {
+      this.applier.apply(frame, !this.onFrame || this.feedBookListeners.size > 0);
+    } catch (error) {
+      needsSnapshot = error instanceof FrameApplyError;
+      console.error('Engine frame apply failed', error);
+    }
+    const read = <T>(section: () => T[]): T[] => {
+      try {
+        return section();
+      } catch (error) {
+        needsSnapshot = true;
+        console.error('Engine frame section failed', error);
+        return [];
+      }
+    };
+    const catalogChanged = previousMarkets !== this.store.markets;
+    if (this.publicFeedObservers.size) {
+      let publicChanged = catalogChanged;
+      try {
+        publicChanged ||= Boolean(frame.tickers() || frame.tickerDeltas());
+      } catch (error) {
+        needsSnapshot = true;
+        console.error('Engine public feed section failed', error);
+      }
+      if (publicChanged)
+        for (const observer of this.publicFeedObservers)
+          this.dispatchFrameEvent(() => observer.updated(catalogChanged));
+    }
+    let sharedFailure: Error | undefined;
+    let sendSharedSnapshot = false;
+    let validatedSharedCatalogue = false;
+    if (this.sharedPublicFeed && this.store.loaded.markets && this.applier.hasMarketIdentity && (catalogChanged || !this.requestSharedSnapshot)) {
       try {
         this.sharedPublicFeed.validateMarkets(this.store.markets);
+        this.sharedValidatedMarkets = this.store.markets;
+        validatedSharedCatalogue = true;
+        const symbols = new Set(this.store.markets.map((market) => market.symbol));
+        const gainedSymbols = [...symbols].some((symbol) => !this.sharedNativeSymbols.has(symbol));
+        // Install before dispatch: a synchronous provider reply or recovery can
+        // apply another frame with the same catalogue.
+        this.sharedNativeSymbols = symbols;
+        if (!this.requestSharedSnapshot || gainedSymbols) {
+          this.requestSharedSnapshot = true;
+          sendSharedSnapshot = true;
+        }
       } catch (error) {
-        this.startupFailure = error instanceof Error ? error : new Error(String(error));
-        this.emitAndLogError(this.startupFailure);
-        this.dispose();
-        return;
-      }
-      const symbols = new Set(this.store.markets.map((market) => market.symbol));
-      const gainedSymbols = [...symbols].some((symbol) => !this.sharedNativeSymbols.has(symbol));
-      // Install the catalogue before sending: a synchronous provider reply can
-      // flush another frame with the same catalogue.
-      this.sharedNativeSymbols = symbols;
-      if (!this.requestSharedSnapshot || gainedSymbols) {
-        this.requestSharedSnapshot = true;
-        this.sharedPublicFeed.send({ op: 'snapshot' });
+        sharedFailure = error instanceof Error ? error : new Error(String(error));
+        this.startupFailure = sharedFailure;
       }
     }
-    for (const fill of this.applier.fills(frame)) this.emitter.emit('fill', fill);
+    for (const fill of read(() => this.applier.fills(frame)))
+      this.dispatchFrameEvent(() => this.emitter.emit('fill', fill));
     if (!this.onFrame || this.feedBookListeners.size) {
-      for (const { symbol, orderbook } of this.applier.books(frame)) {
+      for (const { symbol, orderbook } of read(() => this.applier.books(frame))) {
         const listeners = this.bookListeners.get(symbol);
         if (this.name !== 'asterdex')
           listeners?.forEach((listener) => {
-            if (!this.onFrame || this.feedBookListeners.has(listener)) listener(orderbook);
+            if (!this.onFrame || this.feedBookListeners.has(listener))
+              this.dispatchFrameEvent(() => listener(orderbook));
           });
         else if (listeners)
           for (const [id, listener] of [...listeners]) {
             if (listeners.has(id) && (!this.onFrame || this.feedBookListeners.has(listener)))
-              listener(
-                this.name === 'asterdex'
-                  ? {
-                      bids: orderbook.bids.map((level) => ({ ...level })),
-                      asks: orderbook.asks.map((level) => ({ ...level })),
-                    }
-                  : orderbook,
+              this.dispatchFrameEvent(() =>
+                listener({
+                  bids: orderbook.bids.map((level) => ({ ...level })),
+                  asks: orderbook.asks.map((level) => ({ ...level })),
+                }),
               );
           }
       }
     }
     if (!this.onFrame || this.feedCandleListeners.size) {
-      for (const { symbol, interval, candle } of this.applier.candles(frame)) {
+      for (const { symbol, interval, candle } of read(() => this.applier.candles(frame))) {
         this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => {
-          if (!this.onFrame || this.feedCandleListeners.has(listener)) listener(candle);
+          if (!this.onFrame || this.feedCandleListeners.has(listener))
+            this.dispatchFrameEvent(() => listener(candle));
         });
       }
     }
-    this.onFrame?.(buffer);
-  };
+    this.dispatchFrameEvent(() => this.onFrame?.(buffer));
+    if (sharedFailure) {
+      const failure = sharedFailure;
+      this.dispatchFrameEvent(() => this.emitAndLogError(failure));
+      this.dispose();
+    } else {
+      if (sendSharedSnapshot) this.dispatchFrameEvent(() => this.sharedPublicFeed?.send({ op: 'snapshot' }));
+      // Applying markets notifies the Store before shared compatibility is
+      // checked; only wake startup after this exact catalogue was validated.
+      if (validatedSharedCatalogue) for (const wake of this.startupWaiters) wake();
+      if (needsSnapshot && recover) this.recoverEngineFrame();
+    }
+  }
+
+  private recoverEngineFrame() {
+    if (this.frameRecoveryPending || this.isDisposed || !this.host) return;
+    this.frameRecoveryPending = true;
+    try {
+      const snapshot = this.captureEngineSnapshot();
+      this.applyEngineFrame(snapshot.frame, false);
+      this.dispatchFrameEvent(() => this.applier.applyLeverageSnapshot(snapshot.fetchedLeverage));
+    } catch (error) {
+      console.error('Engine frame recovery failed', error);
+    } finally {
+      this.frameRecoveryPending = false;
+    }
+  }
 
   private receiveLog = (level: 'info' | 'warning' | 'error', message: string) => {
     if (this.name === 'breakoutprop' && level === 'error' && message.startsWith('DXtrade startup failed:')) {
@@ -795,9 +878,9 @@ export class RustEngineExchange extends BaseExchange {
     new Promise<void>((resolve, reject) => {
       const ready = () => {
         const loaded = this.store.loaded;
-        const account = this.isPublicDataOnly || (loaded.balance && loaded.orders && loaded.positions);
-        const publicReady = !this.isPublicDataOnly || loaded.tickers;
-        return loaded.markets && publicReady && account && (!this.sharedPublicFeed || this.sharedPublicReady);
+        const account = this.isPublicDataOnly || (loaded.balance && loaded.orders && loaded.positions && this.applier.hasAccountState);
+        const publicReady = !this.isPublicDataOnly || (loaded.tickers && this.applier.hasTickerState);
+        return loaded.markets && this.applier.hasMarketIdentity && publicReady && account && (!this.sharedPublicFeed || (this.sharedPublicReady && this.sharedValidatedMarkets === this.store.markets));
       };
       let unsubscribe = () => {};
       const wake = () => {
@@ -992,7 +1075,7 @@ export class RustEngineExchange extends BaseExchange {
   setLeverage = async (symbol: string, leverage: number, side?: PositionSide) => {
     await this.command({ op: 'setLeverage', symbol, leverage, ...(side !== undefined ? { side } : {}) });
     if (this.name === 'kucoinspot') {
-      this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: { buyLeverage: 1, sellLeverage: 1 } } });
+      this.applier.applyLeverage(symbol, { buyLeverage: 1, sellLeverage: 1 });
     }
   };
 
@@ -1159,11 +1242,16 @@ export class RustEngineExchange extends BaseExchange {
       )
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
-        const value = await this.fetchSymbolMaxLeverage(symbol);
-        leverage = { buyLeverage: value, sellLeverage: value };
+        const cached = this.store.fetchedLeverage[symbol];
+        if (
+          !cached ||
+          !Number.isFinite(cached.buyLeverage) || cached.buyLeverage <= 0 ||
+          !Number.isFinite(cached.sellLeverage) || cached.sellLeverage <= 0
+        ) return null;
+        return cached;
       }
       this.host?.flush();
-      this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: leverage } });
+      this.applier.applyLeverage(symbol, leverage);
       return leverage;
     } catch (error) {
       this.log(`Error fetching leverage for ${symbol}: ${error}`, LogSeverity.Warning);
@@ -1280,7 +1368,7 @@ export class RustEngineExchange extends BaseExchange {
   dispose() {
     this.sharedPublicFeed?.dispose();
     this.sharedPublicFeed = undefined;
-    for (const observer of this.publicFeedObservers) observer.closed();
+    for (const observer of this.publicFeedObservers) this.dispatchFrameEvent(() => observer.closed());
     this.publicFeedObservers.clear();
     this.feedBookListeners.clear();
     this.feedCandleListeners.clear();

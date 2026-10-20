@@ -9,6 +9,24 @@ import { directTransport } from '../../transport/direct';
 const wasm = vi.hoisted(() => ({ initialize: vi.fn(), generation: 0, engines: [] as WasmEngineLike[] }));
 
 vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
+  // Prove native startup from decoded tables, rather than caller-preloaded JS
+  // flags. Empty validated tables keep this loader-only fixture independent of
+  // venue metadata and the generation sentinel returned by snapshotFrame.
+  const startupFrame = () => {
+    const bytes = new Uint8Array(72);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(0, 0x46584353, true);
+    view.setUint16(4, 1, true);
+    view.setUint16(6, 3, true);
+    let at = 16;
+    for (const [kind, length] of [[2, 8], [3, 8], [10, 16]]) {
+      view.setUint16(at, kind, true);
+      view.setUint32(at + 4, length, true);
+      if (kind === 10) view.setUint32(at + 8, 31, true);
+      at += 8 + length;
+    }
+    return bytes;
+  };
   const engineModule = {
     WasmEngine: class {
       private readonly generation = wasm.generation;
@@ -17,9 +35,14 @@ vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
         wasm.engines.push(this);
       }
 
-      start = () => '';
+      private pending = false;
+      start = () => { this.pending = true; return ''; };
       command = () => '';
-      takeFrame = () => undefined;
+      takeFrame = () => {
+        if (!this.pending) return undefined;
+        this.pending = false;
+        return startupFrame();
+      };
       snapshotFrame = () => {
         if (this.generation !== wasm.generation) throw new Error('WASM instance replaced under a live engine');
         return Uint8Array.of(this.generation);

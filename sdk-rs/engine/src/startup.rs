@@ -91,7 +91,7 @@ impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Row<T> {
 }
 
 /// Protects supplied live ticker fields while a slower discovery read is in flight.
-/// Masks use `store::TICKER_FIELDS` order plus `MID_PRICE` for the native-only midpoint.
+/// Masks use `store::TICKER_FIELDS` order, including `MID_PRICE` for midpoint.
 /// Inactive recording does no lookup or allocation.
 #[derive(Default)]
 pub struct LiveTickers {
@@ -303,6 +303,17 @@ mod live_ticker_tests {
         store.update_ticker("BTC", |ticker| ticker.last = 200.0);
         live.record(&store, "BTC", 1 << 2);
         live.finish(&store, &mut rows);
+        assert_eq!((rows[0].last, rows[0].mark), (200.0, 103.0));
+        assert_eq!(crate::store::TICKER_FIELDS[11], "midPrice");
+        live.begin();
+        store.update_ticker("BTC", |ticker| ticker.mid_price = None);
+        live.record(&store, "BTC", LiveTickers::MID_PRICE);
+        rows[0].mid_price = Some(999.0);
+        live.finish(&store, &mut rows);
+        assert_eq!(
+            rows[0].mid_price, None,
+            "a delayed seed cannot restore a cleared midpoint"
+        );
         assert_eq!((rows[0].last, rows[0].mark), (200.0, 103.0));
     }
 }

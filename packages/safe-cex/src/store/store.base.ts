@@ -23,6 +23,7 @@ export const PACKED_TICKER_FIELDS = [
   'fundingTime',
   'volume',
   'quoteVolume',
+  'midPrice',
 ] as const;
 
 type PackedTickerField = (typeof PACKED_TICKER_FIELDS)[number];
@@ -347,6 +348,11 @@ export class DefaultStore implements Store {
     }
     if (target.index !== source.index) {
       mutableTarget.index = source.index;
+      changed = true;
+    }
+    if (target.midPrice !== source.midPrice) {
+      if (source.midPrice === undefined) delete mutableTarget.midPrice;
+      else mutableTarget.midPrice = source.midPrice;
       changed = true;
     }
     if (target.percentage !== source.percentage) {
@@ -1001,7 +1007,9 @@ export class DefaultStore implements Store {
       for (let fieldIndex = 0; fieldIndex < PACKED_TICKER_FIELDS.length; fieldIndex++) {
         if (mask & (1 << fieldIndex)) {
           const field = PACKED_TICKER_FIELDS[fieldIndex] as PackedTickerField;
-          (ticker as any)[field] = delta[valueCursor++];
+          const value = delta[valueCursor++];
+          if (field === 'midPrice' && Number.isNaN(value)) delete (ticker as any)[field];
+          else (ticker as any)[field] = value;
           didMutate = true;
         }
       }

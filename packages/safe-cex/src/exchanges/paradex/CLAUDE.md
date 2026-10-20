@@ -878,3 +878,15 @@ neighbours remain usable. Private account initialization starts once the usable
 catalogue is available, without waiting for REST ticker seeds. Account snapshots,
 mutation acknowledgements and signing validation retain their stricter rules.
 See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.
+
+Summary ticker numbers accept null as zero as well as empty strings, matching
+TS's optional-field defaults. Mixed nullable bid/ask/funding fields retain valid
+last/mark prices on REST and JSON summaries. Instrument, book and signed/private
+required numbers do not inherit that null coercion.
+
+Rust JSON position snapshots and updates accept an empty string or null for optional
+`leverage` and `liquidation_price`, matching TS's `value || '0'` default. Zero
+leverage uses the existing cached setting or 10x fallback; liquidation defaults
+to zero. Nonempty malformed values and booleans remain invalid; position size/PnL
+still reject null and empty strings. Account margin and depth
+numbers retain strict validation. Binary position decoding is unchanged.

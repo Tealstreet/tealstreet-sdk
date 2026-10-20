@@ -242,3 +242,24 @@ catalogue census before deferred snapshot dispatch. Repeat affected gates agains
 the integrated artifact. The Paradex lane defers public blank startup and the
 narrow optional REST leverage/liquidation blanks here; SBE/trading/errors stay
 with `feat/rust-paradex-emitter`. Generic private row isolation remains later.
+
+## Wire integration and Paradex boundary fixes
+
+Resolved wire landing `c44f22bd8e` while retaining lazy ticker rows, shared
+catalogue-gain snapshots and ticker-independent private startup. Independent
+reviews caught and fixed stale decoded-section evidence after rejected indexed
+identity and a shared compatibility check racing the startup store callback.
+Readiness now requires accepted sections and the current validated shared
+catalogue, with valid empty tables and independent good peers preserved.
+The expanded SDK integration suite passes110 cases/eight files, TypeScript and
+strict runtime lint. Native engine tests pass107 cases with a new midpoint-clear
+overlay assertion. Whole-workspace format and banned-pattern checks pass.
+
+Paradex summary fields coerce null only within Tick, retaining valid last/mark
+prices beside nullable bid/ask/funding. Optional position leverage/liquidation
+accept empty and null with the existing cached/default leverage fallback.
+Required size/PnL/margins, instrument metadata, depth and signing remain strict.
+REST/JSON tests cover funded startup, CLOSED removal, null/empty and mixed bad
+required-size snapshot preservation. Full Paradex passes128 cases/nine targets
+and strict Clippy. Combined release Wasm and full integrated gates are running;
+the earlier complete checkpoint is not proof for these newer artifacts.

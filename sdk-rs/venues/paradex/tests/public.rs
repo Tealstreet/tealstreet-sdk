@@ -479,7 +479,24 @@ fn late_poll_cannot_overwrite_newer_trade_or_restart_removed_subscription() {
     });
     let r = h.take("klines");
     h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"trades.BTC-USD-PERP","data":{"price":"111","size":"2","created_at":1700000000000}}}"#);
-    assert!(h.e.take_market_frame(h.now).is_some());
+    assert!(h.e.take_market_frame(h.now).is_none());
+    let startup = h.e.take_frame(h.now).unwrap();
+    let sections: Vec<_> = safe_cex_engine::wire::sections(startup).collect();
+    assert!(
+        sections
+            .iter()
+            .any(|(kind, _)| *kind == safe_cex_engine::wire::section::MARKETS)
+    );
+    let candle = sections
+        .iter()
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::CANDLES)
+        .unwrap()
+        .1;
+    assert_eq!(u32::from_le_bytes(candle[..4].try_into().unwrap()), 1);
+    let values: [f64; 6] = std::array::from_fn(|i| {
+        f64::from_le_bytes(candle[16 + i * 8..24 + i * 8].try_into().unwrap())
+    });
+    assert_eq!(values, [1699999980000., 111., 111., 111., 111., 2.]);
     h.respond(r, 200, r#"{"results":[[1699999980000,100,100,100,100,1]]}"#);
     assert!(h.e.take_market_frame(h.now).is_none());
     h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"trades.BTC-USD-PERP","data":{"price":"112","size":"1","created_at":1699999900000}}}"#);
@@ -585,6 +602,41 @@ fn sbe_declared_blocks_groups_nullability_and_unknown_versions_are_checked_befor
             .iter()
             .any(|a| matches!(a,Action::WsClose{socket}if *socket==h.public))
     );
+}
+
+#[test]
+fn nullable_summary_fields_keep_valid_prices_on_rest_and_json_updates() {
+    let mut h = Harness::empty(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    h.reply("/markets", MARKETS);
+    h.reply("summary", r#"{"results":[{"symbol":"BTC-USD-PERP","bid":null,"ask":"","funding_rate":null,"underlying_price":null,"last_traded_price":"100","mark_price":"101","volume_24h":"20"}]}"#);
+    assert!(h.e.store().loaded().tickers);
+    let ticker = h.e.store().ticker(BTC).unwrap();
+    assert_eq!((ticker.bid, ticker.ask, ticker.funding_rate), (0., 0., 0.));
+    assert_eq!(
+        (ticker.last, ticker.mark, ticker.index, ticker.volume),
+        (100., 101., 101., 20.)
+    );
+    h.public = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel: Some(SocketChannel::Public),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: h.public });
+    h.collect();
+    h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"markets_summary","data":{"symbol":"BTC-USD-PERP","bid":null,"ask":null,"funding_rate":null,"last_traded_price":"102","mark_price":"103","volume_24h":"25"}}}"#);
+    let ticker = h.e.store().ticker(BTC).unwrap();
+    assert_eq!((ticker.last, ticker.mark, ticker.volume), (102., 103., 25.));
+    assert_eq!(ticker.funding_rate, 0.);
 }
 
 #[test]
@@ -864,7 +916,12 @@ fn polls_cannot_rewind_a_bucket_or_quantity_known_before_the_request_started() {
         interval: "1m".into(),
     });
     h.reply("klines", r#"{"results":[]}"#);
-    let _ = h.e.take_market_frame(h.now);
+    assert!(h.e.take_market_frame(h.now).is_none());
+    let startup = h.e.take_frame(h.now).unwrap();
+    assert!(
+        safe_cex_engine::wire::sections(startup)
+            .any(|(kind, _)| kind == safe_cex_engine::wire::section::MARKETS)
+    );
     h.ws(&format!(r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"trades.BTC-USD-PERP","data":{{"price":"100","size":"2","created_at":{}}}}}}}"#, h.now));
     assert_eq!(emitted(&mut h), Some([bucket, 100., 100., 100., 100., 2.]));
     for (timestamp, price, volume, expected) in [
