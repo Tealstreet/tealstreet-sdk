@@ -5,7 +5,8 @@ use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId,
 };
 use std::collections::{BTreeMap, HashMap};
 const INTX: &str = "https://api.international.coinbase.com/api/v1/instruments/";
@@ -325,7 +326,10 @@ impl Coinbase {
         }
         self.public.socket =
             Some(cx.connect_feed(WS, SocketChannel::Public, "market", self.public.recover));
-        self.public.supervisor.connecting(cx);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
     }
     fn subscription(
         &self,

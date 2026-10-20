@@ -17,22 +17,27 @@ use safe_cex_engine::model::{
     Candle, DerivativeProduct, InstrumentClassification, Interval, Limits, Market, MinMax,
     Precision, ProductKind, Ticker,
 };
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
 
-const MAX_RECONNECT_DELAY_MS: f64 = 30_000.0;
-/// Every socket is checked this often. One quiet for `PING_AFTER_MS` is
-/// pinged (Bybit answers on public and private sockets alike); one silent for
-/// `SILENCE_LIMIT_MS` is treated as dead, since a half-open socket never closes.
-const WATCHDOG_INTERVAL_MS: f64 = 5_000.0;
-const PING_AFTER_MS: f64 = 10_000.0;
-const SILENCE_LIMIT_MS: f64 = 20_000.0;
+/// Bybit answers pings on public and private sockets alike; a socket silent
+/// for the idle timeout is treated as dead, since a half-open socket never closes.
+const SOCKET: Config = Config {
+    connect_timeout_ms: 10_000.0,
+    auth_timeout_ms: None,
+    idle_timeout_ms: 20_000.0,
+    ping_interval_ms: Some(10_000.0),
+    backoff_base_ms: 500.0,
+    backoff_cap_ms: 30_000.0,
+    stable_ms: 30_000.0,
+};
 /// A book that skipped an update is unsubscribed, then subscribed again for a
 /// fresh snapshot this long after.
 const RESUBSCRIBE_DELAY_MS: f64 = 100.0;
@@ -144,11 +149,7 @@ enum Channel {
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    attempts: u32,
-    reconnect: Option<TimerId>,
-    watchdog: Option<TimerId>,
-    last_received: f64,
-    last_ping: f64,
+    supervisor: Supervisor,
     /// Subscribe messages paced out one per `SUBSCRIBE_PACE_MS`.
     outbox: VecDeque<String>,
     outbox_timer: Option<TimerId>,
@@ -159,11 +160,7 @@ impl Connection {
         Self {
             socket: None,
             open: false,
-            attempts: 0,
-            reconnect: None,
-            watchdog: None,
-            last_received: 0.0,
-            last_ping: 0.0,
+            supervisor: Supervisor::new(SOCKET),
             outbox: VecDeque::new(),
             outbox_timer: None,
         }
@@ -611,52 +608,46 @@ impl BybitLinear {
                 Channel::Private => safe_cex_engine::SocketChannel::Private,
             },
         );
+        let supervise =
+            channel == Channel::Private || cx.public_feed_policy() == PublicFeedPolicy::Direct;
         let connection = self.connection(channel);
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if supervise {
+            connection.supervisor.connecting(cx);
+        }
         connection.socket = Some(socket);
         connection.open = false;
     }
 
-    fn watch(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
-        let timer = cx.set_timer(WATCHDOG_INTERVAL_MS);
-        if let Some(previous) = self.connection(channel).watchdog.replace(timer) {
-            cx.clear_timer(previous);
-        }
-    }
-
-    /// Ping a quiet socket; close and reconnect a silent one.
-    fn on_watchdog(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
-        let now = cx.now;
+    fn on_socket_timer(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, timer: TimerId) {
         let connection = self.connection(channel);
-        connection.watchdog = None;
-        let (Some(socket), true) = (connection.socket, connection.open) else {
-            return;
-        };
-        let quiet = now - connection.last_received;
-        if quiet > SILENCE_LIMIT_MS {
-            cx.close(socket);
-            self.on_socket_closed(cx, channel, 4000);
-            return;
+        let socket = connection.socket;
+        match connection.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => self.connect(cx, channel),
+            Tick::Ping => {
+                if let Some(socket) = socket {
+                    cx.send(socket, r#"{"op":"ping"}"#);
+                }
+            }
+            Tick::TimedOut(_) => {
+                if let Some(socket) = socket {
+                    cx.close(socket);
+                }
+                self.on_socket_closed(cx, channel, 4000);
+            }
+            Tick::Handled | Tick::Unhandled => {}
         }
-        if quiet >= PING_AFTER_MS && now - connection.last_ping >= PING_AFTER_MS {
-            connection.last_ping = now;
-            cx.send(socket, r#"{"op":"ping"}"#);
-        }
-        self.watch(cx, channel);
     }
 
     fn on_socket_closed(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, code: u16) {
         let connection = self.connection(channel);
         connection.socket = None;
         connection.open = false;
-        connection.attempts += 1;
         connection.outbox.clear();
-        let timers = [connection.watchdog.take(), connection.outbox_timer.take()];
-        let delay = (250.0 * 2f64.powi(connection.attempts as i32)).min(MAX_RECONNECT_DELAY_MS);
-        for timer in timers.into_iter().flatten() {
+        if let Some(timer) = connection.outbox_timer.take() {
             cx.clear_timer(timer);
         }
-        let timer = cx.set_timer(delay);
-        self.connection(channel).reconnect = Some(timer);
+        connection.supervisor.retry(cx);
         if channel == Channel::Private {
             let category = self.category;
             for other in self.categories() {
@@ -667,7 +658,7 @@ impl BybitLinear {
         }
         cx.log(
             LogLevel::Warning,
-            format!("Bybit socket closed ({code}); reconnecting in {delay} ms"),
+            format!("Bybit socket closed ({code}); reconnecting"),
         );
     }
 
@@ -1866,13 +1857,7 @@ impl BybitLinear {
             if channel == Channel::Private && self.category != self.primary_category {
                 continue;
             }
-            if self.connection(channel).reconnect == Some(timer) {
-                self.connection(channel).reconnect = None;
-                self.connect(cx, channel);
-            }
-            if self.connection(channel).watchdog == Some(timer) {
-                self.on_watchdog(cx, channel);
-            }
+            self.on_socket_timer(cx, channel, timer);
         }
         self.on_account_timer(cx, timer);
         if self.category == self.primary_category {
@@ -1922,13 +1907,9 @@ impl Venue for BybitLinear {
         let Some(channel) = self.channel_of(socket) else {
             return;
         };
-        let now = cx.now;
         let connection = self.connection(channel);
         connection.open = true;
-        connection.attempts = 0;
-        connection.last_received = now;
-        connection.last_ping = now;
-        self.watch(cx, channel);
+        connection.supervisor.opened(cx);
         match channel {
             Channel::Public => {
                 let mut topics: Vec<String> = cx
@@ -1974,7 +1955,7 @@ impl Venue for BybitLinear {
         let Some(channel) = self.channel_of(socket) else {
             return;
         };
-        self.connection(channel).last_received = cx.now;
+        self.connection(channel).supervisor.received(cx.now);
         match channel {
             Channel::Public => self.on_public_frame(cx, text),
             Channel::Private => {

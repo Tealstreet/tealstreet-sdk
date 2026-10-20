@@ -1,7 +1,9 @@
 //! Sequenced trading jobs; preflight and signatures complete before any placement.
 use crate::{ApexOmni, Pending, sign};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Response, TimerId, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, Outcome, Response, TimerId, VenueError, num,
+};
 use serde::Deserialize;
 use std::collections::{HashSet, VecDeque};
 
@@ -24,6 +26,8 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     placements: bool,
+    /// A step took effect, so a later rejection cannot mean nothing happened.
+    effective: bool,
 }
 pub struct Request {
     command: CommandId,
@@ -521,7 +525,7 @@ impl ApexOmni {
             Command::PlaceOrders { command, orders } => {
                 if let Err(error) = validate(&orders, cx) {
                     cx.command_error(command, &error);
-                    cx.done(command, Err(error));
+                    cx.fail(command, not_sent(error));
                     return Ok(());
                 }
                 (command, vec![Step::Build(orders)], true)
@@ -533,9 +537,9 @@ impl ApexOmni {
                 amount,
             } => {
                 if price.is_none() && amount.is_none() {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("ApeX Omni amendment requires a price or amount".into()),
+                        not_sent("ApeX Omni amendment requires a price or amount"),
                     );
                     return Ok(());
                 }
@@ -549,7 +553,7 @@ impl ApexOmni {
                     if !valid_id(&id) {
                         let error = "ApeX Omni cancel requires an order ID".to_owned();
                         cx.command_error(command, &error);
-                        cx.done(command, Err(error));
+                        cx.fail(command, not_sent(error));
                         return Ok(());
                     }
                     if unique.insert(id.clone()) {
@@ -567,7 +571,10 @@ impl ApexOmni {
             }
             Command::CancelSymbolOrders { command, symbol } => {
                 let Some(market) = cx.store.market(&symbol) else {
-                    cx.done(command, Err(format!("ApeX Omni market {symbol} not found")));
+                    cx.fail(
+                        command,
+                        not_sent(format!("ApeX Omni market {symbol} not found")),
+                    );
                     return Ok(());
                 };
                 (
@@ -590,13 +597,16 @@ impl ApexOmni {
                 side: _,
             } => {
                 let Some(market) = cx.store.market(&symbol) else {
-                    cx.done(command, Err(format!("ApeX Omni market {symbol} not found")));
+                    cx.fail(
+                        command,
+                        not_sent(format!("ApeX Omni market {symbol} not found")),
+                    );
                     return Ok(());
                 };
                 if !positive(leverage) {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("ApeX Omni leverage must be finite and positive".into()),
+                        not_sent("ApeX Omni leverage must be finite and positive"),
                     );
                     return Ok(());
                 }
@@ -622,14 +632,12 @@ impl ApexOmni {
             Command::SetMarginType {
                 command, isolated, ..
             } => {
-                cx.done(
-                    command,
-                    if isolated {
-                        Err("ApeX Omni supports cross margin only".into())
-                    } else {
-                        Ok("null".into())
-                    },
-                );
+                if isolated {
+                    let error = not_sent("ApeX Omni supports cross margin only");
+                    cx.fail(command, error.kind(ErrorKind::Unsupported));
+                } else {
+                    cx.done(command, Ok("null".into()));
+                }
                 return Ok(());
             }
             Command::SetPositionMode {
@@ -637,14 +645,12 @@ impl ApexOmni {
                 hedged,
                 symbol: _,
             } => {
-                cx.done(
-                    command,
-                    if hedged {
-                        Ok("null".into())
-                    } else {
-                        Err("ApeX Omni supports hedged position mode only".into())
-                    },
-                );
+                if hedged {
+                    cx.done(command, Ok("null".into()));
+                } else {
+                    let error = not_sent("ApeX Omni supports hedged position mode only");
+                    cx.fail(command, error.kind(ErrorKind::Unsupported));
+                }
                 return Ok(());
             }
             Command::FetchLeverage { command, symbol } => {
@@ -665,7 +671,7 @@ impl ApexOmni {
         {
             let error = "ApeX Omni private commands require API credentials".to_owned();
             cx.command_error(command, &error);
-            cx.done(command, Err(error));
+            cx.fail(command, not_sent(error));
             return Ok(());
         }
         self.trading.queue.push_back(Job {
@@ -673,6 +679,7 @@ impl ApexOmni {
             steps: steps.into(),
             ids: vec![],
             placements,
+            effective: false,
         });
         self.drive_trading(cx);
         Ok(())
@@ -731,7 +738,7 @@ impl ApexOmni {
                         Ok(amendment) => amendment,
                         Err(error) => {
                             cx.command_error(job.command, &error);
-                            cx.done(job.command, Err(error));
+                            cx.fail(job.command, not_sent(error));
                             continue;
                         }
                     };
@@ -761,7 +768,7 @@ impl ApexOmni {
                     });
                     if let Err(error) = result {
                         cx.command_error(job.command, &error);
-                        cx.done(job.command, Err(error));
+                        cx.fail(job.command, not_sent(error));
                         continue;
                     }
                     for step in prepared.into_iter().rev() {
@@ -780,7 +787,7 @@ impl ApexOmni {
                         Pending::Trade(Request { command, accepted }),
                         None,
                     ) {
-                        self.fail_trading(cx, &error);
+                        self.fail_trading(cx, not_sent(error));
                     }
                     return;
                 }
@@ -793,12 +800,17 @@ impl ApexOmni {
         }
     }
 
-    fn fail_trading(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+    fn fail_trading(&mut self, cx: &mut Cx<'_, Pending>, mut error: VenueError) {
         self.trading.waiting = false;
         self.trading.amendment = None;
         if let Some(job) = self.trading.active.take() {
-            cx.command_error(job.command, error);
-            cx.done(job.command, Err(error.into()));
+            // A later refusal after a step took effect cannot mean nothing happened.
+            if job.effective && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+            {
+                error.outcome = None;
+            }
+            cx.command_error(job.command, &error.message);
+            cx.fail(job.command, error);
         }
         self.drive_trading(cx);
     }
@@ -806,7 +818,7 @@ impl ApexOmni {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         _request: Request,
-        error: &str,
+        error: VenueError,
     ) {
         self.fail_trading(cx, error);
     }
@@ -886,7 +898,7 @@ impl ApexOmni {
                     .and_then(|e| e.data)
                     .filter(|d| !d.id.is_empty());
                 let Some(data) = parsed else {
-                    self.fail_trading(cx, "ApeX Omni placement response has no order ID");
+                    self.fail_trading(cx, unknown("ApeX Omni placement response has no order ID"));
                     return;
                 };
                 if let Some(job) = self.trading.active.as_mut() {
@@ -897,7 +909,7 @@ impl ApexOmni {
             Accepted::Cancel(ids) => self.note_cancel(cx, &ids),
             Accepted::AmendCancel => {
                 let Some(mut amendment) = self.trading.amendment.take() else {
-                    self.fail_trading(cx, "ApeX Omni amendment state is unavailable");
+                    self.fail_trading(cx, "ApeX Omni amendment state is unavailable".into());
                     return;
                 };
                 if let Some(parent) = cx.store.order(&amendment.id) {
@@ -907,7 +919,8 @@ impl ApexOmni {
                 }
                 self.note_cancel(cx, &[amendment.id]);
                 if amendment.overflow {
-                    self.fail_trading(cx, "ApeX Omni amendment exceeded the observed fill limit");
+                    let error = "ApeX Omni amendment exceeded the observed fill limit";
+                    self.fail_trading(cx, error.into());
                     return;
                 }
                 if amendment.default_amount {
@@ -940,7 +953,7 @@ impl ApexOmni {
                             }
                         }
                         Err(error) => {
-                            self.fail_trading(cx, &error);
+                            self.fail_trading(cx, error.into());
                             return;
                         }
                     }
@@ -974,9 +987,46 @@ impl ApexOmni {
                 self.refresh_positions(cx);
             }
         }
+        if let Some(job) = self.trading.active.as_mut() {
+            job.effective = true;
+        }
         self.trading.waiting = false;
         self.drive_trading(cx);
     }
+}
+
+/// A failed ApeX Omni request: transport, a gateway status or a coded reply.
+/// No ApeX code table is documented, so other codes stay unclassified.
+pub(crate) fn failure(code: Option<i64>, status: u16, message: String) -> VenueError {
+    let error = VenueError::new(message);
+    let error = match (code, status) {
+        (_, 408 | 500..) | (None, 200..=299) => error.outcome(Outcome::Unknown),
+        (Some(401), _) | (None, 401) => error
+            .kind(ErrorKind::AuthInvalid)
+            .outcome(Outcome::Rejected),
+        (None, 403) => error
+            .kind(ErrorKind::AuthPermission)
+            .outcome(Outcome::Rejected),
+        (Some(429), _) | (None, 429) => error
+            .kind(ErrorKind::RateLimited)
+            .outcome(Outcome::Rejected),
+        (None, _) => error.kind(ErrorKind::Rejected).outcome(Outcome::Rejected),
+        (Some(_), _) => error,
+    };
+    match code {
+        Some(code) => error.venue_code(code.to_string()),
+        None => error,
+    }
+}
+
+/// The write may have executed; reconcile before resending.
+pub(crate) fn unknown(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::Unknown)
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
 }
 
 #[cfg(test)]
