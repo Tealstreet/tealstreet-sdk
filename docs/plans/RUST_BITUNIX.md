@@ -3091,3 +3091,10 @@ Propose a stricter runner state for ONE final Bitruepublic attempt: two readings
 below quartercapacity250%,15sapart. All gates,1sdeadline,100msquietwindow,
 fixtures/equality/metrics and warmup policy remain unchanged; no other profiles
 repeat. Independent review of that bounded infrastructure action pending.
+
+Independent infrastructure plan audit PASS: original sampling phase/cause stay
+unknown; the diagnostic proves only an isolated baseline can complete. Quarter
+capacity is a material admission change (293.9% would fail it). Predeclare exactly
+ONE full3run gate after2readings<250%15sapart, sameNode/source/module/tape/limits.
+Stop on any completed failure or repeated incomplete attempt; do not keep
+adjusting runner admission/retrying to select green. No sampler repair claimed.
