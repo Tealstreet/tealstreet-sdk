@@ -6,6 +6,7 @@ import { OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types
 const exchange = () => {
   const store = new DefaultStore();
   store.update({ markets: [{ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP', base: 'BTC', quote: 'USDT', active: true,
+    info: { ih: '0x030501', bd: 9, qd: 6 },
     precision: { amount: 0.001, price: 0.1 }, limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } } } as any] });
   const e = new GrvtExchange('grvt', {} as any, store);
   e.grvtTradingAccountId = '777';
