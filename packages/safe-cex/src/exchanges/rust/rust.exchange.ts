@@ -53,6 +53,7 @@ import {
 } from '../bybit/bybit.types';
 import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
+import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 
@@ -94,6 +95,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   hyperliquid: 'hyperliquid',
   hyperliquidspot: 'hyperliquidspot',
   paradex: 'paradex',
+  txflow: 'txflow',
   kraken: 'kraken',
   krakenspot: 'krakenspot',
   lighter: 'lighter',
@@ -152,6 +154,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     mint: () => `ts_${uuid()}`,
     isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
   }),
+  txflow: txflowClientOrderIdRule,
   blofin: patternClientOrderIdRule('BloFin', /^[A-Za-z0-9]{1,32}$/, {
     mint: () => `${BLOFIN_BROKER_ID}${uuid()}`.slice(0, 32),
   }),
@@ -338,6 +341,7 @@ export class RustEngineExchange extends BaseExchange {
         !Boolean(this.options.key && this.options.paradexAddress && this.options.subkeyAddress)
       );
     }
+    if (this.name === 'txflow') return this.options.publicDataOnly === true;
     if (this.name === 'lighter') {
       return this.options.publicDataOnly === true || !this.options.secret || !this.options.apiKeyIndex;
     }
@@ -349,6 +353,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   protected override get canSign(): boolean {
+    if (this.name === 'txflow') return Boolean(this.options.secret && this.options.applicationId);
     if (['coinbase', 'coinbasespot'].includes(this.name)) return Boolean(this.options.key);
     if (this.name !== 'asterdex') return super.canSign;
     if (!this.options.key) return false;
@@ -400,7 +405,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
     if (
-      !['hyperliquid', 'paradex', 'lighter', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) &&
+      !['hyperliquid', 'paradex', 'lighter', 'txflow', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) &&
       !this.isPublicDataOnly &&
       (!this.options.key ||
         !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
@@ -868,7 +873,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (['asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) || orderlyNames.has(this.name))
+      if (['asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'txflow', 'coinbase', 'coinbasespot', 'polymarket'].includes(this.name) || orderlyNames.has(this.name))
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
@@ -884,6 +889,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   fetchHistoricalOrders = (opts?: OrderHistoryOptions) => {
+    if (this.name === 'txflow' && (opts?.orderId !== undefined || opts?.status !== undefined)) {
+      return Promise.reject(new Error('TxFlow order history does not support orderId or status filters'));
+    }
     if (['coinbase', 'coinbasespot'].includes(this.name) && (opts?.orderId !== undefined || opts?.status !== undefined)) {
       return Promise.reject(new Error('Coinbase order history does not support orderId or status filters'));
     }

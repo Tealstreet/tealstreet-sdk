@@ -10,6 +10,7 @@ import { coinbasePrivateTape } from '../../../../../sdk-rs/harness/private-tape-
 import { canonicalUrl, Tape } from '../../../../../sdk-rs/harness/tape.mjs';
 import { venueOf } from '../../../../../sdk-rs/harness/venues.mjs';
 import { HYROTRADER_SIMULATOR_URL, HYROTRADER_SIMULATOR_WS_URL } from '../../exchanges/bybit/bybit.types';
+import { directTransport } from '../../transport/direct';
 
 type RecordRow = {
   type: string;
@@ -57,6 +58,7 @@ type BinanceInstrumentInput = {
 };
 
 const orderlyAliases = new Set(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
+const txflowPublicCorsProxy = 'https://txflow-cutover-cors.invalid';
 
 /** Test input only: no network, no SDK store writes and no fabricated empty replies. */
 export const realVenue = (name: ExchangeName) => {
@@ -118,6 +120,9 @@ export const realVenue = (name: ExchangeName) => {
     secret: '',
     publicDataOnly: true,
     engine: 'rust',
+    ...(name === 'txflow'
+      ? { testnet: true, transport: { ...directTransport, publicCorsProxy: () => txflowPublicCorsProxy } }
+      : {}),
     ...(orderlyAliases.has(name) ? { applicationId: venue.publicOptions.applicationId } : {}),
     ...(name === 'polymarket' ? { polymarket: venue.publicOptions.polymarket } : {}),
     ...(name === 'breakoutprop' ? { ...venue.publicOptions, subaccount: venue.options.subaccount } : {}),
@@ -335,7 +340,12 @@ export const realVenue = (name: ExchangeName) => {
         pollingEpoch ??= Date.now();
         tape.time = Math.max(0, Date.now() - pollingEpoch);
       }
-      const response = tape.respond(method, url, body, headers);
+      // Exercise the native public-CORS route, then serve its real venue URL
+      // from the captured tape without contacting the test-only proxy.
+      const venueUrl = name === 'txflow' && url.startsWith(`${txflowPublicCorsProxy}/`)
+        ? url.slice(txflowPublicCorsProxy.length + 1)
+        : url;
+      const response = tape.respond(method, venueUrl, body, headers);
       if (response.status === 599) errors.push(`Untaped ${method} ${url}${body ? ` ${body}` : ''}`);
       if (polling && method === 'POST' && new URL(url).pathname.endsWith('/marketdata') && response.status === 200)
         publicPollResponses.push({

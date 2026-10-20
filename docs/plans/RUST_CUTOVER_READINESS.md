@@ -177,3 +177,20 @@ consumer adoption remain explicit blockers.
   188.0/98.2 ms, steady 98.5/36.2 ms, retained memory 17.0/3.7 MB including
   2.0 MB Rust linear memory. Latest landing is integrated at this checkpoint;
   push/review the refreshed head and merge only after its CI is green.
+
+- TxFlow integration updates the current inventory to **49 registered / 44 Rust /
+  nine defaults / 35 opt-in / five absent names**. Both production registries
+  select Rust for testnet USDC perpetuals; mainnet rejects before I/O and
+  production/preview availability remains disabled. Its independent TS replay
+  reference is frozen under `__tests__/reference/txflow`; the retained
+  production client-ID helper and exact dependencies are in
+  [the caller inventory](RUST_CUTOVER_CALLERS.md#appendix-d-txflow-frozen-reference-and-retained-helper).
+  The real-venue consumer fixture explicitly supplies `testnet: true` and a
+  test-only public-CORS provider, then serves captured venue input without
+  altering production guards or seeding the SDK store. Existing matching-socket
+  delivery and native ticker-frame assertions remain required. The newly
+  integrated combined WASM passes all **six targeted TxFlow tests in two
+  files**: five independent consumer cases and one real native startup/frame/
+  late-snapshot case. Scoped helper lint and safe-cex typecheck pass;
+  independent helper/inventory review has no findings. Earlier checkpoint
+  counts and gate results above describe their original heads.
