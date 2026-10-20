@@ -747,6 +747,82 @@ fn isolated_hedge_leverage_ack_only_updates_the_requested_long_side() {
 }
 
 #[test]
+fn delayed_post_write_recovery_preserves_authentication_backoff_and_recovery_hint() {
+    let mut h = Harness::classic();
+    place(&mut h, vec![limit()]);
+    let (request, _) = body(&mut h, "/batch-place-order");
+    batch_success(&mut h, request, &["recovery-order"]);
+    let write_check = h
+        .timers
+        .iter()
+        .rev()
+        .find(|(_, at)| *at == h.now + 5_000.0)
+        .unwrap()
+        .0;
+    let mut socket = h
+        .sockets
+        .iter()
+        .rev()
+        .find(|(_, url)| url.ends_with("/private"))
+        .unwrap()
+        .0;
+    let mut waiting = None;
+    for attempt in 0..4 {
+        h.now += 1.0;
+        h.event(Event::WsMessage {
+            socket,
+            text: r#"{"event":"login","code":"40009","msg":"bad key"}"#,
+        });
+        let nominal = 1000.0 * 2f64.powi(attempt);
+        let pending = *h
+            .timers
+            .iter()
+            .rev()
+            .find(|(_, at)| (nominal * 0.75..=nominal).contains(&(*at - h.now)))
+            .unwrap();
+        if attempt == 3 {
+            waiting = Some(pending);
+            break;
+        }
+        h.now = pending.1;
+        h.event(Event::TimerFired { timer: pending.0 });
+        socket = h
+            .sockets
+            .iter()
+            .rev()
+            .find(|(_, url)| url.ends_with("/private"))
+            .unwrap()
+            .0;
+        h.event(Event::WsOpened { socket });
+    }
+    let (retry, at) = waiting.unwrap();
+    assert!(at - h.now >= 6_000.0);
+    let before = h.sockets.len();
+    h.event(Event::TimerFired { timer: write_check });
+    assert_eq!(
+        h.sockets.len(),
+        before,
+        "write recovery must honor pending authentication backoff"
+    );
+    assert!(
+        h.timers.iter().any(|(timer, _)| *timer == retry),
+        "pending retry must remain armed"
+    );
+    h.now = at;
+    h.event(Event::TimerFired { timer: retry });
+    assert_eq!(h.sockets.len(), before + 1);
+    assert!(
+        h.socket_contexts
+            .last()
+            .unwrap()
+            .2
+            .as_ref()
+            .is_some_and(|c| c.feed == "private" && c.recover),
+        "deferred reconnect must retain recovery hint"
+    );
+}
+
+#[test]
 fn split_batch_and_uta_receipts_match_only_dispatched_native_ids() {
     for unified in [false, true] {
         let mut h = if unified { uta() } else { Harness::classic() };

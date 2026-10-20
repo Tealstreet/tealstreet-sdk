@@ -125,6 +125,24 @@ impl Harness {
             })
             .unwrap()
     }
+    pub fn reconnect(&mut self) {
+        let (timer, at) = self
+            .actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms }
+                    if (750. ..=1000.).contains(&(*at_ms - self.now)) =>
+                {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .expect("bounded first reconnect");
+        self.now = at;
+        self.e.handle(at, Event::TimerFired { timer });
+        self.collect();
+    }
     pub fn timer(&mut self, at: f64) {
         let timer = self.timer_at(at);
         self.now = at;
