@@ -322,3 +322,8 @@ request, signature, economic, caller-ID and command comparisons remain active.
 The PR targets only `feat/rust-rewrite`; posted correctness reviews and exact-head
 green CI are the remaining landing gates. No live private-authentication claim;
 the retired INTX routes and inactive Starbase migration are documented above.
+
+PR [#1325](https://github.com/Tealstreet/tealstreet-sdk/pull/1325) targets
+`feat/rust-rewrite`. Fresh account/auth, trading/history and public/integration
+code-correctness reviews are running against the published port. Findings and
+fixes will be posted on the PR; merge requires green CI at its exact head.
