@@ -2805,3 +2805,33 @@ Fresh combined validation COMPLETE on Node22/Bun1.4.3:452compiledSDKcases/
 packagedsmoke and all9scriptedlifecycle cases PASS. Logs are under
 /tmp/bitunix-fc809-*.log. Old failed attempts remain preserved. Fresh module
 gates and exact reviewed-head CI remain mandatory before landing.
+
+
+Final native frozen batch COMPLETE:2,937tests across227groups, zero failures
+or ignored; strict native/WASMClippy, globalfmt and bans PASS. All source and
+combined consumer receipts above remain current. Fresh sequential release
+batch /tmp/bitunix-fc809-gates.sh passes Bitunix, KuCoin and KuCoinSpot private/
+public plus all eight Binance USD-M/Spot/COIN-M/PM gates. Seven rebuilt-module
+checks and26selected replay gates are planned in total; no source mutation or
+owned background test/build accompanies measurement. Each module waits for
+two below500percent host readings at least15seconds apart after its build.
+
+Bitunix module852,298bytes under1,258,291; public28,694frames/697markets/
+697tickers/twobooks PASS. TS/Rust main435.3/394.5ms, steady226.8/209.7,
+process627.6/610.7, retained3.6/2.4MB, peak11.8/4.8, linear0.9MB. Private
+42frames correctnessPASS. KuCoin module818,900bytes; public10,034frames/
+692markets/tickers/twobooks, main577.5/356.9, retained6.9/2.7, peak23.4/7.4
+PASS. Spot module721,073bytes; public26,427frames/968markets/tickers/twobooks,
+main511.4/413.0, retained5.1/2.3, peak13.0/4.9 PASS. All their private gates
+alsoPASS. The earlier incomplete Spot baseline is retained, not selected as
+passing evidence; this distinct final source/artifact attempt followed recorded
+host qualification300.0/459.1percent15seconds apart and uses unchanged policy.
+
+Binance rebuilt module968,787bytes; all four public/private modesPASS. Base
+public873frames/917markets/783tickers/threebooks main238.2/129.9, retained
+4.5/2.5, peak21.1/5.1. Spot7045frames/3729markets/tickers/twobooks main
+780.7/533.3, retained13.7/8.8, peak75.7/27.1. Inverse andPM receipts remain
+in their full logs. OKXmodule798,235bytes buildsPASS, but host CPU rises
+673.1→704.3→838.6percent before its qualification; no OKXmeasurement has
+started. Preserve the continuing wait. Remaining planned OKX/Paradex/Bitrue
+replays and exact-head CI still must finish before landing.
