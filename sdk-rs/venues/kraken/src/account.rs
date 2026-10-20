@@ -70,9 +70,16 @@ impl Request {
         }
     }
 }
+struct LocalOrderUpdate {
+    at: f64,
+    amount: f64,
+    amount_changed: bool,
+    native_time: Option<f64>,
+}
 #[derive(Default)]
 pub struct Account {
     pub records: HashMap<String, Order>,
+    local_order_updates: HashMap<String, LocalOrderUpdate>,
     settings: HashMap<String, (f64, MarginType)>,
     settings_revision: u64,
     settings_write_revision: u64,
@@ -407,28 +414,80 @@ impl Kraken {
         });
     }
     pub(crate) fn account_order_accepted(&mut self, cx: &mut Cx<'_, Pending>, order: &Order) {
+        let prior = self.account.records.get(&order.id);
+        let local_update = prior.is_none_or(|old| old != order);
+        let native_time = prior.and_then(|old| {
+            self.account_local_order_clock(old)
+                .map_or(Some(old.last_update), |local| local.native_time)
+        });
+        let amount_changed = prior.is_some_and(|old| {
+            old.amount != order.amount
+                || self
+                    .account_local_order_clock(old)
+                    .is_some_and(|local| local.amount_changed)
+        });
         self.account_apply_order(cx, order.clone(), false);
-    }
-    pub(crate) fn account_order_removed(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
-        self.account.orders_revision += 1;
-        self.account.records.remove(id);
-        self.account.terminal.insert(id.into());
-        cx.store.remove_orders(&[id]);
-    }
-    fn account_apply_order(&mut self, cx: &mut Cx<'_, Pending>, mut order: Order, live: bool) {
-        if self.account.terminal.contains(&order.id) {
-            return;
+        if local_update
+            && self.account.records.get(&order.id).is_some_and(|row| {
+                row.last_update == order.last_update
+                    && row.price == order.price
+                    && row.amount == order.amount
+            })
+        {
+            self.account.local_order_updates.insert(
+                order.id.clone(),
+                LocalOrderUpdate {
+                    at: order.last_update,
+                    amount: order.amount,
+                    amount_changed,
+                    native_time,
+                },
+            );
         }
+    }
+    // A local ACK arrival is not a native source timestamp. A delayed native
+    // cumulative fill still advances progress, while the accepted price, total
+    // quantity and newer source fields remain intact.
+    fn account_merge_order(&self, mut order: Order) -> Order {
         if let Some(old) = self.account.records.get(&order.id) {
-            if order.last_update < old.last_update {
-                return;
+            let filled = order.filled.max(old.filled);
+            if order.last_update < old.last_update || order.amount < old.filled {
+                order = old.clone();
             }
-            order.filled = order.filled.max(old.filled);
+            order.filled = filled.min(order.amount);
             order.remaining = (order.amount - order.filled).max(0.0);
             if order.trigger_type.is_none() {
                 order.trigger_type = old.trigger_type;
             }
         }
+        order
+    }
+    fn account_local_order_clock(&self, order: &Order) -> Option<&LocalOrderUpdate> {
+        self.account
+            .local_order_updates
+            .get(&order.id)
+            .filter(|local| local.at == order.last_update && local.amount == order.amount)
+    }
+    fn account_native_order_clock(&mut self, id: &str, time: f64) {
+        if let Some(local) = self.account.local_order_updates.get_mut(id) {
+            local.native_time = Some(local.native_time.map_or(time, |old| old.max(time)));
+        }
+    }
+    pub(crate) fn account_order_removed(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
+        self.account.orders_revision += 1;
+        self.account.records.remove(id);
+        self.account.local_order_updates.remove(id);
+        self.account.terminal.insert(id.into());
+        cx.store.remove_orders(&[id]);
+    }
+    fn account_apply_order(&mut self, cx: &mut Cx<'_, Pending>, order: Order, live: bool) {
+        if self.account.terminal.contains(&order.id) {
+            return;
+        }
+        if live {
+            self.account_native_order_clock(&order.id, order.last_update);
+        }
+        let order = self.account_merge_order(order);
         if live {
             self.trade_order_observed(&order.id, order.filled, order.status);
         }
@@ -712,13 +771,19 @@ impl Kraken {
                                 e.remaining_order_qty,
                                 e.time,
                                 self.account.records.get(e.order_id.as_ref()).cloned(),
-                            ) && time >= order.last_update
-                                && remaining >= 0.0
+                            ) && self.account_local_order_clock(&order).map_or(
+                                time >= order.last_update,
+                                |local| {
+                                    !local.amount_changed
+                                        && local.native_time.is_none_or(|floor| time >= floor)
+                                },
+                            ) && remaining >= 0.0
                                 && remaining <= order.amount
                             {
                                 order.filled = order.filled.max(order.amount - remaining);
                                 order.remaining = (order.amount - order.filled).max(0.0);
-                                order.last_update = time;
+                                order.last_update = order.last_update.max(time);
+                                self.account_native_order_clock(&order.id, time);
                                 if order.remaining == 0.0 {
                                     self.account_order_removed(cx, &order.id);
                                 } else {
@@ -777,11 +842,11 @@ impl Kraken {
                     && let Ok(row) = serde_json::from_str::<OrderWire<'_>>(raw.get())
                     && let Some(order) = self.map_order(cx, row)
                 {
-                    if self
-                        .account
-                        .records
-                        .get(&order.id)
-                        .is_some_and(|old| old.last_update > order.last_update)
+                    if msg.is_cancel
+                        && self.account.records.get(&order.id).is_some_and(|old| {
+                            old.last_update > order.last_update
+                                && self.account_local_order_clock(old).is_none()
+                        })
                     {
                         return true;
                     }
@@ -839,6 +904,7 @@ impl Kraken {
             self.trade_execution_observed(id);
             self.account.orders_revision += 1;
             self.account.records.remove(id);
+            self.account.local_order_updates.remove(id);
             cx.store.remove_orders(&[id]);
         } else {
             self.trade_order_observed(
@@ -883,7 +949,7 @@ impl Kraken {
         } else {
             row.qty
         };
-        if amount <= 0.0 || remaining < 0.0 || row.filled_size < 0.0 {
+        if amount <= 0.0 || remaining < 0.0 || row.filled_size < 0.0 || row.filled_size > amount {
             return None;
         }
         let trigger_type = match row.trigger_signal.as_ref() {
@@ -1019,26 +1085,21 @@ impl Kraken {
     }
     fn account_commit_orders(&mut self, cx: &mut Cx<'_, Pending>, orders: Vec<Order>, live: bool) {
         let mut mapped = vec![];
-        for mut order in orders {
+        for order in orders {
             if self.account.terminal.contains(&order.id) {
                 continue;
             }
-            if let Some(old) = self.account.records.get(&order.id) {
-                if order.last_update < old.last_update {
-                    order = old.clone();
-                }
-                order.filled = order.filled.max(old.filled);
-                order.remaining = (order.amount - order.filled).max(0.0);
-                if order.trigger_type.is_none() {
-                    order.trigger_type = old.trigger_type;
-                }
-            }
+            self.account_native_order_clock(&order.id, order.last_update);
+            let order = self.account_merge_order(order);
             if live {
                 self.trade_order_observed(&order.id, order.filled, order.status);
             }
             mapped.push(order);
         }
         self.account.records = mapped.iter().map(|o| (o.id.clone(), o.clone())).collect();
+        self.account
+            .local_order_updates
+            .retain(|id, _| self.account.records.contains_key(id));
         cx.store.set_orders(mapped);
     }
     fn account_commit_positions(&mut self, cx: &mut Cx<'_, Pending>, mut positions: Vec<Position>) {

@@ -247,3 +247,16 @@ only those expected fields from recorded WS payloads and excludes subscription
 ACKs. Independent follow-up: original isolated proofs plus ACK proof 3/3 and
 harness 236/236 pass; units, change precedence and unrelated field preservation
 accepted with no remaining scoped findings. Listed as deliberate TS corrections.
+
+Private review fixes accepted: merge monotonic native cumulative fills across
+local ACK arrival clocks, preserving accepted economic fields and terminal fences.
+Active-order provenance prevents ambiguous remaining quantities from inventing
+progress after quantity edits, including subsequent price ACKs and shrinking
+sizes. Native timestamp floors survive local ACKs and advance only from native
+REST/WS/execution observations. Terminal and snapshot removal clean up provenance.
+Five regression tests cover deltas, snapshots, REST, executions, edits and source
+floors; the original reproduction and new native-floor case failed before and
+pass after. Final venue tests 92/92 and all-target Clippy pass. Independent final
+review: 22 account tests pass; no remaining private/trading/signing findings.
+All fresh code-correctness findings and accepted follow-ups are posted on #1323.
+Final affected workspace/Wasm/replay checks are being repeated before push.

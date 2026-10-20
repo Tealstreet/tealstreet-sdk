@@ -634,3 +634,247 @@ fn quiet_authenticated_private_feeds_stay_open_after_initial_empty_snapshots() {
             .expect("private watchdog remains armed");
     }
 }
+fn delayed_placement(e: &mut Engine<Kraken>, id: &str) {
+    let order = serde_json::from_str(
+        r#"{"symbol":"PF_XBTUSD","type":"limit","side":"buy","amount":2,"price":100}"#,
+    )
+    .unwrap();
+    e.handle(
+        NOW,
+        Event::Command(safe_cex_engine::Command::PlaceOrders {
+            command: 700,
+            orders: vec![order],
+        }),
+    );
+    let request = requests(e)
+        .into_iter()
+        .find(|r| r.url.ends_with("sendorder"))
+        .unwrap();
+    reply_at(
+        e,
+        NOW + 100.0,
+        &request,
+        200,
+        &format!(r#"{{"result":"success","sendStatus":{{"status":"placed","order_id":"{id}"}}}}"#),
+    );
+    e.drain_actions().for_each(drop);
+}
+#[test]
+fn authoritative_cumulative_fills_before_local_ack_arrival_are_merged_on_every_read_shape() {
+    for shape in ["delta", "snapshot", "rest"] {
+        let (mut e, mut s) = ready();
+        delayed_placement(&mut e, "ack-order");
+        let native = r#"{"order_id":"ack-order","instrument":"PF_XBTUSD","type":"lmt","direction":0,"qty":2,"filled":0.5,"limit_price":100,"last_update_time":1700000000090}"#;
+        match shape {
+            "delta" => message(
+                &mut e,
+                s,
+                NOW + 110.0,
+                &format!(r#"{{"feed":"open_orders","order":{native}}}"#),
+            ),
+            "snapshot" => {
+                let (next, _) = fresh_private(&mut e, s);
+                s = next;
+                message(
+                    &mut e,
+                    s,
+                    NOW + 1001.0,
+                    r#"{"event":"challenge","message":"fresh"}"#,
+                );
+                message(
+                    &mut e,
+                    s,
+                    NOW + 1002.0,
+                    &format!(r#"{{"feed":"open_orders_snapshot","orders":[{native}]}}"#),
+                );
+            }
+            "rest" => {
+                let reads = poll(&mut e, s);
+                let request = reads.iter().find(|r| r.url.contains("openorders")).unwrap();
+                reply_at(
+                    &mut e,
+                    NOW + 1100.0,
+                    request,
+                    200,
+                    r#"{"result":"success","openOrders":[{"order_id":"ack-order","symbol":"PF_XBTUSD","orderType":"lmt","side":"buy","unfilledSize":1.5,"filledSize":0.5,"limitPrice":100,"lastUpdateTime":1700000000090}]}"#,
+                );
+            }
+            _ => unreachable!(),
+        }
+        let order = e.store().order("ack-order").unwrap();
+        assert_eq!(
+            (order.filled, order.remaining),
+            (0.5, 1.5),
+            "{shape} lost an authoritative partial fill before local ACK arrival"
+        );
+        assert_eq!((order.price, order.amount), (100.0, 2.0));
+    }
+}
+#[test]
+fn execution_remaining_before_local_ack_arrival_advances_placement_without_doublecount() {
+    let (mut e, s) = ready();
+    delayed_placement(&mut e, "ack-order");
+    let fill = r#"{"feed":"fills","fills":[{"fill_id":"before-ack","order_id":"ack-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true,"remaining_order_qty":1.5,"time":1700000000090}]}"#;
+    message(&mut e, s, NOW + 110.0, fill);
+    let order = e.store().order("ack-order").unwrap();
+    assert_eq!((order.filled, order.remaining), (0.5, 1.5));
+    assert_eq!(e.take_frame(NOW + 110.0).map_or(0, fill_count), 1);
+    message(&mut e, s, NOW + 111.0, fill);
+    assert_eq!(e.store().order("ack-order").unwrap().filled, 0.5);
+    assert_eq!(e.take_frame(NOW + 111.0).map_or(0, fill_count), 0);
+}
+#[test]
+fn cumulative_progress_before_edit_ack_keeps_accepted_economics_and_ambiguous_remaining_is_not_inferred()
+ {
+    let (mut e, s) = ready();
+    delayed_placement(&mut e, "ack-order");
+    e.handle(
+        NOW + 110.0,
+        Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 701,
+            id: "ack-order".into(),
+            price: Some(110.0),
+            amount: Some(4.0),
+        }),
+    );
+    let request = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("editorder"))
+        .unwrap();
+    reply_at(
+        &mut e,
+        NOW + 200.0,
+        &request,
+        200,
+        r#"{"result":"success","editStatus":{"status":"edited","orderId":"ack-order"}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    message(
+        &mut e,
+        s,
+        NOW + 210.0,
+        r#"{"feed":"fills","fills":[{"fill_id":"pre-edit-size","order_id":"ack-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true,"remaining_order_qty":1.5,"time":1700000000150}]}"#,
+    );
+    let order = e.store().order("ack-order").unwrap();
+    assert_eq!(
+        (order.amount, order.filled),
+        (4.0, 0.0),
+        "remaining from the earlier native total must not manufacture 2.5 filled"
+    );
+    message(
+        &mut e,
+        s,
+        NOW + 211.0,
+        r#"{"feed":"open_orders","order":{"order_id":"ack-order","instrument":"PF_XBTUSD","type":"lmt","direction":0,"qty":2,"filled":0.5,"limit_price":100,"last_update_time":1700000000150}}"#,
+    );
+    let order = e.store().order("ack-order").unwrap();
+    assert_eq!(
+        (order.price, order.amount, order.filled, order.remaining),
+        (110.0, 4.0, 0.5, 3.5)
+    );
+}
+#[test]
+fn quantity_ack_ambiguity_survives_a_second_price_only_ack_and_shrink_stays_bounded() {
+    for amount in [1.0, 4.0] {
+        let (mut e, s) = ready();
+        delayed_placement(&mut e, "ack-order");
+        for (command, price, size, at) in
+            [(702, 110.0, Some(amount), 200.0), (703, 115.0, None, 300.0)]
+        {
+            e.handle(
+                NOW + at - 50.0,
+                Event::Command(safe_cex_engine::Command::AmendOrder {
+                    command,
+                    id: "ack-order".into(),
+                    price: Some(price),
+                    amount: size,
+                }),
+            );
+            let request = requests(&mut e)
+                .into_iter()
+                .find(|r| r.url.ends_with("editorder"))
+                .unwrap();
+            reply_at(
+                &mut e,
+                NOW + at,
+                &request,
+                200,
+                r#"{"result":"success","editStatus":{"status":"edited","orderId":"ack-order"}}"#,
+            );
+            e.drain_actions().for_each(drop);
+        }
+        message(
+            &mut e,
+            s,
+            NOW + 310.0,
+            r#"{"feed":"fills","fills":[{"fill_id":"pre-size","order_id":"ack-order","instrument":"PF_XBTUSD","qty":0.5,"price":100,"buy":true,"remaining_order_qty":1.5,"time":1700000000150}]}"#,
+        );
+        assert_eq!(
+            e.store().order("ack-order").unwrap().filled,
+            0.0,
+            "a later price ACK cannot relabel an earlier total's remaining quantity"
+        );
+        message(
+            &mut e,
+            s,
+            NOW + 311.0,
+            r#"{"feed":"open_orders","order":{"order_id":"ack-order","instrument":"PF_XBTUSD","type":"lmt","direction":0,"qty":2,"filled":1.5,"limit_price":100,"last_update_time":1700000000150}}"#,
+        );
+        let order = e.store().order("ack-order").unwrap();
+        assert_eq!((order.price, order.amount), (115.0, amount));
+        assert_eq!(order.filled, 1.5f64.min(amount));
+        assert_eq!(order.remaining, (amount - 1.5).max(0.0));
+        assert!(order.filled <= order.amount);
+    }
+}
+
+#[test]
+fn local_price_ack_preserves_the_last_native_execution_clock() {
+    let (mut e, s) = ready();
+    delayed_placement(&mut e, "ack-order");
+    message(
+        &mut e,
+        s,
+        NOW + 110.0,
+        r#"{"feed":"open_orders","order":{"order_id":"ack-order","instrument":"PF_XBTUSD","type":"lmt","direction":0,"qty":2,"filled":0.25,"limit_price":100,"last_update_time":1700000000090}}"#,
+    );
+    e.handle(
+        NOW + 120.0,
+        Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 704,
+            id: "ack-order".into(),
+            price: Some(110.0),
+            amount: None,
+        }),
+    );
+    let request = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("editorder"))
+        .unwrap();
+    reply_at(
+        &mut e,
+        NOW + 200.0,
+        &request,
+        200,
+        r#"{"result":"success","editStatus":{"status":"edited","orderId":"ack-order"}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    message(
+        &mut e,
+        s,
+        NOW + 210.0,
+        r#"{"feed":"fills","fills":[{"fill_id":"old-native-time","order_id":"ack-order","instrument":"PF_XBTUSD","qty":0.25,"price":100,"buy":true,"remaining_order_qty":0.5,"time":1700000000080}]}"#,
+    );
+    assert_eq!(e.store().order("ack-order").unwrap().filled, 0.25);
+    message(
+        &mut e,
+        s,
+        NOW + 211.0,
+        r#"{"feed":"fills","fills":[{"fill_id":"new-native-time","order_id":"ack-order","instrument":"PF_XBTUSD","qty":0.25,"price":100,"buy":true,"remaining_order_qty":1.5,"time":1700000000150}]}"#,
+    );
+    let order = e.store().order("ack-order").unwrap();
+    assert_eq!(
+        (order.price, order.filled, order.remaining),
+        (110.0, 0.5, 1.5)
+    );
+}
