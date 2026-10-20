@@ -69,6 +69,9 @@ impl H {
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, result))
                 }
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.done.push((command, Err(error.legacy_text())))
+                }
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),

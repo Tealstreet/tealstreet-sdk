@@ -98,6 +98,9 @@ impl Harness {
                 Action::Notice(Notice::CommandDone { command, result }) => {
                     self.done.push((command, result))
                 }
+                Action::Notice(Notice::CommandFailed { command, error }) => {
+                    self.done.push((command, Err(error.legacy_text())))
+                }
                 _ => {}
             }
         }
@@ -444,13 +447,17 @@ fn streamed_klines_decode_and_malformed_rows_fail_atomically() {
         200,
         r#"[[1499040000000,"1","2","0.5","1.5","2",0,"0",1,"0","0","0"],["bad"]]"#,
     );
+    let error = h
+        .done
+        .iter()
+        .find(|(command, _)| *command == 13)
+        .unwrap()
+        .1
+        .clone()
+        .unwrap_err();
     assert!(
-        h.done
-            .iter()
-            .find(|(command, _)| *command == 13)
-            .unwrap()
-            .1
-            .is_err()
+        error.starts_with("Aster klines HTTP 200 or malformed payload: row 1: "),
+        "{error}"
     );
 }
 

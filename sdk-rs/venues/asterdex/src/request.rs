@@ -464,7 +464,7 @@ mod tests {
                 Pending::Klines {
                     command: 7,
                     rows: Vec::new(),
-                    malformed: false,
+                    invalid: None,
                 },
             );
         }
@@ -514,7 +514,7 @@ mod tests {
             let pending = Pending::Klines {
                 command: 7,
                 rows: Vec::new(),
-                malformed: false,
+                invalid: None,
             };
             if self.streamed {
                 self.inner
@@ -739,7 +739,7 @@ mod tests {
             pending: Pending::Klines {
                 command: 7,
                 rows: Vec::new(),
-                malformed: false,
+                invalid: None,
             },
             stream: None,
             network_retries: 0,
