@@ -336,7 +336,10 @@ export class RustEngineExchange extends BaseExchange {
       this.fetchFillsForOrderIds = async (ids) => {
         const quantities = new Map<string, number>();
         for (const id of new Set(ids)) {
-          const fills = await this.command<Execution[]>({ op: 'fetchFills', orderId: id, from: 0, limit: 1000 });
+          const fills = await this.command<Execution[]>(
+            { op: 'fetchFills', orderId: id, from: 0, limit: 1000 },
+            { report: false },
+          );
           for (const fill of fills) {
             if (fill.orderId === id) quantities.set(id, (quantities.get(id) ?? 0) + fill.qty);
           }
@@ -800,7 +803,7 @@ export class RustEngineExchange extends BaseExchange {
 
   updateSymbolMetadata = async (symbol: string) => {
     if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
-    const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+    const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
     this.applier.applyLeverage(symbol, rails);
   };
 
@@ -1033,7 +1036,11 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
-  private command = async <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
+  /** `report: false` is for background reads whose caller owns the failure's visibility. */
+  private command = async <T>(
+    command: { op: string; [field: string]: unknown },
+    { report = true }: { report?: boolean } = {},
+  ): Promise<T> => {
     try {
       if (this.engineFailure) throw this.engineFailure;
       if (this.isDisposed) throw new Error(`${this.name} engine disposed`);
@@ -1047,7 +1054,7 @@ export class RustEngineExchange extends BaseExchange {
       }
       return (await this.host.command(command)) as T;
     } catch (error) {
-      this.reportCommandError(error);
+      if (report) this.reportCommandError(error);
       throw error;
     }
   };
@@ -1385,7 +1392,7 @@ export class RustEngineExchange extends BaseExchange {
         ].includes(this.name) ||
         orderlyNames.has(this.name)
       )
-        leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+        leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
       else {
         const cached = this.store.fetchedLeverage[symbol];
         if (
