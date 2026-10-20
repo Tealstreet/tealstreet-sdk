@@ -223,3 +223,8 @@ Root typecheck44/lint28 tasks,51 host/wire tests,272 harness helpers, fmt,
 bans, strict crate/default WASM Clippy and the secret scan all pass. Phase
 review findings and fixes are ready for PR publication; green PR CI is required
 before merging.
+
+
+PR: [#1326](https://github.com/Tealstreet/tealstreet-sdk/pull/1326), targeting
+`feat/rust-rewrite`. All local gates pass; phase findings and final adversarial
+reviews are being published. Merge remains conditional on green PR CI.
