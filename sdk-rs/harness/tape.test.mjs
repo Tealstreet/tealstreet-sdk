@@ -281,6 +281,73 @@ test('websocket normalization handles mutable URL objects and repeated invalid U
   for (let i = 0; i < 2; i++) assert.throws(() => socketsFor(tape, 'invalid URL'), /Invalid URL/);
 });
 
+test('JSON websocket query identities follow mutable generated ID callbacks after decoding', () => {
+  const object = '{"ref":"minted"}', array = '[{"ref":"minted"}]';
+  for (const value of [
+    object, array,
+    encodeURIComponent(object), encodeURIComponent(array),
+    encodeURIComponent(object).replace(/%7B/g, '%7b'),
+    encodeURIComponent(array).replace(/%5B/g, '%5b'),
+    encodeURIComponent(object).replace('%7B', '%\n7B'),
+  ]) {
+    let generated = false;
+    const venue = { generatedBodyId: (key) => generated && key === 'ref' };
+    const tape = new Tape([], venue);
+    const url = `wss://example.test/public?filter=${value}`;
+    const initial = tape.canonicalize(url);
+    assert.equal(initial, canonicalUrl(url, tape.callerIds, venue));
+    generated = true;
+    const changed = tape.canonicalize(url);
+    assert.equal(changed, canonicalUrl(url, tape.callerIds, venue));
+    assert.notEqual(changed, initial);
+    generated = false;
+    assert.equal(tape.canonicalize(url), initial);
+  }
+});
+
+test('JSON websocket query identities follow in-place body rule array changes', () => {
+  const venue = { ignoredBodyFields: [] };
+  const tape = new Tape([], venue);
+  const url = `wss://example.test/public?filter=${encodeURIComponent('{"ref":"minted","scope":"book"}')}`;
+  const initial = tape.canonicalize(url);
+  venue.ignoredBodyFields.push('ref');
+  const changed = tape.canonicalize(url);
+  assert.equal(changed, canonicalUrl(url, tape.callerIds, venue));
+  assert.notEqual(changed, initial);
+  venue.ignoredBodyFields.splice(0);
+  assert.equal(tape.canonicalize(url), canonicalUrl(url, tape.callerIds, venue));
+  assert.equal(tape.canonicalize(url), initial);
+});
+
+test('JSON websocket query identities follow mutable request body transforms', () => {
+  let rewritten = false;
+  const venue = { requestBody: (body) => rewritten ? { ...body, ref: 'replacement' } : body };
+  const tape = new Tape([], venue);
+  const url = `wss://example.test/public?filter=${encodeURIComponent('{"ref":"original"}')}`;
+  const initial = tape.canonicalize(url);
+  rewritten = true;
+  const changed = tape.canonicalize(url);
+  assert.equal(changed, canonicalUrl(url, tape.callerIds, venue));
+  assert.notEqual(changed, initial);
+  rewritten = false;
+  assert.equal(tape.canonicalize(url), canonicalUrl(url, tape.callerIds, venue));
+  assert.equal(tape.canonicalize(url), initial);
+});
+
+test('websocket URL identities follow rolling-window policy changes', () => {
+  const venue = { rollingListWindows: false };
+  const tape = new Tape([], venue);
+  const url = 'wss://example.test/private/planorder/list/orders?start_time=100&end_time=200';
+  const initial = tape.canonicalize(url);
+  venue.rollingListWindows = true;
+  const changed = tape.canonicalize(url);
+  assert.equal(changed, canonicalUrl(url, tape.callerIds, venue));
+  assert.notEqual(changed, initial);
+  venue.rollingListWindows = false;
+  assert.equal(tape.canonicalize(url), canonicalUrl(url, tape.callerIds, venue));
+  assert.equal(tape.canonicalize(url), initial);
+});
+
 test('staged reads advance only after their command and preserve response headers', () => {
   const early = { ...record('GET'), body: 'early' };
   const later = { ...record('GET'), body: 'later', afterCommand: 1, headers: 'x-stage: later' };

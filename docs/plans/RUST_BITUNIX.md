@@ -2745,3 +2745,44 @@ finds two borrow errors in newly adapted Hyperliquid helper calls; copy the
 logical now before mutably dispatching, with all assertions retained. Preserve
 /tmp/bitunix-fc809-helpers.log and native-clippy.log; fresh suffixed checks run
 on the corrected frozen source. Root typecheck44/44 and lint28/28 already PASS.
+
+
+Postmerge native strict Clippy PASS; repository checks44typecheck/28lint/
+27testtasks PASS (SDK7793cases/526files in each runner). Independent merge
+engine/host and venue/helper audits pass, except one bounded P2 in the incoming
+URL memoization: JSON query values call mutable canonicalBody hooks/rules, and
+rollingListWindows can change, so cached identities can become stale. Fix only
+cache admission: bypass decoded JSON object/array query values and active
+rolling-window policy, leaving production canonicalization, physical socket
+selection and common URL cache intact. Four new mutation controls exercise
+generatedBodyId, ignoredBodyFields, requestBody and rolling transitions; all
+four fail on the committed pre-fix source and207tape/memory controls pass after.
+Fail-before proof uses isolated temporary modules, now deleted; source was not
+swapped under concurrent consumers. Logs /tmp/bitunix-fc809-cache-fail-before.log
+and cache-memory-after.log retained. Full848helper rerun is in progress.
+
+The second aggregate's unrelated linear-memory accounting unit fails because
+process-wide arrayBuffers drops16,787,840bytes during construction, including
+the previous test's discarded16MiB buffer. Preserve frozen-helpers predecessor
+/tmp/bitunix-fc809-final-helpers.log. That actual runtime accounting proof now
+runs in a fresh process with GC before baseline and after retained16-page
+WASM allocation, sampling before serialization and reading memory after GC.
+Both original exact zero-arrayBuffers-delta and retainedMemory arithmetic
+assertions remain, plus exact1,048,576linear bytes. Independent plan and diff
+audits PASS;17focused and207combined controls PASS. Production sampler, signed
+deltas, deadlines and all gate policies are unchanged. An initial yarn exec
+invocation without the argument separator executed no controls (empty log) and
+is explicitly not accepted; the actual suffixed log records17 executed PASS.
+
+
+Full848/848 helpers now PASS with all four proven cache regressions; separate
+independent implementation audit PASS for cache admission and isolated runtime
+memory proof. Commit this bounded harness phase. Full native runtime reaches
+one newly adapted Hyperliquid cold-account test failure: completing the atomic
+catalog invokes account_start's deliberate default account initialization, so
+its initial !loaded.balance assertion is no longer a cold fixture. Production
+behavior is unchanged; adapt the unit's public-catalog/private-cold boundary
+without removing the private-readiness or accepted-provider-price assertions.
+Initial full native log is retained; a fresh full workspace run must finish
+before release gates. Combined release build is already complete; compiled
+consumer suite is running on that fresh artifact.

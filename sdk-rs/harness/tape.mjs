@@ -644,10 +644,20 @@ export class Tape {
   socketUrlKey(url) {
     // Custom rules can close over mutable state. Only memoize default identities.
     if (typeof url !== 'string' || !this.callerIds || this.callerIds.size || this.venue.canonicalize
-      || this.venue.requestUrl || this.venue.volatileQueryFields || this.venue.generatedQueryId)
+      || this.venue.requestUrl || this.venue.volatileQueryFields || this.venue.generatedQueryId
+      || this.venue.rollingListWindows)
       return (this.venue.canonicalize ?? ((value) => canonicalUrl(value, this.callerIds, this.venue)))(url);
     let key = this.socketUrlKeys.get(url);
     if (key === undefined) {
+      // JSON query values use canonicalBody's mutable hooks and arrays. Decode
+      // like URLSearchParams, including mixed-case escapes and URL-stripped tabs.
+      const raw = url.replace(/[\t\n\r]/g, '');
+      const query = raw.indexOf('?'), fragment = raw.indexOf('#');
+      if (query !== -1 && (fragment === -1 || query < fragment)) {
+        const params = new URLSearchParams(raw.slice(query + 1, fragment === -1 ? undefined : fragment));
+        for (const value of params.values()) if (/^[\[{]/.test(value))
+          return canonicalUrl(url, this.callerIds, this.venue);
+      }
       key = canonicalUrl(url, this.callerIds, this.venue);
       this.socketUrlKeys.set(url, key);
     }
