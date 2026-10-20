@@ -259,9 +259,10 @@ reverification has begun while this first patch completes its gates.
 
 ## Final merged-source gate evidence
 
-Source: `0cdb22aae8`, including landing `ec5e2e954b` merged at
-`6854f75f3f`, strict Bybit affected-list proof and terminal cleanup.
-Documentation-only checkpoints do not change these artifacts.
+Source: Bybit numeric decoder `1c65ceabf2`; Binance/AsterDEX source and
+selected artifacts remain unchanged from `0cdb22aae8`. Landing documentation
+`702a62050c` merged at `1174b85861` changes no runtime code. Documentation-only
+checkpoints do not change these artifacts.
 All 23 replay invocations pass: 11 documented/scripted private and 12 public.
 Public figures are medians of three runs; pairs below are **TS / Rust**.
 
@@ -272,17 +273,17 @@ Public figures are medians of three runs; pairs below are **TS / Rust**.
 | Binance Spot | 7,045 | 935.5 / 645.7 | 470.4 / 274.6 | 27.6 / 10.8 |
 | Binance PM | 873 | 261.5 / 136.0 | 153.8 / 58.5 | 18.0 / 4.1 |
 | AsterDEX | 384 | 252.9 / 140.7 | 107.6 / 76.2 | 28.4 / 6.2 |
-| Bybit linear | 4,295 | 319.6 / 232.9 | 166.1 / 103.3 | 22.3 / 4.9 |
-| Bybit inverse | 708 | 160.0 / 45.9 | 103.2 / 18.5 | 14.4 / 1.6 |
-| Bybit Spot | 4,339 | 263.8 / 223.4 | 148.9 / 121.4 | 16.5 / 3.1 |
-| Bybit Demo | 5,833 | 242.6 / 224.6 | 125.5 / 97.6 | 21.9 / 5.1 |
-| HyroTrader (scripted public) | 160 | 31.8 / 30.4 | 13.2 / 11.3 | 13.5 / 0.9 |
+| Bybit linear | 4,295 | 340.7 / 225.3 | 164.2 / 91.4 | 22.2 / 4.9 |
+| Bybit inverse | 708 | 198.5 / 56.5 | 129.9 / 24.3 | 14.4 / 1.6 |
+| Bybit Spot | 4,339 | 305.3 / 225.7 | 165.1 / 99.7 | 16.5 / 3.1 |
+| Bybit Demo | 5,833 | 454.0 / 310.6 | 262.1 / 143.1 | 21.9 / 5.1 |
+| HyroTrader (scripted public) | 160 | 38.1 / 30.6 | 10.2 / 9.4 | 13.6 / 0.9 |
 | Fresh Binance public capture | 285 | 459.8 / 161.1 | 290.0 / 86.1 | 18.5 / 4.1 |
-| Fresh Bybit public capture | 19,946 | 485.6 / 247.9 | 293.7 / 114.9 | 22.7 / 5.3 |
+| Fresh Bybit public capture | 19,946 | 795.6 / 483.5 | 454.0 / 213.7 | 22.6 / 5.3 |
 
 All public outputs match under the existing documented TS corrections and
 unchanged thresholds. Process CPU is informational and does not always improve
-(e.g. Bybit Spot 386.6 / 420.0 ms); no claim is made about every CPU metric or
+(e.g. Bybit linear 436.3 / 437.6 ms); no claim is made about every CPU metric or
 peak memory. Private performance is informational, with one correctness run per
 tape. Native regressions carry the adverse ordering cases outside those tapes.
 
@@ -292,11 +293,11 @@ Selected WASM artifacts are below the unchanged 1,258,291-byte limit:
 | --- | ---: | --- |
 | Binance | 997,069 | `f55f6fd02fe287bfe23d8c71460fef69ba5487b51d489b15826a5654f28766b6` |
 | AsterDEX | 1,094,705 | `04d842f43383813042293c1d371e37834c3a363589b0899fc39e25fc78424f03` |
-| Bybit | 1,174,110 | `780d0bc74f53e2c05b0db5d9aa749f869672d39d842ad1476a42a53ba080b89b` |
+| Bybit | 1,178,207 | `39bc44feba817e5c91e5f10aa2957fc2770ef92447dad2060adab6d2bee92d4a` |
 
 - Gate 1: banned-pattern scan passes.
 - Gate 2: workspace formatting and strict all-target Clippy pass. Native tests:
-  engine 90, Binance 140, Bybit 159 and AsterDEX 99 (488 total).
+  engine 90, Binance 140, Bybit 162 and AsterDEX 99 (491 total).
 - Gate 3: strict default-feature WASM Clippy passes.
 - Gates 4–6: all selected release builds, private/public replay gates and
   Binance controls pass, including the fresh 20-second public captures.
@@ -465,3 +466,26 @@ captures were also trimmed and gated separately without replacing that coverage.
   substantially from the baseline; no quantitative speedup is claimed. Final
   selected build and all Bybit profile gates are running before publication.
   Binance/AsterDEX source and their selected artifacts remain unchanged.
+
+- Final numeric-decoder Bybit gates: all eleven PASS (five private, five public
+  profiles plus the fresh public capture). Public medians/sizes above now include
+  those reruns. Hyro steady CPU passes locally at Rust 9.4 / TS 10.2 ms; this
+  is a gate result, not an isolated before/after speedup measurement. Binance/
+  AsterDEX's twelve existing replay controls still apply to unchanged code.
+  Raw log: `/tmp/audit-bb-bybit-numeric-final-gates.log`.
+
+- Final exact-source Bybit suite passes 162 tests after the generic-mapper
+  change (`/tmp/audit-bb-bybit-numeric-final-native.log`). Together with the
+  unchanged engine/Binance/AsterDEX checks this is 491 native tests. Strict
+  WASM Clippy/bans pass again (`/tmp/audit-bb-numeric-{wasm-clippy,bans}.log`).
+  The rebuilt combined default artifact passes SDK WASM 444, host 76, product
+  16 and smoke 9. Root typecheck/lint/other 25 tasks and SDK CI 7,777 remain
+  valid for unchanged TypeScript/host source. Publish after evidence review;
+  CI on the numeric-decoder head must still be green before merge.
+
+- Independent numeric evidence audit confirms all six latest Bybit public rows
+  against three runs per implementation, eleven passing replay invocations and
+  46 result files without request/signature/protocol failures. It verifies the
+  1,178,207-byte hash, final 162-test suite and fresh combined checks. Source
+  comparison confirms no Binance/AsterDEX/engine/harness changes since their
+  prior gates; the latest landing merge is docs-only. No correction remains.
