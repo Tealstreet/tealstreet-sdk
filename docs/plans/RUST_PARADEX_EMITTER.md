@@ -59,3 +59,8 @@ Task: `.aimux/plans/paradex-and-emitter.md`; spec/process:
   owns known-perpetual blank ticker/startup and blank optional position numbers.
   This lane owns malformed SBE drop; its independent review passes, retaining
   per-book sequence-gap recovery and silence watchdogs. Integration/tests pending.
+- Phase2 SBE PASS: 33 public tests pass. Restoring the original recovery call
+  reproduces the new book-preservation failure; fixed source restored afterward.
+  Independent review confirms pure decode before application, intact per-book
+  gap recovery, continued valid frames, and malformed traffic cannot hide silence.
+  Blank-number fixes remain coordinated with the startup lane, not duplicated.

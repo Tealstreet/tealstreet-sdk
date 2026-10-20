@@ -719,7 +719,9 @@ StarkNet typed data, JWT, payloads and SBE decoding match.
 - Medium: multi-order placement stops at first failure and loses placed ids
   (`trading.rs:458,699,867`); venue rejection reasons dropped (`lib.rs:231`);
   leverage serialized `20.0` (`trading.rs:542`; verify live); one malformed SBE
-  frame recycles the public socket (`public.rs:388`).
+  ~~frame recycles the public socket (`public.rs:388`)~~ — malformed frames
+  now drop without clearing books/socket or refreshing liveness; subsequent valid
+  sequence gaps still recover only the affected book (native regressions).
 - Low: one unmappable order row discards refresh; leverage-0 config row; TP/SL
   of 0 rejects order; history fails on one row; stale uPnL after WS close;
   README says remote signing rejected.
