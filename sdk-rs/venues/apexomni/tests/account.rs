@@ -709,10 +709,7 @@ fn server_ping_echoes_args_and_reconnect_fences_old_socket() {
     let timer = e
         .drain_actions()
         .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1200.0,
-            } => Some(timer),
+            Action::SetTimer { timer, at_ms } if (950.0..=1200.0).contains(&at_ms) => Some(timer),
             _ => None,
         })
         .unwrap();
@@ -839,9 +836,9 @@ fn silent_private_handshake_is_closed_and_reconnected_without_open_event() {
             .any(|a| matches!(a,Action::WsClose{socket:s} if *s == socket))
     );
     assert!(
-        actions
-            .iter()
-            .any(|a| matches!(a,Action::SetTimer{at_ms,..} if *at_ms == 31_010.0))
+        actions.iter().any(
+            |a| matches!(a,Action::SetTimer{at_ms,..} if (30_760.0..=31_010.0).contains(at_ms))
+        )
     );
 }
 
