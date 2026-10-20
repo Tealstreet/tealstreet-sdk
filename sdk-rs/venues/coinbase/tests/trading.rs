@@ -19,6 +19,7 @@ struct Session {
     results: Vec<(u32, Result<String, String>)>,
     /// Commands completed with `outcome: Unknown`.
     unknown: Vec<u32>,
+    outcomes: Vec<(u32, Option<safe_cex_engine::Outcome>)>,
     e: Engine<Coinbase>,
     timers: Vec<(f64, TimerId)>,
     now: f64,
@@ -59,6 +60,7 @@ impl Session {
             urls: vec![],
             results: vec![],
             unknown: vec![],
+            outcomes: vec![],
             kind,
             open_orders: String::new(),
             requests: vec![],
@@ -95,6 +97,7 @@ impl Session {
                     if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
                         self.unknown.push(command);
                     }
+                    self.outcomes.push((command, error.outcome));
                     self.results.push((command, Err(error.message)))
                 }
                 Action::Notice(safe_cex_engine::Notice::Deactivate) => self.deactivated = true,
@@ -661,6 +664,13 @@ fn server_errors_are_unknown_but_client_errors_are_rejections() {
         s.reply(r, status, r#"{"error":"x","message":"failed"}"#);
         assert!(s.done(9).is_err());
         assert_eq!(s.unknown == [9], unknown, "{status}");
+        if !unknown {
+            assert_eq!(
+                s.outcomes,
+                [(9, Some(safe_cex_engine::Outcome::Rejected))],
+                "{status}"
+            );
+        }
     }
 }
 
@@ -1697,6 +1707,11 @@ fn rejected_placement_keeps_coinbase_message_and_reason() {
     assert_eq!(
         s.done(309).unwrap_err(),
         "Coinbase placement rejected: Insufficient balance in source account (INSUFFICIENT_FUND)"
+    );
+    // `success: false` is Coinbase's documented refusal.
+    assert_eq!(
+        s.outcomes,
+        [(309, Some(safe_cex_engine::Outcome::Rejected))]
     );
     assert!(s.cancel_symbol(310).is_ok());
 }
