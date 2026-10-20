@@ -93,20 +93,22 @@ export const paradexStream = (data) => {
 const createSocketAudit = (_impl, { isPrivate, books = [], tickers = [] }) => {
   const states = new Map();
   const failures = [];
-  const state = (key) => {
-    if (!states.has(key)) states.set(key, { channels: new Set(), auth: false, authId: undefined });
-    return states.get(key);
+  const state = (url, key = url) => {
+    if (!states.has(url)) states.set(url, new Map());
+    const sockets = states.get(url);
+    if (!sockets.has(key)) sockets.set(key, { channels: new Set(), auth: false, authId: undefined });
+    return sockets.get(key);
   };
   const requiredPrivate = ['orders.ALL', 'fills.ALL', 'positions', 'balance_events', 'account'];
   const requiredPublic = [...tickers.flatMap((s) => [`bbo.${s}`, `trades.${s}`]), 'markets_summary', ...books.map((s) => `order_book.${s}.deltas`)];
   const check = () => {
-    const all = [...states.values()];
+    const all = [...states.values()].flatMap((sockets) => [...sockets.values()]);
     if (!requiredPublic.every((topic) => all.some((s) => s.channels.has(topic)))) return false;
     return !isPrivate || all.some((s) => s.auth && requiredPrivate.every((topic) => s.channels.has(topic)));
   };
   return {
     sent(url, text, socket) {
-      const s = state(socket ?? url);
+      const s = state(url, socket);
       const frame = JSON.parse(text);
       if (['ping', 'pong'].includes(frame.type)) { failures.push('Unexpected Paradex application heartbeat'); return; }
       if (frame.method === 'auth') {
@@ -120,7 +122,7 @@ const createSocketAudit = (_impl, { isPrivate, books = [], tickers = [] }) => {
       } else failures.push('Unexpected Paradex socket write');
     },
     received(url, data, socket) {
-      const s = state(socket ?? url);
+      const s = state(url, socket);
       if (typeof data === 'string') {
         const frame = JSON.parse(data);
         if (s.authId !== undefined && frame.id === s.authId && frame.result && !frame.error) s.auth = true;

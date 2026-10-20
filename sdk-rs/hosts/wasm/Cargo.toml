@@ -18,12 +18,13 @@ blofin = ["dep:safe-cex-venue-blofin"]
 mexc = ["dep:safe-cex-venue-mexc"]
 bingx = ["dep:safe-cex-venue-bingx"]
 weex = ["dep:safe-cex-venue-weex"]
-default = ["paradex", "lighter", "woo", "bitrue", "binance", "bybit", "hyperliquid", "okx", "cryptocom", "weex", "bingx", "mexc", "blofin", "backpack", "bitget"]
+default = ["paradex", "lighter", "woo", "bitrue", "binance", "bybit", "hyperliquid", "okx", "cryptocom", "weex", "bingx", "mexc", "blofin", "backpack", "bitget", "orderly"]
 cryptocom = ["dep:safe-cex-venue-cryptocom"]
 binance = ["dep:safe-cex-venue-binance"]
 bybit = ["dep:safe-cex-venue-bybit"]
 hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
 okx = ["dep:safe-cex-venue-okx"]
+orderly = ["dep:safe-cex-venue-orderly"]
 
 [dependencies]
 safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }
@@ -37,6 +38,7 @@ safe-cex-venue-mexc = { workspace = true, optional = true }
 safe-cex-venue-bingx = { workspace = true, optional = true }
 safe-cex-venue-weex = { workspace = true, optional = true }
 safe-cex-engine.workspace = true
+safe-cex-venue-orderly = { path = "../../venues/orderly", optional = true }
 safe-cex-venue-cryptocom = { workspace = true, optional = true }
 safe-cex-venue-binance = { workspace = true, optional = true }
 safe-cex-venue-bybit = { workspace = true, optional = true }

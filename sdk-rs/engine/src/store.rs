@@ -17,6 +17,7 @@ pub struct Store {
     ticker_by_symbol: Vec<u32>,
     orders: Vec<Order>,
     positions: Vec<Position>,
+    position_ids: bool,
     balance: Balance,
     coin_balances: Option<Vec<CoinBalance>>,
     /// Per-market account settings, keyed by market index.
@@ -371,6 +372,14 @@ impl Store {
         self.changes.markets = true;
     }
 
+    /// Preserve venue-defined position identity when symbol/mode cannot derive it.
+    pub fn retain_position_ids(&mut self) {
+        if !self.position_ids {
+            self.position_ids = true;
+            self.changes.positions = true;
+        }
+    }
+
     pub fn loaded(&self) -> Loaded {
         self.loaded
     }
@@ -670,6 +679,12 @@ impl Store {
         ];
         for column in columns {
             w.f64s(positions.iter().map(column));
+        }
+        if self.position_ids {
+            for p in positions {
+                let id = w.string(&p.id);
+                w.u32(id);
+            }
         }
         w.end();
     }

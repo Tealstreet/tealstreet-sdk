@@ -20,7 +20,7 @@ import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
 import { KucoinExchange } from '../../exchanges/kucoin/kucoin.exchange';
 import { KucoinSpotExchange } from '../../exchanges/kucoin/kucoinspot.exchange';
 import { OKXExchange } from '../../exchanges/okx/okx.exchange';
-import { OrderlyExchange } from '../../exchanges/orderly/orderly.exchange';
+import { RustEngineExchange as OrderlyExchange } from '../../exchanges/rust/rust.exchange';
 import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
 import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
 import { WeexExchange } from '../../exchanges/weex/weex.exchange';
@@ -299,14 +299,13 @@ const CASES: Case[] = [
   [
     'orderly',
     'caller-orderly-1',
-    'client_order_id',
+    'clientOrderId',
     async (id) => {
       const exchange = create(OrderlyExchange, 'salsadex');
-      vi.spyOn(exchange, 'getPositionSideForOrder').mockResolvedValue(undefined);
-      const post = recorder({ data: { order_id: 99 } });
-      exchange.xhr = { post };
+      const command = vi.fn(async (_command: { orders: PlaceOrderOpts[] }) => ['99']);
+      exchange.host = { command };
       await exchange.placeOrder(limit({ clientOrderId: id }));
-      return post.mock.calls[0][1];
+      return command.mock.calls[0][0].orders[0];
     },
   ],
   [

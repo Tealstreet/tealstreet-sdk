@@ -1440,42 +1440,18 @@ exports[`transport adapter selection per exchange > hyrotrader 1`] = `
 
 exports[`transport adapter selection per exchange > kodiakfi 1`] = `
 {
-  "private direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 
@@ -1828,42 +1804,18 @@ exports[`transport adapter selection per exchange > mexc 1`] = `
 
 exports[`transport adapter selection per exchange > mode 1`] = `
 {
-  "private direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 
@@ -2192,83 +2144,35 @@ exports[`transport adapter selection per exchange > polymarket 1`] = `
 
 exports[`transport adapter selection per exchange > salsadex 1`] = `
 {
-  "private direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 
 exports[`transport adapter selection per exchange > tealstreet-dex 1`] = `
 {
-  "private direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 
@@ -2356,42 +2260,18 @@ exports[`transport adapter selection per exchange > weex 1`] = `
 
 exports[`transport adapter selection per exchange > what 1`] = `
 {
-  "private direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 
@@ -2450,41 +2330,17 @@ exports[`transport adapter selection per exchange > woo 1`] = `
 
 exports[`transport adapter selection per exchange > woofi 1`] = `
 {
-  "private direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "private proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "private tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public direct": {
-    "xhr": "default https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-JA": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy+tunnel-SG": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
-  "public proxy-JA": {
-    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public proxy-SG": {
-    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-evm.orderly.org",
-  },
-  "public tunnel-only": {
-    "xhr": "how https://api-evm.orderly.org",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;

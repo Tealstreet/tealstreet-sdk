@@ -49,6 +49,7 @@ export interface EngineRoutingPlan {
 }
 
 type Request = Parameters<Transport['request']>[0];
+const orderlyExchanges = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 
 export const assertEngineAccountRouting = (options: ExchangeOptions): void => {
   if (options.secondary_key || options.secondary_secret) {
@@ -232,6 +233,9 @@ const httpTransport = (
     signal.addEventListener('abort', cleanup, { once: true });
     try {
       signal.throwIfAborted();
+      const signed = orderlyExchanges.has(exchange)
+        ? { url: request.url, method: request.method, body: request.body, headers: Object.entries(request.headers) }
+        : undefined;
       const route = restRoute(provider, exchange, options, routing, request, transport.serverHeaders);
       const config = {
         method: request.method,
@@ -242,8 +246,18 @@ const httpTransport = (
         timeout: 20_000,
         signal,
       } as InternalAxiosRequestConfig;
+      const originalUrl = config.url;
       if (route.proxied && route.authorize) await untilAborted(route.authorize(config), signal);
       signal.throwIfAborted();
+      // ED25519 covers Orderly's exact method, path/query and JSON bytes. Proxy
+      // authorization may add headers, but must never rewrite a signed packet.
+      if (signed && (
+        request.url !== signed.url || request.method !== signed.method || request.body !== signed.body ||
+        config.url !== originalUrl || config.baseURL !== signed.url ||
+        config.method !== signed.method || config.data !== signed.body ||
+        config.params !== undefined || config.signal !== signal ||
+        signed.headers.some(([name, value]) => config.headers.get(name) !== value)
+      )) throw new Error('Orderly transport authorization changed signed request bytes or headers');
       config.timeout = Math.max(1, 20_000 - (Date.now() - started));
       if (adapter) {
         const response = await untilAborted(adapter(config), signal);
@@ -316,6 +330,30 @@ export const createEngineTransport = (
     private: wsRoute(routing.wsPrivate),
     business: wsRoute(routing.wsBusiness),
   };
+  const requireSocketHeaders = (url: string) => {
+    const connection = provider.wsConnection(url);
+    // Tealstreet's identification headers are supplied by the browser itself.
+    // A custom provider's headers may authenticate the upgrade; dropping them
+    // silently would route an Orderly account through an unauthenticated socket.
+    if (orderlyExchanges.has(exchange) && provider !== tealstreetTransport && !transport.webSocketHeaders &&
+        connection && Object.keys(connection.headers).length) {
+      throw new Error('Orderly custom WebSocket routing requires upgrade header support');
+    }
+    return connection;
+  };
+  if (orderlyExchanges.has(exchange)) {
+    const prefix = options.testnet ? 'testnet-' : '';
+    const account = options.applicationId ?? 'OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY';
+    const publicUrl = `wss://${prefix}ws-evm.orderly.org/ws/stream/${account}`;
+    const urls = [[publicUrl, routes.public]] as Array<[string, EngineWsRoute]>;
+    if (!options.publicDataOnly && options.key && options.secret && options.applicationId) {
+      urls.push([`wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/${options.applicationId}`, routes.private]);
+    }
+    for (const [url, route] of urls) {
+      const candidates = route.directUrls?.includes(url) ? [url] : [route.host ?? url, route.relay, route.fallback];
+      for (const candidate of candidates) if (candidate) requireSocketHeaders(candidate);
+    }
+  }
   const fallbacks = new Map<string, WsDirectFallback>();
   const http = httpTransport(exchange, options, transport, provider, restRouting);
   return {
@@ -342,7 +380,7 @@ export const createEngineTransport = (
       }
       if (handlers.context?.recover && route.fallback) fallback?.preferFallback();
       const target = fallback?.resolveUrl(route.host ?? url, route.relay, route.fallback) ?? url;
-      const connection = provider.wsConnection(target);
+      const connection = requireSocketHeaders(target);
       const upgrade = AxiosHeaders.from(handlers.headers ?? {});
       if (transport.webSocketHeaders) {
         upgrade.set(venueHeaders(exchange, options));

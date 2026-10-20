@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { OrderlyExchange } from '../../exchanges/orderly/orderly.exchange';
+import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const orderlyFamily = ['woofi', 'kodiakfi', 'mode', 'salsadex', 'what', 'tealstreet-dex'] as const;
