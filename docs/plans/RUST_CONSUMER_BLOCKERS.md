@@ -538,6 +538,25 @@ publish an empty snapshot or dispose the previous good engine.
   TS deletion, registry changes, publication or deployment. Require green CI
   on the final documentation-integrated head before merging PR #1342.
 
+- Checkpoint `de0471c605` reaches 39/39 green CI checks. Final-head Bybit
+  first misses Hyro steady 5.7 / 6.0 ms; one independently reviewed bounded
+  retry passes main TS 38.1 → Rust 30.8 ms, steady 6.0 → 5.8 ms, retained
+  13.3 → 0.8 MB. Both trials remain visible; runner-image/region drift and
+  sparse-window sensitivity mean this is no robust CPU-margin claim.
+- The pre-merge fetch finds runtime landing PR #1338 plus the port-review
+  docs through `b4c4960a93`. Integrate before landing this lane. Independent
+  conflict reviews preserve incoming shared-command validation, delegated
+  signing/transport and KuCoin Spot alongside typed trusted public ingress,
+  privateOnly/feed ownership, provider callbacks/readiness, native authority,
+  secondary credentials and the inline guard. Source integration audits pass;
+  broad native/JS/WASM/consumer and canonical replay checks must run again.
+  Inventory is now 49 names / 48 Rust aliases / 9 defaults / 39 opt-in,
+  with only Bitunix unregistered. Preserve landing's new isolated build
+  profiles and validate their unchanged budgets; the earlier Paradex host-z
+  override is superseded pending this verification. Sam's production-impact
+  judging rule applies; lifecycle shape alone is not a bug. The bridge audit
+  follow-up remains queued until PR #1342 has merged.
+
 ## Historical public replay metrics (6afa artifact)
 
 Prior acceptance runtime: Node 22.23.3, three-run medians. Fifteen profiles, including OKX EU,

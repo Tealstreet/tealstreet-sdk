@@ -368,6 +368,30 @@ async fn authenticated_accounts_and_command_results_are_isolated() {
 }
 
 #[tokio::test]
+async fn unsupported_symbol_amend_preserves_client_id_and_releases_pending_capacity() {
+    LocalSet::new().run_until(async {
+        let fixture = Fixture::new(ServerConfig {
+            max_pending_per_client: 1,
+            max_pending_per_account: 1,
+            ..config()
+        }).await;
+        let mut socket = fixture.connect("a").await;
+        frame(&mut socket).await;
+        send(&mut socket, r#"{"op":"amendOrderWithSymbol","command":7,"id":"unseen","symbol":"BTC-USDT","price":100}"#).await;
+        assert!(matches!(reply(&mut socket).await, Reply::Done {
+            command: 7, result: None, error: Some(error),
+        } if error.contains("unsupported")));
+        assert!(fixture.observed.borrow().is_empty());
+        send(&mut socket, r#"{"op":"fetchAccount","command":7}"#).await;
+        assert!(matches!(reply(&mut socket).await, Reply::Done {
+            command: 7, result: Some(result), error: None,
+        } if result == "\"a\""));
+        assert_eq!(fixture.observed.borrow().len(), 1);
+        fixture.stop().await;
+    }).await;
+}
+
+#[tokio::test]
 async fn subscriptions_are_refcounted_and_disconnect_releases_them() {
     LocalSet::new()
         .run_until(async {

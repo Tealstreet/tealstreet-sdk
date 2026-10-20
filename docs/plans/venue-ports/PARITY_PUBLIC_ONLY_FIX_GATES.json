@@ -1,0 +1,1377 @@
+{
+  "schemaVersion": 1,
+  "status": "PASS for this bounded local authentication follow-up; exact published-head green CI remains required.",
+  "runtimeSourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+  "docsOnlyMerge": {
+    "head": "c2874607b2536b6e4ca63912f9e2d05b6d4f56ec",
+    "changedPathsFromRuntimeSource": [
+      "docs/plans/RUST_AUDITS.md"
+    ],
+    "runtimeInputsUnchanged": true
+  },
+  "fixScope": "KuCoin futures signed and signed_streamed helpers use secondary GET credentials only when primary authentication is enabled; publicDataOnly stays unsigned while host secondary egress remains unchanged.",
+  "runtimeDeltaFromF920": [
+    "sdk-rs/venues/kucoin/src/lib.rs",
+    "sdk-rs/venues/kucoin/src/secondary_tests.rs"
+  ],
+  "wasmByteBudget": 1258291,
+  "normalEgress": true,
+  "verificationScope": {
+    "freshFuturesGates": 2,
+    "freshFuturesRawRuns": 8,
+    "retainedF920Gates": 20,
+    "retainedF920RawRuns": 80,
+    "extraHyroGates": 2,
+    "extraHyroRawRuns": 8,
+    "interpretation": "The 20 unchanged gates remain attributed to F920; six canonical per-venue builds are byte-identical and TS/host/harness/tapes are unchanged. The extra Hyro comparison does not replace all Bybit-family gate attribution or claim a performance fix."
+  },
+  "canonicalIdentityBuilds": {
+    "paradex": {
+      "sourceHeadBefore": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "sourceHeadAfter": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "referenceSourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "buildCommand": "corepack yarn -s rust:build-wasm --venue paradex",
+      "cargoOverrides": [
+        "profile.release.package.safe-cex-wasm.opt-level=2",
+        "profile.release.package.safe-cex-engine.opt-level=2"
+      ],
+      "wasmByteBudget": 1258291,
+      "budgetPass": true,
+      "allFormatsByteIdentical": true,
+      "buildLog": "/tmp/parity-final19-identity-paradex-build.log",
+      "buildLogSha256": "1562ebad625ef19031295fb88c451406172dae7fee422f57514f487cea3efcd0",
+      "referenceMetadata": {
+        "path": "/tmp/parity-final19-identity-references.json",
+        "sha256": "a3e1cd226c9d414a6e7cdc68f015203cc4a9ee0282eebf90d29c2fc8f54b8ed2"
+      },
+      "capturedAtUnixNs": 1792491626590737000,
+      "files": [
+        {
+          "format": "node",
+          "artifactPath": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+          "savedPath": "/tmp/parity-final19-identity-paradex-node.wasm",
+          "bytes": 1250863,
+          "sha256": "08b95c95d2fc61982d6e488afd0dbc04eac41fa0269414ce979f2e845010636c",
+          "artifactMtimeNs": 1792491626229994931,
+          "savedMtimeNs": 1792491626557064582,
+          "reference": {
+            "format": "node",
+            "savedPath": "/tmp/parity-final17-paradex-node.wasm",
+            "bytes": 1250863,
+            "sha256": "08b95c95d2fc61982d6e488afd0dbc04eac41fa0269414ce979f2e845010636c"
+          },
+          "byteIdentical": true
+        },
+        {
+          "format": "web",
+          "artifactPath": "sdk-rs/hosts/wasm/pkg/web/safe_cex_wasm_bg.wasm",
+          "savedPath": "/tmp/parity-final19-identity-paradex-web.wasm",
+          "bytes": 1250863,
+          "sha256": "08b95c95d2fc61982d6e488afd0dbc04eac41fa0269414ce979f2e845010636c",
+          "artifactMtimeNs": 1792491625975642614,
+          "savedMtimeNs": 1792491626560879172,
+          "reference": {
+            "format": "web",
+            "savedPath": "/tmp/parity-final17-paradex-web.wasm",
+            "bytes": 1250863,
+            "sha256": "08b95c95d2fc61982d6e488afd0dbc04eac41fa0269414ce979f2e845010636c"
+          },
+          "byteIdentical": true
+        }
+      ],
+      "scope": "Identity only; no new replay or performance result. Prior gates retain exact F920 source attribution."
+    },
+    "binance": {
+      "sourceHeadBefore": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "sourceHeadAfter": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "referenceSourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "buildCommand": "corepack yarn -s rust:build-wasm --venue binance",
+      "cargoOverrides": [],
+      "wasmByteBudget": 1258291,
+      "budgetPass": true,
+      "allFormatsByteIdentical": true,
+      "buildLog": "/tmp/parity-final19-identity-binance-build.log",
+      "buildLogSha256": "5984b4092522683df22a279d29b38ab53d0cab0570799143b3b27f1d22663e30",
+      "referenceMetadata": {
+        "path": "/tmp/parity-final19-identity-references.json",
+        "sha256": "a3e1cd226c9d414a6e7cdc68f015203cc4a9ee0282eebf90d29c2fc8f54b8ed2"
+      },
+      "capturedAtUnixNs": 1792491636456980000,
+      "files": [
+        {
+          "format": "node",
+          "artifactPath": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+          "savedPath": "/tmp/parity-final19-identity-binance-node.wasm",
+          "bytes": 935485,
+          "sha256": "4449d409b639fe2d3ad20f2dad92266ff3340d743af71184fa8e80c5d33c8ec0",
+          "artifactMtimeNs": 1792491636177848337,
+          "savedMtimeNs": 1792491636411087159,
+          "reference": {
+            "format": "node",
+            "savedPath": "/tmp/parity-final17-binance-node.wasm",
+            "bytes": 935485,
+            "sha256": "4449d409b639fe2d3ad20f2dad92266ff3340d743af71184fa8e80c5d33c8ec0"
+          },
+          "byteIdentical": true
+        },
+        {
+          "format": "web",
+          "artifactPath": "sdk-rs/hosts/wasm/pkg/web/safe_cex_wasm_bg.wasm",
+          "savedPath": "/tmp/parity-final19-identity-binance-web.wasm",
+          "bytes": 935485,
+          "sha256": "4449d409b639fe2d3ad20f2dad92266ff3340d743af71184fa8e80c5d33c8ec0",
+          "artifactMtimeNs": 1792491636014349637,
+          "savedMtimeNs": 1792491636413041496,
+          "reference": {
+            "format": "web",
+            "savedPath": "/tmp/parity-final17-binance-web.wasm",
+            "bytes": 935485,
+            "sha256": "4449d409b639fe2d3ad20f2dad92266ff3340d743af71184fa8e80c5d33c8ec0"
+          },
+          "byteIdentical": true
+        }
+      ],
+      "scope": "Identity only; no new replay or performance result. Prior gates retain exact F920 source attribution."
+    },
+    "bitrue": {
+      "sourceHeadBefore": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "sourceHeadAfter": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "referenceSourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "buildCommand": "corepack yarn -s rust:build-wasm --venue bitrue",
+      "cargoOverrides": [
+        "profile.release.package.safe-cex-venue-bitrue.opt-level=3"
+      ],
+      "wasmByteBudget": 1258291,
+      "budgetPass": true,
+      "allFormatsByteIdentical": true,
+      "buildLog": "/tmp/parity-final19-identity-bitrue-build.log",
+      "buildLogSha256": "b718aba539a841644aaacc86f27aa14f234c902732cc1c5057f7951e632a4251",
+      "referenceMetadata": {
+        "path": "/tmp/parity-final19-identity-references.json",
+        "sha256": "a3e1cd226c9d414a6e7cdc68f015203cc4a9ee0282eebf90d29c2fc8f54b8ed2"
+      },
+      "capturedAtUnixNs": 1792491641297810000,
+      "files": [
+        {
+          "format": "node",
+          "artifactPath": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+          "savedPath": "/tmp/parity-final19-identity-bitrue-node.wasm",
+          "bytes": 817358,
+          "sha256": "76f752d9e9927f103fdd231b9e95e65f26bb3a2533e22f27d0c3192e98ae42ab",
+          "artifactMtimeNs": 1792491641080645146,
+          "savedMtimeNs": 1792491641274903442,
+          "reference": {
+            "format": "node",
+            "savedPath": "/tmp/parity-final17-bitrue-node.wasm",
+            "bytes": 817358,
+            "sha256": "76f752d9e9927f103fdd231b9e95e65f26bb3a2533e22f27d0c3192e98ae42ab"
+          },
+          "byteIdentical": true
+        },
+        {
+          "format": "web",
+          "artifactPath": "sdk-rs/hosts/wasm/pkg/web/safe_cex_wasm_bg.wasm",
+          "savedPath": "/tmp/parity-final19-identity-bitrue-web.wasm",
+          "bytes": 817358,
+          "sha256": "76f752d9e9927f103fdd231b9e95e65f26bb3a2533e22f27d0c3192e98ae42ab",
+          "artifactMtimeNs": 1792491640996071374,
+          "savedMtimeNs": 1792491641281366745,
+          "reference": {
+            "format": "web",
+            "savedPath": "/tmp/parity-final17-bitrue-web.wasm",
+            "bytes": 817358,
+            "sha256": "76f752d9e9927f103fdd231b9e95e65f26bb3a2533e22f27d0c3192e98ae42ab"
+          },
+          "byteIdentical": true
+        }
+      ],
+      "scope": "Identity only; no new replay or performance result. Prior gates retain exact F920 source attribution."
+    },
+    "polymarket": {
+      "sourceHeadBefore": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "sourceHeadAfter": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "referenceSourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "buildCommand": "corepack yarn -s rust:build-wasm --venue polymarket",
+      "cargoOverrides": [],
+      "wasmByteBudget": 1258291,
+      "budgetPass": true,
+      "allFormatsByteIdentical": true,
+      "buildLog": "/tmp/parity-final19-identity-polymarket-build.log",
+      "buildLogSha256": "b9fe81d095cea1763b75b5ad7e0cf6c45c4ac066a8061b4464a4818f315eaa1a",
+      "referenceMetadata": {
+        "path": "/tmp/parity-final19-identity-references.json",
+        "sha256": "a3e1cd226c9d414a6e7cdc68f015203cc4a9ee0282eebf90d29c2fc8f54b8ed2"
+      },
+      "capturedAtUnixNs": 1792491646307927000,
+      "files": [
+        {
+          "format": "node",
+          "artifactPath": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+          "savedPath": "/tmp/parity-final19-identity-polymarket-node.wasm",
+          "bytes": 859221,
+          "sha256": "739546c8fc87214864b0501bd23063092dba5f58a9c12fd317891d46cca598b1",
+          "artifactMtimeNs": 1792491646115373642,
+          "savedMtimeNs": 1792491646288783485,
+          "reference": {
+            "format": "node",
+            "savedPath": "/tmp/parity-final17-polymarket-node.wasm",
+            "bytes": 859221,
+            "sha256": "739546c8fc87214864b0501bd23063092dba5f58a9c12fd317891d46cca598b1"
+          },
+          "byteIdentical": true
+        },
+        {
+          "format": "web",
+          "artifactPath": "sdk-rs/hosts/wasm/pkg/web/safe_cex_wasm_bg.wasm",
+          "savedPath": "/tmp/parity-final19-identity-polymarket-web.wasm",
+          "bytes": 859221,
+          "sha256": "739546c8fc87214864b0501bd23063092dba5f58a9c12fd317891d46cca598b1",
+          "artifactMtimeNs": 1792491646047157441,
+          "savedMtimeNs": 1792491646290538988,
+          "reference": {
+            "format": "web",
+            "savedPath": "/tmp/parity-final17-polymarket-web.wasm",
+            "bytes": 859221,
+            "sha256": "739546c8fc87214864b0501bd23063092dba5f58a9c12fd317891d46cca598b1"
+          },
+          "byteIdentical": true
+        }
+      ],
+      "scope": "Identity only; no new replay or performance result. Prior gates retain exact F920 source attribution."
+    },
+    "bybit": {
+      "sourceHeadBefore": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "sourceHeadAfter": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "referenceSourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "buildCommand": "corepack yarn -s rust:build-wasm --venue bybit",
+      "cargoOverrides": [],
+      "wasmByteBudget": 1258291,
+      "budgetPass": true,
+      "allFormatsByteIdentical": true,
+      "buildLog": "/tmp/parity-final19-identity-bybit-build.log",
+      "buildLogSha256": "3b31f5f88bad4764d706f66d3732139eaaddc82be86d854491c9529c1cfcece2",
+      "referenceMetadata": {
+        "path": "/tmp/parity-final19-identity-references.json",
+        "sha256": "a3e1cd226c9d414a6e7cdc68f015203cc4a9ee0282eebf90d29c2fc8f54b8ed2"
+      },
+      "capturedAtUnixNs": 1792491651709760000,
+      "files": [
+        {
+          "format": "web",
+          "artifactPath": "sdk-rs/hosts/wasm/pkg/web/safe_cex_wasm_bg.wasm",
+          "savedPath": "/tmp/parity-final19-identity-bybit-web.wasm",
+          "bytes": 1118611,
+          "sha256": "6ed52d131534c5f7ebfb4d8f7ee3a2bffae237001820a10fa636ad3d2ba21b98",
+          "artifactMtimeNs": 1792491651180010607,
+          "savedMtimeNs": 1792491651671737670,
+          "reference": {
+            "format": "web",
+            "savedPath": "/tmp/parity-bybit17-web.wasm",
+            "bytes": 1118611,
+            "sha256": "6ed52d131534c5f7ebfb4d8f7ee3a2bffae237001820a10fa636ad3d2ba21b98"
+          },
+          "byteIdentical": true
+        },
+        {
+          "format": "node",
+          "artifactPath": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+          "savedPath": "/tmp/parity-final19-identity-bybit-node.wasm",
+          "bytes": 1118611,
+          "sha256": "6ed52d131534c5f7ebfb4d8f7ee3a2bffae237001820a10fa636ad3d2ba21b98",
+          "artifactMtimeNs": 1792491651416070392,
+          "savedMtimeNs": 1792491651679126308,
+          "reference": {
+            "format": "node",
+            "savedPath": "/tmp/parity-bybit17-node.wasm",
+            "bytes": 1118611,
+            "sha256": "6ed52d131534c5f7ebfb4d8f7ee3a2bffae237001820a10fa636ad3d2ba21b98"
+          },
+          "byteIdentical": true
+        }
+      ],
+      "scope": "Identity only; no new replay or performance result. Prior gates retain exact F920 source attribution."
+    }
+  },
+  "spotIdentity": {
+    "comparedAtUtc": "2026-10-20T10:22:12.022598+00:00",
+    "prior": {
+      "source": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "bytes": 687701,
+      "sha256": "b90c7a6b92f5cc3613cfe3928746cf4c93dd5f146a820d93aad3c113d922b9cc",
+      "savedArtifact": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/artifacts/kucoinspot.wasm"
+    },
+    "current": {
+      "builtAtUtc": "2026-10-20T10:22:11.903790+00:00",
+      "venue": "kucoinspot",
+      "source": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "artifact": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+      "bytes": 687701,
+      "sha256": "b90c7a6b92f5cc3613cfe3928746cf4c93dd5f146a820d93aad3c113d922b9cc",
+      "budget": 1258291,
+      "standardBuild": true,
+      "buildCommand": "corepack yarn -s rust:build-wasm --venue kucoinspot",
+      "buildLog": "/tmp/kucoin-parity-gates/frozen-6c7cc518fa/kucoinspot-build.log",
+      "savedArtifact": "/tmp/kucoin-parity-gates/frozen-6c7cc518fa/artifacts/kucoinspot.wasm",
+      "webSha256": "b90c7a6b92f5cc3613cfe3928746cf4c93dd5f146a820d93aad3c113d922b9cc"
+    },
+    "byteIdentical": true,
+    "priorGatesRemainAttributedToPriorSource": true
+  },
+  "spotIdentityLog": {
+    "path": "/tmp/kucoin-parity-gates/frozen-6c7cc518fa/kucoinspot-identity.log",
+    "sha256": "f3e315d52fbadec45344f32b9fe71bbe9a2c2401c7109fe72cbaf9d9dd6f171b"
+  },
+  "freshFuturesGates": [
+    {
+      "venue": "kucoin",
+      "stage": "public",
+      "sourceHeadBefore": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "sourceHeadAfter": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "harnessSource": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "proofWrittenAt": "2026-10-20T10:21:45.644815+00:00",
+      "standardEgress": true,
+      "tape": "sdk-rs/harness/fixtures/kucoin-public.jsonl.gz",
+      "tapeBytes": 488852,
+      "tapeSha256": "6830bc02106fb6b4d05db9a3c4e535ea3c6937f39498fc980755facaa44f16b5",
+      "records": 8322,
+      "outputDirectory": "sdk-rs/harness/out/kucoin-33522",
+      "rawRunFiles": {
+        "ts": [
+          "sdk-rs/harness/out/kucoin-33522/ts-0.json",
+          "sdk-rs/harness/out/kucoin-33522/ts-1.json",
+          "sdk-rs/harness/out/kucoin-33522/ts-2.json"
+        ],
+        "rust": [
+          "sdk-rs/harness/out/kucoin-33522/rust-0.json",
+          "sdk-rs/harness/out/kucoin-33522/rust-1.json",
+          "sdk-rs/harness/out/kucoin-33522/rust-2.json"
+        ]
+      },
+      "log": "/tmp/kucoin-parity-gates/frozen-6c7cc518fa/kucoin-public.log",
+      "logSha256": "8ef2b34b356a0c5ea8b4bbe43ff83b4e98d7a0aa8d4784f239158e52e5a773b3",
+      "artifact": {
+        "builtAtUtc": "2026-10-20T10:21:35.398518+00:00",
+        "venue": "kucoin",
+        "source": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+        "artifact": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+        "bytes": 782323,
+        "sha256": "1f68868712b4a549553cc7b62e6e6893b3046ec344b6b6d23d28dc33a202a0ba",
+        "budget": 1258291,
+        "standardBuild": true,
+        "buildCommand": "corepack yarn -s rust:build-wasm --venue kucoin",
+        "buildLog": "/tmp/kucoin-parity-gates/frozen-6c7cc518fa/kucoin-build.log",
+        "savedArtifact": "/tmp/kucoin-parity-gates/frozen-6c7cc518fa/artifacts/kucoin.wasm",
+        "webSha256": "1f68868712b4a549553cc7b62e6e6893b3046ec344b6b6d23d28dc33a202a0ba",
+        "buildLogSha256": "b5d803414294aff0bda4fc59cba0e70c5e3f4ea9413bd6d218c26c3df5224b85"
+      },
+      "pass": true,
+      "implementations": {
+        "ts": {
+          "runs": 3,
+          "rawMetricsByRun": [
+            {
+              "cpuMs": 397.888,
+              "steadyCpuMs": 232.401,
+              "processCpuMs": 565.983,
+              "wallMs": 1460.3039589999998,
+              "rssBytes": 131989504,
+              "heapBeforeBytes": 17071672,
+              "heapUsedBytes": 38421832,
+              "heapRetainedBytes": 21350160,
+              "bufferRetainedBytes": 67785,
+              "buffersBefore": 1564531,
+              "buffersAfter": 1632316,
+              "wasmBytes": 0,
+              "retainedBytes": 21417945
+            },
+            {
+              "cpuMs": 377.72,
+              "steadyCpuMs": 230.136,
+              "processCpuMs": 544.533,
+              "wallMs": 1436.0584159999999,
+              "rssBytes": 129728512,
+              "heapBeforeBytes": 17071112,
+              "heapUsedBytes": 38405136,
+              "heapRetainedBytes": 21334024,
+              "bufferRetainedBytes": 67785,
+              "buffersBefore": 1564531,
+              "buffersAfter": 1632316,
+              "wasmBytes": 0,
+              "retainedBytes": 21401809
+            },
+            {
+              "cpuMs": 385.528,
+              "steadyCpuMs": 231.398,
+              "processCpuMs": 567.15,
+              "wallMs": 1446.8351670000002,
+              "rssBytes": 130777088,
+              "heapBeforeBytes": 17071256,
+              "heapUsedBytes": 38424488,
+              "heapRetainedBytes": 21353232,
+              "bufferRetainedBytes": 67785,
+              "buffersBefore": 1564531,
+              "buffersAfter": 1632316,
+              "wasmBytes": 0,
+              "retainedBytes": 21421017
+            }
+          ],
+          "rawResultSha256ByRun": [
+            "8bf58873b958992d91ba7350a58d70d3e8c912e17d1cfd4c90c44f22d38516ce",
+            "773c238cde1b91b7ca41e9852ebdf69e9cf2186849713295e670997cf0f413c8",
+            "57901c42d4b9efd832a83cc680c6f5df7ef8fa9defacef950f14b3cbbf60288c"
+          ],
+          "frames": 8306,
+          "markets": 692,
+          "tickers": 692,
+          "books": 2,
+          "commands": 0,
+          "median": {
+            "cpuMs": 385.528,
+            "steadyCpuMs": 231.398,
+            "processCpuMs": 565.983,
+            "retainedBytes": 21417945
+          },
+          "bookDepth": {
+            "BTCUSDT": {
+              "bids": 1013,
+              "asks": 1001
+            },
+            "ETHUSDT": {
+              "bids": 1004,
+              "asks": 998
+            }
+          },
+          "requestAudit": {
+            "unserved": 0,
+            "missingWrites": 0,
+            "invalidSignatures": 0,
+            "unusedWrites": 0,
+            "protocolErrors": []
+          }
+        },
+        "rust": {
+          "runs": 3,
+          "rawMetricsByRun": [
+            {
+              "cpuMs": 197.154,
+              "steadyCpuMs": 106.412,
+              "processCpuMs": 369.415,
+              "wallMs": 287.84016599999995,
+              "rssBytes": 102629376,
+              "heapBeforeBytes": 13627896,
+              "heapUsedBytes": 16363352,
+              "heapRetainedBytes": 2735456,
+              "bufferRetainedBytes": 259308,
+              "buffersBefore": 515683,
+              "buffersAfter": 774991,
+              "wasmBytes": 1048576,
+              "retainedBytes": 4043340
+            },
+            {
+              "cpuMs": 218.196,
+              "steadyCpuMs": 118.339,
+              "processCpuMs": 396.226,
+              "wallMs": 319.018667,
+              "rssBytes": 102137856,
+              "heapBeforeBytes": 13627528,
+              "heapUsedBytes": 16363208,
+              "heapRetainedBytes": 2735680,
+              "bufferRetainedBytes": 259308,
+              "buffersBefore": 515683,
+              "buffersAfter": 774991,
+              "wasmBytes": 1048576,
+              "retainedBytes": 4043564
+            },
+            {
+              "cpuMs": 196.402,
+              "steadyCpuMs": 105.108,
+              "processCpuMs": 369.495,
+              "wallMs": 287.271792,
+              "rssBytes": 101990400,
+              "heapBeforeBytes": 13627896,
+              "heapUsedBytes": 16363336,
+              "heapRetainedBytes": 2735440,
+              "bufferRetainedBytes": 259308,
+              "buffersBefore": 515683,
+              "buffersAfter": 774991,
+              "wasmBytes": 1048576,
+              "retainedBytes": 4043324
+            }
+          ],
+          "rawResultSha256ByRun": [
+            "a229d5e9fdbcd28b3e1eb5c0e856252d4c1746cddef79671eef0153bd6434ca2",
+            "3409ece626074ea81d27f09916a5030618eacb0c7894c472a5565de045ff8867",
+            "aec451c7e99f678a2257581bb0fbb05c47266e07df8fdf2d0ad515d9e30a1039"
+          ],
+          "frames": 8306,
+          "markets": 692,
+          "tickers": 692,
+          "books": 2,
+          "commands": 0,
+          "median": {
+            "cpuMs": 197.154,
+            "steadyCpuMs": 106.412,
+            "processCpuMs": 369.495,
+            "retainedBytes": 4043340
+          },
+          "bookDepth": {
+            "BTCUSDT": {
+              "bids": 1013,
+              "asks": 1001
+            },
+            "ETHUSDT": {
+              "bids": 1004,
+              "asks": 998
+            }
+          },
+          "requestAudit": {
+            "unserved": 0,
+            "missingWrites": 0,
+            "invalidSignatures": 0,
+            "unusedWrites": 0,
+            "protocolErrors": []
+          }
+        }
+      },
+      "command": "corepack yarn -s rust:gate --venue kucoin --tape sdk-rs/harness/fixtures/kucoin-public.jsonl.gz --runs 3 --books BTCUSDT,ETHUSDT"
+    },
+    {
+      "venue": "kucoin",
+      "stage": "private",
+      "sourceHeadBefore": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "sourceHeadAfter": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "harnessSource": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "proofWrittenAt": "2026-10-20T10:22:00.222220+00:00",
+      "standardEgress": true,
+      "tape": "sdk-rs/harness/tapes/kucoin-private.jsonl",
+      "tapeBytes": 26347,
+      "tapeSha256": "31eaff8fcb6de28468ba8724923c891650d2734d02b401e200b277bdfc9b20e7",
+      "records": 77,
+      "outputDirectory": "sdk-rs/harness/out/kucoin-34194",
+      "rawRunFiles": {
+        "ts": [
+          "sdk-rs/harness/out/kucoin-34194/ts-0.json"
+        ],
+        "rust": [
+          "sdk-rs/harness/out/kucoin-34194/rust-0.json"
+        ]
+      },
+      "log": "/tmp/kucoin-parity-gates/frozen-6c7cc518fa/kucoin-private.log",
+      "logSha256": "dfadddbc785a051e74570be6b5c11d1e327345f2fdaaedb6f4052a5203d308d9",
+      "artifact": {
+        "builtAtUtc": "2026-10-20T10:21:35.398518+00:00",
+        "venue": "kucoin",
+        "source": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+        "artifact": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+        "bytes": 782323,
+        "sha256": "1f68868712b4a549553cc7b62e6e6893b3046ec344b6b6d23d28dc33a202a0ba",
+        "budget": 1258291,
+        "standardBuild": true,
+        "buildCommand": "corepack yarn -s rust:build-wasm --venue kucoin",
+        "buildLog": "/tmp/kucoin-parity-gates/frozen-6c7cc518fa/kucoin-build.log",
+        "savedArtifact": "/tmp/kucoin-parity-gates/frozen-6c7cc518fa/artifacts/kucoin.wasm",
+        "webSha256": "1f68868712b4a549553cc7b62e6e6893b3046ec344b6b6d23d28dc33a202a0ba",
+        "buildLogSha256": "b5d803414294aff0bda4fc59cba0e70c5e3f4ea9413bd6d218c26c3df5224b85"
+      },
+      "pass": true,
+      "implementations": {
+        "ts": {
+          "runs": 1,
+          "rawMetricsByRun": [
+            {
+              "cpuMs": 78.538,
+              "steadyCpuMs": 43.091,
+              "processCpuMs": 134.321,
+              "wallMs": 9031.082375,
+              "rssBytes": 98402304,
+              "heapBeforeBytes": 8193816,
+              "heapUsedBytes": 24001256,
+              "heapRetainedBytes": 15807440,
+              "bufferRetainedBytes": 67785,
+              "buffersBefore": 1102026,
+              "buffersAfter": 1169811,
+              "wasmBytes": 0,
+              "retainedBytes": 15875225
+            }
+          ],
+          "rawResultSha256ByRun": [
+            "311eb49879801b7b9e7c62cf117581a269dff7e64cf3dc9ab944d3c09fb367b1"
+          ],
+          "frames": 32,
+          "markets": 2,
+          "tickers": 2,
+          "books": 0,
+          "commands": 17,
+          "median": {
+            "cpuMs": 78.538,
+            "steadyCpuMs": 43.091,
+            "processCpuMs": 134.321,
+            "retainedBytes": 15875225
+          },
+          "bookDepth": {},
+          "requestAudit": {
+            "unserved": 0,
+            "missingWrites": 0,
+            "invalidSignatures": 0,
+            "unusedWrites": 0,
+            "protocolErrors": []
+          }
+        },
+        "rust": {
+          "runs": 1,
+          "rawMetricsByRun": [
+            {
+              "cpuMs": 48.944,
+              "steadyCpuMs": 21.709,
+              "processCpuMs": 62.511,
+              "wallMs": 3571.937375,
+              "rssBytes": 66125824,
+              "heapBeforeBytes": 4756712,
+              "heapUsedBytes": 5494416,
+              "heapRetainedBytes": 737704,
+              "bufferRetainedBytes": 4956,
+              "buffersBefore": 53178,
+              "buffersAfter": 58134,
+              "wasmBytes": 327680,
+              "retainedBytes": 1070340
+            }
+          ],
+          "rawResultSha256ByRun": [
+            "c5e45b787726c73831c5629924b2fd1ed932ca48acafccb76efb74e7d5a08cc3"
+          ],
+          "frames": 32,
+          "markets": 2,
+          "tickers": 2,
+          "books": 0,
+          "commands": 17,
+          "median": {
+            "cpuMs": 48.944,
+            "steadyCpuMs": 21.709,
+            "processCpuMs": 62.511,
+            "retainedBytes": 1070340
+          },
+          "bookDepth": {},
+          "requestAudit": {
+            "unserved": 0,
+            "missingWrites": 0,
+            "invalidSignatures": 0,
+            "unusedWrites": 0,
+            "protocolErrors": []
+          }
+        }
+      },
+      "command": "corepack yarn -s rust:gate --venue kucoin --tape sdk-rs/harness/tapes/kucoin-private.jsonl --runs 1 --books ''"
+    }
+  ],
+  "spotSdk": {
+    "passed": 2,
+    "command": "corepack yarn workspace @tealstreet/safe-cex test-wasm src/__tests__/audit-regressions/kucoinspot.rust-boundary.wasm.test.ts",
+    "log": "/tmp/kucoin-parity-gates/frozen-6c7cc518fa/kucoinspot-sdk.log",
+    "logSha256": "cc5d9c87b55afa90094b23057214f4e670c7d07303dd1bdf4905d8ff1e8c9986",
+    "artifactSha256": "b90c7a6b92f5cc3613cfe3928746cf4c93dd5f146a820d93aad3c113d922b9cc",
+    "sourceHeadBefore": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+    "sourceHeadAfter": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e"
+  },
+  "retainedF920GateManifests": [
+    {
+      "path": "docs/plans/venue-ports/PARITY_GATES.json",
+      "sha256": "158979db2b031508119756908a9a34bcc02ed575cdf6e612a12166a85ec67afb"
+    },
+    {
+      "path": "docs/plans/venue-ports/KUCOIN_GATES.json",
+      "sha256": "e99d3d06f812293cb31a3f03ffff9b90d96de1123c01fc15ef0a0d9c430215d1"
+    },
+    {
+      "path": "docs/plans/venue-ports/PARITY_BYBIT_CI_GATES.json",
+      "sha256": "9c5bf32b6f92dd3d9b19230c9f0108753a7dce532c1517628ac0b0cbad7bcc6d"
+    }
+  ],
+  "retainedF920Gates": [
+    {
+      "venue": "paradex",
+      "stage": "public",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_GATES.json",
+      "log": "/tmp/parity-final17-paradex-public.log",
+      "logSha256": "c4eb8f99db0882b914a1ff4916e98534d879e47ec2e3583e0de20ecbb4f5185f",
+      "rawRuns": 6
+    },
+    {
+      "venue": "paradex",
+      "stage": "private",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_GATES.json",
+      "log": "/tmp/parity-final17-paradex-private.log",
+      "logSha256": "f9cee2bc2411548e891a64929ac22d012cdf5550f0a32cd8d6bf1ed257bd7c36",
+      "rawRuns": 2
+    },
+    {
+      "venue": "binance",
+      "stage": "public",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_GATES.json",
+      "log": "/tmp/parity-final17-binance-public.log",
+      "logSha256": "2e174a2227c00eb4203e1cae8a5968f8e71d8124919b5a4a1ab1197b25d52fb4",
+      "rawRuns": 6
+    },
+    {
+      "venue": "binance",
+      "stage": "private",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_GATES.json",
+      "log": "/tmp/parity-final17-binance-private.log",
+      "logSha256": "d715bcdb75eda8e523ba34939848e4b59324b9bdef43cf8565188cd5cc91873d",
+      "rawRuns": 2
+    },
+    {
+      "venue": "bitrue",
+      "stage": "public",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_GATES.json",
+      "log": "/tmp/parity-final17-bitrue-public.log",
+      "logSha256": "735da452c21b1c1edcd2a9e355bb259e93539bc5d1d039b99a325737166ad054",
+      "rawRuns": 6
+    },
+    {
+      "venue": "bitrue",
+      "stage": "private",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_GATES.json",
+      "log": "/tmp/parity-final17-bitrue-private.log",
+      "logSha256": "b6b3b95b88572db3d40ae7b291aaf702a3030a13c30bcebcd0b5e8b2f2a8926b",
+      "rawRuns": 2
+    },
+    {
+      "venue": "polymarket",
+      "stage": "public",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_GATES.json",
+      "log": "/tmp/parity-final17-polymarket-public.log",
+      "logSha256": "de7b310c893e140005376f9203412e7269bc03598a0aba16cceee3d487091e6f",
+      "rawRuns": 6
+    },
+    {
+      "venue": "polymarket",
+      "stage": "private",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_GATES.json",
+      "log": "/tmp/parity-final17-polymarket-private.log",
+      "logSha256": "3105fd851612d7a1a8789c6068756bde5df0ad6c0415bfecbf93c9ffebf90d8c",
+      "rawRuns": 2
+    },
+    {
+      "venue": "kucoinspot",
+      "stage": "public",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/KUCOIN_GATES.json",
+      "log": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/kucoinspot-public.log",
+      "logSha256": "60641517b1f30f50c7c3b903760cadc8083bb171ad2025141b3d7794fba02a3c",
+      "rawRuns": 6
+    },
+    {
+      "venue": "kucoinspot",
+      "stage": "private",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/KUCOIN_GATES.json",
+      "log": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/kucoinspot-private.log",
+      "logSha256": "d3084b27b3a4438db9618c6c51f9df211e1ea52a3abae8083bb37f2ebaf055a3",
+      "rawRuns": 2
+    },
+    {
+      "venue": "bybit",
+      "stage": "public",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_BYBIT_CI_GATES.json",
+      "log": "/tmp/parity-bybit17-final-bybit-public.log",
+      "logSha256": "b5b8e18452f5d28fce5a41bbaec6153273140fe637f3e54eee4b755170cfbb9f",
+      "rawRuns": 6
+    },
+    {
+      "venue": "bybit",
+      "stage": "private",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_BYBIT_CI_GATES.json",
+      "log": "/tmp/parity-bybit17-final-bybit-private.log",
+      "logSha256": "47f067f012e063e35e02d596f8081aa11106b504f297a6dd6c7adbd6651f2d89",
+      "rawRuns": 2
+    },
+    {
+      "venue": "bybitinverse",
+      "stage": "public",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_BYBIT_CI_GATES.json",
+      "log": "/tmp/parity-bybit17-final-bybitinverse-public.log",
+      "logSha256": "0dd8de73f0912ab44ecfa2fde8548ba1c1688250d615dac069ebcd953a7217a7",
+      "rawRuns": 6
+    },
+    {
+      "venue": "bybitinverse",
+      "stage": "private",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_BYBIT_CI_GATES.json",
+      "log": "/tmp/parity-bybit17-final-bybitinverse-private.log",
+      "logSha256": "d932bf1d908e07f1d481739ae643ba1ae0dd373903e15dfb6f71e6daaadb676a",
+      "rawRuns": 2
+    },
+    {
+      "venue": "bybitspot",
+      "stage": "public",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_BYBIT_CI_GATES.json",
+      "log": "/tmp/parity-bybit17-final-bybitspot-public.log",
+      "logSha256": "9a116adb36ad38102f27e24bf97a8706c4e55c0a62f5edea638f05af35302cb9",
+      "rawRuns": 6
+    },
+    {
+      "venue": "bybitspot",
+      "stage": "private",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_BYBIT_CI_GATES.json",
+      "log": "/tmp/parity-bybit17-final-bybitspot-private.log",
+      "logSha256": "424a4f8ee8571ce9183309aaf85c30bbf68f9ab3df6dc5d6453240d59feb2828",
+      "rawRuns": 2
+    },
+    {
+      "venue": "bybitdemo",
+      "stage": "public",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_BYBIT_CI_GATES.json",
+      "log": "/tmp/parity-bybit17-final-bybitdemo-public.log",
+      "logSha256": "59e98389e48743efbc136cdbfaee814b05493d61a8d9c063aa0b52a6f5f676f0",
+      "rawRuns": 6
+    },
+    {
+      "venue": "bybitdemo",
+      "stage": "private",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_BYBIT_CI_GATES.json",
+      "log": "/tmp/parity-bybit17-final-bybitdemo-private.log",
+      "logSha256": "7fc9766c3b04935f05640dabf118e9fdb544d6196d83e164a2c42276f6d54df2",
+      "rawRuns": 2
+    },
+    {
+      "venue": "hyrotrader",
+      "stage": "public",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_BYBIT_CI_GATES.json",
+      "log": "/tmp/parity-bybit17-final-hyrotrader-public.log",
+      "logSha256": "a7b39105bead56bcc7bdd428121f2bdcea8f795e88505b6d305f1464a4563d99",
+      "rawRuns": 6
+    },
+    {
+      "venue": "hyrotrader",
+      "stage": "private",
+      "sourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "manifestPath": "docs/plans/venue-ports/PARITY_BYBIT_CI_GATES.json",
+      "log": "/tmp/parity-bybit17-final-hyrotrader-private.log",
+      "logSha256": "f6c906319f9897b3b2f967e149cff9716374ddffca18c292ad98d1715bb0d077",
+      "rawRuns": 2
+    }
+  ],
+  "combinedArtifact": {
+    "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+    "files": [
+      {
+        "path": "sdk-rs/hosts/wasm/pkg/web/safe_cex_wasm_bg.wasm",
+        "savedPath": "/tmp/parity-final19-combined-web.wasm",
+        "bytes": 11948833,
+        "sha256": "b440a9e996bc45e3f8b4428742e4ffa70e8da8a991d9f2b9b663ae40bdacc039"
+      },
+      {
+        "path": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+        "savedPath": "/tmp/parity-final19-combined-node.wasm",
+        "bytes": 11948833,
+        "sha256": "b440a9e996bc45e3f8b4428742e4ffa70e8da8a991d9f2b9b663ae40bdacc039"
+      }
+    ],
+    "buildCommand": "corepack yarn -s rust:build-wasm",
+    "buildLog": {
+      "path": "/tmp/parity-final19-build.log",
+      "sha256": "a50a15fe44ceb51b463a5fadc93417ff07b598137c67f09aff0e8adce999dae4"
+    },
+    "integrationDriver": {
+      "path": "/tmp/parity-final19-integration.sh",
+      "sha256": "db2519445fc245270831b65078b434e3af381f3da728589bbcf1763181483f2d"
+    },
+    "budgetScope": "Default combined integration artifact; fixed standalone budget applies only to per-venue builds."
+  },
+  "checks": [
+    {
+      "name": "native workspace",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "passed": 2767,
+      "successfulGroups": 212,
+      "path": "/tmp/parity-final19-native.log",
+      "sha256": "3f3f00cf3c6ec2142acaa30d75990b83fab113fb9f5f2bf6614dd19697619bc5"
+    },
+    {
+      "name": "KuCoin scoped",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "passed": 151,
+      "successfulGroups": 7,
+      "path": "/tmp/parity-final19-kucoin-native.log",
+      "sha256": "61945a176b0d1eaacdd78ba9d3434d97b9c8d8e8d220ad9a423b86f629800e5b",
+      "groupsPassed": [
+        19,
+        13,
+        23,
+        20,
+        46,
+        30,
+        0
+      ],
+      "spotPassed": 46
+    },
+    {
+      "name": "product semantics",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "passed": 16,
+      "path": "/tmp/parity-final19-products.log",
+      "sha256": "3a1def8ea220c2b1900b7efc1c8ec92a1d3824baa9c21f8c5a34acc11fe2b4fb"
+    },
+    {
+      "name": "native frame",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "passed": 1,
+      "path": "/tmp/parity-final19-frame-wire.log",
+      "sha256": "b4b233385ec4a061892190ebe6c175a19f15ef0295ad9807b8f65a1fff5c3298"
+    },
+    {
+      "name": "native server adapter",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "passed": 1,
+      "path": "/tmp/parity-final19-server-adapter.log",
+      "sha256": "f3b654497deea2705bfd233654a5c6781cfb32ffba165c9df7d45e6ac4ef68e3"
+    },
+    {
+      "name": "scripted live-smoke",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "passed": 9,
+      "path": "/tmp/parity-final19-live-smoke.log",
+      "sha256": "0ebda7bf5970d10453dfa35134e0afdbddfef88306b39188ad5fc00231b51871"
+    },
+    {
+      "name": "JS host",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "passed": 74,
+      "path": "/tmp/parity-final19-host.log",
+      "sha256": "56764bf147b80612bf591c9630814a9ddc44737b4329acb99a3fe42ebaa8df96"
+    },
+    {
+      "name": "combined SDK/WASM",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "passed": 431,
+      "filesPassed": 14,
+      "path": "/tmp/parity-final19-sdk.log",
+      "sha256": "ab87cac4fc34edd62cd0ca0cda54b0ba87665578527248313dd0cd978b20cd93"
+    },
+    {
+      "name": "clippy",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "path": "/tmp/parity-final19-clippy.log",
+      "sha256": "d9032bb180a72276b25ebfaf93409caeceddec42108448623b6c2a7bd85d4f46"
+    },
+    {
+      "name": "wasm-clippy",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "path": "/tmp/parity-final19-wasm-clippy.log",
+      "sha256": "7a5b2e815b94daa7b30111e8cc7c5192c4155b7662144a06b0caaffdffe87f92"
+    },
+    {
+      "name": "fmt",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "successEvidence": "Root integration lane reported process exit 0; successful command produced no output.",
+      "path": "/tmp/parity-final19-fmt.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "bans",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "successEvidence": "Root integration lane reported process exit 0; successful command produced no output.",
+      "path": "/tmp/parity-final19-bans.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "PR-range secret scan",
+      "sourceHead": "6c7cc518fa8cc36cc776a3f9d2c50425e4155b7e",
+      "pass": true,
+      "path": "/tmp/parity-final19-secret-scan.log",
+      "sha256": "74c1594fbafabcd567865370cbf78470a44bb77ee641f694b24ea44a017361ba"
+    }
+  ],
+  "additionalHyroTimingCheck": {
+    "status": "PASS",
+    "sourceHead": "c2874607b2536b6e4ca63912f9e2d05b6d4f56ec",
+    "normalEgress": true,
+    "wasmByteBudget": 1258291,
+    "reason": "Fresh timing comparison after the 722 hosted Hyro failure; Bybit binary is identical, no performance fix is claimed.",
+    "build": {
+      "sourceHead": "c2874607b2536b6e4ca63912f9e2d05b6d4f56ec",
+      "buildCommand": "corepack yarn -s rust:build-wasm --venue bybit",
+      "budget": 1258291,
+      "builtAtUnixNs": 1792491909184019000,
+      "files": [
+        {
+          "path": "sdk-rs/hosts/wasm/pkg/web/safe_cex_wasm_bg.wasm",
+          "savedPath": "/tmp/parity-final19-hyro-web.wasm",
+          "bytes": 1118611,
+          "sha256": "6ed52d131534c5f7ebfb4d8f7ee3a2bffae237001820a10fa636ad3d2ba21b98",
+          "mtimeNs": 1792491909015538351
+        },
+        {
+          "path": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+          "savedPath": "/tmp/parity-final19-hyro-node.wasm",
+          "bytes": 1118611,
+          "sha256": "6ed52d131534c5f7ebfb4d8f7ee3a2bffae237001820a10fa636ad3d2ba21b98",
+          "mtimeNs": 1792491909110864267
+        }
+      ],
+      "log": "/tmp/parity-final19-hyro-final-build.log",
+      "logSha256": "e17265a7f2d10b715ce07b126088d14042adf1b93ba6088272b56fc0989abc7d"
+    },
+    "gates": [
+      {
+        "venue": "hyrotrader",
+        "stage": "public",
+        "sourceHeadBefore": "c2874607b2536b6e4ca63912f9e2d05b6d4f56ec",
+        "sourceHeadAfter": "c2874607b2536b6e4ca63912f9e2d05b6d4f56ec",
+        "normalEgress": true,
+        "command": "corepack yarn -s rust:gate --venue hyrotrader --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz --runs 3 --books BTCUSDT,ETHUSDT",
+        "tape": {
+          "path": "sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz",
+          "sha256": "3b8707627d73033b373751308e10655a8a9c70363e03ec1a43f1c820cfdbc6e0",
+          "records": 164
+        },
+        "out": "sdk-rs/harness/out/hyrotrader-55723",
+        "pass": true,
+        "log": "/tmp/parity-final19-hyro-final-hyrotrader-public.log",
+        "logSha256": "457b66656983b8b200a9f2556bf9bfaf5e67d00e9e155dfd8bd090dd144e4082",
+        "implementations": {
+          "ts": {
+            "runs": [
+              {
+                "path": "sdk-rs/harness/out/hyrotrader-55723/ts-0.json",
+                "sha256": "07b6ff9d51bd9a799f342c4c20df7ae453c8d1ede82a05a0eeee8fe3aacb6320",
+                "frames": 160,
+                "commands": 0,
+                "writeCount": 0,
+                "markets": 2,
+                "tickers": 2,
+                "books": 2,
+                "metrics": {
+                  "cpuMs": 21.722,
+                  "steadyCpuMs": 4.022,
+                  "processCpuMs": 37.903,
+                  "wallMs": 126.626666,
+                  "rssBytes": 96026624,
+                  "heapBeforeBytes": 8195552,
+                  "heapUsedBytes": 21566600,
+                  "heapRetainedBytes": 13371048,
+                  "bufferRetainedBytes": 67785,
+                  "buffersBefore": 1083871,
+                  "buffersAfter": 1151656,
+                  "wasmBytes": 0,
+                  "retainedBytes": 13438833
+                }
+              },
+              {
+                "path": "sdk-rs/harness/out/hyrotrader-55723/ts-1.json",
+                "sha256": "750fac999f9dd68f598271d9e9126768c4c398f13116c83192223c8a5c8f7219",
+                "frames": 160,
+                "commands": 0,
+                "writeCount": 0,
+                "markets": 2,
+                "tickers": 2,
+                "books": 2,
+                "metrics": {
+                  "cpuMs": 20.981,
+                  "steadyCpuMs": 3.765,
+                  "processCpuMs": 38.611,
+                  "wallMs": 23.677250000000015,
+                  "rssBytes": 94945280,
+                  "heapBeforeBytes": 8195504,
+                  "heapUsedBytes": 21556080,
+                  "heapRetainedBytes": 13360576,
+                  "bufferRetainedBytes": 67785,
+                  "buffersBefore": 1083871,
+                  "buffersAfter": 1151656,
+                  "wasmBytes": 0,
+                  "retainedBytes": 13428361
+                }
+              },
+              {
+                "path": "sdk-rs/harness/out/hyrotrader-55723/ts-2.json",
+                "sha256": "06e37b7d7a623771fc8ece2484e999bd80e5ebd09c621093487ed4dafcebfab5",
+                "frames": 160,
+                "commands": 0,
+                "writeCount": 0,
+                "markets": 2,
+                "tickers": 2,
+                "books": 2,
+                "metrics": {
+                  "cpuMs": 20.587,
+                  "steadyCpuMs": 4.433,
+                  "processCpuMs": 21.688,
+                  "wallMs": 127.86162499999995,
+                  "rssBytes": 95109120,
+                  "heapBeforeBytes": 8195568,
+                  "heapUsedBytes": 21568800,
+                  "heapRetainedBytes": 13373232,
+                  "bufferRetainedBytes": 67785,
+                  "buffersBefore": 1083871,
+                  "buffersAfter": 1151656,
+                  "wasmBytes": 0,
+                  "retainedBytes": 13441017
+                }
+              }
+            ],
+            "median": {
+              "cpuMs": 20.981,
+              "steadyCpuMs": 4.022,
+              "retainedBytes": 13438833,
+              "processCpuMs": 37.903
+            }
+          },
+          "rust": {
+            "runs": [
+              {
+                "path": "sdk-rs/harness/out/hyrotrader-55723/rust-0.json",
+                "sha256": "52ab8298f7e6af4345fbd5bd868efb7bd77a9318a1268644e9af926864395247",
+                "frames": 160,
+                "commands": 0,
+                "writeCount": 0,
+                "markets": 2,
+                "tickers": 2,
+                "books": 2,
+                "metrics": {
+                  "cpuMs": 19.208,
+                  "steadyCpuMs": 3.379,
+                  "processCpuMs": 19.325,
+                  "wallMs": 21.121167000000014,
+                  "rssBytes": 64897024,
+                  "heapBeforeBytes": 4749760,
+                  "heapUsedBytes": 5263048,
+                  "heapRetainedBytes": 513288,
+                  "bufferRetainedBytes": 4964,
+                  "buffersBefore": 26831,
+                  "buffersAfter": 31795,
+                  "wasmBytes": 327680,
+                  "retainedBytes": 845932
+                }
+              },
+              {
+                "path": "sdk-rs/harness/out/hyrotrader-55723/rust-1.json",
+                "sha256": "10988a4eec6c1972b35d62eec9f30e0e10b74eb99bb7b327a1e1326647497353",
+                "frames": 160,
+                "commands": 0,
+                "writeCount": 0,
+                "markets": 2,
+                "tickers": 2,
+                "books": 2,
+                "metrics": {
+                  "cpuMs": 20.24,
+                  "steadyCpuMs": 3.543,
+                  "processCpuMs": 20.413,
+                  "wallMs": 22.28804200000002,
+                  "rssBytes": 64651264,
+                  "heapBeforeBytes": 4749760,
+                  "heapUsedBytes": 5263048,
+                  "heapRetainedBytes": 513288,
+                  "bufferRetainedBytes": 4964,
+                  "buffersBefore": 26831,
+                  "buffersAfter": 31795,
+                  "wasmBytes": 327680,
+                  "retainedBytes": 845932
+                }
+              },
+              {
+                "path": "sdk-rs/harness/out/hyrotrader-55723/rust-2.json",
+                "sha256": "ec9bdfddd93b144a91fde789e2338c54569fd086d1cf93e2e49bd08a9f575258",
+                "frames": 160,
+                "commands": 0,
+                "writeCount": 0,
+                "markets": 2,
+                "tickers": 2,
+                "books": 2,
+                "metrics": {
+                  "cpuMs": 19.177,
+                  "steadyCpuMs": 3.544,
+                  "processCpuMs": 19.308,
+                  "wallMs": 21.134667000000007,
+                  "rssBytes": 64946176,
+                  "heapBeforeBytes": 4749832,
+                  "heapUsedBytes": 5263120,
+                  "heapRetainedBytes": 513288,
+                  "bufferRetainedBytes": 4964,
+                  "buffersBefore": 26831,
+                  "buffersAfter": 31795,
+                  "wasmBytes": 327680,
+                  "retainedBytes": 845932
+                }
+              }
+            ],
+            "median": {
+              "cpuMs": 19.208,
+              "steadyCpuMs": 3.543,
+              "retainedBytes": 845932,
+              "processCpuMs": 19.325
+            }
+          }
+        }
+      },
+      {
+        "venue": "hyrotrader",
+        "stage": "private",
+        "sourceHeadBefore": "c2874607b2536b6e4ca63912f9e2d05b6d4f56ec",
+        "sourceHeadAfter": "c2874607b2536b6e4ca63912f9e2d05b6d4f56ec",
+        "normalEgress": true,
+        "command": "corepack yarn -s rust:gate --venue hyrotrader --tape sdk-rs/harness/tapes/hyrotrader-private.jsonl --runs 1 --books ''",
+        "tape": {
+          "path": "sdk-rs/harness/tapes/hyrotrader-private.jsonl",
+          "sha256": "d950c8d866bffaa14a08439a36b77174a3c8421155481accfede6dd5cd0b66ac",
+          "records": 26
+        },
+        "out": "sdk-rs/harness/out/hyrotrader-56241",
+        "pass": true,
+        "log": "/tmp/parity-final19-hyro-final-hyrotrader-private.log",
+        "logSha256": "214bf5d3ab44a92dcd26185f1ebb479e782cf911d10a98558d05faa8fab4f385",
+        "implementations": {
+          "ts": {
+            "runs": [
+              {
+                "path": "sdk-rs/harness/out/hyrotrader-56241/ts-0.json",
+                "sha256": "a0f2dcd6933c1ffaec59d4ec57468235378fb087663ecbf51c63df4ce9d6d51c",
+                "frames": 13,
+                "commands": 3,
+                "writeCount": 3,
+                "markets": 2,
+                "tickers": 2,
+                "books": 0,
+                "metrics": {
+                  "cpuMs": 34.94,
+                  "steadyCpuMs": 16.901,
+                  "processCpuMs": 52.403,
+                  "wallMs": 3267.836792,
+                  "rssBytes": 95993856,
+                  "heapBeforeBytes": 8153352,
+                  "heapUsedBytes": 21989400,
+                  "heapRetainedBytes": 13836048,
+                  "bufferRetainedBytes": 67785,
+                  "buffersBefore": 1089193,
+                  "buffersAfter": 1156978,
+                  "wasmBytes": 0,
+                  "retainedBytes": 13903833
+                }
+              }
+            ],
+            "median": {
+              "cpuMs": 34.94,
+              "steadyCpuMs": 16.901,
+              "retainedBytes": 13903833,
+              "processCpuMs": 52.403
+            }
+          },
+          "rust": {
+            "runs": [
+              {
+                "path": "sdk-rs/harness/out/hyrotrader-56241/rust-0.json",
+                "sha256": "0e17cbc7ef89e509d9344db2402c8a2af0abcd73a33286576976a5481230cc7f",
+                "frames": 13,
+                "commands": 3,
+                "writeCount": 3,
+                "markets": 2,
+                "tickers": 2,
+                "books": 0,
+                "metrics": {
+                  "cpuMs": 32.656,
+                  "steadyCpuMs": 15.138,
+                  "processCpuMs": 36.721,
+                  "wallMs": 3263.8781670000003,
+                  "rssBytes": 67158016,
+                  "heapBeforeBytes": 4718872,
+                  "heapUsedBytes": 5365216,
+                  "heapRetainedBytes": 646344,
+                  "bufferRetainedBytes": 5748,
+                  "buffersBefore": 40345,
+                  "buffersAfter": 46093,
+                  "wasmBytes": 327680,
+                  "retainedBytes": 979772
+                }
+              }
+            ],
+            "median": {
+              "cpuMs": 32.656,
+              "steadyCpuMs": 15.138,
+              "retainedBytes": 979772,
+              "processCpuMs": 36.721
+            }
+          }
+        }
+      }
+    ]
+  },
+  "restoration": {
+    "sourceHead": "c2874607b2536b6e4ca63912f9e2d05b6d4f56ec",
+    "formats": [
+      {
+        "format": "web",
+        "bytes": 11948833,
+        "sha256": "b440a9e996bc45e3f8b4428742e4ffa70e8da8a991d9f2b9b663ae40bdacc039",
+        "byteIdentical": true
+      },
+      {
+        "format": "node",
+        "bytes": 11948833,
+        "sha256": "b440a9e996bc45e3f8b4428742e4ffa70e8da8a991d9f2b9b663ae40bdacc039",
+        "byteIdentical": true
+      }
+    ],
+    "buildLog": "/tmp/parity-final19-restored-build.log",
+    "buildLogSha256": "a71287f63e007a47d6da8694ee1c814d487d5bf06a3029885bbdeb699c1bc842"
+  },
+  "historicalHostedTimingFailure": {
+    "head": "722c976271c8a92a5a0c16a6ecb20d89d528fa9a",
+    "jobId": 118570938918,
+    "result": "Hyro steady CPU FAIL; printed rounded TS/Rust steady 7.2/7.6 ms, main 35.7/32.6 ms. No manual retry on that head.",
+    "evidence": {
+      "path": "/tmp/pr1338-722-bybit-ci.log",
+      "sha256": "b5b7499af0b0e9e41e52f25f9b77ef56cf07f3e308893d502a2af83da7d5cbbd"
+    },
+    "attribution": "The KuCoin public-only auth fix leaves the Bybit binary byte-identical. The new local Hyro PASS is an additional comparison, not evidence that this auth fix improved Bybit."
+  },
+  "evidenceFiles": {
+    "identityIndex": {
+      "path": "/tmp/parity-final19-identity-proof.json",
+      "sha256": "21a4baa603597bb14a78b605bcc313a7c57188f79664a2160b8d7d9429c3f597"
+    },
+    "kucoinSummary": {
+      "path": "/tmp/kucoin-parity-gates/frozen-6c7cc518fa/followup-summary.json",
+      "sha256": "a49b13f2d35b39e061aaf80649689f5626dc64fab571311903f7b45b66150555"
+    },
+    "combinedMetadata": {
+      "path": "/tmp/parity-final19-combined-artifact.json",
+      "sha256": "37b2089273b5580caba3f71527094f008b72a037ed20168e4a902849ec26876c"
+    },
+    "restoration": {
+      "path": "/tmp/parity-final19-restoration.json",
+      "sha256": "4c9e2f34e91dfb9b5839d8230427ebb5f198239673d0ca40c79b143df958c9f7"
+    },
+    "hyroProof": {
+      "path": "/tmp/parity-final19-hyro-proof.json",
+      "sha256": "775b7155029dcac6399b5fc3dc6624265e03655630f4c2cb261dff937fa02a68"
+    }
+  },
+  "sourceAttributionNote": "Native/combined source attribution comes from the frozen integration driver and root-reported successful process completion; individual cargo logs do not independently print source markers. Empty fmt/bans logs are not treated as standalone proof of exit status."
+}

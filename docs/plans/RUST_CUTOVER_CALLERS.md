@@ -7,11 +7,11 @@ phase-9 decision and gate results live in [RUST_REWRITE.md](RUST_REWRITE.md).
 
 ## What is ready, and what is still a deletion blocker
 
-The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **47**.
+The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **48**.
 The two registries currently default **9 names** to `RustEngineExchange`:
 `coinbase`, `coinbasespot`, and Orderly's `tealstreet-dex`, `kodiakfi`, `mode`,
 `salsadex`, `what`, `woofi`, plus testnet-only `txflow`. They default the other **40 names** to TypeScript,
-including **38 names with an available Rust adapter**. Registration in
+including **39 names with an available Rust adapter**. Registration in
 `RUST_VENUES` proves the adapter exists; it does not prove every optional product,
 credential mode, consumer, or live deployment is ready to delete.
 
@@ -43,7 +43,7 @@ of saved accounts.
 | `bitrue` | Yes | TS default; futures adapter; no spot coverage inferred. |
 | `cryptocom` | Yes | TS default; preserve optional account/product gates before switching creation defaults. |
 | `kucoin` | Yes | TS default; futures adapter, native contract-unit and broker configuration gates. |
-| `kucoinspot` | No | TS required; futures coverage cannot substitute for saved spot accounts. |
+| `kucoinspot` | Yes | TS default; opt-in native HF Spot in the KuCoin crate. Preserve native Spot IDs/base units, trade-account currency balances, broker/passphrase and secondary-read routing, caller-context amendments/cancels and fixed Spot settings. Futures coverage is a separate profile; see [scope and evidence](venue-ports/KUCOIN_SPOT.md). |
 | `hyperliquid` | Yes | TS default; perps/HIP-3 adapter. Public builder/agent utilities and `hyperliquid.cloid` still have callers. |
 | `hyperliquidspot` | Yes | TS default; distinct spot product in the existing Hyperliquid crate. Native spot identities, balances, signing, live public/documented private gates and native worker/late-consumer checks pass ([RUST_SPOT_PRODUCTS.md](RUST_SPOT_PRODUCTS.md)); no combined perps/spot account claim. Preserve wallet/builder/agent and cloid helper callers before deletion. |
 | `kraken` | Yes | TS default; futures adapter. |
@@ -60,8 +60,8 @@ of saved accounts.
 | `breakoutprop` | Yes | TS default, legacy DXtrade only and disabled in production/preview (`enabledInDev: true`); authenticated REST polling, no venue WebSocket or anonymous public feed. Username/password and exact FULL_TRADING account selection are required even for public-data-only reads; `supportsChaser: false` remains enforced by metadata. LIMIT/MARKET/last-price STOP, GTC, reduce-only as CLOSE, confirmed zero-fill cancel-replace; caller IDs, attached brackets/close-all and leverage/margin/mode changes unsupported. One-way/cross account model, native lot IDs and explicitly estimated margin/PnL; quote-derived books/live candles are synthetic. Generic fills/order/income history remain branded inert fallbacks, public trades unsupported; internal cancel history proof is not a history-query implementation. Public fixture is documented/scripted under the recorded waiver, with live credential capture/connectivity still unverified; read [RUST_BREAKOUTPROP.md](RUST_BREAKOUTPROP.md). |
 | `bitunix` | None | TS required. Roster work-in-progress is not a registered Rust adapter; an explicit port or supported-product retirement decision remains necessary. |
 
-The 2 names absent from `RUST_VENUES` are exactly `bitunix`, `kucoinspot`.
-Do not silently route them through another family's adapter.
+The sole name absent from `RUST_VENUES` is `bitunix`.
+Do not silently route it through another family's adapter.
 
 Native consumer proof includes both WebSocket venues and HTTP-polling venues.
 BreakoutProp starts the actual Rust engine with documented DXtrade session/
@@ -796,7 +796,7 @@ Appendix B), 10 Orderly audit files, three Coinbase reference subclasses/socket
 types and eight Orderly reference broker subclasses/socket types. Appendix B
 now names all 32 exact class targets, adding the 30 previously absent callers
 and extending the existing two client-ID entries. These counts are test/reference
-source counts for that checkpoint; the current runtime totals are 49 names / 47 Rust aliases.
+source counts for that checkpoint; the current runtime totals are 49 names / 48 Rust aliases.
 
 That checkpoint's Coinbase/Orderly frozen-module graph below additionally includes signing/API/type/
 utility imports: **79 static imports in 40 caller files** at this review

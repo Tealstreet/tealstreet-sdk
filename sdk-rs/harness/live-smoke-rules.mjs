@@ -31,6 +31,7 @@ export const LIVE_SMOKE_UNKNOWN_RULES = Object.freeze({
   cryptocom: 'qty_tick_size alone does not establish a minimum order value.',
   hyrotrader: 'No reviewed endpoint profile.',
   grvt: 'No reviewed endpoint profile or sizing contract.',
+  kucoinspot: 'No reviewed Spot endpoint profile or sizing contract.',
 });
 
 const unknown = () => ({ notionalKnown: false, minNotional: 0 });

@@ -57,6 +57,9 @@ impl Harness {
     pub fn collect(&mut self) {
         for action in self.engine.drain_actions() {
             match action {
+                Action::SignPayload { .. } => {
+                    panic!("delegated signing is unsupported in the bitget test harness")
+                }
                 Action::Http(r) => self.requests.push(r),
                 Action::WsConnect {
                     socket,

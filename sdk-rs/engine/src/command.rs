@@ -1,7 +1,9 @@
 //! The shared JSON command boundary for engine hosts.
+#[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
+use crate::model::CancelOrderRef;
 use crate::model::PlaceOrderOpts;
 #[cfg(feature = "command-asterdex")]
-use crate::model::{CancelOrderRef, StpMode};
+use crate::model::StpMode;
 use crate::{Command, Query};
 use serde::Deserialize;
 
@@ -23,7 +25,7 @@ enum CommandIn {
     FetchAccountGreeks {
         command: u32,
     },
-    #[cfg(feature = "command-apexomni")]
+    #[cfg(any(feature = "command-apexomni", feature = "command-kucoinspot"))]
     GetAccount {
         command: u32,
     },
@@ -52,7 +54,7 @@ enum CommandIn {
         command: u32,
         ids: Vec<String>,
     },
-    #[cfg(feature = "command-asterdex")]
+    #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
     CancelOrdersWithSymbols {
         command: u32,
         orders: Vec<CancelOrderRef>,
@@ -60,6 +62,16 @@ enum CommandIn {
     AmendOrder {
         command: u32,
         id: String,
+        #[serde(default)]
+        price: Option<f64>,
+        #[serde(default)]
+        amount: Option<f64>,
+    },
+    #[cfg(feature = "command-kucoinspot")]
+    AmendOrderWithSymbol {
+        command: u32,
+        id: String,
+        symbol: String,
         #[serde(default)]
         price: Option<f64>,
         #[serde(default)]
@@ -191,7 +203,7 @@ impl From<CommandIn> for Command {
             },
             #[cfg(feature = "command-options")]
             CommandIn::FetchAccountGreeks { command } => Self::FetchAccountGreeks { command },
-            #[cfg(feature = "command-apexomni")]
+            #[cfg(any(feature = "command-apexomni", feature = "command-kucoinspot"))]
             CommandIn::GetAccount { command } => Self::FetchAccount { command },
             CommandIn::FindOrderByClientOrderId {
                 command,
@@ -215,7 +227,7 @@ impl From<CommandIn> for Command {
             }
             CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
             CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
-            #[cfg(feature = "command-asterdex")]
+            #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
             CommandIn::CancelOrdersWithSymbols { command, orders } => {
                 Self::CancelOrdersWithSymbols { command, orders }
             }
@@ -227,6 +239,20 @@ impl From<CommandIn> for Command {
             } => Self::AmendOrder {
                 command,
                 id,
+                price,
+                amount,
+            },
+            #[cfg(feature = "command-kucoinspot")]
+            CommandIn::AmendOrderWithSymbol {
+                command,
+                id,
+                symbol,
+                price,
+                amount,
+            } => Self::AmendOrderWithSymbol {
+                command,
+                id,
+                symbol,
                 price,
                 amount,
             },
@@ -403,7 +429,7 @@ pub fn decode_subscription(json: &str) -> Result<Option<Command>, serde_json::Er
     Ok(None)
 }
 
-/// Decode the shared host protocol, including nullable polling configuration.
+/// Decode trusted provider controls on every host and optional polling configuration.
 // Keep the large command variant inlined through the host boundary as well.
 #[inline(always)]
 pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
@@ -433,35 +459,96 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
             candles: control.candles,
         }));
     }
-    if header.op != "setTickInterval" {
-        return decode_command(json).map(HostInput::Command);
+    #[cfg(feature = "polling-control")]
+    if header.op == "setTickInterval" {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Interval {
+            Millis(f64),
+            Paused(()),
+        }
+        #[derive(Deserialize)]
+        struct Control {
+            interval: Interval,
+        }
+        let control: Control = serde_json::from_str(json)?;
+        let interval_ms = match control.interval {
+            Interval::Millis(ms) => ms,
+            Interval::Paused(()) => f64::INFINITY,
+        };
+        if interval_ms.is_nan() || interval_ms <= 0.0 {
+            return Err(serde::de::Error::custom(
+                "Polling interval must be positive or null to pause",
+            ));
+        }
+        return Ok(HostInput::TickIntervalChanged { interval_ms });
     }
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Interval {
-        Millis(f64),
-        Paused(()),
-    }
-    #[derive(Deserialize)]
-    struct Control {
-        interval: Interval,
-    }
-    let control: Control = serde_json::from_str(json)?;
-    let interval_ms = match control.interval {
-        Interval::Millis(ms) => ms,
-        Interval::Paused(()) => f64::INFINITY,
-    };
-    if interval_ms.is_nan() || interval_ms <= 0.0 {
-        return Err(serde::de::Error::custom(
-            "Polling interval must be positive or null to pause",
-        ));
-    }
-    Ok(HostInput::TickIntervalChanged { interval_ms })
+    decode_command(json).map(HostInput::Command)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn symbol_context_commands_follow_the_compiled_parser_features() {
+        let account = decode_command(r#"{"op":"getAccount","command":77}"#);
+        assert_eq!(
+            account.is_ok(),
+            cfg!(any(
+                feature = "command-apexomni",
+                feature = "command-kucoinspot"
+            ))
+        );
+        if let Ok(command) = account {
+            assert_eq!(command, Command::FetchAccount { command: 77 });
+        }
+        let cancel = decode_command(
+            r#"{"op":"cancelOrdersWithSymbols","command":78,"orders":[{"id":"unseen","symbol":"BTC-USDT"}]}"#,
+        );
+        assert_eq!(
+            cancel.is_ok(),
+            cfg!(any(
+                feature = "command-asterdex",
+                feature = "command-kucoinspot"
+            ))
+        );
+        if let Ok(cancel) = cancel {
+            let Command::CancelOrdersWithSymbols { command, orders } = cancel else {
+                panic!("symbol-scoped cancellation changed its command mapping");
+            };
+            assert_eq!(command, 78);
+            assert_eq!(
+                orders,
+                vec![crate::model::CancelOrderRef {
+                    id: "unseen".into(),
+                    symbol: "BTC-USDT".into(),
+                }]
+            );
+        }
+        let amend = decode_command(
+            r#"{"op":"amendOrderWithSymbol","command":79,"id":"unseen","symbol":"BTC-USDT","price":100,"amount":2}"#,
+        );
+        #[cfg(feature = "command-kucoinspot")]
+        assert_eq!(
+            amend.unwrap(),
+            Command::AmendOrderWithSymbol {
+                command: 79,
+                id: "unseen".into(),
+                symbol: "BTC-USDT".into(),
+                price: Some(100.0),
+                amount: Some(2.0),
+            }
+        );
+        #[cfg(not(feature = "command-kucoinspot"))]
+        assert!(amend.is_err());
+        assert!(
+            decode_command(
+                r#"{"op":"amendOrderWithSymbol","command":79,"id":"unseen","price":100}"#,
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn subscription_boundary_matches_the_complete_command_decoder() {
@@ -573,6 +660,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "polling-control"))]
+    fn polling_controls_are_excluded_from_ordinary_command_parsers() {
+        assert!(decode_host_input(r#"{"op":"setTickInterval","interval":1000}"#).is_err());
+        assert!(decode_host_input(r#"{"op":"setTickInterval","interval":null}"#).is_err());
+    }
+
+    #[test]
+    #[cfg(feature = "polling-control")]
     fn host_configuration_accepts_positive_milliseconds_and_explicit_pause() {
         assert_eq!(
             decode_host_input(r#"{"op":"setTickInterval","interval":123.5}"#).unwrap(),
