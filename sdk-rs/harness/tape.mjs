@@ -300,7 +300,8 @@ export class Tape {
   }
 
   send(socket, text) {
-    this.venue.validateSocketMessage?.(socket, text);
+    try { this.venue.validateSocketMessage?.(socket, text); }
+    catch(error) { this.invalidSignatures++; throw error; }
     let message;
     try { message = JSON.parse(text); } catch { /* Plain-text heartbeat. */ }
     if (message && this.isPrivate && this.venue.verifySubscribe) {
@@ -433,7 +434,8 @@ export class Tape {
         throw new Error(`Taped login success preceded a valid login on ${socket.url}`);
       this.assertSubscribed(socket, message);
     }
-    deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame);
+    try { deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame); }
+    catch(error) { this.invalidSignatures++; throw error; }
   }
 
   async deliverFrame(frame) {

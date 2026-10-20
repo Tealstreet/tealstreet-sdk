@@ -545,7 +545,7 @@ async function runTs() {
   const wallStart = performance.now();
   const started = exchange.start();
   const subscribed = (async () => {
-    while (!store.markets.length) await new Promise((r) => setTimeout(r, 1));
+    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange,store))) await new Promise((r) => setTimeout(r, 1));
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
   })();
   // Model the worker posting each subscribed book to main every 250 ms.

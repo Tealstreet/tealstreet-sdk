@@ -310,7 +310,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | KuCoin, Phemex, Bitrue, Orderly family, Bybit inverse/spot/demo/Hyro, Bitget parity | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
-| Kraken futures | port in progress on `feat/rust-kraken`; plan in `KRAKEN_RUST_PORT.md` |
+| Kraken futures | implemented on `feat/rust-kraken`; phase code-correctness reviews accepted, harness gates in progress (`KRAKEN_RUST_PORT.md`) |
 | Paradex, GRVT, AsterDEX, ApeX Omni, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge

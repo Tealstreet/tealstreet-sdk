@@ -106,3 +106,25 @@ failed reads retain previous state, retry reads with bounded backoff.
   negative precision powers, execution-ID deduplication, remaining protective
   size, accepted-write/source fences, documented index triggers and explicit
   failed/incomplete reads. The harness lists these in KNOWN_TS_FIXES.
+
+### Harness phase reviewed / landing integration next
+
+- Recorded live 20 seconds: 28,048 WS frames, two books. Trimmed fixture: 9,641
+  frames, 207 markets/tickers. Public gate PASS: TS 1,714.5 ms versus Rust
+  457.6 ms (3.75x); steady 1,275.7/294.7 ms (4.33x); retained 3.6/1.7 MB.
+  Single-venue browser Wasm 842,175 bytes, budget 1,258,291 bytes.
+- Private PASS: 35 WS events + 13 commands + one close; 11 signed writes;
+  challenge A, reconnect with challenge B, fills replayed across reconnect,
+  bracket/amend/batch-cancel/settings/history, retained order and nonzero position.
+- Independent integration code-correctness review found oracle gaps for minted-ID
+  reuse, stale challenge proof, duplicate form/JSON economic keys and broad page
+  normalization. All fixed with tamper and mixed-query regressions. 186 harness
+  tests pass, independently rerun; final review accepted.
+- Native workspace 1,165 tests (Kraken 80), workspace/all-target Clippy, Wasm
+  Clippy, bans and formatting pass. Root typecheck 44/44, lint 28/28 and test
+  tasks 27/27 pass. Combined build/Binance regression gates still running.
+- Crypto audit: reuse the existing UUID primitive; HMAC-SHA512 is venue-local
+  over zeroizing decoded key bytes. No newly unused crypto facade found. Removed
+  the redundant direct getrandom dependency (entropy belongs to crypto::uuid).
+- Latest fetched landing is f66bdc26f9 (Orderly). Integrate its structure after
+  this stable checkpoint, repeat affected gates, then open the PR as authorized.

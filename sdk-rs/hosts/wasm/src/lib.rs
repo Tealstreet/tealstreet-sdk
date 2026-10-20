@@ -16,11 +16,12 @@
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
+    feature = "kraken",
     feature = "lighter",
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, okx, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -45,6 +46,8 @@ use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
+#[cfg(feature = "kraken")]
+use safe_cex_venue_kraken::{Kraken, Options as KrakenOptions};
 #[cfg(feature = "lighter")]
 use safe_cex_venue_lighter::{Lighter, Options as LighterOptions};
 #[cfg(feature = "mexc")]
@@ -105,6 +108,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
+    feature = "kraken",
     feature = "lighter",
     feature = "okx"
 ))]
@@ -128,6 +132,7 @@ struct EngineOptions {
         feature = "woo",
         feature = "cryptocom",
         feature = "hyperliquid",
+        feature = "kraken",
         feature = "lighter",
         feature = "bitget",
         feature = "okx"
@@ -613,6 +618,7 @@ impl WasmEngine {
         feature = "backpack",
         feature = "weex",
         feature = "hyperliquid",
+        feature = "kraken",
         feature = "lighter",
         feature = "okx"
     ))]
@@ -627,6 +633,13 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "kraken")]
+            "kraken" => Box::new(Engine::new(Kraken::new(KrakenOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
             #[cfg(feature = "lighter")]
             "lighter" => Box::new(Engine::new(Lighter::new(LighterOptions {
                 testnet: options.testnet,

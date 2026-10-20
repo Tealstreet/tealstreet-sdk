@@ -3729,7 +3729,6 @@ name = "safe-cex-venue-kraken"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "getrandom 0.2.17",
  "hmac 0.12.1",
  "safe-cex-crypto",
  "safe-cex-engine",

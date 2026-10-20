@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { subscriptionKeys } from './requests.mjs';
 import { gunzipSync } from 'node:zlib';
-import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands } from './known-ts-fixes.mjs';
+import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands, fixKrakenOutput } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { venueOf } from './venues.mjs';
 import { memoryMetricErrors } from './memory.mjs';
@@ -118,6 +118,24 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  kraken: {
+    output: fixKrakenOutput,
+    fixes: [
+      'Retain full depth, reject sequence gaps/stale snapshots, unsubscribe unused books.',
+      'Negative instrument quantity precision is a positive power-of-ten step; TS clamps it to 0.1.',
+      'Deduplicate native execution IDs; suppress historical fills snapshots.',
+      'Use monotonic nonces beyond 1000 same-millisecond requests and clock regression.',
+      'Use documented index triggerSignal (TS sends stale spot enum).',
+      'Keep accepted settings and newer socket state across delayed reads/write ACKs.',
+      'Replace partially executed protective orders with remaining size and stop on raced fills.',
+      'Reject missing/contradictory semantic ACKs and failed/incomplete reads explicitly.',
+      'Keep exact native milliseconds for fill filters/cursors before seconds output.',
+      'Count raw ledger rows for pagination rather than mapped cash components.',
+      'One-way mode is an accepted no-op; TS inherits an unimplemented setter.',
+      'Use valid authenticated feeds and REST balance instead of invalid account_balances.',
+      'Preserve absent position margin allocation instead of TS base-store synthetic zero.',
+    ],
+  },
   lighter: {
     fills: fixLighterFills,
     commands: fixLighterCommands,
@@ -494,6 +512,7 @@ for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
   if (values.venue === 'backpack') KNOWN_TS_FIXES.backpack(ts);
+  if (values.venue === 'kraken') KNOWN_TS_FIXES.kraken.output(ts,tapeRecords);
   if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
   // Every request must match a taped one: an unserved request sent different parameters.
   for (const impl of ['ts', 'rust']) {
