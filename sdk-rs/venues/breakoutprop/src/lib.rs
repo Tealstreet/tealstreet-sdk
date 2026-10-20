@@ -808,7 +808,13 @@ impl Venue for BreakoutProp {
             return;
         }
         if !(200..300).contains(&response.status) {
-            self.fail_operation(cx, pending.operation, http_failure(response.status));
+            let mut error = http_failure(response.status);
+            // The amend's history read precedes the replacement, which was never sent.
+            if matches!(&pending.operation, Operation::Trade(request) if request.method == Method::Get)
+            {
+                error.outcome = Some(Outcome::NotSent);
+            }
+            self.fail_operation(cx, pending.operation, error);
             self.drive(cx);
             return;
         }

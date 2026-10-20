@@ -462,6 +462,8 @@ fn failed_native_cancellation_history_read_does_not_place_replacement() {
     rig.reply(&confirmation, 503, "{}");
     assert!(rig.result(10).is_err());
     assert!(rig.requests.is_empty());
+    // The cancel took effect and the replacement was never sent.
+    assert_eq!(rig.failures[0].outcome, None);
 }
 
 #[test]
@@ -1052,4 +1054,23 @@ fn a_refusal_after_an_accepted_placement_is_never_rejected() {
     rig.reply(&second, 409, r#"{"errorCode":33}"#);
     assert_eq!(rig.result(10), &Err("DXtrade HTTP 409".to_owned()));
     assert_eq!(rig.failures[0].outcome, None);
+}
+
+#[test]
+fn an_unknown_cancel_leg_makes_the_batch_unknown_with_its_kind() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let mut rig = private();
+    rig.command(Command::CancelOrders {
+        command: 10,
+        ids: vec!["first".into(), "second".into()],
+    });
+    let first = rig.next_request();
+    let second = rig.next_request();
+    rig.reply(&first, 429, "{}");
+    rig.failure(&second);
+    assert_eq!(rig.result(10), &Err("DXtrade HTTP 429".to_owned()));
+    assert_eq!(
+        (rig.failures[0].kind, rig.failures[0].outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
 }

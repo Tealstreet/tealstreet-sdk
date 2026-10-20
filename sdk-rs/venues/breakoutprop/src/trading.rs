@@ -236,6 +236,7 @@ impl Job {
             None => self.error = Some(error),
             Some(first) if error.outcome == Some(Outcome::Unknown) => {
                 first.outcome = Some(Outcome::Unknown);
+                first.kind = error.kind;
             }
             Some(_) => {}
         }
