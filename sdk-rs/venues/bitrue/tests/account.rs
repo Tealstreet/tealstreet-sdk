@@ -173,13 +173,28 @@ fn futures_listen_key_subscriptions_ping_timestamp_and_keepalive() {
 fn private_socket_watchdog_recovers_without_a_spot_fallback() {
     let mut h = Harness::new();
     let old = h.private;
-    h.fire_at(20_000.0);
+    h.e.handle(h.now, Event::WsOpened { socket: old });
+    h.collect();
+    for at in [5000.0, 10_000.0, 15_000.0, 20_000.0] {
+        h.fire_at(at);
+    }
     assert!(
         h.actions
             .iter()
             .any(|a| matches!(a,Action::WsClose{socket}if *socket==old))
     );
-    h.fire_at(21_000.0);
+    let at = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { at_ms, .. } if *at_ms > h.now && *at_ms <= h.now + 1000.0 => {
+                Some(*at_ms)
+            }
+            _ => None,
+        })
+        .unwrap();
+    h.fire_at(at);
     let r = h.take("listenKey");
     assert_eq!(
         r.url,
@@ -406,4 +421,55 @@ fn rest_progress_reseeds_the_quote_basis_before_an_average_only_execution() {
     h.reply("/openOrders", r#"{"code":"0","data":[{"orderId":2334151155877155281,"type":"LIMIT","side":"BUY","status":"PART_FILLED","action":"OPEN","price":100,"origQty":100,"executedQty":30,"avgPrice":110}]}"#);
     h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"4","ap":"115"}}"#);
     assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 10.0)]);
+}
+
+#[test]
+fn private_open_flaps_back_off_without_reusing_listen_keys() {
+    let mut h = Harness::new();
+    h.e.handle(h.now, Event::WsOpened { socket: h.private });
+    h.collect();
+    for nominal in [1000.0, 2000.0, 4000.0] {
+        let old = h.private;
+        h.e.handle(
+            h.now,
+            Event::WsClosed {
+                socket: old,
+                code: 1006,
+            },
+        );
+        h.collect();
+        let (timer, at) = h
+            .actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        assert!((nominal * 0.75..=nominal).contains(&(at - h.now)));
+        assert!(!h.pending.iter().any(|r| r.url.contains("listenKey")));
+        h.now = at;
+        h.e.handle(h.now, Event::TimerFired { timer });
+        h.collect();
+        let request = h.take("listenKey");
+        assert_eq!(request.method, Method::Post);
+        h.respond(request, r#"{"code":200,"data":{"listenKey":"new-key"}}"#);
+        h.private = h
+            .actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::WsConnect {
+                    socket,
+                    channel: Some(SocketChannel::Private),
+                    ..
+                } => Some(*socket),
+                _ => None,
+            })
+            .unwrap();
+        assert_ne!(h.private, old);
+        h.e.handle(h.now, Event::WsOpened { socket: h.private });
+        h.collect();
+    }
 }

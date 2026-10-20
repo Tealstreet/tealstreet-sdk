@@ -7,16 +7,92 @@ import { test } from 'node:test';
 import { VENUES } from './venues.mjs';
 import { requestKey } from './requests.mjs';
 
+const midpointProducts = ['DEEP-USD', 'DEEP-USDC'].map((product_id) => ({
+  product_id,
+  product_type: 'SPOT',
+  future_product_details: null,
+  base_currency_id: 'DEEP',
+  quote_currency_id: product_id.slice(5),
+  status: 'online',
+  is_disabled: false,
+  trading_disabled: false,
+  base_increment: '1',
+  price_increment: '0.00001',
+  base_min_size: '1',
+  base_max_size: '100000000',
+  price: '0.01875',
+  volume_24h: '2625844',
+  approximate_quote_24h_volume: '49234.58',
+}));
+
 // Exercise the actual CLI and comparison call sites. Stub only the expensive
 // replay subprocess, supplying independently controlled TS and Rust results.
 const gate = (venue, isPrivate = false, defect) => {
   const cwd = mkdtempSync(join(tmpdir(), 'safe-cex-gate-'));
   const tape = join(cwd, 'tape.jsonl');
   const records = [{ type: 'meta', private: isPrivate }];
+  const midpoint = defect?.startsWith('coinbase-midpoint:');
+  const midpointIssue = midpoint ? defect.slice('coinbase-midpoint:'.length) : undefined;
+  if (midpoint) {
+    records[0].venue = 'coinbase'; // Both saved aliases share this proven SPOT public source.
+    records[0].profile = 'spot';
+    const products = structuredClone(midpointProducts);
+    if (midpointIssue === 'missing-native') delete products[0].approximate_quote_24h_volume;
+    records.push({
+      type: 'http',
+      t: 10,
+      requestOrdinal: 0,
+      method: 'GET',
+      status: 200,
+      url: 'https://api.coinbase.com/api/v3/brokerage/market/products?limit=1000',
+      body: JSON.stringify({
+        products,
+        num_products: 2,
+        pagination: { has_next: false, has_prev: false, next_cursor: '', prev_cursor: '' },
+      }),
+    });
+    if (midpointIssue === 'selector') records[1].afterCommand = 1;
+    if (midpointIssue === 'unconsumed') {
+      const later = { ...records[1], t: 20, requestOrdinal: 1 };
+      const earlier = JSON.parse(records[1].body);
+      earlier.products[0].price = '0.018750000000000001';
+      records[1].body = JSON.stringify(earlier);
+      records.push(later);
+    }
+    if (midpointIssue === 'duplicate-keys') {
+      const original = JSON.parse(records[1].body);
+      const first = structuredClone(original.products);
+      first[0].price = '0.018750000000000001';
+      records[1].body = '{"products":' + JSON.stringify(first) + ',"\\u0070roducts":' +
+        JSON.stringify(original.products) + ',"num_products":2,"pagination":' + JSON.stringify(original.pagination) + '}';
+    }
+    if (midpointIssue === 'binary') {
+      records.push({ type: 'open', url: 'wss://advanced-trade-ws.coinbase.com', socket: 0 });
+      records.push({
+        type: 'ws', socket: 0, url: 'wss://advanced-trade-ws.coinbase.com',
+        text: '{"channel":"heartbeats","sequence_num":0}',
+        binary: Buffer.from('{"channel":"ticker","sequence_num":0}').toString('base64'),
+      });
+    }
+    if (midpointIssue === 'private-contradiction') records.push({ type: 'config', options: { key: 'contradiction' } });
+    if (midpointIssue === 'commands') records.push({ type: 'command', op: 'comparisonControl' });
+  }
   if (defect?.startsWith('live-smoke')) {
-    records[0].liveSmoke=true;
-    const commands=['placeOrders','amendOrder','cancelOrders','cancelSymbolOrders','setLeverage'];
-    records.push(...commands.map(op=>({type:'command',op})),{type:'live-smoke-verification',ok:true},{type:'live-smoke-result',ok:true,cleanupComplete:true,authoritative:true,stage:'complete',symbol:'BTCUSDT',commands});
+    records[0].liveSmoke = true;
+    const commands = ['placeOrders', 'amendOrder', 'cancelOrders', 'cancelSymbolOrders', 'setLeverage'];
+    records.push(
+      ...commands.map((op) => ({ type: 'command', op })),
+      { type: 'live-smoke-verification', ok: true },
+      {
+        type: 'live-smoke-result',
+        ok: true,
+        cleanupComplete: true,
+        authoritative: true,
+        stage: 'complete',
+        symbol: 'BTCUSDT',
+        commands,
+      },
+    );
   }
   if (defect === 'orderly-missing-result' || defect === 'coinbase-missing-result') records.push({ type: 'command', op: 'fetchFills' });
   if (defect?.startsWith('impl-plans')) {
@@ -47,12 +123,14 @@ const gate = (venue, isPrivate = false, defect) => {
     const isOrderly = ${JSON.stringify(VENUES[venue].family === 'orderly')};
     const defect = ${JSON.stringify(defect ?? null)};
     const planKeys = ${JSON.stringify(Object.fromEntries(['ts','rust'].map(impl => [impl, records.filter(record => record.type === 'http' && record.impl === impl).map(record => requestKey(record.method, record.url, record.requestBody, new Set(), VENUES[venue]))])))};
+    const midpoint = ${JSON.stringify(Boolean(midpoint))};
+    const midpointIssue = ${JSON.stringify(midpointIssue ?? null)};
     // The gate must override an explicit parent opt-in for both implementations,
     // while retaining unrelated replay configuration in the child environment.
     process.env.ESBUILD_WORKER_THREADS = '1';
     process.env.HARNESS_TEST_INHERITED = 'retained';
     process.argv = ['node', 'gate.mjs', '--venue', venue, '--tape', ${JSON.stringify(tape)},
-      '--books', 'BTCUSDT', '--runs', '2'];
+      '--books', midpoint ? 'DEEP-USD' : 'BTCUSDT', '--runs', '2'];
     const spawned = new Set();
     childProcess.spawnSync = (_executable, args, options) => {
       assert.equal(options.env.ESBUILD_WORKER_THREADS, '0');
@@ -86,7 +164,40 @@ const gate = (venue, isPrivate = false, defect) => {
           orders: [], positions: [], settings: [], fills: [],
         } } : {}),
       };
-      if (defect === 'orderly-extra-result' || defect === 'coinbase-extra-result') output.commands.push({ ok: [] });
+      if (midpoint) {
+        output.markets = ['DEEP-USD', 'DEEP-USDC'].map((symbol) => ({
+          id: symbol, symbol, base: 'DEEP', quote: symbol.slice(5), active: true,
+          precision: { amount: 1, price: 0.00001 },
+          isSpot: true, isInverse: false, isExpiring: false, contractSize: 1,
+        }));
+        output.tickers = ['DEEP-USD', 'DEEP-USDC'].map((symbol) => ({
+          symbol, last: 0.01875, volume: 2625844, bid: 0.01875,
+          quoteVolume: rust || isPrivate ? 49234.58 : 49234.57,
+        }));
+        output.books = { 'DEEP-USD': { bids: [[0.01874, 1]], asks: [[0.01876, 1]] } };
+        if (midpointIssue === 'commands') {
+          output.commands = [{ ok: { ids: rust ? ['two', 'one'] : ['one', 'two'] } }];
+        }
+        if (isPrivate && midpointIssue === 'fee')
+          output.account.orders = [{ id: 'one', symbol: 'DEEP-USD', fee: { cost: rust ? 0.02 : 0.01, currency: 'USD' } }];
+        if (rust) {
+          if (midpointIssue === 'price') output.tickers[0].last = 0.01876;
+          if (midpointIssue === 'volume') output.tickers[0].volume = 2625843;
+          if (midpointIssue === 'quote') output.tickers[0].quoteVolume = 49234.59;
+          if (midpointIssue === 'field') output.tickers[0].bid = 0.01874;
+          if (midpointIssue === 'later' && out.endsWith('rust-1.json')) output.tickers[0].last = 1;
+          if (midpointIssue === 'book') output.books['DEEP-USD'].bids[0][1] = 2;
+          if (midpointIssue === 'request') output.requests = ['GET https://example.test/unexpected?'];
+          if (midpointIssue === 'subscription') output.subscriptions = ['WS public unexpected'];
+          if (midpointIssue === 'wsrequest') output.wsRequests = ['unexpected native request'];
+          if (midpointIssue === 'account') output.account = { balance: { total: 999 } };
+          if (isPrivate && midpointIssue === 'balance') output.account.balance.total = 101;
+          if (isPrivate && midpointIssue === 'orders') output.account.orders = [{ id: 'one', price: 1 }];
+          if (isPrivate && midpointIssue === 'positions') output.account.positions = [{ symbol: 'DEEP-USD', contracts: 1 }];
+          if (isPrivate && midpointIssue === 'fills') output.account.fills = [{ id: 'one', price: 1, amount: 1 }];
+        }
+      }
+      if (['orderly-extra-result', 'coinbase-extra-result'].includes(defect)) output.commands.push({ ok: [] });
       if (defect?.startsWith('live-smoke')) {
         output.commands=Array.from({length:5},()=>({ok:[]}));
         if(defect==='live-smoke-identical-errors')output.commands[0]={error:'identical placement rejection'};
@@ -258,5 +369,77 @@ test('live smoke gates every replay command success even when both engines fail 
     const result = gate('binance', true, defect);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /did not successfully complete every lifecycle command/);
+  }
+});
+
+test('Coinbase CLI reports independent public midpoint proofs for both aliases on every run', () => {
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const result = gate(venue, false, 'coinbase-midpoint:good');
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    for (const run of [1, 2]) assert.match(result.stdout, new RegExp('public spot decimal midpoints run ' + run + ':'));
+    assert.match(result.stdout, /"symbol":"DEEP-USD"/);
+    assert.match(result.stdout, /"symbol":"DEEP-USDC"/);
+    assert.match(result.stdout, /"native":"49234.58"/);
+    assert.match(result.stdout, /\nPASS\n$/);
+  }
+});
+
+test('Coinbase CLI refuses invalid inputs and contradictory scope instead of masking ticker failures', () => {
+  for (const issue of ['price', 'volume', 'quote', 'missing-native', 'field', 'private-contradiction', 'selector', 'binary', 'unconsumed', 'duplicate-keys']) {
+    const result = gate('coinbase', false, 'coinbase-midpoint:' + issue);
+    assert.equal(result.status, 1, issue + ': ' + result.stderr + result.stdout);
+    assert.match(result.stdout, /ticker DEEP-USD:/);
+    assert.doesNotMatch(result.stdout, /public spot decimal midpoints run/);
+  }
+});
+
+test('accepted Coinbase midpoint proofs preserve independent book and transport failures', () => {
+  for (const [issue, message] of [
+    ['book', /book DEEP-USD differs/],
+    ['request', /requests differ:/],
+    ['subscription', /subscriptions:/],
+    ['wsrequest', /wsRequests:/],
+  ]) {
+    const result = gate('coinbase', false, 'coinbase-midpoint:' + issue);
+    assert.equal(result.status, 1, issue + ': ' + result.stderr + result.stdout);
+    assert.match(result.stdout, /public spot decimal midpoints run 1:/);
+    assert.match(result.stdout, message);
+  }
+});
+
+test('Coinbase midpoint comparison preserves ordered command and public-account consistency checks', () => {
+  for (const [issue, message] of [
+    ['commands', /command results:/],
+    ['account', /account presence differs from tape classification/],
+  ]) {
+    const result = gate('coinbase', false, 'coinbase-midpoint:' + issue);
+    assert.equal(result.status, 1, result.stderr + result.stdout);
+    assert.match(result.stdout, message);
+  }
+});
+
+test('Coinbase private financial fields remain exact and never receive a public midpoint exception', () => {
+  for (const [issue, field] of [
+    ['balance', 'balance'],
+    ['orders', 'orders'],
+    ['positions', 'positions'],
+    ['fills', 'fills'],
+    ['fee', 'orders'],
+  ]) {
+    const result = gate('coinbase', true, 'coinbase-midpoint:' + issue);
+    assert.equal(result.status, 1, issue + ': ' + result.stderr + result.stdout);
+    assert.match(result.stdout, new RegExp('account ' + field + ':'));
+    assert.doesNotMatch(result.stdout, /public spot decimal midpoints run/);
+    assert.doesNotMatch(result.stdout, /ticker DEEP-USD:/, 'financial control isolates account comparison');
+  }
+});
+
+test('Coinbase CLI revalidates later runs rather than reusing a first-run midpoint proof', () => {
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const result = gate(venue, false, 'coinbase-midpoint:later');
+    assert.equal(result.status, 1, result.stderr + result.stdout);
+    assert.match(result.stdout, /public spot decimal midpoints run 1:/);
+    assert.doesNotMatch(result.stdout, /public spot decimal midpoints run 2:/);
+    assert.match(result.stdout, /ticker DEEP-USD:/);
   }
 });

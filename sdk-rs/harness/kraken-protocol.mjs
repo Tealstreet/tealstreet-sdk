@@ -1,6 +1,7 @@
 // Independent Node crypto oracle for the Futures wire; never use the Rust signer.
 import {createHash,createHmac} from 'node:crypto';
 import {parseRequestJson} from './request-json.mjs';
+import {parseUniqueJson as uniqueJson} from './json-unique.mjs';
 const KEY='replay-key';
 const SECRET=Buffer.from('replay-secret');
 export const krakenSignature=(payload)=>createHmac('sha512',SECRET).update(createHash('sha256').update(payload).digest()).digest('base64');
@@ -67,17 +68,4 @@ export function krakenCommandResult(result,command){
   if(result.error==='Not implemented'||('ok'in result&&(result.ok===null||Array.isArray(result.ok)&&result.ok.length===0)))return {ok:[]};
  }
  return result;
-}
-
-// JSON.parse validates syntax; retain object scopes to reject repeated keys
-// before a last-wins parser can hide a signed batch's economic fields.
-function uniqueJson(text){
- JSON.parse(text);
- const tokens=text.match(/"(?:\\.|[^"\\])*"|[{}\[\]:,]/g)??[];const scopes=[];
- for(let i=0;i<tokens.length;i++){
-  const t=tokens[i];if(t==='{')scopes.push(new Set());else if(t==='[')scopes.push(null);else if(t==='}'||t===']')scopes.pop();
-  else if(t.startsWith('"')&&tokens[i+1]===':'){
-   const key=JSON.parse(t),keys=scopes.at(-1);if(keys?.has(key))throw Error('Kraken duplicate JSON property');keys?.add(key);
-  }
- }
 }

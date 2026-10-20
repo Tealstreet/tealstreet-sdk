@@ -76,9 +76,13 @@ High:
 - ~~Binance USD-M amend re-places the full original size when the order filled
   during the cancel ("unknown order" counted as cancel) (`binance/src/trading.rs:1131,536,1463`).~~
   Fixed: replacement waits for cancellation proof and subtracts racing fills; unknown cancellation cannot replace.
-- Rejected private login leaves a silent socket: bitget `account.rs:1128`,
+- ~~Rejected private login leaves a silent socket: bitget `account.rs:1128`,
   blofin `account.rs:1125`, mexc `account.rs:308`, woo `account.rs:1482`,
-  cryptocom `lib.rs:390`, apexomni `account.rs:1130`. Close and back off; add an auth deadline.
+  cryptocom `lib.rs:390`, apexomni `account.rs:1130`. Close and back off; add an auth deadline.~~
+  Fixed in `feat/rust-socket-supervisor`: rejected login retires the socket,
+  preserves account state and schedules jittered retry; an independent auth
+  deadline expires despite pongs. Native regressions cover all six, including
+  ApeX's required immediate subscriptions and validated ACK-less wallet data.
 - ~~Binance USD-M emits fills from non-TRADE events and does not dedupe on trade id
   (`binance/src/account.rs:1169`).~~ Fixed: TRADE-only execution-ID dedupe, including PM/COIN-M.
 
@@ -105,8 +109,13 @@ Medium:
   A regression verifies authoritative inverse amend updates preserve coin `remaining` and native `remainingNative`.
 - Write timeout discards optimistic state instead of refreshing: orderly, okx.
 
-Low: no reconnect backoff (asterdex, bitrue, bingx, kucoin, cryptocom, phemex,
-coinbase public, grvt, paradex, polymarket); KuCoin client-id collisions;
+Low: ~~no reconnect backoff (asterdex, bitrue, bingx, kucoin, cryptocom, phemex,
+coinbase public, grvt, paradex, polymarket)~~ — fixed for the requested feeds
+by the shared supervisor, including fresh KuCoin token POSTs. Reverification
+dropped the literal public no-backoff claim for AsterDEX, Bitrue, BingX and
+Paradex: they already had exponential delays, but reset at open; their fixed
+private recovery, missing jitter and repeated-flap reset are now covered.
+KuCoin client-id collisions;
 ~~`uuid().unwrap_or_default()` in Binance~~ (fixed: propagate entropy failure instead of producing a broker-only ID); Backpack empty positions on any 404;
 OKX `partially_effective` final; Lighter late-fill drop; ~~Bybit unused `exec_id`~~ (fixed: bounded native execution-ID dedupe retained across reconnects).
 
@@ -390,18 +399,22 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 - ~~The known USD-M amend double exposure also hits PM, where TS throws on -2011
   and Rust re-places (`binance/src/trading.rs:530`): a regression.~~
   Fixed with the USD-M/PM cancellation-proof and racing-fill regression matrix.
-- Medium: PM upserts `fs:"CM"` rows as phantom positions (`account.rs:1381`);
-  REST candles with `from`+`limit` return the oldest N instead of newest, no
-  1500 cap (`lib.rs:1439`); COIN-M strict batch discards placed ids on a partial
-  reject (`trading.rs:397,700`); PM `close: true` with an amount closes the whole
-  position (`trading.rs:1087`); COIN-M unpriced coin excluded from totals
+- Medium: ~~PM upserts `fs:"CM"` rows as phantom positions (`account.rs:1381`)~~;
+  ~~REST candles with `from`+`limit` return the oldest N instead of newest, no
+  1500 cap (`lib.rs:1439`)~~; ~~COIN-M strict batch discards placed ids on a partial
+  reject (`trading.rs:397,700`)~~; ~~PM `close: true` with an amount closes the whole
+  position (`trading.rs:1087`)~~; COIN-M unpriced coin excluded from totals
   (TS counts 1:1 — confirm); ~~CancelOrders with unknown ids reports success
   without sending (`trading.rs:224`)~~ (explicit errors; see
-  [cancel audit](RUST_UNKNOWN_CANCEL.md)); history maps `EXPIRED_IN_MATCH` to filled
-  (`history.rs:687`); spot/COIN-M history returns plain `[]` instead of
-  unsupported; USD-M journal (`fetchHistoricalPositions`) not wired in the host.
-- Low: fixed `recvWindow`; closePosition conflict cancel in batches; Binance UI
+  [cancel audit](RUST_UNKNOWN_CANCEL.md)); ~~history maps `EXPIRED_IN_MATCH` to filled
+  (`history.rs:687`)~~; ~~spot/COIN-M history returns plain `[]` instead of
+  unsupported~~; USD-M journal (`fetchHistoricalPositions`) not wired in the host.
+- Low: ~~fixed `recvWindow`~~; closePosition conflict cancel in batches; Binance UI
   STOP orders amend to stop-market; PM -2011 plain cancel marks canceled.
+- Follow-up fixes and scenario evidence: [Binance/Bybit follow-up](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md).
+  Native unsupported histories reject; SDK methods expose matching branded Base
+  fallbacks. Existing unknown-ID mixed-batch cancellation preflight was reverified.
+  PM canonical ownership and Spot quantified-ACK delivery are also covered there.
 - Confirm (TS bugs Rust fixed): fill price `L` not `ap`; spot fill price on
   market orders; spot cancel uses `C`; amend keeps TIF; PM conditional client id
   `newClientStrategyId`; PM TRIGGERED closes; PM cancel-all both endpoints;
@@ -417,8 +430,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   `baseCoin=All` unverified; live candles lack trade aggregation and seconds
   intervals; option WS ticker field names likely wrong; no UNIFIED retry on the
   wallet call; demo reduce-only fill check missing; Hyro tears down on one bad
-  poll (`account.rs:1838`); order/income history caps; Partial TP/SL amend
-  semantics — decided: match TS (flip SL/TP on drag), do not amend in place; spot create params (`marketUnit`); one unmappable
+  poll (`account.rs:1838`); order/income history caps; ~~Partial TP/SL amend
+  semantics — decided: match TS (flip SL/TP on drag), do not amend in place~~
+  ([owner-selected cancel/recreate regressions](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)); spot create params (`marketUnit`); one unmappable
   order invalidates every later snapshot (`account.rs:1569`).
 - Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
   breadth; split-lot error handling; classic upnl; inverse reference price;
@@ -712,24 +726,32 @@ Signing and payloads match; no confirmed highs.
 ### Paradex
 StarkNet typed data, JWT, payloads and SBE decoding match.
 - High: one blank ticker field halts the venue incl. private side
-  (`paradex/src/public.rs:714`, `lib.rs:127`); a failed TP/SL child logs at
-  Warning so no toast — user believes they are protected (`trading.rs:855`);
+  (`paradex/src/public.rs:714`, `lib.rs:127`); ~~a failed TP/SL child logs at
+  Warning so no toast — user believes they are protected (`trading.rs:855`)~~
+  — child failures now produce Error notices while retaining accepted entry IDs;
   REST positions may never commit if `leverage`/`liquidation_price` are blank
   (`account.rs:1824`; verify live).
-- Medium: multi-order placement stops at first failure and loses placed ids
-  (`trading.rs:458,699,867`); venue rejection reasons dropped (`lib.rs:231`);
-  leverage serialized `20.0` (`trading.rs:542`; verify live); one malformed SBE
-  frame recycles the public socket (`public.rs:388`).
+- Medium: ~~multi-order placement stops at first failure and loses placed ids
+  (`trading.rs:458,699,867`)~~ — independent operations continue, verified partial
+  native IDs are returned in caller order and failures identify rejected clients;
+  ~~venue rejection reasons dropped (`lib.rs:231`)~~ — structured error/message
+  details retained with bounded text and no response dump;
+  ~~leverage serialized `20.0` (`trading.rs:542`; verify live)~~ — JSON integer,
+  per the documented request schema, matching confirmed state;
+  ~~one malformed SBE frame recycles the public socket (`public.rs:388`)~~ — malformed frames
+  now drop without clearing books/socket or refreshing liveness; subsequent valid
+  sequence gaps still recover only the affected book (native regressions).
 - Low: one unmappable order row discards refresh; leverage-0 config row; TP/SL
   of 0 rejects order; history fails on one row; stale uPnL after WS close;
-  README says remote signing rejected.
+  ~~README says remote signing rejected~~ — corrected to the landed payload
+  signing contract exercised by the delegated-signing regressions.
 
 ### Cross-venue: silent partial failures
 - Child-leg failures (TP/SL after an entry) must surface as errors on every
-  venue (Paradex logs at Warning).
-- Batches that fail midway must return placed ids with the error (Paradex,
+  venue (~~Paradex logs at Warning~~; now Error with a native regression).
+- Batches that fail midway must return placed ids with the error (~~Paradex~~ repaired,
   Binance COIN-M, Bitrue cancels).
-- Integers serialized as floats (`20.0`): Paradex leverage, KuCoin leverage;
+- Integers serialized as floats (`20.0`): ~~Paradex leverage~~ repaired, KuCoin leverage;
   check every venue's integer fields.
 
 ### GRVT

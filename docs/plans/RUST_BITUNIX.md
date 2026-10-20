@@ -3270,3 +3270,32 @@ all41exactheadCIchecks including mandatoryBitunix/Binance gates, complete
 Bitrue and lifecycle remain prerequisites to merge. No deadline, sampler,
 CPU/memory/module cap, inputfixture or equality/oracle change. No completed
 performancefailure is retried unchanged. Then winddown, nofollowupwork.
+
+## Required second landing merge: 3686c4ffa1
+
+Publishedfea43c36b7 GitHubreportsCONFLICTING. Fetch+merge newlanding3686c4ffa1
+(socket supervisor, Binance/Bybit auditfollowup, Paradex/emitter fixes).
+Resolveonly3conflicts gate.mjs/gate.test.mjs/kraken-protocol.mjs: retain our
+strictcallable adapters/rawauth/memory/identity controls plus incoming duplicate
+JSON-key checks, independent Coinbase midpoint proof, live-smoke proof and
+current Bybit owner-selected Partial replacement semantics. No stale amend-
+in-place divergence note. Auto-merged incoming private/trading implementation
+byte-identical to landing, Bitunix economic/fill/cancel guards unchanged;
+independent privateunion audit PASS.
+
+Under newloadrule rootfocused engine+Bitunix checks PASS:127engine+90Bitunix
+nativecases (217total), touchedcrate format/strictalltargetClippy/bans;75TS
+cases across6touched/integration files PASS. CARGO_BUILD_JOBS=4. No local
+WASMrelease, timinggate, size matrix or replay started. Currenthead release
+gates remain delegatedto all41strictCIcontexts beforemerge.
+
+Secondmerge unions independently PASS: public/core/SDK/feed/supervisor;
+private/trading/netPNL/fill/cancel; and crossaudit3conflictedharnessfiles.
+Focusedgate/Kraken/uniqueJSON/CoinbaseMidpoint controls138/138PASS, zero skipped.
+Coinbase-family exactrequests comparison is restored after the existing bounded
+fixCoinbase proof; newnegativeCLI test retains unknown-request rejection.
+Midpoint comparator uses actualtape, only proven fullrow cosmetic ticker cases
+may differ; books/auth/account/request/metric checks remain independent.
+Kraken duplicate validator is shared while exactBigInt nonce/signature/activation
+fences stay intact. Commit and push resolvedmerge now, actualPRround2reviews
+thenall41strictCIgreen beforemerge. No localrelease/timing/sweep executed.

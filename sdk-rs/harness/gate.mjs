@@ -18,6 +18,7 @@ import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
 import { venueOf } from './venues.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
+import { compareCoinbaseSpotMidpoints } from './coinbase-spot-midpoints.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -113,8 +114,29 @@ const isPrivate = tape.find((record) => record.type === 'config')?.private ?? ta
 //  - Bybit: TS may drop the initial ticker snapshot before a slow REST seed;
 //    Rust installs the seed before connecting. These cases have native regression
 //    coverage; the committed replay tapes require no normalization for them.
-//  - Bybit: with no mark price, TS can add a second Partial stop on amend;
-//    Rust amends the existing native order ID.
+//  - Bybit Partial TP/SL now follows the owner-selected TS replacement and
+//    missing-mark fallbacks; the former amend-in-place divergence is retired.
+//  - Bybit inverse: TS clamps USD contracts before splitting, silently shrinking
+//    large requests; Rust preserves the requested total in max lots + remainder.
+//  - Bybit inverse: TS sums coin PnL into the USD wallet; Rust converts using
+//    the position's USD notional/base contracts while preserving coin position PnL.
+//  - Bybit spot: TS reads absent qtyStep and deprecated maxOrderQty; Rust reads
+//    basePrecision and the conservative minimum of documented limit/market maxima.
+//    TS also sends invalid spot instrument pagination parameters; Rust omits them.
+//  - Bybit spot: documented tpslOrder rows become protective orders; TS has no
+//    mapping for that spelling. PartiallyFilledCanceled events now retire orders
+//    instead of leaving them open after their remaining quantity was cancelled.
+//  - Bybit spot: Rust sends marketUnit=baseCoin for market buys, uses native
+//    spot conditional/amend/cancel families, and rejects unsupported trailing
+//    orders instead of calling derivative position/trading-stop endpoints.
+//  - Bybit spot: TS cancel-all omits orderFilter and leaves trigger families
+//    live; Rust cancels Order, StopOrder and tpslOrder independently. Documented
+//    private tapes select each implementation's exact expected write plan.
+//  - Hyro: seed unseen partial fills from accepted account snapshots; TS can
+//    report pre-snapshot cumulative executions again when the order stream resumes.
+//  - Hyro: TS keys ambiguous-create recovery by a re-rendered wire payload;
+//    ticker/position changes can allocate a new identity for the same retry.
+//    Rust resumes the original caller intent before rendering any new payload.
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
 // Paired production fixes compare outputs without answer normalization:
@@ -141,6 +163,9 @@ const isPrivate = tape.find((record) => record.type === 'config')?.private ?? ta
 // cancellations against REST reads issued before, during or after the write,
 // with bounded native terminal retention against stale replicas. Native tests
 // exercise equal-time and late-response races without normalization.
+// BloFin and MEXC reject failed login and bound pending auth independently of
+// transport pongs; native failure regressions prove closure/backoff without
+// rewriting replay liveness output.
 const fixBackpack = (ts) => {
     const bytes = readFileSync(values.tape);
     const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
@@ -266,6 +291,8 @@ const fixBackpack = (ts) => {
 //   instead targets c, which can be the cancellation request's client ID.
 // - Spot/COIN-M duplicate cumulative executions can emit fills again and
 //   stale NEW events reopen terminal orders; Rust fences by native order ID.
+//   Spot also deduplicates the latest 16,384 native (symbol, order, trade) IDs,
+//   independently of ACK totals and terminal lifecycle (native/SDK proofs).
 // - COIN-M malformed openOrders responses become authoritative empty in TS;
 //   Rust preserves the previous order state and retries reconciliation.
 // - COIN-M TS values an unpriced collateral coin at USD1; Rust keeps its
@@ -445,7 +472,7 @@ KNOWN_TS_FIXES.krakenspot = {
 // Price-only cancel/replace amendments re-place the remaining quantity after
 // partial execution; TS re-places the original amount and increases exposure.
 KNOWN_TS_FIXES.lighter = { fills: fixLighterFills, commands: fixLighterCommands };
-KNOWN_TS_FIXES.woo = [];
+KNOWN_TS_FIXES.woo = ['Close rejected private authentication and bound pending authentication independently of pongs.'];
   // ApeX repairs are in the TS reference; output is compared without rewriting:
   // continuous book sequences and atomic invalid depth updates; top-level ping
   // detection avoids answering echoed ping acknowledgements; stable original
@@ -463,8 +490,14 @@ KNOWN_TS_FIXES.woo = [];
 // Phemex execution IDs, cumulative exposure and flat settings derive only
 // from recorded native rows; full-depth production TS books stay unmodified.
 KNOWN_TS_FIXES.phemex = [];
+// Paradex preserves accepted IDs from partial/sequential batches, continues
+// independent orders after rejection, reports failed protection at Error level,
+// retains structured rejection reasons and sends integer leverage. Native
+// regressions cover these TS defects; no replay normalization is applied.
 KNOWN_TS_FIXES.paradex = [];
-KNOWN_TS_FIXES.apexomni = [];
+// Native rejection/missing-ACK controls preserve immediate subscriptions.
+KNOWN_TS_FIXES.apexomni = ['Close rejected private logins and bound missing login ACK/account-stream readiness independently of pongs; preserve immediate subscriptions.'];
+KNOWN_TS_FIXES.cryptocom = ['Close rejected private authentication and enforce an independent auth deadline while preserving server heartbeat replies.'];
 KNOWN_TS_FIXES.kraken = {
     output: fixKrakenOutput,
     fixes: [
@@ -529,6 +562,7 @@ KNOWN_TS_FIXES.bitget = {
   // Each correction is covered by documented-payload Rust tests. Normal
   // tapes still compare unchanged; these notes do not rewrite mismatches.
   notes: [
+    'Close rejected private login and enforce an auth deadline independent of transport pongs.',
     'Reject book sequence gaps and legacy checksum failures.',
     'Preserve account state on failed business-error reads.',
     'Filter all-product UTA streams to this futures product.',
@@ -680,7 +714,7 @@ for (let run = 0; run < runs; run++) {
   if (ts.frames !== rust.frames) differences.push(`run ${run} frames: ts=${ts.frames} rust=${rust.frames}`);
   if (values.venue === 'backpack') fixBackpack(ts);
   if (venue.family === 'orderly') fixOrderly(ts, tape);
-  if (venue.family === 'orderly' && !equal(ts.requests, rust.requests))
+  if (['orderly', 'coinbase'].includes(venue.family) && !equal(ts.requests, rust.requests))
     differences.push(`requests differ: ts=${JSON.stringify(ts.requests)} rust=${JSON.stringify(rust.requests)}`);
   // Phase-9 native regressions additionally correct TS: account-wide history
   // limits before joining newer inverse/options sources; ignored IV on ordinary
@@ -848,7 +882,14 @@ for (let run = 0; run < runs; run++) {
     // transport's single-use consumption audit, including ordered mutations.
   }
   compare('market', ts.markets, rust.markets);
-  compare('ticker', ts.tickers, rust.tickers);
+  // Prove cosmetic spot-estimate midpoints against native decimal inputs.
+  // Neither output is rewritten; private and financial comparisons stay exact.
+  const midpoints = !isPrivate && ['coinbase', 'coinbasespot'].includes(values.venue)
+    ? compareCoinbaseSpotMidpoints({ venue: values.venue, records: tape, ts, rust })
+    : undefined;
+  if (midpoints?.equivalent)
+    console.log(`(Coinbase public spot decimal midpoints run ${run + 1}: ${JSON.stringify(midpoints.exceptions)})`);
+  else compare('ticker', ts.tickers, rust.tickers);
   for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
     if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
       differences.push(`book ${symbol} differs`);

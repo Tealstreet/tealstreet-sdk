@@ -727,3 +727,34 @@ fn ticker_seed_retains_native_rows_without_active_market_metadata() {
     assert_eq!(h.engine.store().tickers().len(), 1);
     assert_eq!(h.engine.store().tickers()[0].symbol, "OLDUSDT");
 }
+
+#[test]
+fn supervisor_backs_off_open_flaps_and_retires_a_connection_that_never_opens() {
+    let mut h = Harness::ready();
+    let mut previous = 0.0;
+    for nominal in [500.0, 1000.0, 2000.0] {
+        let socket = h.socket();
+        h.event(Event::WsClosed { socket, code: 1006 });
+        let (timer, at) = *h.timers.last().unwrap();
+        let delay = at - h.now;
+        assert!((nominal * 0.75..=nominal).contains(&delay));
+        assert!(delay > previous);
+        previous = delay;
+        h.now = at;
+        h.event(Event::TimerFired { timer });
+        assert_ne!(h.socket(), socket);
+        if nominal < 2000.0 {
+            h.event(Event::WsOpened { socket: h.socket() });
+        }
+    }
+    let stalled = h.socket();
+    h.advance(10_000.0);
+    assert!(h.closed.contains(&stalled));
+    let count = h.sockets.len();
+    h.event(Event::WsOpened { socket: stalled });
+    h.event(Event::WsClosed {
+        socket: stalled,
+        code: 1006,
+    });
+    assert_eq!(h.sockets.len(), count);
+}

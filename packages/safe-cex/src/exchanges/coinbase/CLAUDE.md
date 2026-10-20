@@ -289,3 +289,7 @@ canonical `order_id`, and instrument-history rows must all match the requested
 Starbase instrument. Account decoding also preserves Coinbase's optional
 `total_*_usd` cross-collateral fields under explicit USD names; that does not
 resolve the unlabelled PnL-unit blocker.
+
+## Rust socket supervision
+
+The Rust public socket uses `engine::socket::Supervisor` with a 10-second connection deadline, 20-second validated-traffic watchdog and capped exponential reconnect delay with jitter. Native `heartbeats` subscriptions provide idle traffic; there is no invented client ping. The separate 10-second initial-book snapshot deadline, connection-wide sequences, recovery routing and daily candle backfill remain enforced. Short open/close flaps retain the failure count.

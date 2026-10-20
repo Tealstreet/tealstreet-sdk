@@ -967,7 +967,9 @@ fn close_reauth_and_cookie_rotation_cancel_ping_and_fence_old_generation() {
                     .iter()
                     .rev()
                     .find_map(|action| match action {
-                        Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1_000. => {
+                        Action::SetTimer { timer, at_ms }
+                            if (*at_ms - h.now >= 750.) && (*at_ms - h.now <= 1000.) =>
+                        {
                             Some(*timer)
                         }
                         _ => None,
@@ -1179,4 +1181,67 @@ fn undiscovered_products_in_rest_snapshots_do_not_alias_perpetuals() {
             20.
         );
     }
+}
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn private_supervisor_retries_flaps_and_bounds_never_open_handshakes() {
+    for proxy in [false, true] {
+        let mut h = Harness::new(proxy);
+        h.authenticate();
+        h.open();
+        socket_checks::flaps(h.engine, h.socket.unwrap(), h.now);
+    }
+}
+
+#[test]
+fn proxy_pongs_cannot_extend_private_authentication_deadline() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    let socket = h.socket.unwrap();
+    let opened = h.now;
+    h.engine.handle(opened, Event::WsOpened { socket });
+    h.collect();
+    let mut timer = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == opened + 5000. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    for offset in [5000., 10_000., 15_000.] {
+        h.now = opened + offset;
+        h.engine.handle(
+            h.now,
+            Event::WsMessage {
+                socket,
+                text: "pong",
+            },
+        );
+        h.engine.handle(h.now, Event::TimerFired { timer });
+        h.collect();
+        if offset < 15_000. {
+            timer = h
+                .actions
+                .iter()
+                .rev()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } if *at_ms == h.now + 5000. => Some(*timer),
+                    _ => None,
+                })
+                .unwrap();
+        }
+    }
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+    );
+    assert!(
+        private_pings(&h).is_empty(),
+        "no unauthenticated application ping"
+    );
 }
