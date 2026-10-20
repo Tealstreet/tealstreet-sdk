@@ -199,8 +199,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   1500 cap (`lib.rs:1439`); COIN-M strict batch discards placed ids on a partial
   reject (`trading.rs:397,700`); PM `close: true` with an amount closes the whole
   position (`trading.rs:1087`); COIN-M unpriced coin excluded from totals
-  (TS counts 1:1 — confirm); CancelOrders with unknown ids reports success
-  without sending (`trading.rs:224`); history maps `EXPIRED_IN_MATCH` to filled
+  (TS counts 1:1 — confirm); ~~CancelOrders with unknown ids reports success
+  without sending (`trading.rs:224`)~~ (explicit errors; see
+  [cancel audit](RUST_UNKNOWN_CANCEL.md)); history maps `EXPIRED_IN_MATCH` to filled
   (`history.rs:687`); spot/COIN-M history returns plain `[]` instead of
   unsupported; USD-M journal (`fetchHistoricalPositions`) not wired in the host.
 - Low: fixed `recvWindow`; closePosition conflict cancel in batches; Binance UI
@@ -234,15 +235,16 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 
 ### BloFin
 - High: a failed or malformed ticker read at startup means the private side
-  never starts, no retry (`blofin/src/lib.rs:617,651`); `brokerId` never sent,
-  losing broker attribution (`trading.rs:126`, TS `blofin.exchange.ts:2159`);
+  never starts, no retry (`blofin/src/lib.rs:617,651`); ~~`brokerId` never sent,
+  losing broker attribution (`trading.rs:126`, TS `blofin.exchange.ts:2159`)~~
+  ([attribution audit](RUST_BROKER_ATTRIBUTION.md));
   per-symbol margin mode stays stale after a position closes, so orders go out
   in the wrong margin mode (`trading.rs:271`, `account.rs:614`).
 - Medium: `null` in order/position/ticker fields rejects whole snapshots/frames
   (`wire.rs`; verify against one live frame); WS login timestamp serialized as
   float (`account.rs:284`); one odd instrument row aborts startup
-  (`lib.rs:505`); cancel of an id the store lacks resolves OK with no request
-  (`trading.rs:671`).
+  (`lib.rs:505`); ~~cancel of an id the store lacks resolves OK with no request
+  (`trading.rs:671`)~~ (explicit error).
 - Low: strict leverage fetch; trigger TP/SL not tick-rounded; missing
   iso/cross warnings; 102143 not translated; history shape.
 - Confirm (TS bugs Rust fixed): IOC/FOK rejected; TP/SL trigger type honored;
@@ -253,9 +255,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 ### Cross-venue patterns from the port reviews
 - Startup is fail-closed with no retry on OKX and BloFin where TS continues on
   partial data; check every venue and set one engine policy.
-- Broker attribution: BloFin drops `brokerId`; check every venue's broker/referral
-  tag against TS.
-- Cancel of ids not in the store silently succeeds (Binance, BloFin).
+- ~~Broker attribution: BloFin drops `brokerId`; check every venue's broker/referral
+  tag against TS.~~ All registered names audited; payload/partner/header fixes
+  and preserved gates are tabled in [the attribution audit](RUST_BROKER_ATTRIBUTION.md).
+- ~~Cancel of ids not in the store silently succeeds (Binance, BloFin).~~ Eight
+  families now error; KuCoin sends uncached IDs. [Every-family audit](RUST_UNKNOWN_CANCEL.md).
 
 ### Bitget family
 - High: hedge-mode isolated leverage always goes to the long leg — the adapter
@@ -327,11 +331,13 @@ TxFlow loses nothing (master TS was a placeholder).
   candle `from`/`to` filtering a latest-N fetch.
 
 ### KuCoin
-- High: cancel-symbol also deletes the symbol's TP/SL stops
-  (`kucoin/src/trading.rs:515`; TS only `/api/v3/orders`); one failed or
+- High: ~~cancel-symbol also deletes the symbol's TP/SL stops
+  (`kucoin/src/trading.rs:515`; TS only `/api/v3/orders`)~~ (stop-book deletion
+  now only on account-wide cancel); one failed or
   malformed markets/tickers read stops the venue, and futures private REST
   waits for the private socket `welcome` (`lib.rs:767,954,1026`).
-- Medium: one unknown id rejects the whole cancel batch (`trading.rs:505,1034`);
+- Medium: ~~one unknown id rejects the whole cancel batch (`trading.rs:505,1034`)~~
+  (uncached IDs sent directly; later cancellations continue and failures surface);
   one malformed REST row freezes reconciliation (`account.rs:652`); caller client
   id on attached TP/SL rejected (`trading.rs:120`).
 - Low: leverage sent as `10.0`; fill without `matchPrice` dropped; spot polls
@@ -536,7 +542,8 @@ CLOB V2 signing and amounts match the official client.
 
 ### Registration and options (all RUST_VENUES aliases)
 Alias→product mapping, credentials, testnet, routing and broker/builder
-attribution are correct for all 48 names (BloFin `brokerId` aside).
+attribution are correct for all 48 names (~~BloFin `brokerId` aside~~; repaired
+with its production/proxy gate).
 - Medium: Coinbase accounts with a saved read-only key fail to start — no
   `secondaryReadHeaders` entry or `read_credentials` (`transport/engine.ts:76,116`,
   `hosts/wasm/src/lib.rs:656`); Coinbase is Rust-only.

@@ -512,7 +512,7 @@ impl BybitLinear {
                 credentials.headers(cx.now + self.clock_offset_ms, &rest.payload)
             }
             (None, true) => return,
-            _ => Vec::new(),
+            _ => vec![("X-Referer", sign::BROKER_ID.into())],
         };
         let body = (rest.method != Method::Get).then(|| rest.payload.clone());
         let (method, stream) = (rest.method, rest.stream);
