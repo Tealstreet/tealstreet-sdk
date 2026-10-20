@@ -178,6 +178,8 @@ pub struct Account {
     terminal_ids: VecDeque<String>,
     executions: HashSet<String>,
     execution_ids: VecDeque<String>,
+    /// Perpetuals the catalogue drops on purpose (non-active); not malformed.
+    pub(crate) excluded_perps: HashSet<String>,
 }
 
 impl Account {
@@ -224,6 +226,7 @@ impl Account {
             terminal_ids: VecDeque::new(),
             executions: HashSet::new(),
             execution_ids: VecDeque::new(),
+            excluded_perps: HashSet::new(),
         }
     }
     pub fn rest(&self) -> &'static str {
@@ -1058,7 +1061,12 @@ impl Account {
     }
     pub fn on_item(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
         if matches!(request, Request::Positions { .. } | Request::Orders { .. }) {
-            match registered_market(cx, item, matches!(request, Request::Positions { .. })) {
+            match registered_market(
+                cx,
+                &self.excluded_perps,
+                item,
+                matches!(request, Request::Positions { .. }),
+            ) {
                 Ok(false) => return,
                 Err(()) => {
                     match request {
@@ -1367,7 +1375,7 @@ impl Account {
         };
         let mut valid = false;
         for raw in rows {
-            match registered_market(cx, raw.get(), false) {
+            match registered_market(cx, &self.excluded_perps, raw.get(), false) {
                 Ok(true) => {}
                 Ok(false) => continue,
                 Err(()) => {
@@ -1502,7 +1510,7 @@ impl Account {
         };
         let mut valid = false;
         for raw in rows {
-            match registered_market(cx, raw.get(), true) {
+            match registered_market(cx, &self.excluded_perps, raw.get(), true) {
                 Ok(true) => {}
                 Ok(false) => continue,
                 Err(()) => {
@@ -1637,7 +1645,7 @@ impl Account {
         };
         let mut valid = false;
         for raw in rows {
-            if registered_market(cx, raw.get(), false) != Ok(true) {
+            if registered_market(cx, &self.excluded_perps, raw.get(), false) != Ok(true) {
                 continue;
             }
             if let Ok(row) = serde_json::from_str::<FillRow<'_>>(raw.get()) {
@@ -1989,7 +1997,12 @@ fn decimal8(mantissa: i64) -> String {
     format!("{sign}{integer}.{}", fraction.trim_end_matches('0'))
 }
 
-fn registered_market(cx: &Cx<'_, Pending>, raw: &str, position: bool) -> Result<bool, ()> {
+fn registered_market(
+    cx: &Cx<'_, Pending>,
+    excluded_perps: &HashSet<String>,
+    raw: &str,
+    position: bool,
+) -> Result<bool, ()> {
     #[derive(Deserialize)]
     struct Identity<'a> {
         #[serde(borrow)]
@@ -2006,8 +2019,11 @@ fn registered_market(cx: &Cx<'_, Pending>, raw: &str, position: bool) -> Result<
     if cx.store.market(identity.market).is_some() {
         return Ok(true);
     }
+    if excluded_perps.contains(identity.market) {
+        return Ok(false);
+    }
     // Options/spot are intentionally outside this perpetual adapter. An unknown
-    // perpetual may be a skipped catalogue row, so it cannot prove absence of
+    // perpetual may be a malformed catalogue row, so it cannot prove absence of
     // working orders or positions in an authoritative account snapshot.
     if identity.market.ends_with("-PERP") {
         if position

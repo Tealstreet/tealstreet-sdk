@@ -1095,3 +1095,49 @@ fn unmapped_perpetual_private_snapshots_cannot_erase_confirmed_exposure() {
     assert!(h.e.store().orders().is_empty());
     assert!(h.e.store().positions().is_empty());
 }
+
+#[test]
+fn exposure_on_a_deliberately_excluded_perpetual_does_not_block_startup_or_streams() {
+    let (mut h, socket) = seed();
+    let old_position = POSITION.replace("BTC-USD-PERP", "OLD-USD-PERP");
+    let old_order = ORDER
+        .replace("BTC-USD-PERP", "OLD-USD-PERP")
+        .replace(r#""id":"123""#, r#""id":"old-1""#);
+    h.reply("/auth/", r#"{"jwt_token":"jwt-first"}"#);
+    h.reply(
+        "/account/margin",
+        r#"{"configs":[{"market":"BTC-USD-PERP","leverage":20}]}"#,
+    );
+    h.reply(
+        "/positions",
+        &format!("{{\"results\":[{old_position},{POSITION}]}}"),
+    );
+    h.reply(
+        "/account",
+        r#"{"total_collateral":"1000","free_collateral":"800","initial_margin_requirement":"200"}"#,
+    );
+    h.reply("/orders", &format!("{{\"results\":[{old_order},{ORDER}]}}"));
+    let loaded = h.e.store().loaded();
+    assert!(loaded.positions && loaded.orders && loaded.balance);
+    assert_eq!(h.e.store().positions().len(), 1);
+    assert_eq!(h.e.store().positions()[0].symbol, "BTC-USD-PERP");
+    assert_eq!(h.e.store().orders().len(), 1);
+    assert_eq!(h.e.store().orders()[0].symbol, "BTC-USD-PERP");
+    authenticate(&mut h, socket);
+    let pending = h.actions.len();
+    for (channel, row) in [("positions", &old_position), ("orders.ALL", &old_order)] {
+        message(
+            &mut h,
+            socket,
+            &format!(
+                r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"{channel}","data":{row}}}}}"#
+            ),
+        );
+    }
+    assert!(!h.actions[pending..].iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("unmappable market")
+    )));
+    assert_eq!(h.e.store().positions().len(), 1);
+    assert_eq!(h.e.store().orders().len(), 1);
+}

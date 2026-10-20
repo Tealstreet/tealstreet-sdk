@@ -5,12 +5,13 @@ use safe_cex_engine::model::{Candle, Limits, Market, Min, MinMax, Precision, Tic
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub enum Request {
     Markets {
         rows: Vec<Market>,
         bands: HashMap<String, f64>,
+        excluded: HashSet<String>,
         invalid: bool,
     },
     Tickers {
@@ -141,6 +142,7 @@ impl Paradex {
                 Request::Markets {
                     rows: vec![],
                     bands: HashMap::new(),
+                    excluded: HashSet::new(),
                     invalid: false,
                 },
             )
@@ -633,6 +635,7 @@ impl Paradex {
             Request::Markets {
                 rows,
                 bands,
+                excluded,
                 invalid: _,
             } => {
                 let Ok(identity) = serde_json::from_str::<InstrumentIdentity<'_>>(item) else {
@@ -644,11 +647,14 @@ impl Paradex {
                     || identity.market_kind.to_ascii_uppercase().contains("OPTION")
                     || identity.market.ends_with("-C")
                     || identity.market.ends_with("-P");
-                if identity.market.is_empty()
-                    || option
+                if identity.market.is_empty() {
+                    return;
+                }
+                if option
                     || (!identity.status.is_empty() && identity.status != "ACTIVE")
                     || !(kind.is_empty() || kind == "PERP" || identity.market.ends_with("-PERP"))
                 {
+                    excluded.insert(identity.market.to_string());
                     return;
                 }
                 let Ok(m) = serde_json::from_str::<Instrument<'_>>(item) else {
@@ -772,10 +778,12 @@ impl Paradex {
             Request::Markets {
                 rows,
                 bands,
+                excluded,
                 invalid: false,
             } => {
                 self.public.seed_retry.succeeded(cx, &true);
                 self.public.price_bands = bands;
+                self.account.excluded_perps = excluded;
                 cx.store.set_markets(rows);
                 self.public
                     .books
