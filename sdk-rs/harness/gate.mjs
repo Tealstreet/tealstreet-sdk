@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
-import { sameCommandResults, stable } from './tape.mjs';
+import { sameCommandResults } from './tape.mjs';
 import { venueOf } from './venues.mjs';
 import { COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
@@ -99,9 +99,7 @@ const compare = (label, a, b) => {
   const ta = keyed(a);
   const tb = keyed(b);
   for (const symbol of new Set([...ta.keys(), ...tb.keys()])) {
-    const left = JSON.stringify(stable(ta.get(symbol)));
-    const right = JSON.stringify(stable(tb.get(symbol)));
-    if (left !== right) differences.push(`${label} ${symbol}: ts=${left} rust=${right}`);
+    differences.push(...valueDifferences(ta.get(symbol), tb.get(symbol), `${label} ${symbol}`));
   }
 };
 
@@ -283,9 +281,7 @@ for (let run = 0; run < correctnessRuns; run++) {
   compare('market', ts.markets, rust.markets);
   compare('ticker', ts.tickers, rust.tickers);
   for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
-    if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
-      differences.push(`book ${symbol} differs`);
-    }
+    differences.push(...valueDifferences(ts.books[symbol], rust.books[symbol], `book ${symbol}`));
   }
 }
 

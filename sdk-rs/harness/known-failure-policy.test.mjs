@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { assessGateReport, diagnosticKey, validateKnownFailures } from './known-failure-policy.mjs';
+import { valueDifferences } from './snapshot-compare.mjs';
 
 const metric = (mode = 'correctness', amount = 10) => ({
   baselineKind: 'idle-loaded', measuredMode: mode,
@@ -31,6 +32,17 @@ test('known failures are exact venue, tape hash and field declarations', () => {
   const assessment = assessGateReport(passing, manifest());
   assert.deepEqual(assessment.errors, []);
   assert.equal(assessment.resolved.length, 1);
+});
+
+test('a declared final ticker field cannot absorb a second final-only field divergence', () => {
+  const value = report();
+  const expected = { symbol: 'BTC', fundingRate: 0.01, quoteVolume: 100 };
+  value.failures = valueDifferences(expected, { ...expected, fundingRate: 0.02 }, 'ticker BTC');
+  const declared = manifest();
+  declared.failures[0].diagnostics = [{ key: diagnosticKey(value.failures[0]), divergence: 'Only the existing funding-rate difference is declared.' }];
+  assert.deepEqual(assessGateReport(value, declared).errors, []);
+  value.failures = valueDifferences(expected, { ...expected, fundingRate: 0.02, quoteVolume: 0 }, 'ticker BTC');
+  assert.match(assessGateReport(value, declared).errors.join('\n'), /unexpected ticker BTC.quoteVolume/);
 });
 
 test('manifest rejects wildcards, unnamed exceptions, duplicates and malformed data', () => {

@@ -123,3 +123,8 @@ never retry an unchanged failed performance measurement to obtain a pass.
 - Repository test verification on stable post-merge source: all 27 tasks PASS;
   safe-cex unit and CI suites each pass 7,748 tests in 523 files. Source logs:
   `/tmp/gate-honesty-final-{typecheck,lint,repo-tests}.log`.
+- Round 1 follow-up tightened final diagnostic keys: whole market/ticker rows
+  and books now produce leaf paths, so one declared field cannot hide a second
+  final-only error introduced after checkpoints. CLI/policy controls 21/21 PASS
+  (`/tmp/gate-honesty-leaf-review-tests.log`). Findings and corrections posted
+  on PR #1346; phase and PR reviews are distinct evidence.

@@ -146,6 +146,7 @@ const gate = (venue, isPrivate = false, defect) => {
       if (rust && defect === 'comparisons') {
         output.markets[0].precision.price = 0.2;
         output.tickers[0].last = 101;
+        output.tickers[0].ask = 102;
         output.books.BTCUSDT.bids[0][1] = 2;
         output.commands[0].ok.ids.reverse();
       }
@@ -220,7 +221,7 @@ test('gate CLI compares populated outputs and calls every venue oracle in public
 test('gate CLI rejects independent market, ticker, book and ordered command mismatches', () => {
   const result = gate('bybitinverse', false, 'comparisons');
   assert.equal(result.status, 1, result.stderr);
-  for (const difference of ['market BTCUSDT:', 'ticker BTCUSDT:', 'book BTCUSDT differs', 'command results:'])
+  for (const difference of ['market BTCUSDT.precision.price:', 'ticker BTCUSDT.last:', 'ticker BTCUSDT.ask:', 'book BTCUSDT.bids[0][1]:', 'command results:'])
     assert.ok(result.stdout.includes(difference), `${difference}\n${result.stdout}`);
   assert.doesNotMatch(result.stderr, /ReferenceError/);
 });
