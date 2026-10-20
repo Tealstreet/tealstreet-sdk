@@ -524,13 +524,17 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
 
 ### Kraken
 Futures matches TS on nearly every input; no high regression.
-- Medium: isolated positions flip to cross when a WS row omits
+- ~~Medium: isolated positions flip to cross when a WS row omits
   `maxFixedLeverage` (`kraken/src/account.rs:1056,1132`; confirm live);
   `more_candles: true` fails the whole candle fetch, empty chart (`lib.rs:727`);
   spot `EGeneral:Permission denied` on an order deactivates the account
-  (`spot/account.rs:513`).
-- Decided: market entry with attached TP/SL is rejected (Rust behaviour);
-  the error must say the TP/SL legs are unsupported on market entry.
+  (`spot/account.rs:513`).~~ Fixed: a stream row without the field keeps the
+  REST-proven margin mode and leverage (as TS's cached preference does); a capped
+  candle page (Kraken serves 2000 bars from `from`) pages forward to `to`, bounded; permission denied on a spot write fails only that
+  command, while on a read it still deactivates.
+- ~~Decided: market entry with attached TP/SL is rejected (Rust behaviour);
+  the error must say the TP/SL legs are unsupported on market entry.~~ Done: the
+  rejection names the unsupported take-profit/stop-loss legs before any write.
 - Low: income over 500 rows errors (TS partial); one bad row rejects
   catalogue/tickers/open orders and blocks private start (startup lane);
   missing funding field set to 0; raw error text; spot 3m candles.
