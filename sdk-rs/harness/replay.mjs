@@ -195,9 +195,9 @@ async function runRust() {
   const transport = {
     now: () => Date.now(),
     webSocketHeaders: true,
-    connect: (url, { headers, onOpen, onMessage, onClose }) => {
+    connect: (url, { headers, onOpen, onMessage, onBinary, onClose }) => {
       venue.validateSocket?.(url, headers);
-      const socket = tape.connect(url, onOpen, onMessage, onClose);
+      const socket = tape.connect(url, onOpen, (data) => typeof data === 'string' ? onMessage(data) : onBinary?.(data), onClose);
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
     },
     request: async ({ method, url, body: requestBody, headers, signal }) => {
@@ -519,7 +519,8 @@ async function runTs() {
     const requestBody =
       init.body ??
       (request && !['GET', 'HEAD'].includes(method.toUpperCase()) ? await request.clone().text() : undefined);
-    const { status, body } = tape.respond(method, request?.url ?? String(input), requestBody);
+    const headers = Object.fromEntries(new Headers(init.headers ?? request?.headers).entries());
+    const { status, body } = tape.respond(method, request?.url ?? String(input), requestBody, headers);
     return new Response([204, 205, 304].includes(status) ? null : body, { status });
   };
   // Header-capable Node sockets resolve `ws` directly instead of the global.
@@ -576,6 +577,7 @@ async function runTs() {
     return response;
   };
   const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
+  await venue.loadTs?.({ isPrivate });
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());

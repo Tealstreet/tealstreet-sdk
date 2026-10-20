@@ -84,6 +84,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   kucoin: 'kucoin',
   polymarket: 'polymarket',
   hyperliquid: 'hyperliquid',
+  paradex: 'paradex',
   kraken: 'kraken',
   lighter: 'lighter',
   okx: 'okx',
@@ -126,6 +127,10 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     isValid: (id) => /^[1-9]\d{0,9}$/.test(id) && Number(id) <= 0xffff_ffff,
   },
   hyperliquid: hyperliquidClientOrderIdRule,
+  paradex: patternClientOrderIdRule('Paradex', /^.{1,64}$/, {
+    mint: () => `ts_${uuid()}`,
+    isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
+  }),
   blofin: patternClientOrderIdRule('BloFin', /^[A-Za-z0-9]{1,32}$/, {
     mint: () => `${BLOFIN_BROKER_ID}${uuid()}`.slice(0, 32),
   }),
@@ -235,7 +240,7 @@ export class RustEngineExchange extends BaseExchange {
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
-    if (exchangeName === 'hyperliquid') {
+    if (exchangeName === 'hyperliquid' || exchangeName === 'paradex') {
       this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
         this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
     }
@@ -267,6 +272,12 @@ export class RustEngineExchange extends BaseExchange {
 
   get isPublicDataOnly(): boolean {
     if (this.name === 'polymarket') return this.options.publicDataOnly === true || !this.options.key;
+    if (this.name === 'paradex') {
+      return (
+        this.options.publicDataOnly === true ||
+        !Boolean(this.options.key && this.options.paradexAddress && this.options.subkeyAddress)
+      );
+    }
     if (this.name === 'lighter') {
       return this.options.publicDataOnly === true || !this.options.secret || !this.options.apiKeyIndex;
     }
@@ -302,6 +313,14 @@ export class RustEngineExchange extends BaseExchange {
 
   private createHost = async () => {
     assertEngineAccountRouting(this.options, this.name);
+    if (this.name === 'paradex') {
+      if (this.options.payloadSigner || this.options.remoteSigner) {
+        throw new Error('Rust Paradex remote signing is unsupported');
+      }
+      if (this.options.publicDataOnly === false && this.isPublicDataOnly) {
+        throw new Error('Rust Paradex private accounts require a local subkey, Paradex address and subkey address');
+      }
+    }
     if (this.name === 'asterdex' && !this.options.publicDataOnly) {
       const auth = resolveAsterDEXV3AuthContext(this.options);
       if (
@@ -317,7 +336,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
     if (
-      !['hyperliquid', 'lighter', 'polymarket'].includes(this.name) &&
+      !['hyperliquid', 'paradex', 'lighter', 'polymarket'].includes(this.name) &&
       !this.isPublicDataOnly &&
       (!this.options.key ||
         !(this.name === 'asterdex' ? resolveAsterDEXV3AuthContext(this.options).signerPrivateKey : this.options.secret))
@@ -373,6 +392,8 @@ export class RustEngineExchange extends BaseExchange {
       secret,
       passphrase,
       omniKeySeed,
+      paradexAddress,
+      subkeyAddress,
       testnet,
       applicationId,
       vault,
@@ -407,6 +428,7 @@ export class RustEngineExchange extends BaseExchange {
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
         ...(this.name === 'polymarket' ? { polymarket: this.options.polymarket } : {}),
+        ...(this.name === 'paradex' ? { paradexAddress, subkeyAddress } : {}),
         ...(this.name === 'asterdex'
           ? {
               asterdex: {
@@ -742,7 +764,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['apexomni', 'blofin', 'bitrue', 'hyperliquid', 'lighter', 'kraken', 'woo'].includes(this.name)
+      ...(['apexomni', 'blofin', 'bitrue', 'hyperliquid', 'paradex', 'lighter', 'kraken', 'woo'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });
@@ -751,7 +773,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (['asterdex', 'blofin', 'bitrue', 'polymarket'].includes(this.name) || orderlyNames.has(this.name))
+      if (['asterdex', 'blofin', 'bitrue', 'paradex', 'polymarket'].includes(this.name) || orderlyNames.has(this.name))
         leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);

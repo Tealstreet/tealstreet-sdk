@@ -264,3 +264,17 @@ keeps100);150level default/explicitlimit actualWasm regression PASS. History7,
 trading26 and boundary15 tests PASS; selectedWasm848,107bytes below1,258,291.
 Root44typecheck/28lint, wasmclippy and workspace native tests PASS. Remaining
 combined gates and PR review will be recorded at their actual head.
+
+Public gate at5096e3c13e PASS3runs: TS/RustCPU48.8/31.6ms,
+steady23.2/9.9ms, retained21.3/0.9MB. Private33records/12WS/8commandsPASS,
+CPU87.0/49.8ms informational. Workspace1,748tests androot27testtasks PASS.
+
+### Paradex landing integration
+
+Landing advanced to1f9e9a5206 while combined build ran. Integrated its explicit
+binary transport, tape hooks and crypto cleanup without touching Polymarket's
+text feeds. All318harness tests and44incomingSDKwrapper testsPASS. Independent
+manifest/host/lockfile auditPASS: allincomingfeatures/versions retained, only
+Polymarketcrate/dep additions. Incoming host parsers are feature gated; expose
+account/book forPolymarket aswell asAster, preservingothercommandgates. Native
+feature tests and fullcombinedbuild/gates running beforePR.

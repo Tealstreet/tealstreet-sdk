@@ -1,0 +1,135 @@
+{
+  "oracle": "Installed Starknet JS shortString/hash and ethers TypedDataEncoder.hash/Wallet.signTypedData; synthetic keys only. Reproduce with sign-formulas.cjs.",
+  "shortStrings": [
+    {
+      "input": "",
+      "output": "0x0"
+    },
+    {
+      "input": "Paradex",
+      "output": "0x50617261646578"
+    },
+    {
+      "input": "StarkNet Message",
+      "output": "0x537461726b4e6574204d657373616765"
+    },
+    {
+      "input": "STARKNET_CONTRACT_ADDRESS",
+      "output": "0x535441524b4e45545f434f4e54524143545f41444452455353"
+    },
+    {
+      "input": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "output": "0x41414141414141414141414141414141414141414141414141414141414141"
+    }
+  ],
+  "selectors": [
+    {
+      "input": "initialize",
+      "output": "0x79dc0da7c54b95f10aa182ad0a46400db63156920adb65eca2654c0945a463"
+    },
+    {
+      "input": "StarkNetDomain(name:felt,chainId:felt,version:felt)",
+      "output": "0x98d1932052fc5137543de5ed85b7a88555a4cd1ff5d5bfedb62ed9b9a1f0db"
+    },
+    {
+      "input": "Request(method:felt,path:felt,body:felt,timestamp:felt,expiration:felt)",
+      "output": "0x186cdef6b179923c411c13c11b8a825f12bf34203bdda0a984da9d6f2313c2"
+    },
+    {
+      "input": "Order(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt)",
+      "output": "0xa56d5225b97b257c15ae2cb1cc0ea605381a886cd75463db45fd2ef9fbc255"
+    },
+    {
+      "input": "ModifyOrder(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt,id:felt)",
+      "output": "0x201789bb587c17b251fd38daf43b14807010ea721c2929a8c2fc33bf15c2e2c"
+    }
+  ],
+  "hashes": [
+    {
+      "input": [],
+      "output": "0x49ee3eba8c1600700ee1b87eb599f16716b0b1022947733551fde4050ca6804"
+    },
+    {
+      "input": [
+        "0"
+      ],
+      "output": "0x137c95c76862129847d0f5e3618c7a4c3822ee344f4aa80bcb897cb97d3e16"
+    },
+    {
+      "input": [
+        "1",
+        "2",
+        "3"
+      ],
+      "output": "0xf9d95fbf356fbeda26538c92f7040abe51bf142350f73c9ee5ba7c660bae71"
+    },
+    {
+      "input": [
+        "0x800000000000011000000000000000000000000000000000000000000000000"
+      ],
+      "output": "0x35d35c95ae5b49b5735454744e40d71843327a97a095ee0238bae782dd6157b"
+    }
+  ],
+  "addresses": [
+    {
+      "public": "0x1",
+      "proxy": "0x456",
+      "calldata": [
+        "0x123",
+        "0x79dc0da7c54b95f10aa182ad0a46400db63156920adb65eca2654c0945a463",
+        "0x2",
+        "0x1",
+        "0x0"
+      ],
+      "output": "0x1c831c0c42cf3b6f2a7aa434487b5c83b00ff33d1483a82cbe8a814c430ceb"
+    },
+    {
+      "public": "0x12345678901234567890",
+      "proxy": "0x789",
+      "calldata": [],
+      "output": "0x5138ea3c8ce25fe941cb278fababdbdfdf891592873d92f3b107380884d7733"
+    },
+    {
+      "public": "0x7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "proxy": "0x123",
+      "calldata": [
+        "0",
+        "1",
+        "2"
+      ],
+      "output": "0x1b3dade2d28000387d65c3f863e0954c7c936b94da90de250ad47465e1452b3"
+    }
+  ],
+  "ethereum": [
+    {
+      "chain": "0",
+      "key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "digest": "0xa25a4bd134ce3f7b0fd7740c85fa4851c8ed92a37df8981e4c8a8c158ef75377",
+      "seed": "0x7f41342cc25bac71af82aeb57498dcf92535707c7c709e27d4b5745a7dd0cd1608d01228f6d34092139df5a837b73d7ebdebaef418ec6d0845f7c48cace84b8f1b"
+    },
+    {
+      "chain": "1",
+      "key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "digest": "0xb1e196638d6734e2fcec9d9e3aa0e54468ba0593fc1d602e217e1dad02ba2d90",
+      "seed": "0x32f840abbaf2ebf8b9a62c81643f45501fedc36048bd296efd73bd274e5e7e162ef4bc57c0c23f41e263240cf23f1620b32caf6d9817e9d893d4e1387ef32e801b"
+    },
+    {
+      "chain": "11155111",
+      "key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "digest": "0xaf7a452df1d98575210fe5bd0c759c73bd5eb1d79671856b875569a2c2c1601f",
+      "seed": "0xa4c0280bd61047e81410212664d31bc4ee88d05e2060241890fad6c3bd3d69fc328a7cfd9baf493439845f7d30ab7980e5332bf5a0e9f4726f8136d24a0eebd71b"
+    },
+    {
+      "chain": "0x01",
+      "key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "digest": "0xb1e196638d6734e2fcec9d9e3aa0e54468ba0593fc1d602e217e1dad02ba2d90",
+      "seed": "0x32f840abbaf2ebf8b9a62c81643f45501fedc36048bd296efd73bd274e5e7e162ef4bc57c0c23f41e263240cf23f1620b32caf6d9817e9d893d4e1387ef32e801b"
+    },
+    {
+      "chain": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "key": "1111111111111111111111111111111111111111111111111111111111111111",
+      "digest": "0xddb4830eb7aed05bf7b257686d2949f230ab3544e903fbbcfac2cfc9100bec5e",
+      "seed": "0x8cbdac6270e6a3a9861b7b63bfcdb074e8b94f2a882c587bdfba27f5343202fa369c4913734cfb58badd2c385aad2daafdc6d413dbe74cf4d6ebc372ecaef0491c"
+    }
+  ]
+}
