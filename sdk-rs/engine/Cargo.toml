@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [features]
+order-locks = []
 # Prediction venues opt in; other standalone builds omit metadata storage and frames.
 prediction = []
 # Polling venues and native hosts opt into the polling configuration decoder.

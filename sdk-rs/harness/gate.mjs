@@ -12,6 +12,7 @@ import { sameCommandResults, expectedCheckpointPlan } from './tape.mjs';
 import { venueOf } from './venues.mjs';
 import { COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
+import { BITRUE_TS_FIXES } from './known-ts-fixes-bitrue.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 import { requestKey, callerIdsOf } from './requests.mjs';
 import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
@@ -199,6 +200,10 @@ const rawAudited = { ts: structuredClone(ts), rust: structuredClone(rust) };
 // Binance/OKX also bypass cached client-ID hits with secondary credentials:
 // that cache may contain another account's orders. TS and Rust both query
 // the primary account; native tests retain PM's canonical client-ID identity.
+// Audit corrections are exercised by native interleaving regressions, never
+// rewritten into the replay result: Kraken Spot verifies raw-decimal CRC32;
+// WOO validates prevTs and clears invalid books during recovery; Backpack
+// preserves positions after an unqualified 404 rather than committing [].
 const { KNOWN_TS_FIXES, applyTsCorrections } = createTsFixes(values, tapeRecords);
 for (let run = 0; run < correctnessRuns; run++) {
   const ts = results.ts[run];
@@ -333,6 +338,8 @@ if (venue.family === 'orderly')
   console.log(
     `(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`,
   );
+if (values.venue === 'bitrue' && isPrivate)
+  console.log(`(documented Bitrue corrections: ${BITRUE_TS_FIXES.length}; exact fixture and TS baseline checked)`);
 if (values.venue.startsWith('okx'))
   console.log(
     `(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`,
