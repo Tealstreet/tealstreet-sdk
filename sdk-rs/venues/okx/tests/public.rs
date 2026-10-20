@@ -531,3 +531,56 @@ fn price_channels_follow_last_duplicate_symbol_in_reordered_ticker_seed() {
     assert_eq!(e.store().ticker("ETHUSDT").unwrap().mark, 88.0);
     assert!(e.store().ticker("SOLUSDT").is_none());
 }
+
+#[test]
+fn null_ticker_quote_seeds_zero_like_a_blank() {
+    let mut e = Engine::new(Okx::new(Options::default()));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(MARKET), 1.0);
+    let request = actions(&mut e).remove(0);
+    reply(
+        &mut e,
+        &request,
+        &envelope(
+            r#"{"instId":"BTC-USDT-SWAP","last":null,"open24h":null,"bidPx":"39999.9","askPx":null,"volCcy24h":null,"vol24h":"5"}"#,
+        ),
+        2.0,
+    );
+    assert!(e.store().loaded().tickers);
+    let t = e.store().ticker("BTCUSDT").unwrap();
+    assert_eq!(
+        (t.bid, t.ask, t.last, t.quote_volume),
+        (39999.9, 0.0, 0.0, 5.0)
+    );
+}
+
+#[test]
+fn all_undecodable_ticker_rows_retry_startup() {
+    let mut e = Engine::new(Okx::new(Options::default()));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(MARKET), 1.0);
+    let request = actions(&mut e).remove(0);
+    reply(
+        &mut e,
+        &request,
+        &envelope(r#"{"instId":"BTC-USDT-SWAP","last":40000}"#),
+        2.0,
+    );
+    assert!(!e.store().loaded().tickers);
+    let out = actions(&mut e);
+    assert!(out.iter().all(|a| !matches!(a, Action::WsConnect { .. })));
+    let timer = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1_002.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("startup retry timer");
+    e.handle(1_002.0, Event::TimerFired { timer });
+    let request = actions(&mut e).remove(0);
+    assert!(is_get(&request, "/api/v5/market/tickers?instType=SWAP"));
+    reply(&mut e, &request, &envelope(TICKER), 1_003.0);
+    assert!(e.store().loaded().tickers);
+}

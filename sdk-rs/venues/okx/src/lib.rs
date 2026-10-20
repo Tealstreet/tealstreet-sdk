@@ -876,7 +876,14 @@ impl Venue for Okx {
                         maker_fee: None,
                     });
                 }
-                Err(_) => *skipped += 1,
+                Err(_) => {
+                    *skipped += 1;
+                    if let Ok(row) = serde_json::from_str::<wire::InstrumentId<'_>>(item)
+                        && !row.inst_id.is_empty()
+                    {
+                        self.skipped_instruments.insert(row.inst_id.into());
+                    }
+                }
             },
             Pending::Tickers {
                 kind,
@@ -1002,10 +1009,17 @@ impl Venue for Okx {
                     self.load_tickers(cx, next, rows, skipped);
                     return;
                 }
+                if rows.is_empty() && skipped > 0 {
+                    self.retry_startup(
+                        cx,
+                        &format!("OKX tickers had no usable rows ({skipped} skipped)"),
+                    );
+                    return;
+                }
                 if skipped > 0 {
                     cx.log(
                         LogLevel::Warning,
-                        format!("OKX seeded {skipped} malformed ticker rows as zero"),
+                        format!("OKX had {skipped} malformed ticker rows (seeded zero or skipped)"),
                     );
                 }
                 self.startup_failures = 0;
