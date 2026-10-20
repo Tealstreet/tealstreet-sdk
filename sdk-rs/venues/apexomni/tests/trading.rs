@@ -153,6 +153,41 @@ fn batch_caller_id_preflight_rejects_before_any_first_write() {
 }
 
 #[test]
+fn bybit_only_controls_reject_single_and_whole_batch_without_io_or_state_changes() {
+    for extra in [
+        serde_json::json!({"bybitBbo":{"sideType":"Counterparty","level":1}}),
+        serde_json::json!({"bybitSlippageToleranceTicks":0}),
+    ] {
+        for batch in [false, true] {
+            let mut e = ready();
+            let mut orders = vec![];
+            if batch {
+                orders.push(order(
+                    serde_json::json!({"clientOrderId":"first-must-not-place"}),
+                ));
+            }
+            orders.push(order(extra.clone()));
+            let actions = place(&mut e, orders);
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_) | Action::WsSend { .. }))
+            );
+            assert!(actions.iter().any(|action| matches!(action,
+                Action::Notice(Notice::CommandDone { command: 42, result: Err(message) })
+                    if message.contains("Bybit BBO and TickSize controls are not supported by ApeX Omni")
+            )));
+            assert!(e.store().orders().is_empty());
+            // A rejected preflight must leave the sequenced trading queue usable.
+            assert_eq!(
+                http(place(&mut e, vec![order(serde_json::json!({}))])).len(),
+                1
+            );
+        }
+    }
+}
+
+#[test]
 fn split_bracket_and_unsupported_shapes_fail_before_writes() {
     for extra in [
         serde_json::json!({"amount":1001,"takeProfit":65000}),

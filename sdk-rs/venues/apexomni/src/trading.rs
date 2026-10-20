@@ -119,6 +119,9 @@ fn lots(order: &PlaceOrderOpts, market: &Market) -> Result<Vec<f64>, String> {
 fn validate(orders: &[PlaceOrderOpts], cx: &Cx<'_, Pending>) -> Result<(), String> {
     let mut ids = HashSet::new();
     for order in orders {
+        if order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some() {
+            return Err("Bybit BBO and TickSize controls are not supported by ApeX Omni".into());
+        }
         let market = cx
             .store
             .market(&order.symbol)
@@ -217,6 +220,8 @@ fn replacement(
             .or(parent.extra.as_ref().and_then(|e| e.sl_trigger_type)),
         client_order_id: None,
         close: parent.close,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
     };
     if let Some(price) = price {
         if target.parent_id.is_some() || id != base_id {

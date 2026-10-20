@@ -192,3 +192,15 @@ generated ID and preserves both virtual siblings when editing one leg.
 - Landing advanced to `922b5fdc89` (Bybit variants), which includes the
   configuration-test cold-import repair. Commit this checkpoint, integrate
   landing, then repeat affected acceptance gates on the merged state.
+
+### Bybit variants integration
+
+- Landing `922b5fdc89` integrated at `dd154bcfda`. Independent reviews verify
+  all landing engine/host, Bybit variants, wrapper and gate contracts remain;
+  ApeX's `FetchAccount`, auth, strict protocol oracle and paired TS fixes remain.
+- Adapted replacement orders to the engine's new Bybit-only fields. ApeX
+  rejects either field before any batch I/O or mutation. Focused trading
+  tests: 12 passing; independent code-correctness review passes, including
+  zero tick values, mixed-batch atomicity and queue recovery after rejection.
+- Post-merge harness: 242/242 passing; root typecheck: 44/44 tasks; lint:
+  28/28 tasks. Native, combined WASM, root tests and replay gates continue.
