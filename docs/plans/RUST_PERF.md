@@ -585,3 +585,22 @@ gross WS/frame/HTTP method CPU, actual call counts and overall process/main-thre
 mix. Parser source and ticker lookup are unchanged on Crypto/WEEX. Investigate
 queue packing, double UTF8 validation, singleton delivery and startup/frame cost
 only where data supports a real hot path; fix/review/test before new comparisons.
+
+All54 planned method profiles completed without reruns. Gross websocket methods
+generally improve, but reduced per-call observer cost prevents exact attribution.
+Frame writing is consistently small. Identical WEEX batch code varies73.238–
+189.275ms, and MEXC batch308.634–361.966 with constant2596 engine calls.
+Large host/harness/JIT residuals remain; do not blame parser/frame code or dismiss
+valid initial regressions without further evidence.
+
+Next phase plan: optional Node inspector sampling via `--cpu-profile PATH`,
+using a local inspector session (no debug network port) and1000us interval.
+Start after baseline and before CPU start; capture CPU/wall cutoffs before
+awaiting sampler stop; finish sampling before final GC and WASM memory read.
+Default uninstrumented gates keep their existing execution order. Focused tests
+prove lifecycle/order and default-off behavior; independent agent reviews both
+plan and implementation. Then collect one fixed unsupplemented batch sample on
+WEEX and MEXC without the per-method observer. Classify sampled WASM, host,
+harness, GC and idle stacks; sampled wall distribution is not exact thread CPU.
+Only evidence-backed runtime/harness optimization follows, with review/tests and
+a stable commit before new performance comparisons.
