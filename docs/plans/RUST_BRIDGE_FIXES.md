@@ -790,3 +790,19 @@ Extend the existing FetchAccount JSON decoder universally for standalone
 identity-enabled crates, rather than relying on combined Aster/Polymarket
 features. Verify each product's route, read-key signatures, nullable/parent
 semantics, large IDs, failures before I/O and once-only completion/error.
+
+## Phase 4d third identity-query batch plan
+
+Crypto.com POST private/get-accounts returns result.this_account.uuid, with
+affiliate null; use its primary private-POST signing and existing safe read
+signature retry policy. GRVT POST /lite/v1/account_summary validates the chosen
+trading subaccount, then returns the authenticated session's main account ID,
+not trading_account_id. Reuse login deferral/headers and preserve generation
+fences, including legitimate header rotation on the current response. Paradex
+GET /account returns account_number through the existing JWT queue, with
+affiliate null; pending authentication failures must settle the rare read once.
+Dedicated identity continuations leave reconciliation flags and account Store
+domains unchanged. Verify routes/signing, required/missing/large IDs,
+public-only/missing credentials and malformed/error results. GRVT tests separate
+main/trading IDs and stale-session responses; Paradex tests expired JWT queue
+and refresh. Native batches precede consolidated SDK/standalone integration.
