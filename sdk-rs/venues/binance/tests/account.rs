@@ -1046,8 +1046,9 @@ fn an_open_order_of_unsupported_type_keeps_its_stored_copy_until_a_valid_snapsho
         )
     };
     let refresh = |h: &mut Harness, orders: &[String], algos: &[String]| {
-        let private = h.socket("/private/ws").unwrap();
-        h.event(Event::WsOpened { socket: private });
+        // Any private order event schedules the debounced REST order snapshot.
+        let event = r#"{"e":"ORDER_TRADE_UPDATE","E":1568879465651,"T":1568879465650,"o":{"s":"BTCUSDT","c":"poke","S":"BUY","o":"LIMIT","f":"GTC","q":"0.001","p":"1000","ap":"0","sp":"0","x":"NEW","X":"NEW","i":9000,"l":"0","z":"0","L":"0","T":1568879465650,"t":0,"b":"0","a":"0","m":false,"R":false,"wt":"CONTRACT_PRICE","ot":"LIMIT","ps":"BOTH","cp":false,"rp":"0"}}"#;
+        h.message("/private/ws", event);
         h.advance(10_000.0);
         h.respond(
             "/fapi/v1/openOrders",
