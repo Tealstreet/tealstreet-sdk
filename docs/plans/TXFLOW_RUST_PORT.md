@@ -430,3 +430,13 @@ safe-cex typecheck pass. Wrapper guard proofs pass 9/9. Refresh the public tape
 from a real recording because metadata now requests delisted identities; do not
 rewrite the old recorded request. The generic TS replay snapshot boundary is
 also being corrected before rerunning the Phemex CI regression.
+
+Shared replay-boundary fix independently accepted: both implementations now
+synchronously detach every comparison/protocol result before invoking memory
+measurement. CPU includes reconstruction/copy work symmetrically and the copies
+remain retained during memory sampling. Three deterministic regressions mutate
+balance 1280→1300 and nested/typed-array state synchronously and asynchronously
+during measurement; captured results remain unchanged. Complete Node 22 harness
+passes 387/387. No fixture padding, Phemex normalization or gate relaxation.
+The exact CI log cannot distinguish a pre-boundary REST overwrite from the
+confirmed post-boundary exposure; rebuilt Phemex private replay is still required.
