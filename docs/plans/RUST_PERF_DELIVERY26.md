@@ -495,3 +495,34 @@ nine aggregate bindings have equal browser/Node WASM, 11,732,506 bytes, SHA-256
 `e09563111217316847f13819b019b5a12089ce110530d1e020a64f07c00adc3d`.
 Independent original-control audit passes. New release, actual-WASM validation,
 KuCoin validity check, all final performance gates and PR landing remain pending.
+
+## Parity release checkpoint and failed validity check
+
+Fresh release and all 26 isolated feature Clippy checks pass; all 435 source
+inputs, 234 bindings, 243 archived files, tools and command logs pass independent
+physical audit. SDK actual WASM passes 426/13 files, host 172, parity/lifecycle/
+product/reference 39, and full harness 656. An SDK observer initially missed the
+new byte entry (425/426 pass); instrument that actual entry while keeping every
+output, crossing and socket-error assertion. Independent review passes. Final
+repository typecheck/lint pass 44/28 tasks; 27 repository test tasks passed.
+
+Retain the initial cap failure. Three independently reviewed functional growth
+exceptions use actual plus 3%, rounded up to KiB: OKX 854,460 bytes/cap 880,640;
+Phemex 804,542/cap 829,440; GRVT 1,029,587/cap 1,060,864. Incoming changes expand
+primary/read identity and atomic financial/lookup handling, Phemex income ledger
+and history, and GRVT authoritative cancellation/session/heartbeat validation.
+No precise byte attribution or performance win is inferred. Other 23 caps stay
+fixed; all 52 final size checks pass.
+
+The single declared KuCoin validity trial failed: control gate passes, candidate
+retained total is -490,352 bytes (heap 19,674,888 to 17,925,040, buffers +276,456,
+WASM 983,040). Explicit fixture ownership raises both heaps while leaving the
+roughly 1.75 MB release intact; it did NOT resolve the actual problem. Preserve
+all four raw replay outputs, scripts/logs/counters, failed SDK/typecheck/caps and
+passing source/release evidence in `RUST_PERF_DELIVERY26_PARITY_CHECKPOINT.json.gz`.
+All guarded runtime inputs and artifacts remain unchanged. No numerical retry
+or final 39/63 collection occurred. Diagnose the actual retained heap owner next
+with one declared unscored diagnostic; raw heap dumps remain local and use a
+sanitized environment. Never clamp, permit invalid public negatives, or move
+implementation imports/initialization ahead of the memory baseline to hide it.
+Full performance goals and PR landing remain pending.

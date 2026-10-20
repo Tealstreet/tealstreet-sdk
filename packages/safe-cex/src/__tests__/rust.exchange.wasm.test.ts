@@ -936,6 +936,12 @@ describe('RustEngineExchange', () => {
               Object.defineProperty(this, 'wsMessageBytes', { value: undefined });
             }
           }
+          wsMessageBytes(socket: number, bytes: Uint8Array, now: number) {
+            const output = super.wsMessageBytes!(socket, bytes, now);
+            crossings.push('single');
+            outputs.push(output);
+            return output;
+          }
           wsMessageActions(socket: number, text: string, now: number) {
             const output = super.wsMessageActions!(socket, text, now);
             crossings.push('single');
