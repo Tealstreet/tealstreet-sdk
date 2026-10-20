@@ -923,3 +923,21 @@ Native strict Clippy, fmt and bans pass. Broader workspace tests/Clippy and
 17-family release/size/private/public checks remain pending; no new timing
 comparison has run. Preserve the two19c diagnostic raw profiles, output,
 provenance and limitations in RUST_PERF_HOST_DIAGNOSE19C.json.gz.
+
+Optional diagnostic phase plan: wrap only nonempty outermost host drains under
+the existing --profile flag; production host and default replay remain untouched.
+Observe queued-message distribution and inclusive thread CPU/wall versus nested
+engine-method CPU. Preserve receiver, return/throw identity, reentry and empty
+calls; report signed residual without calling it pure packing. Freeze host and
+engine observer snapshots at the main CPU cutoff, before sampler shutdown/GC.
+Deterministic tests cover empty/throw/reentry, fallback clocks and immutable
+snapshots. Independent review follows tests. No repeat of the fixed19b profiles;
+any new diagnostics require distinct paths, frozen provenance and a fixed count.
+
+Optional observer phase verified:314/314 harness tests pass, including7 new
+host observer cases and a cutoff-order regression. Independent helper and
+replay integration reviews pass. The diagnostic row counts outer queues;
+reentrant work contributes inclusive time once. Engine counter scans remain
+outside the drain interval but inside whole replay CPU, so the signed residual
+must not be presented as all host overhead or exact packing. Production source
+and default replay behavior are unchanged; no new timing sample was collected.

@@ -72,7 +72,7 @@ test('a failed Rust measurement window still stops the local sampler', async () 
   const events = [];
   const error = new Error('replay failed');
   const start = source.indexOf('  const heapBefore = await baseline();', source.indexOf('async function runRust'));
-  const end = source.indexOf('  if (profile) metrics.profile', start);
+  const end = source.indexOf('  const protocolErrors = tape.audit?.errors() ?? [];', start);
   const window = source.slice(start, end).replace("(await import('./cpu-profile.mjs')).startCpuProfile", 'startCpuProfile');
   await assert.rejects(vm.runInNewContext(`(async () => { ${window} })()`, {
     values: { 'cpu-profile': '/tmp/test.cpuprofile' },
@@ -89,7 +89,7 @@ test('sampling cleanup retains a simultaneous replay error before the write erro
   const replayError = new Error('replay failed');
   const cleanupError = new Error('profile write failed');
   const start = source.indexOf('  const heapBefore = await baseline();', source.indexOf('async function runRust'));
-  const end = source.indexOf('  if (profile) metrics.profile', start);
+  const end = source.indexOf('  const protocolErrors = tape.audit?.errors() ?? [];', start);
   const window = source.slice(start, end).replace("(await import('./cpu-profile.mjs')).startCpuProfile", 'startCpuProfile');
   await assert.rejects(vm.runInNewContext(`(async () => { ${window} })()`, {
     values: { 'cpu-profile': '/tmp/test.cpuprofile' },
@@ -117,4 +117,23 @@ test('both runtimes snapshot protocol coverage before disposal closes its live a
     assert.equal(closed, true, `${name} actually disposed`);
     assert.deepEqual(Array.from(errors), [], `${name} captures coverage while sockets are alive`);
   }
+});
+
+
+test('optional observer snapshots freeze at CPU cutoff before sampler shutdown and GC', async () => {
+  const events = [];
+  const live = { cpuMs: 7 };
+  const measure = vm.runInNewContext(`${measureSource}\nmeasure`, {
+    process: { cpuUsage() { events.push('processCPU'); return { user: 1, system: 0 }; },
+      threadCpuUsage() { events.push('threadCPU'); return { user: 1, system: 0 }; } },
+    performance: { now() { events.push('wall'); return 5; } },
+    async baseline() { events.push('GC'); live.cpuMs = 999; return { rss: 1, heapUsed: 1, arrayBuffers: 1 }; },
+    retainedMemory,
+  });
+  const result = await measure({ process: {}, thread: {} }, 0, { heapUsed: 1, arrayBuffers: 1 }, 0, undefined,
+    { async stop() { events.push('stop'); live.cpuMs = 99; } },
+    () => { events.push('snapshot'); return { hostProfile: { ...live } }; });
+  assert.equal(result.hostProfile.cpuMs, 7);
+  assert.deepEqual(events, ['processCPU', 'threadCPU', 'wall', 'snapshot', 'stop', 'GC']);
+  assert.equal(live.cpuMs, 999);
 });

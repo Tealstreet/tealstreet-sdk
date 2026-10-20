@@ -85,11 +85,13 @@ const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
 };
 
-const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark, cpuSampler) => {
+const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark, cpuSampler, snapshotDiagnostics) => {
   const cpu = process.cpuUsage(cpuStart.process);
   const thread = process.threadCpuUsage(cpuStart.thread);
   const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
   const wallMs = performance.now() - wallStart;
+  // Freeze optional observers at the same cutoff, before GC can run timers.
+  const diagnostics = snapshotDiagnostics?.();
   if (cpuSampler) await cpuSampler.stop();
   const memory = await baseline();
   const linearBytes = typeof wasmBytes === 'function' ? wasmBytes() : wasmBytes;
@@ -111,6 +113,7 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark,
     wasmBytes: linearBytes,
     // What the implementation keeps alive beyond the harness and loaded code.
     retainedBytes: retainedMemory(heapBefore, memory, linearBytes),
+    ...diagnostics,
   };
 };
 
@@ -235,6 +238,7 @@ async function runRust() {
       }
     },
   }, { batchMessages: values.delivery === 'batch' });
+  const hostProfile = profile ? (await import('./profile-host.mjs')).profileHost(host, profile) : undefined;
   const heapBefore = await baseline();
   const cpuSampler = values['cpu-profile']
     ? await (await import('./cpu-profile.mjs')).startCpuProfile(values['cpu-profile']) : undefined;
@@ -276,7 +280,11 @@ async function runRust() {
     tape.assertWritesConsumed();
     clearInterval(flushTimer);
     host.flush();
-    metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark, cpuSampler);
+    metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark, cpuSampler,
+      profile ? () => ({
+        profile: Object.fromEntries(Object.entries(profile.methods).map(([name, row]) => [name, { ...row }])),
+        hostProfile: hostProfile.snapshot(),
+      }) : undefined);
   } catch (error) {
     replayFailed = true;
     replayError = error;
@@ -293,7 +301,6 @@ async function runRust() {
       }
     }
   }
-  if (profile) metrics.profile = profile.methods;
   const protocolErrors = tape.audit?.errors() ?? [];
   host.dispose();
   clock?.restore();
