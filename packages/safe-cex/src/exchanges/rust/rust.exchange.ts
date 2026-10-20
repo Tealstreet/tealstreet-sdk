@@ -84,7 +84,13 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { paradexSigningTransport } from './paradex.signing';
-import { RustPublicFeedClient, rustPublicFeedIdentity } from './publicFeed';
+import {
+  IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
+  inProcessPortPair,
+  RustPublicFeedClient,
+  rustPublicFeedIdentity,
+  serveInProcessPublicData,
+} from './publicFeed';
 
 /** Exchange names the Rust engine runs; the engine takes the same name. */
 export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
@@ -275,8 +281,14 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   get publicFeedMode(): 'direct' | 'disabled' | 'shared' {
-    if (this.options.publicFeed?.mode === 'shared') return 'shared';
+    if (this.options.publicFeed?.mode === 'shared' || this.usesInProcessPublicData) return 'shared';
+    // exchange-server keys its shared source by venue only, so testnet runs its own feed.
+    if (this.options.externalPublicData?.type === 'in-process' && this.options.testnet) return 'direct';
     return this.publicFeedDisabled || this.isPrivateOnly ? 'disabled' : (this.options.publicFeed?.mode ?? 'direct');
+  }
+
+  private get usesInProcessPublicData() {
+    return this.options.externalPublicData?.type === 'in-process' && !this.options.testnet;
   }
 
   override disablePublicWebsockets(): void {
@@ -284,6 +296,7 @@ export class RustEngineExchange extends BaseExchange {
     this.publicFeedDisabled = true;
   }
   private sharedPublicFeed?: RustPublicFeedClient;
+  private stopInProcessFeed?: () => void;
   private requestSharedSnapshot = false;
   private sharedNativeSymbols = new Set<string>();
   private sharedValidatedMarkets?: Store['markets'];
@@ -477,10 +490,13 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private createHost = async () => {
-    if (this.options.externalPublicData) {
+    if (this.options.externalPublicData?.type === 'websocket') {
       throw new Error(
-        'Rust externalPublicData is unsupported; use publicFeed: { mode: "shared", port } with RustPublicFeedProvider',
+        'Rust externalPublicData websocket gateways are unsupported; use publicFeed: { mode: "shared", port } or an in-process source',
       );
+    }
+    if (this.options.externalPublicData && this.options.publicFeed) {
+      throw new Error('externalPublicData conflicts with publicFeed policy');
     }
     if (this.options.privateOnly && this.options.publicFeed?.mode === 'direct') {
       throw new Error('privateOnly conflicts with direct publicFeed policy');
@@ -775,12 +791,25 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
+  /** exchange-server's in-process source speaks the shared-feed protocol over an in-memory port. */
+  private openSharedFeedPort = ():
+    | { port: MessagePort; policy?: { handshakeTimeoutMs: number; inProcess: true } }
+    | undefined => {
+    if (this.options.publicFeed?.mode === 'shared') return { port: this.options.publicFeed.port };
+    const external = this.options.externalPublicData;
+    if (external?.type !== 'in-process' || !this.usesInProcessPublicData) return undefined;
+    const [port, sourcePort] = inProcessPortPair();
+    this.stopInProcessFeed = serveInProcessPublicData(external.source, sourcePort);
+    return { port, policy: { handshakeTimeoutMs: IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS, inProcess: true } };
+  };
+
   private startEngine = async () => {
     await this.ensureHost();
     if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
-    if (this.options.publicFeed?.mode === 'shared') {
+    const sharedFeed = this.openSharedFeedPort();
+    if (sharedFeed) {
       this.sharedPublicFeed = new RustPublicFeedClient(
-        this.options.publicFeed.port,
+        sharedFeed.port,
         rustPublicFeedIdentity(this.name, this.options),
         async (update) => {
           await this.host?.command(update);
@@ -800,6 +829,7 @@ export class RustEngineExchange extends BaseExchange {
           this.emitAndLogError(error);
           this.dispose();
         },
+        sharedFeed.policy,
       );
       try {
         await this.sharedPublicFeed.connect();
@@ -808,6 +838,8 @@ export class RustEngineExchange extends BaseExchange {
         throw error;
       }
       if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
+      if (!this.sharedPublicFeed.isReady)
+        this.log('In-process public data has not loaded; continuing private startup', LogSeverity.Warning);
     }
     // A fresh engine's full native snapshot clears the previous worker stream's
     // catalog/book baselines before any new deltas reach the main consumer.
@@ -1639,6 +1671,8 @@ export class RustEngineExchange extends BaseExchange {
   dispose() {
     this.sharedPublicFeed?.dispose();
     this.sharedPublicFeed = undefined;
+    this.stopInProcessFeed?.();
+    this.stopInProcessFeed = undefined;
     for (const observer of this.publicFeedObservers) this.dispatchFrameEvent(() => observer.closed());
     this.publicFeedObservers.clear();
     this.feedBookListeners.clear();
