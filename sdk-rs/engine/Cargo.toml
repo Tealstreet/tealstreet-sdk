@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+# Prediction venues opt in; other standalone builds omit metadata storage and frames.
+prediction = []
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true

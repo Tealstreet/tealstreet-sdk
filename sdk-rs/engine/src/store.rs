@@ -3,15 +3,19 @@
 //! frame with [`Store::write`].
 use crate::model::{
     Balance, CoinBalance, CurrencyBalance, Loaded, MarginType, Market, Order, OrderStatus,
-    Position, PredictionHolding, PredictionMarket, Ticker,
+    Position, Ticker,
 };
+#[cfg(feature = "prediction")]
+use crate::model::{PredictionHolding, PredictionMarket};
 use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
 use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct Store {
     markets: Vec<Market>,
+    #[cfg(feature = "prediction")]
     prediction_markets: Option<Vec<PredictionMarket>>,
+    #[cfg(feature = "prediction")]
     prediction_holdings: Option<Vec<PredictionHolding>>,
     market_by_symbol: HashMap<Box<str>, u32>,
     market_by_id: HashMap<Box<str>, u32>,
@@ -145,19 +149,24 @@ impl Store {
             .map(|(index, market)| (market.id.clone().into_boxed_str(), index as u32))
             .collect();
         self.markets = markets;
-        let had_prediction_markets = self.prediction_markets.take().is_some();
-        if self.prediction_holdings.take().is_some() || had_prediction_markets {
-            self.changes.positions = true;
+        #[cfg(feature = "prediction")]
+        {
+            let had_prediction_markets = self.prediction_markets.take().is_some();
+            if self.prediction_holdings.take().is_some() || had_prediction_markets {
+                self.changes.positions = true;
+            }
         }
         self.changes.markets = true;
         self.set_loaded(|loaded| loaded.markets = true);
     }
 
+    #[cfg(feature = "prediction")]
     pub fn prediction_markets(&self) -> Option<&[PredictionMarket]> {
         self.prediction_markets.as_deref()
     }
 
     /// Replace metadata after `set_markets`; table indices belong to that snapshot.
+    #[cfg(feature = "prediction")]
     pub fn set_prediction_markets(&mut self, markets: Vec<PredictionMarket>) {
         if self.prediction_markets.as_ref() != Some(&markets) {
             self.prediction_markets = Some(markets);
@@ -169,11 +178,13 @@ impl Store {
         }
     }
 
+    #[cfg(feature = "prediction")]
     pub fn prediction_holdings(&self) -> Option<&[PredictionHolding]> {
         self.prediction_holdings.as_deref()
     }
 
     /// Replace settlement flags after an authoritative position snapshot.
+    #[cfg(feature = "prediction")]
     pub fn set_prediction_holdings(&mut self, holdings: Vec<PredictionHolding>) {
         if self.prediction_holdings.as_ref() != Some(&holdings) {
             self.prediction_holdings = Some(holdings);
@@ -311,11 +322,13 @@ impl Store {
 
     pub fn set_positions(&mut self, positions: Vec<Position>) {
         self.positions = positions;
+        #[cfg(feature = "prediction")]
         self.prune_prediction_holdings();
         self.changes.positions = true;
         self.set_loaded(|loaded| loaded.positions = true);
     }
 
+    #[cfg(feature = "prediction")]
     fn prune_prediction_holdings(&mut self) {
         if let Some(holdings) = &mut self.prediction_holdings {
             holdings.retain(|holding| {
@@ -345,6 +358,7 @@ impl Store {
             (None, true) => return,
             (None, false) => self.positions.push(position),
         }
+        #[cfg(feature = "prediction")]
         self.prune_prediction_holdings();
         self.changes.positions = true;
     }
@@ -355,6 +369,7 @@ impl Store {
             update(position);
         }
         self.positions.retain(|p| p.contracts != 0.0);
+        #[cfg(feature = "prediction")]
         self.prune_prediction_holdings();
         self.changes.positions = true;
     }
@@ -535,6 +550,7 @@ impl Store {
         }
         if changes.markets {
             self.write_markets(w);
+            #[cfg(feature = "prediction")]
             self.write_prediction_markets(w);
         }
         if changes.tickers_replaced {
@@ -557,6 +573,7 @@ impl Store {
         }
         if changes.positions {
             self.write_positions(w);
+            #[cfg(feature = "prediction")]
             self.write_prediction_holdings(w);
         }
         if changes.balance {
@@ -620,6 +637,7 @@ impl Store {
         self.market_index(symbol).unwrap_or(wire::NONE)
     }
 
+    #[cfg(feature = "prediction")]
     fn write_prediction_markets<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let Some(markets) = &self.prediction_markets else {
             return;
@@ -644,6 +662,7 @@ impl Store {
         w.end();
     }
 
+    #[cfg(feature = "prediction")]
     fn write_prediction_holdings<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let Some(holdings) = &self.prediction_holdings else {
             return;
@@ -1230,6 +1249,7 @@ mod tests {
             12_501.0
         );
     }
+    #[cfg(feature = "prediction")]
     fn prediction_store() -> Store {
         use crate::model::{Limits, MinMax, PositionSide, Precision};
         let mut store = Store::default();
@@ -1280,6 +1300,7 @@ mod tests {
         store
     }
 
+    #[cfg(feature = "prediction")]
     fn prediction_metadata() -> PredictionMarket {
         PredictionMarket {
             market: 0,
@@ -1295,6 +1316,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "prediction")]
     fn prediction_columns_preserve_ordinary_layout_and_full_snapshot_identity() {
         let mut store = prediction_store();
         let legacy = balance_frame(&mut store);
@@ -1348,6 +1370,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "prediction")]
     fn prediction_flags_survive_position_changes_but_never_resurrect_on_reopen() {
         let mut store = prediction_store();
         store.set_prediction_markets(vec![prediction_metadata()]);
