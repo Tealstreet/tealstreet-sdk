@@ -68,6 +68,9 @@ pub struct Mapped {
     pub position_bound: bool,
     fill_cursor: FillCursor,
     terminal: bool,
+    /// A spot TP/SL classified with neither a trigger direction nor a price
+    /// to compare against; reclassified once tickers are seeded.
+    unpriced_tpsl: bool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -131,6 +134,7 @@ struct HyroSnapshot {
 #[derive(Default)]
 pub struct AccountState {
     started: bool,
+    unpriced_tpsl: HashSet<String>,
     unsupported_logged: HashSet<String>,
     /// Demo reduce-only repair reads due: order id, symbol, placement time.
     fill_repairs: HashMap<TimerId, (String, String, f64)>,
@@ -433,8 +437,9 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     let is_stop = stop_order_type.is_some_and(|t| t != "UNKNOWN") || from_create_type.is_some();
     let trigger_price = present(&o.trigger_price);
     let spot_tpsl = stop_order_type == Some("tpslOrder");
+    let last = store.ticker(&o.symbol).map_or(0.0, |ticker| ticker.last);
+    let unpriced_tpsl = spot_tpsl && o.trigger_direction.is_none() && last <= 0.0;
     let spot_tpsl_kind = spot_tpsl.then(|| {
-        let last = store.ticker(&o.symbol).map_or(0.0, |ticker| ticker.last);
         let below = match o.trigger_direction {
             Some(1) => false,
             Some(2) => true,
@@ -572,6 +577,7 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     Some(Mapped {
         orders,
         position_bound,
+        unpriced_tpsl,
         terminal: matches!(
             o.order_status.as_ref(),
             "Cancelled" | "Filled" | "Deactivated" | "Rejected" | "PartiallyFilledCanceled"
@@ -1756,6 +1762,7 @@ impl BybitLinear {
         let Some(mut mapped) = map_order(row, cx.store, cx.now) else {
             return;
         };
+        self.note_unpriced_tpsl(&mapped);
         if self.stale_terminal_snapshot(&mapped) {
             return;
         }
@@ -1794,6 +1801,39 @@ impl BybitLinear {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn note_unpriced_tpsl(&mut self, mapped: &Mapped) {
+        // The spot TP/SL itself is the parent row; legs carry their own kind.
+        let Some(order) = mapped.orders.first() else {
+            return;
+        };
+        if mapped.unpriced_tpsl {
+            self.account.unpriced_tpsl.insert(order.id.clone());
+        } else {
+            self.account.unpriced_tpsl.remove(&order.id);
+        }
+    }
+
+    /// Spot TP/SL rows read before the ticker seed were labelled against a
+    /// zero price; relabel them from their trigger now that one exists.
+    pub(crate) fn reclassify_unpriced_tpsl(&mut self, cx: &mut Cx<'_, Pending>) {
+        for id in std::mem::take(&mut self.account.unpriced_tpsl) {
+            let Some(order) = cx.store.order(&id) else {
+                continue;
+            };
+            let last = cx.store.ticker(&order.symbol).map_or(0.0, |t| t.last);
+            if last <= 0.0 || !matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                continue;
+            }
+            let below = order.price < last;
+            let kind = if (order.side == OrderSide::Sell) == below {
+                OrderType::StopLoss
+            } else {
+                OrderType::TakeProfit
+            };
+            cx.store.update_order(&id, |order| order.kind = kind);
         }
     }
 
@@ -1946,6 +1986,7 @@ impl BybitLinear {
                 {
                     *invalid = true;
                 } else if let Some(mapped) = mapped {
+                    self.note_unpriced_tpsl(&mapped);
                     rows.push(mapped);
                 }
             }
