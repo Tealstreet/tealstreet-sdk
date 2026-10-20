@@ -1438,7 +1438,12 @@ export class BaseExchange implements Exchange {
    * object messages are emitted, so subscribers cannot tell the difference.
    */
   applyWorkerFrame(buffer: ArrayBuffer) {
-    this.workerFrameApplier ??= new FrameApplier(this.store, ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot', 'okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name), this.name === 'bitgetinverse');
+    this.workerFrameApplier ??= new FrameApplier(
+      this.store,
+      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot', 'okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
+      this.name === 'bitgetinverse',
+      this.name === 'binanceinverse',
+    );
     const frame = new Frame(buffer);
     this.workerFrameApplier.apply(frame);
     for (const book of this.workerFrameApplier.books(frame)) this.emitter.emit('listenOrderBook', book);
