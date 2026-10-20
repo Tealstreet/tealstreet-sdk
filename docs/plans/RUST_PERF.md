@@ -30,8 +30,11 @@ atomicity, mixed ordering, per-message time, binary mutation and state parity.
 Independent phase reviews pass for the mixed Rust ABI, native/JS hosts and
 root harness/loaders. All400 harness tests,95 host tests,210 SDK transport tests,
 15 repaired test-double checks,78 engine and17 WASM tests pass. Strict native
-all-target clippy, fmt and bans pass. Full workspace tests/wasm clippy and final
-44/28/27 repository checks remain in progress. Failed runner, process-resource,
+all-target clippy, fmt and bans pass. Final44 typecheck,28 lint and27 repository tasks also pass, including493
+safe-cex CI files and493 unit files. All1909 Rust tests/157 groups pass with no failures or ignored tests; strict
+configured wasm workspace Clippy also passes. The21-family release is running
+at JOBS1 after preserving171 previous19-family artifacts. Exact passing-check,
+control-audit/refresh and43-generation proofs are in `RUST_PERF_VERIFY21.json.gz`. Failed runner, process-resource,
 stale test-double and test API attempts remain in `RUST_PERF_INTEGRATION21.json.gz`;
 serial harness verification preserves every assertion and timeout.
 
@@ -50,7 +53,7 @@ checks,43 private gates and25 public gates/comparisons remain pending. Freeze
 source versions and shared runtime inventories after those checks; retain every
 negative measurement. Older23-profile protocol/tapes were prepared but never run.
 
-## Current verification checkpoint
+## Prior nineteen-family checkpoint
 
 The last measured production source is `ecca589fb3`, integrated through landing
 `922b5fdc89` (15 WASM families, 19 public profiles). Its workspace, repository,
@@ -61,7 +64,7 @@ OKX/Bybit diagnostic profiles also retain an OKX batch regression. These are
 recorded in `RUST_PERF_FIRST19.json.gz`; wider performance remains unproven.
 Earlier negative eleven-family results remain in `RUST_PERF_INITIAL11.json`.
 
-Current production source is `c5071e2fcc`, integrated through ApeX landing
+That checkpoint production source is `c5071e2fcc`, integrated through ApeX landing
 `ecb313026f`. The19-family isolated release is built. All1700 Rust tests,
 351 harness tests, strict workspace native/wasm checks,44 typecheck and28 lint
 tasks pass. All19 isolated Clippy,38 size,118 host and81 default-timeout
