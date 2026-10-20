@@ -14,8 +14,8 @@ use safe_cex_engine::model::{Balance, Candle, Market, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, Store, TimerId,
-    Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    Store, TimerId, Venue,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -314,6 +314,10 @@ impl Kucoin {
     fn token(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         let c = &mut self.connections[channel];
         if c.token_pending || c.socket.is_some() {
+            return;
+        }
+        // Suppressed public feeds never open; bullets and supervision would only churn retries.
+        if !matches!(c.role, Role::Private) && cx.public_feed_policy() != PublicFeedPolicy::Direct {
             return;
         }
         c.token_pending = true;

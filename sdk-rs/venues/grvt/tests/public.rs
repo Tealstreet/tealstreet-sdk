@@ -1,4 +1,7 @@
-use safe_cex_engine::{Action, Command, Engine, Event, Response, SocketChannel, SocketId, Venue};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, PublicFeedPolicy, RequestId, Response, SocketChannel, SocketId,
+    TimerId, Venue,
+};
 use safe_cex_venue_grvt::{Grvt, Options};
 const CATALOG: &str = r#"{"r":[{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6},{"i":"ETH_USDT_Perp","ih":"0x030502","b":"ETH","q":"USDT","k":"PERPETUAL","ts":"0.01","ms":"0.01","bd":9,"qd":6}]}"#;
 fn boot() -> (Engine<Grvt>, SocketId) {
@@ -649,4 +652,67 @@ fn candle_supervisor_retries_flaps_independently_and_stops_when_unsubscribed() {
         !e.drain_actions()
             .any(|a| matches!(a, Action::WsConnect { .. } | Action::WsSend { .. }))
     );
+}
+
+#[derive(Default)]
+struct Suppressed {
+    requests: Vec<RequestId>,
+    timers: Vec<(TimerId, f64)>,
+    connects: usize,
+    closes: usize,
+}
+
+impl Suppressed {
+    fn collect(&mut self, e: &mut Engine<Grvt>) {
+        for action in e.drain_actions() {
+            match action {
+                Action::Http(r) => self.requests.push(r.id),
+                Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::WsConnect { .. } => self.connects += 1,
+                Action::WsClose { .. } => self.closes += 1,
+                _ => {}
+            }
+        }
+    }
+}
+
+#[test]
+fn suppressed_public_feed_is_not_supervised() {
+    let mut e = Engine::new(Grvt::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.set_public_feed_policy(PublicFeedPolicy::Shared).unwrap();
+    let start = 1700000000000.;
+    e.start(start);
+    let mut h = Suppressed::default();
+    h.collect(&mut e);
+    let request = h.requests.remove(0);
+    let response = Response {
+        status: 200,
+        headers: "",
+        body: CATALOG,
+    };
+    e.handle(start + 1., Event::HttpResponse { request, response });
+    h.collect(&mut e);
+    assert_eq!(e.store().markets().len(), 2, "public startup completed");
+    let mut fired = 0;
+    while let Some(&(timer, at)) = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at <= start + 600_000.)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+    {
+        h.timers.retain(|(t, _)| *t != timer);
+        e.handle(at, Event::TimerFired { timer });
+        h.collect(&mut e);
+        fired += 1;
+    }
+    assert_eq!(
+        (h.connects, h.closes),
+        (0, 0),
+        "no public connects or closes"
+    );
+    assert_eq!(fired, 1, "only the unanswered catalog refresh fires");
 }
