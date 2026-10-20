@@ -669,6 +669,7 @@ impl Grvt {
                                 stp_mode: None,
                                 bybit_bbo: None,
                                 bybit_slippage_tolerance_ticks: None,
+                                implied_volatility: None,
                             };
                             plan.steps.push_back(self.placement(
                                 cx,
@@ -1104,6 +1105,7 @@ impl Grvt {
                         stp_mode: None,
                         bybit_bbo: None,
                         bybit_slippage_tolerance_ticks: None,
+                        implied_volatility: None,
                     };
                     let replacement = self.placement(
                         cx,

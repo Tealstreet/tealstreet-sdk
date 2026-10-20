@@ -349,3 +349,53 @@ review integration before final release/measurement. Build a matching physical
 original control and preserve every prior control/cohort with its source label.
 No public performance samples ran in this repair phase; the full task remains
 pending the final expanded gates and before/after margins.
+
+
+## Product-semantics integration checkpoint
+
+Merge `5e92f93a8a` into checked ingress repair `f2fd8ac2c6`. Preserve incoming
+typed classifications, option terms/queries/Greeks, native filled quantities,
+combined Bybit accounts and global/EU OKX product discovery/reconciliation.
+Retain canonical family features and aliases, activate semantic command/store
+features only through Bybit, and retain Breakout's cold subscription outline.
+Keep both batch ABIs and profiling boundaries. OKX retains native index fanout,
+subscription dedup and empty-quote guards; borrowed ticker-ID mutation and
+first-insert-only mark/index cache writes remain. Restore landing's startup
+subscription serialization where its dedup/catalog behavior supersedes the old
+linear-only batching. New product integration callers select the Bybit package.
+
+Review caught a missing test command counter and new frame sections bypassing
+allocation bounds. Repair both. Feature-gated hints/string reserves now include
+classifications, derivative products, position Greeks and the second order tail
+(including the native placeholder when only filled placement units exist).
+Meaningful RED cases exceeded capacity on an empty classification header and
+filled-only order; seven targeted tests now pass, covering Unicode, absent/empty
+metadata, odd/even/257 rows, independent sections and reserved/unreserved parity.
+Independent Store and remaining product integration reviews pass.
+
+Three harness tests needed current contracts: use the real subscription oracle,
+include inverse/global/EU products from the recorded catalogs, and sign an actual
+native OKX request. Runtime guards remain unchanged; missing/wrong product,
+precise unsubscribed book/ticker, typed quantity, write-once and bad-signature
+negatives remain or are stronger. Retain the initial 646/649 failed run and the
+passing 103 targeted /649 full harness checks.
+
+All 2,625 Rust tests/206 groups pass (zero failures/ignored), as do formatting,
+bans and strict native all-target/WASM workspace Clippy. Repository checks pass
+44 typecheck, 28 lint and 27 test tasks. Fresh release/actual-WASM checks are next.
+`RUST_PERF_DELIVERY26_PRODUCTS_INTEGRATION.json.gz` contains source/check evidence.
+
+The final roster supersedes 36/63: 37 public profiles (new OKXEU), 63 private
+variants. Regenerate only the four changed OKX tapes; reuse the other 59 exact
+tapes/logs, with current generator/dependency hashes checked. Keep the original
+fixed collection method, now 19 AB /18 BA by CI index (one unavoidable profile
+imbalance). One official three-run public gate per arm/profile, no numerical
+retries/warmups/profiling; retain numerical failures and stop on operational or
+parity failures. Original source is physical `5e92f93a8a`, with 412 Rust/config
+and 33 protected files, 29 fresh archive compile traces and nine aggregate
+bindings. Its browser/Node WASM is 11,609,430 bytes, SHA-256
+`8a8f67fb74f5fb7981651a84028985ba2382a6e538151090fa57dbcb0ed94300`.
+Independent audit passes; no explicit internal-cache deletion proof is claimed.
+Freeze final shared helpers/TS/dependencies only after candidate checks/release.
+Prior controls and stopped cohorts remain immutable. Full performance goals and
+PR landing remain unfinished; no public samples ran in this integration phase.

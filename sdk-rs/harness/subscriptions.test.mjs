@@ -104,24 +104,36 @@ test('deterministic mutation sequences match the frozen audit', () => {
   }
 });
 
-test('the complete recorded OKX fixture retains exact subscription coverage', () => {
-  const records = gunzipSync(readFileSync(new URL('./fixtures/okx-public.jsonl.gz', import.meta.url))).toString().trim().split('\n').map(JSON.parse);
-  const markets = JSON.parse(records.find((row) => row.type === 'http' && row.url.includes('/public/instruments')).body).data
-    .filter((row) => row.ctType === 'linear' && ['USDT', 'USDC'].includes(row.settleCcy));
-  const socket = fixture();
-  for (const channel of ['tickers', 'mark-price', 'index-tickers', 'open-interest', 'funding-rate']) {
-    for (const market of markets) add(socket, { channel, instId: channel === 'index-tickers' ? market.instId.replace(/-SWAP$/, '') : market.instId });
+test('the complete recorded OKX and EEA fixtures retain exact subscription coverage', () => {
+  for (const name of ['okx', 'okxeu']) {
+    const records = gunzipSync(readFileSync(new URL(`./fixtures/${name}-public.jsonl.gz`, import.meta.url))).toString().trim().split('\n').map(JSON.parse);
+    const markets = records.filter((row) => row.type === 'http' && new URL(row.url).pathname.endsWith('/instruments'))
+      .flatMap((row) => JSON.parse(row.body).data)
+      .filter((row) => ['linear', 'inverse'].includes(row.ctType)
+        && (row.instType === 'SWAP' || (name === 'okxeu' && row.instType === 'FUTURES' && row.ruleType === 'xperp')));
+    assert(markets.some((row) => row.instId === 'BTC-USD-SWAP' && row.ctType === 'inverse'));
+    if (name === 'okxeu') assert(markets.some((row) => row.instType === 'FUTURES' && row.ruleType === 'xperp'));
+    const socket = fixture();
+    for (const channel of ['tickers', 'mark-price', 'index-tickers', 'open-interest', 'funding-rate']) {
+      for (const market of markets) add(socket, { channel, instId: channel === 'index-tickers' ? market.uly || market.instId.replace(/-SWAP$/, '') : market.instId });
+    }
+    const books = name === 'okx' ? ['BTC-USDT-SWAP', 'ETH-USDT-SWAP'] : ['BTC-USD_UM_XPERP-310404', 'ETH-USD_UM_XPERP-310404'];
+    for (const instId of books) {
+      assert(markets.some((row) => row.instId === instId));
+      add(socket, { channel: 'books', instId });
+    }
+    const messages = records.filter((row) => row.type === 'ws' && row.text.trimStart().startsWith('{')).map((row) => JSON.parse(row.text));
+    for (const message of messages) {
+      assert.equal(result(() => socket.index.assertSubscribed(socket, message)), undefined, name);
+      same(socket, message);
+    }
+    for (const topic of [...books.map((instId) => ({ channel: 'books', instId })), { channel: 'tickers', instId: 'BTC-USD-SWAP' }]) {
+      const message = messages.find((row) => row.arg?.channel === topic.channel && row.arg.instId === topic.instId && Array.isArray(row.data));
+      assert(message, `${name} fixture must exercise ${JSON.stringify(topic)}`);
+      remove(socket, topic);
+      same(socket, message);
+      assert.match(result(() => socket.index.assertSubscribed(socket, message))[1], new RegExp(`Unsubscribed ${topic.channel}`));
+      add(socket, topic);
+    }
   }
-  for (const instId of ['BTC-USDT-SWAP', 'ETH-USDT-SWAP']) add(socket, { channel: 'books', instId });
-  for (const record of records) {
-    if (record.type !== 'ws' || !record.text.trimStart().startsWith('{')) continue;
-    const message = JSON.parse(record.text);
-    assert.equal(result(() => socket.index.assertSubscribed(socket, message)), undefined);
-    same(socket, message);
-  }
-  remove(socket, { channel: 'books', instId: 'BTC-USDT-SWAP' });
-  const message = records.filter((row) => row.type === 'ws' && row.text.includes('"channel":"books"'))
-    .map((row) => JSON.parse(row.text)).find((row) => row.arg.instId === 'BTC-USDT-SWAP' && Array.isArray(row.data));
-  same(socket, message);
-  assert.match(result(() => socket.index.assertSubscribed(socket, message))[1], /Unsubscribed books/);
 });

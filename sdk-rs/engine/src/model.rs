@@ -133,6 +133,70 @@ pub struct Limits {
     pub price: Option<Min>,
 }
 
+/// Native semantic labels; an absent label differs from an explicitly empty one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InstrumentClassification {
+    pub market: u32,
+    pub symbol_type: Option<String>,
+    pub market_region: Option<String>,
+    pub underlying_ticker: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProductKind {
+    Future,
+    Call,
+    Put,
+}
+
+/// Native derivative terms. Unknown expiry/settlement remain absent.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DerivativeProduct {
+    pub market: u32,
+    pub kind: ProductKind,
+    pub underlying: String,
+    pub expiry: Option<f64>,
+    pub strike: Option<f64>,
+    pub settlement_asset: Option<String>,
+    pub premium_asset: Option<String>,
+    pub style: Option<String>,
+    pub settlement: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct OptionGreeks {
+    pub delta: f64,
+    pub gamma: f64,
+    pub vega: f64,
+    pub theta: f64,
+    pub units: String,
+}
+
+/// Position-specific Greeks keyed by position ID, never only by market.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PositionGreeks {
+    pub position_id: String,
+    pub greeks: OptionGreeks,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionChainQuery {
+    pub underlying: String,
+    pub expiry: Option<f64>,
+    pub right: Option<OptionRight>,
+    pub strike_min: Option<f64>,
+    pub strike_max: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OptionRight {
+    Call,
+    Put,
+}
+
 /// Typed outcome metadata for prediction markets; ordinary venues allocate none.
 /// `market` is an index in the store's current market table.
 #[derive(Clone, Debug, PartialEq)]
@@ -392,6 +456,8 @@ pub struct PlaceOrderOpts {
     pub bybit_bbo: Option<BybitBbo>,
     #[serde(default)]
     pub bybit_slippage_tolerance_ticks: Option<f64>,
+    #[serde(default)]
+    pub implied_volatility: Option<f64>,
 }
 
 fn caller_client_order_id<'de, D: serde::Deserializer<'de>>(

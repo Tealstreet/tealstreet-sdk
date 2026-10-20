@@ -9,6 +9,8 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 profiling = []
+# Polling-only builds trade parser bytes for lower first-subscription CPU.
+cold-subscriptions = []
 default = [
     "venue-backpack",
     "venue-binance",
@@ -61,7 +63,7 @@ venue-phemex = ["dep:safe-cex-venue-phemex"]
 venue-coinbase = ["dep:safe-cex-venue-coinbase"]
 venue-polymarket = ["dep:safe-cex-venue-polymarket", "safe-cex-engine/command-polymarket"]
 venue-grvt = ["dep:safe-cex-venue-grvt"]
-venue-breakoutprop = ["dep:safe-cex-venue-breakoutprop"]
+venue-breakoutprop = ["dep:safe-cex-venue-breakoutprop", "cold-subscriptions"]
 venue-txflow = ["dep:safe-cex-venue-txflow"]
 
 # Keep landing feature names available to direct Cargo callers.

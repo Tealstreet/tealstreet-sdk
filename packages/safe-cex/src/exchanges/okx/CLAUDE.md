@@ -1117,10 +1117,16 @@ The Rust replay oracle includes this correction explicitly in `KNOWN_TS_FIXES`.
 
 ## Rust engine scope and verified corrections
 
-`engine: 'rust'` supports USDT/USDC linear SWAPs under all four OKX names.
+`engine: 'rust'` supports linear and inverse SWAPs under all four OKX names;
+EU profiles additionally retain `FUTURES` with `ruleType: xperp`, matching TS.
+Signed EU discovery uses account-scoped instruments for both product types.
 Sizes sent to OKX remain contracts; fills and remaining quantities use ctVal,
-while the existing book contract uses lotSz. EEA X-Perps and inverse products
-remain outside this engine lane.
+while the existing book contract uses lotSz. Inverse base quantities divide
+quote contract value by the native reference price, position notional remains
+quote value, and coin margin/PnL normalize to USD. Exact native filled/leaves
+and position counts survive both frame consumers. EU income walks both product
+types before global limiting; stalled/capped composite sources fail explicitly.
+Generic account-wide fills retain the inherited empty-result contract.
 
 The replay oracle also implements public trades (previously inherited an
 unimplemented method), and OHLCV request bounds use UTC calendar arithmetic
@@ -1141,3 +1147,11 @@ Rust oracle audit: historical fill windows compare native millisecond timestamps
 before truncating public execution timestamps to seconds. Positive protective
 dust must not become close-all; ambiguous standalone protective limit amends
 fail before cancellation in Rust, preserving the existing execution price.
+
+EU Rust account reconciliation reads explicit SWAP and FUTURES scopes and commits
+positions/orders only after both products finish successfully. Failed, malformed
+or stale later-product reads retain the proven whole-account snapshot. Public
+index prices use a catalog-owned fanout table for shared inverse/X-Perp indexes.
+An explicitly empty live last/open quote retains the last proven trade/change;
+unavailable REST seeds start at zero, while malformed nonempty quotes remain
+visible to the reference oracle.

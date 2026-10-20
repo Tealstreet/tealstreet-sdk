@@ -4,11 +4,11 @@
 use crate::account::{order_side, order_status, order_type};
 use crate::sign::Query;
 use crate::wire::*;
-use crate::{BybitLinear, Pending, Rest, Then, venue_error};
+use crate::{BybitLinear, Category, Pending, Rest, Then, venue_error};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::{CommandId, Cx, LogLevel, Query as Read, Response};
 use serde::Serialize;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Bybit treats both window bounds as inclusive and refuses wider ones.
 const MAX_WINDOW_MS: f64 = 7.0 * 24.0 * 3_600_000.0 - 1.0;
@@ -106,14 +106,37 @@ impl Rows {
         }
     }
 
-    fn json(&mut self) -> String {
+    fn json(&mut self, cap: usize) -> String {
         match self {
-            Self::Fills(rows) => serde_json::to_string(rows),
-            Self::Orders(rows) => {
-                rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
+            Self::Fills(rows) => {
+                rows.sort_by(|left, right| right.timestamp.total_cmp(&left.timestamp));
+                let mut seen = HashSet::new();
+                rows.retain(|row| seen.insert((row.symbol.clone(), row.id.clone())));
+                if cap > 0 {
+                    rows.truncate(cap);
+                }
                 serde_json::to_string(rows)
             }
-            Self::Income(rows) => serde_json::to_string(rows),
+            Self::Orders(rows) => {
+                rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
+                let mut seen = HashSet::new();
+                rows.retain(|row| seen.insert((row.symbol.clone(), row.id.clone())));
+                if cap > 0 {
+                    rows.truncate(cap);
+                }
+                serde_json::to_string(rows)
+            }
+            Self::Income(rows) => {
+                rows.sort_by(|left, right| right.timestamp.total_cmp(&left.timestamp));
+                let mut seen = HashSet::new();
+                rows.retain(|row| {
+                    seen.insert((row.symbol.clone(), row.tran_id.clone(), row.income_type))
+                });
+                if cap > 0 {
+                    rows.truncate(cap);
+                }
+                serde_json::to_string(rows)
+            }
             Self::Trades(rows) => serde_json::to_string(rows),
         }
         .unwrap_or_default()
@@ -131,8 +154,11 @@ struct Walk {
     cursor: Option<String>,
     pages: u32,
     cap: usize,
+    category_rows_start: usize,
     rows: Rows,
     inverse: bool,
+    categories: VecDeque<Category>,
+    original_windows: VecDeque<(Option<f64>, Option<f64>)>,
 }
 
 #[derive(Default)]
@@ -245,6 +271,23 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
 
 impl BybitLinear {
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
+        let symbol = match &read {
+            Read::Fills { symbol, .. }
+            | Read::OrderHistory { symbol, .. }
+            | Read::Income { symbol, .. } => symbol.as_deref(),
+            Read::PublicTrades { symbol, .. } | Read::OrderByClientId { symbol, .. } => {
+                Some(symbol.as_str())
+            }
+        };
+        if symbol.is_some_and(|symbol| !self.category_enabled(self.category_for(symbol))) {
+            cx.done(command, Err("Bybit product is not enabled".into()));
+            return;
+        }
+        let categories = if symbol.is_none() {
+            self.categories()
+        } else {
+            vec![self.category]
+        };
         if self.credentials.is_none()
             && !matches!(
                 read,
@@ -262,7 +305,7 @@ impl BybitLinear {
             );
             return;
         }
-        let walk = match read {
+        let mut walk = match read {
             Read::OrderByClientId { .. } => {
                 cx.done(
                     command,
@@ -282,7 +325,10 @@ impl BybitLinear {
                 params.extend(symbol.map(|s| ("symbol", s)));
                 params.extend(order_id.map(|id| ("orderId", id)));
                 Walk {
-                    inverse: self.variant.is_inverse(),
+                    inverse: self.category == Category::Inverse,
+                    categories: VecDeque::new(),
+                    original_windows: VecDeque::new(),
+                    category_rows_start: 0,
                     path: "/v5/execution/list",
                     signed: true,
                     params,
@@ -305,7 +351,10 @@ impl BybitLinear {
                 let mut params = vec![("category", self.paths.category.to_owned())];
                 params.extend(symbol.map(|s| ("symbol", s)));
                 Walk {
-                    inverse: self.variant.is_inverse(),
+                    inverse: self.category == Category::Inverse,
+                    categories: VecDeque::new(),
+                    original_windows: VecDeque::new(),
+                    category_rows_start: 0,
                     path: "/v5/order/history",
                     signed: true,
                     params,
@@ -341,7 +390,10 @@ impl BybitLinear {
                     ("type", venue)
                 }));
                 Walk {
-                    inverse: self.variant.is_inverse(),
+                    inverse: self.category == Category::Inverse,
+                    categories: VecDeque::new(),
+                    original_windows: VecDeque::new(),
+                    category_rows_start: 0,
                     path: "/v5/account/transaction-log",
                     signed: true,
                     params,
@@ -355,7 +407,10 @@ impl BybitLinear {
                 }
             }
             Read::PublicTrades { symbol, limit } => Walk {
-                inverse: self.variant.is_inverse(),
+                inverse: self.category == Category::Inverse,
+                categories: VecDeque::new(),
+                original_windows: VecDeque::new(),
+                category_rows_start: 0,
                 path: "/v5/market/recent-trade",
                 signed: false,
                 params: vec![
@@ -378,6 +433,11 @@ impl BybitLinear {
                 rows: Rows::Trades(Vec::new()),
             },
         };
+        walk.original_windows = walk.windows.clone();
+        walk.categories = categories
+            .into_iter()
+            .filter(|category| *category != self.category && *category != Category::Spot)
+            .collect();
         self.history.reads.insert(command, walk);
         self.next_window(cx, command);
     }
@@ -386,7 +446,7 @@ impl BybitLinear {
         let Some(walk) = self.history.reads.get_mut(&command) else {
             return;
         };
-        let full = walk.cap > 0 && walk.rows.len() >= walk.cap;
+        let full = walk.cap > 0 && walk.rows.len() - walk.category_rows_start >= walk.cap;
         match walk.windows.pop_front().filter(|_| !full) {
             Some(window) => {
                 walk.window = window;
@@ -395,8 +455,21 @@ impl BybitLinear {
                 self.request_page(cx, command);
             }
             None => {
+                if let Some(category) = walk.categories.pop_front() {
+                    if let Some((_, value)) =
+                        walk.params.iter_mut().find(|(key, _)| *key == "category")
+                    {
+                        *value = category.as_str().into();
+                    }
+                    walk.inverse = category == Category::Inverse;
+                    walk.category_rows_start = walk.rows.len();
+                    walk.windows = walk.original_windows.clone();
+                    self.select_category(category);
+                    self.next_window(cx, command);
+                    return;
+                }
                 let mut walk = self.history.reads.remove(&command).expect("present");
-                cx.done(command, Ok(walk.rows.json()));
+                cx.done(command, Ok(walk.rows.json(walk.cap)));
             }
         }
     }
@@ -449,8 +522,20 @@ impl BybitLinear {
             }
         };
         walk.pages += 1;
-        let full = walk.cap > 0 && walk.rows.len() >= walk.cap;
-        match cursor.filter(|_| walk.pages < MAX_PAGES_PER_WINDOW && !full) {
+        let full = walk.cap > 0 && walk.rows.len() - walk.category_rows_start >= walk.cap;
+        if !full
+            && cursor.as_ref().is_some_and(|cursor| {
+                walk.cursor.as_ref() == Some(cursor) || walk.pages >= MAX_PAGES_PER_WINDOW
+            })
+        {
+            self.history.reads.remove(&command);
+            cx.done(
+                command,
+                Err("Bybit history pagination is incomplete or did not advance".into()),
+            );
+            return;
+        }
+        match cursor.filter(|_| !full) {
             Some(cursor) => {
                 walk.cursor = Some(cursor);
                 self.request_page(cx, command);

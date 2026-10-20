@@ -1531,9 +1531,17 @@ test('actual legacy venue tapes retain typed matching and consume writes once', 
   for (const name of ['binance', 'bybit', 'okx', 'weex', 'cryptocom', 'bingx', 'blofin']) {
     const route = name === 'cryptocom'
       ? 'https://api.crypto.com/exchange/v1/private/create-order'
-      : 'https://example.test/capi/v3/market/order';
+      : name === 'okx' ? 'https://www.okx.com/api/v5/trade/order' : 'https://example.test/capi/v3/market/order';
     // Binance carries signed batch JSON in the query, never a request body.
     const request = (quantity) => {
+      if (name === 'okx') {
+        const body = { instId: 'BTC-USDT-SWAP', tdMode: 'cross', side: 'buy', ordType: 'limit', sz: quantity, px: '100' };
+        const timestamp = new Date().toISOString();
+        return { url: route, body, headers: {
+          'OK-ACCESS-KEY': 'replay-key', 'OK-ACCESS-PASSPHRASE': 'replay-passphrase', 'OK-ACCESS-TIMESTAMP': timestamp,
+          'OK-ACCESS-SIGN': createHmac('sha256', 'replay-secret').update(timestamp + 'POST/api/v5/trade/order' + JSON.stringify(body)).digest('base64'),
+        } };
+      }
       if (name !== 'binance') return { url: route, body: { quantity } };
       const query = new URLSearchParams({ batchOrders: JSON.stringify([{ symbol: 'BTCUSDT', quantity }]),
         timestamp: String(Date.now()), recvWindow: '5000' }).toString();
@@ -1543,17 +1551,27 @@ test('actual legacy venue tapes retain typed matching and consume writes once', 
     };
     // Isolate matching/consumption from Crypto's independently tested signing.
     const venue = name === 'cryptocom' ? { ...venueOf(name), checkRequest: undefined } : venueOf(name);
-    const expected = request(1);
+    const quantity = name === 'okx' ? '1' : 1;
+    const expected = request(quantity);
     const tape = new Tape([{ ...record('POST', expected.body), url: expected.url }], venue, false);
     const respond = (quantity) => {
       const { url, body, headers } = request(quantity);
       return tape.respond('POST', url, body, headers);
     };
-    assert.equal(respond('1').status, 599, name);
-    assert.equal(respond(1).status, 200, name);
-    assert.equal(respond(1).status, 599, name);
+    assert.equal(respond(name === 'okx' ? 1 : '1').status, 599, name);
+    assert.equal(respond(quantity).status, 200, name);
+    assert.equal(respond(quantity).status, 599, name);
     assert.equal(tape.missingWrites, 0);
     assert.equal(tape.invalidSignatures, 0);
+    if (name === 'okx') {
+      const rejected = new Tape([{ ...record('POST', expected.body), url: expected.url }], venue, false);
+      assert.throws(() => rejected.respond('POST', expected.url, expected.body, { ...expected.headers, 'OK-ACCESS-SIGN': 'wrong' }), /signature/);
+      assert.equal(rejected.respond('POST', expected.url, expected.body, expected.headers).status, 200);
+      assert.equal(rejected.respond('POST', expected.url, expected.body, expected.headers).status, 599);
+      assert.equal(rejected.missingWrites, 0);
+      assert.equal(rejected.invalidSignatures, 1);
+      assert.throws(() => rejected.assertWritesConsumed(), /1 invalid replay signature/);
+    }
   }
 });
 

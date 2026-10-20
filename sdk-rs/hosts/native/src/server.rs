@@ -681,7 +681,10 @@ fn release<K: std::hash::Hash + Eq>(counts: &mut HashMap<K, usize>, key: &K) -> 
 
 fn command_id(command: &mut Command) -> Option<&mut u32> {
     match command {
-        Command::PlaceOrders { command, .. }
+        Command::FetchOptionChain { command, .. }
+        | Command::FetchOptionExpiries { command, .. }
+        | Command::FetchAccountGreeks { command, .. }
+        | Command::PlaceOrders { command, .. }
         | Command::CancelOrders { command, .. }
         | Command::CancelOrdersWithSymbols { command, .. }
         | Command::AmendOrder { command, .. }

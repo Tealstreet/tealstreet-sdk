@@ -158,7 +158,11 @@ fn klines_stream_into_candle_frames() {
 
 #[test]
 fn fetched_candles_come_back_oldest_first() {
-    let mut h = Harness::new();
+    let mut h = Harness::started(safe_cex_venue_bybit::Options {
+        variant: safe_cex_venue_bybit::Variant::Inverse,
+        public_data_only: true,
+        ..Default::default()
+    });
     h.command(Command::FetchCandles {
         command: 3,
         symbol: "BTCUSD".into(),
@@ -169,7 +173,7 @@ fn fetched_candles_come_back_oldest_first() {
     });
     let request = h.take("/v5/market/kline");
     assert!(request.url.ends_with(
-        "?category=linear&symbol=BTCUSD&interval=60&start=1670601600000&end=1670608800000&limit=500"
+        "?category=inverse&symbol=BTCUSD&interval=60&start=1670601600000&end=1670608800000&limit=500"
     ));
     // "Get Kline", the documented response.
     h.reply(
