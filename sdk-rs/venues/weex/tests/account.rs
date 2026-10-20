@@ -222,23 +222,37 @@ fn fills_are_per_execution_and_duplicates_are_suppressed() {
             text: fills,
         },
     );
-    let frame = e.take_market_frame(NOW).unwrap();
+    assert!(e.take_market_frame(NOW).is_none());
+    let frame = e.take_frame(NOW).unwrap();
     let mut at = 16;
     let mut found = false;
     for _ in 0..u16::from_le_bytes([frame[6], frame[7]]) {
         let kind = u16::from_le_bytes([frame[at], frame[at + 1]]);
         let len = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
         if kind == 11 {
-            let data = &frame[at + 8..at + 8 + len];
-            assert_eq!(u32::from_le_bytes(data[..4].try_into().unwrap()), 2);
-            // The final columns hold price, amount for each execution.
             assert_eq!(
-                f64::from_le_bytes(data[len - 32..len - 24].try_into().unwrap()),
+                u16::from_le_bytes(frame[at + 2..at + 4].try_into().unwrap()),
+                1
+            );
+            let data = &frame[at + 8..at + 8 + len];
+            let count = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
+            assert_eq!(count, 2);
+            let rows = (4 + 12 * count).next_multiple_of(8);
+            assert_eq!(
+                f64::from_le_bytes(data[rows..rows + 8].try_into().unwrap()),
                 1000.0
             );
             assert_eq!(
-                f64::from_le_bytes(data[len - 16..len - 8].try_into().unwrap()),
+                f64::from_le_bytes(data[rows + 8..rows + 16].try_into().unwrap()),
+                0.1
+            );
+            assert_eq!(
+                f64::from_le_bytes(data[rows + 16..rows + 24].try_into().unwrap()),
                 1100.0
+            );
+            assert_eq!(
+                f64::from_le_bytes(data[rows + 24..rows + 32].try_into().unwrap()),
+                0.2
             );
             found = true;
         }

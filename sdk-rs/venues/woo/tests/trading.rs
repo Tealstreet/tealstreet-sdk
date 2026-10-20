@@ -576,6 +576,7 @@ fn leverage_commits_only_after_matching_authoritative_readback() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         }),
     );
     let a: Vec<_> = e.drain_actions().collect();
@@ -604,6 +605,7 @@ fn mode_readback_retries_reads_only_and_never_invents_confirmation() {
         Event::Command(Command::SetPositionMode {
             command: 1,
             hedged: true,
+            symbol: None,
         }),
     );
     let a: Vec<_> = e.drain_actions().collect();

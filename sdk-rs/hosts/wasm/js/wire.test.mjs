@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { Frame, NONE, SECTION, TICKER_FIELDS, TickerState } from './wire.mjs';
+import { Frame, NONE, SECTION, TICKER_FIELDS, TickerState, orderEnums, positionEnums } from './wire.mjs';
 
 const stringFrame = (strings) => {
   const encoder = new TextEncoder();
@@ -104,6 +104,7 @@ function numericFrame(sections) {
   let offset = 16;
   for (const section of sections) {
     view.setUint16(offset, section.kind, true);
+    view.setUint16(offset + 2, section.revision ?? 0, true);
     view.setUint32(offset + 4, section.length, true);
     section.write(view, offset + 8);
     offset += 8 + section.length;
@@ -113,12 +114,12 @@ function numericFrame(sections) {
 
 const tickerTable = (start) => ({
   kind: SECTION.TICKERS,
-  length: 16 + TICKER_FIELDS.length * 16,
+  length: 16 + 11 * 16,
   write(view, offset) {
     view.setUint32(offset, 2, true);
     view.setUint32(offset + 4, 7, true);
     view.setUint32(offset + 8, 9, true);
-    for (let i = 0; i < TICKER_FIELDS.length * 2; i++) view.setFloat64(offset + 16 + i * 8, start + i, true);
+    for (let i = 0; i < 11 * 2; i++) view.setFloat64(offset + 16 + i * 8, start + i, true);
   },
 });
 
@@ -145,7 +146,7 @@ test('ticker replacements adopt new columns before applying sparse multirow delt
   assert.deepEqual([...state.columns.bid], [200, 301]);
   assert.deepEqual([...state.columns.ask], [302, 203]);
   assert.deepEqual([...state.columns.quoteVolume], [220, 0]);
-  for (const field of TICKER_FIELDS.slice(2, -1)) {
+  for (const field of TICKER_FIELDS.slice(2, 10)) {
     const index = TICKER_FIELDS.indexOf(field);
     assert.deepEqual([...state.columns[field]], [200 + index * 2, 201 + index * 2]);
   }
@@ -369,7 +370,7 @@ function tickerFrame(identities) {
   const strings = ['LIVEUSDT', 'OLDUSDT', 'native-retired-id'];
   const stringBuffer = stringFrame(strings).buffer;
   const at = (4 + count * 4 + 7) & ~7;
-  const tail = at + count * TICKER_FIELDS.length * 8;
+  const tail = at + count * 11 * 8;
   const length = tail + (identities ? count * 8 : 0);
   const result = new ArrayBuffer(24 + length + stringBuffer.byteLength - 16);
   const view = new DataView(result);
@@ -380,7 +381,7 @@ function tickerFrame(identities) {
   view.setUint32(24, count, true);
   view.setUint32(28, 0, true);
   view.setUint32(32, identities ? NONE : 1, true);
-  TICKER_FIELDS.forEach((_, column) => {
+  TICKER_FIELDS.slice(0, 11).forEach((_, column) => {
     view.setFloat64(24 + at + column * count * 8, column + 1, true);
     view.setFloat64(24 + at + column * count * 8 + 8, column + 100, true);
   });
@@ -473,4 +474,305 @@ test('frame envelope refuses truncated section headers, payloads and trailing by
   const extra = new Uint8Array(buffer.byteLength + 8);
   extra.set(new Uint8Array(buffer));
   assert.throws(() => new Frame(extra.buffer), /trailing/);
+});
+
+const revisedTable = (kind, count = 2) => {
+  const data = Math.ceil((4 + count * ({ [SECTION.MARKETS]: 20, [SECTION.TICKERS]: 4, [SECTION.ORDERS]: 20, [SECTION.POSITIONS]: 8, [SECTION.SETTINGS]: 8, [SECTION.FILLS]: 12 }[kind])) / 8) * 8;
+  const bytes = { [SECTION.MARKETS]: 84, [SECTION.TICKERS]: 104, [SECTION.ORDERS]: 96, [SECTION.POSITIONS]: 80, [SECTION.SETTINGS]: 28, [SECTION.FILLS]: 20 }[kind];
+  return { kind, revision: 1, length: data + count * bytes,
+    write(view, offset) {
+      view.setUint32(offset, count, true);
+      for (let i = 0; i < count; i++) {
+        const symbols = { [SECTION.MARKETS]: 80, [SECTION.TICKERS]: 96, [SECTION.ORDERS]: 92, [SECTION.POSITIONS]: 76, [SECTION.SETTINGS]: 24, [SECTION.FILLS]: 16 }[kind];
+        view.setUint32(offset + data + count * symbols + i * 4, i, true);
+        if (kind === SECTION.TICKERS) {
+          view.setFloat64(offset + data + count * 88 + i * 8, 100 + i, true);
+          view.setUint32(offset + data + count * 100 + i * 4, i, true);
+        }
+        if (kind === SECTION.ORDERS) {
+          view.setFloat64(offset + data + count * 56 + i * 8, 3 + i, true);
+          view.setFloat64(offset + data + count * 64 + i * 8, 4 + i, true);
+          view.setFloat64(offset + data + count * 72 + i * 8, 300 + i, true);
+          view.setFloat64(offset + data + count * 80 + i * 8, 101 + i, true);
+          view.setUint32(offset + data + count * 88 + i * 4, i ? 0xffff : 1 | (3 << 8), true);
+        }
+        if (kind === SECTION.POSITIONS) view.setUint32(offset + data + count * 72 + i * 4, i, true);
+      }
+    },
+  };
+};
+const withStrings = (frame, values = ['BTC-USD', 'ETH-USD']) => {
+  frame.strings = stringFrame(values).strings;
+  return frame;
+};
+
+test('writer-required references reject NONE while preserving explicit empty strings', () => {
+  const cases = [];
+  const add = (table, reader, fields) => {
+    for (const [field, offset] of Object.entries(fields)) {
+      cases.push({ make: () => withStrings(numericFrame([table]), ['']), offset,
+        read: (frame) => frame[reader]()[field](0), label: `${reader}.${field}` });
+    }
+  };
+  add(revisedTable(SECTION.MARKETS, 1), 'markets', { id: 4, symbol: 8, base: 12, quote: 16 });
+  add(revisedTable(SECTION.ORDERS, 1), 'orders', { id: 4, symbol: 116 });
+  add(revisedTable(SECTION.POSITIONS, 1), 'positions', { id: 88, symbol: 92 });
+  add(revisedTable(SECTION.SETTINGS, 1), 'settings', { symbol: 40 });
+  add(revisedTable(SECTION.FILLS, 1), 'fills', { orderId: 4, symbol: 32 });
+  const metadata = (kind, length) => ({ kind, length,
+    write(view, offset) { view.setUint32(offset, 1, true); } });
+  add(metadata(SECTION.CANDLES, 64), 'candles', { interval: 8 });
+  add(metadata(SECTION.DERIVATIVE_PRODUCTS, 48), 'derivativeProducts', { underlying: 12 });
+  add(metadata(SECTION.POSITION_GREEKS, 48), 'positionGreeks', { positionId: 4, units: 8 });
+  add(metadata(SECTION.PREDICTION_MARKETS, 48), 'predictionMarkets', {
+    conditionId: 8, outcome: 12, question: 16, description: 20, endDate: 24, slug: 28,
+  });
+  for (const [field, offset] of [['symbol', 104], ['id', 108]]) {
+    cases.push({ make: () => withStrings(numericFrame([revisedTable(SECTION.TICKERS, 1)]), ['']),
+      offset, read: (frame) => frame.tickers().identity(0)[field], label: `ticker.${field}` });
+  }
+  cases.push({ make: () => new Frame(balanceFrame([{ base: '', amount: 1, notional: 2 }])),
+    offset: 36, read: (frame) => frame.balance().coins[''].base, label: 'coin.base' });
+  cases.push({ make: () => new Frame(balanceFrame(undefined, [{ currency: '', used: 1, free: 2, total: 3, upnl: 0 }])),
+    offset: 48, read: (frame) => { frame.balance(); return ''; }, label: 'currency.name' });
+  for (const { make, offset, read, label } of cases) {
+    const frame = make();
+    assert.equal(read(frame), '', `${label}: explicit empty value`);
+    new DataView(frame.buffer).setUint32(24 + offset, NONE, true);
+    assert.throws(() => read(frame), /required string/, `${label}: absent mandatory value`);
+  }
+});
+
+test('optional NONE references remain absent independently of required identities', () => {
+  const marketTable = revisedTable(SECTION.MARKETS, 1);
+  marketTable.length = Math.ceil(marketTable.length / 8) * 8;
+  const frame = withStrings(numericFrame([marketTable, revisedTable(SECTION.ORDERS, 1)]), ['']);
+  const view = new DataView(frame.buffer);
+  view.setUint32(frame.first(SECTION.MARKETS).offset + 104, NONE, true);
+  const ordersAt = frame.first(SECTION.ORDERS).offset;
+  view.setUint32(ordersAt + 8, NONE, true);
+  view.setUint32(ordersAt + 12, NONE, true);
+  assert.equal(frame.markets().prettySymbol(0), undefined);
+  assert.equal(frame.markets().symbol(0), '');
+  assert.equal(frame.orders().id(0), '');
+  assert.equal(frame.orders().clientOrderId(0), undefined);
+  assert.equal(frame.orders().parentId(0), undefined);
+  const metadata = withStrings(numericFrame([
+    { kind: SECTION.INSTRUMENT_CLASSIFICATIONS, length: 24, write(view, offset) {
+      view.setUint32(offset, 1, true);
+      for (const at of [8, 12, 16]) view.setUint32(offset + at, NONE, true);
+    } },
+    { kind: SECTION.DERIVATIVE_PRODUCTS, length: 48, write(view, offset) {
+      view.setUint32(offset, 1, true);
+      for (const at of [16, 20, 24, 28]) view.setUint32(offset + at, NONE, true);
+    } },
+  ]), ['']);
+  const labels = metadata.instrumentClassifications();
+  for (const field of ['symbolType', 'marketRegion', 'underlyingTicker']) assert.equal(labels[field](0), undefined);
+  const products = metadata.derivativeProducts();
+  assert.equal(products.underlying(0), '');
+  for (const field of ['settleAsset', 'premiumAsset', 'style', 'settlement']) assert.equal(products[field](0), undefined);
+  const legacy = positionFrame(false);
+  assert.equal(legacy.positions().id(0), undefined);
+});
+
+test('revision one preserves pretty symbols, independent order fields and orphan symbols', () => {
+  const frame = withStrings(numericFrame([SECTION.MARKETS, SECTION.TICKERS, SECTION.ORDERS, SECTION.POSITIONS, SECTION.SETTINGS, SECTION.FILLS].map((kind) => revisedTable(kind))));
+  assert.equal(frame.markets().prettySymbol(0), 'BTC-USD');
+  assert.deepEqual([...frame.tickers().midPrice], [100, 101]);
+  assert.deepEqual(frame.tickers().identity(1), { symbol: 'ETH-USD', id: 'ETH-USD' });
+  const orders = frame.orders();
+  assert.deepEqual([...orders.remainingNative], [3, 4]);
+  assert.deepEqual([...orders.filledInPlacementUnits], [4, 5]);
+  assert.deepEqual([...orders.remainingNotional], [300, 301]);
+  assert.deepEqual([...orders.conditionalOrderPrice], [101, 102]);
+  assert.equal(orders.tpTriggerType(0), 'mark_price');
+  assert.equal(orders.slTriggerType(0), 'index_price');
+  assert.equal(orders.tpTriggerType(1), undefined);
+  assert.equal(orders.slTriggerType(1), undefined);
+  for (const table of [orders, frame.positions(), frame.settings(), frame.fills()]) assert.equal(table.symbol(1), 'ETH-USD');
+  assert.equal(frame.positions().id(1), 'ETH-USD');
+});
+
+test('revised table extensions cannot borrow bytes from a later section', () => {
+  const readers = new Map([[SECTION.MARKETS, 'markets'], [SECTION.TICKERS, 'tickers'], [SECTION.ORDERS, 'orders'], [SECTION.POSITIONS, 'positions'], [SECTION.SETTINGS, 'settings'], [SECTION.FILLS, 'fills']]);
+  for (const [kind, reader] of readers) {
+    const table = revisedTable(kind);
+    const original = numericFrame([table]);
+    const section = original.sections[0];
+    for (const count of [0, 2]) {
+      const bad = numericFrame([{ kind, revision: 1, length: count ? table.length - 8 : 0,
+        write(view, offset) { if (count) view.setUint32(offset, 2, true); } },
+      { kind: SECTION.STATUS, length: 512, write() {} }]);
+      assert.throws(() => bad[reader](), /truncated/, `${reader} truncated extension`);
+    }
+    assert.equal(section.revision, 1);
+  }
+});
+
+test('format and known section revisions are checked while future section kinds are skipped', () => {
+  const buffer = numericFrame([]).buffer.slice(0);
+  new DataView(buffer).setUint16(4, 2, true);
+  assert.throws(() => new Frame(buffer), /unsupported frame format/);
+  for (const [kind, revision] of [[SECTION.MARKETS, 2], [SECTION.STATUS, 1], [SECTION.STRINGS, 1]]) {
+    assert.throws(() => numericFrame([{ kind, revision, length: 8, write() {} }]), /unsupported section/);
+  }
+  assert.equal(numericFrame([{ kind: 4000, revision: 99, length: 0, write() {} }]).sections[0].revision, 99);
+});
+
+test('unknown order, position, margin and trigger enums stay absent', () => {
+  const order = orderEnums(0xffffffff);
+  assert.equal(order.status, undefined);
+  assert.equal(order.type, undefined);
+  assert.equal(order.timeInForce, undefined);
+  assert.equal(order.triggerType, undefined);
+  assert.equal(order.rejectReason, undefined);
+  const position = positionEnums(0xffffffff);
+  assert.equal(position.side, undefined);
+  assert.equal(position.marginType, undefined);
+  assert.equal(position.positionMode, undefined);
+  const settings = new Frame(settingsFrame([10]));
+  new Uint32Array(settings.buffer, 32, 1)[0] = 99;
+  assert.equal(settings.settings().marginType(0), undefined);
+});
+
+test('TickerState owns numeric columns and identities after source transfer', () => {
+  const table = revisedTable(SECTION.TICKERS);
+  const frame = withStrings(numericFrame([table]));
+  const state = new TickerState();
+  state.apply(frame);
+  structuredClone(frame.buffer, { transfer: [frame.buffer] });
+  structuredClone(frame.strings.bytes.buffer, { transfer: [frame.strings.bytes.buffer] });
+  assert.deepEqual([...state.market], [0, 0]);
+  assert.deepEqual([...state.columns.midPrice], [100, 101]);
+  assert.deepEqual(state.identity(1), { symbol: 'ETH-USD', id: 'ETH-USD' });
+  const delta = tickerDeltas([1, 2048, 105]);
+  delta.revision = 1;
+  state.apply(numericFrame([delta]));
+  assert.deepEqual([...state.columns.midPrice], [100, 105]);
+  state.apply(numericFrame([tickerTable(100)]));
+  assert.equal(state.columns.midPrice, undefined);
+  assert.equal(state.identity, undefined);
+});
+
+test('owned ticker tables copy one numeric buffer and retain lazy identities after transfer', () => {
+  const frame = withStrings(numericFrame([revisedTable(SECTION.TICKERS)]), ['é', '']);
+  const raw = frame.tickers();
+  for (const [field, name] of TICKER_FIELDS.entries()) {
+    raw[name].set([field + 0.5, field === 0 ? NaN : field + 1.5]);
+  }
+  raw.market.set([7, 9]);
+  const decode = TextDecoder.prototype.decode;
+  let decodes = 0;
+  TextDecoder.prototype.decode = function (...args) {
+    decodes++;
+    return decode.apply(this, args);
+  };
+  try {
+    const owned = frame.tickers(true);
+    const state = new TickerState();
+    state.apply(frame);
+    assert.equal(decodes, 0);
+    assert.equal(raw.last.buffer, frame.buffer);
+    assert.equal(raw.market.buffer, frame.buffer);
+    assert.notEqual(owned.market.buffer, frame.buffer);
+    assert.notEqual(owned.last.buffer, frame.buffer);
+    assert.equal(owned.last.buffer.byteLength, TICKER_FIELDS.length * 2 * 8);
+    for (const name of TICKER_FIELDS) {
+      assert.equal(owned[name].buffer, owned.last.buffer);
+      assert.equal(state.columns[name].buffer, state.columns.last.buffer);
+      assert.deepEqual([...owned[name]], [...raw[name]]);
+      assert.deepEqual([...state.columns[name]], [...raw[name]]);
+    }
+    raw.last[0] = 900;
+    raw.market[0] = 99;
+    structuredClone(frame.buffer, { transfer: [frame.buffer] });
+    structuredClone(frame.strings.bytes.buffer, { transfer: [frame.strings.bytes.buffer] });
+    assert.equal(owned.last[0], 2.5);
+    assert.equal(state.columns.last[0], 2.5);
+    assert.deepEqual([...owned.market], [7, 9]);
+    assert.deepEqual([...state.market], [7, 9]);
+    assert.equal(decodes, 0);
+    assert.deepEqual(owned.identity(0), { symbol: 'é', id: 'é' });
+    assert.deepEqual(owned.identity(1), { symbol: '', id: '' });
+    assert.equal(decodes, 2);
+    assert.deepEqual(owned.identity(1), { symbol: '', id: '' });
+    assert.equal(decodes, 2);
+    assert.deepEqual(state.identity(0), { symbol: 'é', id: 'é' });
+    assert.deepEqual(state.identity(1), { symbol: '', id: '' });
+    assert.equal(decodes, 4);
+  } finally {
+    TextDecoder.prototype.decode = decode;
+  }
+});
+
+test('owned tickers validate every required identity reference without decoding strings', () => {
+  for (const value of [NONE, 2]) {
+    for (let reference = 0; reference < 4; reference++) {
+      const frame = withStrings(numericFrame([revisedTable(SECTION.TICKERS)]));
+      const section = frame.first(SECTION.TICKERS);
+      frame.view.setUint32(section.offset + 208 + reference * 4, value, true);
+      const expected = value === NONE ? /missing required string/ : /invalid string reference/;
+      assert.throws(() => frame.tickers(true), expected);
+      assert.throws(() => new TickerState().apply(frame), expected);
+      assert.equal(frame.strings.cache.length, 0);
+    }
+  }
+  const missing = numericFrame([revisedTable(SECTION.TICKERS)]);
+  assert.throws(() => missing.tickers(true), /missing STRINGS/);
+  assert.throws(() => new TickerState().apply(missing), /missing STRINGS/);
+  const empty = numericFrame([revisedTable(SECTION.TICKERS, 0)]).tickers(true);
+  assert.equal(empty.count, 0);
+  assert.equal(empty.last.length, 0);
+});
+
+test('legacy ticker tables omit mid-price and delta revisions bound their masks and rows', () => {
+  assert.equal(numericFrame([tickerTable(100)]).tickers().midPrice, undefined);
+  for (const values of [[0, 2048, 5], [0, 4], [0], [-1, 0], [0, 1.5, 3]]) {
+    assert.throws(() => numericFrame([tickerDeltas(values)]).tickerDeltas(), /ticker delta/);
+  }
+  const state = new TickerState();
+  state.apply(numericFrame([tickerTable(100)]));
+  const delta = tickerDeltas([1, 2048, 105]);
+  delta.revision = 1;
+  state.apply(numericFrame([delta]));
+  assert.ok(Number.isNaN(state.columns.midPrice[0]));
+  assert.equal(state.columns.midPrice[1], 105);
+  assert.throws(() => state.apply(numericFrame([tickerDeltas([2, 1, 6])])), /baseline row/);
+});
+
+test('legacy tables and metadata cannot borrow required fields from a following section', () => {
+  const readers = new Map([[SECTION.MARKETS, 'markets'], [SECTION.TICKERS, 'tickers'], [SECTION.ORDERS, 'orders'], [SECTION.POSITIONS, 'positions'], [SECTION.SETTINGS, 'settings'], [SECTION.FILLS, 'fills'], [SECTION.CANDLES, 'candles'], [SECTION.BALANCE, 'balance'], [SECTION.STATUS, 'status'], [SECTION.PREDICTION_MARKETS, 'predictionMarkets'], [SECTION.PREDICTION_HOLDINGS, 'predictionHoldings'], [SECTION.INSTRUMENT_CLASSIFICATIONS, 'instrumentClassifications'], [SECTION.DERIVATIVE_PRODUCTS, 'derivativeProducts'], [SECTION.POSITION_GREEKS, 'positionGreeks']]);
+  for (const [kind, reader] of readers) {
+    const frame = numericFrame([{ kind, length: 8, write(view, offset) { view.setUint32(offset, 3, true); } },
+      { kind: 4000, length: 1024, write() {} }]);
+    assert.throws(() => frame[reader](), /truncated/i, reader);
+  }
+});
+
+test('a missing STRINGS section rejects concrete identity references without inventing empty values', () => {
+  const frame = numericFrame([revisedTable(SECTION.MARKETS)]);
+  const markets = frame.markets();
+  assert.equal(markets.count, 2);
+  assert.equal(markets.precisionPrice.length, 2);
+  for (const field of ['id', 'symbol', 'base', 'quote', 'prettySymbol']) {
+    assert.throws(() => markets[field](0), /missing STRINGS/, field);
+  }
+  for (const reference of [0, 100, -1, NaN, undefined]) {
+    assert.throws(() => frame.string(reference), /missing STRINGS/);
+  }
+  assert.equal(frame.string(NONE), undefined);
+});
+
+test('numeric-only frames remain readable without STRINGS while present tables validate references', () => {
+  const numeric = numericFrame([tickerTable(100), tickerDeltas([1, 4, 500])]);
+  const state = new TickerState();
+  state.apply(numeric);
+  assert.equal(state.columns.last[1], 500);
+  assert.equal(numeric.string(NONE), undefined);
+  const strings = stringFrame(['native-id']);
+  assert.equal(strings.string(0), 'native-id');
+  for (const reference of [1, -1, NaN, undefined]) {
+    assert.throws(() => strings.string(reference), /invalid string reference/);
+  }
 });

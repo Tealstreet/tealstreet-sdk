@@ -26,7 +26,6 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     settings: bool,
-    mode: Option<bool>,
 }
 pub struct Request {
     command: CommandId,
@@ -58,6 +57,7 @@ enum Call {
     Settings {
         symbol: String,
         leverage: Option<f64>,
+        side: Option<PositionSide>,
         margin: Option<MarginType>,
         mode: Option<PositionMode>,
     },
@@ -227,6 +227,9 @@ impl PhemexPerpetuals {
             if o.client_order_id.is_some() && o.amount > m.limits.amount.max {
                 return Err("Phemex caller clientOrderId cannot span split orders".into());
             }
+            self.account
+                .context(&o.symbol)
+                .ok_or("Phemex leverage/margin context is unknown; await account reconciliation")?;
             let mode = self
                 .account
                 .mode(&o.symbol)
@@ -506,6 +509,9 @@ impl PhemexPerpetuals {
             } else if let Some(p) = self.account.order_pos_side(&base) {
                 p.to_owned()
             } else {
+                self.account
+                    .context(&o.symbol)
+                    .ok_or("Phemex cancel position mode is unknown")?;
                 let mode = self
                     .account
                     .mode(&o.symbol)
@@ -706,6 +712,7 @@ impl PhemexPerpetuals {
         cx: &Cx<'_, Pending>,
         symbol: String,
         leverage: Option<f64>,
+        side: Option<PositionSide>,
         margin: Option<MarginType>,
     ) -> Result<VecDeque<Step>, String> {
         let m = cx
@@ -725,21 +732,28 @@ impl PhemexPerpetuals {
             return Err("Phemex market leverage limits are invalid".into());
         }
         let changing_leverage = leverage.is_some();
-        let long = leverage.unwrap_or(context.long_leverage);
-        let short = if context.mode == PositionMode::Hedged && !changing_leverage {
+        let side = side.filter(|_| context.mode == PositionMode::Hedged);
+        let long = if side == Some(PositionSide::Short) {
+            context.long_leverage
+        } else {
+            leverage.unwrap_or(context.long_leverage)
+        };
+        let short = if side == Some(PositionSide::Long)
+            || context.mode == PositionMode::Hedged && !changing_leverage
+        {
             context.short_leverage
         } else {
-            long
+            leverage.unwrap_or(context.long_leverage)
         };
         if !long.is_finite() || long <= 0.0 || !short.is_finite() || short <= 0.0 {
             return Err("Phemex current side leverage is unknown or invalid".into());
         }
-        let long = if changing_leverage {
+        let long = if changing_leverage && side != Some(PositionSide::Short) {
             long.clamp(m.limits.leverage.min, m.limits.leverage.max)
         } else {
             long
         };
-        let short = if changing_leverage {
+        let short = if changing_leverage && side != Some(PositionSide::Long) {
             short.clamp(m.limits.leverage.min, m.limits.leverage.max)
         } else {
             short
@@ -764,7 +778,12 @@ impl PhemexPerpetuals {
             query: query(params),
             call: Call::Settings {
                 symbol,
-                leverage: changing_leverage.then_some(long),
+                leverage: changing_leverage.then_some(if side == Some(PositionSide::Short) {
+                    short
+                } else {
+                    long
+                }),
+                side,
                 margin: Some(margin),
                 mode: None,
             },
@@ -799,7 +818,6 @@ impl PhemexPerpetuals {
             command,
             Command::PlaceOrders { .. } | Command::AmendOrder { .. }
         );
-        let mut mode = None;
         let (id, planned) = match command {
             Command::CancelOrdersWithSymbols { command, .. }
             | Command::FetchStpMode { command }
@@ -858,9 +876,10 @@ impl PhemexPerpetuals {
                 command,
                 symbol,
                 leverage,
+                side,
             } => (
                 command,
-                self.settings_plan(cx, symbol, Some(leverage), None),
+                self.settings_plan(cx, symbol, Some(leverage), side, None),
             ),
             Command::SetMarginType {
                 command,
@@ -872,6 +891,7 @@ impl PhemexPerpetuals {
                     cx,
                     symbol,
                     None,
+                    None,
                     Some(if isolated {
                         MarginType::Isolated
                     } else {
@@ -879,46 +899,45 @@ impl PhemexPerpetuals {
                     }),
                 ),
             ),
-            Command::SetPositionMode { command, hedged } => {
-                mode = Some(hedged);
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol,
+            } => {
                 let result = (|| {
-                    let mut steps = VecDeque::new();
-                    for m in cx
+                    let symbol = symbol
+                        .filter(|s| !s.is_empty())
+                        .ok_or("Phemex symbol is required for position mode")?;
+                    let market = cx
                         .store
-                        .markets()
-                        .iter()
-                        .filter(|m| m.active && m.is_read_only != Some(true))
-                    {
-                        self.account.context(&m.symbol).ok_or(
-                            "Phemex global mode change requires confirmed context for every market",
-                        )?;
-                        steps.push_back(Step {
-                            method: Method::Put,
-                            path: "/g-positions/switch-pos-mode-sync",
-                            query: query(vec![
-                                ("symbol", self.native_symbol(&m.symbol).to_owned()),
-                                (
-                                    "targetPosMode",
-                                    if hedged { "Hedged" } else { "OneWay" }.into(),
-                                ),
-                            ]),
-                            call: Call::Settings {
-                                symbol: m.symbol.clone(),
-                                leverage: None,
-                                margin: None,
-                                mode: Some(if hedged {
-                                    PositionMode::Hedged
-                                } else {
-                                    PositionMode::Oneway
-                                }),
-                            },
-                            replacement: None,
-                        });
+                        .market(&symbol)
+                        .ok_or("Phemex position mode market not found")?;
+                    if !market.active || market.is_read_only == Some(true) {
+                        return Err("Phemex position mode market is not tradable".into());
                     }
-                    if steps.is_empty() {
-                        return Err("Phemex no markets available for mode change".into());
-                    }
-                    Ok(steps)
+                    Ok(VecDeque::from([Step {
+                        method: Method::Put,
+                        path: "/g-positions/switch-pos-mode-sync",
+                        query: query(vec![
+                            ("symbol", self.native_symbol(&symbol).to_owned()),
+                            (
+                                "targetPosMode",
+                                if hedged { "Hedged" } else { "OneWay" }.into(),
+                            ),
+                        ]),
+                        call: Call::Settings {
+                            symbol,
+                            leverage: None,
+                            side: None,
+                            margin: None,
+                            mode: Some(if hedged {
+                                PositionMode::Hedged
+                            } else {
+                                PositionMode::Oneway
+                            }),
+                        },
+                        replacement: None,
+                    }]))
                 })();
                 (command, result)
             }
@@ -953,7 +972,6 @@ impl PhemexPerpetuals {
                         steps,
                         ids: Vec::new(),
                         settings: is_settings,
-                        mode,
                     },
                 );
                 self.trade_next(cx, id);
@@ -968,9 +986,6 @@ impl PhemexPerpetuals {
         };
         let Some(step) = job.steps.pop_front() else {
             let job = self.trading.jobs.remove(&id).unwrap();
-            if let Some(hedged) = job.mode {
-                cx.store.set_hedged(hedged);
-            }
             cx.done(id, Ok(serde_json::to_string(&job.ids).unwrap()));
             return;
         };
@@ -1268,18 +1283,41 @@ impl PhemexPerpetuals {
                 Call::Settings {
                     symbol,
                     leverage,
+                    side,
                     margin,
                     mode,
                 } => {
                     if let Some(l) = leverage {
-                        cx.store.update_setting(symbol, |s| s.leverage = *l);
+                        cx.store.update_setting(symbol, |s| {
+                            if *side != Some(PositionSide::Short) {
+                                s.leverage = *l;
+                                s.buy_leverage = Some(*l);
+                            }
+                            if *side != Some(PositionSide::Long) {
+                                s.sell_leverage = Some(*l);
+                            }
+                        });
+                        cx.store.update_positions(|p| {
+                            if p.symbol == *symbol && side.is_none_or(|selected| selected == p.side)
+                            {
+                                p.leverage = *l;
+                            }
+                        });
                     }
                     if let Some(m) = margin {
                         cx.store
                             .update_setting(symbol, |s| s.margin_type = Some(*m));
                     }
                     self.account
-                        .apply_settings(symbol, *leverage, *margin, *mode);
+                        .apply_settings(symbol, *leverage, *side, *margin, *mode);
+                    if let Some(mode) = mode {
+                        cx.store.update_positions(|p| {
+                            if p.symbol == *symbol {
+                                p.position_mode = Some(*mode);
+                            }
+                        });
+                        cx.store.set_hedged(self.account.any_hedged());
+                    }
                 }
             }
             Ok(())

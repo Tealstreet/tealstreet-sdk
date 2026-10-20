@@ -414,6 +414,7 @@ fn inverse_metadata_leverage_margin_and_cancellation_use_symbol_collateral() {
         command: 80,
         symbol: "ETHUSD".into(),
         leverage: 25.0,
+        side: None,
     });
     let metadata = h.take("/account/account?");
     assert!(

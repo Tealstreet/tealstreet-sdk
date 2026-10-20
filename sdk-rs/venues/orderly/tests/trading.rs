@@ -9,6 +9,7 @@ fn place(e: &mut Driver, command: u32, json: &str) {
         Event::Command(Command::PlaceOrders { command, orders }),
     );
 }
+
 fn done(out: Vec<Action>, id: u32) -> Result<String, String> {
     out.into_iter()
         .find_map(|a| {
@@ -20,6 +21,7 @@ fn done(out: Vec<Action>, id: u32) -> Result<String, String> {
         })
         .expect("command completion")
 }
+
 fn body(r: &safe_cex_engine::HttpRequest) -> serde_json::Value {
     serde_json::from_str(r.body.as_deref().unwrap()).unwrap()
 }
@@ -48,6 +50,7 @@ fn caller_id_is_exact_and_documented_tif_is_native() {
     );
     assert_eq!(done(actions(&mut e), 1).unwrap(), r#"["9007199254740995"]"#);
 }
+
 #[test]
 fn full_batch_fails_before_any_write_for_invalid_later_id_and_bracket_source() {
     let (mut e, _) = ready();
@@ -63,6 +66,7 @@ fn full_batch_fails_before_any_write_for_invalid_later_id_and_bracket_source() {
         assert!(done(out, 10).is_err());
     }
 }
+
 fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
     for busy in [false, true] {
         let (mut e, _) = ready();
@@ -176,6 +180,7 @@ fn split_quantities_preserve_exact_amount_and_report_partial_acceptance() {
             .all(|r| r.method == safe_cex_engine::Method::Get)
     );
 }
+
 #[test]
 fn brackets_follow_entry_and_accept_documented_root_id_shape() {
     let (mut e, s) = ready();
@@ -221,6 +226,7 @@ fn brackets_follow_entry_and_accept_documented_root_id_shape() {
     );
     assert_eq!(done(actions(&mut e), 1).unwrap(), r#"["50","51"]"#);
 }
+
 #[test]
 fn replacing_one_stop_preserves_opposite_sibling_once_after_confirmed_cancel() {
     let (mut e, s) = ready_with(ORDER, ALGO, POSITIONS);
@@ -258,6 +264,7 @@ fn replacing_one_stop_preserves_opposite_sibling_once_after_confirmed_cancel() {
     assert_eq!(b["child_orders"][0]["trigger_price"], "48000");
     assert_eq!(b["child_orders"][1]["trigger_price"], "55000");
 }
+
 #[test]
 fn cancelling_both_children_sends_one_parent_delete_and_never_repairs() {
     let (mut e, _) = ready_with(ORDER, ALGO, POSITIONS);
@@ -280,6 +287,7 @@ fn cancelling_both_children_sends_one_parent_delete_and_never_repairs() {
     assert!(done(actions(&mut e), 1).is_ok());
     assert!(requests(&mut e).is_empty());
 }
+
 #[test]
 fn bulk_cancel_attempts_both_families_after_a_failure() {
     let (mut e, _) = ready_with(ORDER, ALGO, POSITIONS);
@@ -317,6 +325,7 @@ fn bulk_cancel_attempts_both_families_after_a_failure() {
     );
     assert!(done(actions(&mut e), 1).is_err());
 }
+
 #[test]
 fn strict_native_amend_preserves_identity_and_never_replaces() {
     let (mut e, _) = ready();
@@ -354,6 +363,7 @@ fn strict_native_amend_preserves_identity_and_never_replaces() {
     );
     assert!(done(actions(&mut e), 2).is_err());
 }
+
 #[test]
 fn margin_selector_keeps_existing_positions_and_targets_symbol_leverage() {
     let (mut e, _) = ready();
@@ -376,6 +386,7 @@ fn margin_selector_keeps_existing_positions_and_targets_symbol_leverage() {
             command: 2,
             symbol: "BTCUSDC".into(),
             leverage: 1000.0,
+            side: None,
         }),
     );
     let r = requests(&mut e).pop().unwrap();
@@ -493,6 +504,7 @@ fn global_cross_leverage_is_clamped_for_each_symbol() {
             command: 1,
             symbol: String::new(),
             leverage: 100.0,
+            side: None,
         }),
     );
     let r = requests(&mut e).pop().unwrap();
@@ -1532,5 +1544,118 @@ fn definite_native_rejection_still_restores_optimistic_order_state() {
     assert_eq!(
         e.store().order("9007199254740993").unwrap().status,
         OrderStatus::Open
+    );
+}
+
+#[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let (mut e, _) = ready();
+        actions(&mut e);
+        e.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        e.handle(
+            2000.0,
+            Event::Command(Command::SetLeverage {
+                command: 99,
+                symbol: "BTCUSDC".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+        let out = actions(&mut e);
+        assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+    }
+}
+
+#[test]
+fn accepted_global_leverage_continues_past_invalid_market_limits() {
+    use safe_cex_engine::model::MarginType;
+    let (mut e, _) = ready();
+    actions(&mut e);
+    e.handle(
+        2000.,
+        Event::Command(Command::SetMarginType {
+            command: 100,
+            symbol: "ETHUSDC".into(),
+            isolated: false,
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, 200, r#"{"success":true}"#);
+    assert!(done(actions(&mut e), 100).is_ok());
+    let mut markets = e.store().markets().to_vec();
+    let mut sol = markets[0].clone();
+    sol.id = "SOL/USDC:USDC".into();
+    sol.symbol = "SOLUSDC".into();
+    sol.base = "SOL".into();
+    sol.limits.leverage.max = 30.;
+    markets[1].limits.leverage.min = 50.;
+    markets[1].limits.leverage.max = 10.;
+    markets.push(sol);
+    e.store_mut().set_markets(markets);
+    let positions = e.store().positions().to_vec();
+    let cross = positions
+        .iter()
+        .find(|p| p.margin_type == Some(MarginType::Cross))
+        .unwrap()
+        .clone();
+    let isolated = positions
+        .iter()
+        .find(|p| p.margin_type == Some(MarginType::Isolated))
+        .unwrap()
+        .clone();
+    let mut rows = vec![isolated.clone()];
+    for symbol in ["BTCUSDC", "ETHUSDC", "SOLUSDC"] {
+        let mut p = cross.clone();
+        p.id = symbol.into();
+        p.symbol = symbol.into();
+        rows.push(p);
+    }
+    e.store_mut().set_positions(rows);
+    e.handle(
+        2000.,
+        Event::Command(Command::SetLeverage {
+            command: 101,
+            symbol: String::new(),
+            leverage: 80.,
+            side: None,
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    assert_eq!(body(&r)["leverage"], 80.);
+    assert!(body(&r).get("symbol").is_none());
+    reply(&mut e, &r, 200, r#"{"success":true}"#);
+    let out = actions(&mut e);
+    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Warning,message}) if message.contains("ETHUSDC") && message.contains("confirmed account leverage"))));
+    assert!(done(out, 101).is_ok());
+    for (symbol, expected) in [("BTCUSDC", 80.), ("ETHUSDC", 80.), ("SOLUSDC", 30.)] {
+        assert_eq!(e.store().setting(symbol).unwrap().leverage, expected);
+        assert_eq!(
+            e.store()
+                .positions()
+                .iter()
+                .find(|p| p.id == symbol)
+                .unwrap()
+                .leverage,
+            expected
+        );
+    }
+    assert_eq!(
+        e.store()
+            .positions()
+            .iter()
+            .find(|p| p.id == isolated.id)
+            .unwrap()
+            .leverage,
+        isolated.leverage
     );
 }

@@ -238,6 +238,7 @@ fn settings_rejections_preserve_known_leverage() {
             command: 7,
             symbol: "BTCUSDT".into(),
             leverage: 30.0,
+            side: None,
         }),
     );
     h.collect();
@@ -481,6 +482,7 @@ fn isolated_hedge_leverage_sends_both_sides_before_either_response() {
         Event::Command(Command::SetPositionMode {
             command: 9,
             hedged: true,
+            symbol: None,
         }),
     );
     h.collect();
@@ -494,6 +496,7 @@ fn isolated_hedge_leverage_sends_both_sides_before_either_response() {
             command: 7,
             symbol: "BTCUSDT".into(),
             leverage: 30.0,
+            side: None,
         }),
     );
     h.collect();
@@ -1227,5 +1230,36 @@ fn mixed_unknown_cancel_keeps_ack_route_and_sends_no_partial_write() {
                 result: Ok(_)
             })
         )));
+    }
+}
+
+#[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let mut h = Harness::new();
+        h.seed();
+        h.pending.clear();
+        h.actions.clear();
+        h.e.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        h.e.handle(
+            1.0,
+            Event::Command(Command::SetLeverage {
+                command: 99,
+                symbol: "BTCUSDT".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+        h.collect();
+        assert!(h.pending.is_empty());
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
     }
 }

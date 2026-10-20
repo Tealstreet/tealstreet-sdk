@@ -47,6 +47,7 @@ fn fixed_one_way_one_x_settings_are_read_only_and_client_lookup_is_not_definitiv
             command: 1,
             symbol: "x".into(),
             leverage: 100.0,
+            side: None,
         },
         Command::SetMarginType {
             command: 1,
@@ -56,6 +57,7 @@ fn fixed_one_way_one_x_settings_are_read_only_and_client_lookup_is_not_definitiv
         Command::SetPositionMode {
             command: 1,
             hedged: true,
+            symbol: None,
         },
     ] {
         e.handle(0.0, Event::Command(command));

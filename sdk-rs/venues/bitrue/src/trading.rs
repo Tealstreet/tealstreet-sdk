@@ -765,7 +765,11 @@ impl Bitrue {
                 );
                 return true;
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 if *hedged {
                     cx.done(
                         *command,

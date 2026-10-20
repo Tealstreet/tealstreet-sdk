@@ -6,6 +6,7 @@ use support::*;
 fn order(text: &str) -> PlaceOrderOpts {
     serde_json::from_str(text).unwrap()
 }
+
 fn place(
     e: &mut safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
     orders: Vec<PlaceOrderOpts>,
@@ -16,6 +17,7 @@ fn place(
     );
     actions(e)
 }
+
 #[test]
 fn caller_id_and_contract_amount_are_sent_verbatim_after_lot_adjustment() {
     let mut e = trading_engine();
@@ -40,6 +42,7 @@ fn caller_id_and_contract_amount_are_sent_verbatim_after_lot_adjustment() {
     );
     assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(s), .. }) if s == "[\"1234\"]")));
 }
+
 #[test]
 fn whole_batch_rejects_unhonorable_or_duplicate_caller_id_before_writes() {
     for bad in [
@@ -62,6 +65,7 @@ fn whole_batch_rejects_unhonorable_or_duplicate_caller_id_before_writes() {
         )));
     }
 }
+
 #[test]
 fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
     let mut e = trading_engine();
@@ -99,6 +103,7 @@ fn bracket_entry_then_stop_then_take_profit_are_sequenced() {
     );
     assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Ok(s), .. }) if s == "[\"1\",\"2\",\"3\"]")));
 }
+
 #[test]
 fn lost_write_response_never_retries() {
     let mut e = trading_engine();
@@ -161,17 +166,20 @@ fn stored(id: &str, kind: safe_cex_engine::model::OrderType) -> safe_cex_engine:
         extra: None,
     }
 }
+
 fn http(out: &[Action]) -> &Action {
     out.iter()
         .find(|a| matches!(a, Action::Http(_)))
         .expect("HTTP action")
 }
+
 fn body(action: &Action) -> &str {
     let Action::Http(r) = action else {
         panic!("HTTP action")
     };
     r.body.as_deref().unwrap()
 }
+
 fn ack(
     e: &mut safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
     a: &Action,
@@ -529,6 +537,7 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
             command: 2,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         }),
     );
     let out = actions(&mut e);
@@ -1104,5 +1113,33 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
             "missing cancellation error: {actions:?}"
         );
         assert_eq!(e.store().order("123").unwrap().status, OrderStatus::Open);
+    }
+}
+
+#[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let mut e = trading_engine();
+        e.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        e.handle(
+            5.0,
+            Event::Command(Command::SetLeverage {
+                command: 99,
+                symbol: "BTCUSDT".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+        let out = actions(&mut e);
+        assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
     }
 }

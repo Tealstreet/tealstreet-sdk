@@ -75,7 +75,7 @@ import { ExternalPublicDataProvider } from './external-public-data';
 import { reportException } from '../telemetry';
 import { InProcessPublicDataProvider } from './in-process-public-data';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
-import { FrameApplier } from '../store/frameApplier';
+import { FrameApplier, FrameApplyError } from '../store/frameApplier';
 
 const normalizeSymbols = (symbols: string[]): string[] => {
   const deduped = new Set<string>();
@@ -223,12 +223,18 @@ export const isEmptyStubCapability = (value: unknown): boolean => {
 export const isInertCapability = (value: unknown, method: BaseCapabilityMethod): boolean =>
   isBaseCapabilityFallback(value, method) || isEmptyStubCapability(value);
 
+export type EngineSnapshot = {
+  frame: ArrayBuffer;
+  fetchedLeverage: Record<string, FetchedLeverage>;
+};
+
 export type CallableMethodsInWorker =
   | 'setLeverage'
   | 'scheduleCancel'
   | 'changePositionMode'
   | 'changeMarginType'
   | 'fetchAndSetPrivateSnapshot'
+  | 'fetchEngineSnapshot'
   | 'reconnect'
   | 'recoverAfterOffline'
   | 'fetchOHLCV'
@@ -318,6 +324,7 @@ export interface Exchange {
   fetchTickers?: () => Promise<Ticker[]>;
   fetchSymbolMaxLeverage?: (symbol: string) => Promise<number>;
   fetchLeverageForSymbol: (symbol: string) => Promise<FetchedLeverage | null>;
+  fetchEngineSnapshot: () => Promise<EngineSnapshot>;
   updateSymbolMetadata: (symbol: string) => Promise<void>;
   fetchClosedPnl: (opts: HistoricalTradeOptions) => Promise<ClosedPnlEntry[]>;
   fetchIncomeHistory: (opts?: IncomeHistoryOptions) => Promise<IncomeRecord[]>;
@@ -1431,6 +1438,19 @@ export class BaseExchange implements Exchange {
   }
 
   private workerFrameApplier?: FrameApplier;
+  private workerFrameRecoveryPending = false;
+
+  fetchEngineSnapshot = async (): Promise<EngineSnapshot> => {
+    throw new Error('Engine snapshots are unavailable for this exchange');
+  };
+
+  protected dispatchFrameEvent(callback: () => void) {
+    try {
+      callback();
+    } catch (error) {
+      console.error('Engine frame listener failed', error);
+    }
+  }
 
   /**
    * Main thread: apply one Rust engine frame from the worker (`op: 'frame'`)
@@ -1438,6 +1458,10 @@ export class BaseExchange implements Exchange {
    * object messages are emitted, so subscribers cannot tell the difference.
    */
   applyWorkerFrame(buffer: ArrayBuffer) {
+    this.applyWorkerFrameBuffer(buffer, true);
+  }
+
+  private applyWorkerFrameBuffer(buffer: ArrayBuffer, recover: boolean) {
     this.workerFrameApplier ??= new FrameApplier(
       this.store,
       ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
@@ -1445,11 +1469,51 @@ export class BaseExchange implements Exchange {
       ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
       this.name === 'binanceinverse',
     );
-    const frame = new Frame(buffer);
-    this.workerFrameApplier.apply(frame);
-    for (const book of this.workerFrameApplier.books(frame)) this.emitter.emit('listenOrderBook', book);
-    for (const candle of this.workerFrameApplier.candles(frame)) this.emitter.emit('listenOHLCV', candle);
-    for (const fill of this.workerFrameApplier.fills(frame)) this.emitter.emit('fill', fill);
+    let frame: Frame | undefined;
+    let needsSnapshot = false;
+    try {
+      frame = new Frame(buffer);
+    } catch (error) {
+      this.workerFrameApplier.invalidateMarketIdentity();
+      needsSnapshot = true;
+      console.error('Invalid engine frame', error);
+    }
+    if (frame) {
+      try {
+        this.workerFrameApplier.apply(frame);
+      } catch (error) {
+        needsSnapshot = error instanceof FrameApplyError;
+        console.error('Engine frame apply failed', error);
+      }
+      const deliver = <T>(read: () => T[], event: string) => {
+        let rows: T[];
+        try {
+          rows = read();
+        } catch (error) {
+          needsSnapshot = true;
+          console.error('Engine frame section failed', error);
+          return;
+        }
+        for (const row of rows) this.dispatchFrameEvent(() => this.emitter.emit(event, row));
+      };
+      deliver(() => this.workerFrameApplier!.books(frame!), 'listenOrderBook');
+      deliver(() => this.workerFrameApplier!.candles(frame!), 'listenOHLCV');
+      deliver(() => this.workerFrameApplier!.fills(frame!), 'fill');
+    }
+    if (!needsSnapshot || !recover || this.workerFrameRecoveryPending || this.isDisposed) return;
+    this.workerFrameRecoveryPending = true;
+    void Promise.resolve()
+      .then(async () => {
+        const snapshot = await (this as Exchange).callMethodInWorker('fetchEngineSnapshot');
+        if (!this.isDisposed) {
+          this.applyWorkerFrameBuffer(snapshot.frame, false);
+          this.dispatchFrameEvent(() => this.workerFrameApplier!.applyLeverageSnapshot(snapshot.fetchedLeverage));
+        }
+      })
+      .catch((error) => console.error('Engine frame recovery failed', error))
+      .finally(() => {
+        this.workerFrameRecoveryPending = false;
+      });
   }
 
   listenOrderBookWebworker(s: string, c: (o: OrderBook) => void) {

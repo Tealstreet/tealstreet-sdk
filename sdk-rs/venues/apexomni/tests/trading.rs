@@ -396,6 +396,7 @@ fn leverage_uses_real_multipart_and_clamps_to_market_rails() {
             command: 9,
             symbol: "BTCUSDT".into(),
             leverage: 500.0,
+            side: None,
         }),
     );
     let request = requests(&mut e).remove(0);
