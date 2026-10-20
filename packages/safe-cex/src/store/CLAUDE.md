@@ -4,7 +4,10 @@ The Tealstreet exchange store. One `DefaultStore` per exchange
 account; mirrored across worker → main thread via the worker's
 throttled postMessage.
 
-Rust frames keep quantities in published base units. For MEXC, BloFin and KuCoin futures,
+Rust frames keep the venue adapter's published SDK quantity units. COIN-M
+orders carry native contract counts while positions carry base quantity; the
+COIN-M applier preserves the USD contract multiplier in native sizing extras.
+For MEXC, BloFin and KuCoin futures,
 `FrameApplier` also retains native placement-unit order extras in both worker
 and main stores. Prefer the exact native remaining column when present; legacy
 frames reconstruct placement quantities from `contractSize` so chaser arithmetic
@@ -265,8 +268,11 @@ frame cannot detach future delta state. Forwarding workers call
 ## Rust frame native units
 
 `FrameApplier` preserves inverse sizing metadata across the worker bridge.
-Inverse position `notional` is the native quote-contract size, so the applier
-also publishes it as `extra.contractsNative`; `extra.unrealizedPnlNative`
+For Bybit/Bitget inverse, position `notional` is the native quote-contract
+size, so the applier also publishes it as `extra.contractsNative`. Binance
+COIN-M uses fixed USD contract sizes: its worker and main appliers divide
+notional by market `contractSize` for native contract counts, and multiply exact
+order leaves by `contractSize` for `remainingNotional`; `extra.unrealizedPnlNative`
 keeps the native PnL. Copier closes consume the native size rather than the
 rounded base-coin `contracts` field.
 

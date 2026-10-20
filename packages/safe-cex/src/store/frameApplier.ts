@@ -27,7 +27,7 @@ export class FrameApplier {
   private readonly frameMarkets = new WeakMap<Frame, { symbols: string[]; ids: string[] }>();
   private contractSizes: number[] = [];
 
-  constructor(private readonly store: Store, private readonly nativePlacementAmounts = false, private readonly inverseNativeAmounts = false) {}
+  constructor(private readonly store: Store, private readonly nativePlacementAmounts = false, private readonly inverseNativeAmounts = false, private readonly inverseContractSized = false) {}
 
   /** Forwarding workers skip book reconstruction before transferring the frame. */
   apply(frame: Frame, applyBooks = true): void {
@@ -129,7 +129,7 @@ export class FrameApplier {
         const market = update.markets?.[orders.market[i]] ?? this.store.marketsBySymbol[symbol];
         const native = orders.remainingNative?.[i];
         const nativeExtra = market?.isInverse && native !== undefined && Number.isFinite(native)
-          ? { remainingNative: native, remainingNotional: native }
+          ? { remainingNative: native, remainingNotional: native * (this.inverseContractSized ? this.contractSizes[orders.market[i]] : 1) }
           : this.inverseNativeAmounts
             ? { remainingNative: Math.max(0, subtract(orders.amount[i], orders.filled[i])) }
             : undefined;
@@ -205,7 +205,7 @@ export class FrameApplier {
             ...(this.nativePlacementAmounts && {
               contractsNative: divide(positions.contracts[i], this.contractSizes[positions.market[i]]),
             }),
-            ...((market?.isInverse || this.inverseNativeAmounts) && { contractsNative: positions.notional[i], unrealizedPnlNative: positions.unrealizedPnl[i] }),
+            ...((market?.isInverse || this.inverseNativeAmounts) && { contractsNative: positions.notional[i] / (this.inverseContractSized ? this.contractSizes[positions.market[i]] : 1), unrealizedPnlNative: positions.unrealizedPnl[i] }),
           } }),
           liquidationPrice: positions.liquidationPrice[i],
           ...(mode !== undefined && { positionMode: mode }),
