@@ -24,6 +24,7 @@ import { fixCoinbase, COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { fixBitrue, BITRUE_TS_FIXES } from './known-ts-fixes-bitrue.mjs';
 import { memoryMetricErrors } from './memory.mjs';
+import { cpuObjectiveMet } from './cpu-objective.mjs';
 import { fixBinanceSpotFills, fixBinanceFilledStatus } from './binance-protocol.mjs';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
@@ -1157,8 +1158,8 @@ if (venue.family === 'coinbase')
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.
 if (!isPrivate) {
-  if (!(r.cpuMs < t.cpuMs)) failures.push('Rust main-thread CPU is not below TS');
-  if (!(r.steadyCpuMs < t.steadyCpuMs)) failures.push('Rust steady-state CPU is not below TS');
+  if (!cpuObjectiveMet(r.cpuMs, t.cpuMs)) failures.push('Rust main-thread CPU is not below TS');
+  if (!cpuObjectiveMet(r.steadyCpuMs, t.steadyCpuMs)) failures.push('Rust steady-state CPU is not below TS');
   if (!(r.retainedMB < t.retainedMB)) failures.push('Rust retained memory is not below TS');
 }
 if (failures.length) {
