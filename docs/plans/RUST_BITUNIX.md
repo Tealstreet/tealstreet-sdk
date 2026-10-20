@@ -603,3 +603,12 @@ unused-write errors. Root full 27 tasks PASS (including 458 safe-cex files,
 6,622 tests). Bitunix/Binance/Crypto.com public and private gates PASS; Bitget
 public rerun passes after the busy full-suite run ended, its private gate PASS.
 Remaining venues and exact-head CI are required before merging PR #1309.
+
+Exact-head CI exposed two production-only integration gaps missed by shared
+helper tests: BloFin literal ping reached JSON.parse, and BingX retained
+signing timestamp/signature in legacy request identity. Fix literal handling
+without inventing pong responses, and route BingX through strict typed matching.
+Both exact-production regressions and independent adversarial probes PASS;
+222 helpers PASS. Malformed/auth/subscription errors, caller IDs, economic
+field types and one-shot write consumption remain strict. Hyperliquid CI's
+negative 88-byte buffer component remains under investigation, not normalized.

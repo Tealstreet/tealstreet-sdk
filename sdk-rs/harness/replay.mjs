@@ -120,7 +120,7 @@ const canonicalUrl = (url) => {
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
-const requestKey = (method, url, body) => ['blofin', 'mexc'].includes(values.venue)
+const requestKey = (method, url, body) => ['blofin', 'mexc', 'bingx'].includes(values.venue)
   ? keyOf(method, url, body, callerIds, venue)
   : `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
 
@@ -169,11 +169,11 @@ class Tape extends SharedTape {
     }
     this.audit?.sent(socket.rawUrl, text);
     if (values.venue === 'bingx' && (text === 'Ping' || text === 'Pong')) return;
-    if (venue.respondToPing && text === 'ping') {
-      setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
+    if ((venue.respondToPing || venue.blofinProtocol) && text === 'ping') {
+      if (venue.respondToPing) setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
       return;
     }
-    if (venue.respondToPing && text === 'pong') return;
+    if ((venue.respondToPing || venue.blofinProtocol) && text === 'pong') return;
     const message = JSON.parse(text);
     if (venue.requestBodies) {
       if (message.op === 'subscribe' || message.op === 'unsubscribe') {
