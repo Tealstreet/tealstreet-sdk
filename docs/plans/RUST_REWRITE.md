@@ -349,9 +349,22 @@ worker shell's chasers, TWAP, CLI, post-processors and derived store fields.
 Application session authorization, TLS termination, credential provisioning,
 process supervision and public routing remain deployment responsibilities.
 No cache export or existing hosted-account protocol is removed in this step.
-A later TS session adapter can translate worker commands and feed these frames
-through `FrameApplier`; only after parity for shell behavior and cache hydration
-can the deployed exchange-server stop its old worker execution path. Browser
+`packages/safe-cex-server` now exposes `ServerSessionFactory` and
+`NativeFrameSession` for application session routes. Explicit Rust selection
+resolves an authorized, preconfigured native account and relays binary SCXF
+snapshots/flushes unchanged, then routes native/WASM JSON commands and their
+client-scoped results. It constructs no TS exchange for that session and never
+falls back after native failure. A client uses a fresh `FrameApplier` per
+connection; ordered async delivery is bounded, and overflow or a stream gap
+closes the session instead of dropping deltas. AbortSignal covers client
+disconnect during resolution/connection/delivery. The explicit TypeScript path
+returns the existing PublicExchangeFactory handle unchanged; its startup,
+hourly refresh and cache policies remain owned by the consumer-blockers work.
+See `packages/safe-cex-server/src/frameSession/README.md` and the committed
+`RUST_SERVER_ADAPTER_PROGRESS.md` plan/gates. This mirror contains the library,
+not the deployed application: session-route adoption and preservation of worker
+shell behavior/cache hydration remain application work before its old worker
+execution path can stop. Browser
 adoption is still the separate master/Copybara step above.
 
 Bandwidth is measured with a deterministic two-book fixture, without a load

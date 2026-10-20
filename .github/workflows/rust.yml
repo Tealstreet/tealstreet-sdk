@@ -11,11 +11,13 @@ on:
     paths:
       - 'sdk-rs/**'
       - 'packages/safe-cex/**'
+      - 'packages/safe-cex-server/**'
       - '.github/workflows/rust.yml'
   pull_request:
     paths:
       - 'sdk-rs/**'
       - 'packages/safe-cex/**'
+      - 'packages/safe-cex-server/**'
       - '.github/workflows/rust.yml'
 
 permissions:
@@ -215,6 +217,12 @@ jobs:
       - name: Rust book delta wire through the JS decoder and SDK
         if: matrix.venue == 'binance'
         run: yarn rust:test-frame-wire
+      - name: Build the offline native session fixture
+        if: matrix.venue == 'binance'
+        run: cargo build --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-native --example session-adapter-fixture
+      - name: Native frame session adapter through real WebSockets
+        if: matrix.venue == 'binance'
+        run: yarn rust:test-server-adapter
       - name: Build the combined wasm engine
         if: matrix.venue == 'binance'
         run: yarn rust:build-wasm
