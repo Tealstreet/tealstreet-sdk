@@ -47,6 +47,13 @@ pub struct Options {
     pub application_id: Option<String>,
     pub tick_interval: Option<f64>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
 
 pub enum Pending {
     History(history::Request),
@@ -117,7 +124,7 @@ enum Seed {
 }
 
 pub struct Orderly {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     public: Connection,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, Interval), u32>,
@@ -131,6 +138,7 @@ pub struct Orderly {
 }
 impl Orderly {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             public: Connection::new(None),
@@ -583,6 +591,9 @@ fn interval_valid(i: Interval) -> bool {
 }
 
 impl Venue for Orderly {
+    fn on_tick_interval(&mut self, cx: &mut Cx<'_, Pending>, interval_ms: f64) {
+        self.account_tick_interval(cx, interval_ms);
+    }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
