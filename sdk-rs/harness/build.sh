@@ -14,6 +14,10 @@ if [[ $# -gt 0 ]]; then
     orderly|tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) build_args+=(--no-default-features --features orderly) ;;
     *) echo "Unsupported venue: $2 (expected asterdex, binance, kucoin, kucoinspot, bybit, hyperliquid, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, phemex, woo, lighter, apexomni, kraken, paradex, coinbase, orderly or polymarket)" >&2; exit 2 ;;
   esac
+  if [[ $2 == paradex ]]; then
+    # Keep standalone Paradex within the fixed size gate; public replay also gates CPU and memory.
+    build_args+=(--config 'profile.release.package.safe-cex-wasm.opt-level=2')
+  fi
 fi
 cd "$(dirname "$0")/.."
 # macOS strips DYLD_* from inherited environments; rust-lld needs the toolchain's libLLVM.
