@@ -324,6 +324,30 @@ publish an empty snapshot or dispose the previous good engine.
   Previous artifact metrics below remain evidence for the pre-integration head
   until replaced by the new acceptance checkpoint.
 
+- Integrated source verification: 2,607 native tests / 212 result suites,
+  strict native all-target/all-feature and WASM32 Clippy, bans/fmt PASS.
+  Cold and non-cold host dispatch both preserve typed public-feed ingress,
+  original clocks and single flushes. SDK unit 7,497 / 517 files and WASM
+  430 / 14 files PASS; 16 native CLI product controls, 576 harness / 70 host
+  tests, nine CLI/MCP/mobile WASM cases and isolated MCP smoke PASS.
+  New combined web/node/packaged artifact is 11,826,378 bytes, SHA-256
+  `6afa3acf260286cac3be6e8bf0a162fb7cafbca4241e000b5a9d587bc9a94c34`;
+  packaged notices remain 131 JS / 353 Rust.
+- Shared semantic catalog closure `d99b895044` adds typed classification,
+  future and option identity to the public-provider fingerprint without
+  transporting metadata into private state. Four boundary regressions prove
+  failure against the old fingerprint; production is restored and all checks
+  pass. Independent review PASS. Factory product cache partition `ed31745ae4`
+  initially covered explicit Rust selection; fresh review found that registry
+  defaults must use the actual resolved native class too. Correct that path
+  and add default-Orderly testnet isolation before final acceptance.
+- Pre-integration head `6d160de6f7` passed all 39 CI checks. Cold-cache packaging
+  fetched the missing locked manifest and passed. Hyro's 160-frame steady-CPU
+  gate initially missed at TS/Rust 3.2/3.7 ms; the prior run passed at 7.3/7.0.
+  Independent review confirmed unchanged runtime/build trees and a different
+  runner image. One unchanged-job rerun passed; no fixture/threshold change.
+  Fresh integrated-head CI and replay acceptance are still required.
+
 ## Final public replay metrics
 
 CI runtime: Node 22.23.3, three-run medians. Fourteen profiles use the current
