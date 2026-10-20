@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { memoryMetricErrors } from './memory.mjs';
-import { fixWeexConditionals } from './known-ts-fixes.mjs';
+import { fixWeexConditionals, fixLighterFills, fixLighterCommands } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { venueOf } from './venues.mjs';
 
@@ -308,6 +308,9 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
 // per-execution deduplication, atomic failed-page snapshots, protection provenance,
 // tick splitting, cancellation families, hedge mode and signed V1 income fees.
 // Rust additionally walks V3 fill time windows; TS still reads one page.
+// Lighter's independent tape oracle fixes duplicated/missed TS execution notifications
+// and acknowledges retaining net-only mode; native output is never its input.
+KNOWN_TS_FIXES.lighter = { fills: fixLighterFills, commands: fixLighterCommands };
 KNOWN_TS_FIXES.woo = [];
 KNOWN_TS_FIXES.bitrue = [];
 KNOWN_TS_FIXES.bitget = {
@@ -449,6 +452,10 @@ for (let run = 0; run < runs; run++) {
     if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
     KNOWN_TS_FIXES(ts.account, rust.account);
     fixHistoricalFills(ts.commands);
+    if (values.venue === 'lighter') {
+      KNOWN_TS_FIXES.lighter.fills(ts.account, tape);
+      KNOWN_TS_FIXES.lighter.commands(ts.commands, tape);
+    }
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
       const left = JSON.stringify(ts.account[field]);
       const right = JSON.stringify(rust.account[field]);

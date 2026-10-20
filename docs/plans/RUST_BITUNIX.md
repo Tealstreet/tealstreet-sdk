@@ -748,3 +748,27 @@ head, along with native/workspace/WASM checks; root CI is still running. The
 final throughput profile commit requires its own green exact-head CI before
 merge, then a fresh branch from landedfeat/rust-rewrite. Local full root test
 rerun continues; typecheck44/lint28 and all239harness helpers already PASS.
+
+### Lighter landing integration plan
+
+Before final-profile CI could run, landing31ec401f60 (PR1319) made#1309
+conflicting. Merge it with the nested structure and fifteen optional/default
+venue factories; preserve Bitunix/BingX throughput optimization, WOO's
+per-socket audit and symmetric REST-seed barrier, and every prior strict
+clock/request/signature/memory comparison. Review shared harness, host/SDK and
+crypto/engine compatibility in independent scopes, then rerun affected checks
+and exact-head CI. The new Lighter lane adds the15th public venue and19th
+private variant; retain four native Bitget parity cases. Its deleted crypto
+wrappers must remain provably unused; existing Fp5/Schnorr APIs remain intact.
+
+Lighter merge review preserves all prior controls and passes256helpers. Fix
+its strict transformed-form matching so duplicate/extra fields cannot disappear
+into a canonical object; invalid writes return599 without consuming a tape
+response. Preserve pre-consumption matched-write hooks and explicit command
+ordering. Host review found unconditional client-ID checks would reject Binance
+USD-M/PM because their shared rules were absent; add the exact existing TS
+36/32-character rules and broker mint, with failed-before/pass-after tests.
+Lighter/MEXC fail-closed guards remain intact.42SDK and36host checks PASS.
+Engine61/Bitunix58 and crypto24+integration/doctests PASS; deleted crypto
+wrappers have no surviving callers. Root typecheck44/lint28 PASS; preceding
+full root27tasks PASS. Final workspace and exact merged-head CI continue.

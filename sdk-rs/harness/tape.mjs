@@ -388,10 +388,10 @@ export class Tape {
       this.responses.get(key).push(record);
       if (this.isWrite(record.method, record.url)) this.writeOrder.push(record);
     }
-    if (!venue.responses && (this.contract || venue.checkRequest || venue.requestKey || venue.requestBodies)) {
+    if (!venue.responses && (this.contract || venue.checkRequest || venue.requestKey || venue.requestBodies || venue.requestBody || venue.validateMatchedRequest)) {
       const responseKey = (method, url, body) => {
         if (this.requestKey) return this.requestKey(method, url, body, this.callerIds);
-        if (venue.requestBodies) return typedRequestKey(method, url, body, this.callerIds, venue);
+        if (venue.requestBodies || venue.requestBody) return typedRequestKey(method, url, body, this.callerIds, venue);
         const base = `${method} ${canonicalUrl(url, this.callerIds, this.venue)}`;
         const exact = `${base} BODY ${canonicalBody(body, this.callerIds, venue)}`;
         return this.responses.has(exact) ? exact : base;
@@ -517,11 +517,19 @@ export class Tape {
       try { if (!this.venue.verifyRequest({ method, url, body, headers })) throw new Error(`invalid replay signature: ${method} ${url}`); }
       catch (error) { this.invalidSignatures++; throw error; }
     }
-    if (typeof this.responses.respond === 'function') return this.responses.respond(method, url, body, this.commandIndex, this.responseTime);
+    const validateMatch = (record) => {
+      this.contract?.match(record, method, url, body);
+      if (this.venue.compareWriteOrder && this.isWrite(method, url) && this.writeOrder[0] !== record)
+        throw new Error('Unexpected replay write order');
+      this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
+      if (this.isWrite(method, url)) this.writeOrder.splice(this.writeOrder.indexOf(record), 1);
+    };
+    if (typeof this.responses.respond === 'function') return this.responses.respond(method, url, body, this.commandIndex, this.responseTime,
+      this.venue.validateMatchedRequest ? validateMatch : undefined);
     const now = this.responseTime;
     if (this.responseStore) {
       const response = this.responseStore.respond(method, url, body, this.commandIndex, now,
-        this.contract ? (record) => this.contract.match(record, method, url, body) : undefined);
+        this.contract || this.venue.validateMatchedRequest ? validateMatch : undefined);
       this._unserved = this.responseStore.unserved;
       return response;
     }

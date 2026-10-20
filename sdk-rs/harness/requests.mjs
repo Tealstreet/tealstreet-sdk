@@ -63,7 +63,9 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
   if (body instanceof URLSearchParams || (typeof body === 'string' && !/^[\[{]/.test(body.trimStart()) && body.includes('='))) {
     const form = new URLSearchParams(body);
     const entries = [...form].filter(stable(callerIds, options)).sort(([a], [b]) => a.localeCompare(b));
-    return `${method} ${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)} FORM ${new URLSearchParams(entries)}`;
+    if (!options.requestBody || new Set([...form.keys()]).size !== [...form.keys()].length)
+      return `${method} ${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)} FORM ${new URLSearchParams(entries)}`;
+    body = Object.fromEntries(form);
   }
   let payload = typeof body === 'string' && body ? parseRequestJson(body) : (body ?? {});
   if (options.requestBody) payload = options.requestBody(payload, { method, url, callerIds });
@@ -187,6 +189,7 @@ export const callerIdsOf = (records) => {
 };
 
 const normalize = (value, callerIds, root = true, options = {}) => {
+  if (typeof value === 'bigint') return JSON.rawJSON(String(value));
   if (JSON.isRawJSON(value)) return value;
   if (Array.isArray(value)) return value.map((item) => normalize(item, callerIds, false, options));
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
@@ -222,7 +225,8 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
   catch { return `WS ${canonicalUrl(url, callerIds)} ${text}`; }
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? '').toLowerCase();
+  message = options.subscriptionMessage?.(message) ?? message;
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
   if (options.bitrueProtocol) {
     if (message?.ping !== undefined || message?.pong !== undefined) return undefined;
     if (message?.params?.cb_id !== undefined) {
@@ -276,7 +280,7 @@ const fullSubscriptionKeys = (url, text, callerIds = new Set(), options = {}) =>
     const key = subscriptionKey(url, text, callerIds, options);
     return key === undefined ? [] : [key];
   }
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? '').toLowerCase();
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
     if (options.cryptoProtocol && Array.isArray(message.params?.channels)) {
       return message.params.channels.map((channel) => subscriptionKey(url,

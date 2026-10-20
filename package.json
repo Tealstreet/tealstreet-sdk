@@ -25,6 +25,8 @@
     "rust:private-tape-bitrue": "node sdk-rs/harness/private-tape-bitrue.mjs",
     "rust:private-tape-bitunix": "node sdk-rs/harness/private-tape-bitunix.mjs",
     "rust:private-tape-bitget": "node sdk-rs/harness/private-tape-bitget.mjs",
+    "rust:lighter-signing-vectors": "node --import tsx sdk-rs/harness/lighter-signing-vectors.mjs",
+    "rust:private-tape-lighter": "node sdk-rs/harness/private-tape-lighter.mjs",
     "rust:private-tape-hyperliquid": "node sdk-rs/harness/private-tape-hyperliquid.mjs",
     "rust:private-tape-mexc": "node sdk-rs/harness/private-tape-mexc.mjs",
     "rust:private-tape-bingx": "node sdk-rs/harness/private-tape-bingx.mjs",
