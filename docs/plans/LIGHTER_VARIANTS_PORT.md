@@ -121,3 +121,36 @@ Regression coverage warms Premium and proves fresh Standard blocks every write.
 Final independent re-review PASS. Native suite now 100 PASS, including five new
 limits tests for all deployments, auth absence, coalescing, expiry, failure and
 trading coordination. Crate Clippy/fmt/bans PASS; combined WASM checks continuing.
+
+## Gates before TxFlow integration
+
+Runtime commit `c8376a828e`, canonical combined default-feature release WASM.
+Bans, crate/host fmt, crate all-target Clippy, WASM host Clippy, 100 native
+suite tests, package typecheck/lint, 56 wrapper/TS signing-mode tests and 14
+real-WASM boundary tests all PASS. Integrated harness 146 PASS; routing 219 PASS.
+Every local public gate below uses three runs and identical output.
+
+| Venue | TS/Rust main CPU ms | TS/Rust steady CPU ms | TS/Rust retained MB | Rust linear MB |
+| --- | --- | --- | --- | --- |
+| lighter | 805.8 / 633.3 | 513.2 / 392.1 | 16.4 / 3.1 | 1.6 |
+| lighter-robinhood | 385.5 / 181.3 | 261.4 / 91.3 | 18.0 / 4.3 | 2.8 |
+| binance | 263.7 / 158.8 | 151.3 / 78.8 | 16.0 / 3.2 | 2.0 |
+
+Public frames/markets/tickers/books: lighter 8,875/213/213/2; Robinhood
+1,404/58/58/2; Binance 873/917/783/2. All three gates PASS.
+
+Private correctness: lighter mainnet/testnet, Robinhood mainnet/testnet and
+Binance all PASS, 14 frames each; each Lighter tape exercises eight commands.
+Private CPU/memory are informational: some Rust private CPU figures exceed TS;
+no private performance improvement is claimed. Public thresholds are unchanged.
+Existing documented Lighter TS corrections (notably one fill per execution and
+net-mode acknowledgement) apply identically to the broker alias. No new TS bug
+or undocumented output divergence is introduced. TS venues/helpers are retained.
+
+Remaining process: final gate-phase review, PR correctness review comments,
+green CI, merge into `feat/rust-rewrite`, and fresh follow-up branch.
+
+Landing advanced to `bf1cf3c99a` (TxFlow PR #1329) during these gates.
+Commit this passing evidence, integrate the landing without discarding either
+venue, then rebuild combined WASM and repeat gates affected by shared replay
+finalization/routing changes before PR creation.

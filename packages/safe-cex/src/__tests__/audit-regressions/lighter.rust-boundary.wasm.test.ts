@@ -85,6 +85,7 @@ const recorded = () => {
             },
           ],
         });
+      if (pathname.endsWith('/accountLimits')) return response({ code: 200, user_tier_name: 'premium' });
       if (pathname.endsWith('/accountActiveOrders')) return response({ code: 200, orders: [] });
       if (pathname.endsWith('/nextNonce')) return response({ code: 200, nonce: 10 });
       if (pathname.endsWith('/sendTx')) {
@@ -272,7 +273,7 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('%s real WASM boundary'
     expect(store.loaded.orders && store.loaded.balance && store.loaded.positions).toBe(true);
     expect(sockets).toHaveLength(1);
     expect(requests.some((r) => new URL(r.url).pathname.endsWith('/account'))).toBe(true);
-    expect(requests.some((r) => /accountActiveOrders|nextNonce/.test(r.url))).toBe(false);
+    expect(requests.some((r) => /accountActiveOrders|accountLimits|nextNonce/.test(r.url))).toBe(false);
     await expect(
       exchange.placeOrder({ symbol: 'ETH', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.2, price: 90 }),
     ).rejects.toThrow();

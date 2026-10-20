@@ -494,7 +494,7 @@ ported. The linked inventory records exact callers and product constraints.
 | `kucoin` | Opt-in futures; preserve native units/broker options and shared files still needed by spot. |
 | `hyperliquid` | Opt-in perps/HIP-3; spot absent, wallet/builder/agent and caller-ID helpers still imported. |
 | `kraken` | Opt-in futures; spot remains TS. |
-| `lighter`, `lighter-robinhood` | Opt-in perpetuals; four explicit main/test deployment profiles, USDC/USDG and domain-separated local signing. TS remote-only mode polls unsigned account snapshots without private WebSocket/auth/transactions; payload-only starts public, mixed local/callback credentials sign locally. No remote transaction provider exists in current TS. Retain wallet approval/account-tier exports and frozen TS oracle; [variant scope/evidence](LIGHTER_VARIANTS_PORT.md). |
+| `lighter`, `lighter-robinhood` | Opt-in perpetuals; four explicit main/test deployment profiles, USDC/USDG and domain-separated local signing. TS remote-only mode polls unsigned account snapshots without private WebSocket/auth/transactions; payload-only starts public, mixed local/callback credentials sign locally. No remote transaction provider exists in current TS. Retain wallet approval/account-tier exports, the API-key-index parser used by the wrapper, and frozen TS oracle; [variant scope/evidence](LIGHTER_VARIANTS_PORT.md). |
 | `mexc` | Opt-in; preserve native sizing and conditional/trailing evidence. |
 | `paradex` | Opt-in; retain binary feed, native signing and routing evidence. |
 | `phemex` | Opt-in; retain account identity/native protocol and broker helper. |

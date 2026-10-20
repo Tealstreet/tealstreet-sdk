@@ -47,7 +47,7 @@ of saved accounts.
 | `hyperliquidspot` | No | TS required; perps coverage cannot substitute for saved spot accounts. |
 | `kraken` | Yes | TS default; futures adapter. |
 | `krakenspot` | No | TS required; Kraken futures signing/protocol does not cover Kraken spot. |
-| `lighter` | Yes | TS default; local signing on main/test chains 304/300. Remote-only account snapshot polling, payload-only public startup and mixed local/callback behavior match the current TS startup contract; no supported remote transaction signer in TS. Keep wallet approval/account-tier helpers and TS oracle; [variant evidence](LIGHTER_VARIANTS_PORT.md). |
+| `lighter` | Yes | TS default; local signing on main/test chains 304/300. Remote-only account snapshot polling, payload-only public startup and mixed local/callback behavior match the current TS startup contract; no supported remote transaction signer in TS. Keep wallet approval/account-tier helpers, the wrapper's API-key-index parser and TS oracle; [variant evidence](LIGHTER_VARIANTS_PORT.md). |
 | `lighter-robinhood` | Yes | TS default; explicit Rust alias with Robinhood main/test URLs, USDG, signing chains 466324/300 and no default zkLighter integrator attribution. Same credential modes and retained helper/oracle requirements as `lighter`; [variant evidence](LIGHTER_VARIANTS_PORT.md). |
 | `mexc` | Yes | TS default; conditional/trailing and native-unit proofs still required when removing reference coverage. |
 | `paradex` | Yes | TS default; retain binary/text feed and Starknet account mode checks. |
