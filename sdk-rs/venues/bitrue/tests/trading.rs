@@ -1,7 +1,9 @@
 //! Scripted orders from Bitrue's documented v2 futures payloads.
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId, TimerId,
+};
 use safe_cex_venue_bitrue::{Bitrue, Options};
 const CONTRACT: &str = r#"[{"symbol":"E-BTC-USDT","pricePrecision":1,"multiplier":0.001,"minOrderVolume":1,"maxMarketVolume":10,"maxLimitVolume":10,"minOrderMoney":5,"status":1,"side":1,"type":"E","multiplierCoin":"BTC"}]"#;
 enum Trace {
@@ -13,6 +15,8 @@ struct Harness {
     requests: Vec<HttpRequest>,
     notices: Vec<Notice>,
     trace: Vec<Trace>,
+    timers: Vec<(TimerId, f64)>,
+    sockets: Vec<(SocketId, String)>,
 }
 impl Harness {
     fn new() -> Self {
@@ -27,6 +31,8 @@ impl Harness {
             requests: vec![],
             notices: vec![],
             trace: vec![],
+            timers: vec![],
+            sockets: vec![],
         };
         h.collect();
         let request = h.take(Method::Get, "/fapi/v1/contracts");
@@ -59,6 +65,8 @@ impl Harness {
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::Notice(n) => self.notices.push(n),
+                Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
+                Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
                 _ => {}
             }
         }
@@ -312,7 +320,11 @@ fn protective_orders_require_a_position_and_opposite_side() {
     assert_eq!(row["open"], "CLOSE");
     assert_eq!(row["triggerType"], 1);
     assert_eq!(row["triggerPriceType"], 2);
+    let client = row["clientOrderId"].as_str().unwrap();
     h.reply(request, r#"{"code":"0","data":{"orderId":123}}"#);
+    assert_eq!(h.result(), None);
+    let census = post_write_census(&mut h);
+    h.reply(census, &protective_census(client));
     assert_eq!(h.result(), Some("[]"));
 }
 #[test]
@@ -447,6 +459,544 @@ fn settings_commit_only_after_success_and_unsupported_modes_never_write() {
     });
     assert!(h.failed());
 }
+
+#[test]
+fn cancel_symbol_includes_ack_before_rest_or_private_new() {
+    let mut h = Harness::new();
+    h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000,"clientOrderId":"pending"}]"#);
+    let create = h.take(Method::Post, "/fapi/v2/order");
+    h.reply(
+        create,
+        r#"{"code":"0","data":{"orderId":2334151155877155281}}"#,
+    );
+    assert!(h.e.store().orders().is_empty());
+    h.command(Command::CancelSymbolOrders {
+        command: 8,
+        symbol: "E-BTC-USDT".into(),
+    });
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    assert_eq!(body(&cancel)["orderId"], "2334151155877155281");
+    h.reply(
+        cancel,
+        r#"{"code":"0","data":{"orderId":2334151155877155281}}"#,
+    );
+    assert!(h.notices.iter().any(|n| matches!(
+        n,
+        Notice::CommandDone {
+            command: 8,
+            result: Ok(_)
+        }
+    )));
+}
+
+fn protective_census(client: &str) -> String {
+    format!(
+        r#"{{"code":"0","data":[{{"orderId":456,"clientOrderId":"{client}","contractName":"E-BTC-USDT","type":"MARKET","side":"SELL","status":"INIT","action":"CLOSE","origQty":0.001,"executedQty":0,"triggerPrice":1800,"triggerType":1,"triggerPriceType":2,"conditionOrder":true}}]}}"#
+    )
+}
+fn post_write_census(h: &mut Harness) -> HttpRequest {
+    // Startup's census predates the write. It cannot certify its outcome.
+    let stale = h.take(Method::Get, "/fapi/v2/openOrders");
+    h.reply(stale, r#"{"code":"0","data":[]}"#);
+    let timer = h
+        .timers
+        .iter()
+        .rev()
+        .find(|(_, at)| *at == 600.0)
+        .unwrap()
+        .0;
+    h.e.handle(600.0, Event::TimerFired { timer });
+    h.collect();
+    h.take(Method::Get, "/fapi/v2/openOrders")
+}
+fn protective_ack() -> (Harness, String) {
+    let mut h = Harness::new();
+    h.e.store_mut().set_positions(vec![Position {
+        id: "E-BTC-USDT".into(),
+        symbol: "E-BTC-USDT".into(),
+        side: PositionSide::Long,
+        entry_price: 2000.0,
+        notional: 20.0,
+        leverage: 20.0,
+        margin_type: Some(MarginType::Cross),
+        position_mode: Some(PositionMode::Oneway),
+        unrealized_pnl: 0.0,
+        realized_pnl: None,
+        contracts: 0.01,
+        liquidation_price: 0.0,
+        margin_size: None,
+        last_update: None,
+    }]);
+    h.place(r#"[{"symbol":"E-BTC-USDT","type":"stop_market","side":"sell","amount":0.001,"price":1800}]"#);
+    let create = h.take(Method::Post, "/fapi/v2/order");
+    let client = body(&create)["clientOrderId"].as_str().unwrap().to_owned();
+    // Bitrue returns incorrect protective create IDs (Bitrue CLAUDE.md).
+    h.reply(create, r#"{"code":"0","data":{"orderId":123}}"#);
+    (h, client)
+}
+#[test]
+fn conditional_cancel_all_waits_for_real_native_identity_in_a_post_write_census() {
+    let (mut h, client) = protective_ack();
+    h.command(Command::CancelSymbolOrders {
+        command: 8,
+        symbol: "E-BTC-USDT".into(),
+    });
+    assert_eq!(h.result(), None);
+    assert_eq!(
+        h.writes(),
+        0,
+        "the unreliable ACK must not authorize cancel123"
+    );
+    let census = post_write_census(&mut h);
+    assert_eq!(
+        h.result(),
+        None,
+        "a pre-write census cannot resolve placement"
+    );
+    assert_eq!(h.writes(), 0);
+    h.reply(census, &protective_census(&client));
+    assert_eq!(h.result(), Some("[]"));
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    assert_eq!(body(&cancel)["orderId"], "456");
+    assert_eq!(body(&cancel)["conditionOrder"], true);
+    h.reply(cancel, r#"{"code":"0","data":{"orderId":456}}"#);
+    assert!(h.notices.iter().any(|n| matches!(
+        n,
+        Notice::CommandDone {
+            command: 8,
+            result: Ok(_)
+        }
+    )));
+    assert_eq!(h.writes(), 0);
+}
+#[test]
+fn conditional_census_requires_complete_success() {
+    for scenario in ["malformed", "business_error", "incomplete"] {
+        let (mut h, _) = protective_ack();
+        h.command(Command::CancelSymbolOrders {
+            command: 8,
+            symbol: "E-BTC-USDT".into(),
+        });
+        let census = post_write_census(&mut h);
+        let response = match scenario {
+            "malformed" => r#"{"code":"0","data":{}}"#.to_owned(),
+            "incomplete" => r#"{"code":"0","data":[{"orderId":456,"status":"INIT"}]}"#.to_owned(),
+            _ => r#"{"code":"-1","msg":"denied"}"#.to_owned(),
+        };
+        h.reply(census, &response);
+        assert!(
+            h.failed(),
+            "{scenario} must not confirm protective placement"
+        );
+        assert_eq!(
+            h.writes(),
+            0,
+            "{scenario} cannot authorize a guessed cancellation"
+        );
+        assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:8,result:Err(error) } if error.contains("uncertain"))));
+        for command in [9, 10] {
+            h.command(Command::CancelSymbolOrders {
+                command,
+                symbol: "E-BTC-USDT".into(),
+            });
+            assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:id,result:Err(error) } if *id == command && error.contains("uncertain"))));
+        }
+        assert_eq!(h.writes(), 0);
+    }
+}
+
+#[test]
+fn conditional_census_superseded_by_stream_cannot_authorize_cancel_all() {
+    let (mut h, client) = protective_ack();
+    h.command(Command::CancelSymbolOrders {
+        command: 8,
+        symbol: "E-BTC-USDT".into(),
+    });
+    let census = post_write_census(&mut h);
+    let listen = h.take(Method::Post, "/user_stream/api/v1/listenKey");
+    h.reply(listen, r#"{"code":"0","data":{"listenKey":"replay-key"}}"#);
+    let socket = h
+        .sockets
+        .iter()
+        .find(|(_, url)| url.contains("fapiws.bitrue.com"))
+        .unwrap()
+        .0;
+    h.e.handle(700.0, Event::WsMessage { socket, text: r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":999,"S":"BUY","o":"LIMIT","x":"NEW","X":"NEW","q":"1","z":"0","p":"2000"}}"# });
+    h.collect();
+    h.reply(census, &protective_census(&client));
+    assert!(h.failed());
+    assert_eq!(h.writes(), 0);
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:8,result:Err(error) } if error.contains("uncertain"))));
+}
+#[test]
+fn conditional_census_transport_retries_do_not_complete_or_send_guessed_cancel() {
+    let (mut h, _) = protective_ack();
+    h.command(Command::CancelSymbolOrders {
+        command: 8,
+        symbol: "E-BTC-USDT".into(),
+    });
+    let mut census = post_write_census(&mut h);
+    for attempt in 0..4 {
+        h.e.handle(
+            700.0 + f64::from(attempt),
+            Event::HttpFailed {
+                request: census.id,
+                error: "census transport unavailable",
+            },
+        );
+        h.collect();
+        assert_eq!(h.writes(), 0);
+        if attempt < 3 {
+            assert_eq!(h.result(), None);
+            assert!(!h.failed());
+            census = h.take(Method::Get, "/fapi/v2/openOrders");
+        }
+    }
+    assert!(h.failed());
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:8,result:Err(error) } if error.contains("uncertain"))));
+}
+#[test]
+fn attached_protection_census_owns_the_native_open_set_even_when_one_leg_is_gone() {
+    for missing_take_profit in [false, true] {
+        let mut h = Harness::new();
+        h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000,"stopLoss":1800,"takeProfit":2200}]"#);
+        let create = h.take(Method::Post, "/fapi/v2/order");
+        let payload = body(&create);
+        h.reply(create, r#"{"code":"0","data":{"orderId":100}}"#);
+        assert_eq!(h.result(), None);
+        let census = post_write_census(&mut h);
+        let children = payload["triggerOrderCreateParams"].as_array().unwrap().iter().filter(|child| !missing_take_profit || child["triggerType"] != 2).enumerate().map(|(index, child)| serde_json::json!({
+            "orderId": 456 + index, "clientOrderId": child["clientOrderId"],
+            "type": "MARKET", "side": "SELL", "status": "INIT", "action": "CLOSE",
+            "origQty": 0.003, "executedQty": 0, "triggerPrice": child["triggerPrice"],
+            "triggerType": child["triggerType"], "triggerPriceType": 2, "conditionOrder": true,
+        })).collect::<Vec<_>>();
+        let response = serde_json::json!({"code":"0","data":[{
+            "orderId":100,"clientOrderId":payload["clientOrderId"],"contractName":"E-BTC-USDT",
+            "type":"LIMIT","side":"BUY","status":"INIT","action":"OPEN","price":2000,
+            "origQty":0.003,"executedQty":0,"childOrders":children,
+        }]})
+        .to_string();
+        h.reply(census, &response);
+        assert_eq!(h.result(), Some("[]"));
+    }
+}
+
+#[test]
+fn conditional_census_accepts_rewritten_zero_and_missing_client_ids_without_trusting_ack() {
+    for client in ["0", "server-rewritten", ""] {
+        let (mut h, _) = protective_ack();
+        h.command(Command::CancelSymbolOrders {
+            command: 8,
+            symbol: "E-BTC-USDT".into(),
+        });
+        let census = post_write_census(&mut h);
+        h.reply(census, &protective_census(client));
+        assert_eq!(h.result(), Some("[]"));
+        let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+        assert_eq!(body(&cancel)["orderId"], "456");
+        assert_eq!(body(&cancel)["conditionOrder"], true);
+    }
+}
+#[test]
+fn complete_post_write_empty_census_proves_no_open_protection_and_releases_cancel_all() {
+    let (mut h, _) = protective_ack();
+    h.command(Command::CancelSymbolOrders {
+        command: 8,
+        symbol: "E-BTC-USDT".into(),
+    });
+    let census = post_write_census(&mut h);
+    assert_eq!(h.result(), None);
+    h.reply(census, r#"{"code":"0","data":[]}"#);
+    assert_eq!(h.result(), Some("[]"));
+    assert_eq!(h.writes(), 0);
+    assert!(h.notices.iter().any(|n| matches!(
+        n,
+        Notice::CommandDone {
+            command: 8,
+            result: Ok(_)
+        }
+    )));
+}
+
+#[test]
+fn protective_amend_failed_census_keeps_native_cancel_all_uncertain_until_a_fresh_read() {
+    let (mut h, client) = protective_ack();
+    let census = post_write_census(&mut h);
+    h.reply(census, &protective_census(&client));
+    h.command(Command::AmendOrder {
+        command: 11,
+        id: "456".into(),
+        price: Some(1790.0),
+        amount: None,
+    });
+    let detail = |status| {
+        format!(
+            r#"{{"code":"0","data":[{{"orderId":456,"contractName":"E-BTC-USDT","status":"{status}","origQty":0.001,"executedQty":0,"side":"SELL","type":"MARKET","action":"CLOSE","conditionOrder":true,"triggerType":1,"triggerPriceType":2}}]}}"#
+        )
+    };
+    let inspect = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(inspect, &detail("INIT"));
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    h.reply(cancel, r#"{"code":"0","data":{"orderId":456}}"#);
+    let verify = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(verify, &detail("CANCELED"));
+    let create = h.take(Method::Post, "/fapi/v2/order");
+    h.reply(
+        create,
+        r#"{"code":"0","data":{"orderId":"unreliable-replacement"}}"#,
+    );
+    let census = h.take(Method::Get, "/fapi/v2/openOrders");
+    h.reply(census, r#"{"code":"-1","msg":"denied"}"#);
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:11,result:Err(error) } if error.contains("uncertain"))));
+    h.command(Command::CancelSymbolOrders {
+        command: 12,
+        symbol: "E-BTC-USDT".into(),
+    });
+    assert_eq!(h.writes(), 0);
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:12,result:Err(error) } if error.contains("uncertain"))));
+    let timer = h
+        .timers
+        .iter()
+        .rev()
+        .find(|(_, at)| *at == 600.0)
+        .unwrap()
+        .0;
+    h.e.handle(600.0, Event::TimerFired { timer });
+    h.collect();
+    let census = h.take(Method::Get, "/fapi/v2/openOrders");
+    h.reply(census, r#"{"code":"0","data":[]}"#);
+    h.command(Command::CancelSymbolOrders {
+        command: 13,
+        symbol: "E-BTC-USDT".into(),
+    });
+    assert!(h.notices.iter().any(|n| matches!(
+        n,
+        Notice::CommandDone {
+            command: 13,
+            result: Ok(_)
+        }
+    )));
+    assert_eq!(h.writes(), 0);
+}
+
+fn protective_amend_create() -> (Harness, HttpRequest) {
+    let (mut h, client) = protective_ack();
+    let census = post_write_census(&mut h);
+    h.reply(census, &protective_census(&client));
+    h.command(Command::AmendOrder {
+        command: 11,
+        id: "456".into(),
+        price: Some(1790.0),
+        amount: None,
+    });
+    let detail = |status| {
+        format!(
+            r#"{{"code":"0","data":[{{"orderId":456,"contractName":"E-BTC-USDT","status":"{status}","origQty":0.001,"executedQty":0,"side":"SELL","type":"MARKET","action":"CLOSE","conditionOrder":true,"triggerType":1,"triggerPriceType":2}}]}}"#
+        )
+    };
+    let inspect = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(inspect, &detail("INIT"));
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    h.reply(cancel, r#"{"code":"0","data":{"orderId":456}}"#);
+    let verify = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(verify, &detail("CANCELED"));
+    let create = h.take(Method::Post, "/fapi/v2/order");
+    (h, create)
+}
+
+#[test]
+fn protective_amend_lost_or_malformed_create_ack_fences_cancel_until_fresh_native_census() {
+    for outcome in [
+        "lost",
+        "malformed",
+        "missing_id",
+        "native_timeout",
+        "server_error",
+    ] {
+        let (mut h, create) = protective_amend_create();
+        if outcome == "lost" {
+            h.e.handle(
+                700.0,
+                Event::HttpFailed {
+                    request: create.id,
+                    error: "replacement accepted but response lost",
+                },
+            );
+            h.collect();
+        } else if outcome == "server_error" {
+            h.e.handle(
+                700.0,
+                Event::HttpResponse {
+                    request: create.id,
+                    response: Response {
+                        status: 504,
+                        headers: "",
+                        body: r#"{"code":"-1102","msg":"proxy response is not a rejection proof"}"#,
+                    },
+                },
+            );
+            h.collect();
+        } else {
+            h.reply(
+                create,
+                match outcome {
+                    "malformed" => "truncated",
+                    "missing_id" => r#"{"code":"0","data":{}}"#,
+                    _ => r#"{"code":"-1007","msg":"execution status unknown"}"#,
+                },
+            );
+        }
+        assert!(h.notices.iter().any(|n| matches!(
+            n,
+            Notice::CommandDone {
+                command: 11,
+                result: Err(_)
+            }
+        )));
+        let census = h.take(Method::Get, "/fapi/v2/openOrders");
+        for command in [12, 13] {
+            h.command(Command::CancelSymbolOrders {
+                command,
+                symbol: "E-BTC-USDT".into(),
+            });
+            assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:id,result:Err(error) } if *id == command && error.contains("uncertain"))), "{outcome}: held census must prevent empty cancel success");
+            assert_eq!(
+                h.writes(),
+                0,
+                "{outcome}: no guessed cancel or create replay"
+            );
+        }
+        h.reply(census, &protective_census("0").replace("456", "789"));
+        h.command(Command::CancelSymbolOrders {
+            command: 14,
+            symbol: "E-BTC-USDT".into(),
+        });
+        let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+        assert_eq!(body(&cancel)["orderId"], "789");
+        assert_eq!(body(&cancel)["conditionOrder"], true);
+        h.reply(cancel, r#"{"code":"0","data":{"orderId":789}}"#);
+        assert!(h.notices.iter().any(|n| matches!(
+            n,
+            Notice::CommandDone {
+                command: 14,
+                result: Ok(_)
+            }
+        )));
+    }
+}
+
+#[test]
+fn protective_amend_definite_parameter_rejection_does_not_fence_cancel_all() {
+    let (mut h, create) = protective_amend_create();
+    h.reply(
+        create,
+        r#"{"code":"-1102","msg":"Required parameter missing"}"#,
+    );
+    assert!(h.notices.iter().any(|n| matches!(
+        n,
+        Notice::CommandDone {
+            command: 11,
+            result: Err(_)
+        }
+    )));
+    let _held = h.take(Method::Get, "/fapi/v2/openOrders");
+    h.command(Command::CancelSymbolOrders {
+        command: 12,
+        symbol: "E-BTC-USDT".into(),
+    });
+    assert!(h.notices.iter().any(|n| matches!(
+        n,
+        Notice::CommandDone {
+            command: 12,
+            result: Ok(_)
+        }
+    )));
+    assert_eq!(h.writes(), 0);
+}
+
+#[test]
+fn protective_amend_preflight_failure_keeps_existing_protection_cancelable() {
+    let (mut h, client) = protective_ack();
+    let census = post_write_census(&mut h);
+    h.reply(census, &protective_census(&client));
+    h.command(Command::AmendOrder {
+        command: 11,
+        id: "456".into(),
+        price: Some(0.0),
+        amount: None,
+    });
+    assert!(h.notices.iter().any(|n| matches!(
+        n,
+        Notice::CommandDone {
+            command: 11,
+            result: Err(_)
+        }
+    )));
+    assert_eq!(h.writes(), 0);
+    h.command(Command::CancelSymbolOrders {
+        command: 12,
+        symbol: "E-BTC-USDT".into(),
+    });
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    assert_eq!(body(&cancel)["orderId"], "456");
+}
+
+#[test]
+fn protective_amend_rejection_preserves_an_earlier_lost_replacement_fence() {
+    let (mut h, create) = protective_amend_create();
+    h.e.handle(
+        700.0,
+        Event::HttpFailed {
+            request: create.id,
+            error: "earlier replacement response lost",
+        },
+    );
+    h.collect();
+    let held = h.take(Method::Get, "/fapi/v2/openOrders");
+    let mut other = h.e.store().order("456").unwrap().clone();
+    other.id = "555".into();
+    other.status = OrderStatus::Open;
+    h.e.store_mut().upsert_order(other);
+    h.command(Command::AmendOrder {
+        command: 15,
+        id: "555".into(),
+        price: Some(1780.0),
+        amount: None,
+    });
+    let detail = |status| {
+        format!(
+            r#"{{"code":"0","data":[{{"orderId":555,"contractName":"E-BTC-USDT","status":"{status}","origQty":0.001,"executedQty":0,"side":"SELL","type":"MARKET","action":"CLOSE","conditionOrder":true,"triggerType":1,"triggerPriceType":2}}]}}"#
+        )
+    };
+    let inspect = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(inspect, &detail("INIT"));
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    h.reply(cancel, r#"{"code":"0","data":{"orderId":555}}"#);
+    let verify = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(verify, &detail("CANCELED"));
+    let create = h.take(Method::Post, "/fapi/v2/order");
+    h.reply(
+        create,
+        r#"{"code":"-1102","msg":"Required parameter missing"}"#,
+    );
+    assert!(h.notices.iter().any(|n| matches!(
+        n,
+        Notice::CommandDone {
+            command: 15,
+            result: Err(_)
+        }
+    )));
+    // This read predates the second write and cannot resolve the older unknown order.
+    h.reply(held, r#"{"code":"0","data":[]}"#);
+    h.command(Command::CancelSymbolOrders {
+        command: 16,
+        symbol: "E-BTC-USDT".into(),
+    });
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandDone { command:16,result:Err(error) } if error.contains("uncertain"))));
+    assert_eq!(h.writes(), 0);
+}
+
 #[test]
 fn missing_leverage_and_invalid_caller_null_fail_before_writes() {
     let mut h = Harness::new();
@@ -808,4 +1358,111 @@ fn confirmed_parent_cancel_deduplicates_child_only_after_success() {
     );
     assert!(!h.requests.iter().any(|r| r.url.ends_with("/cancel")));
     assert_eq!(h.result(), Some("[]"));
+}
+
+#[test]
+fn cancellation_missing_from_store_reports_error_and_attempts_known_mixed_targets() {
+    for mixed in [false, true] {
+        let mut h = Harness::new();
+        h.order(0.0);
+        h.command(Command::CancelOrders {
+            command: 991,
+            ids: if mixed {
+                vec!["2334151155877155281".into(), "missing".into()]
+            } else {
+                vec!["missing".into()]
+            },
+        });
+        if mixed {
+            let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+            assert_eq!(body(&cancel)["orderId"], "2334151155877155281");
+            h.reply(
+                cancel,
+                r#"{"code":"0","data":{"orderId":2334151155877155281}}"#,
+            );
+        }
+        assert_eq!(h.writes(), 0);
+        assert!(h.notices.iter().any(|notice| matches!(notice,
+            Notice::CommandDone { command: 991, result: Err(error) }
+                if error.contains("missing") && error.contains("not found")
+        )));
+    }
+}
+
+#[test]
+fn mixed_unknown_cancel_attempts_exact_ack_route_and_failed_ack_target_remains_retryable() {
+    for cached_first in [false, true] {
+        for rejected in [false, true] {
+            let mut h = Harness::new();
+            h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000,"clientOrderId":"pending"}]"#);
+            let create = h.take(Method::Post, "/fapi/v2/order");
+            h.reply(
+                create,
+                r#"{"code":"0","data":{"orderId":2334151155877155281}}"#,
+            );
+            assert!(h.e.store().orders().is_empty());
+            let cached = "2334151155877155281".to_string();
+            h.command(Command::CancelOrders {
+                command: 991,
+                ids: if cached_first {
+                    vec![cached.clone(), "missing".into()]
+                } else {
+                    vec!["missing".into(), cached.clone()]
+                },
+            });
+            let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+            assert_eq!(body(&cancel)["orderId"], cached);
+            assert_eq!(body(&cancel)["contractName"], "E-BTC-USDT");
+            assert_eq!(body(&cancel)["conditionOrder"], false);
+            h.reply(
+                cancel,
+                if rejected {
+                    r#"{"code":"-1","msg":"denied"}"#
+                } else {
+                    r#"{"code":"0","data":{"orderId":2334151155877155281}}"#
+                },
+            );
+            assert_eq!(h.writes(), 0);
+            let error = h
+                .notices
+                .iter()
+                .find_map(|notice| match notice {
+                    Notice::CommandDone {
+                        command: 991,
+                        result: Err(error),
+                    } => Some(error),
+                    _ => None,
+                })
+                .expect("mixed cancellation remains visibly partial");
+            let error: serde_json::Value = serde_json::from_str(error).unwrap();
+            assert!(
+                error["failedOrders"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|f| f["id"] == "missing")
+            );
+            if rejected {
+                h.command(Command::CancelOrders {
+                    command: 992,
+                    ids: vec![cached],
+                });
+                let retry = h.take(Method::Post, "/fapi/v2/cancel");
+                assert_eq!(body(&retry)["orderId"], "2334151155877155281");
+                h.reply(
+                    retry,
+                    r#"{"code":"0","data":{"orderId":2334151155877155281}}"#,
+                );
+                assert!(h.notices.iter().any(|notice| matches!(
+                    notice,
+                    Notice::CommandDone {
+                        command: 992,
+                        result: Ok(_)
+                    }
+                )));
+            } else {
+                assert_eq!(error["canceledOrderIds"][0], "2334151155877155281");
+            }
+        }
+    }
 }

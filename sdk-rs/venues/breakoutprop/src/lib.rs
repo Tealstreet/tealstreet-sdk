@@ -737,6 +737,13 @@ impl BreakoutProp {
 }
 
 impl Venue for BreakoutProp {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
