@@ -17,11 +17,12 @@
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
+    feature = "orderly",
     feature = "lighter",
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -54,6 +55,8 @@ use safe_cex_venue_lighter::{Lighter, Options as LighterOptions};
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 #[cfg(feature = "okx")]
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
+#[cfg(feature = "orderly")]
+use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions, Orderly};
 #[cfg(feature = "weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 #[cfg(feature = "woo")]
@@ -109,6 +112,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
+    feature = "orderly",
     feature = "lighter",
     feature = "okx"
 ))]
@@ -133,6 +137,7 @@ struct EngineOptions {
         feature = "woo",
         feature = "cryptocom",
         feature = "hyperliquid",
+        feature = "orderly",
         feature = "lighter",
         feature = "bitget",
         feature = "okx"
@@ -156,7 +161,12 @@ struct EngineOptions {
     ))]
     #[serde(default)]
     passphrase: Option<String>,
-    #[cfg(any(feature = "hyperliquid", feature = "lighter", feature = "woo"))]
+    #[cfg(any(
+        feature = "hyperliquid",
+        feature = "orderly",
+        feature = "lighter",
+        feature = "woo"
+    ))]
     #[serde(default)]
     application_id: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -180,6 +190,9 @@ struct EngineOptions {
     #[cfg(feature = "grvt")]
     #[serde(default)]
     grvt_session_proxy: bool,
+    #[cfg(feature = "orderly")]
+    #[serde(default)]
+    tick_interval: Option<f64>,
 }
 #[cfg(feature = "hyperliquid")]
 #[derive(Deserialize)]
@@ -208,6 +221,7 @@ fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Opti
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
+    Deactivate,
     WsConnect {
         socket: u32,
         url: &'a str,
@@ -314,6 +328,7 @@ fn encode(actions: &[Action]) -> String {
                 at: *at_ms,
             },
             Action::ClearTimer { timer } => ActionOut::ClearTimer { timer: timer.0 },
+            Action::Notice(Notice::Deactivate) => ActionOut::Deactivate,
             Action::Notice(Notice::Log { level, message }) => ActionOut::Log {
                 level: match level {
                     LogLevel::Info => "info",
@@ -629,6 +644,7 @@ impl WasmEngine {
         feature = "backpack",
         feature = "weex",
         feature = "hyperliquid",
+        feature = "orderly",
         feature = "lighter",
         feature = "okx"
     ))]
@@ -653,6 +669,25 @@ impl WasmEngine {
                 signer_address: options.grvt_signer_address,
                 session_proxy: options.grvt_session_proxy,
             }))),
+            #[cfg(feature = "orderly")]
+            "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
+                Box::new(Engine::new(Orderly::new(OrderlyOptions {
+                    broker: match venue {
+                        "kodiakfi" => OrderlyBroker::KodiakFi,
+                        "mode" => OrderlyBroker::Mode,
+                        "salsadex" => OrderlyBroker::SalsaDex,
+                        "what" => OrderlyBroker::What,
+                        "woofi" => OrderlyBroker::WooFi,
+                        _ => OrderlyBroker::Tealstreet,
+                    },
+                    public_data_only: options.public_data_only,
+                    testnet: options.testnet,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    tick_interval: options.tick_interval,
+                })))
+            }
             #[cfg(feature = "lighter")]
             "lighter" => Box::new(Engine::new(Lighter::new(LighterOptions {
                 testnet: options.testnet,

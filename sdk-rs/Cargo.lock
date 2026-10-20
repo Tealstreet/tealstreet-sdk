@@ -3767,6 +3767,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-orderly"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bs58",
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+ "zeroize",
+]
+
+[[package]]
 name = "safe-cex-venue-weex"
 version = "0.1.0"
 dependencies = [
@@ -3805,6 +3818,7 @@ dependencies = [
  "safe-cex-venue-lighter",
  "safe-cex-venue-mexc",
  "safe-cex-venue-okx",
+ "safe-cex-venue-orderly",
  "safe-cex-venue-weex",
  "safe-cex-venue-woo",
  "serde",

@@ -2,13 +2,13 @@ import type { AxiosRequestConfig } from 'axios';
 import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
 import qs from 'qs';
-import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
-import type { ExchangeOptions } from '../../types';
-import { virtualClock } from '../../utils/virtualClock';
-import { BaseExchange } from '../base';
+import { safeCexAxiosCreate, installTransportAdapter } from '../../../safeCexAxiosCreate';
+import type { ExchangeOptions } from '../../../types';
+import { virtualClock } from '../../../utils/virtualClock';
+import { BaseExchange } from '../../../exchanges/base';
 import { orderlySign } from './orderly.encryption';
 import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW, TESTNET_BROKER_ID } from './orderly.types';
-import { networkErrorOnRead } from '../../utils/retryReadsOnly';
+import { networkErrorOnRead } from '../../../utils/retryReadsOnly';
 
 const signRequest = (c: AxiosRequestConfig, options: ExchangeOptions) => {
   // we need to uppercase the method and default to GET

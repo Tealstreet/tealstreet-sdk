@@ -31,6 +31,7 @@ export interface Transport {
     url: string;
     headers: Record<string, string>;
     body?: string;
+    /** Aborted on host disposal; check again after asynchronous authorization. */
     signal?: AbortSignal;
   }): Promise<HttpResponse>;
   setTimeout(fn: () => void, ms: number): unknown;
@@ -38,6 +39,7 @@ export interface Transport {
 }
 
 export interface EngineHandlers {
+  onDeactivate?(): void;
   /** One frame per flush; transfer it, don't copy it. */
   onFrame?(buffer: ArrayBuffer): void;
   onLog?(level: 'info' | 'warning' | 'error', message: string): void;
