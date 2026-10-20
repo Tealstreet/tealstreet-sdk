@@ -14,6 +14,7 @@ struct Rig {
     timers: HashMap<TimerId, f64>,
     node: SocketId,
     api: SocketId,
+    connected_at: f64,
 }
 
 fn connected(actions: &[Action], api: bool) -> Option<SocketId> {
@@ -58,9 +59,13 @@ impl Rig {
             timers: HashMap::new(),
             node: SocketId(0),
             api: SocketId(0),
+            connected_at: 1000.0,
         };
         let mut actions = rig.drain();
-        actions.extend(rig.advance(1025.0));
+        if connected(&actions, false).is_none() {
+            actions.extend(rig.advance(1025.0));
+            rig.connected_at = rig.now;
+        }
         rig.node = connected(&actions, false).unwrap_or(SocketId(0));
         rig.api = connected(&actions, true).unwrap_or(SocketId(0));
         (rig, actions)
@@ -302,7 +307,7 @@ fn never_opened_sockets_expire_after_ten_seconds_and_reconnect() {
     for api in [false, true] {
         let mut rig = Rig::new();
         let socket = rig.socket(api);
-        let started = rig.now;
+        let started = rig.connected_at;
         assert!(!closed(&rig.advance(started + 9_999.0), socket));
         let actions = rig.advance(started + 10_000.0);
         assert!(closed(&actions, socket), "api={api}");

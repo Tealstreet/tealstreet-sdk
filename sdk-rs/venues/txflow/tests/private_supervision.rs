@@ -12,6 +12,7 @@ struct Rig {
     now: f64,
     timers: HashMap<TimerId, f64>,
     node: SocketId,
+    connected_at: f64,
 }
 
 fn connected(actions: &[Action], path: &str) -> Option<SocketId> {
@@ -42,9 +43,13 @@ impl Rig {
             now: NOW,
             timers: HashMap::new(),
             node: SocketId(0),
+            connected_at: NOW,
         };
         let mut actions = rig.drain();
-        actions.extend(rig.advance(NOW + 25.0));
+        if connected(&actions, "/ws").is_none() {
+            actions.extend(rig.advance(NOW + 25.0));
+            rig.connected_at = rig.now;
+        }
         rig.node = connected(&actions, "/ws").unwrap();
         (rig, actions)
     }
@@ -179,7 +184,7 @@ fn private_node_pings_expires_idle_and_never_opened_sockets_under_any_policy() {
             }
         )));
         let socket = rig.node;
-        let started = rig.now;
+        let started = rig.connected_at;
         assert!(!closed(&rig.advance(started + 9_999.0), socket));
         assert!(closed(&rig.advance(started + 10_000.0), socket));
         rig.node = connected(&rig.advance(started + 11_000.0), "/ws").expect("retry");

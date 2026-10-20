@@ -885,9 +885,12 @@ are skipped within a batch; explicit caller IDs still fail preflight if no
 order can honor them. Sized full-position stops emit a downgrade warning.
 
 Classic history recognizes forced-close long/short suffixes and absent profit
-as zero. Typed unmappable account rows warn and skip independently; wholly
-unmappable nonempty snapshots preserve known state, while actual empty lists
-clear it. Malformed envelopes and failed reads never clear good state. Busy
+as zero. Unmappable REST position or order rows warn and retain the entire
+previous authoritative snapshot, including when a valid peer maps; partial
+catalogues cannot prove missing owned exposure or protective orders absent.
+Actual empty lists clear state. Independent private stream updates can still
+apply valid peers. Row-level authoritative replacement awaits identity-preserving
+reconciliation. Malformed envelopes and failed reads never clear good state. Busy
 Classic stream refreshes reschedule, zero leverage limits default to 1/20, and
 invalid bounds fail visibly before writes. UTA one-way fills retain their
 execution-derived position leg. Startup retry and Confirm audit items remain

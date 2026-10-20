@@ -140,7 +140,6 @@ fn independent_book_subscribers_and_reconnect_restore_interest() {
 fn failed_or_malformed_market_lists_do_not_load_and_retry() {
     for body in [
         r#"{"error":"UNAVAILABLE","message":"try later","results":[]}"#,
-        r#"{"results":[{"symbol":"BTC-USD-PERP","step_size":"invalid"}]}"#,
         r#"{"message":"missing list"}"#,
     ] {
         let mut h = Harness::empty(Options {
@@ -674,6 +673,41 @@ fn sbe_declared_blocks_groups_nullability_and_unknown_versions_are_checked_befor
 }
 
 #[test]
+fn nullable_summary_fields_keep_valid_prices_on_rest_and_json_updates() {
+    let mut h = Harness::empty(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    h.reply("/markets", MARKETS);
+    h.reply("summary", r#"{"results":[{"symbol":"BTC-USD-PERP","bid":null,"ask":"","funding_rate":null,"underlying_price":null,"last_traded_price":"100","mark_price":"101","volume_24h":"20"}]}"#);
+    assert!(h.e.store().loaded().tickers);
+    let ticker = h.e.store().ticker(BTC).unwrap();
+    assert_eq!((ticker.bid, ticker.ask, ticker.funding_rate), (0., 0., 0.));
+    assert_eq!(
+        (ticker.last, ticker.mark, ticker.index, ticker.volume),
+        (100., 101., 101., 20.)
+    );
+    h.public = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel: Some(SocketChannel::Public),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: h.public });
+    h.collect();
+    h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"markets_summary","data":{"symbol":"BTC-USD-PERP","bid":null,"ask":null,"funding_rate":null,"last_traded_price":"102","mark_price":"103","volume_24h":"25"}}}"#);
+    let ticker = h.e.store().ticker(BTC).unwrap();
+    assert_eq!((ticker.last, ticker.mark, ticker.volume), (102., 103., 25.));
+    assert_eq!(ticker.funding_rate, 0.);
+}
+
+#[test]
 fn malformed_sbe_preserves_books_and_socket_while_real_gaps_resync_only_the_affected_book() {
     let mut h = Harness::new();
     h.command(Command::SubscribeOrderBook { symbol: BTC.into() });
@@ -904,7 +938,7 @@ fn market_selection_precedes_numeric_decoding_of_irrelevant_instruments() {
 }
 
 #[test]
-fn malformed_selected_perpetual_numbers_still_reject_the_entire_market_snapshot() {
+fn malformed_selected_perpetual_numbers_skip_only_the_bad_market_row() {
     for invalid in ["\"invalid\"", "null", "\"NaN\""] {
         let mut h = Harness::empty(Options {
             public_data_only: true,
@@ -914,12 +948,11 @@ fn malformed_selected_perpetual_numbers_still_reject_the_entire_market_snapshot(
             {{"symbol":"BTC-USD-PERP","asset_kind":"PERP","step_size":"0.001","price_bands_width":"5"}},
             {{"symbol":"ETH-USD-PERP","asset_kind":"PERP","status":"ACTIVE","price_tick_size":{invalid}}}
         ]}}"#));
-        assert!(!h.e.store().loaded().markets);
-        assert!(h.e.store().markets().is_empty());
-        assert!(h.pending.is_empty());
-        h.timer(h.now + 1_000.);
+        assert!(h.e.store().loaded().markets);
+        assert_eq!(h.e.store().markets().len(), 1);
+        assert_eq!(h.e.store().markets()[0].symbol, "BTC-USD-PERP");
         assert_eq!(h.pending.len(), 1);
-        assert!(h.pending[0].url.ends_with("/markets"));
+        assert!(h.pending[0].url.ends_with("summary?market=ALL"));
     }
 }
 
@@ -1049,6 +1082,68 @@ fn polls_cannot_rewind_a_bucket_or_quantity_known_before_the_request_started() {
         );
         assert_eq!(emitted(&mut h), expected);
     }
+}
+
+#[test]
+fn blank_book_size_is_rejected_atomically_and_explicit_zero_remains_a_delete() {
+    let mut h = Harness::new();
+    h.command(Command::SubscribeOrderBook { symbol: BTC.into() });
+    depth(
+        &mut h,
+        r#"{"update_type":"s","seq_no":100,"inserts":[{"side":"BUY","price":"100","size":"2"}],"updates":[],"deletes":[]}"#,
+    );
+    depth(
+        &mut h,
+        r#"{"update_type":"d","seq_no":101,"inserts":[],"updates":[{"side":"BUY","price":"100","size":""}],"deletes":[]}"#,
+    );
+    assert_eq!(h.e.book(BTC).unwrap().bids(), [(100., 2.)]);
+    depth(
+        &mut h,
+        r#"{"update_type":"s","seq_no":102,"inserts":[{"side":"BUY","price":"100","size":"2"}],"updates":[],"deletes":[]}"#,
+    );
+    depth(
+        &mut h,
+        r#"{"update_type":"d","seq_no":103,"inserts":[],"updates":[{"side":"BUY","price":"100","size":"0"}],"deletes":[]}"#,
+    );
+    assert!(h.e.book(BTC).unwrap().bids().is_empty());
+}
+
+#[test]
+fn late_rest_summary_keeps_early_live_bbo_without_suppressing_last_and_statistics() {
+    let mut h = Harness::empty(Options {
+        public_data_only: true,
+        ..Default::default()
+    });
+    h.reply("/markets", MARKETS);
+    h.public = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel: Some(SocketChannel::Public),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: h.public });
+    h.collect();
+    h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"bbo.BTC-USD-PERP","data":{"market":"BTC-USD-PERP","bid_price":"110","ask_price":"112"}}}"#);
+    assert!(!h.e.store().loaded().tickers);
+    h.reply("summary", TICKERS);
+    let ticker = h.e.store().ticker(BTC).unwrap();
+    assert_eq!(
+        (
+            ticker.bid,
+            ticker.ask,
+            ticker.last,
+            ticker.mark,
+            ticker.volume
+        ),
+        (110., 112., 100., 100.5, 200.)
+    );
+    assert!(h.e.store().loaded().tickers);
 }
 
 #[path = "support/socket.rs"]

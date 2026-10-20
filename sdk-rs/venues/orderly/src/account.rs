@@ -428,13 +428,32 @@ impl Orderly {
         r: &PositionRow<'_>,
     ) -> Result<Option<Position>, String> {
         let Some(symbol) = symbol(&r.symbol).filter(|s| cx.store.market(s).is_some()) else {
-            return Ok(None);
+            return if r.position_qty == 0.0 {
+                Ok(None)
+            } else {
+                Err(
+                    "Orderly owned position market unavailable; preserving previous snapshot"
+                        .into(),
+                )
+            };
         };
         let mode = margin(&r.margin_mode)?;
-        let mark = if r.mark_price > 0.0 {
-            r.mark_price
+        let mark = if r.position_qty == 0.0 {
+            0.0
         } else {
-            cx.store.ticker(&symbol).map_or(0.0, |t| t.mark)
+            Some(r.mark_price)
+                .filter(|price| price.is_finite() && *price > 0.0)
+                .or_else(|| {
+                    cx.store.ticker(&symbol).and_then(|ticker| {
+                        [ticker.mark, ticker.last]
+                            .into_iter()
+                            .find(|price| price.is_finite() && *price > 0.0)
+                    })
+                })
+                .ok_or_else(|| {
+                    "Orderly position mark unavailable; preserving previous positions and valuation"
+                        .to_string()
+                })?
         };
         let leverage = if r.leverage > 0.0 {
             r.leverage
@@ -501,9 +520,32 @@ impl Orderly {
                 .find(|r| !r.symbol.is_empty())
                 .map(|r| r.symbol.as_ref())
                 .unwrap_or("");
-            let Some(symbol) = symbol(native).filter(|s| cx.store.market(s).is_some()) else {
+            let Some(symbol) = symbol(native) else {
                 continue;
             };
+            if cx.store.market(&symbol).is_none() {
+                let raw = lineage
+                    .iter()
+                    .rev()
+                    .map(|r| raw_order_status(r, algo))
+                    .find(|s| !s.is_empty())
+                    .unwrap_or("");
+                let final_status = status(raw)
+                    .is_ok_and(|s| matches!(s, OrderStatus::Closed | OrderStatus::Canceled))
+                    || status(raw).is_ok_and(|s| s == OrderStatus::Open)
+                        && lineage.iter().any(|r| {
+                            status(&r.root_algo_status).is_ok_and(|s| {
+                                matches!(s, OrderStatus::Closed | OrderStatus::Canceled)
+                            })
+                        });
+                if !final_status {
+                    return Err(
+                        "Orderly working order market unavailable; preserving previous orders"
+                            .into(),
+                    );
+                }
+                continue;
+            }
             if lineage
                 .iter()
                 .any(|r| !r.symbol.is_empty() && r.symbol != native)
@@ -823,6 +865,9 @@ impl Orderly {
             Ok(())
         })();
         if let Err(e) = result {
+            if e == "Orderly working order market unavailable; preserving previous orders" {
+                cx.log(LogLevel::Warning, &e);
+            }
             match request {
                 Request::Modes { invalid, .. }
                 | Request::Positions { invalid, .. }

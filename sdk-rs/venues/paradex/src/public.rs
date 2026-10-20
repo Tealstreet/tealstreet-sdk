@@ -7,12 +7,13 @@ use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
     TimerId,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub enum Request {
     Markets {
         rows: Vec<Market>,
         bands: HashMap<String, f64>,
+        excluded: HashSet<String>,
         invalid: bool,
     },
     Tickers {
@@ -42,7 +43,8 @@ pub(crate) struct Public {
     next_rpc: u64,
     subscriptions: HashMap<u64, Subscription>,
     retries: Vec<(TimerId, String, u8)>,
-    seed_retry: Option<(TimerId, bool)>,
+    seed_retry: safe_cex_engine::startup::Backoff<bool>,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
     pub(crate) books: HashMap<String, BookState>,
     pub(crate) price_bands: HashMap<String, f64>,
     candles: HashMap<(String, String), CandleState>,
@@ -129,13 +131,17 @@ impl Paradex {
     pub(crate) fn public_start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public_seed(cx, true);
     }
-    fn public_seed(&self, cx: &mut Cx<'_, Pending>, markets: bool) {
+    fn public_seed(&mut self, cx: &mut Cx<'_, Pending>, markets: bool) {
+        if !markets {
+            self.public.live_tickers.begin();
+        }
         let (path, request) = if markets {
             (
                 "/markets",
                 Request::Markets {
                     rows: vec![],
                     bands: HashMap::new(),
+                    excluded: HashSet::new(),
                     invalid: false,
                 },
             )
@@ -394,6 +400,9 @@ impl Paradex {
             &row.market
         };
         self.public.supervisor.received(cx.now);
+        let supplied = u16::from(row.bid_price.0 > 0.)
+            | (u16::from(row.ask_price.0 > 0.) << 1)
+            | (u16::from(row.index_price.0 > 0.) << 4);
         cx.store.update_ticker(symbol, |t| {
             if row.bid_price.0 > 0. {
                 t.bid = row.bid_price.0;
@@ -405,9 +414,21 @@ impl Paradex {
                 t.index = row.index_price.0;
             }
         });
+        self.public.live_tickers.record(cx.store, symbol, supplied);
     }
     fn public_summary(&mut self, cx: &mut Cx<'_, Pending>, row: &Tick<'_>) {
         self.public.supervisor.received(cx.now);
+        let supplied = u16::from(row.bid.0 > 0.)
+            | (u16::from(row.ask.0 > 0.) << 1)
+            | (u16::from(row.last_traded_price.0 > 0.) << 2)
+            | (u16::from(row.mark_price.0 > 0.) << 3)
+            | (u16::from(
+                row.oracle_price.0 > 0. || row.index_price.0 > 0. || row.underlying_price.0 > 0.,
+            ) << 4)
+            | (1 << 5)
+            | (1 << 6)
+            | (1 << 7)
+            | (1 << 9);
         cx.store.update_ticker(&row.symbol, |t| {
             if row.bid.0 > 0. {
                 t.bid = row.bid.0;
@@ -436,6 +457,9 @@ impl Paradex {
             t.open_interest = row.open_interest.0;
             t.funding_rate = row.funding_rate.0;
         });
+        self.public
+            .live_tickers
+            .record(cx.store, &row.symbol, supplied);
     }
     fn public_trade(&mut self, cx: &mut Cx<'_, Pending>, fallback: &str, row: &Trade<'_>) {
         let symbol = if row.market.is_empty() {
@@ -451,6 +475,9 @@ impl Paradex {
             t.last = row.price.0;
             t.mark = row.price.0;
         });
+        self.public
+            .live_tickers
+            .record(cx.store, symbol, (1 << 2) | (1 << 3));
         self.trade_candles(
             cx,
             symbol,
@@ -604,26 +631,30 @@ impl Paradex {
             Request::Markets {
                 rows,
                 bands,
+                excluded,
                 invalid,
             } => {
-                let Ok(identity) = serde_json::from_str::<InstrumentIdentity<'_>>(item) else {
-                    *invalid = true;
-                    return;
+                let identity = match serde_json::from_str::<InstrumentIdentity<'_>>(item) {
+                    Ok(identity) => identity,
+                    Err(e) => return skip_or_reject(cx, invalid, &e),
                 };
                 let kind = identity.asset_kind.to_ascii_uppercase();
                 let option = kind.contains("OPTION")
                     || identity.market_kind.to_ascii_uppercase().contains("OPTION")
                     || identity.market.ends_with("-C")
                     || identity.market.ends_with("-P");
-                if identity.market.is_empty()
-                    || option
+                if identity.market.is_empty() {
+                    return;
+                }
+                if option
                     || (!identity.status.is_empty() && identity.status != "ACTIVE")
                     || !(kind.is_empty() || kind == "PERP" || identity.market.ends_with("-PERP"))
                 {
+                    excluded.insert(identity.market.to_string());
                     return;
                 }
                 let Ok(m) = serde_json::from_str::<Instrument<'_>>(item) else {
-                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
                     return;
                 };
                 let imf = if m.delta1_cross_margin_params.imf_base.0 > 0. {
@@ -673,9 +704,9 @@ impl Paradex {
                 });
             }
             Request::Tickers { rows, invalid } => {
-                let Ok(identity) = serde_json::from_str::<MarketIdentity<'_>>(item) else {
-                    *invalid = true;
-                    return;
+                let identity = match serde_json::from_str::<MarketIdentity<'_>>(item) {
+                    Ok(identity) => identity,
+                    Err(e) => return skip_or_reject(cx, invalid, &e),
                 };
                 if !identity.symbol.ends_with("-PERP")
                     || cx.store.market(&identity.symbol).is_none()
@@ -706,7 +737,7 @@ impl Paradex {
                             });
                         }
                     }
-                    Err(_) => *invalid = true,
+                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
                 }
             }
             Request::Candles { rows, invalid, .. } => {
@@ -730,13 +761,25 @@ impl Paradex {
             self.public_failed(cx, request, &e);
             return;
         }
+        let empty = match &request {
+            Request::Markets { rows, .. } => rows.is_empty(),
+            Request::Tickers { rows, .. } => rows.is_empty(),
+            _ => false,
+        };
+        if empty {
+            self.public_failed(cx, request, "No valid Paradex discovery rows");
+            return;
+        }
         match request {
             Request::Markets {
                 rows,
                 bands,
+                excluded,
                 invalid: false,
             } => {
+                self.public.seed_retry.succeeded(cx, &true);
                 self.public.price_bands = bands;
+                self.account.excluded_perps = excluded;
                 cx.store.set_markets(rows);
                 self.public
                     .books
@@ -771,14 +814,16 @@ impl Paradex {
                         false,
                     );
                 }
+                self.public_connect(cx);
                 self.public_seed(cx, false);
             }
             Request::Tickers {
-                rows,
+                mut rows,
                 invalid: false,
             } => {
+                self.public.seed_retry.succeeded(cx, &false);
+                self.public.live_tickers.finish(cx.store, &mut rows);
                 cx.store.set_tickers(rows);
-                self.public_connect(cx);
                 if self.options.public_data_only
                     || self.options.key.as_ref().is_none_or(String::is_empty)
                 {
@@ -851,9 +896,7 @@ impl Paradex {
             Request::Markets { .. } | Request::Tickers { .. } => {
                 let markets = matches!(request, Request::Markets { .. });
                 cx.log(LogLevel::Warning, error);
-                if self.public.seed_retry.is_none() {
-                    self.public.seed_retry = Some((cx.set_timer(1_000.), markets));
-                }
+                self.public.seed_retry.failed(cx, markets);
             }
             Request::Candles {
                 target,
@@ -992,8 +1035,7 @@ impl Paradex {
         }
     }
     pub(crate) fn public_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.public.seed_retry.is_some_and(|(t, _)| t == timer) {
-            let (_, markets) = self.public.seed_retry.take().unwrap();
+        if let Some(markets) = self.public.seed_retry.on_timer(timer) {
             self.public_seed(cx, markets);
             return true;
         }
@@ -1197,6 +1239,17 @@ impl Paradex {
     }
 }
 
+// Rows reach the venue unvalidated (venue item check), so a JSON syntax error
+// means the stream itself is untrustworthy: reject the read and retry. A
+// well-formed row with unusable fields is skipped so its peers still load.
+fn skip_or_reject(cx: &mut Cx<'_, Pending>, invalid: &mut bool, e: &serde_json::Error) {
+    if e.is_syntax() || e.is_eof() {
+        *invalid = true;
+    } else {
+        safe_cex_engine::startup::skipped_row(cx);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1247,7 +1300,11 @@ mod tests {
             })
             .unwrap();
         failed.handle(0.,Event::HttpResponse{request:id,response:Response{status:200,headers:"",body:r#"{"results":[{"symbol":"BTC-USD-PERP","asset_kind":"PERP","price_bands_width":"5"},{"symbol":"ETH-USD-PERP","step_size":"invalid"}]}"#}});
-        assert!(!failed.store().loaded().markets);
-        assert!(failed.venue().public.price_bands.is_empty());
+        assert!(failed.store().loaded().markets);
+        assert_eq!(failed.store().markets().len(), 1);
+        assert_eq!(
+            failed.venue().public.price_bands.get("BTC-USD-PERP"),
+            Some(&0.05)
+        );
     }
 }

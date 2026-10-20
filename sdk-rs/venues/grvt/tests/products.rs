@@ -290,7 +290,7 @@ fn broad_and_exact_fill_reads_isolate_supported_markets() {
 }
 
 #[test]
-fn malformed_catalog_refresh_is_atomic_and_keeps_existing_market_data() {
+fn malformed_catalog_refresh_skips_bad_market_and_commits_valid_neighbours() {
     let mut h = Harness::new(false);
     let timer = h
         .actions
@@ -310,9 +310,9 @@ fn malformed_catalog_refresh_is_atomic_and_keeps_existing_market_data() {
     );
     assert!(malformed.contains(r#""ts":"NaN""#));
     h.respond(r, &malformed, "");
-    assert_eq!(h.e.store().markets().len(), MARKETS.len());
-    for (id, _) in MARKETS {
-        assert_eq!(h.e.store().market_by_id(id).unwrap().precision.price, 0.1);
+    assert_eq!(h.e.store().markets().len(), MARKETS.len() - 1);
+    for market in h.e.store().markets() {
+        assert_eq!(market.precision.price, 0.2);
     }
 }
 
