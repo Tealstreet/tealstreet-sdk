@@ -169,6 +169,18 @@ const KNOWN_TS_FIXES = {
   // Rust also refuses replacement after observed execution/lifecycle progress
   // or stale cancellation proof, rechecking deferred/resigned dispatches.
   grvt() {},
+  // ApeX repairs are in the TS reference; output is compared without rewriting:
+  // continuous book sequences and atomic invalid depth updates; top-level ping
+  // detection avoids answering echoed ping acknowledgements; stable original
+  // payloads for legacy HMAC across form transforms; canonical hedged position
+  // IDs; failure-safe private snapshots and required row identifiers;
+  // documented realizedPnl aliases; raw-millisecond history bounds/order;
+  // one fill per genuine execution, isolated synthetic replay identity;
+  // distinct equal executions preserved in REST/WS history; exact tick splitting;
+  // both bracket siblings preserved during parent cancel/replace amendments.
+  // Price-only amendments keep the observed residual quantity; invalid/no-op
+  // amendments reject before cancellation and filled sources are not replaced.
+  apexomni: [],
   kraken: {
     output: fixKrakenOutput,
     fixes: [

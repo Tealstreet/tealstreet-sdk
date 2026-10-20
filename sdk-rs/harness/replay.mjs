@@ -90,6 +90,11 @@ const options = {
     : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }),
   ...config.options,
 };
+const initializeReplay = async () => {
+  await venue.prepareReplay?.({ isPrivate, options });
+  await venue.initializeReplay?.(values.impl, options);
+};
+
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 
 const settle = async () => {
@@ -169,7 +174,7 @@ const marketFields = (m) => ({
 async function runRust() {
   const heapBefore = await baselineBeforeSetup({
     baseline,
-    initialize: () => venue.initializeReplay?.(values.impl, options),
+    initialize: initializeReplay,
   });
   const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
@@ -346,6 +351,8 @@ const commandArgs = ({ t, type, expected, ...args }) => args;
 async function tsCommand(exchange, store, record) {
   const { op, ...args } = commandArgs(record);
   switch (op) {
+    case 'getAccount':
+      return exchange.getAccount();
     case 'placeOrders':
       return exchange.placeOrders(args.orders);
     case 'cancelOrders':
@@ -467,7 +474,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 async function runTs() {
   const heapBefore = await baselineBeforeSetup({
     baseline,
-    initialize: () => venue.initializeReplay?.(values.impl, options),
+    initialize: initializeReplay,
   });
   const tape = new Tape(records, venue, isPrivate, 30000, 'ts', bookSymbols, options);
   class TapeWebSocket {
@@ -604,7 +611,7 @@ async function runTs() {
     });
   });
   venue.configureTs?.(exchange);
-  venue.prepareTs?.(exchange, TapeWebSocket);
+  await venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;

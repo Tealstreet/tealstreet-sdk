@@ -356,7 +356,7 @@ export class Tape {
 
   respond(method, url, body, headers) {
     try {
-      this.validateRequest?.({ method, url, body, headers });
+      this.validateRequest?.({ method, url, body, headers, callerIds: this.callerIds });
       this.requestAudit?.validate({ method, url, body, headers });
     } catch (error) {
       this.invalidSignatures++;
