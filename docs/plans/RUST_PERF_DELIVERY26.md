@@ -146,3 +146,27 @@ runtime/dependency inventories before/after the whole collection, with smaller
 helper/host/selected-binding/fixture guards per gate. All owned compiler/test
 jobs must be finished before measurements. This checkpoint passes prerequisites;
 the requested final public/private gate and margin results remain pending.
+
+## Replay reconciliation before public measurement
+
+The first fixed collection stopped on its first private gate (Breakout): four
+zero-leverage placeholders appeared only in the Rust comparison view. Two
+private replay children ran; no public gate or comparison ran. The failure,
+raw-output hashes and passing endpoint audits remain in
+`RUST_PERF_DELIVERY26_RECONCILIATION.json.gz`; original config/proofs are unchanged.
+
+The merge had retained an old BloFin-only comparison filter. Restore the exact
+landing generic scalar leverage >0 filter, preserving independent buy/sell rows
+and native consumer placeholders. A fresh remaining-diff review also found two
+landing rules to restore: unconditional Tape interception of SDK fetch calls,
+and the explicit 15-second startup/subscription timeout instead of the helper's
+30-second default. Response headers remain preserved.
+
+All 632 serialized harness tests pass. Two actual-function VM regressions cover
+scalar/independent leverage and ordinary-venue fetch interception with Request
+cloning, overrides, response metadata and bodyless statuses. Independent reviews
+pass. Engine/Rust source and all 234 WASM artifacts are unchanged, retaining
+prior Rust/SDK/host/parity/size validation. Refresh this one shared helper in the
+control, preserve the original failed collection, then freeze a fresh config and
+run the same declared 61-private/34-public protocol. This is a correctness repair
+before public sampling; no numerical retries or performance tuning occurred.

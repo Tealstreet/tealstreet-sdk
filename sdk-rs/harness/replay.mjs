@@ -387,7 +387,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   const settingRows = [];
   for (let i = 0; i < (settings?.count ?? 0); i++) {
     // TS has no margin-only placeholder; frames retain it for actual consumers.
-    if (values.venue === 'blofin' && !(settings.leverage[i] > 0)) continue;
+    if (!venue.independentLeverage && !(settings.leverage[i] > 0)) continue;
     settingRows.push({
       symbol: symbol(settings.market[i]),
       marginType: settings.marginType(i),
@@ -470,8 +470,8 @@ async function runTs() {
     }
   }
   globalThis.WebSocket = TapeWebSocket;
-  // These venue SDKs also use fetch beside the axios adapters below.
-  if (['hyperliquid', 'paradex'].includes(values.venue)) globalThis.fetch = async (input, init = {}) => {
+  // SDK helpers may use fetch beside the axios adapters below.
+  globalThis.fetch = async (input, init = {}) => {
     const request = input instanceof Request ? input : undefined;
     const method = init.method ?? request?.method ?? 'GET';
     const requestBody = init.body ?? (request && !['GET', 'HEAD'].includes(method.toUpperCase()) ? await request.clone().text() : undefined);
@@ -602,7 +602,7 @@ async function runTs() {
     (record) => runTsCommand(exchange, store, record),
     clock,
   );
-  await withTimeout(Promise.all([started, subscribed]), 'TS startup/subscriptions');
+  await withTimeout(Promise.all([started, subscribed]), 'TS startup/subscriptions', 15000);
   if (venue.tsReplaySettled) await until(() => venue.tsReplaySettled(exchange, bookSymbols.length), 'TS pending book snapshots');
   await withTimeout(venue.settleTs?.(exchange, { isPrivate, clock }) ?? Promise.resolve(), 'TS pending venue reads', 15000);
   await settle();
