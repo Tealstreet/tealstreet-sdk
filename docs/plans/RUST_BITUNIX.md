@@ -3063,3 +3063,14 @@ only root performance/build batch. Each profile waits independently for2hostCPU
 readings below50percent aggregatehardwarecapacity,15sapart; no constructors or
 replay samples run while waiting. All original limits/equality/tapes/timers stay
 unchanged. Preserve stopped publication batch (no finalpublic attempt started).
+
+Final Bitunix gates PASS on3d975c0d78 production: standalone856,206bytes
+(SHA256be1a4ce3917d738b42fee0b9945bb1d57be547ee8189369e512c3e9bcf8b5cd3)
+under1,258,291. Private42frames/2markets/tickers passes exact correctness;
+CPU/memory informational. Public3run exact output28,694frames/697markets/
+tickers/2books PASS: TS/Rust main505.9/425.5ms, steady280.1/198.0,
+process696.7/652.3, retained3.6/2.4MB, peak11.6/4.8, WASMlinear0.9.
+Preserve /tmp/bitunix-702-bitunix-{private,public}.log and complete raw samples
+sdk-rs/harness/out/bitunix-bitunix-public-jsonl-gz-30916. Host qualified before
+each profile. Remaining regression gates and actual published-head PR review/CI
+are still pending; continue, do not report complete from these Bitunix receipts.
