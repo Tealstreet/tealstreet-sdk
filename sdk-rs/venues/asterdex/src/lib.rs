@@ -661,6 +661,16 @@ impl Venue for AsterDex {
     }
 
     type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
+            account: safe_cex_engine::AccountLookup::Query,
+            leverage_query: safe_cex_engine::LeverageQuery::OnRead,
+            cancel_with_symbols: true,
+            order_book_query: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(credentials) = &self.credentials

@@ -1,5 +1,5 @@
 import type { ExchangeLike } from '@tealstreet/cli-core/src/types';
-import type { BaseCapabilityMethod, Exchange } from '@tealstreet/safe-cex/src/exchanges/base';
+import type { Exchange, ExchangeCapabilities } from '@tealstreet/safe-cex/src/exchanges/base';
 import type { Order, PlaceOrderOpts } from '@tealstreet/safe-cex/src/types';
 
 import {
@@ -12,7 +12,7 @@ import {
 import { z } from 'zod';
 
 import { prepareCliAmendPrice, prepareCliOrder } from '@tealstreet/cli-core/src/order/prepareCliOrder';
-import { isInertCapability } from '@tealstreet/safe-cex/src/exchanges/base';
+import { CAPABILITY_METHODS } from '@tealstreet/safe-cex/src/exchanges/base';
 import { roundOrderSizeToNearest } from '@tealstreet/script-api-core/src/order/orderPricing';
 
 type Shape = z.ZodRawShape;
@@ -356,9 +356,16 @@ export const tools: Tool[] = [
   }),
 ];
 
-export const supportedTools = (exchange: Exchange, { options = false }: { options?: boolean } = {}): Tool[] =>
-  tools.filter((t) => {
+const capabilityOf = new Map<string, keyof ExchangeCapabilities>(
+  Object.entries(CAPABILITY_METHODS).map(([capability, method]) => [method, capability as keyof ExchangeCapabilities]),
+);
+
+export const supportedTools = (exchange: Exchange, { options = false }: { options?: boolean } = {}): Tool[] => {
+  const { capabilities } = exchange;
+  return tools.filter((t) => {
     if (t.requiresOptions && !options) return false;
-    const fn = (exchange as unknown as Record<string, unknown>)[t.method];
-    return typeof fn === 'function' && !isInertCapability(fn, t.method as BaseCapabilityMethod);
+    if (typeof (exchange as unknown as Record<string, unknown>)[t.method] !== 'function') return false;
+    const capability = capabilityOf.get(t.method);
+    return capability === undefined || capabilities[capability];
   });
+};

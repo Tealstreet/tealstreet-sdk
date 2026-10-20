@@ -332,6 +332,40 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     await expect(adapter(callerConfig)).rejects.toThrow('proxy token unavailable');
   });
 
+  it('reads the token bound at request start after waiting for a cold socket', async () => {
+    let context = 'account-a';
+    configureHOW({
+      getProxyToken: async () => context,
+      bindProxyToken: () => {
+        const bound = context;
+        return async () => bound;
+      },
+      isTokenExpired: () => false,
+    });
+    mockWs.isOpen = false;
+    mockWs.isTokenSent = false;
+    mockWs.authState = 'Unknown';
+    mockWs.replyTo = (sent) => {
+      mockWs.emitter.emit('sub:' + sent.nonce, { data: { ok: true }, status: 200, headers: {} });
+    };
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    try {
+      const pending = adapter({ url: '/api/path', method: 'GET', baseURL: 'https://example.com', headers: {} } as any);
+      // Another account's work runs while this request waits for the socket.
+      context = 'account-b';
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      mockWs.isOpen = true;
+      await vi.waitFor(() => expect(mockWs.sendToken).toHaveBeenCalled());
+      expect(mockWs.sendToken.mock.calls[0][0]).toMatchObject({ type: 'rpc.auth', token: 'account-a' });
+      mockWs.authState = 'Good';
+      await expect(pending).resolves.toMatchObject({ data: { ok: true } });
+    } finally {
+      configureHOW({ bindProxyToken: undefined });
+      mockWs.isOpen = true;
+      adapter.dispose();
+    }
+  });
+
   it('uses TradeTunnel IP auto-auth without fetching or sending a token', async () => {
     const getProxyToken = vi.fn(async () => {
       throw new Error('proxy token should not be requested');
