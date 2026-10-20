@@ -87,3 +87,7 @@ Initial Rust workspace run: **2,370/2,370 tests**, 190 groups, no failed/ignored
 workspace all-target clippy, bans/fmt and workspace wasm32 clippy PASS. Re-running
 integration/package/root gates after the merge, then current-head WASM build,
 host/harness/frame-wire and Binance public/private acceptance before opening PR.
+Phase-4 sub-agent audit confirmed this gate set; added explicit CI fixture
+prebuild so cold native/TLS compilation uses the existing job budget rather
+than the integration runner's 120-second fixture deadline. No budgets, thresholds
+or timeouts changed. No additional production correctness findings.
