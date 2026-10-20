@@ -1532,3 +1532,15 @@ Final three-delta independent audit PASS:10/10 targeted tests and exact/changed
 signature fallback probe. Legacy normalization defaults, logical startup
 observers and repeated serialized query parameters remain intact. No findings
 or background jobs remain. Source review closed; start rebuilt gates now.
+
+Reviewed merge checkpoint cb9e684e68. Coinbase public three-run gate PASS:
+201frames/925markets/tickers/2books, module991,290bytes. TS/Rust main
+919.0/436.2ms, steady562.1/190.5ms, retained18.2/14.1MB, peak103.7/46.2MB.
+First INTX ES256 private gate stopped at independent oracle assertion
+"missing Coinbase held currency oracle". Retained raw outputs show both
+balances exactly {used:200,free:800,total:1000,upnl:20,currencies:{}} with
+61frames, zero unserved/unused writes/protocol errors. The incidental portfolio
+breakdown contains spot_positions but selected portfolio is INTX, for which
+TS never publishes spot currencies. Fix only input-proven INTX exclusion;
+CFM remains strict, including futures-only metadata and empty output. No gate
+rerun until failed-before/passed-after oracle tests and independent audit.
