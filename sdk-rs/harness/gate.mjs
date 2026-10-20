@@ -454,7 +454,7 @@ for (let run = 0; run < runs; run++) {
   if (venue.family === 'orderly') fixOrderly(ts, tape);
   if (venue.family === 'orderly' && !equal(ts.requests, rust.requests))
     differences.push(`requests differ: ts=${JSON.stringify(ts.requests)} rust=${JSON.stringify(rust.requests)}`);
-  if (venue.subscriptionGenerations) {
+  if (venue.family === 'bybit') {
     if (ts.account) {
       const rest = tape.find((record) => record.type === 'config')?.options?.endpoints?.rest
         ?? (values.venue === 'bybitdemo' ? 'https://api-demo.bybit.com' : 'https://api.bybit.com');
@@ -530,7 +530,7 @@ for (let run = 0; run < runs; run++) {
     if (result[impl].unserved) differences.push(`${impl}: ${result[impl].unserved} unserved requests`);
   }
   for (const field of ['outbound', 'subscriptions', 'candles', 'bookEvents', 'wsRequests']) {
-    if (field === 'outbound' && venue.subscriptionGenerations) {
+    if (field === 'outbound' && venue.family === 'bybit') {
       const selected = (impl) => new Set(tape.filter((record) => record.type === 'http' && record.impl === impl)
         .map((record) => requestKey(record.method, record.url, record.requestBody, callerIdsOf(tape), venue)));
       if (!equal(ts.outbound?.filter((key) => !selected('ts').has(key)), rust.outbound?.filter((key) => !selected('rust').has(key))))
@@ -581,7 +581,7 @@ for (let run = 0; run < runs; run++) {
       if (maxima.length) market.limits.amount.max = Math.min(...maxima);
     }
   }
-  if (venue.subscriptionGenerations) {
+  if (venue.family === 'bybit') {
     const selected = (impl) => new Set(tape.filter((record) => record.type === 'http' && record.impl === impl)
       .map((record) => requestKey(record.method, record.url, record.requestBody, callerIdsOf(tape), venue)));
     const plans = { ts: selected('ts'), rust: selected('rust') };

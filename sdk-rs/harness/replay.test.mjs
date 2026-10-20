@@ -202,3 +202,45 @@ test('production Hyro partial readiness waits for both public seed flags in publ
     assert.equal(done, true, 'partial readiness does not require private account state');
   }
 });
+
+test('production constructor keeps typed signed HTTP matching separate from subscription generations', () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const keyStart = source.indexOf('const VOLATILE =');
+  const classStart = source.indexOf('class Tape extends SharedTape {');
+  const classEnd = source.indexOf('\nconst settle =', classStart);
+  assert(keyStart >= 0 && classStart > keyStart && classEnd > classStart);
+  const url = 'https://open-api.bingx.com/openApi/swap/v2/trade/order';
+  const order = { symbol: 'BTC-USDT', positionSide: 'BOTH', side: 'BUY', type: 'LIMIT',
+    quantity: 0.0021, price: 90500, timeInForce: 'GTC', clientOrderId: 'caller-lowercase' };
+  const records = [{ type: 'http', method: 'POST', url, requestBody: JSON.stringify(order), status: 200, body: '{}' }];
+  const venue = venueOf('bingx');
+  assert.equal(venue.subscriptionGenerations, true, 'generation tracking also belongs to unrelated protocols');
+  const ProductionTape = new Function('SharedTape', 'values', 'venue', 'records', 'bookSymbols', 'callerIds',
+    'keyOf', 'Responses', 'sharedUrl', 'parseRequestJson', 'isRead', 'isPrivate',
+    `${source.slice(keyStart, classStart)}\nreturn (${source.slice(classStart, classEnd)});`)(
+    Tape, { venue: 'bingx' }, venue, records, [], new Set(['caller-lowercase']), requestKey,
+    Responses, undefined, parseRequestJson, () => false, true,
+  );
+  const tape = new ProductionTape('ts');
+  const signed = { ...order, timestamp: 1792454400000, signature: 'verified-separately' };
+  for (const changed of [{ ...signed, quantity: 0.0022 }, { ...signed, quantity: '0.0021' },
+    { ...signed, clientOrderId: 'other' }, { ...signed, extra: true }]) {
+    assert.equal(tape.respond('POST', url, JSON.stringify(changed)).status, 599);
+    assert.equal(tape.missingWrites, 1);
+  }
+  assert.equal(tape.respond('POST', url, JSON.stringify(signed)).status, 200);
+  assert.equal(tape.missingWrites, 0);
+  assert.equal(tape.respond('POST', url, JSON.stringify(signed)).status, 599);
+  const socketUrl = 'wss://ws-market-swap.qq-os.com/ws';
+  const message = JSON.stringify({ id: 'runtime-id', reqType: 'sub', dataType: 'BTC-USDT@depth20' });
+  const first = tape.connect(socketUrl, () => {}, () => {});
+  tape.send(first, message);
+  const expected = subscriptionKeys(socketUrl, message, new Set(), { ...venue, fullSocketIdentity: true });
+  assert.deepEqual([...tape.fullSubscriptions], expected.map((key) => `1 ${key}`));
+  tape.close(first, 1000, true);
+  const replacement = tape.connect(socketUrl, () => {}, () => {});
+  tape.send(replacement, message);
+  assert.deepEqual([...tape.fullSubscriptions], [
+    ...expected.map((key) => `1 ${key}`), ...expected.map((key) => `2 ${key}`),
+  ]);
+});

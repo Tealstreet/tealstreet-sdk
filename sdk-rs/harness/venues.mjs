@@ -18,6 +18,7 @@ const typedRequest = function (method, url, body, callerIds) {
 
 const bybit = (name, className) => ({
   rust: name,
+  family: 'bybit',
   subscriptionGenerations: true,
   compareWriteOrder: true,
   ts: { module: `${root}/bybit/${name}.exchange.ts`, className, name },
@@ -187,7 +188,6 @@ const orderly = (alias) => {
     family: 'orderly',
     orderlyProtocol: true,
     subscriptionGenerations: true,
-  compareWriteOrder: true,
     publicTickers: (records) => {
       const seed = records.find((r) => r.type === 'http' && new URL(r.url).pathname === '/v1/public/info');
       return seed ? JSON.parse(seed.body).data.rows.map((row) => row.symbol) : [];
@@ -546,7 +546,6 @@ export const VENUES = {
     initialBookSnapshots: true,
     wooProtocol: true,
     subscriptionGenerations: true,
-  compareWriteOrder: true,
     ts: { module: `${root}/woo/woo.exchange.ts`, className: 'WOOXExchange', name: 'woo' },
     privateSocket: '/v2/ws/private/',
     matchRequestBody: true,
@@ -832,7 +831,6 @@ export const VENUES = {
     bingxProtocol: true,
     // BingX owns one listener per URL; resubscriptions must recur on reconnect.
     subscriptionGenerations: true,
-  compareWriteOrder: true,
   },
   weex: {
     rust: 'weex',

@@ -130,7 +130,7 @@ const canonicalUrl = (url) => {
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
-const requestKey = (method, url, body) => (['blofin', 'mexc', 'bingx', 'bitrue', 'lighter'].includes(values.venue) || venue.family === 'orderly' || venue.subscriptionGenerations)
+const requestKey = (method, url, body) => (['blofin', 'mexc', 'bingx', 'bitrue', 'lighter'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'bybit')
   ? keyOf(method, url, body, callerIds, venue)
   : `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
 
@@ -141,7 +141,7 @@ class Tape extends SharedTape {
   constructor(impl) {
     super(records, { ...venue, impl, books: bookSymbols, timeoutMs: 15000, isPrivate, canonicalize: values.venue === 'backpack' ? (url) => sharedUrl(url, callerIds, venue) : canonicalUrl,
       explicitOpens: values.venue === 'bitunix', legacyLatest: false,
-      responses: values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'lighter' || venue.family === 'orderly' || venue.subscriptionGenerations || values.venue.startsWith('bitget') ? undefined : new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
+      responses: values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'lighter' || venue.family === 'orderly' || venue.family === 'bybit' || values.venue.startsWith('bitget') ? undefined : new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
         venue.matchRequestBody ? undefined : (method, url, body) => isWriteRequest(method, url) && !['', '{}'].includes(canonicalBody(body)) ? undefined : requestKey(method, url)),
       prepareFrame: (r) => {
         if (r.type !== 'ws') return r;
@@ -370,8 +370,8 @@ const marketFields = (m) => ({
   base: m.base,
   quote: m.quote,
   active: m.active,
-  ...(venue.inverseNativeAmounts || venue.subscriptionGenerations ? { isInverse: Boolean(m.isInverse) } : {}),
-  ...(venue.subscriptionGenerations ? { isSpot: Boolean(m.isSpot), isExpiring: Boolean(m.isExpiring) } : {}),
+  ...(venue.inverseNativeAmounts || venue.family === 'bybit' ? { isInverse: Boolean(m.isInverse) } : {}),
+  ...(venue.family === 'bybit' ? { isSpot: Boolean(m.isSpot), isExpiring: Boolean(m.isExpiring) } : {}),
   contractSize: m.contractSize ?? null,
   precision: { amount: m.precision.amount, price: m.precision.price },
   limits: { amount: { min: Number(m.limits.amount.min), max: Number(m.limits.amount.max) } },

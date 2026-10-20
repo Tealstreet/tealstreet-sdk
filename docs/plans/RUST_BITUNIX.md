@@ -885,3 +885,21 @@ output normalization. Independent311helper aggregate plus this regression
 PASS (312total); signed request/socket/generated-ID/frame controls have no
 remaining findings. Checkpoint this two-file follow-up before final exact-head
 CI; no further source changes planned absent a proven failure.
+
+### Explicit venue-family selection correction
+
+On e78dd50cba every20public fixture and36other private variants pass,
+including all14Orderly and4Bybit variants. BingX TS private fails because
+new Bybit code infers family from the generic subscriptionGenerations flag,
+bypassing its injected typed matcher. The quantity0.0021 matches the fixture;
+no SDK/native arithmetic changes are warranted. Add explicit Bybit family
+metadata and isolate only family-specific matching/market/gate normalizations.
+Keep generic shared-send/generation-aware subscription capture unchanged.
+
+The exact production constructor regression fails before (599vs200), then
+passes after. Wrong quantity/type/caller/extra-field attempts reject without
+consumption, while original0.0021 succeeds once; two generations and topic
+capture remain verified. All313helpers and8production-replay controls PASS.
+Actual TS BingX private38frames/3commands PASS with zero unserved/unused/
+protocol errors. No economic aliases or source-venue changes. Independent
+final review and entirely green fresh CI remain required before merge.
