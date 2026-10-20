@@ -36,6 +36,8 @@ type PredictionInput = {
 
 type GrvtInstrumentInput = { i: string; b: string; q: string; k: string; ms: string; ts: string };
 
+type BreakoutQuote = { symbol: string; bid: number; ask: number };
+
 const orderlyAliases = new Set(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 
 /** Test input only: no network, no SDK store writes and no fabricated empty replies. */
@@ -74,6 +76,7 @@ export const realVenue = (name: ExchangeName) => {
       .split('\n')
       .map((line) => JSON.parse(line));
     source = `${fixture}-public.jsonl.gz`;
+    if (name === 'breakoutprop') source += ' (documented-scripted DXtrade session, not a live recording)';
   }
   // Never replay commands or a private account payload from a schema builder.
   records = records.filter((record) => record.type === 'http' || record.type === 'ws' || record.type === 'config');
@@ -99,6 +102,7 @@ export const realVenue = (name: ExchangeName) => {
     engine: 'rust',
     ...(orderlyAliases.has(name) ? { applicationId: venue.publicOptions.applicationId } : {}),
     ...(name === 'polymarket' ? { polymarket: venue.publicOptions.polymarket } : {}),
+    ...(name === 'breakoutprop' ? { ...venue.publicOptions, subaccount: venue.options.subaccount } : {}),
     ...(name === 'hyrotrader' ? { extra: { hyrotraderMode: 'demo' } } : {}),
   };
   const restore: (() => void)[] = [];
@@ -144,6 +148,17 @@ export const realVenue = (name: ExchangeName) => {
         : {}),
     }));
   const tape = new Tape(records, venue, false, 2000, 'rust', [], options);
+  const polling = venue.polling === true;
+  let pollingEpoch: number | undefined;
+  const publicPollResponses: Array<{ status: number; quotes: BreakoutQuote[] }> = [];
+  const breakoutQuotes: BreakoutQuote[][] =
+    name === 'breakoutprop'
+      ? records
+          .filter((row) => row.type === 'http' && new URL(row.url!).pathname.endsWith('/marketdata'))
+          .map((row) =>
+            (JSON.parse(row.body!).events as BreakoutQuote[]).map(({ symbol, bid, ask }) => ({ symbol, bid, ask })),
+          )
+      : [];
   // GRVT's Lite REST instruments retain their native mixed-case ID while
   // the SDK symbol is uppercase. Keep the precision oracle in raw API units.
   const grvtMarkets =
@@ -234,8 +249,24 @@ export const realVenue = (name: ExchangeName) => {
     async request({ method, url, body, headers, signal }) {
       signal?.throwIfAborted();
       requests.push(`${method} ${url}`);
+      // Polling records become available with real elapsed input time. Start
+      // after WASM initialization, at the first actual request, and leave the
+      // native engine's timers and store publication untouched.
+      if (polling) {
+        pollingEpoch ??= Date.now();
+        tape.time = Math.max(0, Date.now() - pollingEpoch);
+      }
       const response = tape.respond(method, url, body, headers);
       if (response.status === 599) errors.push(`Untaped ${method} ${url}${body ? ` ${body}` : ''}`);
+      if (polling && method === 'POST' && new URL(url).pathname.endsWith('/marketdata') && response.status === 200)
+        publicPollResponses.push({
+          status: response.status,
+          quotes: (JSON.parse(response.body).events as BreakoutQuote[]).map(({ symbol, bid, ask }) => ({
+            symbol,
+            bid,
+            ask,
+          })),
+        });
       return { status: response.status, headers: response.headers, body: new TextEncoder().encode(response.body) };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -247,6 +278,9 @@ export const realVenue = (name: ExchangeName) => {
     requests,
     errors,
     source,
+    polling,
+    publicPollResponses,
+    breakoutQuotes,
     predictionMarkets,
     grvtMarkets,
     publicBookSymbols,

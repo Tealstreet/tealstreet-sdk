@@ -132,3 +132,26 @@ consumer adoption remain explicit blockers.
   memory. All independent integration findings are resolved. Push the refreshed
   PR checkpoint, publish this review/gate update and merge only on green CI for
   its exact head.
+- BreakoutProp landed as `74b0a7dd14` during the final CI wait. Merge
+  `a0413b6520` is clean. Its public mode requires a DXtrade session and uses
+  authenticated HTTP polling, so native coverage must prove a real subsequent
+  quote poll rather than require a nonexistent websocket. Shared boundary cases
+  supply explicit offline replay credentials, preserving the wrapper's guard.
+  The automatically enumerated matrix now includes 41 aliases. Refresh the
+  inventory, review polling evidence and rerun affected gates before landing.
+- Breakout acceptance passes: full SDK/WASM 359 tests in ten files, including
+  all 41 real native aliases and 215 independent consumer/metadata cases. SDK
+  unit 7,305 tests / 503 files, five lint-rule tests, other 25 workspace test
+  tasks, root typecheck 44 tasks and lint 28 tasks pass. Native workspace passes
+  2,272 tests / 183 suites; harness 418, JS host 65, and four compiled Breakout
+  frame tests pass. Rust bans/format, strict WASM Clippy, explicit fixture lint
+  and combined build pass (10,620,599 bytes). Breakout documented public/private
+  and regenerated Binance controls pass. Binance public main CPU TS/Rust is
+  280.5/153.9 ms, steady 156.0/73.6 ms, retained memory 17.0/3.7 MB including
+  2.0 MB Rust linear memory. Fixed the polling fixture clock's availability
+  advance and a fragile positional quote assumption; independent re-review is
+  clear. Inventory is 49 registered / 41 Rust / eight defaults / 33 opt-in /
+  eight absent names, with seven explicit deletion blockers and additional
+  live/product scope prerequisites. No newer landing commit at this checkpoint.
+  Push the refreshed PR, publish the review/gates and wait for exact-head green
+  CI before merging and cutting a follow-up branch.

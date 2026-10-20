@@ -7,11 +7,11 @@ phase-9 decision and gate results live in [RUST_REWRITE.md](RUST_REWRITE.md).
 
 ## What is ready, and what is still a deletion blocker
 
-The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **40**.
+The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **41**.
 The two registries currently default **8 names** to `RustEngineExchange`:
 `coinbase`, `coinbasespot`, and Orderly's `tealstreet-dex`, `kodiakfi`, `mode`,
 `salsadex`, `what`, `woofi`. They default the other **41 names** to TypeScript,
-including **32 names with an available Rust adapter**. Registration in
+including **33 names with an available Rust adapter**. Registration in
 `RUST_VENUES` proves the adapter exists; it does not prove every optional product,
 credential mode, consumer, or live deployment is ready to delete.
 
@@ -55,12 +55,20 @@ of saved accounts.
 | `woo` | Yes | TS default; WOO X, not Orderly `woofi`; keep WOO position-history adapter used by Rust. |
 | `polymarket` | Yes | TS default, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage; generic algorithm fixtures do not enable venue features. Prediction CLOB V2 outcome shares with typed prediction/holding metadata; native local-wallet signature types 0/1/2/3 and supplied/derived L2 credentials. Limit/GTC only; no client IDs, market/conditional/bracket/reduce-only orders, or generic fills/order-history/income/public-trades query claims. Preserve authoritative final-fill-safe cancel-replace and bounded sampled price history. Read [venue-ports/POLYMARKET.md](venue-ports/POLYMARKET.md) for exact auth/product/query scope; private tests use documented fixtures, not live-key proof. |
 | `grvt` | Yes | TS default; perpetual-only Rust catalog, with local EIP-712 signing (chains 325/326), API-key/session login, routed/direct private auth, subaccount discovery and mandatory builder authorization. Canonical caller IDs are decimal 1..2^63-1; limit/market/protective/bracket commands and final-fill-safe cancel-replace, one-way positions, real leverage reads/updates; margin-mode mutation unsupported. Bounded fills/history/funding/public-trade queries and definitive client-ID lookup, including the chaser fill-verification hook. Preserve public browser builder-authorization exports and signing/session routing. TS maps non-perpetual instrument kinds: resolve that product gap explicitly before deletion; no future/options claim. Exact scope/evidence: [GRVT_RUST_PORT.md](GRVT_RUST_PORT.md). |
-| `bitunix`, `breakoutprop`, `txflow` | None | TS required. Bitunix roster work-in-progress is not a registered Rust adapter. TxFlow is explicitly a Phase-0 scaffold, not a completed venue. Each needs an explicit port or an explicit supported-product retirement decision. |
+| `breakoutprop` | Yes | TS default, legacy DXtrade only and disabled in production/preview (`enabledInDev: true`); authenticated REST polling, no venue WebSocket or anonymous public feed. Username/password and exact FULL_TRADING account selection are required even for public-data-only reads; `supportsChaser: false` remains enforced by metadata. LIMIT/MARKET/last-price STOP, GTC, reduce-only as CLOSE, confirmed zero-fill cancel-replace; caller IDs, attached brackets/close-all and leverage/margin/mode changes unsupported. One-way/cross account model, native lot IDs and explicitly estimated margin/PnL; quote-derived books/live candles are synthetic. Generic fills/order/income history remain branded inert fallbacks, public trades unsupported; internal cancel history proof is not a history-query implementation. Public fixture is documented/scripted under the recorded waiver, with live credential capture/connectivity still unverified; read [RUST_BREAKOUTPROP.md](RUST_BREAKOUTPROP.md). |
+| `bitunix`, `txflow` | None | TS required. Bitunix roster work-in-progress is not a registered Rust adapter. TxFlow is explicitly a Phase-0 scaffold, not a completed venue. Each needs an explicit port or an explicit supported-product retirement decision. |
 
-The 9 names absent from `RUST_VENUES` are exactly `binanceinverse`,
-`binancespot`, `bitunix`, `breakoutprop`, `hyperliquidspot`,
+The 8 names absent from `RUST_VENUES` are exactly `binanceinverse`,
+`binancespot`, `bitunix`, `hyperliquidspot`,
 `krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow`.
 Do not silently route them through another family's adapter.
+
+Native consumer proof includes both WebSocket venues and HTTP-polling venues.
+BreakoutProp starts the actual Rust engine with documented DXtrade session/
+account/quote responses; it emits no venue socket frames. Its fixture proves
+polling dispatch, frame/store publication and consumer compatibility under that
+input. It is not a live credential capture or evidence that new proprietary
+Breakout Terminal accounts work with this legacy DXtrade adapter.
 
 ## Consumer gaps repaired by this readiness change
 
@@ -203,7 +211,7 @@ keep derived display/store fields and sequencing while inputs become Rust frames
    corpus. Keep absence of optional data distinct from an authoritative empty
    snapshot, updateId bumps, native units, terminal fences and serialize/stub
    parity. Run integration/build/replay controls as applicable.
-2. **Close unsupported aliases/products.** Port the 9 missing names or obtain an
+2. **Close unsupported aliases/products.** Port the 8 missing names or obtain an
    explicit supported-product retirement decision in a separate change. A
    perps port never retires a saved spot/inverse account implicitly. Audit
    all credential/signing modes, proxy/tunnel/region, secondary keys, product
@@ -227,13 +235,13 @@ keep derived display/store fields and sequencing while inputs become Rust frames
    Coinbase/Orderly production implementation is already replaced and their
    frozen references remain. Next choose independent ready families (Backpack,
    BingX, Crypto.com, MEXC, BloFin, Bitrue, Phemex, WEEX, WOO, ApeX, Paradex,
-   Aster, Polymarket, GRVT) after defaults and helper extraction. Delete
+   Aster, Polymarket, GRVT, Breakout legacy) after defaults and helper extraction. Delete
    Bybit/Hyro and OKX groups together (subclasses depend on parents), then
    Bitget's three profiles together.
    Remove KuCoin futures, Kraken futures, Hyperliquid perps and Lighter only
    while retaining shared code required by still-unported spot/broker siblings.
    Binance USD-M/PM must retain shared files needed by spot/inverse until those
-   ports pass. Retire the remaining 9 implementations only after step 2.
+   ports pass. Retire the remaining 8 implementations only after step 2.
    This ordering is a dependency order, not an assertion that all are already
    deployment-approved.
 6. **Retire each old oracle deliberately.** Rewrite useful deterministic venue
@@ -438,6 +446,7 @@ These are all direct base/concrete-class/registry callers in test source at the 
 
 | Exact caller path | Imported base/class/registry targets |
 | --- | --- |
+| `packages/safe-cex/src/__tests__/audit-regressions/rust.breakoutprop-wrapper.test.ts` | `base`, `rust/rust.exchange` |
 | `packages/safe-cex/src/__tests__/audit-regressions/grvt-private-rust-port.test.ts` | `grvt/grvt.exchange` |
 | `packages/safe-cex/src/__tests__/audit-regressions/grvt-public-delta-rust-port.test.ts` | `grvt/grvt.exchange` |
 | `packages/safe-cex/src/__tests__/audit-regressions/grvt-signing-integer-precision.test.ts` | `grvt/grvt.exchange` |
@@ -755,7 +764,7 @@ Appendix B), 10 Orderly audit files, three Coinbase reference subclasses/socket
 types and eight Orderly reference broker subclasses/socket types. Appendix B
 now names all 32 exact class targets, adding the 30 previously absent callers
 and extending the existing two client-ID entries. These counts are test/reference
-source counts; the runtime registration totals remain 49 names / 40 Rust aliases.
+source counts; the runtime registration totals remain 49 names / 41 Rust aliases.
 
 The complete frozen-module graph below additionally includes signing/API/type/
 utility imports: **79 static imports in 40 caller files** at this review
