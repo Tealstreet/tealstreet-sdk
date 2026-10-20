@@ -218,3 +218,37 @@ Reference-only TS for deleted families is inspected in
 - Paradex isolated size is 1,224,951 bytes against the unchanged 1,258,291-byte
   budget. All 30 CI profile sizes and remaining replay gates are pending.
 - Secret scan: five lane commits, 148,051 bytes, no leaks.
+
+### Pre-broker landing replay checkpoint
+
+- All 16 public and 19 paired private replay gates pass at runtime source
+  `d6c9e5a8e0`, using canonical isolated release builds for public metrics.
+  This includes Binance Spot/COIN-M/PM, Bitget inverse and both Lighter testnets.
+- Bitget UTA's four compiled documented-contract tests pass on both combined
+  and isolated builds. An extra paired TS UTA probe cannot run: the TS reference
+  lacks its ledger/trailing routes and strategy-order subscription. Its failure
+  is retained; no fixture or output normalization was changed. CI uses the
+  independent native contract suite for these Rust-only features.
+- Size sweep interrupted after landing PR #1347 (`9c34020741`) advanced the
+  base. Completed sizes remain diagnostic evidence; final merged-tree checks
+  and combined comparison are required. No combined performance attribution
+  or full size-sweep pass is claimed at this checkpoint.
+
+| Profile | Main CPU TS/Rust (ms) | Steady CPU TS/Rust (ms) | Retained TS/Rust (MB) | WASM bytes |
+| --- | ---: | ---: | ---: | ---: |
+| binance | 228.0 / 102.3 | 122.2 / 39.5 | 18.2 / 4.0 | 979150 |
+| bitget | 939.7 / 819.9 | 654.8 / 559.7 | 21.1 / 4.6 | 1016226 |
+| bingx | 140.7 / 85.5 | 53.8 / 37.3 | 17.5 / 3.5 | 916678 |
+| mexc | 676.1 / 341.5 | 413.5 / 191.7 | 27.7 / 5.0 | 850051 |
+| phemex | 393.9 / 103.7 | 266.7 / 36.8 | 20.2 / 4.4 | 826977 |
+| weex | 150.0 / 107.6 | 73.5 / 49.7 | 19.1 / 3.5 | 865646 |
+| lighter | 337.8 / 209.9 | 203.6 / 118.2 | 17.7 / 2.8 | 1052987 |
+| lighter-robinhood | 319.3 / 123.7 | 222.8 / 65.2 | 20.3 / 5.0 | 1052987 |
+| orderly | 119.2 / 77.7 | 85.2 / 49.3 | 14.4 / 1.8 | 861699 |
+| blofin | 177.4 / 141.9 | 112.6 / 75.7 | 16.6 / 3.0 | 862156 |
+| okx | 1172.1 / 1048.9 | 862.4 / 790.9 | 19.3 / 5.2 | 872161 |
+| kucoin | 516.5 / 257.6 | 308.1 / 136.1 | 21.5 / 4.0 | 826807 |
+| kraken | 1553.9 / 327.2 | 1111.8 / 194.4 | 16.9 / 2.7 | 1122420 |
+| binancespot | 848.5 / 671.5 | 373.2 / 314.8 | 27.6 / 10.8 | 979150 |
+| binanceinverse | 227.0 / 91.8 | 149.1 / 53.3 | 13.9 / 1.9 | 979150 |
+| binancepm | 236.2 / 124.4 | 135.8 / 64.9 | 18.0 / 4.0 | 979150 |
