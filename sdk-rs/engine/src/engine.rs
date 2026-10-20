@@ -321,7 +321,9 @@ struct Io<P> {
     incoming: HashMap<RequestId, Incoming>,
     timers: HashMap<TimerId, ()>,
     next_id: u32,
+    /// Retained symbol buffers; only the active prefix belongs to the next frame.
     changed_books: Vec<String>,
+    changed_books_active: usize,
     candles: Vec<(String, String, Candle)>,
     fills: Vec<Fill>,
     frame: Vec<u8>,
@@ -338,6 +340,7 @@ impl<P> Default for Io<P> {
             timers: HashMap::new(),
             next_id: 1,
             changed_books: Vec::new(),
+            changed_books_active: 0,
             candles: Vec::new(),
             fills: Vec::new(),
             frame: Vec::new(),
@@ -522,8 +525,15 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn book_changed(&mut self, symbol: &str) {
-        if !self.io.changed_books.iter().any(|s| s == symbol) {
-            self.io.changed_books.push(symbol.to_owned());
+        let active = self.io.changed_books_active;
+        if !self.io.changed_books[..active].iter().any(|s| s == symbol) {
+            if let Some(slot) = self.io.changed_books.get_mut(active) {
+                slot.clear();
+                slot.push_str(symbol);
+            } else {
+                self.io.changed_books.push(symbol.to_owned());
+            }
+            self.io.changed_books_active += 1;
         }
     }
 
@@ -864,8 +874,7 @@ impl<V: Venue> Engine<V> {
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
         }
-        let books = std::mem::take(&mut self.io.changed_books);
-        for symbol in &books {
+        for symbol in &self.io.changed_books[..self.io.changed_books_active] {
             if let (Some(book), Some(market)) =
                 (self.venue.book(symbol), self.store.market_index(symbol))
             {
@@ -881,7 +890,7 @@ impl<V: Venue> Engine<V> {
             })
             .collect();
         w.candles(&candles);
-        let fills = std::mem::take(&mut self.io.fills);
+        let mut fills = std::mem::take(&mut self.io.fills);
         if !fills.is_empty() {
             w.begin(section::FILLS);
             w.u32(fills.len() as u32);
@@ -901,6 +910,12 @@ impl<V: Venue> Engine<V> {
         }
         let empty = w.is_empty();
         let frame = w.finish();
+        self.io.changed_books_active = 0;
+        if let Some(pending) = pending {
+            self.store.recycle_pending(pending);
+        }
+        fills.clear();
+        self.io.fills = fills;
         drop(candles);
         self.io.candles.clear();
         self.io.frame = frame;
@@ -917,6 +932,7 @@ mod streaming_tests {
         rows: Vec<String>,
         body: Option<String>,
         failure: Option<String>,
+        book: Option<Book>,
     }
 
     impl Venue for StreamVenue {
@@ -931,7 +947,11 @@ mod streaming_tests {
             );
         }
         fn on_open(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId) {}
-        fn on_message(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _text: &str) {}
+        fn on_message(&mut self, cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, text: &str) {
+            for symbol in text.split(',') {
+                cx.book_changed(symbol);
+            }
+        }
         fn on_close(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _code: u16) {}
         fn on_response(
             &mut self,
@@ -961,7 +981,7 @@ mod streaming_tests {
         fn on_timer(&mut self, _cx: &mut Cx<'_, Self::Pending>, _timer: TimerId) {}
         fn on_command(&mut self, _cx: &mut Cx<'_, Self::Pending>, _command: Command) {}
         fn book(&self, _symbol: &str) -> Option<&Book> {
-            None
+            self.book.as_ref()
         }
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
@@ -974,6 +994,7 @@ mod streaming_tests {
             rows: Vec::new(),
             body: None,
             failure: None,
+            book: None,
         });
         engine.start(0.0);
         let request = engine
@@ -996,6 +1017,144 @@ mod streaming_tests {
         }
         engine.handle(1.0, Event::HttpEnd { request });
         engine.venue
+    }
+
+    fn frame_engine() -> Engine<StreamVenue> {
+        Engine::new(StreamVenue {
+            at: ArrayAt::Root,
+            rows: Vec::new(),
+            body: None,
+            failure: None,
+            book: Some(Book::default()),
+        })
+    }
+
+    fn market(symbol: &str) -> crate::model::Market {
+        use crate::model::{Limits, Market, MinMax, Precision};
+        Market {
+            id: symbol.into(),
+            symbol: symbol.into(),
+            pretty_symbol: None,
+            base: symbol.into(),
+            quote: "USD".into(),
+            active: true,
+            precision: Precision {
+                amount: 1.,
+                price: 1.,
+            },
+            limits: Limits {
+                amount: MinMax { min: 1., max: 100. },
+                leverage: MinMax { min: 1., max: 10. },
+                price: None,
+            },
+            contract_size: None,
+            is_expiring: None,
+            is_inverse: None,
+            is_spot: None,
+            is_perpetual: None,
+            is_read_only: None,
+            taker_fee: None,
+            maker_fee: None,
+        }
+    }
+
+    fn book_markets(frame: &[u8]) -> Vec<u32> {
+        crate::wire::sections(frame)
+            .filter(|(kind, _)| *kind == section::BOOK)
+            .map(|(_, row)| u32::from_le_bytes(row[..4].try_into().unwrap()))
+            .collect()
+    }
+
+    #[test]
+    fn book_flushes_preserve_first_change_order_and_resolve_current_market_identity() {
+        let mut engine = frame_engine();
+        engine.store.set_markets(vec![market("A"), market("B")]);
+        engine.take_frame(0.).unwrap();
+        engine.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "B,A,B",
+            },
+        );
+        engine.snapshot_frame(1.);
+        assert_eq!(book_markets(engine.take_market_frame(1.).unwrap()), [1, 0]);
+        assert!(engine.take_market_frame(1.).is_none());
+
+        engine.handle(
+            2.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "A,A,B",
+            },
+        );
+        engine.store.set_markets(vec![market("B"), market("A")]);
+        assert_eq!(book_markets(engine.take_frame(2.).unwrap()), [1, 0]);
+        assert!(engine.take_frame(2.).is_none());
+
+        engine.handle(
+            3.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "missing",
+            },
+        );
+        assert!(engine.take_market_frame(3.).is_none());
+        engine
+            .store
+            .set_markets(vec![market("missing"), market("A")]);
+        assert!(book_markets(engine.take_frame(3.).unwrap()).is_empty());
+        engine.handle(
+            4.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "missing,A,missing",
+            },
+        );
+        assert_eq!(book_markets(engine.take_market_frame(4.).unwrap()), [0, 1]);
+    }
+
+    #[test]
+    fn ticker_flushes_do_not_replay_deltas_or_consume_them_during_snapshots() {
+        use crate::model::Ticker;
+        let mut engine = frame_engine();
+        let tickers = || {
+            ["A", "B"]
+                .into_iter()
+                .map(|symbol| Ticker {
+                    symbol: symbol.into(),
+                    ..Ticker::default()
+                })
+                .collect()
+        };
+        engine.store.set_tickers(tickers());
+        engine.take_frame(0.).unwrap();
+        engine.store.update_ticker("B", |t| t.last = 1.);
+        assert!(engine.take_market_frame(1.).is_none());
+        engine.snapshot_frame(1.);
+        let deltas = |frame: &[u8]| -> Vec<f64> {
+            crate::wire::sections(frame)
+                .filter(|(kind, _)| *kind == section::TICKER_DELTAS)
+                .flat_map(|(_, row)| row.as_chunks::<8>().0)
+                .map(|value| f64::from_le_bytes(*value))
+                .collect()
+        };
+        assert_eq!(deltas(engine.take_frame(1.).unwrap()), [1., 4., 1.]);
+        assert!(engine.take_frame(1.).is_none());
+        engine.store.update_ticker("A", |t| t.bid = 2.);
+        engine.store.update_ticker("A", |t| t.bid = 3.);
+        assert_eq!(deltas(engine.take_frame(2.).unwrap()), [0., 1., 3.]);
+
+        engine.store.update_ticker("A", |t| t.last = 9.);
+        engine.store.set_tickers(vec![Ticker {
+            symbol: "B".into(),
+            ..Ticker::default()
+        }]);
+        engine.store.update_ticker("B", |t| t.volume = 3.);
+        assert!(deltas(engine.take_frame(3.).unwrap()).is_empty());
+        engine.store.update_ticker("B", |t| t.ask = 4.);
+        assert_eq!(deltas(engine.take_frame(4.).unwrap()), [0., 2., 4.]);
+        assert!(engine.take_frame(4.).is_none());
     }
 
     #[test]

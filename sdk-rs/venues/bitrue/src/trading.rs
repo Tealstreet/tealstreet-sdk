@@ -297,6 +297,9 @@ impl Bitrue {
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
     ) -> Result<Vec<(Placement, Order)>, String> {
+        if opts.bybit_bbo.is_some() || opts.bybit_slippage_tolerance_ticks.is_some() {
+            return Err("Bybit BBO and TickSize controls are not supported by Bitrue".into());
+        }
         let market = cx
             .store
             .market(&opts.symbol)
@@ -983,7 +986,6 @@ impl Bitrue {
                     }),
                     price: amend.price.or(Some(amend.order.price)),
                     trigger_price: None,
-                    max_slippage_pct: None,
                     stop_loss: None,
                     take_profit: None,
                     reduce_only: Some(amend.order.reduce_only),
@@ -993,6 +995,9 @@ impl Bitrue {
                     sl_trigger_type: None,
                     client_order_id: None,
                     close: amend.order.close,
+                    max_slippage_pct: None,
+                    bybit_bbo: None,
+                    bybit_slippage_tolerance_ticks: None,
                 };
                 if protective {
                     if detail.trigger_type.map(|n| n.0)

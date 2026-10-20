@@ -29,6 +29,7 @@ pub struct Store {
     /// Changed-field bits per ticker, in [`TICKER_FIELDS`] order.
     ticker_masks: Vec<u16>,
     dirty_tickers: Vec<u32>,
+    ticker_deltas_spare: Vec<(u32, u16)>,
 }
 
 /// Packed ticker delta field order; matches `PACKED_TICKER_FIELDS` in
@@ -418,7 +419,10 @@ impl Store {
     /// Drain change tracking for one frame.
     pub fn take_pending(&mut self) -> Pending {
         let changes = std::mem::take(&mut self.changes);
-        let mut ticker_deltas = Vec::with_capacity(self.dirty_tickers.len());
+        let mut ticker_deltas = std::mem::take(&mut self.ticker_deltas_spare);
+        if !changes.tickers_replaced {
+            ticker_deltas.reserve(self.dirty_tickers.len());
+        }
         for index in self.dirty_tickers.drain(..) {
             let mask = std::mem::take(&mut self.ticker_masks[index as usize]);
             // A replaced list already carries every value.
@@ -430,6 +434,12 @@ impl Store {
             changes,
             ticker_deltas,
         }
+    }
+
+    /// Return drained row storage after its frame has finished serialization.
+    pub(crate) fn recycle_pending(&mut self, mut pending: Pending) {
+        pending.ticker_deltas.clear();
+        self.ticker_deltas_spare = pending.ticker_deltas;
     }
 
     /// Write the drained changes as frame sections.
@@ -623,6 +633,19 @@ impl Store {
         ];
         for column in columns {
             w.f64s(orders.iter().map(column));
+        }
+        // Native leavesQty cannot be recovered from rounded base quantities or
+        // amount=0 full-position stops. Older readers ignore this optional tail.
+        if orders
+            .iter()
+            .any(|o| o.extra.as_ref().and_then(|e| e.remaining_native).is_some())
+        {
+            w.f64s(orders.iter().map(|o| {
+                o.extra
+                    .as_ref()
+                    .and_then(|e| e.remaining_native)
+                    .unwrap_or(f64::NAN)
+            }));
         }
         w.end();
     }

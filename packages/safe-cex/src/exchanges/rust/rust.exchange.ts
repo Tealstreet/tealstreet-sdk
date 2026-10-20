@@ -1,4 +1,3 @@
-import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import type { EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
@@ -28,6 +27,7 @@ import bs58 from 'bs58';
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
+import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
@@ -35,6 +35,12 @@ import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
+import {
+  HYROTRADER_PROD_URL,
+  HYROTRADER_PROD_WS_URL,
+  HYROTRADER_SIMULATOR_URL,
+  HYROTRADER_SIMULATOR_WS_URL,
+} from '../bybit/bybit.types';
 import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
@@ -59,6 +65,10 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   woo: 'woo',
   bingx: 'bingx',
   bybit: 'bybit',
+  bybitinverse: 'bybitinverse',
+  bybitspot: 'bybitspot',
+  bybitdemo: 'bybitdemo',
+  hyrotrader: 'hyrotrader',
   cryptocom: 'cryptocom',
   hyperliquid: 'hyperliquid',
   lighter: 'lighter',
@@ -74,6 +84,7 @@ export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefin
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
 });
+const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
@@ -90,14 +101,15 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     requirement: 'be a canonical positive decimal integer within the JavaScript safe-integer range',
     isValid: (id) => /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id)),
   },
-  backpack: {
-    label: 'Backpack',
-    requirement: 'be a canonical decimal uint32 between 1 and 4294967295',
-    isValid: (id) => /^[1-9]\d{0,9}$/.test(id) && Number(id) <= 0xffff_ffff,
-  },
   bitget: bitgetClientOrderIdRule,
   bitgetusdc: bitgetClientOrderIdRule,
   bitgetinverse: bitgetClientOrderIdRule,
+  backpack: {
+    label: 'Backpack',
+    isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
+    requirement: 'be a canonical decimal uint32 between 1 and 4294967295',
+    isValid: (id) => /^[1-9]\d{0,9}$/.test(id) && Number(id) <= 0xffff_ffff,
+  },
   hyperliquid: hyperliquidClientOrderIdRule,
   blofin: patternClientOrderIdRule('BloFin', /^[A-Za-z0-9]{1,32}$/, {
     mint: () => `${BLOFIN_BROKER_ID}${uuid()}`.slice(0, 32),
@@ -110,9 +122,14 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     isValid: (id) => id.length >= 1 && id.length <= 40 && id === id.toLowerCase(),
   },
   bitrue: patternClientOrderIdRule('Bitrue', /^.{1,31}$/),
-  bybit: patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/),
   cryptocom: patternClientOrderIdRule('Crypto.com', /^.{1,36}$/),
-  weex: patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/, { mint: () => `ts${uuid()}`.slice(0, 36) }),
+  weex: patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/, {
+    mint: () => `ts${uuid()}`.slice(0, 36),
+  }),
+  bybit: bybitClientOrderIdRule,
+  bybitinverse: bybitClientOrderIdRule,
+  bybitspot: bybitClientOrderIdRule,
+  bybitdemo: bybitClientOrderIdRule,
   okx: okxClientOrderIdRule,
   okxeu: okxClientOrderIdRule,
   okxdemo: okxClientOrderIdRule,
@@ -179,11 +196,14 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
+    this.isSpot = exchangeName === 'bybitspot';
+    this.isDemo =
+      exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     if (exchangeName === 'hyperliquid') {
       this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
         this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
     }
-    this.applier = new FrameApplier(store, this.name === 'mexc', this.name === 'bitgetinverse');
+    this.applier = new FrameApplier(store, this.name === 'mexc' || this.name === 'blofin', this.name === 'bitgetinverse');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     if (this.name === 'woo') {
       this.cancelAllOrders = async () => {
@@ -266,6 +286,7 @@ export class RustEngineExchange extends BaseExchange {
     const { key, secret, passphrase, testnet, applicationId, vault, hyperliquidBuilder, enableSpotMarkets } =
       this.options;
     const publicDataOnly = this.isPublicDataOnly;
+    const endpoints = this.name === 'hyrotrader' ? this.hyroEndpoints() : undefined;
     const transport = createEngineTransport(this.name, this.options, engineTransport());
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
@@ -275,6 +296,7 @@ export class RustEngineExchange extends BaseExchange {
         passphrase,
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
+        endpoints,
         ...(['backpack', 'bitrue'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,
         ...(orderlyNames.has(this.name) ? { tickInterval: this.options.extra?.tickInterval } : {}),
@@ -322,6 +344,17 @@ export class RustEngineExchange extends BaseExchange {
       this.dispose();
       throw error;
     }
+  };
+
+  private hyroEndpoints = () => {
+    const simulator = this.options.extra?.hyrotraderMode === 'demo' || !HYROTRADER_PROD_URL.livenet;
+    const rest = simulator ? HYROTRADER_SIMULATOR_URL : HYROTRADER_PROD_URL;
+    const ws = simulator ? HYROTRADER_SIMULATOR_WS_URL : HYROTRADER_PROD_WS_URL;
+    const network = this.options.testnet ? 'testnet' : 'livenet';
+    if (!rest[network] || !ws.public.linear[network] || !ws.private[network]) {
+      throw new Error('HyroTrader REST/public/private URLs are not configured');
+    }
+    return { rest: rest[network], publicWs: ws.public.linear[network], privateWs: ws.private[network] };
   };
 
   /** The whole current state as one frame, for a consumer that starts late. */
@@ -405,7 +438,44 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    const isBybit = ['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name);
+    if (!isBybit && orders.some((order) => 'bybitBbo' in order || 'bybitSlippageToleranceTicks' in order)) {
+      this.rejectPreflight(`${this.name} does not support Bybit BBO or TickSize controls`);
+    }
+    if (!isBybit) {
+      for (const order of orders) {
+        for (const field of ['amount', 'price', 'triggerPrice', 'stopLoss', 'takeProfit', 'maxSlippagePct'] as const) {
+          const value = order[field];
+          if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
+            this.rejectPreflight(`${this.name} ${field} must be finite`);
+          }
+        }
+      }
+    }
     this.assertCallerClientOrderIds(orders);
+    if (isBybit) {
+      for (const order of orders) {
+        for (const field of ['amount', 'price', 'triggerPrice', 'stopLoss', 'takeProfit'] as const) {
+          const value = order[field];
+          if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
+            this.rejectPreflight(`Bybit ${field} must be finite`);
+          }
+        }
+        if (
+          this.name === 'hyrotrader' &&
+          (order.maxSlippagePct !== undefined || 'bybitBbo' in order || 'bybitSlippageToleranceTicks' in order)
+        ) {
+          this.rejectPreflight('HyroTrader does not support client-defined slippage or Bybit execution controls');
+        }
+        const ticks = 'bybitSlippageToleranceTicks' in order ? order.bybitSlippageToleranceTicks : undefined;
+        if (ticks !== undefined && (typeof ticks !== 'number' || !Number.isFinite(ticks))) {
+          this.rejectPreflight('Bybit bybitSlippageToleranceTicks must be finite');
+        }
+        if (order.maxSlippagePct !== undefined && !Number.isFinite(order.maxSlippagePct)) {
+          this.rejectPreflight('Bybit maxSlippagePct must be finite');
+        }
+      }
+    }
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 

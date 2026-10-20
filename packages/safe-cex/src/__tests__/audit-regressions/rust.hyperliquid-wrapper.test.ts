@@ -194,6 +194,34 @@ describe('Rust Hyperliquid wrapper', () => {
     expect(commands).toEqual([]);
   });
 
+  it.each(['amount', 'price', 'triggerPrice', 'stopLoss', 'takeProfit', 'maxSlippagePct'] as const)(
+    'rejects non-finite %s before JSON can erase it from a mixed batch',
+    async (field) => {
+      const { exchange, commands } = setup();
+      vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
+      await exchange.start();
+      for (const value of [NaN, Infinity, -Infinity]) {
+        await expect(exchange.placeOrders([placement(), placement({ [field]: value })])).rejects.toThrow(
+          `${field} must be finite`,
+        );
+      }
+      expect(commands).toEqual([]);
+    },
+  );
+
+  it.each(['bybitBbo', 'bybitSlippageToleranceTicks'] as const)(
+    'rejects unsupported %s controls before issuing a mixed batch command',
+    async (field) => {
+      const { exchange, commands } = setup();
+      vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
+      await exchange.start();
+      await expect(exchange.placeOrders([placement(), { ...placement(), [field]: undefined }])).rejects.toThrow(
+        'does not support Bybit BBO or TickSize controls',
+      );
+      expect(commands).toEqual([]);
+    },
+  );
+
   it('preserves the replacement cloid on the returned array, including no venue IDs', async () => {
     const { exchange, commands, result } = setup();
     await exchange.start();

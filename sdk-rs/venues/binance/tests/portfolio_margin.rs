@@ -61,7 +61,6 @@ fn limit(amount: f64, price: f64) -> PlaceOrderOpts {
         amount,
         price: Some(price),
         trigger_price: None,
-        max_slippage_pct: None,
         stop_loss: None,
         take_profit: None,
         reduce_only: None,
@@ -70,6 +69,9 @@ fn limit(amount: f64, price: f64) -> PlaceOrderOpts {
         tp_trigger_type: None,
         sl_trigger_type: None,
         client_order_id: None,
+        max_slippage_pct: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
         close: None,
     }
 }
