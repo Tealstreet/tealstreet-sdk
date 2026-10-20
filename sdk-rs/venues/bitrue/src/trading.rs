@@ -1052,6 +1052,13 @@ impl Bitrue {
         }
         self.trade_next(cx);
     }
+    /// The command whose protective placement this order read would certify.
+    pub(crate) fn census_owner(&self, symbol: &str, revision: u64) -> Option<CommandId> {
+        self.trading.census.as_ref().and_then(|(plan, minimum)| {
+            (revision >= *minimum && plan.protections.iter().any(|s| s == symbol))
+                .then_some(plan.command)
+        })
+    }
     pub(crate) fn trade_census(
         &mut self,
         cx: &mut Cx<'_, Pending>,

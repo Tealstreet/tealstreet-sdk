@@ -1713,7 +1713,11 @@ impl Bitrue {
                     cx.command_error(command, message);
                     Self::finish_lookup(cx, command, &symbol, &client_order_id, None);
                 } else {
-                    cx.log(LogLevel::Error, message);
+                    // A census owned by a placement fails that command, which reports it.
+                    match self.census_owner(&symbol, revision) {
+                        Some(command) => cx.command_error(command, message),
+                        None => cx.log(LogLevel::Error, message),
+                    }
                     self.trade_census(cx, &symbol, revision, false);
                     self.order_finished(cx, symbol, false);
                 }

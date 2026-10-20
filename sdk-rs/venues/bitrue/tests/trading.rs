@@ -1466,3 +1466,52 @@ fn mixed_unknown_cancel_attempts_exact_ack_route_and_failed_ack_target_remains_r
         }
     }
 }
+
+#[test]
+fn failed_protective_census_read_reports_once_through_the_placement() {
+    let (mut h, _) = protective_ack();
+    let mut census = post_write_census(&mut h);
+    h.notices.clear();
+    // Reads may retry; exhaust every attempt of the post-write census.
+    for _ in 0..10 {
+        h.e.handle(
+            100.0,
+            Event::HttpFailed {
+                request: census.id,
+                error: "census transport failed",
+            },
+        );
+        h.collect();
+        match h
+            .requests
+            .iter()
+            .position(|r| r.method == Method::Get && r.url.contains("/fapi/v2/openOrders"))
+        {
+            Some(index) => census = h.requests.remove(index),
+            None => break,
+        }
+    }
+    assert!(h.failed(), "an uncertain protective placement fails");
+    let error = h
+        .notices
+        .iter()
+        .position(|n| matches!(n, Notice::CommandError { command: 7, message } if message.contains("census transport failed")));
+    let done = h.notices.iter().position(|n| {
+        matches!(
+            n,
+            Notice::CommandDone {
+                command: 7,
+                result: Err(_)
+            }
+        )
+    });
+    assert!(error.is_some() && error < done, "{:?}", h.notices);
+    // An uncorrelated Error log would surface as a second toast beside Done Err.
+    assert!(!h.notices.iter().any(|n| matches!(
+        n,
+        Notice::Log {
+            level: safe_cex_engine::LogLevel::Error,
+            ..
+        }
+    )));
+}
