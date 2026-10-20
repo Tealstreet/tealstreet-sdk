@@ -1,30 +1,9 @@
 //! PerpetualV2 public wire records use real prices and quantities.
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
-pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Bare(n) => n,
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
-    if f64::is_finite(n) {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
-pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    Ok(Option::<N>::deserialize(d)?.map(|n| n.0))
-}
-#[derive(Deserialize)]
-pub struct N(#[serde(deserialize_with = "number")] pub f64);
+pub use safe_cex_engine::de::{Number as N, number, optional_number};
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Product<'a> {

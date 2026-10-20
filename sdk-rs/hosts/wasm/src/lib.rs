@@ -590,6 +590,9 @@ fn tighter_recv_window(value: Option<f64>) -> Option<u32> {
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
     Deactivate,
+    StartupFailed {
+        detail: &'a safe_cex_engine::VenueError,
+    },
     WsConnect {
         #[serde(skip_serializing_if = "is_false")]
         binary: bool,
@@ -732,6 +735,9 @@ fn encode(actions: &[Action]) -> String {
             },
             Action::ClearTimer { timer } => ActionOut::ClearTimer { timer: timer.0 },
             Action::Notice(Notice::Deactivate) => ActionOut::Deactivate,
+            Action::Notice(Notice::StartupFailed { error }) => {
+                ActionOut::StartupFailed { detail: error }
+            }
             Action::Notice(Notice::Log { level, message }) => ActionOut::Log {
                 level: match level {
                     LogLevel::Info => "info",

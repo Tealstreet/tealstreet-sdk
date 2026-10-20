@@ -1721,7 +1721,9 @@ async fn routed_signed_network_notices(
             Notice::CommandDone { result, .. } => match result {
                 Ok(value) | Err(value) => value.clone(),
             },
-            Notice::CommandFailed { error, .. } => error.legacy_text(),
+            Notice::CommandFailed { error, .. } | Notice::StartupFailed { error } => {
+                error.legacy_text()
+            }
             Notice::Deactivate => String::new(),
         };
         for forbidden in [

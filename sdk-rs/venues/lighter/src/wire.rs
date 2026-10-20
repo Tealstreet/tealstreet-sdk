@@ -1,29 +1,8 @@
 //! Borrowed public payloads; lists are decoded one row at a time.
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::borrow::Cow;
 
-pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Number(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
-    }
-    let value = match N::deserialize(d)? {
-        N::Number(n) => n,
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
-    if value.is_finite() {
-        Ok(value)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
-}
-pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct N(#[serde(deserialize_with = "number")] f64);
-    Ok(Option::<N>::deserialize(d)?.map(|n| n.0))
-}
+pub use safe_cex_engine::de::{number, optional_number};
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
     #[serde(default, borrow)]
