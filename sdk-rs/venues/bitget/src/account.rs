@@ -55,6 +55,7 @@ pub struct InverseAsset {
     upnl: f64,
     used: f64,
     total: f64,
+    priced: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -90,6 +91,7 @@ pub struct Account {
     orders_timer: Option<TimerId>,
     balance_version: u64,
     inverse_assets: Vec<InverseAsset>,
+    inverse_unpriced_warned: bool,
     full_positions_at: Option<f64>,
     full_position_ids: HashSet<String>,
     ws_positions: HashMap<String, WsPosition>,
@@ -1091,33 +1093,69 @@ impl BitgetFutures {
             return None;
         }
         let amounts = classic_amounts(raw)?;
-        let usd = raw
-            .usdt_equity
-            .0
-            .filter(|v| *v > 0.0)
-            .or_else(|| {
-                cx.store
-                    .tickers()
-                    .iter()
-                    .find(|t| t.symbol == format!("{coin}USD") || t.symbol == format!("{coin}USDT"))
-                    .map(|t| amounts.equity * t.mark)
-            })
-            .unwrap_or(0.0);
-        let rate = if usd > 0.0 && amounts.equity != 0.0 {
-            usd / amounts.equity
-        } else {
-            1.0
-        };
-        let asset = InverseAsset {
-            coin: CoinBalance {
-                base: coin.into(),
-                amount: amounts.equity,
-                notional: if usd != 0.0 { usd } else { amounts.equity },
+        let usd = raw.usdt_equity.0.filter(|v| *v > 0.0).or_else(|| {
+            cx.store
+                .tickers()
+                .iter()
+                .find(|t| t.symbol == format!("{coin}USD") || t.symbol == format!("{coin}USDT"))
+                .map(|t| amounts.equity * t.mark)
+                .filter(|v| *v > 0.0)
+        });
+        let asset = match usd {
+            Some(usd) if amounts.equity != 0.0 => {
+                let rate = usd / amounts.equity;
+                InverseAsset {
+                    coin: CoinBalance {
+                        base: coin.into(),
+                        amount: amounts.equity,
+                        notional: usd,
+                    },
+                    free: amounts.free * rate,
+                    used: (amounts.equity - amounts.free) * rate,
+                    total: (amounts.equity - amounts.upnl) * rate,
+                    upnl: amounts.upnl * rate,
+                    priced: true,
+                }
+            }
+            _ if amounts.equity == 0.0 => InverseAsset {
+                coin: CoinBalance {
+                    base: coin.into(),
+                    amount: 0.0,
+                    notional: usd.unwrap_or(0.0),
+                },
+                free: amounts.free,
+                used: -amounts.free,
+                total: -amounts.upnl,
+                upnl: amounts.upnl,
+                priced: true,
             },
-            free: amounts.free * rate,
-            used: (amounts.equity - amounts.free) * rate,
-            total: (amounts.equity - amounts.upnl) * rate,
-            upnl: amounts.upnl * rate,
+            // Unpriced coin: keep its last real USD valuation, never value coins as dollars.
+            _ => match self
+                .account
+                .inverse_assets
+                .iter()
+                .find(|prior| prior.priced && prior.coin.base == coin)
+            {
+                Some(prior) => InverseAsset {
+                    coin: CoinBalance {
+                        amount: amounts.equity,
+                        ..prior.coin.clone()
+                    },
+                    ..prior.clone()
+                },
+                None => InverseAsset {
+                    coin: CoinBalance {
+                        base: coin.into(),
+                        amount: amounts.equity,
+                        notional: 0.0,
+                    },
+                    free: 0.0,
+                    used: 0.0,
+                    total: 0.0,
+                    upnl: 0.0,
+                    priced: false,
+                },
+            },
         };
         [
             asset.coin.amount,
@@ -1132,14 +1170,7 @@ impl BitgetFutures {
         .then_some(asset)
     }
 
-    fn apply_inverse_balance(&self, cx: &mut Cx<'_, Pending>) {
-        let mut balance = Balance::default();
-        for a in &self.account.inverse_assets {
-            balance.total += a.total;
-            balance.upnl += a.upnl;
-            balance.used += a.used;
-            balance.free += a.free;
-        }
+    fn apply_inverse_balance(&mut self, cx: &mut Cx<'_, Pending>) {
         cx.store.set_coin_balances(
             self.account
                 .inverse_assets
@@ -1147,6 +1178,23 @@ impl BitgetFutures {
                 .map(|a| a.coin.clone())
                 .collect(),
         );
+        if self.account.inverse_assets.iter().any(|a| !a.priced) {
+            if !std::mem::replace(&mut self.account.inverse_unpriced_warned, true) {
+                cx.log(
+                    LogLevel::Warning,
+                    "Bitget inverse collateral USD price unavailable; preserving previous USD balance",
+                );
+            }
+            return;
+        }
+        self.account.inverse_unpriced_warned = false;
+        let mut balance = Balance::default();
+        for a in &self.account.inverse_assets {
+            balance.total += a.total;
+            balance.upnl += a.upnl;
+            balance.used += a.used;
+            balance.free += a.free;
+        }
         cx.store.set_balance(balance);
     }
 
