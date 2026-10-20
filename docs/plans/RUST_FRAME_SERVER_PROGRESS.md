@@ -216,3 +216,17 @@ The interrupted twenty-two-venue workspace gate chain had not completed; it is
 not counted as passing evidence. Root typecheck did complete: all 44 tasks pass.
 Final acceptance now runs on the twenty-three-venue integrated tree, including
 coexisting prediction metadata and book deltas.
+
+Polymarket integration verification at 20d6f7de0d: isolated engine tests pass
+68 default / 71 delta-enabled; both all-target engine clippy profiles, fmt,
+standalone Polymarket parser tests (6), native host tests (53), and default
+twenty-three-venue WASM clippy pass. Focused SDK frame tests: 25 across six files;
+package typecheck/lint pass. An interleaved prediction13/book-delta15/holding14
+frame regression proves the sections coexist. Independent Rust/native and
+consumer union reviews pass.
+
+Actual isolated Paradex release size after this merge: **1,247,082 bytes** for
+both web and Node, **11,209 bytes** under the unchanged budget, still only
+79 bytes above the landed twenty-three-venue CI artifact. Artifact-dependent
+host tests are deferred until the combined build is restored; a diagnostic
+single-venue run's two missing-feature errors are not counted as acceptance.
