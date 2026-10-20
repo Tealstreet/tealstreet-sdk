@@ -1372,7 +1372,7 @@ mod cache_tests {
     use super::*;
     #[test]
     fn execution_identity_memory_is_bounded_without_forgetting_recent_duplicates() {
-        let mut account = Account::default();
+        let mut account = Account::new();
         for n in 0..20000 {
             assert!(account.seen_fills.insert(format!("fill-{n}")));
         }
@@ -1386,7 +1386,7 @@ mod cache_tests {
     }
     #[test]
     fn terminal_order_memory_is_bounded_without_forgetting_recent_fences() {
-        let mut account = Account::default();
+        let mut account = Account::new();
         for n in 0..20000 {
             assert!(account.terminal.insert(format!("order-{n}")));
         }
