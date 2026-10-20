@@ -187,11 +187,14 @@ flat. Omitting side changes both rails. A confirmed write updates that leg's
 position and fetched leverage; a failed write preserves its previous setting.
 
 Rust also subscribes to the documented all-contract `sub.tickers` stream so
-last/mark prices and 24-hour fields stay live beyond the first 100 detailed
-subscriptions. Its sparse rows preserve omitted or null detailed values;
+last/mark/index prices and 24-hour fields stay live beyond the first 100 detailed
+subscriptions. Its sparse rows preserve omitted or null values; zero last/mark/index
+prices mean unavailable and preserve the previous quote while other valid fields
+still update. Unknown or inactive symbols outside the market catalog are ignored
+before field validation.
 `SetTickerSymbols` reconciles all requested known detailed subscriptions without
-duplicates, preserves caller priority, and survives reconnects. With no selection, the first 100 markets keep the
-detailed feed. See the [official futures WS contract](https://mexcdevelop.github.io/apidocs/contract_v1_en/#tickers).
+duplicates, preserves caller priority, and survives reconnects. With no selection,
+the first 100 markets keep the detailed feed. See the [official futures WS contract](https://mexcdevelop.github.io/apidocs/contract_v1_en/#tickers).
 
 Typed open-order rows whose market is unavailable are logged and skipped,
 while any existing copy of their id survives reconciliation. Other valid rows

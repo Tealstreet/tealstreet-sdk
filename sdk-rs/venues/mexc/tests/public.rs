@@ -626,7 +626,8 @@ fn invalid_mini_ticker_prices_and_volumes_preserve_the_previous_row() {
     let before = e.store().ticker("BTCUSDT").unwrap().clone();
     for invalid in [
         r#""lastPrice":-1"#,
-        r#""fairPrice":0"#,
+        r#""fairPrice":-1"#,
+        r#""indexPrice":-1"#,
         r#""volume24":-1"#,
         r#""amount24":-1"#,
         r#""lastPrice":"NaN""#,
@@ -642,4 +643,60 @@ fn invalid_mini_ticker_prices_and_volumes_preserve_the_previous_row() {
         assert_eq!(actual.volume, before.volume);
         assert_eq!(actual.quote_volume, before.quote_volume);
     }
+}
+
+#[test]
+fn mini_ticker_zero_unavailable_prices_preserve_quotes_and_apply_valid_fields() {
+    let (mut e, socket) = started();
+    let before = e.store().ticker("BTCUSDT").unwrap().clone();
+    e.drain_actions().for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.tickers","data":[{"symbol":"BTC_USDT","lastPrice":0,"fairPrice":62000,"indexPrice":"61900","volume24":0,"amount24":0}]}"#,
+    );
+    let ticker = e.store().ticker("BTCUSDT").unwrap();
+    assert_eq!(ticker.last, before.last);
+    assert_eq!(ticker.mark, 62000.0);
+    assert_eq!(ticker.index, 61900.0);
+    assert_eq!(ticker.volume, 0.0);
+    assert_eq!(ticker.quote_volume, 0.0);
+    assert_eq!(ticker.funding_rate, before.funding_rate);
+    assert!((ticker.open_interest - 62000.0).abs() < 1e-8);
+    for missing in ["0", "null"] {
+        ws(
+            &mut e,
+            socket,
+            &format!(
+                r#"{{"channel":"push.tickers","data":[{{"symbol":"BTC_USDT","lastPrice":63000,"fairPrice":{missing},"indexPrice":{missing}}}]}}"#
+            ),
+        );
+        let ticker = e.store().ticker("BTCUSDT").unwrap();
+        assert_eq!(ticker.last, 63000.0);
+        assert_eq!(ticker.mark, 62000.0);
+        assert_eq!(ticker.index, 61900.0);
+    }
+    assert!(
+        !e.drain_actions()
+            .any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { .. })))
+    );
+}
+
+#[test]
+fn mini_ticker_unknown_inactive_symbols_are_ignored_without_warning() {
+    let (mut e, socket) = started();
+    let before = e.store().ticker("BTCUSDT").unwrap().clone();
+    e.drain_actions().for_each(drop);
+    // The all-market feed includes inactive/unloaded symbols and their sentinels.
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.tickers","data":[{"symbol":"INACTIVE_USDT","lastPrice":0,"fairPrice":0,"indexPrice":0,"volume24":0},{"symbol":"UNKNOWN_USDT","lastPrice":"NaN"}]}"#,
+    );
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, before.last);
+    assert_eq!(e.store().tickers().len(), 1);
+    assert!(
+        !e.drain_actions()
+            .any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Log { .. })))
+    );
 }

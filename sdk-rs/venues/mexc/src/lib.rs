@@ -171,17 +171,34 @@ impl MexcFutures {
         }
     }
     fn mini_ticker(&self, cx: &mut Cx<'_, Pending>, item: &str) {
-        let Ok(raw) = serde_json::from_str::<MiniTick<'_>>(item) else {
+        #[derive(serde::Deserialize)]
+        struct Identity<'a> {
+            #[serde(borrow)]
+            symbol: Str<'a>,
+        }
+        let Ok(identity) = serde_json::from_str::<Identity<'_>>(item) else {
+            cx.log(
+                LogLevel::Warning,
+                "Skipping malformed MEXC all-market ticker identity",
+            );
+            return;
+        };
+        let symbol = compact(&identity.symbol);
+        let Some(market) = cx.store.market(&symbol) else {
+            return;
+        };
+        let size = market.contract_size.unwrap_or(1.0);
+        let Ok(raw) = serde_json::from_str::<MiniTick>(item) else {
             cx.log(
                 LogLevel::Warning,
                 "Skipping malformed MEXC all-market ticker row",
             );
             return;
         };
-        if [raw.last_price, raw.fair_price]
+        if [raw.last_price, raw.fair_price, raw.index_price]
             .into_iter()
             .flatten()
-            .any(|n| n <= 0.0)
+            .any(|n| n < 0.0)
             || [raw.volume24, raw.amount24]
                 .into_iter()
                 .flatten()
@@ -193,22 +210,22 @@ impl MexcFutures {
             );
             return;
         }
-        let symbol = compact(&raw.symbol);
-        let Some(market) = cx.store.market(&symbol) else {
-            return;
-        };
-        let size = market.contract_size.unwrap_or(1.0);
         cx.store.update_ticker(&symbol, |t| {
-            if let Some(last) = raw.last_price {
+            // A zero price is an unavailable quote (seen in the public feed),
+            // not a reason to discard valid mark/index/volume fields.
+            if let Some(last) = raw.last_price.filter(|n| *n > 0.0) {
                 t.last = last;
             }
-            if let Some(mark) = raw.fair_price {
+            if let Some(mark) = raw.fair_price.filter(|n| *n > 0.0) {
                 // The all-market feed omits holdVol: retain the known quantity,
                 // but value its quote notional at the new mark.
                 if t.mark > 0.0 {
                     t.open_interest *= mark / t.mark;
                 }
                 t.mark = mark;
+            }
+            if let Some(index) = raw.index_price.filter(|n| *n > 0.0) {
+                t.index = index;
             }
             if let Some(rate) = raw.rise_fall_rate {
                 t.percentage = if rate.abs() <= 1.0 {

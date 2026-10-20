@@ -151,3 +151,29 @@ cases, not live traffic. No TS state normalization is added for these fixes.
 - MEXC startup policy remains assigned to the cross-venue startup lane. Sent
   two coordination messages and durable Aimux handoff `task-dmbixqhc1yzx` to
   `codex-u1pmrg`; no duplicate startup retry implementation in this branch.
+
+### Fresh public capture follow-up
+
+Fresh anonymous 20-second captures succeeded on all three venues (two books
+each): MEXC 19,111 WS frames / 6 HTTP responses, Bitrue 3,412 / 1, BloFin
+20,985 / 2. MEXC delivered eight `push.tickers` arrays (5,254 rows); untraded
+contracts legitimately carry `lastPrice: 0` beside valid fair/index prices.
+The initial strict positive-price check incorrectly skipped the other fields
+and warned for inactive instruments. Corrected by resolving catalog identity
+first, treating zero quotes as unavailable per field, accepting optional live
+index prices, and retaining strict negative/non-finite rejection for known
+instruments. MEXC now passes 75 native tests and strict clippy; bounded
+independent re-review PASS. The captured input remains in ignored harness tapes.
+
+Canonical recorded fixtures remain unchanged so the benchmark baseline does not
+move with these repairs. Live capture is public protocol evidence, not private
+authentication/trading evidence or a claim that TS handles its missing mini
+feed. The standard paired public gates still compare the committed recordings.
+
+Final merged root checks pass: 44 typecheck, 28 lint, 27 test tasks; safe-cex
+7,798 tests / 528 files per runner. Native workspace: 2,939 tests / 228 suites,
+zero failures (before the final two MEXC mini regressions; those pass separately).
+Bans, fmt, workspace all-target clippy and WASM clippy pass. Clean combined
+WASM has the new command and dependency paths exclusively in this worktree;
+all 444 compiled SDK tests and 76 host tests pass before the final mini change.
+Compiled replay/consumer and per-venue gates continue below.

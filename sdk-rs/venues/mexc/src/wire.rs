@@ -125,13 +125,13 @@ pub struct Tick<'a> {
 /// The all-contract channel intentionally omits detailed ticker fields.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MiniTick<'a> {
-    #[serde(borrow)]
-    pub symbol: Str<'a>,
+pub struct MiniTick {
     #[serde(default, deserialize_with = "optional_number")]
     pub last_price: Option<f64>,
     #[serde(default, deserialize_with = "optional_number")]
     pub fair_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub index_price: Option<f64>,
     #[serde(default, deserialize_with = "optional_number")]
     pub rise_fall_rate: Option<f64>,
     #[serde(default, deserialize_with = "optional_number")]
