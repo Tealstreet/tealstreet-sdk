@@ -729,3 +729,139 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         assert_eq!(e.store().order("123").unwrap().status, OrderStatus::Open);
     }
 }
+
+#[test]
+fn fetch_leverage_reads_flat_symbol_cross_leverage_into_settings() {
+    let mut e = trading_engine();
+    assert!(
+        e.store()
+            .setting("BTCUSDT")
+            .is_none_or(|s| s.leverage == 0.0)
+    );
+    e.handle(
+        5.0,
+        Event::Command(Command::FetchLeverage {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let out = actions(&mut e);
+    let request = out
+        .iter()
+        .find(|a| {
+            is_get(
+                a,
+                "/api/v5/account/leverage-info?instId=BTC-USDT-SWAP&mgnMode=cross",
+            )
+        })
+        .expect("leverage-info read");
+    reply(
+        &mut e,
+        request,
+        &envelope(r#"{"instId":"BTC-USDT-SWAP","mgnMode":"cross","posSide":"","lever":"25"}"#),
+        6.0,
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result: Ok(s) }) if s.contains("\"buyLeverage\":25.0") && s.contains("\"sellLeverage\":25.0"))));
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 25.0);
+}
+
+#[test]
+fn fetch_leverage_failure_answers_instead_of_hanging() {
+    let mut e = trading_engine();
+    e.handle(
+        5.0,
+        Event::Command(Command::FetchLeverage {
+            command: 8,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let out = actions(&mut e);
+    let request = out.iter().find(|a| is_get(a, "mgnMode=cross")).unwrap();
+    reply(
+        &mut e,
+        request,
+        r#"{"code":"50011","msg":"Too Many Requests","data":[]}"#,
+        6.0,
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 8,
+            result: Err(_)
+        })
+    )));
+    e.handle(
+        7.0,
+        Event::Command(Command::FetchLeverage {
+            command: 9,
+            symbol: "NOPE".into(),
+        }),
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 9,
+            result: Err(_)
+        })
+    )));
+}
+
+#[test]
+fn account_config_is_reread_and_a_mode_change_in_the_okx_app_is_applied() {
+    let mut e =
+        safe_cex_engine::Engine::new(safe_cex_venue_okx::Okx::new(safe_cex_venue_okx::Options {
+            key: Some("test-key".into()),
+            secret: Some("test-secret".into()),
+            passphrase: Some("test-passphrase".into()),
+            ..Default::default()
+        }));
+    e.start(0.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(MARKET), 1.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(TICKER), 2.0);
+    let a = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut e,
+        &a,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.0,
+    );
+    assert!(!e.store().hedged());
+    let mut out = actions(&mut e);
+    let mut config = None;
+    let mut now = 3.0;
+    while config.is_none() && now < 40_000.0 {
+        let tick = out.iter().find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == now + 2_000.0 => Some(*timer),
+            _ => None,
+        });
+        let Some(tick) = tick else {
+            panic!("account tick not re-armed at {now}");
+        };
+        now += 2_000.0;
+        e.handle(now, Event::TimerFired { timer: tick });
+        out = actions(&mut e);
+        config = out
+            .iter()
+            .find(|a| is_get(a, "/api/v5/account/config"))
+            .cloned();
+    }
+    let config = config.expect("periodic config read");
+    assert!(now >= 30_000.0, "polled too early at {now}");
+    reply(
+        &mut e,
+        &config,
+        &envelope(r#"{"posMode":"long_short_mode","acctLv":"2"}"#),
+        now,
+    );
+    assert!(e.store().hedged());
+    assert!(
+        actions(&mut e)
+            .iter()
+            .any(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
+    );
+}

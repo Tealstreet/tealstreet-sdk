@@ -2,10 +2,11 @@
 use crate::wire::*;
 use crate::{Okx, Pending, Topic, scaled, usd};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
+use safe_cex_engine::{CommandId, Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
 use std::collections::{HashMap, HashSet};
 
 pub const PRIVATE: usize = 1;
+const CONFIG_POLL_MS: f64 = 30_000.0;
 const ORDER_KINDS: [&str; 5] = ["", "oco", "conditional", "trigger", "move_order_stop"];
 
 // Match the SDK's decimal arithmetic without reducing native coin precision.
@@ -42,6 +43,12 @@ fn reserve_leverage(value: &str) -> f64 {
 
 pub enum Request {
     Config,
+    Leverage {
+        command: CommandId,
+        symbol: String,
+        inst_id: String,
+        revision: u64,
+    },
     Balance {
         generation: u64,
         version: u64,
@@ -90,6 +97,8 @@ struct Join {
 pub struct AccountState {
     pub ready: bool,
     configured: bool,
+    config_in_flight: bool,
+    config_read_at: f64,
     account_level: u8,
     pub revision: u64,
     position_versions: HashMap<String, u64>,
@@ -119,14 +128,43 @@ impl Okx {
     }
 
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_none() {
+        if self.credentials.is_none() || self.account.config_in_flight {
             return;
         }
+        self.account.config_in_flight = true;
         self.get(
             cx,
             "/api/v5/account/config",
             true,
             Pending::Account(Request::Config),
+        );
+    }
+
+    pub(crate) fn fetch_leverage(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: String,
+    ) {
+        let Some(m) = cx.store.market(&symbol) else {
+            cx.done(command, Err(format!("unknown market {symbol}")));
+            return;
+        };
+        if self.credentials.is_none() {
+            cx.done(command, Err("OKX leverage requires credentials".into()));
+            return;
+        }
+        let inst_id = m.id.clone();
+        self.get(
+            cx,
+            &format!("/api/v5/account/leverage-info?instId={inst_id}&mgnMode=cross"),
+            true,
+            Pending::Account(Request::Leverage {
+                command,
+                symbol,
+                inst_id,
+                revision: self.account.revision,
+            }),
         );
     }
 
@@ -298,7 +336,7 @@ impl Okx {
                 .as_ref()
                 .is_some_and(|join| join.generation == *generation),
             Request::Orders { generation, .. } => self.account.orders_generation == *generation,
-            Request::Config => true,
+            Request::Config | Request::Leverage { .. } => true,
         }
     }
 
@@ -332,7 +370,7 @@ impl Okx {
             return;
         }
         match request {
-            Request::Config => {}
+            Request::Config | Request::Leverage { .. } => {}
             Request::Balance {
                 equity,
                 risk_rows,
@@ -429,7 +467,17 @@ impl Okx {
             }
         };
         match request {
+            Request::Leverage {
+                command,
+                symbol,
+                inst_id,
+                revision,
+            } => {
+                let result = self.leverage_result(cx, data, &symbol, &inst_id, revision);
+                cx.done(command, result);
+            }
             Request::Config => {
+                self.account.config_in_flight = false;
                 let configs = serde_json::from_str::<Vec<Config<'_>>>(data);
                 let Ok(configs) = configs else {
                     self.account_failed(cx, Request::Config, "malformed OKX config");
@@ -442,8 +490,20 @@ impl Okx {
                     self.account_failed(cx, Request::Config, "missing OKX position mode");
                     return;
                 };
-                cx.store.set_hedged(config.pos_mode == "long_short_mode");
-                self.account.account_level = config.acct_lv.parse().unwrap_or(2);
+                self.account.config_read_at = cx.now;
+                let hedged = config.pos_mode == "long_short_mode";
+                let level = config.acct_lv.parse().unwrap_or(2);
+                if self.account.configured {
+                    // A mode changed in the OKX app makes every posSide we send wrong.
+                    if hedged != cx.store.hedged() || level != self.account.account_level {
+                        cx.store.set_hedged(hedged);
+                        self.account.account_level = level;
+                        self.account_after_settings(cx);
+                    }
+                    return;
+                }
+                cx.store.set_hedged(hedged);
+                self.account.account_level = level;
                 self.account.configured = true;
                 self.connect(cx, PRIVATE);
                 self.account_refresh(cx);
@@ -513,11 +573,10 @@ impl Okx {
                     if cursor.is_empty() || cursors.len() >= 200 || !cursors.insert(cursor.clone())
                     {
                         self.account.orders_in_flight = false;
-                        self.account_failed(
-                            cx,
-                            Request::Config,
-                            "OKX order paging did not advance",
-                        );
+                        cx.log(LogLevel::Error, "OKX order paging did not advance");
+                        if self.account.retry.is_none() {
+                            self.account.retry = Some(cx.set_timer(5_000.0));
+                        }
                         return;
                     }
                     self.orders_page(
@@ -676,7 +735,17 @@ impl Okx {
                 }
             }
             Request::Orders { .. } => self.account.orders_in_flight = false,
-            Request::Config => {}
+            Request::Config => {
+                self.account.config_in_flight = false;
+                if self.account.configured {
+                    cx.log(LogLevel::Warning, error);
+                    return;
+                }
+            }
+            Request::Leverage { command, .. } => {
+                cx.done(command, Err(error.to_owned()));
+                return;
+            }
         }
         cx.log(LogLevel::Error, error);
         if self.account.retry.is_none() {
@@ -687,6 +756,9 @@ impl Okx {
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         if self.account.tick == Some(timer) {
             self.account.tick = Some(cx.set_timer(2_000.0));
+            if self.account.configured && cx.now - self.account.config_read_at >= CONFIG_POLL_MS {
+                self.account_start(cx);
+            }
             self.recalculate(cx);
             self.account.fills.retain(|_, at| cx.now - *at < 120_000.0);
             self.account
@@ -704,6 +776,51 @@ impl Okx {
             return true;
         }
         false
+    }
+
+    fn leverage_result(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        data: &str,
+        symbol: &str,
+        inst_id: &str,
+        revision: u64,
+    ) -> Result<String, String> {
+        let rows = serde_json::from_str::<Vec<LeverageRow<'_>>>(data)
+            .map_err(|_| "malformed OKX leverage-info".to_owned())?;
+        // Cross leverage is per instrument on OKX; hedge mode repeats it per side.
+        let leverage = rows
+            .iter()
+            .filter(|r| r.inst_id == inst_id && r.mgn_mode == "cross")
+            .filter_map(|r| r.lever.parse::<f64>().ok())
+            .find(|v| v.is_finite() && *v > 0.0)
+            .ok_or_else(|| format!("OKX returned no cross leverage for {symbol}"))?;
+        if revision != self.account.revision {
+            return Err(format!("OKX leverage read for {symbol} was superseded"));
+        }
+        cx.store.update_setting(symbol, |s| {
+            s.leverage = leverage;
+            s.margin_type = Some(MarginType::Cross);
+        });
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Fetched {
+            buy_leverage: f64,
+            sell_leverage: f64,
+            margin_type: MarginType,
+            position_mode: PositionMode,
+        }
+        serde_json::to_string(&Fetched {
+            buy_leverage: leverage,
+            sell_leverage: leverage,
+            margin_type: MarginType::Cross,
+            position_mode: if cx.store.hedged() {
+                PositionMode::Hedged
+            } else {
+                PositionMode::Oneway
+            },
+        })
+        .map_err(|e| e.to_string())
     }
 
     fn setting(cx: &mut Cx<'_, Pending>, position: &Position) {

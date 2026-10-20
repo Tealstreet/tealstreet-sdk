@@ -132,6 +132,10 @@ impl Okx {
                 price,
                 amount,
             } => (command, self.plan_amend(cx, &id, price, amount)),
+            Command::FetchLeverage { command, symbol } => {
+                self.fetch_leverage(cx, command, symbol);
+                return;
+            }
             Command::SetMarginType { command, .. } => {
                 cx.done(command, Err("Only cross mode is supported".into()));
                 return;
