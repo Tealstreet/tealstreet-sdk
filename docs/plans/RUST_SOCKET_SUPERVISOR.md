@@ -255,3 +255,29 @@ does not claim that every venue now uses the shared module:
 BreakoutProp uses polling rather than a venue WebSocket and needs no socket
 supervisor migration. Native mandatory-pong/subscription/session state remains
 venue-owned even on migrated feeds.
+
+
+## Published PR integration and adversarial review
+
+PR [#1350](https://github.com/Tealstreet/tealstreet-sdk/pull/1350) targets
+`feat/rust-rewrite`. `fe337b6611` merges landing `5f84b3e21d` (Binance/Bybit
+trading and cross-venue leverage audit fixes). Manual conflicts were independent
+audit closures and Phemex documentation; both additions were retained. Rust
+source changed, so the prior verified checkpoint above is historical and all
+builds, sizes, integration checks and 72 replay cases are being repeated.
+
+Fresh adversarial auth and feed reviews found no production-impact defect.
+The harness review found two P2 provenance gaps: mixed text/binary WS records
+could be audited through the wrong payload, and a final taped catalog need not
+have been consumed. The proof now rejects any binary property and requires
+every validated catalog row that could produce the observed numeric fields to
+corroborate the same exact rational notional, product units and native cent
+neighbors. Different raw decimals that collapse to the same floating value
+cannot supply ambiguous evidence. Candidate request ordinals are reported;
+there is no claim the last response was consumed. Neither output is rewritten.
+
+Seven new pure regressions and two new CLI controls reproduce these gaps;
+690 harness tests pass after repair (94 pure midpoint tests and 15 CLI tests
+included). The original binary controls had four failures; adding candidate
+controls produced seven failures before the repair. Focused independent
+rereview and final integrated verification remain pending before merge.

@@ -51,6 +51,21 @@ const gate = (venue, isPrivate = false, defect) => {
       }),
     });
     if (midpointIssue === 'selector') records[1].afterCommand = 1;
+    if (midpointIssue === 'unconsumed') {
+      const later = { ...records[1], t: 20, requestOrdinal: 1 };
+      const earlier = JSON.parse(records[1].body);
+      earlier.products[0].price = '0.018750000000000001';
+      records[1].body = JSON.stringify(earlier);
+      records.push(later);
+    }
+    if (midpointIssue === 'binary') {
+      records.push({ type: 'open', url: 'wss://advanced-trade-ws.coinbase.com', socket: 0 });
+      records.push({
+        type: 'ws', socket: 0, url: 'wss://advanced-trade-ws.coinbase.com',
+        text: '{"channel":"heartbeats","sequence_num":0}',
+        binary: Buffer.from('{"channel":"ticker","sequence_num":0}').toString('base64'),
+      });
+    }
     if (midpointIssue === 'private-contradiction') records.push({ type: 'config', options: { key: 'contradiction' } });
     if (midpointIssue === 'commands') records.push({ type: 'command', op: 'comparisonControl' });
   }
@@ -318,7 +333,7 @@ test('Coinbase CLI reports independent public midpoint proofs for both aliases o
 });
 
 test('Coinbase CLI refuses invalid inputs and contradictory scope instead of masking ticker failures', () => {
-  for (const issue of ['price', 'volume', 'quote', 'missing-native', 'field', 'private-contradiction', 'selector']) {
+  for (const issue of ['price', 'volume', 'quote', 'missing-native', 'field', 'private-contradiction', 'selector', 'binary', 'unconsumed']) {
     const result = gate('coinbase', false, 'coinbase-midpoint:' + issue);
     assert.equal(result.status, 1, issue + ': ' + result.stderr + result.stdout);
     assert.match(result.stdout, /ticker DEEP-USD:/);

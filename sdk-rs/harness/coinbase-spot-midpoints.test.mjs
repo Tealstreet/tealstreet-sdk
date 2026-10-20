@@ -95,6 +95,7 @@ test('proves all four independent native midpoint rows without mutating either m
     notional: { numerator: '4923457500', denominator: '100000' },
     requestOrdinal: 0,
     timestamp: 10,
+    candidateRequestOrdinals: [0],
   });
   assert.equal(JSON.stringify(f), before);
 });
@@ -125,7 +126,24 @@ test('accepts public heartbeat and book records with one unambiguous native sequ
   });
   assert.equal(compareCoinbaseSpotMidpoints(f).equivalent, true);
 });
-test('chooses the last complete ordered catalog, never a matching historical row', () => {
+for (const binary of [
+  Buffer.from('{"channel":"ticker","sequence_num":0}').toString('base64'),
+  Buffer.from('{"channel":"user","sequence_num":0}').toString('base64'),
+  undefined,
+])
+  test(`rejects a text heartbeat with an independent binary payload ${binary}`, () => {
+    const f = fixture();
+    f.records.push({ type: 'open', url: 'wss://advanced-trade-ws.coinbase.com', socket: 0 });
+    f.records.push({
+      type: 'ws',
+      socket: 0,
+      url: 'wss://advanced-trade-ws.coinbase.com',
+      text: '{"channel":"heartbeats","sequence_num":0}',
+      binary,
+    });
+    assert.equal(compareCoinbaseSpotMidpoints(f).equivalent, false);
+  });
+test('requires the latest validated catalog to match the observed output fields', () => {
   const f = fixture();
   const rows = JSON.parse(f.records[1].body).products;
   f.records.push(catalog(rows, 1, 20));
@@ -135,7 +153,30 @@ test('chooses the last complete ordered catalog, never a matching historical row
   });
   assert.equal(compareCoinbaseSpotMidpoints(f).equivalent, false);
 });
-test('failed later catalog reads retain the previous proven publication', () => {
+for (const issue of ['rounded-price-collision', 'reused-identity', 'missing-corroboration'])
+  test(`rejects an ambiguous earlier matching catalog: ${issue}`, () => {
+    const f = fixture();
+    const latest = JSON.parse(f.records[1].body).products;
+    changeRows(f, (rows) => {
+      if (issue === 'rounded-price-collision') rows[0].price = '0.018750000000000001';
+      if (issue === 'reused-identity') rows[0].base_currency_id = 'DIFFERENT';
+      if (issue === 'missing-corroboration') delete rows[0].approximate_quote_24h_volume;
+    });
+    f.records.push(catalog(latest, 1, 20));
+    assert.equal(compareCoinbaseSpotMidpoints(f).equivalent, false);
+  });
+test('permits varying catalogs only when every numerically matching candidate proves the same exact notional', () => {
+  const f = fixture();
+  const latest = JSON.parse(f.records[1].body).products;
+  changeRows(f, (rows) => {
+    rows[0].volume_24h = '2625843'; // Cannot be the source of the observed base volume.
+    rows[1].price = '0.01875000';
+    rows[1].volume_24h = '2625844.00'; // Equivalent rationals need not share decimal encoding.
+  });
+  f.records.push(catalog(latest, 1, 20));
+  assert.equal(compareCoinbaseSpotMidpoints(f).equivalent, true);
+});
+test('failed later catalog reads retain the previous validated candidate', () => {
   const f = fixture();
   f.records.push({ ...f.records[1], requestOrdinal: 1, t: 20, status: 503, body: 'unavailable' });
   const result = compareCoinbaseSpotMidpoints(f);

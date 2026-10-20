@@ -38,6 +38,7 @@ function publicCatalog(venue, records) {
     metas.length === 1 && metas[0] === records[0] && metas[0].private === false,
     'explicit public tape required',
   );
+  const candidates = [];
   let publication,
     ordinal = -1,
     time = -1,
@@ -46,7 +47,7 @@ function publicCatalog(venue, records) {
   for (const record of records) {
     requireThat(['meta', 'config', 'http', 'open', 'ws'].includes(record.type), 'unsupported tape record');
     requireThat(
-      ['impl', 'availableAt', 'effectiveAt', 'availableAfter', 'afterCommand', 'requestBody', 'tsRequestBody'].every(
+      ['binary', 'impl', 'availableAt', 'effectiveAt', 'availableAfter', 'afterCommand', 'requestBody', 'tsRequestBody'].every(
         (key) => !Object.hasOwn(record, key),
       ),
       'unmodeled tape request selector',
@@ -183,9 +184,10 @@ function publicCatalog(venue, records) {
       );
     }
     publication = { snapshot, ordinal, time };
+    candidates.push(publication);
   }
-  requireThat(publication, 'missing committed catalog');
-  return publication;
+  requireThat(publication, 'missing validated catalog');
+  return { ...publication, candidates };
 }
 
 function cents(value) {
@@ -229,7 +231,7 @@ export function compareCoinbaseSpotMidpoints({ venue, records, ts, rust }) {
         'account or command output excluded',
       );
     }
-    const { snapshot, ordinal, time } = publicCatalog(venue, records);
+    const { snapshot, ordinal, time, candidates } = publicCatalog(venue, records);
     const left = unique(ts.tickers, 'symbol'),
       right = unique(rust.tickers, 'symbol');
     const markets = [unique(ts.markets, 'id'), unique(rust.markets, 'id')];
@@ -286,6 +288,27 @@ export function compareCoinbaseSpotMidpoints({ venue, records, ts, rust }) {
           [(native.n * 100n) / native.d].some((c) => c === lower || c === lower + 1n),
         'native approximate quote volume does not corroborate midpoint',
       );
+      // A tape's last response need not have been consumed. Every possible
+      // source of these observed numeric fields must prove the same notional.
+      const candidateRequestOrdinals = [];
+      for (const candidate of candidates) {
+        const row = candidate.snapshot.get(id);
+        if (!row || Number(row.price) !== a.last || Number(row.volume_24h) !== a.volume) continue;
+        requireThat(
+          row.base_currency_id === markets[0].get(id).base && row.quote_currency_id === markets[0].get(id).quote,
+          'ambiguous candidate product units',
+        );
+        const product = priceVolume(row, a);
+        requireThat(product.n * value.d === value.n * product.d, 'ambiguous candidate decimal notional');
+        const estimate = decimal(row.approximate_quote_24h_volume);
+        requireThat(
+          (estimate.n * 100n) % estimate.d === 0n &&
+            [(estimate.n * 100n) / estimate.d].some((c) => c === lower || c === lower + 1n),
+          'candidate native estimate does not corroborate midpoint',
+        );
+        candidateRequestOrdinals.push(candidate.ordinal);
+      }
+      requireThat(candidateRequestOrdinals.length > 0, 'no unambiguous native candidate');
       exceptions.push({
         symbol: id,
         ts: a.quoteVolume,
@@ -294,6 +317,7 @@ export function compareCoinbaseSpotMidpoints({ venue, records, ts, rust }) {
         notional: { numerator: String(value.n), denominator: String(value.d) },
         requestOrdinal: ordinal,
         timestamp: time,
+        candidateRequestOrdinals,
       });
     }
     requireThat(exceptions.length > 0, 'no midpoint representation difference');
