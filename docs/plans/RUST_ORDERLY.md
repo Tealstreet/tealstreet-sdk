@@ -323,3 +323,17 @@ live private credentials were supplied; documented-payload private tapes are
 strictly signed/verified, with exact requests, ordered writes and protocol
 checks. No local gate is waived. Next: PR into feat/rust-rewrite, post local
 adversarial reviews, fix findings, wait for green CI, merge and branch afresh.
+
+### PR1318 correctness review, round1
+
+Three independent reviews were posted as PR comments. Six findings reopen
+verification: cross-account browser initialization, main-subscription rejection,
+incomplete live rows, native STOP/nested bracket mapping, finite/limit sibling
+repair, and queued repairs surviving bulk cancellation.
+
+The browser loader now shares one module-level initialization promise across
+accounts and later starts; failed initialization clears only that module cache.
+Three new loader regressions plus transport suite41tests, package typecheck
+and lint pass. Independent re-review repeated the browser-artifact reproduction:
+one initializer invocation and existing engines remain usable. Public/private
+regressions reproduced the other findings before their implementation fixes.
