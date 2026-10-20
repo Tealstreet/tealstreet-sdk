@@ -277,35 +277,54 @@ publish an empty snapshot or dispose the previous good engine.
   Public timing runs alone after all other owned checks stop. Final metrics
   replace the pre-spot measurements below once the replay completes.
 
+- Runtime diagnostic checkpoint: the 67-frame Hyperliquid Spot fixture missed
+  main/steady CPU on the combined Node 24 build (38.8/39.7 ms main) and main CPU
+  on its canonical O3 solo build (36.7/38.7 ms). A compact-host experiment still
+  missed Node 24 main CPU and was discarded; no Hyperliquid profile, fixture or
+  threshold change is used. The unchanged canonical O3 artifact passes on CI's
+  Node 22.23.3: main 39.8/35.5 ms, steady 11.5/9.9 ms, retained 18.7/6.0 MB.
+  Private correctness passes. Keep this Node 24 short-fixture performance
+  limitation visible; the actual-byte consumer functional proofs pass Node 24.
+- Final performance controls are standardized on CI Node 22.23.3 instead of
+  mixing Node 24 trials into the acceptance table. Hyperliquid Spot, Kraken
+  Spot/futures and Paradex use their canonical solo artifacts; all four public
+  and private gates PASS. The combined artifact restores exactly to `d1fdda29…8e7b88` before remaining public/private controls. No benchmark tests/builds run
+  concurrently during accepted public measurements.
+
 ## Final public replay metrics
 
-Three-run medians on the integrated `eb2f1751…b3359` combined binary, except
-Paradex on its scoped 1,221,468-byte solo binary (`044c75bc…6826`). Values are
-TypeScript → Rust. Public gates enforce main-thread CPU, steady CPU and
-retained memory; process CPU is an additional diagnostic. Private replay
-controls enforce correctness only. The updated landing GRVT/Lighter fixtures
-are used; this consumer change adds no live venue capture or TS protocol fix.
+CI runtime: Node 22.23.3, three-run medians. Fourteen profiles use the current
+`d1fdda29…8e7b88` combined binary; Hyperliquid Spot, Kraken Spot/futures and
+Paradex use canonical single-venue builds. Values are TypeScript → Rust.
+Gates enforce main-thread CPU, steady CPU and retained memory; process CPU is
+an additional diagnostic. Private replay controls enforce correctness only.
+Existing documented/live fixtures are reused; this lane adds no live capture,
+TS protocol correction or threshold change. Node 24's short Hyperliquid Spot
+CPU miss is recorded above and is not represented as a passing control here.
 
 | Profile | Main CPU ms | Steady CPU ms | Process CPU ms | Retained MB |
 | --- | ---: | ---: | ---: | ---: |
-| binance | 281.0 → 144.7 | 158.3 → 67.5 | 351.3 → 235.4 | 18.8 → 5.2 |
-| binancespot | 928.6 → 783.9 | 495.7 → 368.7 | 1091.7 → 963.6 | 28.0 → 11.9 |
-| binanceinverse | 234.2 → 102.5 | 158.0 → 57.0 | 260.8 → 154.9 | 14.1 → 3.0 |
-| binancepm | 222.0 → 107.9 | 114.4 → 42.2 | 275.3 → 192.4 | 18.4 → 5.2 |
-| hyperliquid | 335.2 → 53.0 | 26.0 → 15.5 | 419.7 → 141.7 | 24.9 → 3.7 |
-| coinbase | 791.4 → 311.6 | 454.5 → 92.5 | 987.2 → 410.6 | 38.8 → 21.8 |
-| phemex | 371.0 → 100.2 | 261.2 → 33.4 | 456.7 → 164.8 | 20.6 → 5.7 |
-| asterdex | 168.6 → 94.1 | 65.3 → 42.1 | 285.7 → 203.8 | 28.2 → 7.5 |
-| txflow | 92.7 → 73.1 | 21.4 → 16.6 | 144.5 → 128.9 | 18.0 → 2.5 |
-| grvt | 169.9 → 147.9 | 102.7 → 82.2 | 208.4 → 257.8 | 27.2 → 2.9 |
-| lighter | 400.6 → 243.0 | 270.3 → 156.4 | 497.1 → 382.1 | 17.7 → 4.0 |
-| lighter-robinhood | 267.5 → 96.8 | 187.4 → 43.0 | 334.7 → 209.0 | 20.5 → 6.2 |
-| apexomni | 78.6 → 39.2 | 47.0 → 6.8 | 110.3 → 83.7 | 21.8 → 3.4 |
-| breakoutprop | 22.2 → 18.8 | 6.3 → 5.0 | 44.2 → 25.6 | 12.3 → 2.0 |
-| paradex | 947.1 → 705.3 | 526.9 → 338.4 | 1061.2 → 847.1 | 19.6 → 2.3 |
+| binance | 199.7 → 95.4 | 109.7 → 38.1 | 255.8 → 155.5 | 18.2 → 4.8 |
+| binancespot | 583.0 → 381.8 | 247.7 → 113.5 | 869.6 → 572.5 | 27.6 → 11.7 |
+| binanceinverse | 165.8 → 65.8 | 108.7 → 35.5 | 199.3 → 95.2 | 13.8 → 2.7 |
+| binancepm | 191.8 → 92.4 | 107.5 → 36.5 | 248.6 → 152.2 | 17.9 → 4.8 |
+| hyperliquid | 323.9 → 50.0 | 26.4 → 14.7 | 445.1 → 134.1 | 24.3 → 3.4 |
+| hyperliquidspot | 39.8 → 35.5 | 11.5 → 9.9 | 69.5 → 86.9 | 18.7 → 6.0 |
+| krakenspot | 248.6 → 120.2 | 186.7 → 67.0 | 368.2 → 264.5 | 16.5 → 4.3 |
+| kraken | 963.7 → 167.7 | 703.0 → 93.8 | 1131.4 → 316.6 | 16.8 → 2.7 |
+| coinbase | 835.0 → 338.4 | 499.6 → 110.1 | 1134.5 → 462.7 | 38.5 → 21.4 |
+| phemex | 392.8 → 102.5 | 264.6 → 35.0 | 469.0 → 157.8 | 20.1 → 5.3 |
+| asterdex | 165.7 → 88.7 | 60.1 → 39.3 | 280.6 → 168.6 | 27.9 → 7.0 |
+| txflow | 109.2 → 64.8 | 20.7 → 12.6 | 151.9 → 101.8 | 17.3 → 2.2 |
+| grvt | 175.8 → 121.2 | 95.1 → 67.0 | 276.4 → 270.8 | 26.5 → 2.6 |
+| lighter | 308.0 → 194.2 | 194.6 → 109.6 | 460.2 → 370.4 | 17.3 → 3.7 |
+| lighter-robinhood | 240.4 → 85.1 | 165.9 → 36.9 | 307.1 → 183.3 | 19.9 → 5.8 |
+| apexomni | 81.3 → 34.8 | 48.8 → 5.6 | 118.0 → 72.5 | 21.3 → 3.2 |
+| breakoutprop | 16.4 → 16.0 | 6.5 → 4.3 | 16.6 → 20.1 | 11.9 → 1.7 |
+| paradex | 530.1 → 477.8 | 231.9 → 173.9 | 723.3 → 602.5 | 19.0 → 2.1 |
 
-All 15 public controls PASS. GRVT process CPU is higher in this run;
-its gated main/steady CPU and retained memory remain below TS. Public
-main-thread speedups range from 1.15× to 6.32×; retained memory reductions
-range from 1.78× to 9.45×. No benchmark builds/tests ran concurrently with
-these public measurements in this lane.
+All 18 public controls PASS. Process CPU is higher for hyperliquidspot, breakoutprop;
+their gated main/steady CPU and retained memory remain below TS. Public
+main-thread speedups range from 1.03× to 6.47×; retained memory reductions
+range from 1.79× to 10.08×. No builds/tests ran concurrently with these
+accepted public measurements in this lane.
