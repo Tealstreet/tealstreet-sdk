@@ -245,3 +245,33 @@ test('BloFin login checks account, fresh timestamp, nonce and hex-base64 signatu
   venue.validateSocketMessage(socket, feeds, now);
 });
 }
+
+test('Bybit variant startup topics keep native categories, depths and configured origins', () => {
+  for (const [name, symbol, quoteCoin, category, depth, origin] of [
+    ['bybitinverse', 'BTCUSD', 'USD', 'inverse', 1000, 'wss://stream.bybit.com'],
+    ['bybitspot', 'BTCUSDT', 'USDT', 'spot', 200, 'wss://stream.bybit.com'],
+    ['bybitdemo', 'BTCUSDT', 'USDT', 'linear', 1000, 'wss://stream.bybit.com'],
+    ['hyrotrader', 'BTCUSDT', 'USDT', 'linear', 1000, 'wss://challenge.example.test'],
+  ]) {
+    const publicWs = `${origin}/v5/public/${category}`;
+    const records = [
+      {
+        type: 'http',
+        method: 'GET',
+        status: 200,
+        url: `https://example.test/v5/market/instruments-info?category=${category}`,
+        body: JSON.stringify({ retCode: 0, result: { list: [{ symbol, quoteCoin }] } }),
+      },
+      { type: 'ws', url: `${publicWs}?requestId=generated`, text: '{}' },
+    ];
+    if (name === 'hyrotrader') records.unshift({ type: 'config', options: { endpoints: { publicWs } } });
+    assert.deepEqual(
+      venueOf(name).startupSubscriptions(records, [symbol]),
+      [
+        `${publicWs} subscribe tickers.${symbol}`,
+        `${publicWs} subscribe orderbook.${depth}.${symbol}`,
+      ],
+      name,
+    );
+  }
+});

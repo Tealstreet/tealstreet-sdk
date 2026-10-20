@@ -2,7 +2,8 @@
 //!
 //! JavaScript owns sockets, fetch and timers; it forwards each event here and
 //! executes the returned actions. Every call returns the pending actions as a
-//! JSON array string, or an empty string when there are none.
+//! JSON array string, or an empty string when there are none. `wsMessage`
+//! returns `undefined` instead, avoiding empty-string decoding on the hot path.
 #[cfg(not(any(
     feature = "bitrue",
     feature = "binance",
@@ -44,7 +45,9 @@ use safe_cex_venue_bitunix::{BitunixFutures, Options as BitunixOptions};
 #[cfg(feature = "blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 #[cfg(feature = "bybit")]
-use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
+use safe_cex_venue_bybit::{
+    BybitLinear, Endpoints as BybitEndpoints, Options as BybitOptions, Variant as BybitVariant,
+};
 #[cfg(feature = "cryptocom")]
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "hyperliquid")]
@@ -181,9 +184,21 @@ struct EngineOptions {
     #[cfg(feature = "weex")]
     #[serde(default)]
     private_ws_headers: bool,
+    #[cfg(feature = "bybit")]
+    #[serde(default)]
+    endpoints: Option<EndpointOptions>,
     #[cfg(feature = "orderly")]
     #[serde(default)]
     tick_interval: Option<f64>,
+}
+
+#[cfg(feature = "bybit")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EndpointOptions {
+    rest: String,
+    public_ws: String,
+    private_ws: String,
 }
 #[cfg(feature = "hyperliquid")]
 #[derive(Deserialize)]
@@ -752,12 +767,28 @@ impl WasmEngine {
                 application_id: options.application_id,
             }))),
             #[cfg(feature = "bybit")]
-            "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-            }))),
+            "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
+                let options = BybitOptions {
+                    variant: match venue {
+                        "bybitinverse" => BybitVariant::Inverse,
+                        "bybitspot" => BybitVariant::Spot,
+                        "bybitdemo" => BybitVariant::Demo,
+                        "hyrotrader" => BybitVariant::Hyrotrader,
+                        _ => BybitVariant::Linear,
+                    },
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    endpoints: options.endpoints.map(|e| BybitEndpoints {
+                        rest: e.rest,
+                        public_ws: e.public_ws,
+                        private_ws: e.private_ws,
+                    }),
+                };
+                options.validate().map_err(|e| JsError::new(&e))?;
+                Box::new(Engine::new(BybitLinear::new(options)))
+            }
             #[cfg(feature = "bitget")]
             "bitget" | "bitgetusdc" | "bitgetinverse" => {
                 if !options.public_data_only
@@ -849,10 +880,11 @@ impl WasmEngine {
     }
 
     #[wasm_bindgen(js_name = wsMessage)]
-    pub fn ws_message(&mut self, socket: u32, text: &str, now: f64) -> String {
+    pub fn ws_message(&mut self, socket: u32, text: &str, now: f64) -> Option<String> {
         let socket = SocketId(socket);
         self.inner.handle(now, Event::WsMessage { socket, text });
-        self.flush()
+        let actions = self.inner.drain();
+        (!actions.is_empty()).then(|| encode(&actions))
     }
 
     #[wasm_bindgen(js_name = wsClose)]

@@ -178,6 +178,9 @@ impl BitunixFutures {
     fn preflight(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<(), String> {
         let mut ids = HashSet::new();
         for o in orders {
+            if o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some() {
+                return Err("Bybit BBO and TickSize controls are not supported by Bitunix".into());
+            }
             let m = cx
                 .store
                 .market(&o.symbol)
@@ -872,6 +875,8 @@ impl BitunixFutures {
             price: Some(parent.price),
             trigger_price: None,
             max_slippage_pct: None,
+            bybit_bbo: None,
+            bybit_slippage_tolerance_ticks: None,
             stop_loss: n.sl,
             take_profit: n.tp,
             reduce_only: Some(parent.reduce_only),

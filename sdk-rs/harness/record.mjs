@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
 import { canonicalUrl } from './tape.mjs';
-import { venueOf } from './venues.mjs';
+import { configuredOptions, venueOf } from './venues.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 
 const { values } = parseArgs({
@@ -98,7 +98,8 @@ const recording = {
   },
 };
 
-const options = { ...venue.options, ...venue.publicOptions, ...venue.recordOptions, publicDataOnly: true };
+const options = { ...configuredOptions(values.venue), ...venue.publicOptions, ...venue.recordOptions, publicDataOnly: true };
+if (options.endpoints) write({ type: 'config', options });
 const { WasmEngine } = await loadEngine(venue.rust, options);
 let frames = 0;
 let updates = 0;

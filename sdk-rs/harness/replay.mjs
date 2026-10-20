@@ -14,7 +14,7 @@ import { replayStoreReady, replayBooksReady, ReplayClock, Tape as SharedTape, ca
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout, setInterval as realInterval, clearInterval as realClearInterval } from 'node:timers';
 import { parseRequestJson } from './request-json.mjs';
 import { retainedMemory, settledMemory } from './memory.mjs';
-import { Responses } from './responses.mjs';
+import { Responses, implementationRecords } from './responses.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -29,7 +29,7 @@ const { values } = parseArgs({
 });
 const venue = venueOf(values.venue);
 const tapeBytes = readFileSync(values.tape);
-const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
+const records = implementationRecords((values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
   .toString('utf8')
   .split('\n')
   .filter(Boolean)
@@ -38,7 +38,13 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
     // Both tape spellings describe the earliest time a snapshot is visible.
     if (record.effectiveAt !== undefined) record.availableAfter ??= record.effectiveAt;
     return record;
-  });
+  }), values.impl);
+const replayOptions = records.find((record) => record.type === 'config')?.options ?? {};
+if (values.venue === 'hyrotrader' && replayOptions.endpoints) {
+  process.env.NEXT_PUBLIC_HYROTRADER_PROD_REST_URL = replayOptions.endpoints.rest;
+  process.env.NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL = replayOptions.endpoints.publicWs;
+  process.env.NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL = replayOptions.endpoints.privateWs;
+}
 const bookSymbols = values.books.split(',').filter(Boolean);
 const metadata = records.find((r) => r.type === 'meta');
 let clockStart = performance.now();
@@ -124,7 +130,7 @@ const canonicalUrl = (url) => {
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
-const requestKey = (method, url, body) => (['blofin', 'mexc', 'bingx', 'bitrue', 'lighter'].includes(values.venue) || venue.family === 'orderly')
+const requestKey = (method, url, body) => (['blofin', 'mexc', 'bingx', 'bitrue', 'lighter'].includes(values.venue) || venue.family === 'orderly' || venue.subscriptionGenerations)
   ? keyOf(method, url, body, callerIds, venue)
   : `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
 
@@ -135,7 +141,7 @@ class Tape extends SharedTape {
   constructor(impl) {
     super(records, { ...venue, impl, books: bookSymbols, timeoutMs: 15000, isPrivate, canonicalize: values.venue === 'backpack' ? (url) => sharedUrl(url, callerIds, venue) : canonicalUrl,
       explicitOpens: values.venue === 'bitunix', legacyLatest: false,
-      responses: values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'lighter' || venue.family === 'orderly' || values.venue.startsWith('bitget') ? undefined : new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
+      responses: values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'lighter' || venue.family === 'orderly' || venue.subscriptionGenerations || values.venue.startsWith('bitget') ? undefined : new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
         venue.matchRequestBody ? undefined : (method, url, body) => isWriteRequest(method, url) && !['', '{}'].includes(canonicalBody(body)) ? undefined : requestKey(method, url)),
       prepareFrame: (r) => {
         if (r.type !== 'ws') return r;
@@ -163,7 +169,7 @@ class Tape extends SharedTape {
 
   send(socket, text) {
     const { url, connection } = socket;
-    if (values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || values.venue.startsWith('bitget')) return super.send(socket, text);
+    if (values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || venue.subscriptionGenerations || values.venue.startsWith('bitget')) return super.send(socket, text);
     venue.validateSocketMessage?.(socket, text);
     for (const key of subscriptionKeys(socket.rawUrl, text)) {
       if (this.startupSubscriptions.get(key) === false) {
@@ -364,7 +370,8 @@ const marketFields = (m) => ({
   base: m.base,
   quote: m.quote,
   active: m.active,
-  ...(venue.inverseNativeAmounts ? { isInverse: Boolean(m.isInverse) } : {}),
+  ...(venue.inverseNativeAmounts || venue.subscriptionGenerations ? { isInverse: Boolean(m.isInverse) } : {}),
+  ...(venue.subscriptionGenerations ? { isSpot: Boolean(m.isSpot), isExpiring: Boolean(m.isExpiring) } : {}),
   contractSize: m.contractSize ?? null,
   precision: { amount: m.precision.amount, price: m.precision.price },
   limits: { amount: { min: Number(m.limits.amount.min), max: Number(m.limits.amount.max) } },
@@ -457,11 +464,11 @@ async function runRust() {
         lastFlush = t;
       }
     },
-    async () => {
+    async (accountReady = true) => {
       for (;;) {
         host.flush();
         const booksReady = !venue.initialBookSnapshots || replayBooksReady(bookSymbols, Array.from(books.keys(), (market) => markets?.symbol(market)));
-        if (replayStoreReady(status?.loaded ?? 0, isPrivate) && booksReady && (!tape.audit || tape.audit.ready()) && tape.sockets.some((s) => s.opened && !s.closed)) break;
+        if (replayStoreReady(status?.loaded ?? 0, isPrivate && accountReady) && booksReady && (!tape.audit || tape.audit.ready()) && tape.sockets.some((s) => s.opened && !s.closed)) break;
         await new Promise((r) => realTimeout(r, 5));
       }
     },
@@ -492,6 +499,8 @@ async function runRust() {
       quote: markets.quote(i),
       active: (markets.flags[i] & 1) !== 0,
       isInverse: (markets.flags[i] & 2) !== 0,
+      isSpot: (markets.flags[i] & 4) !== 0,
+      isExpiring: (markets.flags[i] & 16) !== 0,
       contractSize: markets.contractSize[i] || undefined,
       precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
       limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
@@ -513,7 +522,7 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly') ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return { frames, metrics, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || venue.subscriptionGenerations) ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
@@ -694,11 +703,12 @@ async function runTs() {
         lastFlush = t;
       }
     },
-    async () => {
-      await prepared;
+    async (accountReady = true) => {
+      await (accountReady ? Promise.all([prepared, subscribed]) : subscribed);
       while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => realTimeout(r, 5));
       while (venue.initialBookSnapshots && !replayBooksReady(bookSymbols, Object.keys(finalBooks))) await new Promise((r) => realTimeout(r, 5));
-      const loaded = () => Object.values(store.loaded).every(Boolean);
+      const loaded = () => accountReady ? Object.values(store.loaded).every(Boolean)
+        : store.loaded.markets && store.loaded.tickers;
       while (isPrivate && !loaded()) await new Promise((r) => realTimeout(r, 5));
     },
     (record) => runTsCommand(exchange, store, record, { candleListeners, candleUpdates }),
@@ -734,7 +744,7 @@ async function runTs() {
   const protocolErrors = tape.audit?.errors() ?? [];
   exchange.dispose();
   clock?.restore();
-  return { frames, metrics, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly') ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return { frames, metrics, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || venue.subscriptionGenerations) ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
 }
 
 async function runTsCommand(exchange, store, record, { candleListeners, candleUpdates }) {

@@ -227,6 +227,25 @@ fn position() -> Position {
 }
 
 #[test]
+fn bybit_execution_controls_reject_entire_batch_before_writes() {
+    for bbo in [true, false] {
+        let mut h = Harness::new(None);
+        let mut second = opts();
+        if bbo {
+            second.bybit_bbo = Some(BybitBbo {
+                side_type: "Queue".into(),
+                level: 1.0,
+            });
+        } else {
+            second.bybit_slippage_tolerance_ticks = Some(2.0);
+        }
+        h.place(vec![opts(), second]);
+        assert!(h.requests.is_empty());
+        assert!(h.done[0].as_ref().unwrap_err().contains("Bybit"));
+    }
+}
+
+#[test]
 fn every_order_is_preflighted_before_the_first_write() {
     for invalid in [
         PlaceOrderOpts {

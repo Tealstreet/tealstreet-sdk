@@ -112,6 +112,35 @@ fn all_caller_ids_are_checked_before_any_order_write() {
 }
 
 #[test]
+fn bybit_controls_reject_the_whole_batch_before_any_order_write() {
+    for uta_mode in [false, true] {
+        for (field, value) in [
+            ("bybitBbo", json!({"sideType":"Queue","level":1})),
+            ("bybitSlippageToleranceTicks", json!(2)),
+        ] {
+            let mut h = if uta_mode { uta() } else { Harness::classic() };
+            let mut unsupported = limit();
+            unsupported[field] = value;
+            place(&mut h, vec![limit(), unsupported]);
+            assert!(
+                h.requests.iter().all(|r| r.method == Method::Get),
+                "{field} emitted an order write (UTA: {uta_mode})"
+            );
+            assert!(
+                h.done
+                    .last()
+                    .unwrap()
+                    .1
+                    .as_ref()
+                    .unwrap_err()
+                    .contains("Bybit"),
+                "{field} was not rejected as unsupported (UTA: {uta_mode})"
+            );
+        }
+    }
+}
+
+#[test]
 fn caller_id_rejects_brackets_stops_and_precision_induced_split() {
     for shape in [
         json!({"stopLoss":80}),

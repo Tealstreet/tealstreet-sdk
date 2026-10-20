@@ -467,3 +467,39 @@ test('zero-byte request bodies share absent identity while encoded JSON values s
     assert.notEqual(key(body), key(undefined));
   assert.notEqual(key('{"order_id":"100"}'), key('{"order_id":100}'));
 });
+
+test('Bybit spot instrument equivalence leaves other categories and routes exact', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  const venue = venueOf('bybitspot');
+  const root = 'https://api.bybit.com/v5/market/instruments-info';
+  const key = (url) => requestKey('GET', url, undefined, new Set(), venue);
+  assert.equal(key(`${root}?category=spot&limit=1000&cursor=invalid`), key(`${root}?category=spot`));
+  assert.notEqual(key(`${root}?category=linear&limit=1000`), key(`${root}?category=linear`));
+  assert.notEqual(
+    key('https://api.bybit.com/v5/order/realtime?category=spot&cursor=next'),
+    key('https://api.bybit.com/v5/order/realtime?category=spot'),
+  );
+  assert.notEqual(
+    requestKey('GET', `${root}?category=spot&limit=1000`, undefined, new Set(), venueOf('bybit')),
+    requestKey('GET', `${root}?category=spot`, undefined, new Set(), venueOf('bybit')),
+  );
+});
+
+
+test('Hyro generated identities vary while caller IDs, categories and native quantities stay exact', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  const venue = venueOf('hyrotrader');
+  const url = 'https://challenge.example.test/v5/order/create';
+  const key = (body, ids = new Set()) => requestKey('POST', url, body, ids, venue);
+  assert.equal(
+    key({ category: 'linear', qty: '1', orderLinkId: 'generated-one' }),
+    key({ category: 'linear', qty: '1', orderLinkId: 'generated-two' }),
+  );
+  assert.notEqual(
+    key({ orderLinkId: 'caller' }, new Set(['caller'])),
+    key({ orderLinkId: 'generated' }, new Set(['caller'])),
+  );
+  assert.notEqual(key({ category: 'linear', qty: '1' }), key({ category: 'inverse', qty: '1' }));
+  assert.notEqual(key({ qty: '1' }), key({ qty: 1 }));
+  assert.notEqual(key({ qty: '1' }), key({ qty: '2' }));
+});

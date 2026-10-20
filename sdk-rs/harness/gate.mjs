@@ -10,6 +10,8 @@ import { gunzipSync } from 'node:zlib';
 import { memoryMetricErrors } from './memory.mjs';
 import { fixWeexConditionals, fixLighterFills, fixLighterCommands } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
+import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
+import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
 import { venueOf } from './venues.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 
@@ -30,7 +32,7 @@ const replay = (impl, run) => {
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
   args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
   if (values['no-egress']) args.push('--no-egress');
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000 });
+  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000, env: { ...process.env, ESBUILD_WORKER_THREADS: '0' } });
   if (result.status !== 0) throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
 };
@@ -293,7 +295,7 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
     }
     return;
   }
-  if (!['binance', 'bybit'].includes(values.venue)) return;
+  if (!['binance', 'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue)) return;
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
     if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
@@ -452,6 +454,40 @@ for (let run = 0; run < runs; run++) {
   if (venue.family === 'orderly') fixOrderly(ts, tape);
   if (venue.family === 'orderly' && !equal(ts.requests, rust.requests))
     differences.push(`requests differ: ts=${JSON.stringify(ts.requests)} rust=${JSON.stringify(rust.requests)}`);
+  if (venue.subscriptionGenerations) {
+    if (ts.account) {
+      const rest = tape.find((record) => record.type === 'config')?.options?.endpoints?.rest
+        ?? (values.venue === 'bybitdemo' ? 'https://api-demo.bybit.com' : 'https://api.bybit.com');
+      const metadataRequest = requestKey('GET', `${rest}/v5/user/query-api`, undefined, new Set(), venue);
+      ts.requests = ts.requests.filter((key) => key !== metadataRequest);
+      if (values.venue !== 'hyrotrader') {
+        const feeds = new Set(ts.subscriptions);
+        for (const key of ts.subscriptions) {
+          const match = /^([1-9]\d*) WS (\S+) \{"args":\["order"\],"op":"subscribe"\}$/.exec(key);
+          if (!match || new URL(match[2]).pathname !== '/v5/private') continue;
+          for (const required of subscriptionKeys(match[2], { op: 'subscribe', args: ['execution', 'wallet'] }, new Set(), { fullSocketIdentity: true }))
+            feeds.add(`${match[1]} ${required}`);
+        }
+        ts.subscriptions = [...feeds].sort();
+      }
+      const latest = new Map();
+      for (const record of tape) {
+        if (record.type !== 'ws') continue;
+        const event = JSON.parse(record.text);
+        if (event.topic === 'order') for (const row of event.data) latest.set(String(row.orderId), row);
+      }
+      for (const order of ts.account.orders) {
+        if (order.rejectReason === null && order.status === 'canceled'
+          && latest.get(order.id)?.rejectReason === 'EC_PostOnlyWillTakeLiquidity') order.rejectReason = 'PostOnly';
+      }
+    }
+    if (['bybitinverse', 'bybitspot'].includes(values.venue)) {
+      const privateRecord = tape.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/v5/private');
+      const privateUrl = privateRecord && new URL(privateRecord.url);
+      ts.subscriptions = normalizeTsBybitSubscriptions(values.venue, ts.subscriptions,
+        privateUrl && `${privateUrl.origin}${privateUrl.pathname}`);
+    }
+  }
   if (isPrivate && ts.account && rust.account) {
     if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
     KNOWN_TS_FIXES(ts.account, rust.account);
@@ -459,6 +495,12 @@ for (let run = 0; run < runs; run++) {
     if (values.venue === 'lighter') {
       KNOWN_TS_FIXES.lighter.fills(ts.account, tape);
       KNOWN_TS_FIXES.lighter.commands(ts.commands, tape);
+    }
+    if (values.venue === 'bybitinverse') {
+      const upnl = ts.account.positions.reduce((sum, position) => sum
+        + (position.contracts > 0 ? position.unrealizedPnl * position.notional / position.contracts : 0), 0);
+      ts.account.balance.total = Math.round((ts.account.balance.total + ts.account.balance.upnl - upnl) * 1e8) / 1e8;
+      ts.account.balance.upnl = upnl;
     }
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
       const left = JSON.stringify(ts.account[field]);
@@ -487,20 +529,14 @@ for (let run = 0; run < runs; run++) {
     if (result[impl].socketErrors?.length) differences.push(`${impl}: ${result[impl].socketErrors.join('; ')}`);
     if (result[impl].unserved) differences.push(`${impl}: ${result[impl].unserved} unserved requests`);
   }
-  // KNOWN_TS_FIXES: the existing Bybit Rust port also subscribes to execution
-  // and wallet for execution IDs and live balances. TS subscribes only to
-  // order/position. Require those two exact extra topics on every private
-  // connection rather than dropping them from the comparison.
-  if (values.venue === 'bybit' && ts.account) {
-    for (const row of [...ts.subscriptions]) {
-      const [url, connection, op, topic] = JSON.parse(row);
-      if (new URL(url).pathname === '/v5/private' && op === 'subscribe' && topic === 'order') {
-        for (const extra of ['execution', 'wallet']) ts.subscriptions.push(JSON.stringify([url, connection, op, extra]));
-      }
-    }
-    ts.subscriptions.sort();
-  }
   for (const field of ['outbound', 'subscriptions', 'candles', 'bookEvents', 'wsRequests']) {
+    if (field === 'outbound' && venue.subscriptionGenerations) {
+      const selected = (impl) => new Set(tape.filter((record) => record.type === 'http' && record.impl === impl)
+        .map((record) => requestKey(record.method, record.url, record.requestBody, callerIdsOf(tape), venue)));
+      if (!equal(ts.outbound?.filter((key) => !selected('ts').has(key)), rust.outbound?.filter((key) => !selected('rust').has(key))))
+        differences.push(`outbound differs on run ${run + 1}`);
+      continue;
+    }
     if (!equal(ts[field], rust[field])) {
       const left = ts[field] ?? [];
       const right = rust[field] ?? [];
@@ -531,6 +567,35 @@ for (let run = 0; run < runs; run++) {
     for (const field of ['bid', 'ask', 'last', 'percentage', 'volume', 'quoteVolume', 'openInterest']) {
       if (ticker[field] === null) ticker[field] = 0;
     }
+  }
+  if (values.venue === 'bybitspot') {
+    const instruments = new Map(tape.filter((record) => record.type === 'http'
+      && new URL(record.url).pathname === '/v5/market/instruments-info')
+      .flatMap((record) => JSON.parse(record.body).result?.list ?? []).map((row) => [row.symbol, row]));
+    for (const market of ts.markets) {
+      const lot = instruments.get(market.symbol)?.lotSizeFilter;
+      if (!lot) continue;
+      market.precision.amount = Number(lot.qtyStep ?? lot.basePrecision);
+      const maxima = [lot.maxLimitOrderQty, lot.maxMarketOrderQty, lot.maxOrderQty]
+        .map(Number).filter((number) => Number.isFinite(number) && number > 0);
+      if (maxima.length) market.limits.amount.max = Math.min(...maxima);
+    }
+  }
+  if (venue.subscriptionGenerations) {
+    const selected = (impl) => new Set(tape.filter((record) => record.type === 'http' && record.impl === impl)
+      .map((record) => requestKey(record.method, record.url, record.requestBody, callerIdsOf(tape), venue)));
+    const plans = { ts: selected('ts'), rust: selected('rust') };
+    const left = ts.requests?.filter((key) => !plans.ts.has(key));
+    const right = rust.requests?.filter((key) => !plans.rust.has(key));
+    if (!Array.isArray(left) || !Array.isArray(right) || !equal(left, right))
+      differences.push(`requests run ${run + 1}: ts=${JSON.stringify(left)} rust=${JSON.stringify(right)}`);
+    const tsWrites = ts.writes?.filter((key) => !plans.ts.has(key));
+    const rustWrites = rust.writes?.filter((key) => !plans.rust.has(key));
+    if (!Array.isArray(tsWrites) || !Array.isArray(rustWrites) || ts.writeCount !== ts.writes.length
+      || rust.writeCount !== rust.writes.length || !equal(tsWrites, rustWrites))
+      differences.push(`HTTP write sequence run ${run + 1}: ts=${JSON.stringify(tsWrites)} rust=${JSON.stringify(rustWrites)}`);
+    // The selected per-implementation rows are separately required by the
+    // transport's single-use consumption audit, including ordered mutations.
   }
   compare('market', ts.markets, rust.markets);
   compare('ticker', ts.tickers, rust.tickers);

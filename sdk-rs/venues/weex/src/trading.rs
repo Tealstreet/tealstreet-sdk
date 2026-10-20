@@ -378,6 +378,11 @@ impl WeexFutures {
         cx: &Cx<'_, Pending>,
         orders: Vec<PlaceOrderOpts>,
     ) -> Result<VecDeque<Step>, String> {
+        if orders.iter().any(|order| {
+            order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some()
+        }) {
+            return Err("Bybit BBO and TickSize controls are not supported by WEEX".into());
+        }
         // Validate every caller ID (including duplicates) before constructing a
         // job. No earlier row can escape when a later row is unhonorable.
         let mut seen = HashSet::new();
@@ -786,7 +791,6 @@ impl WeexFutures {
                                 Some(new_price.unwrap_or(o.price)).filter(|v| *v > 0.0)
                             },
                             trigger_price: conditional.then_some(new_price.unwrap_or(o.price)),
-                            max_slippage_pct: None,
                             stop_loss: o.stop_loss,
                             take_profit: o.take_profit,
                             reduce_only: Some(o.reduce_only),
@@ -796,6 +800,9 @@ impl WeexFutures {
                             sl_trigger_type: brackets.sl,
                             client_order_id: None,
                             close: o.close,
+                            max_slippage_pct: None,
+                            bybit_bbo: None,
+                            bybit_slippage_tolerance_ticks: None,
                         };
                         // Replacement preflight runs before the destructive cancel.
                         let mut replacement = self.plan_orders(cx, vec![opts])?;

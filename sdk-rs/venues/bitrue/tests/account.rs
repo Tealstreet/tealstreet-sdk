@@ -184,6 +184,12 @@ fn private_socket_watchdog_recovers_without_a_spot_fallback() {
         "https://fapiws-auth.bitrue.com/user_stream/api/v1/listenKey"
     );
     assert_eq!(r.method, Method::Post);
+    h.respond(r, r#"{"code":200,"data":{"listenKey":"replacement-key"}}"#);
+    assert!(h.actions.iter().any(|action| matches!(
+        action,
+        Action::WsConnect { socket, url, channel: Some(SocketChannel::Private), .. }
+            if *socket != old && url == "wss://fapiws.bitrue.com/stream?listenKey=replacement-key"
+    )));
 }
 #[test]
 fn account_positions_and_settings_are_authoritative_and_missing_schema_is_not_empty() {

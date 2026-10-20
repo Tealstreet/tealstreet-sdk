@@ -10,6 +10,85 @@ let lighterVerifier;
 
 const root = '../../packages/safe-cex/src/exchanges';
 
+// Existing venues retain typed request matching after Tape extraction.
+// Backpack separately checks its documented numeric wire equivalences and write order.
+const typedRequest = function (method, url, body, callerIds) {
+  return requestKey(method, url, body, callerIds, this);
+};
+
+const bybit = (name, className) => ({
+  rust: name,
+  subscriptionGenerations: true,
+  compareWriteOrder: true,
+  ts: { module: `${root}/bybit/${name}.exchange.ts`, className, name },
+  tsBooksSubscribed: (exchange, count) =>
+    count === 0 ||
+    Object.keys((exchange.publicWebsocket ?? exchange.publicInverseWebsocket)?.messageHandlers ?? {}).filter((key) =>
+      key.startsWith('orderbook.'),
+    ).length >= count,
+  startupSubscriptions: (records, books) => {
+    const symbols = new Set();
+    for (const record of records) {
+      if (
+        record.type !== 'http' ||
+        record.method !== 'GET' ||
+        !(record.status >= 200 && record.status < 300) ||
+        new URL(record.url).pathname !== '/v5/market/instruments-info'
+      )
+        continue;
+      const category = name === 'bybitinverse' ? 'inverse' : name === 'bybitspot' ? 'spot' : 'linear';
+      const recordedCategory = new URL(record.url).searchParams.get('category');
+      if (recordedCategory && recordedCategory !== category) continue;
+      const body = JSON.parse(record.body);
+      if (Number(body.retCode) !== 0) continue;
+      for (const row of body.result?.list ?? []) {
+        if (
+          (name === 'bybitinverse' ? row.quoteCoin === 'USD' : ['USDT', 'USDC'].includes(row.quoteCoin)) &&
+          typeof row.symbol === 'string' &&
+          row.symbol
+        )
+          symbols.add(row.symbol);
+      }
+    }
+    const category = name === 'bybitinverse' ? 'inverse' : name === 'bybitspot' ? 'spot' : 'linear';
+    const configured = records.find((record) => record.type === 'config')?.options?.endpoints?.publicWs;
+    const observed = records.find(
+      (record) => record.type === 'ws' && record.url?.includes(`/v5/public/${category}`),
+    )?.url;
+    const url = new URL(configured ?? observed ?? `wss://stream.bybit.com/v5/public/${category}`);
+    return subscriptionKeys(url.toString(), {
+      op: 'subscribe',
+      args: [...symbols]
+        .map((symbol) => `tickers.${symbol}`)
+        .concat(books.map((symbol) => `orderbook.${name === 'bybitspot' ? 200 : 1000}.${symbol}`)),
+    });
+  },
+  tsRejectReason: (order) =>
+    order.status === 'canceled' && order.info?.rejectReason === 'EC_PostOnlyWillTakeLiquidity' ? 'PostOnly' : undefined,
+  privateSocket: '/v5/private',
+  bootstrapPrivateFromTape: name === 'hyrotrader',
+  requestUrl:
+    name === 'bybitspot'
+      ? (url) => {
+          const parsed = new URL(url);
+          // Spot instruments are unpaginated; TS's limit/cursor fields are invalid.
+          if (parsed.pathname === '/v5/market/instruments-info' && parsed.searchParams.get('category') === 'spot') {
+            parsed.searchParams.delete('limit');
+            parsed.searchParams.delete('cursor');
+          }
+          return parsed.toString();
+        }
+      : undefined,
+  requestOptions: name === 'hyrotrader' ? (method, url) => ({
+    generatedBodyId: (key, value) => method === 'POST' && /^\/v5\/order\/create(?:-batch)?$/.test(url.pathname)
+      && key === 'orderLinkId' && typeof value === 'string' && value.length > 0 && value.length <= 36 && !/[^A-Za-z0-9_-]/.test(value),
+  }) : undefined,
+  isWrite: (method) => method === 'POST',
+  requestKey: typedRequest,
+  matchRequestBody: true,
+  volatileBodyFields: true,
+});
+
 const base58 = (bytes) => {
   const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   let value = BigInt(`0x${Buffer.from(bytes).toString('hex')}`);
@@ -108,6 +187,7 @@ const orderly = (alias) => {
     family: 'orderly',
     orderlyProtocol: true,
     subscriptionGenerations: true,
+  compareWriteOrder: true,
     publicTickers: (records) => {
       const seed = records.find((r) => r.type === 'http' && new URL(r.url).pathname === '/v1/public/info');
       return seed ? JSON.parse(seed.body).data.rows.map((row) => row.symbol) : [];
@@ -277,9 +357,13 @@ const orderly = (alias) => {
 
 
 // Replay transport and signing clocks both default to wall-clock milliseconds.
-const validWeexTimestamp = (time, now) => typeof time === 'string' && /^\d+$/.test(time)
-  && Number.isSafeInteger(Number(time)) && Number(time) > 0
-  && Number.isFinite(now) && Math.abs(Number(time) - now) <= 30_000;
+const validWeexTimestamp = (time, now) =>
+  typeof time === 'string' &&
+  /^\d+$/.test(time) &&
+  Number.isSafeInteger(Number(time)) &&
+  Number(time) > 0 &&
+  Number.isFinite(now) &&
+  Math.abs(Number(time) - now) <= 30_000;
 
 // Public deterministic replay credentials, never a funded account.
 const backpackSeed = Buffer.alloc(32, 7);
@@ -304,16 +388,22 @@ const backpackInstructions = {
   'GET /wapi/v1/history/orders': 'orderHistoryQueryAll',
   'GET /wapi/v1/history/funding': 'fundingHistoryQueryAll',
 };
-const validBackpackTime = (timestamp, window, now) => /^\d+$/.test(String(timestamp ?? ''))
-  && /^\d+$/.test(String(window ?? '')) && Number.isSafeInteger(Number(timestamp)) && Number(timestamp) > 0
-  && Number.isSafeInteger(Number(window)) && Number(window) > 0 && Number(window) <= 60000
-  && Math.abs(Number(timestamp) - now) <= Number(window);
+const validBackpackTime = (timestamp, window, now) =>
+  /^\d+$/.test(String(timestamp ?? '')) &&
+  /^\d+$/.test(String(window ?? '')) &&
+  Number.isSafeInteger(Number(timestamp)) &&
+  Number(timestamp) > 0 &&
+  Number.isSafeInteger(Number(window)) &&
+  Number(window) > 0 &&
+  Number(window) <= 60000 &&
+  Math.abs(Number(timestamp) - now) <= Number(window);
 const verifyBackpackSubscribe = (message, now = Date.now()) => {
   if (!(message.params ?? []).some((p) => p.startsWith('account.')) || message.method !== 'SUBSCRIBE') return true;
   const [key, signature, timestamp, window] = message.signature ?? [];
   return (
     key === backpackKey &&
-    window === '5000' && validBackpackTime(timestamp, window, now) &&
+    window === '5000' &&
+    validBackpackTime(timestamp, window, now) &&
     verify(
       null,
       Buffer.from(`instruction=subscribe&timestamp=${timestamp}&window=${window}`),
@@ -329,8 +419,12 @@ const verifyBackpack = ({ method, url, headers, body, now = Date.now() }) => {
   const h = Object.fromEntries(
     (Array.isArray(headers) ? headers : Object.entries(headers ?? {})).map(([k, v]) => [k.toLowerCase(), String(v)]),
   );
-  if (h['x-api-key'] !== backpackKey || h['x-broker-id'] !== '1200'
-    || !validBackpackTime(h['x-timestamp'], h['x-window'], now)) return false;
+  if (
+    h['x-api-key'] !== backpackKey ||
+    h['x-broker-id'] !== '1200' ||
+    !validBackpackTime(h['x-timestamp'], h['x-window'], now)
+  )
+    return false;
   const params = method === 'GET' ? Object.fromEntries(parsed.searchParams) : parseRequestJson(body ?? '{}');
   const rows = Array.isArray(params) ? params : [params];
   const pieces = rows.map(
@@ -396,7 +490,8 @@ export const mexcRequestBody = (body, { url = '' } = {}) => {
     }
     if (JSON.isRawJSON(value)) return value;
     if (Array.isArray(value)) return value.map((item) => visit(item, key === '' ? '<root-id>' : key));
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, visit(v, k)]));
+    if (value && typeof value === 'object')
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, visit(v, k)]));
     return value;
   };
   return visit(body);
@@ -404,9 +499,13 @@ export const mexcRequestBody = (body, { url = '' } = {}) => {
 export const mexcRequestUrl = (url) => {
   const parsed = new URL(url);
   const params = parsed.searchParams;
-  if (parsed.hostname === 'api.mexc.com' && /^\/api\/v1\/private\/(planorder|stoporder)\/list\/orders$/.test(parsed.pathname)
-    && (params.get('states') === '1' || params.get('is_finished') === '0')
-    && /^\d+$/.test(params.get('start_time') ?? '') && /^\d+$/.test(params.get('end_time') ?? '')) {
+  if (
+    parsed.hostname === 'api.mexc.com' &&
+    /^\/api\/v1\/private\/(planorder|stoporder)\/list\/orders$/.test(parsed.pathname) &&
+    (params.get('states') === '1' || params.get('is_finished') === '0') &&
+    /^\d+$/.test(params.get('start_time') ?? '') &&
+    /^\d+$/.test(params.get('end_time') ?? '')
+  ) {
     params.set('start_time', String(BigInt(params.get('start_time')) - BigInt(params.get('end_time'))));
     params.set('end_time', 'now');
   }
@@ -447,6 +546,7 @@ export const VENUES = {
     initialBookSnapshots: true,
     wooProtocol: true,
     subscriptionGenerations: true,
+  compareWriteOrder: true,
     ts: { module: `${root}/woo/woo.exchange.ts`, className: 'WOOXExchange', name: 'woo' },
     privateSocket: '/v2/ws/private/',
     matchRequestBody: true,
@@ -558,7 +658,9 @@ export const VENUES = {
     rust: 'bitget',
     ts: { module: `${root}/bitget/bitget.exchange.ts`, className: 'BitgetExchange', name: 'bitget' },
     tsBooksSubscribed: (exchange, count) =>
-      Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('orderBook_') && handlers.length).length >= count,
+      Object.entries(exchange.publicWebsocket.messageHandlers).filter(
+        ([key, handlers]) => key.startsWith('orderBook_') && handlers.length,
+      ).length >= count,
     privateSocket: '/ws/private',
     options: { passphrase: 'replay-passphrase' },
   },
@@ -566,7 +668,9 @@ export const VENUES = {
     rust: 'bitgetusdc',
     ts: { module: `${root}/bitget/bitgetusdc.exchange.ts`, className: 'BitgetUSDCExchange', name: 'bitgetusdc' },
     tsBooksSubscribed: (exchange, count) =>
-      Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('orderBook_') && handlers.length).length >= count,
+      Object.entries(exchange.publicWebsocket.messageHandlers).filter(
+        ([key, handlers]) => key.startsWith('orderBook_') && handlers.length,
+      ).length >= count,
     privateSocket: '/ws/private',
     options: { passphrase: 'replay-passphrase' },
   },
@@ -630,10 +734,17 @@ export const VENUES = {
       if (frame.op !== 'login') return;
       const arg = frame.args?.length === 1 ? frame.args[0] : {};
       const { apiKey, passphrase, timestamp, nonce, sign } = arg ?? {};
-      if (!validWeexTimestamp(String(timestamp), now) || apiKey !== 'replay-key' || passphrase !== 'replay-passphrase'
-        || typeof nonce !== 'string' || !nonce.length) throw new Error('invalid BloFin socket login');
-      const expected = Buffer.from(createHmac('sha256', 'replay-secret')
-        .update(`/users/self/verifyGET${timestamp}${nonce}`).digest('hex')).toString('base64');
+      if (
+        !validWeexTimestamp(String(timestamp), now) ||
+        apiKey !== 'replay-key' ||
+        passphrase !== 'replay-passphrase' ||
+        typeof nonce !== 'string' ||
+        !nonce.length
+      )
+        throw new Error('invalid BloFin socket login');
+      const expected = Buffer.from(
+        createHmac('sha256', 'replay-secret').update(`/users/self/verifyGET${timestamp}${nonce}`).digest('hex'),
+      ).toString('base64');
       if (sign !== expected) throw new Error('invalid BloFin socket signature');
       socket.loginVerified = true;
     },
@@ -678,15 +789,19 @@ export const VENUES = {
       const frame = JSON.parse(text);
       if (frame.method !== 'login') return;
       const { apiKey, reqTime, signature } = frame.param ?? {};
-      if (!validWeexTimestamp(reqTime, now) || apiKey !== 'replay-key'
-        || signature !== createHmac('sha256', 'replay-secret').update(`${apiKey}${reqTime}`).digest('hex')) {
+      if (
+        !validWeexTimestamp(reqTime, now) ||
+        apiKey !== 'replay-key' ||
+        signature !== createHmac('sha256', 'replay-secret').update(`${apiKey}${reqTime}`).digest('hex')
+      ) {
         throw new Error('invalid MEXC socket login');
       }
       socket.loginVerified = true;
     },
     validateSocketFrame(socket, text) {
       const frame = JSON.parse(text);
-      if (frame.channel === 'rs.login' && frame.data === 'success' && !socket.loginVerified) throw new Error('MEXC login acknowledgement preceded valid login');
+      if (frame.channel === 'rs.login' && frame.data === 'success' && !socket.loginVerified)
+        throw new Error('MEXC login acknowledgement preceded valid login');
     },
     matchRequestBody: true,
     ts: { module: `${root}/mexc/mexc.exchange.ts`, className: 'MexcExchange', name: 'mexc' },
@@ -717,10 +832,11 @@ export const VENUES = {
     bingxProtocol: true,
     // BingX owns one listener per URL; resubscriptions must recur on reconnect.
     subscriptionGenerations: true,
+  compareWriteOrder: true,
   },
   weex: {
     rust: 'weex',
-    ts: { module: `${root}/weex/weex.exchange.ts`, className: 'WeexExchange', name: 'weex' },
+      ts: { module: `${root}/weex/weex.exchange.ts`, className: 'WeexExchange', name: 'weex' },
     privateSocket: '/v3/ws/private',
     matchRequestBody: true,
     volatileBodyFields: true,
@@ -746,8 +862,15 @@ export const VENUES = {
       const lookup = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
       const time = lookup('ACCESS-TIMESTAMP');
       if (!validWeexTimestamp(time, now)) throw new Error('invalid WEEX authentication timestamp');
-      const signature = createHmac('sha256', 'replay-secret').update(`${time}${method}${parsed.pathname}${parsed.search}${body || ''}`).digest('base64');
-      if (lookup('ACCESS-KEY') !== 'replay-key' || lookup('ACCESS-PASSPHRASE') !== 'replay-passphrase' || lookup('ACCESS-SIGN') !== signature) throw new Error(`invalid WEEX signed request: ${method} ${parsed.pathname}`);
+      const signature = createHmac('sha256', 'replay-secret')
+        .update(`${time}${method}${parsed.pathname}${parsed.search}${body || ''}`)
+        .digest('base64');
+      if (
+        lookup('ACCESS-KEY') !== 'replay-key' ||
+        lookup('ACCESS-PASSPHRASE') !== 'replay-passphrase' ||
+        lookup('ACCESS-SIGN') !== signature
+      )
+        throw new Error(`invalid WEEX signed request: ${method} ${parsed.pathname}`);
     },
     validateSocket(url, headers = {}, now = Date.now()) {
       if (!url.includes('/v3/ws/private')) return;
@@ -765,7 +888,7 @@ export const VENUES = {
   },
   cryptocom: {
     rust: 'cryptocom',
-    ts: { module: root + '/cryptocom/cryptocom.exchange.ts', className: 'CryptocomExchange', name: 'cryptocom' },
+      ts: { module: root + '/cryptocom/cryptocom.exchange.ts', className: 'CryptocomExchange', name: 'cryptocom' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('book.')).length >= count,
     privateSocket: '/exchange/v1/user',
@@ -921,7 +1044,7 @@ export const VENUES = {
   },
   binance: {
     rust: 'binance',
-    ts: { module: `${root}/binance/binance.exchange.ts`, className: 'BinanceExchange', name: 'binance' },
+      ts: { module: `${root}/binance/binance.exchange.ts`, className: 'BinanceExchange', name: 'binance' },
     /** Depth topics are registered once each book subscription reaches the socket. */
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >=
@@ -930,40 +1053,11 @@ export const VENUES = {
     volatileBodyFields: true,
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
   },
-  bybit: {
-    rust: 'bybit',
-    ts: { module: `${root}/bybit/bybit.exchange.ts`, className: 'BybitExchange', name: 'bybit' },
-    /** Book topics get a message handler once each subscription reaches the socket. */
-    tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >=
-      count,
-    startupSubscriptions: (records, books) => {
-      const symbols = new Set();
-      for (const record of records) {
-        if (record.type !== 'http' || record.method !== 'GET' || !(record.status >= 200 && record.status < 300)) continue;
-        const url = new URL(record.url);
-        if (url.pathname !== '/v5/market/instruments-info' || (url.searchParams.has('category') && url.searchParams.get('category') !== 'linear')) continue;
-        const body = JSON.parse(record.body);
-        if (Number(body.retCode) !== 0) continue;
-        for (const row of body.result?.list ?? []) {
-          if (['USDT', 'USDC'].includes(row.quoteCoin) && typeof row.symbol === 'string' && row.symbol)
-            symbols.add(row.symbol);
-        }
-      }
-      const socket = records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/v5/public/linear')?.url
-        ?? 'wss://stream.bybit.com/v5/public/linear';
-      return subscriptionKeys(socket, { op: 'subscribe', args: [...symbols].map((symbol) => `tickers.${symbol}`)
-        .concat(books.map((symbol) => `orderbook.1000.${symbol}`)) });
-    },
-    privateSocket: '/v5/private',
-    tsRejectReason: (order) =>
-      order.status === 'canceled' && order.info?.rejectReason === 'EC_PostOnlyWillTakeLiquidity'
-        ? 'PostOnly'
-        : undefined,
-    isWrite: (method) => method === 'POST',
-    matchRequestBody: true,
-    volatileBodyFields: true,
-  },
+  bybit: bybit('bybit', 'BybitExchange'),
+  bybitinverse: bybit('bybitinverse', 'BybitInverseExchange'),
+  bybitspot: bybit('bybitspot', 'BybitSpotExchange'),
+  bybitdemo: bybit('bybitdemo', 'BybitDemoExchange'),
+  hyrotrader: bybit('hyrotrader', 'HyrotraderExchange'),
   ...Object.fromEntries(['okx', 'okxeu', 'okxdemo', 'okxeudemo'].map((name) => [name, okx(name)])),
 };
 
@@ -977,3 +1071,20 @@ export const venueOf = (name) => {
 export const axiosClients = (exchange) =>
   [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance]))]
     .filter((value) => value?.defaults && value?.interceptors);
+
+/** Native Hyro callers supply endpoints; the harness uses the same public config as TS. */
+export const configuredOptions = (name) => {
+  if (name !== 'hyrotrader') return { ...venueOf(name).options };
+  const env = process.env;
+  const mode = env.NEXT_PUBLIC_HYROTRADER_PROD_REST_URL ? 'PROD' : 'SIMULATOR';
+  const rest = env[`NEXT_PUBLIC_HYROTRADER_${mode}_REST_URL`]?.trim().replace(/\/+$/, '');
+  if (!rest) throw new Error('HyroTrader endpoints are not configured');
+  const ws = rest.replace(/^http/i, 'ws');
+  return {
+    endpoints: {
+      rest,
+      publicWs: env[`NEXT_PUBLIC_HYROTRADER_${mode}_PUBLIC_WS_URL`] || `${ws}/v5/public/linear`,
+      privateWs: env[`NEXT_PUBLIC_HYROTRADER_${mode}_PRIVATE_WS_URL`] || `${ws}/v5/private`,
+    },
+  };
+};

@@ -837,3 +837,42 @@ zero unserved/unused/signature/protocol/socket errors. Independent final guard
 review and all14broker/network native private gates follow this checkpoint.
 Full workspace bans/fmt/Clippy/tests/WASM Clippy on the integrated Rust source
 PASS; exact-head CI must pass before merge.
+
+### Bybit variants landing integration plan
+
+The exact-head watcher detects922b5fdc89 (PR1307) landing before1eac CI can
+finish. Four full Orderly broker/network private gates pass (Orderly and
+Tealstreet DEX, both networks); stop the old chain before merging new harness
+code. Integrate Bybit inverse/spot/demo/Hyro variants without changing Bitunix
+base sizing or net PNL. Review host/SDK, harness and engine/Bitrue compatibility
+in independent scopes. Preserve our exact signed-component net memory policy,
+constructor baseline and strict sampled-peak gate; incoming older component
+restrictions/omitted peak checks must not undo audited policy. Preserve every
+Orderly289 correction and Lighter decimal snapshot fix.
+
+New Bybit-only BBO/tick controls require Bitunix whole-batch rejection and
+explicit None on cancel/replace. The optional ORDERS native-remaining column
+must be fully preallocated alongside existing position-ID/collateral tails.
+Review retained engine scratch buffers and AnyFieldEnvelope/object-path guards;
+preserve mandatory Bitrue roles through conflicts. Verify helpers and focused
+regressions, checkpoint, then require entirely green fresh CI. Coverage becomes
+20public fixtures/37private variants over16venue rows, plus4Bitget cases.
+
+Bybit integration source is verified and released. Engine69/Bitunix59/
+Bitrue61tests PASS; fix conditional eighth ORDERS column reservation and
+Bitunix's new-field initialization/whole-batch unsupported-control rejection.
+JSON preserves AnyFieldEnvelope semantics with explicit-object-path guards,
+Bitrue mandatory socket roles remain intact, and retained frame scratch buffers
+pass reuse regressions. Full workspace bans/fmt/Clippy/tests/WASM Clippy PASS.
+Root typecheck44/lint28,100SDK and46host/socket/wire checks PASS.
+
+All311helpers PASS, including strict signed-component and public-peak gate
+regressions. Independent review finds malformed Hyro generated IDs could alias
+valid create requests; restrict original typed strings to documented ASCII
+1..36characters on creation routes only. Eleven malformed transport probes
+now reject without consumption; caller/cancel/recovery identities stay exact.
+Replace the old invalid synthetic @generated placeholder with a valid fixture
+ID, rather than relaxing validation. Actual TS Hyro private13frames/3commands
+PASS with zero unserved/unused/protocol errors. Memory/requests helpers retain
+our audited policy verbatim. Independent final aggregate and exact-head CI
+follow this checkpoint; all20public/37private+4Bitget cases must pass to merge.

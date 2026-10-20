@@ -69,6 +69,35 @@ fn markets_have_native_multiplier_and_conservative_leverage() {
     assert_eq!(m.contract_size, Some(0.001));
     assert_eq!(m.limits.leverage.max, 100.0);
 }
+
+#[test]
+fn public_reconnect_preserves_the_declared_role_and_upstream_url() {
+    let (mut e, socket) = boot();
+    e.handle(4.0, Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .expect("public reconnect timer");
+    e.handle(at, Event::TimerFired { timer });
+    let (replacement, url, channel) = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                url,
+                channel,
+                ..
+            } => Some((socket, url, channel)),
+            _ => None,
+        })
+        .expect("replacement public socket");
+    assert_ne!(replacement, socket);
+    assert_eq!(url, "wss://fmarket-ws.bitrue.com/kline-api/ws");
+    assert_eq!(channel, Some(SocketChannel::Public));
+}
 #[test]
 fn ticker_contract_volume_is_base_units() {
     let (mut e, socket) = boot();

@@ -2410,3 +2410,130 @@ test('ordered typed writes match the declared TS fixture body without weakening 
   assert.equal(rust.missingWrites, 2);
   assert.equal(rust.respond('POST', url, records[0].requestBody).status, 200);
 });
+
+
+{
+  const URL = 'https://example.test/order';
+  const record = (method, requestBody) => ({
+    type: 'http',
+    method,
+    url: URL,
+    status: 200,
+    body: '{}',
+    ...(requestBody === undefined ? {} : { requestBody: JSON.stringify(requestBody) }),
+  });
+  test('extracted Tape scopes both HTTP stores and write ordering to the selected implementation', () => {
+    const records = [
+      { ...record('POST', { family: 'shared' }) },
+      { ...record('POST', { family: 'legacy' }), impl: 'ts' },
+      { ...record('POST', { family: 'Order' }), impl: 'rust' },
+      { ...record('POST', { family: 'StopOrder' }), impl: 'rust' },
+    ];
+    for (const typed of [false, true]) {
+      const venue = { compareWriteOrder: true, ...(typed ? { requestBodies: true } : {}) };
+      for (const impl of ['ts', 'rust']) {
+        const tape = new Tape(records, venue, true, 100, impl);
+        assert.equal(tape.missingWrites, impl === 'ts' ? 2 : 3);
+        assert.equal(tape.respond('POST', URL, { family: impl === 'ts' ? 'Order' : 'legacy' }).status, 599);
+        assert.equal(tape.respond('POST', URL, { family: 'shared' }).status, 200);
+        for (const family of impl === 'ts' ? ['legacy'] : ['Order', 'StopOrder']) {
+          assert.equal(tape.respond('POST', URL, { family }).status, 200);
+          assert.equal(tape.respond('POST', URL, { family }).status, 599);
+        }
+        assert.equal(tape.missingWrites, 0);
+        tape.assertWritesConsumed();
+      }
+      assert.throws(() => new Tape(records, venue), /require a replay implementation/);
+      assert.throws(() => new Tape(records, venue, false, 100, 'typo'), /Unknown replay implementation/);
+      assert.throws(
+        () => new Tape([{ ...records[0], impl: 'typo' }], venue, false, 100, 'rust'),
+        /Unknown HTTP record/,
+      );
+    }
+  });
+
+  test('Bybit typed Tape matching retains exact types, category and caller identity', () => {
+    const venue = venueOf('bybitspot');
+    const url = 'https://api.bybit.com/v5/order/create';
+    const requestBody = { category: 'spot', qty: '1', orderLinkId: 'caller' };
+    const tape = new Tape(
+      [
+        { type: 'command', t: 0, op: 'placeOrders', orders: [{ clientOrderId: 'caller' }] },
+        { ...record('POST', requestBody), url },
+      ],
+      venue,
+      true,
+      100,
+      'rust',
+    );
+    for (const body of [
+      { ...requestBody, qty: 1 },
+      { ...requestBody, category: 'linear' },
+      { ...requestBody, orderLinkId: 'other' },
+    ])
+      assert.equal(tape.respond('POST', url, body).status, 599);
+    assert.equal(tape.respond('POST', url, requestBody).status, 200);
+    assert.equal(tape.missingWrites, 0);
+  });
+
+  test('Hyro taped handshakes bootstrap before full account readiness and echo each connection request', async () => {
+    const url = 'wss://hyro.example/v5/private';
+    const records = [
+      { type: 'ws', t: 0, url, text: '{"op":"auth","req_id":"@latest","success":true}' },
+      { type: 'command', t: 0, op: 'write' },
+    ];
+    const tape = new Tape(records, { bootstrapPrivateFromTape: true }, true, 100);
+    let authenticated = false;
+    const seen = [];
+    const socket = tape.connect(
+      url,
+      () => {
+        setImmediate(() => tape.send(socket, '{"op":"auth","req_id":"connection-local"}'));
+      },
+      (text) => {
+        assert.equal(JSON.parse(text).req_id, 'connection-local');
+        authenticated = true;
+      },
+    );
+    await tape.play(
+      undefined,
+      async (accountReady) => {
+        seen.push(accountReady);
+        if (accountReady) assert.equal(authenticated, true);
+      },
+      async () => {
+        assert.equal(authenticated, true);
+        seen.push('command');
+        return [];
+      },
+    );
+    assert.deepEqual(seen, [false, true, 'command']);
+    const missing = new Tape(records.slice(0, 1), { bootstrapPrivateFromTape: true }, true, 20);
+    missing.connect(
+      url,
+      () => {},
+      () => assert.fail('unsolicited ack was delivered'),
+    );
+    await assert.rejects(missing.play(), /auth request for acknowledgement/);
+  });
+}
+
+
+test('Hyro generated create IDs retain wire types and remain exact on cancellation', () => {
+  const venue = venueOf('hyrotrader');
+  const url = 'https://challenge.example.test/v5/order/create';
+  const requestBody = { category: 'linear', qty: '1', orderLinkId: 'generated-one' };
+  const records = [{ type: 'http', method: 'POST', url, requestBody, status: 200, body: '{}' }];
+  const tape = new Tape(records, venue, true, 100, 'rust');
+  for (const orderLinkId of [123, null, true, '', {}, [], 'bad\n', 'bad\r', 'bad\u2028', 'bad\u2029', 'x'.repeat(37)]) {
+    assert.equal(tape.respond('POST', url, { ...requestBody, orderLinkId }).status, 599);
+    assert.equal(tape.missingWrites, 1);
+  }
+  assert.equal(tape.respond('POST', url, { ...requestBody, orderLinkId: 'generated-two' }).status, 200);
+  assert.equal(tape.respond('POST', url, requestBody).status, 599);
+  const cancel = url.replace('/create', '/cancel');
+  const canceled = new Tape([{ ...records[0], url: cancel }], venue, true, 100, 'rust');
+  assert.equal(canceled.respond('POST', cancel, { ...requestBody, orderLinkId: 'other' }).status, 599);
+  assert.equal(canceled.missingWrites, 1);
+  assert.equal(canceled.respond('POST', cancel, requestBody).status, 200);
+});

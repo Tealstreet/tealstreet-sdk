@@ -1,6 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
-import { Responses } from './responses.mjs';
+import { Responses, implementationRecords } from './responses.mjs';
 import { isRead, subscriptionKeys, requestKey as typedRequestKey, subscriptionMessage } from './requests.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
@@ -345,6 +345,7 @@ const bitgetContract = (callerIds, venue) => {
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 export class Tape {
   constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = venue.timeoutMs ?? 30000, impl = venue.impl, books = venue.books ?? []) {
+    records = implementationRecords(records, impl);
     this.records = records;
     this.impl = impl;
     this.canonicalize = venue.canonicalize ?? ((url) => canonicalUrl(url, this.callerIds, venue));
@@ -385,7 +386,7 @@ export class Tape {
     this.bitget = venue.rust?.startsWith('bitget') ?? false;
     this.hyperliquid = venue.rust === 'hyperliquid';
     this.contract = this.bitget ? bitgetContract(this.callerIds, venue) : undefined;
-    this.requestKey = this.contract?.requestKey ?? venue.requestKey ?? (venue.mexcProtocol ? (method, url, body) => typedRequestKey(method, url, body, this.callerIds, venue) : undefined);
+    this.requestKey = this.contract?.requestKey ?? venue.requestKey?.bind(venue) ?? (venue.mexcProtocol ? (method, url, body) => typedRequestKey(method, url, body, this.callerIds, venue) : undefined);
     this.bodyKey = (body, url, method) => canonicalBody(body, this.callerIds, {
       ...venue,
       preserveClientId: venue.preserveClientId || (venue.rust === 'backpack' &&
@@ -421,6 +422,8 @@ export class Tape {
         responseKey,
         venue.checkRequest,
         this.isWrite.bind(this),
+        undefined,
+        impl,
       );
     }
     // Share immutable canonical URL strings across every frame and both samples.
@@ -611,7 +614,7 @@ export class Tape {
     const connection = this.connectionCounts.get(url) ?? 0;
     this.connectionCounts.set(url, connection + 1);
     const socket = { url, rawUrl, channel: metadata.channel, context: metadata.context, connection, onOpen, onData: onMessage, onMessage: (text) => deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame), onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set(), subscriptionArgs: new Map(), subscriptions: new Set(), generation: connection + 1, ordinal: connection, loginVerified: false };
-    if (this.venue.socketRequest || this.venue.socketResponse) {
+    if (this.venue.socketRequest || this.venue.socketResponse || this.venue.bootstrapPrivateFromTape) {
       Object.assign(socket, { requests: new Map(), requestIds: new Set(), requestCounts: new Map(), mappedRequests: new Map(), responseIds: new Set() });
       const deliver = socket.onMessage;
       socket.onMessage = (text) => deliver(this.correlateSocketResponse(socket, text));
@@ -646,6 +649,10 @@ export class Tape {
   }
 
   send(socket, text) {
+    if (this.venue.bootstrapPrivateFromTape) {
+      const message = JSON.parse(text);
+      if (message.op && typeof message.req_id === 'string' && message.req_id) socket.requests.set(message.op, message.req_id);
+    }
     this.venue.validateSocketMessage?.(socket, text);
     let parsed;
     try { parsed = JSON.parse(text); } catch { /* Literal heartbeat. */ }
@@ -904,7 +911,19 @@ export class Tape {
         this.assertSubscribed(socket, message, frame.subscriptionKey);
       }
       this.validateTopic?.(socket, frame);
-      socket.onMessage(frame.text);
+      let text = frame.text;
+      if (this.venue.bootstrapPrivateFromTape) {
+        const message = JSON.parse(text);
+        if (message.req_id === '@latest') {
+          const deadline = performance.now() + this.timeoutMs;
+          while (!socket.requests.has(message.op)) {
+            if (performance.now() >= deadline) throw new Error(`replay timeout: ${message.op} request for acknowledgement`);
+            await new Promise((resolve) => realTimeout(resolve, 5));
+          }
+          text = JSON.stringify({ ...message, req_id: socket.requests.get(message.op) });
+        }
+      }
+      socket.onMessage(text);
     }
   }
 
@@ -917,7 +936,7 @@ export class Tape {
     let initialized;
     let startupReady = false;
     const ensureReady = () => initialized ??= withTimeout((async () => {
-      await ready();
+      await ready(!this.venue.bootstrapPrivateFromTape);
       while (this.audit && !this.audit.ready()) await new Promise((r) => realTimeout(r, 5));
       while (this.pendingStartupSubscriptions) await new Promise((resolve) => realTimeout(resolve, 1));
       if (this.venue.startupTopics) {
@@ -961,6 +980,10 @@ export class Tape {
       await clock?.advance(frame.t);
       if (frame.type === 'command') {
         await ensureReady();
+        if (this.venue.bootstrapPrivateFromTape) {
+          const account = ready(true);
+          await (clock?.active ? clock.wait(account, 'account readiness', this.timeoutMs) : withTimeout(account, 'account readiness', this.timeoutMs));
+        }
         this.results.push(await this.executeCommand(frame, runCommand).then((ids) => ({ ok: ids }), (error) => {
           if (String(error?.message).startsWith('replay timeout:')) throw error;
           return { error: String(error?.message ?? error) };
