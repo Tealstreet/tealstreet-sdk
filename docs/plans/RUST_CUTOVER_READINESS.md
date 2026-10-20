@@ -155,3 +155,25 @@ consumer adoption remain explicit blockers.
   live/product scope prerequisites. No newer landing commit at this checkpoint.
   Push the refreshed PR, publish the review/gates and wait for exact-head green
   CI before merging and cutting a follow-up branch.
+- All 35 checks passed on `22edf9f141`; the exact-head merge attempt was refused
+  because Binance Spot/COIN-M landed concurrently as `e391337054`. Merge
+  `3627ddfaab` retains both the new COIN-M sizing flag and all four OKX flags;
+  quantity-contract guidance preserves both. Refresh native/generic coverage
+  for 43 aliases, independently audit inverse contract multipliers and caller
+  inventory, then repeat affected gates and exact-head CI. GRVT's concurrent
+  profiling handoff is documentation-only and retained in the merge.
+- Binance integration acceptance passes: full SDK/WASM 376 tests / 11 files,
+  including all 43 native aliases and 225 independent consumer/metadata cases.
+  SDK unit 7,313 tests / 503 files plus five lint-rule tests, other 25 workspace
+  tasks, root typecheck 44 tasks and lint 28 tasks pass. Native workspace passes
+  2,342 tests / 189 suites; harness 436 and JS host 65 pass. Rust bans/format,
+  strict WASM Clippy, explicit fixture lint and combined build pass (10,751,800
+  bytes). Independent integration review is clear: COIN-M fixtures distinguish
+  native counts, USD notional and base positions, while Spot/COIN-M raw catalog
+  oracles preserve both receivers' identity/flags/multipliers. Inventory is
+  49 registered / 43 Rust / eight defaults / 35 opt-in / six absent names;
+  seven explicit deletion blockers remain. All four Binance public three-run
+  controls and regenerated private controls pass. USD-M main CPU TS/Rust is
+  188.0/98.2 ms, steady 98.5/36.2 ms, retained memory 17.0/3.7 MB including
+  2.0 MB Rust linear memory. Latest landing is integrated at this checkpoint;
+  push/review the refreshed head and merge only after its CI is green.

@@ -55,7 +55,8 @@ const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 function state(name: ExchangeName): Partial<StoreData> {
   const lots = native.includes(name);
-  const inverse = name === 'bybitinverse' || name === 'bitgetinverse';
+  const coinM = name === 'binanceinverse';
+  const inverse = coinM || name === 'bybitinverse' || name === 'bitgetinverse';
   return {
     markets: [
       {
@@ -64,8 +65,8 @@ function state(name: ExchangeName): Partial<StoreData> {
         base: 'BTC',
         quote: 'USDT',
         active: true,
-        precision: { amount: 0.1, price: 0.1 },
-        contractSize: lots ? 0.1 : 1,
+        precision: { amount: coinM ? 1 : 0.1, price: 0.1 },
+        contractSize: coinM ? 100 : lots ? 0.1 : 1,
         ...(inverse ? { isInverse: true } : {}),
         limits: { amount: { min: 0.1, max: 100 }, leverage: { min: 1, max: 50 } },
       },
@@ -74,17 +75,17 @@ function state(name: ExchangeName): Partial<StoreData> {
       {
         id: 'native-market',
         symbol: 'BTCUSDT',
-        bid: 99,
-        ask: 101,
-        last: 100,
-        mark: 100,
-        index: 100,
+        bid: coinM ? 9999 : 99,
+        ask: coinM ? 10001 : 101,
+        last: coinM ? 10000 : 100,
+        mark: coinM ? 10000 : 100,
+        index: coinM ? 10000 : 100,
         percentage: 1,
         openInterest: 20,
         fundingRate: 0.0001,
         fundingTime: 1_700_000_000_000,
         volume: 50,
-        quoteVolume: 5000,
+        quoteVolume: coinM ? 500000 : 5000,
       },
     ],
     orders: [
@@ -95,15 +96,15 @@ function state(name: ExchangeName): Partial<StoreData> {
         status: OrderStatus.Open,
         side: OrderSide.Buy,
         type: OrderType.Limit,
-        price: 99,
-        amount: inverse ? 70 : name.startsWith('okx') ? 7 : 0.7,
-        filled: inverse ? 30 : 0.3,
-        remaining: inverse ? 40 / 99 : 0.4,
+        price: coinM ? 9999 : 99,
+        amount: coinM ? 7 : inverse ? 70 : name.startsWith('okx') ? 7 : 0.7,
+        filled: coinM ? 3 : inverse ? 30 : 0.3,
+        remaining: coinM ? 4 : inverse ? 40 / 99 : 0.4,
         reduceOnly: false,
         lastUpdate: 1_700_000_000_000,
         timeInForce: OrderTimeInForce.PostOnly,
         ...(lots ? { extra: { remainingNative: 4, filledInPlacementUnits: 3 } } : {}),
-        ...(inverse ? { extra: { remainingNative: 40, remainingNotional: 40 } } : {}),
+        ...(inverse ? { extra: { remainingNative: coinM ? 4 : 40, remainingNotional: coinM ? 400 : 40 } } : {}),
       },
     ],
     positions: [
@@ -111,16 +112,16 @@ function state(name: ExchangeName): Partial<StoreData> {
         id: 'venue-position-1',
         symbol: 'BTCUSDT',
         side: PositionSide.Long,
-        contracts: 0.7,
-        entryPrice: 90,
-        notional: 70,
+        contracts: coinM ? 0.07 : 0.7,
+        entryPrice: coinM ? 9900 : 90,
+        notional: coinM ? 700 : 70,
         leverage: 10,
         unrealizedPnl: 7,
-        liquidationPrice: 50,
+        liquidationPrice: coinM ? 5000 : 50,
         marginType: MarginType.Cross,
         positionMode: PositionMode.OneWay,
         ...(lots ? { extra: { contractsNative: 7 } } : {}),
-        ...(inverse ? { extra: { contractsNative: 70, unrealizedPnlNative: 7 } } : {}),
+        ...(inverse ? { extra: { contractsNative: coinM ? 7 : 70, unrealizedPnlNative: 7 } } : {}),
       },
     ],
     balance: { total: 1000, free: 900, used: 100, upnl: 7 },
@@ -373,8 +374,9 @@ describe.each(venues)('%s consumer conformance', (name) => {
 
   it('drives native chaser fill sizing and TWAP limit prices from decoded stores', async () => {
     const { exchange, main, ctx, deliver } = await consumer(name);
+    const coinM = name === 'binanceinverse';
     const inverse = name === 'bybitinverse' || name === 'bitgetinverse';
-    const size = inverse ? 70 : native.includes(name) ? 7 : 0.7;
+    const size = coinM ? 7 : inverse ? 70 : native.includes(name) ? 7 : 0.7;
     for (const reader of [exchange, main]) {
       const chaser = new ChaserOrderInstance(reader, {
         symbol: 'BTCUSDT',
@@ -385,9 +387,9 @@ describe.each(venues)('%s consumer conformance', (name) => {
       });
       chaser.subtractFilledSize(reader.store.orders[0]);
       if (native.includes(name)) expect(reader.store.orders[0].extra?.filledInPlacementUnits).toBe(3);
-      expect(chaser.remainingSize).toBeCloseTo(inverse ? 40 : native.includes(name) ? 4 : 0.4, 12);
+      expect(chaser.remainingSize).toBeCloseTo(coinM ? 4 : inverse ? 40 : native.includes(name) ? 4 : 0.4, 12);
       chaser.subtractFilledSize(reader.store.orders[0]);
-      expect(chaser.remainingSize).toBeCloseTo(inverse ? 40 : native.includes(name) ? 4 : 0.4, 12);
+      expect(chaser.remainingSize).toBeCloseTo(coinM ? 4 : inverse ? 40 : native.includes(name) ? 4 : 0.4, 12);
     }
     const place = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(['twap-order']);
     for (const side of [OrderSide.Buy, OrderSide.Sell]) {
@@ -414,7 +416,7 @@ describe.each(venues)('%s consumer conformance', (name) => {
         symbol: 'BTCUSDT',
         side,
         type: OrderType.Limit,
-        price: side === OrderSide.Buy ? 99 : 101,
+        price: side === OrderSide.Buy ? state(name).tickers![0].bid : state(name).tickers![0].ask,
         amount: size,
         reduceOnly: false,
       });
@@ -479,7 +481,7 @@ describe.each(venues)('%s consumer conformance', (name) => {
     const chaser = new ChaserOrderInstance(exchange, {
       symbol: 'BTCUSDT',
       side: OrderSide.Buy,
-      size: name.includes('inverse') ? 70 : native.includes(name) ? 7 : 0.7,
+      size: name === 'binanceinverse' ? 7 : name.includes('inverse') ? 70 : native.includes(name) ? 7 : 0.7,
       maxAttempts: 5,
       delay: 1000,
     });

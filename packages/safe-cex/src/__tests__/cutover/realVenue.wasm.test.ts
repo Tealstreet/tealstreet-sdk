@@ -175,11 +175,30 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
         for (const key of ['markets', 'tickers', 'orders', 'positions', 'balance'])
           expect(payload).not.toHaveProperty(key);
       }
-      if (name === 'bybitspot' || name === 'coinbasespot')
+      if (name === 'bybitspot' || name === 'coinbasespot' || name === 'binancespot')
         expect(lateStore.markets.every((row) => row.isSpot)).toBe(true);
-      if (name === 'bitgetinverse' || name === 'bybitinverse')
+      if (name === 'bitgetinverse' || name === 'bybitinverse' || name === 'binanceinverse')
         expect(lateStore.markets.every((row) => row.isInverse)).toBe(true);
       if (name === 'bitgetusdc') expect(lateStore.markets.every((row) => row.quote === 'USDC')).toBe(true);
+      if (name === 'binancespot' || name === 'binanceinverse') {
+        expect(input.binanceMarkets.length).toBeGreaterThan(0);
+        for (const store of [worker.store, lateStore]) {
+          expect(
+            store.markets.map(({ id, symbol, base, quote, active, contractSize }) => ({
+              id,
+              symbol,
+              base,
+              quote,
+              active,
+              ...(name === 'binanceinverse' ? { contractSize } : {}),
+            })),
+          ).toEqual(input.binanceMarkets);
+          if (name === 'binanceinverse') {
+            expect(store.markets.every((row) => row.isInverse && !row.isSpot && row.quote === 'USD')).toBe(true);
+            expect(store.markets.find((row) => row.symbol === 'BTCUSD_PERP')?.contractSize).toBe(100);
+          } else expect(store.markets.every((row) => row.isSpot && !row.isInverse)).toBe(true);
+        }
+      }
       if (name === 'grvt') {
         expect(input.grvtMarkets.length).toBeGreaterThan(0);
         for (const store of [worker.store, lateStore]) {

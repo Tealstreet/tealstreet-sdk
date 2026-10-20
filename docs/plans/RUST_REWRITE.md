@@ -359,9 +359,9 @@ work with its frames. The implementation/checkpoints are in
 each direct `BaseExchange`/venue/registry importer across `packages/` and
 `apps/`, including type-only callers, tests and dynamic reference loaders.
 
-The SDK has 49 registered names: 41 in `RUST_VENUES`, eight already defaulting
-to Rust (Coinbase's two and Orderly's six), 33 with opt-in Rust adapters but
-TS defaults, and eight without a Rust registration. `createExchange` now honors
+The SDK has 49 registered names: 43 in `RUST_VENUES`, eight already defaulting
+to Rust (Coinbase's two and Orderly's six), 35 with opt-in Rust adapters but
+TS defaults, and six without a Rust registration. `createExchange` now honors
 explicit `engine: 'rust'`, as `ExchangeWorker` does; changing the default
 registries remains a separate cutover decision.
 
@@ -412,7 +412,9 @@ ported. The linked inventory records exact callers and product constraints.
 | --- | --- |
 | `coinbase`, `coinbasespot` | Rust defaults; CFM/spot and saved spot-only covered. Retired INTX is fixture compatibility only. Keep frozen TS reference and inert Starbase evidence separate. |
 | `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | Rust defaults, one broker-configured Orderly crate. Keep frozen reference until its replay oracle is replaced deliberately. |
-| `binance`, `binancepm` | Opt-in; preserve shared modules for unported spot/COIN-M siblings; prove default account/routing modes before deletion. |
+| `binance`, `binancepm` | Opt-in USD-M/PM; preserve their account/query/routing behavior and regression gates while the shared crate now also supplies Spot/COIN-M. Shared TS/oracle removal still requires all callers/defaults to migrate. |
+| `binancespot` | Opt-in Spot; signed user-data WebSocket API ACK/liveness, native currency balances, no derivative positions/settings, native client-ID order identity and final-fill-aware cancel/replace. Preserve supported regular/protective/order-list preflight; private history/fills/income retain TS empty results, public-trades/client-lookup unsupported. Live public and documented private evidence: [variant plan](BINANCE_VARIANTS_PORT.md). |
+| `binanceinverse` | Opt-in COIN-M; native contract quantities, USD-per-contract multiplier, base position quantities and coin-denominated PnL/margin; worker/main native-count/quote-notional bridge retained. Regular/stops/trailing, identity/final-fill-safe replacement, caller client IDs rejected. Public trades implemented; private histories retain TS empty-result contract. Keep USD-M/PM controls and [exact scope/evidence](BINANCE_VARIANTS_PORT.md). |
 | `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader` | Opt-in; combined inverse/options toggles and semantic instrument classification remain blockers. Hyro live connectivity unverified. Preserve region/Hyro policy helpers. |
 | `bitget`, `bitgetusdc`, `bitgetinverse` | Opt-in; keep inverse/native sizing, UTA ledger/trailing and account-mode evidence; extract shared transport constants. |
 | `okx`, `okxeu`, `okxdemo`, `okxeudemo` | Opt-in; native chaser bridge repaired. Rust filters linear USDT/USDC markets; TS inverse and EU product coverage need explicit resolution before deletion. Extract broker constants. |
@@ -435,7 +437,7 @@ ported. The linked inventory records exact callers and product constraints.
 | `polymarket` | Opt-in, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage. Prediction CLOB V2 with typed outcome/holding metadata; local-wallet signature types 0/1/2/3, supplied/derived L2 credentials, limit/GTC and final-fill-safe cancel-replace. No caller client IDs, market/conditional/bracket/reduce-only orders or generic history/fills/income/public-trades query coverage; price history is bounded sampled data. Preserve [exact port scope and fixture/live boundaries](venue-ports/POLYMARKET.md) and default-factory migration evidence. |
 | `grvt` | Opt-in perpetuals; local exact EIP-712 chains 325/326, session/API-key/private routing, subaccount discovery, mandatory builder authorization and decimal caller IDs 1..2^63-1. Preserve one-way/account leverage, protective/bracket and safe cancel-replace, bounded query/client-lookup and chaser fill-verification contracts. Margin-mode changes unsupported. TS non-perpetual catalog rows remain an explicit deletion blocker; do not infer Future/Call/Put support. Keep public builder-wallet exports; [GRVT scope/evidence](GRVT_RUST_PORT.md). |
 | `breakoutprop` | Opt-in, legacy DXtrade and development-only; authenticated REST polling with username/password and exact selected FULL_TRADING account even for public-data reads. LIMIT/MARKET/last-price STOP, GTC and proven zero-fill cancel-replace; one-way/cross and estimated margin/PnL. Caller IDs, brackets/close-all/settings writes unsupported; generic history/fills/income queries retain branded inert behavior, public trades unsupported. Quote books/live candles are synthetic. Documented public fixture waiver is explicit; live credential capture/connectivity remains unverified, and new Breakout Terminal accounts are outside scope. Preserve [scope/evidence](RUST_BREAKOUTPROP.md). |
-| `binanceinverse`, `binancespot`, `bitunix`, `hyperliquidspot`, `krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
+| `bitunix`, `hyperliquidspot`, `krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
 
 #### Known consumer blockers and replacement order
 
@@ -471,8 +473,10 @@ Deletion proceeds in separate, reviewable PRs:
    base now would delete the working Rust adapter's shell too.
 3. Remove independent ready implementations first, after freezing/replacing
    the replay oracle. Remove Bybit/Hyro, OKX and Bitget subclasses as family
-   units. Keep Binance, KuCoin, Kraken, Hyperliquid and Lighter shared modules
-   while unported siblings still depend on them. The inventory maps every
+   units. Retire the four Binance TS profile paths only after their default
+   callers and shared oracle migrate, preserving USD-M/PM gates. Keep KuCoin,
+   Kraken, Hyperliquid and Lighter shared modules while unported siblings still
+   depend on them. The inventory maps every
    caller to its interface, host, shared-helper or test-reference replacement.
 4. Migrate test/harness imports deliberately. Preserve independent documented
    protocol fixtures and a reviewed performance baseline; never compare Rust

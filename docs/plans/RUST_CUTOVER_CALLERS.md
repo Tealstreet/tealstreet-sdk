@@ -7,11 +7,11 @@ phase-9 decision and gate results live in [RUST_REWRITE.md](RUST_REWRITE.md).
 
 ## What is ready, and what is still a deletion blocker
 
-The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **41**.
+The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **43**.
 The two registries currently default **8 names** to `RustEngineExchange`:
 `coinbase`, `coinbasespot`, and Orderly's `tealstreet-dex`, `kodiakfi`, `mode`,
 `salsadex`, `what`, `woofi`. They default the other **41 names** to TypeScript,
-including **33 names with an available Rust adapter**. Registration in
+including **35 names with an available Rust adapter**. Registration in
 `RUST_VENUES` proves the adapter exists; it does not prove every optional product,
 credential mode, consumer, or live deployment is ready to delete.
 
@@ -28,8 +28,9 @@ of saved accounts.
 | --- | --- | --- |
 | Coinbase: `coinbase`, `coinbasespot` | Both | Rust default; active CFM/spot and saved spot-only. Legacy INTX fixtures remain compatibility coverage for retired Advanced Trade routes. Frozen TS reference remains a harness dependency. Inert Starbase code is not an enabled product. |
 | Orderly: `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | All six | Rust default; all are broker options of one Orderly crate. `woo` is WOO X, a separate family. Frozen TS reference remains a harness dependency. |
-| Binance: `binance`, `binancepm` | Both | TS default; switch both registries only after consumer/routing/key-mode gates. Keep common files needed by the two unported Binance siblings. |
-| Binance: `binanceinverse`, `binancespot` | Neither | TS required; COIN-M and spot need their own Rust product ports and all consumer/protocol gates. USD-M/PM does not imply these products. |
+| Binance: `binance`, `binancepm` | Both | TS default; preserve USD-M and PM protocol/account/query scope and regression gates while switching both registries after consumer/routing/key-mode evidence. All four Binance Rust profiles now exist; shared TS implementation/reference files still have callers until each profile defaults/migrates. |
+| Binance Spot: `binancespot` | Yes | TS default; signed WebSocket API user-data subscription with ACK/subscription-ID/liveness checks, native per-asset currency balances and USD totals; no derivative positions/settings. Native client-order-ID identity and supported regular/protective/order-list paths retain whole-batch preflight and final-fill-aware cancel/replace; unsupported derivative flags/STP/trailing or conditional parameters reject. Private history/fills/income retain the existing TS empty-result contract; public-trades/client-lookup queries unsupported. Preserve exact scope, live public versus documented private evidence and USD-M/PM controls in [BINANCE_VARIANTS_PORT.md](BINANCE_VARIANTS_PORT.md). |
+| Binance COIN-M: `binanceinverse` | Yes | TS default; native contract order/placement amounts, USD-per-contract multiplier, base position contracts, coin-denominated PnL/margin and USD-valued aggregate balances with unpriced coin detail retained. Worker/main bridges preserve native count versus quote notional. Regular/stops/trailing endpoints and cancel/replace retain identity/terminal/final-fill proof; caller client IDs reject before batch writes. Public trades implemented; private history/fills/income retain TS empty results and client lookup unsupported. Preserve one-way/hedged/account sizing/routing evidence, and shared USD-M/PM regressions; [exact profile scope](BINANCE_VARIANTS_PORT.md). |
 | Bybit: `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader` | All five | TS default; **blocked** by missing instrument classification metadata and the combined `enableInverseMarkets` / `enableOptionMarkets` modes described below. A separate `bybitinverse` alias does not cover a combined linear account. Hyro live connectivity remains unverified in the roster; synthetic frames do not close that limitation. Preserve `bybit.site` and public order-parameter contracts. |
 | Bitget: `bitget`, `bitgetusdc`, `bitgetinverse` | All three | TS default; switch together after inverse/native-size and UTA ledger/trailing/optional-product checks. Preserve transport constants shared outside the family. |
 | OKX: `okx`, `okxeu`, `okxdemo`, `okxeudemo` | All four | TS default; **blocked** by inverse swap products: Rust accepts only linear USDT/USDC, while the TS OKX family maps inverse swaps. All host/demo and external-public account overlay checks remain required. Preserve broker constants used by the Rust wrapper. |
@@ -58,8 +59,7 @@ of saved accounts.
 | `breakoutprop` | Yes | TS default, legacy DXtrade only and disabled in production/preview (`enabledInDev: true`); authenticated REST polling, no venue WebSocket or anonymous public feed. Username/password and exact FULL_TRADING account selection are required even for public-data-only reads; `supportsChaser: false` remains enforced by metadata. LIMIT/MARKET/last-price STOP, GTC, reduce-only as CLOSE, confirmed zero-fill cancel-replace; caller IDs, attached brackets/close-all and leverage/margin/mode changes unsupported. One-way/cross account model, native lot IDs and explicitly estimated margin/PnL; quote-derived books/live candles are synthetic. Generic fills/order/income history remain branded inert fallbacks, public trades unsupported; internal cancel history proof is not a history-query implementation. Public fixture is documented/scripted under the recorded waiver, with live credential capture/connectivity still unverified; read [RUST_BREAKOUTPROP.md](RUST_BREAKOUTPROP.md). |
 | `bitunix`, `txflow` | None | TS required. Bitunix roster work-in-progress is not a registered Rust adapter. TxFlow is explicitly a Phase-0 scaffold, not a completed venue. Each needs an explicit port or an explicit supported-product retirement decision. |
 
-The 8 names absent from `RUST_VENUES` are exactly `binanceinverse`,
-`binancespot`, `bitunix`, `hyperliquidspot`,
+The 6 names absent from `RUST_VENUES` are exactly `bitunix`, `hyperliquidspot`,
 `krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow`.
 Do not silently route them through another family's adapter.
 
@@ -211,7 +211,7 @@ keep derived display/store fields and sequencing while inputs become Rust frames
    corpus. Keep absence of optional data distinct from an authoritative empty
    snapshot, updateId bumps, native units, terminal fences and serialize/stub
    parity. Run integration/build/replay controls as applicable.
-2. **Close unsupported aliases/products.** Port the 8 missing names or obtain an
+2. **Close unsupported aliases/products.** Port the 6 missing names or obtain an
    explicit supported-product retirement decision in a separate change. A
    perps port never retires a saved spot/inverse account implicitly. Audit
    all credential/signing modes, proxy/tunnel/region, secondary keys, product
@@ -240,8 +240,9 @@ keep derived display/store fields and sequencing while inputs become Rust frames
    Bitget's three profiles together.
    Remove KuCoin futures, Kraken futures, Hyperliquid perps and Lighter only
    while retaining shared code required by still-unported spot/broker siblings.
-   Binance USD-M/PM must retain shared files needed by spot/inverse until those
-   ports pass. Retire the remaining 8 implementations only after step 2.
+   Remove the four Binance TS profiles only after each default path and native
+   unit/account/query contract is proven and their shared oracle is retained
+   independently; the new Spot/COIN-M ports do not retire USD-M/PM evidence. Retire the remaining 6 implementations only after step 2.
    This ordering is a dependency order, not an assertion that all are already
    deployment-approved.
 6. **Retire each old oracle deliberately.** Rewrite useful deterministic venue
@@ -446,6 +447,7 @@ These are all direct base/concrete-class/registry callers in test source at the 
 
 | Exact caller path | Imported base/class/registry targets |
 | --- | --- |
+| `packages/safe-cex/src/__tests__/audit-regressions/binance-variants.rust-boundary.wasm.test.ts` | `base`, `rust/rust.exchange` |
 | `packages/safe-cex/src/__tests__/audit-regressions/rust.breakoutprop-wrapper.test.ts` | `base`, `rust/rust.exchange` |
 | `packages/safe-cex/src/__tests__/audit-regressions/grvt-private-rust-port.test.ts` | `grvt/grvt.exchange` |
 | `packages/safe-cex/src/__tests__/audit-regressions/grvt-public-delta-rust-port.test.ts` | `grvt/grvt.exchange` |
@@ -764,7 +766,7 @@ Appendix B), 10 Orderly audit files, three Coinbase reference subclasses/socket
 types and eight Orderly reference broker subclasses/socket types. Appendix B
 now names all 32 exact class targets, adding the 30 previously absent callers
 and extending the existing two client-ID entries. These counts are test/reference
-source counts; the runtime registration totals remain 49 names / 41 Rust aliases.
+source counts; the runtime registration totals remain 49 names / 43 Rust aliases.
 
 The complete frozen-module graph below additionally includes signing/API/type/
 utility imports: **79 static imports in 40 caller files** at this review

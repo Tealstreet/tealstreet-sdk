@@ -38,6 +38,17 @@ type GrvtInstrumentInput = { i: string; b: string; q: string; k: string; ms: str
 
 type BreakoutQuote = { symbol: string; bid: number; ask: number };
 
+type BinanceInstrumentInput = {
+  symbol: string;
+  baseAsset: string;
+  quoteAsset: string;
+  status?: string;
+  contractStatus?: string;
+  contractType?: string;
+  marginAsset?: string;
+  contractSize?: number;
+};
+
 const orderlyAliases = new Set(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 
 /** Test input only: no network, no SDK store writes and no fabricated empty replies. */
@@ -157,6 +168,32 @@ export const realVenue = (name: ExchangeName) => {
           .filter((row) => row.type === 'http' && new URL(row.url!).pathname.endsWith('/marketdata'))
           .map((row) =>
             (JSON.parse(row.body!).events as BreakoutQuote[]).map(({ symbol, bid, ask }) => ({ symbol, bid, ask })),
+          )
+      : [];
+  // Spot pair IDs and COIN-M settlement/contract sizes come directly from
+  // their distinct recorded exchangeInfo endpoints, not the engine output.
+  const binanceMarkets =
+    name === 'binancespot' || name === 'binanceinverse'
+      ? records
+          .filter((row) => row.type === 'http' && new URL(row.url!).pathname.endsWith('/exchangeInfo'))
+          .flatMap((row) =>
+            (JSON.parse(row.body!).symbols as BinanceInstrumentInput[])
+              .filter(
+                (instrument) =>
+                  name === 'binancespot' ||
+                  (instrument.contractType === 'PERPETUAL' && instrument.contractStatus === 'TRADING'),
+              )
+              .map((instrument) => ({
+                id:
+                  name === 'binancespot'
+                    ? `${instrument.baseAsset}/${instrument.quoteAsset}`
+                    : `${instrument.baseAsset}/${instrument.quoteAsset}:${instrument.marginAsset}`,
+                symbol: instrument.symbol,
+                base: instrument.baseAsset,
+                quote: instrument.quoteAsset,
+                active: (instrument.status ?? instrument.contractStatus) === 'TRADING',
+                ...(name === 'binanceinverse' ? { contractSize: instrument.contractSize } : {}),
+              })),
           )
       : [];
   // GRVT's Lite REST instruments retain their native mixed-case ID while
@@ -281,6 +318,7 @@ export const realVenue = (name: ExchangeName) => {
     polling,
     publicPollResponses,
     breakoutQuotes,
+    binanceMarkets,
     predictionMarkets,
     grvtMarkets,
     publicBookSymbols,
