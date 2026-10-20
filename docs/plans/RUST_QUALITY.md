@@ -13,7 +13,9 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
 - Lost-send recovery never runs for Rust: `isUnknownOutcome`
   (`utils/unknownSendOutcome.ts:3`) does not match the Rust "outcome unknown"
   texts (lighter, coinbase, txflow, orderly, bybit). **Risky** (enables lookups
-  and chaser decisions).
+  and chaser decisions). Rust side landed: those venues complete unknown-outcome
+  writes via `Cx::fail` with `outcome: Unknown` (text unchanged); TS reading of
+  `detail.outcome` follows the bridge PR.
 - ~~A bad key can hang `start()`: Bybit retries startup forever
   (`bybit/src/lib.rs:734-745`) and `untilLoaded` has no failure path
   (`rust.exchange.ts:795`). Needs a terminal startup failure.~~ Engine
