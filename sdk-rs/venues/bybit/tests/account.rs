@@ -5,7 +5,7 @@ use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::model::{
     MarginType, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide, RejectReason,
 };
-use safe_cex_engine::{Command, Event, HttpRequest, Method, Notice, Query};
+use safe_cex_engine::{Command, Event, HttpRequest, Method, Query};
 use safe_cex_venue_bybit::Options;
 use support::Harness;
 
@@ -1136,13 +1136,8 @@ fn log_safe_engine() -> Harness {
 }
 fn assert_private_notices_are_safe(h: &Harness) {
     for notice in &h.notices {
-        let text = match notice {
-            Notice::Log { message, .. } => message.as_str(),
-            Notice::CommandDone { result, .. } => match result {
-                Ok(value) | Err(value) => value.as_str(),
-            },
-            Notice::Deactivate => "",
-        };
+        // Debug covers every notice field, including structured venue errors.
+        let text = format!("{notice:?}");
         assert!(
             !text.contains(LOG_SECRET),
             "credential escaped in {notice:?}"

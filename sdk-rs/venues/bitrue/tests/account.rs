@@ -451,13 +451,8 @@ const SIGNED_STREAM_URL: &str =
 fn assert_stream_notices_are_safe(h: &Harness) {
     for action in &h.actions {
         if let Action::Notice(notice) = action {
-            let text = match notice {
-                Notice::Log { message, .. } => message.as_str(),
-                Notice::CommandDone { result, .. } => match result {
-                    Ok(value) | Err(value) => value.as_str(),
-                },
-                Notice::Deactivate => "",
-            };
+            // Debug covers every notice field, including structured venue errors.
+            let text = format!("{notice:?}");
             for secret in [
                 LOG_SECRET,
                 SIGNED_STREAM_URL,

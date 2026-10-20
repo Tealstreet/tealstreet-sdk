@@ -1704,7 +1704,7 @@ async fn routed_signed_network_notices(
         while !startup_failed || !command_failed {
             let notice = emitted.recv().await.expect("native host emitted a failure notice");
             startup_failed |= matches!(&notice, Notice::Log { message, .. } if message.starts_with("Binance startup request failed:"));
-            command_failed |= matches!(&notice, Notice::CommandDone { command: 411, result: Err(_) });
+            command_failed |= matches!(&notice, Notice::CommandDone { command: 411, result: Err(_) } | Notice::CommandFailed { command: 411, .. });
             collected.push(notice);
         }
     }).await.expect("real network failures reached startup log and command completion");
@@ -1717,11 +1717,12 @@ async fn routed_signed_network_notices(
     for notice in &collected {
         let rendered = format!("{notice:?}");
         let payload = match notice {
-            Notice::Log { message, .. } => message.as_str(),
+            Notice::Log { message, .. } => message.clone(),
             Notice::CommandDone { result, .. } => match result {
-                Ok(value) | Err(value) => value.as_str(),
+                Ok(value) | Err(value) => value.clone(),
             },
-            Notice::Deactivate => "",
+            Notice::CommandFailed { error, .. } => error.legacy_text(),
+            Notice::Deactivate => String::new(),
         };
         for forbidden in [
             NOTICE_API_KEY,
