@@ -71,6 +71,8 @@ const options = { ...venue.options, ...metadata?.options,
   ? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', ...venue.replayCredentials }
   : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }), ...config.options };
 
+await venue.initializeReplay?.(values.impl, options);
+
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 
@@ -707,7 +709,8 @@ writeFileSync(
     ),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
-    commands: result.commands,
+    commands: result.commands.map((result, index) => venue.commandResult?.(result,
+      records.filter((record) => record.type === 'command')[index], index + 1) ?? result),
   }),
 );
 realClearTimeout(replayDeadline);

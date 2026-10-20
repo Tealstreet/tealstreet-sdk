@@ -61,6 +61,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   bybit: 'bybit',
   cryptocom: 'cryptocom',
   hyperliquid: 'hyperliquid',
+  lighter: 'lighter',
   okx: 'okx',
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',
@@ -201,6 +202,9 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   get isPublicDataOnly(): boolean {
+    if (this.name === 'lighter') {
+      return this.options.publicDataOnly === true || !this.options.secret || !this.options.apiKeyIndex;
+    }
     if (this.name !== 'hyperliquid') return super.isPublicDataOnly;
     return (
       this.options.publicDataOnly === true ||
@@ -222,7 +226,11 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
-    if (this.name !== 'hyperliquid' && !this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
+    if (
+      !['hyperliquid', 'lighter'].includes(this.name) &&
+      !this.isPublicDataOnly &&
+      (!this.options.key || !this.options.secret)
+    ) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
     if (orderlyNames.has(this.name) && !this.isPublicDataOnly) {
@@ -270,6 +278,13 @@ export class RustEngineExchange extends BaseExchange {
         ...(['backpack', 'bitrue'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,
         ...(orderlyNames.has(this.name) ? { tickInterval: this.options.extra?.tickInterval } : {}),
+        ...(this.name === 'lighter'
+          ? {
+              apiKeyIndex: this.options.apiKeyIndex,
+              lighterIntegratorAccountIndex: this.options.extra?.lighterIntegratorAccountIndex,
+              lighterStopSlippagePct: this.options.extra?.lighterStopSlippagePct,
+            }
+          : {}),
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
@@ -390,12 +405,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (this.clientOrderIdRule) this.assertCallerClientOrderIds(orders);
+    this.assertCallerClientOrderIds(orders);
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
-    if (this.clientOrderIdRule) this.resolveCallerClientOrderId(opts);
+    this.resolveCallerClientOrderId(opts);
     return this.placeOrders([opts]);
   };
 
@@ -478,7 +493,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['blofin', 'bitrue', 'hyperliquid', 'woo'].includes(this.name)
+      ...(['blofin', 'bitrue', 'hyperliquid', 'lighter', 'woo'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });
