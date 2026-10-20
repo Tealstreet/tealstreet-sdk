@@ -199,3 +199,16 @@ for green CI, merge, and cut a fresh follow-up branch.
   actual1); exact deadline and abort assertions pass. Focused195-case rerun and
   four deadline cases pass; independent review is investigating timer ownership.
   The failed broad result is retained rather than declared green.
+
+### Combined engine and timer ownership
+
+- Default combined16-venue release WASM build passes. All52 real-WASM adapter
+  tests and46 host tests pass on that artifact.
+- Replaced the environment-wide timer-count assertion with exact transport-owned
+  deadline handle cleanup. Exact default20second/explicit5second boundaries and
+  abort checks remain. New disposal regression proves a caller timer survives
+  and fires once. Independent review clear;208 transport tests and scoped lint
+  pass. Broad safe-cex suite is rerunning with this test correction.
+- A final credential audit found forcedV1 secondary HMAC incorrectly inherited
+  an unrelated auth.privateKey override. A request-level regression and narrow
+  V1-only selection fix are in progress. V3 auth precedence already matches TS.

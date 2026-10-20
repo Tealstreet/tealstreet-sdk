@@ -1122,6 +1122,8 @@ describe('typed HTTP operation deadlines', () => {
     [5_000, 5_000],
   ] as const)('bounds the whole request at %s with default 20 seconds', async (timeoutMs, deadline) => {
     vi.useFakeTimers();
+    const schedule = vi.spyOn(globalThis, 'setTimeout');
+    const cancel = vi.spyOn(globalThis, 'clearTimeout');
     const raw = makeRaw();
     raw.request.mockImplementation(() => new Promise(() => {}));
     const routed = createEngineTransport('asterdex', options({ transport: directTransport }), raw);
@@ -1132,6 +1134,10 @@ describe('typed HTTP operation deadlines', () => {
       url: 'https://venue.test/time',
       headers: {},
     });
+    const deadlineTimers = schedule.mock.calls.flatMap(([, delay], index) =>
+      delay === deadline ? [schedule.mock.results[index].value] : [],
+    );
+    expect(deadlineTimers).toHaveLength(1);
     const rejected = expect(pending).rejects.toThrow('timed out');
     await vi.advanceTimersByTimeAsync(deadline - 1);
     expect(raw.request.mock.lastCall![0].signal?.aborted).toBe(false);
@@ -1140,7 +1146,34 @@ describe('typed HTTP operation deadlines', () => {
     expect(raw.request.mock.lastCall![0]).not.toHaveProperty('timeoutMs');
     expect(raw.request.mock.lastCall![0]).not.toHaveProperty('route');
     routed.dispose!();
-    expect(vi.getTimerCount()).toBe(0);
+    // Other environment tasks may schedule timers during the asynchronous clock
+    // advance. Verify cleanup of this request's deadline by its own handle.
+    expect(cancel).toHaveBeenCalledWith(deadlineTimers[0]);
+  });
+
+  it('disposal clears its pending deadline while preserving an unrelated caller timer', async () => {
+    vi.useFakeTimers();
+    const caller = vi.fn();
+    const callerTimer = setTimeout(caller, 60_000);
+    const schedule = vi.spyOn(globalThis, 'setTimeout');
+    const cancel = vi.spyOn(globalThis, 'clearTimeout');
+    const raw = makeRaw();
+    raw.request.mockImplementation(() => new Promise(() => {}));
+    const routed = createEngineTransport('asterdex', options({ transport: directTransport }), raw);
+    const pending = routed.request({ method: 'GET', route: 'direct', url: 'https://venue.test/time', headers: {} });
+    const deadlineTimers = schedule.mock.calls.flatMap(([, delay], index) =>
+      delay === 20_000 ? [schedule.mock.results[index].value] : [],
+    );
+    expect(deadlineTimers).toHaveLength(1);
+    const rejected = expect(pending).rejects.toThrow('disposed');
+    routed.dispose!();
+    await rejected;
+    expect(raw.request.mock.lastCall![0].signal?.aborted).toBe(true);
+    expect(cancel).toHaveBeenCalledWith(deadlineTimers[0]);
+    expect(cancel).not.toHaveBeenCalledWith(callerTimer);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(caller).toHaveBeenCalledTimes(1);
+    clearTimeout(callerTimer);
   });
 
   it('keeps the 5-second clock budget active through a stalled CORS response body', async () => {
