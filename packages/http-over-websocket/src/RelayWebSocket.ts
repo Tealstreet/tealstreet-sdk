@@ -26,7 +26,7 @@
 // ALPN http/1.1 — the tunnel's WAF needs them); in browsers it is the native
 // WebSocket, which ignores those options.
 
-import { getProxyToken } from './config';
+import { bindProxyToken } from './config';
 import { parseRelayUrl } from './tunnelEndpoints';
 
 export { buildRelayUrl, isRelayUrl, parseRelayUrl, RELAY_QUERY_PARAM } from './tunnelEndpoints';
@@ -97,6 +97,8 @@ export class RelayWebSocket extends EventTarget {
   private authSent = false;
   private closeDispatched = false;
   private handshakeTimer: ReturnType<typeof setTimeout> | undefined;
+  // Read on the inner socket's open event, outside the creating context.
+  private readonly getProxyToken = bindProxyToken();
 
   constructor(url: string, protocols?: string | string[], nodeOptions?: unknown, WebSocketCtor?: typeof WebSocket) {
     super();
@@ -153,7 +155,7 @@ export class RelayWebSocket extends EventTarget {
 
   private onInnerOpen = () => {
     if (this.readyState !== RelayWebSocket.CONNECTING) return;
-    getProxyToken()
+    this.getProxyToken()
       .then((token) => {
         if (this.readyState !== RelayWebSocket.CONNECTING) return;
         this.authSent = true;

@@ -861,6 +861,9 @@ Mostly matches TS.
 - Low: one bad contract row blocks startup; stream stops misclassified;
   snapshot starvation under load (revision discard, `account.rs:581,1310`);
   malformed snapshot never sets loaded.
+- Confirm (TS bugs Rust fixed): TS prices a position at the all-zero placeholder
+  ticker before the first quote (private tape: -12000 on a 0.2 BTC long whose
+  real quote equals its 60000 entry); Rust keeps 0 until a real price arrives.
 
 ### Cross-venue: per-coin balances and snapshot starvation
 - Per-coin balances missing on ~~Bybit~~ (#1379), ~~Crypto.com~~, ~~Bitrue~~;
@@ -887,6 +890,10 @@ Signing and payloads match; no confirmed highs.
 - Low: caller client id rejected on stops/brackets/splits; float remaining size;
   zero-price candle rejects batch; leverage always sent. Unchecked: private
   socket via Tealstreet proxy.
+- Confirm (TS bugs Rust fixed): TS values positions at an all-zero placeholder
+  ticker on startup, showing a fabricated loss (private tape: balance 1300 / upnl
+  -300 while the real quote equals the 60000 entry and native PnL is 0) until its
+  next balance fetch; Rust uses reported PnL until a real price arrives.
 
 ### Paradex
 StarkNet typed data, JWT, payloads and SBE decoding match.

@@ -9,6 +9,7 @@ import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const accounts: BaseExchange[] = [];
@@ -127,6 +128,7 @@ it('applies the configured deadline to the live SDK host while preserving caller
   const requests: Array<{ op: string }> = [];
   const idle = () => '[]';
   const native: WasmEngineLike = {
+    capabilities: () => engineCapabilities('bybit'),
     start: idle, wsOpen: idle, wsMessage: idle, wsClose: idle,
     httpStart: idle, httpChunk: idle, httpEnd: idle, httpFailed: idle, timer: idle,
     command: (json) => { requests.push(JSON.parse(json)); return '[]'; },
