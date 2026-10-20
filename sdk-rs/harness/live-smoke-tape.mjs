@@ -9,7 +9,10 @@ const normalized = (name) => String(name).split('.').at(-1).toLowerCase().replac
 const credentialNames = new Set(['key', 'apikey', 'secret', 'apisecret', 'privatekey', 'passphrase', 'password', 'authorization', 'cookie', 'setcookie']);
 const sessionNames = new Set(['token', 'accesstoken', 'refreshtoken', 'authtoken', 'sessiontoken', 'sessionkey', 'listenkey', 'jwt', 'jwttoken', 'auth', 'bearer']);
 const signatureNames = new Set(['signature', 'sig', 'sign', 'signedchallenge', 'authent']);
-const sensitive = (name) => credentialNames.has(normalized(name)) || sessionNames.has(normalized(name)) || signatureNames.has(normalized(name)) || /(?:apikey|apisecret|passphrase|accesstoken|authtoken|refreshtoken|signature|apisign)$/.test(normalized(name));
+// Header signatures conventionally end in a delimited SIGN (ACCESS-SIGN,
+// KC-API-PARTNER-SIGN, X-CH-SIGN); matching only SIGNATURE misses these.
+const signatureName = (name) => signatureNames.has(normalized(name)) || /(?:signature|apisign)$/.test(normalized(name)) || /(?:^|[-_])sign$/i.test(name);
+const sensitive = (name) => credentialNames.has(normalized(name)) || sessionNames.has(normalized(name)) || signatureName(name) || /(?:apikey|apisecret|accesskey|orderlykey|passphrase|accesstoken|authtoken|refreshtoken|authorization)$/.test(normalized(name));
 const parseJson = (text) => JSON.parse(text, (_key, value, context) =>
   typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)
     ? JSON.rawJSON(context.source) : value);
@@ -45,7 +48,7 @@ export function createSmokeRedactor(secrets = {}, replayCredentials = {}, { venu
           : ['key', 'apikey'].includes(key) ? 'replay-key'
       : ['secret', 'apisecret', 'privatekey'].includes(key) ? 'replay-secret'
         : ['passphrase', 'password'].includes(key) ? 'replay-passphrase'
-          : signatureNames.has(key) ? '<redacted-signature>'
+          : signatureName(name) ? '<redacted-signature>'
             : `live-smoke-${sessionNames.has(key) ? 'session' : 'secret'}-${++next}`;
     aliases.set(value, alias);
   };
@@ -88,7 +91,8 @@ export function createSmokeRedactor(secrets = {}, replayCredentials = {}, { venu
     const variants = [];
     for (const [secret, alias] of aliases) {
       const encoded = encodeURIComponent(secret);
-      const forms = new Set([secret, encoded, encoded.replace(/%[\dA-F]{2}/g, (part) => part.toLowerCase()),
+      const formEncoded = new URLSearchParams({ value: secret }).toString().slice('value='.length);
+      const forms = new Set([secret, encoded, formEncoded, formEncoded.replace(/%[\dA-F]{2}/g, (part) => part.toLowerCase()), encoded.replace(/%[\dA-F]{2}/g, (part) => part.toLowerCase()),
         JSON.stringify(secret).slice(1, -1), Buffer.from(secret).toString('base64'), Buffer.from(secret).toString('base64url')]);
       for (const form of forms) if (form) variants.push([form, alias]);
     }

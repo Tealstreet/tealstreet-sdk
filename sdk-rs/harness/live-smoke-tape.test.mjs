@@ -359,3 +359,37 @@ test('recorder persists only explicit Orderly request correlation, omitting auth
   assert.deepEqual(recorder.records.slice(2).map((record) => [record.type, JSON.parse(record.text)]), [['ws-send', request]]);
   assert.ok(!JSON.stringify(recorder.records).includes('live-signature'));
 });
+
+test('all registered venue auth header signatures are discovered before arbitrary response echoes', async () => {
+  const names = ['KC-API-SIGN', 'KC-API-PARTNER-SIGN', 'ACCESS-SIGN', 'OK-ACCESS-SIGN', 'X-BAPI-SIGN', 'API-Sign', 'X-CH-SIGN', 'X-Signature', 'Authent', 'X-PHEMEX-REQUEST-SIGNATURE', 'orderly-signature', 'APEX-SIGNATURE', 'POLY_SIGNATURE', 'x-api-signature'];
+  for (const [index, name] of names.entries()) {
+    const signature = `generated-live-auth-signature-${index}`;
+    const recorder = createPrivateRecorder(makeLive(async () => ({ status: 200, headers: `${name}: ${signature}`,
+      body: bytes(JSON.stringify({ echo: signature, encoded: encodeURIComponent(signature), orderId: 'native-order-42', price: '10.5' })) })), { secrets });
+    await recorder.transport.request({ method: 'POST', url: 'https://exchange.example/private', headers: { [name]: signature } });
+    assert.ok(!JSON.stringify(recorder.records).includes(signature), `persisted ${name}`);
+    const body = JSON.parse(recorder.records[2].body);
+    assert.equal(body.orderId, 'native-order-42');
+    assert.equal(body.price, '10.5');
+  }
+});
+
+test('newly returned venue credential headers and bearer aliases are scrubbed before echoes', () => {
+  const scrub = createSmokeRedactor();
+  for (const [index, name] of ['ACCESS-KEY', 'OK-ACCESS-KEY', 'orderly-key', 'X-PHEMEX-ACCESS-TOKEN', 'Coinbase-Authorization'].entries()) {
+    const token = `returned-dynamic-credential-${index}`;
+    const original = name === 'Coinbase-Authorization' ? `Bearer ${token}` : token;
+    assert.ok(!scrub.headers(`${name}: ${original}`).includes(token), name);
+    assert.ok(!scrub.redact(`server echo ${token}`).includes(token), `${name} echo`);
+  }
+  assert.equal(scrub.redact('{"design":"keep-economic-field","triggerSignal":"last"}'), '{"design":"keep-economic-field","triggerSignal":"last"}');
+});
+
+test('canonical form encoding cannot retain known credentials containing spaces, quotes or tildes', () => {
+  const secret = 'private key ~ with "quotes"';
+  const scrub = createSmokeRedactor({ key: secret });
+  const form = new URLSearchParams({ apiKey: secret }).toString();
+  const url = scrub.url(`https://exchange.example/private?${form}&symbol=BTCUSDT`);
+  assert.equal(url, 'https://exchange.example/private?apiKey=replay-key&symbol=BTCUSDT');
+  assert.ok(!scrub.redact(`echo ${form}`).includes(form));
+});
