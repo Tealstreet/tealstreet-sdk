@@ -14,6 +14,7 @@ polymarket = ["dep:safe-cex-venue-polymarket", "safe-cex-engine/command-polymark
 coinbase = ["dep:safe-cex-venue-coinbase"]
 paradex = ["dep:safe-cex-venue-paradex"]
 apexomni = ["dep:safe-cex-venue-apexomni", "safe-cex-engine/command-apexomni"]
+txflow = ["dep:safe-cex-venue-txflow"]
 kraken = ["dep:safe-cex-venue-kraken"]
 asterdex = ["dep:safe-cex-venue-asterdex", "safe-cex-engine/command-asterdex"]
 lighter = ["dep:safe-cex-venue-lighter"]
@@ -33,6 +34,7 @@ default = [
     "coinbase",
     "paradex",
     "apexomni",
+    "txflow",
     "kraken",
     "asterdex",
     "lighter",
@@ -68,6 +70,7 @@ safe-cex-venue-polymarket = { path = "../../venues/polymarket", optional = true 
 safe-cex-venue-coinbase = { path = "../../venues/coinbase", optional = true }
 safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }
 safe-cex-venue-apexomni = { path = "../../venues/apexomni", optional = true }
+safe-cex-venue-txflow = { path = "../../venues/txflow", optional = true }
 safe-cex-venue-kraken = { path = "../../venues/kraken", optional = true }
 safe-cex-venue-asterdex = { path = "../../venues/asterdex", optional = true }
 safe-cex-venue-lighter = { path = "../../venues/lighter", optional = true }

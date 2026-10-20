@@ -180,6 +180,9 @@ jobs:
           - venue: paradex
             books: BTC-USD-PERP,ETH-USD-PERP
             private_script: rust:private-tape-paradex
+          - venue: txflow
+            books: BTC-USDC,ETH-USDC
+            private_script: rust:private-tape-txflow
     env:
       WASM_BINDGEN_VERSION: 0.2.129
       # Budget per single-venue browser bundle.
