@@ -2269,6 +2269,27 @@ fn cancel_all_ids(
 /// A create ACK that proves nothing: the fence rises, but the venue answered.
 const UNPROVEN_ACK: &str = r#"{"code":0,"data":{}}"#;
 
+/// Places `id` at `now`, answers it with an unproven ACK and fires the owed read
+/// (signed expiry plus clock skew); returns the read and when it was sent.
+fn unproven_then_read(
+    e: &mut Engine<PhemexPerpetuals>,
+    now: f64,
+    command: safe_cex_engine::CommandId,
+    id: &str,
+) -> (HttpRequest, f64) {
+    let create = place_at(e, now, command, id);
+    let a = reply(e, now + 1., &create, 200, UNPROVEN_ACK);
+    assert!(done(&a).is_err());
+    assert!(
+        open_order_reads(&a).is_empty(),
+        "an unproven answer may still be followed by a late landing"
+    );
+    let (timer, wake) = latest_timer(&a).expect("read scheduled");
+    assert_eq!(wake, ((now + 60_000.) / 1000.).round() * 1000. + 5_000.);
+    let read = open_order_reads(&at(e, wake, Event::TimerFired { timer })).remove(0);
+    (read, wake)
+}
+
 #[test]
 fn transport_uncertain_placement_reads_open_orders_after_its_signed_expiry() {
     let mut e = rejection_engine(vec![live_row("old-live")]);
@@ -2313,18 +2334,16 @@ fn transport_uncertain_placement_reads_open_orders_after_its_signed_expiry() {
 #[test]
 fn open_order_read_started_before_a_later_failure_cannot_settle_it() {
     let mut e = rejection_engine(vec![live_row("old-live")]);
-    let first = place_at(&mut e, 1000., 131, "first-unknown");
-    let a = reply(&mut e, 1001., &first, 200, UNPROVEN_ACK);
-    let stale = open_order_reads(&a).remove(0);
-    let second = place_at(&mut e, 1002., 132, "second-unknown");
-    let a = reply(&mut e, 1003., &second, 200, UNPROVEN_ACK);
+    let (stale, now) = unproven_then_read(&mut e, 1000., 131, "first-unknown");
+    let second = place_at(&mut e, now + 1., 132, "second-unknown");
+    let a = reply(&mut e, now + 2., &second, 200, UNPROVEN_ACK);
     assert!(
         open_order_reads(&a).is_empty(),
         "one read per symbol at a time"
     );
     let a = reply(
         &mut e,
-        1004.,
+        now + 3.,
         &stale,
         200,
         &rows(vec![
@@ -2332,12 +2351,17 @@ fn open_order_read_started_before_a_later_failure_cannot_settle_it() {
             rest_row("first", "first-unknown"),
         ]),
     );
-    assert_eq!(cancel_all_ids(&mut e, 1005., 133), ["first", "old-live"]);
-    let fresh = open_order_reads(&a);
-    assert_eq!(fresh.len(), 1, "a newer failure owes a newer read");
+    assert!(
+        open_order_reads(&a).is_empty(),
+        "second write is not expired yet"
+    );
+    let (timer, wake) = latest_timer(&a).expect("a newer failure owes a newer read");
+    assert_eq!(cancel_all_ids(&mut e, now + 4., 133), ["first", "old-live"]);
+    let fresh = open_order_reads(&at(&mut e, wake, Event::TimerFired { timer }));
+    assert_eq!(fresh.len(), 1);
     let a = reply(
         &mut e,
-        1006.,
+        wake + 1.,
         &fresh[0],
         200,
         &rows(vec![
@@ -2370,12 +2394,10 @@ fn definite_rejection_owes_no_open_order_read() {
 #[test]
 fn failed_read_retries_and_empty_code_reconciles() {
     let mut e = rejection_engine(vec![live_row("old-live")]);
-    let create = place_at(&mut e, 1000., 141, "unknown-caller");
-    let a = reply(&mut e, 1001., &create, 200, UNPROVEN_ACK);
-    let read = open_order_reads(&a).remove(0);
-    let a = reply(&mut e, 1002., &read, 500, "{}");
+    let (read, now) = unproven_then_read(&mut e, 1000., 141, "unknown-caller");
+    let a = reply(&mut e, now + 1., &read, 500, "{}");
     let (timer, wake) = latest_timer(&a).expect("failed read schedules a retry");
-    assert_eq!(wake, 3002.);
+    assert_eq!(wake, now + 2001.);
     let a = at(&mut e, wake, Event::TimerFired { timer });
     let read = open_order_reads(&a).remove(0);
     reply(
@@ -2391,12 +2413,10 @@ fn failed_read_retries_and_empty_code_reconciles() {
 #[test]
 fn persistently_unmappable_row_stops_retrying_with_one_error() {
     let mut e = rejection_engine(vec![live_row("old-live")]);
-    let create = place_at(&mut e, 1000., 161, "unknown-caller");
-    let a = reply(&mut e, 1001., &create, 200, UNPROVEN_ACK);
-    let mut read = open_order_reads(&a).remove(0);
+    let (mut read, now) = unproven_then_read(&mut e, 1000., 161, "unknown-caller");
     let mut bad = rest_row("unmappable", "unknown-caller");
     bad["side"] = json!("Sideways");
-    let mut now = 1002.;
+    let mut now = now + 1.;
     let mut errors = 0;
     for attempt in 1..=3 {
         let a = reply(&mut e, now, &read, 200, &rows(vec![bad.clone()]));
@@ -2575,4 +2595,155 @@ fn placement_lost_after_cancel_all_is_not_canceled_by_it() {
     );
     assert!(deletes(&a).is_empty(), "{a:?}");
     assert!(e.store().order("kept").is_some());
+}
+
+fn armed_engine(mode: &str) -> (Engine<PhemexPerpetuals>, SocketId) {
+    let (mut e, socket) = authenticated(mode);
+    at(
+        &mut e,
+        1000.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"type":"snapshot","orders_p":[]}"#,
+        },
+    );
+    (e, socket)
+}
+
+/// Loses `id` to a transport timeout at `now`, then sends cancel-all; returns
+/// the owed read's timer.
+fn lose_then_cancel_all(
+    e: &mut Engine<PhemexPerpetuals>,
+    now: f64,
+    command: safe_cex_engine::CommandId,
+    order: PlaceOrderOpts,
+) -> (safe_cex_engine::TimerId, f64) {
+    let a = at(
+        e,
+        now,
+        Event::Command(Command::PlaceOrders {
+            command,
+            orders: vec![order],
+        }),
+    );
+    let create = writes(&a).remove(0);
+    at(
+        e,
+        now + 1.,
+        Event::HttpFailed {
+            request: create.id,
+            error: "transport timeout",
+        },
+    );
+    let a = at(
+        e,
+        now + 2.,
+        Event::Command(Command::CancelSymbolOrders {
+            command: command + 1,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert_eq!(done(&a), Ok("[]".into()));
+    latest_timer(&a).expect("read owed after signed expiry")
+}
+
+#[test]
+fn lost_client_order_id_cannot_be_reused_until_its_read_settles_it() {
+    let (mut e, _) = armed_engine("OneWay");
+    let (timer, wake) = lose_then_cancel_all(&mut e, 1000., 201, opts("lost-caller"));
+    let a = at(
+        &mut e,
+        2000.,
+        Event::Command(Command::PlaceOrders {
+            command: 203,
+            orders: vec![opts("lost-caller")],
+        }),
+    );
+    assert!(
+        writes(&a).is_empty(),
+        "a retry would be canceled as the late landing"
+    );
+    assert!(done(&a).unwrap_err().contains("unknown outcome"), "{a:?}");
+    let read = open_order_reads(&at(&mut e, wake, Event::TimerFired { timer })).remove(0);
+    let a = reply(&mut e, wake + 1., &read, 200, &rows(vec![]));
+    assert!(deletes(&a).is_empty());
+    let a = at(
+        &mut e,
+        wake + 2.,
+        Event::Command(Command::PlaceOrders {
+            command: 204,
+            orders: vec![opts("lost-caller")],
+        }),
+    );
+    assert_eq!(
+        writes(&a).len(),
+        1,
+        "the read proved the lost write never landed"
+    );
+}
+
+#[test]
+fn late_landing_seen_on_the_private_stream_is_canceled_immediately() {
+    let (mut e, socket) = armed_engine("OneWay");
+    lose_then_cancel_all(&mut e, 1000., 211, opts("lost-caller"));
+    let mut row = live_row("landed");
+    row["clOrdID"] = json!("lost-caller");
+    let text =
+        json!({"type":"incremental","timestamp":2_000_000_000_u64,"orders_p":[row]}).to_string();
+    let a = at(
+        &mut e,
+        2000.,
+        Event::WsMessage {
+            socket,
+            text: &text,
+        },
+    );
+    let late = deletes(&a);
+    assert_eq!(late.len(), 1, "no wait for the post-expiry read: {a:?}");
+    assert_eq!(p(&late[0], "orderID").as_deref(), Some("landed"));
+    assert!(warnings(&a).iter().any(|m| m.contains("landed")));
+    let a = at(
+        &mut e,
+        2001.,
+        Event::WsMessage {
+            socket,
+            text: &text,
+        },
+    );
+    assert!(deletes(&a).is_empty(), "one cancel per landing");
+}
+
+#[test]
+fn late_cancels_in_two_groups_are_sequenced_without_false_errors() {
+    let (mut e, _) = armed_engine("Hedged");
+    lose_then_cancel_all(&mut e, 1000., 221, opts("long-lost"));
+    let mut short = opts("short-lost");
+    short.side = OrderSide::Sell;
+    let (timer, wake) = lose_then_cancel_all(&mut e, 1010., 223, short);
+    let read = open_order_reads(&at(&mut e, wake, Event::TimerFired { timer })).remove(0);
+    let mut long = rest_row("long", "long-lost");
+    long["posSide"] = json!("Long");
+    let mut short = rest_row("short", "short-lost");
+    short["posSide"] = json!("Short");
+    short["side"] = json!("Sell");
+    let a = reply(&mut e, wake + 1., &read, 200, &rows(vec![long, short]));
+    let first = deletes(&a);
+    assert_eq!(first.len(), 1, "one late cancel in flight at a time: {a:?}");
+    let id = p(&first[0], "orderID").unwrap();
+    let body = json!({"code":0,"data":{"orderID":id,"ordStatus":"Canceled"}}).to_string();
+    let a = reply(&mut e, wake + 2., &first[0], 200, &body);
+    assert_eq!(error_logs(&a), 0, "{a:?}");
+    let second = deletes(&a);
+    assert_eq!(second.len(), 1);
+    let other = p(&second[0], "orderID").unwrap();
+    assert_ne!(other, id);
+    let body = json!({"code":0,"data":{"orderID":other,"ordStatus":"Canceled"}}).to_string();
+    let a = reply(&mut e, wake + 3., &second[0], 200, &body);
+    assert_eq!(error_logs(&a), 0, "{a:?}");
+    for id in ["long", "short"] {
+        assert_eq!(
+            e.store().order(id).map(|o| o.status),
+            Some(OrderStatus::Canceled)
+        );
+    }
 }

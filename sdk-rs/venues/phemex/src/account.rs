@@ -161,6 +161,16 @@ impl State {
     pub fn order_revision(&self) -> u64 {
         self.order_revision
     }
+    /// Whether `id` is the clOrdID of a placement whose outcome is still unknown.
+    pub fn lost_client(&self, id: &str) -> bool {
+        self.reconcile.values().any(|entry| {
+            entry
+                .lost
+                .iter()
+                .chain(&entry.cancel)
+                .any(|(lost, _)| lost == id)
+        })
+    }
     pub fn has_unreconciled_fills(&self) -> bool {
         self.uncertainty_overflow || !self.uncertain_fills.is_empty()
     }
@@ -922,6 +932,16 @@ impl PhemexPerpetuals {
                 }
                 self.account.snapshot = true;
             }
+            let owed: Vec<_> = self
+                .account
+                .reconcile
+                .iter()
+                .filter(|(_, entry)| !entry.cancel.is_empty())
+                .map(|(symbol, _)| symbol.clone())
+                .collect();
+            for symbol in owed {
+                self.cancel_landed(cx, &symbol);
+            }
         }
         if message.positions_p.is_some() {
             for (row, currency, context, position, version, key, last) in staged_positions {
@@ -1051,7 +1071,24 @@ impl PhemexPerpetuals {
     /// Cancels live orders of lost placements a cancel-all already covered.
     /// A complete read proves every lost placement it postdates.
     fn cancel_late_orders(&mut self, cx: &mut Cx<'_, Pending>, read: &OrdersRead, complete: bool) {
-        let Some(entry) = self.account.reconcile.get_mut(&read.symbol) else {
+        self.cancel_landed(cx, &read.symbol);
+        if complete && let Some(entry) = self.account.reconcile.get_mut(&read.symbol) {
+            entry
+                .cancel
+                .retain(|(_, generation)| *generation > read.generation);
+            entry
+                .lost
+                .retain(|(_, generation)| *generation > read.generation);
+        }
+    }
+    /// Cancels any stored order a cancel-all owes on `symbol`, however it arrived.
+    fn cancel_landed(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        let Some(entry) = self
+            .account
+            .reconcile
+            .get_mut(symbol)
+            .filter(|entry| !entry.cancel.is_empty())
+        else {
             return;
         };
         let (mut late, mut handled, mut filled) = (Vec::new(), Vec::new(), Vec::new());
@@ -1059,7 +1096,7 @@ impl PhemexPerpetuals {
             let Some(client) = order.client_order_id.as_deref() else {
                 continue;
             };
-            if order.symbol != read.symbol
+            if order.symbol != symbol
                 || order.parent_id.is_some()
                 || !entry.cancel.iter().any(|(id, _)| id == client)
             {
@@ -1076,27 +1113,18 @@ impl PhemexPerpetuals {
                 handled.push(client.to_owned());
             }
         }
+        entry.cancel.retain(|(id, _)| !handled.contains(id));
         if !filled.is_empty() {
             cx.log(
                 LogLevel::Error,
                 format!(
-                    "Phemex order {} landed after cancel-all on {}; check the position",
-                    filled.join(", "),
-                    read.symbol
+                    "Phemex order {} landed after cancel-all on {symbol}; check the position",
+                    filled.join(", ")
                 ),
             );
         }
-        entry.cancel.retain(|(id, _)| !handled.contains(id));
-        if complete {
-            entry
-                .cancel
-                .retain(|(_, generation)| *generation > read.generation);
-            entry
-                .lost
-                .retain(|(_, generation)| *generation > read.generation);
-        }
         if !late.is_empty() {
-            self.cancel_late(cx, &read.symbol, late);
+            self.cancel_late(cx, symbol, late);
         }
     }
     /// Starts each owed read once it is due and no placement on that symbol is in flight.

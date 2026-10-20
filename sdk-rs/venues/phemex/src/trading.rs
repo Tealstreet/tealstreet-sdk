@@ -17,6 +17,9 @@ pub(crate) struct State {
     jobs: HashMap<CommandId, Job>,
     sides: HashMap<String, String>,
     brackets: HashMap<String, Brackets>,
+    /// Venue-originated late cancels, sent one at a time so no ack sees another's revision bump.
+    late: VecDeque<Step>,
+    late_sending: bool,
 }
 impl State {
     pub(crate) fn placing(&self, symbol: &str) -> bool {
@@ -49,10 +52,9 @@ pub struct Request {
 pub(crate) enum Outcome {
     /// The venue proved no order was created; no read is owed.
     Rejected,
-    /// The venue answered without proving the outcome; read now.
+    /// No proof either way (unproven answer, transport, non-2xx): Phemex may still
+    /// accept the write until its signed expiry, so read once that passes.
     Unknown,
-    /// No usable answer (transport, non-2xx): the write may still land.
-    Late,
 }
 /// Margin for the client clock running ahead of Phemex's when bounding a late write.
 const CLOCK_SKEW_MS: f64 = 5_000.;
@@ -215,6 +217,12 @@ impl PhemexPerpetuals {
                 }
                 if !seen.insert(id.clone()) {
                     return Err("Phemex duplicate clientOrderId in command".into());
+                }
+                // A late landing of the lost write is canceled by clOrdID alone.
+                if self.account.lost_client(id) {
+                    return Err(format!(
+                        "Phemex clientOrderId {id} belongs to a placement with an unknown outcome; use a new clientOrderId"
+                    ));
                 }
             }
         }
@@ -1381,14 +1389,19 @@ impl PhemexPerpetuals {
                 self.account_refresh(cx);
                 match (request.command, &request.call) {
                     (Some(command), _) => self.trade_next(cx, command),
-                    (None, Call::Cancel { ids, .. }) => cx.log(
-                        LogLevel::Warning,
-                        format!(
-                            "Phemex canceled late-landing order {} after cancel-all",
-                            ids.join(", ")
-                        ),
-                    ),
-                    (None, _) => {}
+                    (None, call) => {
+                        if let Call::Cancel { ids, .. } = call {
+                            cx.log(
+                                LogLevel::Warning,
+                                format!(
+                                    "Phemex canceled late-landing order {} after cancel-all",
+                                    ids.join(", ")
+                                ),
+                            );
+                        }
+                        self.trading.late_sending = false;
+                        self.late_next(cx);
+                    }
                 }
             }
             Err(error) => {
@@ -1438,17 +1451,17 @@ impl PhemexPerpetuals {
                     error.into()
                 ),
             );
+            self.trading.late_sending = false;
+            self.late_next(cx);
             return;
         };
         let job = self.trading.jobs.remove(&command);
         self.account_refresh(cx);
         reject(cx, command, error.into());
         // Read only after `reject` raises the fence, so the read postdates the failure.
-        // A late write cannot land after its signed expiry, so read once that passes.
         let (symbols, not_before) = match outcome {
             Outcome::Rejected => (vec![], cx.now),
-            Outcome::Unknown => (job.map(|job| job.placing).unwrap_or_default(), cx.now),
-            Outcome::Late => (
+            Outcome::Unknown => (
                 job.map(|job| job.placing).unwrap_or_default(),
                 request.signed_until + CLOCK_SKEW_MS,
             ),
@@ -1471,9 +1484,8 @@ impl PhemexPerpetuals {
         );
         match self.cancel_plan(cx, ids) {
             Ok(steps) => {
-                for step in steps {
-                    self.dispatch(cx, None, step);
-                }
+                self.trading.late.extend(steps);
+                self.late_next(cx);
             }
             Err(error) => cx.log(
                 LogLevel::Error,
@@ -1481,6 +1493,16 @@ impl PhemexPerpetuals {
                     "Phemex could not cancel late-landing orders on {symbol}: {error}; cancel them manually"
                 ),
             ),
+        }
+    }
+
+    fn late_next(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.trading.late_sending {
+            return;
+        }
+        if let Some(step) = self.trading.late.pop_front() {
+            self.trading.late_sending = true;
+            self.dispatch(cx, None, step);
         }
     }
 }
