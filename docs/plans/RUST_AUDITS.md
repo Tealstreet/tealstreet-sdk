@@ -653,8 +653,8 @@ Signing, integer scaling, tx encoding and nonces match TS.
   (`lighter/src/account.rs:424,877`), so leverage reads as the market max and a
   margin-mode change signs max leverage (`trading.rs:567`).~~ Position-only
   ratio/percentage/tick normalization now has REST/WS and 5x signing regressions.
-- Medium: windowed fill history pages the whole account history then fails
-  (`history.rs:404,744`); one bad market/account row stalls startup or sync;
+- Medium: ~~windowed fill history pages the whole account history then fails
+  (`history.rs:404,744`)~~ (newest-first paging stops past `from`); one bad market/account row stalls startup or sync;
   account tier not exposed and `changeAccountTier` missing.
 - Low: thinner error mapping (rate-limit guidance, 21613 refresh); reduce-only
   re-check races a fixed 2 s timer. ~~Shared with TS: amend re-places the full
