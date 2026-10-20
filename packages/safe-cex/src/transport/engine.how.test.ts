@@ -46,7 +46,12 @@ vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
     }
   },
 }));
-vi.mock('../accessToken', () => ({ getProxyToken: vi.fn(async () => 'proxy-fixture'), isTokenExpired: () => false }));
+vi.mock('../accessToken', () => ({
+  getProxyToken: vi.fn(async () => 'proxy-fixture'),
+  isTokenExpired: () => false,
+  captureProxyTokenProvider: () => null,
+  withProxyTokenProvider: (_provider: unknown, fn: () => unknown) => fn(),
+}));
 
 const rawTransport = (): Transport => ({
   now: () => 0,

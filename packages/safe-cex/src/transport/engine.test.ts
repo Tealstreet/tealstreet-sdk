@@ -41,7 +41,11 @@ const mocks = vi.hoisted(() => ({
   nodeRuntime: vi.fn(() => true),
 }));
 
-vi.mock('../accessToken', () => ({ getProxyToken: mocks.token }));
+vi.mock('../accessToken', () => ({
+  getProxyToken: mocks.token,
+  captureProxyTokenProvider: () => null,
+  withProxyTokenProvider: (_provider: unknown, fn: () => unknown) => fn(),
+}));
 vi.mock('../index', () => ({ createExchange: vi.fn() }));
 vi.mock('../utils/runtime', () => ({ isNodeOrBunRuntime: mocks.nodeRuntime }));
 // Avoid global HOW socket/token configuration. The real provider still selects

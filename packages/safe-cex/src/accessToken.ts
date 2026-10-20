@@ -42,7 +42,10 @@ export class ProxyTokenUnavailableError extends Error {
 
 // Optional custom refresh function (for CLI environments)
 let customRefreshFn: (() => Promise<string>) | null = null;
-let contextualTokenProviderFn: (() => (() => Promise<string> | string) | null) | null = null;
+type ProxyTokenProvider = () => Promise<string> | string;
+let contextualTokenProviderFn: (() => ProxyTokenProvider | null) | null = null;
+// Set only for the synchronous start of a lookup; see `withProxyTokenProvider`.
+let scopedTokenProvider: ProxyTokenProvider | null = null;
 
 // Detect if we're in a browser context (has SharedWorker support)
 const isBrowserContext = typeof window !== 'undefined' || typeof self !== 'undefined';
@@ -56,7 +59,7 @@ function syncToken() {
 }
 
 async function getContextualProxyToken(): Promise<string | null> {
-  const contextualTokenProvider = contextualTokenProviderFn?.();
+  const contextualTokenProvider = scopedTokenProvider ?? contextualTokenProviderFn?.();
   if (!contextualTokenProvider) return null;
 
   try {
@@ -182,6 +185,30 @@ export function setTokenRefreshFunction(fn: (() => Promise<string>) | null) {
  */
 export function setContextualProxyTokenProvider(fn: (() => (() => Promise<string> | string) | null) | null) {
   contextualTokenProviderFn = fn;
+}
+
+/**
+ * The calling async context's proxy-token provider, so an account can keep
+ * using it from work started outside that context (engine timers, sockets).
+ */
+export function captureProxyTokenProvider(): ProxyTokenProvider | null {
+  return contextualTokenProviderFn?.() ?? null;
+}
+
+/**
+ * Run `fn` with `provider` answering token lookups that start synchronously
+ * inside it. `getProxyToken` reads the provider before its first await, so a
+ * synchronous scope is enough and never leaks into another account's work.
+ */
+export function withProxyTokenProvider<T>(provider: ProxyTokenProvider | null, fn: () => T): T {
+  if (!provider) return fn();
+  const previous = scopedTokenProvider;
+  scopedTokenProvider = provider;
+  try {
+    return fn();
+  } finally {
+    scopedTokenProvider = previous;
+  }
 }
 
 /**
