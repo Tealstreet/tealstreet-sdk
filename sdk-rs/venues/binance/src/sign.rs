@@ -54,10 +54,21 @@ impl Query {
     }
 
     /// Append `timestamp`, `recvWindow` and the HMAC-SHA256 `signature`.
+    #[cfg(test)]
     pub fn signed(self, credentials: &Credentials, now_ms: f64) -> String {
+        self.signed_window(credentials, now_ms, None)
+    }
+
+    pub fn signed_window(
+        self,
+        credentials: &Credentials,
+        now_ms: f64,
+        window: Option<u32>,
+    ) -> String {
+        let window = window.unwrap_or(RECV_WINDOW_MS).clamp(1, RECV_WINDOW_MS);
         let mut query = self
             .num("timestamp", now_ms.floor())
-            .num("recvWindow", f64::from(RECV_WINDOW_MS))
+            .num("recvWindow", f64::from(window))
             .0;
         let signature = hmac_sha256(
             credentials.secret.as_bytes(),
@@ -127,5 +138,36 @@ mod tests {
             query.as_str(),
             "batchOrders=%5B%7B%22a%22%3A%22b%20c%22%7D%5D"
         );
+    }
+}
+
+safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);
+
+#[cfg(test)]
+mod security_receive_window {
+    use super::*;
+
+    #[test]
+    fn smaller_receive_window_is_signed_and_unbounded_windows_are_clamped() {
+        let c = Credentials {
+            key: "k".into(),
+            secret: "s".into(),
+        };
+        for (window, expected) in [
+            (None, 20_000),
+            (Some(500), 500),
+            (Some(0), 1),
+            (Some(u32::MAX), 20_000),
+        ] {
+            let query = Query::new()
+                .str("symbol", "BTCUSDT")
+                .signed_window(&c, 1000.0, window);
+            let (payload, signature) = query.split_once("&signature=").unwrap();
+            assert!(payload.ends_with(&format!("recvWindow={expected}")));
+            assert_eq!(
+                signature,
+                hmac_sha256(b"s", payload.as_bytes(), Encoding::Hex)
+            );
+        }
     }
 }

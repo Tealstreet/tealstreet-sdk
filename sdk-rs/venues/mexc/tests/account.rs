@@ -229,6 +229,7 @@ fn unrelated_order_update_does_not_skip_the_second_hedge_rail() {
 fn startup_mode_and_metadata_reads_respect_the_rate_limit_pause() {
     let mut e = safe_cex_engine::Engine::new(safe_cex_venue_mexc::MexcFutures::new(
         safe_cex_venue_mexc::Options {
+            recv_window: None,
             read_credentials: None,
             key: Some("key".into()),
             secret: Some("secret".into()),

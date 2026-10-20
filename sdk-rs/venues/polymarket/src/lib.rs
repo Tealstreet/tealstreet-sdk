@@ -24,7 +24,7 @@ const SOCKETS: [&str; 2] = [
     "wss://ws-subscriptions-clob.polymarket.com/ws/user",
 ];
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PolymarketOptions {
     pub api_key: Option<String>,
@@ -35,12 +35,30 @@ pub struct PolymarketOptions {
     pub funder_address: Option<String>,
     pub market_slugs: Option<Vec<String>>,
 }
-#[derive(Clone, Debug, Default)]
+safe_cex_crypto::redacted_debug!(PolymarketOptions);
+impl safe_cex_crypto::secrets::EraseSecrets for PolymarketOptions {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.api_key);
+        safe_cex_crypto::secrets::erase(&mut self.api_secret);
+        safe_cex_crypto::secrets::erase(&mut self.api_passphrase);
+    }
+}
+#[derive(Clone, Default)]
 pub struct Options {
     pub public_data_only: bool,
     pub key: Option<String>,
     pub polymarket: Option<PolymarketOptions>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        if let Some(options) = self.polymarket.as_mut() {
+            safe_cex_crypto::secrets::EraseSecrets::erase_secrets(options);
+        }
+    }
+}
+
 pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
@@ -89,7 +107,7 @@ struct CandleSubscription {
     last: f64,
 }
 pub struct Polymarket {
-    pub(crate) options: Options,
+    pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) account: account::Account,
     pub(crate) trading: trading::Trading,
     pub(crate) credentials: Option<sign::Credentials>,
@@ -139,6 +157,7 @@ fn tick_supported(tick: f64) -> bool {
 }
 impl Polymarket {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let address = options
             .key
             .as_deref()

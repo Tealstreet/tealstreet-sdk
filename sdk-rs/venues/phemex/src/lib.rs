@@ -22,6 +22,17 @@ pub struct Options {
     pub secret: Option<String>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
+
 pub enum Pending {
     Markets(Vec<Market>, bool),
     Tickers(Vec<Ticker>, bool),
@@ -73,7 +84,7 @@ impl BookState {
     }
 }
 pub struct PhemexPerpetuals {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<sign::Credentials>,
     read_credentials: Option<sign::Credentials>,
     public: Connection,
@@ -90,12 +101,16 @@ pub struct PhemexPerpetuals {
 }
 impl PhemexPerpetuals {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = options
             .key
-            .clone()
-            .zip(options.secret.clone())
+            .as_ref()
+            .zip(options.secret.as_ref())
             .filter(|(k, s)| !k.is_empty() && !s.is_empty())
-            .map(|(key, secret)| sign::Credentials { key, secret });
+            .map(|(key, secret)| sign::Credentials {
+                key: key.clone(),
+                secret: secret.clone(),
+            });
         let read_credentials = options
             .read_credentials
             .as_ref()
@@ -812,5 +827,22 @@ impl Venue for PhemexPerpetuals {
                 .filter(|(_, b)| b.last.is_some())
                 .map(|(s, b)| (s.as_str(), &b.book)),
         )
+    }
+}
+
+#[cfg(test)]
+mod security_constructor {
+    use super::*;
+    #[test]
+    fn incomplete_credentials_are_retained_only_in_a_scrubbing_owner() {
+        for key in [None, Some(String::new())] {
+            let venue = PhemexPerpetuals::new(Options {
+                key,
+                secret: Some("private-secret".into()),
+                ..Options::default()
+            });
+            let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
+            assert!(venue.credentials.is_none());
+        }
     }
 }

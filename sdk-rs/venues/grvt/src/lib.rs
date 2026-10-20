@@ -13,7 +13,7 @@ use safe_cex_engine::{
 use serde::Serialize;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -23,6 +23,14 @@ pub struct Options {
     pub signer_address: Option<String>,
     pub session_proxy: bool,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 #[derive(Clone)]
 pub struct InstrumentInfo {
     pub hash: String,
@@ -88,7 +96,7 @@ struct TickerState {
     subscriptions: u8,
 }
 pub struct Grvt {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     metadata: HashMap<String, InstrumentInfo>,
@@ -133,6 +141,7 @@ fn interval(s: &str) -> Option<String> {
 }
 impl Grvt {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::default(),

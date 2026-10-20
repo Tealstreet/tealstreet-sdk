@@ -331,7 +331,11 @@ impl MexcFutures {
         let headers = if matches!(r.kind, Kind::Trades) {
             vec![]
         } else {
-            self.credentials.as_ref().unwrap().headers(cx.now, &payload)
+            self.credentials.as_ref().unwrap().headers_window(
+                cx.now,
+                &payload,
+                self.options.recv_window,
+            )
         };
         let at = if matches!(r.kind, Kind::Funding) {
             ArrayAt::Path(&["data", "resultList"])

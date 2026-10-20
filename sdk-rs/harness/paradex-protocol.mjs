@@ -40,7 +40,7 @@ const verifyRequest = ({ method, url, body, headers }) => {
     const expiration = Number(h['paradex-signature-expiration']);
     return method === 'POST' && parsed.pathname === `/v1/auth/${credentials.subkeyAddress}` && (body == null || body === '') &&
       h['paradex-starknet-account'] === credentials.paradexAddress && Number.isSafeInteger(timestamp) &&
-      Math.abs(timestamp * 1000 - Date.now()) < 60_000 && expiration === timestamp + 86400 &&
+      Math.abs(timestamp * 1000 - Date.now()) < 60_000 && [300, 86400].includes(expiration - timestamp) &&
       verify(h['paradex-starknet-signature'], typed('Request', ['method', 'path', 'body', 'timestamp', 'expiration'],
         { method: 'POST', path: '/v1/auth', body: '', timestamp, expiration }, testnet));
   }
@@ -138,6 +138,17 @@ export const paradexProtocol = {
   replayCredentials: credentials,
   // Match loadEngine: load code before baseline, keeping account I/O and signing timed.
   loadTs: async ({ isPrivate }) => { if (isPrivate) await import(require.resolve('@tealstreet/paradex-sdk')); },
+  // TS retains its 24-hour auth signature; Rust intentionally limits replay
+  // authorization to five minutes. Both preimages are independently verified.
+  createRequestAudit: (implementation) => ({
+    validate({ url, headers }) {
+      if (!new URL(url).pathname.startsWith('/v1/auth/')) return;
+      const h = headerMap(headers);
+      const lifetime = Number(h['paradex-signature-expiration']) - Number(h['paradex-timestamp']);
+      if (lifetime !== (implementation === 'rust' ? 300 : 86400)) throw new Error('Unexpected Paradex auth lifetime');
+    },
+    response() {},
+  }),
   compareClientIds: true, compareFillPrices: true, compareSubscriptions: true, compareWriteOrder: true,
   matchRequestBody: true, requestBody, generatedBodyId: (key) => key === 'client_id',
   subscriptionRouting: true, streamOf: paradexStream, socketMessage, createSocketAudit, verifyRequest,

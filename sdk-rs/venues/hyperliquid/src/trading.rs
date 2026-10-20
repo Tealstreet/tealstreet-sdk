@@ -14,7 +14,6 @@ pub struct Trading {
     queue: VecDeque<Job>,
     active: Option<Job>,
     inflight: bool,
-    nonce: u64,
     write_at: Option<f64>,
     pace: Option<TimerId>,
     builder_wait: Option<TimerId>,
@@ -585,8 +584,17 @@ impl Hyperliquid {
             self.pump_trades(cx);
             return;
         }
-        self.trading.nonce = (cx.now.max(0.0) as u64).max(self.trading.nonce.saturating_add(1));
-        let nonce = self.trading.nonce;
+        let nonce = match safe_cex_crypto::nonce::ethereum_agent(
+            self.options.secret.as_deref().unwrap_or(""),
+            cx.now,
+        ) {
+            Ok(nonce) => nonce,
+            Err(error) => {
+                self.restore_cancel(cx, &effect);
+                self.finish_trade(cx, Err(error));
+                return;
+            }
+        };
         let signature = match sign::sign(
             &action,
             self.options.vault.as_deref(),

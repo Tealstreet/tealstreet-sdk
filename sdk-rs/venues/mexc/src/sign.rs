@@ -15,12 +15,22 @@ impl Credentials {
             Encoding::Hex,
         )
     }
+    #[cfg(test)]
     pub fn headers(&self, now: f64, payload: &str) -> Vec<(&'static str, String)> {
+        self.headers_window(now, payload, None)
+    }
+    pub fn headers_window(
+        &self,
+        now: f64,
+        payload: &str,
+        window: Option<u32>,
+    ) -> Vec<(&'static str, String)> {
+        let window = window.unwrap_or(20_000).clamp(1, 20_000);
         vec![
             ("ApiKey", self.key.clone()),
             ("Request-Time", num::format(now)),
             ("Signature", self.signature(now, payload)),
-            ("Recv-Window", "20000".into()),
+            ("Recv-Window", window.to_string()),
             ("Content-Type", "application/json".into()),
         ]
     }
@@ -67,5 +77,33 @@ mod tests {
             c.signature(1.0, r#"{"vol":1}"#),
             c.signature(1.0, r#"{ "vol":1}"#)
         );
+    }
+}
+
+safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);
+
+#[cfg(test)]
+mod security_receive_window {
+    use super::*;
+
+    #[test]
+    fn smaller_receive_window_reaches_header_and_cannot_be_unbounded() {
+        let c = Credentials {
+            key: "k".into(),
+            secret: "s".into(),
+        };
+        for (window, expected) in [
+            (None, 20_000),
+            (Some(500), 500),
+            (Some(0), 1),
+            (Some(u32::MAX), 20_000),
+        ] {
+            let headers = c.headers_window(1000.0, "symbol=BTCUSDT", window);
+            assert!(
+                headers
+                    .iter()
+                    .any(|(k, v)| *k == "Recv-Window" && v == &expected.to_string())
+            );
+        }
     }
 }

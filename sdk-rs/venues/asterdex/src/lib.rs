@@ -21,7 +21,7 @@ const WATCHDOG_MS: f64 = 5_000.0;
 const SILENCE_MS: f64 = 20_000.0;
 const INTEREST_MS: f64 = 15_000.0;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -37,6 +37,16 @@ pub struct Options {
     pub builder_address: Option<String>,
     pub builder_fee_rate_maker: Option<String>,
     pub builder_fee_rate_taker: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.auth_private_key);
+        safe_cex_crypto::secrets::erase(&mut self.read_key);
+        safe_cex_crypto::secrets::erase(&mut self.read_secret);
+    }
 }
 
 struct Urls {
@@ -117,7 +127,7 @@ struct BookState {
 }
 
 pub struct AsterDex {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     version: Version,
     credentials: Option<Credentials>,
     read_credentials: Option<Credentials>,
@@ -141,6 +151,7 @@ fn nonempty(value: Option<&str>) -> Option<&str> {
 
 impl AsterDex {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let user = nonempty(options.auth_user_address.as_deref())
             .or_else(|| nonempty(options.application_id.as_deref()));
         let signer = nonempty(options.auth_signer_address.as_deref())

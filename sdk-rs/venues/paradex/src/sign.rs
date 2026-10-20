@@ -19,7 +19,7 @@ pub struct SystemConfig {
 }
 
 pub struct Credentials {
-    key: Felt,
+    key: zeroize::Zeroizing<[u8; 32]>,
     address_felt: Felt,
     address: String,
     subkey: String,
@@ -126,7 +126,7 @@ impl Credentials {
             derive_ethereum(key, config)?
         };
         Ok(Self {
-            key,
+            key: zeroize::Zeroizing::new(key.to_bytes_be()),
             address_felt,
             address,
             subkey: subkey.into(),
@@ -164,7 +164,8 @@ impl Credentials {
             self.address_felt,
             hash_elements(&fields),
         ]);
-        let (r, s) = starknet::sign(&hash, &self.key).map_err(|_| "Paradex signing failed")?;
+        let (r, s) = starknet::sign(&hash, &Felt::from_bytes_be(&self.key))
+            .map_err(|_| "Paradex signing failed")?;
         Ok(format!(
             "[\"{}\",\"{}\"]",
             U256::from_be_bytes(r.to_bytes_be()),
@@ -175,7 +176,7 @@ impl Credentials {
     pub fn auth(&self, now_ms: u64) -> Result<AuthSignature, String> {
         let timestamp = now_ms / 1000;
         let expiration = timestamp
-            .checked_add(86400)
+            .checked_add(300)
             .ok_or("Invalid Paradex auth timestamp")?;
         let signature = self.signature(
             "Request",

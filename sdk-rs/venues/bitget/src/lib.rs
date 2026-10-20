@@ -36,6 +36,17 @@ pub struct Options {
     pub passphrase: Option<String>,
     pub product: Product,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
 
 pub enum Pending {
     History(Box<history::Request>),
@@ -71,7 +82,7 @@ struct Connection {
 }
 
 pub struct BitgetFutures {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     history: history::History,
@@ -83,6 +94,7 @@ pub struct BitgetFutures {
 
 impl BitgetFutures {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::default(),

@@ -17,14 +17,25 @@ pub struct Credentials {
 
 impl Credentials {
     /// The auth headers for one request at `timestamp_ms`.
+    #[cfg(test)]
     pub fn headers(&self, timestamp_ms: f64, payload: &str) -> Vec<(&'static str, String)> {
+        self.headers_window(timestamp_ms, payload, None)
+    }
+
+    pub fn headers_window(
+        &self,
+        timestamp_ms: f64,
+        payload: &str,
+        window: Option<u32>,
+    ) -> Vec<(&'static str, String)> {
+        let window = window.unwrap_or(RECV_WINDOW_MS).clamp(1, RECV_WINDOW_MS);
         let timestamp = num::format(timestamp_ms.floor());
-        let signed = format!("{timestamp}{}{RECV_WINDOW_MS}{payload}", self.key);
+        let signed = format!("{timestamp}{}{window}{payload}", self.key);
         let signature = hmac_sha256(self.secret.as_bytes(), signed.as_bytes(), Encoding::Hex);
         vec![
             ("X-BAPI-API-KEY", self.key.clone()),
             ("X-BAPI-TIMESTAMP", timestamp),
-            ("X-BAPI-RECV-WINDOW", RECV_WINDOW_MS.to_string()),
+            ("X-BAPI-RECV-WINDOW", window.to_string()),
             ("X-BAPI-SIGN", signature),
             ("X-Referer", BROKER_ID.to_owned()),
             ("Content-Type", "application/json".to_owned()),
@@ -205,5 +216,38 @@ mod tests {
             Query::new().str("cursor", "page_args%3Dx").into_string(),
             "cursor=page_args%253Dx"
         );
+    }
+}
+
+safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);
+
+#[cfg(test)]
+mod security_receive_window {
+    use super::*;
+
+    #[test]
+    fn smaller_receive_window_is_in_both_signed_preimage_and_header() {
+        let c = Credentials {
+            key: "k".into(),
+            secret: "s".into(),
+        };
+        for (window, expected) in [
+            (None, 20_000),
+            (Some(500), 500),
+            (Some(0), 1),
+            (Some(u32::MAX), 20_000),
+        ] {
+            let headers = c.headers_window(1000.0, "symbol=BTCUSDT", window);
+            let header = |key| &headers.iter().find(|(k, _)| *k == key).unwrap().1;
+            assert_eq!(header("X-BAPI-RECV-WINDOW"), &expected.to_string());
+            assert_eq!(
+                header("X-BAPI-SIGN"),
+                &hmac_sha256(
+                    b"s",
+                    format!("1000k{expected}symbol=BTCUSDT").as_bytes(),
+                    Encoding::Hex
+                )
+            );
+        }
     }
 }

@@ -35,8 +35,10 @@ pub enum Variant {
     Spot,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
+    /// Optional tighter signing receive window in milliseconds.
+    pub recv_window: Option<u32>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
     pub variant: Variant,
@@ -46,6 +48,16 @@ pub struct Options {
     pub secret: Option<String>,
     /// A portfolio margin account (`papi`) rather than USD-M futures.
     pub portfolio_margin: bool,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 struct Urls {
@@ -196,7 +208,7 @@ mod source {
 }
 
 pub struct BinanceFutures {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     urls: Urls,
     paths: &'static paths::Paths,
     credentials: Option<Credentials>,
@@ -219,7 +231,8 @@ pub struct BinanceFutures {
 }
 
 impl BinanceFutures {
-    pub fn new(mut options: Options) -> Self {
+    pub fn new(options: Options) -> Self {
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         if options.variant == Variant::UsdM && options.portfolio_margin {
             options.variant = Variant::PortfolioMargin;
         }
@@ -370,7 +383,7 @@ impl BinanceFutures {
         let Some(credentials) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
             return;
         };
-        let query = query.signed(credentials, cx.now);
+        let query = query.signed_window(credentials, cx.now, self.options.recv_window);
         let url = format!("{}{path}?{query}", self.urls.account_rest);
         let headers = vec![("X-MBX-APIKEY", credentials.key.clone())];
         match stream {

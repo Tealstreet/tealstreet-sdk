@@ -17,7 +17,7 @@ use wire::*;
 
 pub const REST_URL: &str = "https://rpc.txflow-testnet.xyz";
 pub const API_VERSION: &str = "2026-08-16";
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -26,6 +26,14 @@ pub struct Options {
     pub application_id: Option<String>,
     pub vault: Option<String>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 impl Options {
     pub fn validate(&self) -> Result<(), String> {
         if !self.testnet {
@@ -89,7 +97,7 @@ struct Sub<'a> {
     instrument_id: Option<u32>,
 }
 pub struct TxFlow {
-    pub(crate) options: Options,
+    pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) account: account::AccountState,
     pub(crate) trading: trading::Trading,
     pub(crate) assets: HashMap<String, u32>,
@@ -108,6 +116,7 @@ pub struct TxFlow {
 }
 impl TxFlow {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: Default::default(),

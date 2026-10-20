@@ -126,3 +126,8 @@ live trading, weakened parity oracle, or performance threshold changes.
   policy. The engine now retains that behavior while bounding positive finite
   values and preserving explicit positive-infinity pause; independent re-review
   accepted the correction. The workspace suite is rerunning after the change.
+- Landing advanced during implementation to `1b8592dbd2` (remote payload
+  signing and KuCoin Spot parity). Commit the reviewed credential/signing work
+  before integration; merge the landing structure and re-audit newly introduced
+  signing/credential paths before final tests and all replay gates. Pre-merge
+  checks remain checkpoint evidence, not final merged-source gate claims.

@@ -108,3 +108,5 @@ mod tests {
         assert_eq!(iso_timestamp(-1.0), "1969-12-31T23:59:59.999Z");
     }
 }
+
+safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret, passphrase);

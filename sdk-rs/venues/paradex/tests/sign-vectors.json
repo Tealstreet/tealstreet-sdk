@@ -80,7 +80,17 @@
           "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_PARACLEAR_MAINNET\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717258117}}",
           "hash": "0x7c2e06c3525b6541334453736f9722480c2ce32659c0fa2d4f2b8fc52a0de79",
           "signature": "[\"81452468745321081314422137953619068506022007472660034095415855042691851024\",\"1838150356649616347743283627632738209519745256637659853685349021030282165143\"]"
+        },
+        "shortAuth": {
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_PARACLEAR_MAINNET\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717172017}}",
+          "hash": "0x40b6064ba2d662d4e6e7b48a416d96cb730b5453cc61b5c04bf602d66cd34ce",
+          "signature": "[\"760460408874822742719819630491380929488671230540536395794208817992832734855\",\"1320110736178224356113551929302115749790352335557005451264196218294579524126\"]"
         }
+      },
+      "shortAuth": {
+        "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_PARACLEAR_MAINNET\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717172017}}",
+        "hash": "0x59fb845367c361556226659e66ca45112fd70cae0c0f7283731ea961195fc81",
+        "signature": "[\"231979350948343018106765523287202811199617808344828686846219691482795094354\",\"832468217157371240387679252539815718862416568643662979876906935613286465501\"]"
       }
     },
     {
@@ -162,7 +172,17 @@
           "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_POTC_SEPOLIA\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717258117}}",
           "hash": "0x63e06503c5a93c38acee9b5eec3e9dd6ab4e9ca1be51a4e0ed4846d53977c0b",
           "signature": "[\"3130601969825633528042781643618849397700393871191295593153177385668011628815\",\"1544685308404509673589024586843482169246348639361366022474354012239216793382\"]"
+        },
+        "shortAuth": {
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_POTC_SEPOLIA\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717172017}}",
+          "hash": "0x6ab136bf8160e6c6dce953d78a727b7ebc3d2ae66ab4f12c34a481cb0a15ac6",
+          "signature": "[\"1380525831866187140855060399656173769485343258683608351934767225859144711380\",\"1355324703687702537343818203428942149814570699551551364445721834808452951097\"]"
         }
+      },
+      "shortAuth": {
+        "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_POTC_SEPOLIA\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717172017}}",
+        "hash": "0x5b6fe460c2edeaa75028908661a7ef4943342dcd9aa9b00b5e16840df0f891a",
+        "signature": "[\"801454883139064163261939273803191067529563982847479340440534498648984543027\",\"378418729177399347803761029550918249565270261658281232928426170046659620465\"]"
       }
     }
   ]

@@ -51,7 +51,7 @@ test('generic API key exemptions require the exact public vector and fixture tog
   assert.equal(exempt(vector, publicKey), true);
   assert.equal(exempt(provenance, publicHash), true);
   for (const path of [vector, provenance, 'sdk-rs/crypto/tests/new-credential.rs',
-    'sdk-rs/engine/tests/secret.rs', 'sdk-rs/venues/paradex/tests/sign-vectors.json.bak'])
+    'sdk-rs/engine/tests/secret.rs', 'sdk-rs/venues/binance/src/sign.rs', 'sdk-rs/venues/paradex/tests/sign-vectors.json.bak'])
     assert.equal(exempt(path, 'new-live-api-key-not-a-public-vector'), false, path);
   assert.equal(exempt('sdk-rs/crypto/tests/new-credential.rs', publicHash), false);
   assert.equal(exempt(vector, publicHash), false);

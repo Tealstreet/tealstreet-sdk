@@ -106,7 +106,7 @@ impl MexcFutures {
         let Some(c) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
             return;
         };
-        let headers = c.headers(cx.now, &payload);
+        let headers = c.headers_window(cx.now, &payload, self.options.recv_window);
         let url = if method == Method::Get && !payload.is_empty() {
             format!("{}{path}?{payload}", crate::REST)
         } else {

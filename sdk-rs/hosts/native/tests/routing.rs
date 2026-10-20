@@ -1540,3 +1540,82 @@ async fn healthy_binary_frames_reset_the_silent_connection_streak() {
     }
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn signed_request_urls_are_absent_from_connection_and_body_errors() {
+    let (listener, _origin) = listener().await;
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    let transport = NetworkTransport::new();
+    let (sender, mut events) = mpsc::unbounded_channel();
+    transport.request(
+        http_request(
+            800,
+            format!("http://{address}/private?api_key=secret-key&signature=secret-signature"),
+        ),
+        sender,
+    );
+    match next(&mut events).await {
+        HostEvent::HttpFailed(_, error) => {
+            assert!(!error.contains("secret-key"), "{error}");
+            assert!(!error.contains("secret-signature"), "{error}");
+            assert!(!error.contains("http://"), "{error}");
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    // Truncated bodies fail only after response headers, through reqwest's body error path.
+    let (listener, _) = self::listener().await;
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        request_text(&mut stream).await;
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 100\r\nconnection: close\r\n\r\nx")
+            .await
+            .unwrap();
+    });
+    let (sender, mut events) = mpsc::unbounded_channel();
+    transport.request(
+        http_request(801, format!("{origin}/private?signature=secret-signature")),
+        sender,
+    );
+    loop {
+        match next(&mut events).await {
+            HostEvent::HttpFailed(_, error) => {
+                assert!(!error.contains("secret-signature"), "{error}");
+                assert!(!error.contains("http://"), "{error}");
+                break;
+            }
+            HostEvent::HttpStart { .. } | HostEvent::HttpChunk(..) => {}
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn signed_requests_never_follow_cross_origin_redirects() {
+    let (target, target_origin) = listener().await;
+    let (source, source_origin) = listener().await;
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = source.accept().await.unwrap();
+        let request = request_text(&mut stream).await;
+        assert!(request.contains("secret-api-key"));
+        stream.write_all(format!("HTTP/1.1 307 Temporary Redirect\r\nlocation: {target_origin}/stolen\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").as_bytes()).await.unwrap();
+    });
+    let (sender, mut events) = mpsc::unbounded_channel();
+    let mut request = http_request(802, source_origin);
+    request.headers.push(("X-Api-Key", "secret-api-key".into()));
+    NetworkTransport::new().request(request, sender);
+    assert!(matches!(
+        next(&mut events).await,
+        HostEvent::HttpStart { status: 307, .. }
+    ));
+    assert!(matches!(next(&mut events).await, HostEvent::HttpEnd(_)));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), target.accept())
+            .await
+            .is_err()
+    );
+    server.await.unwrap();
+}

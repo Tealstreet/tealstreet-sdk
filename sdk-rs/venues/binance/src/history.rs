@@ -380,7 +380,7 @@ impl BinanceFutures {
             .credentials
             .as_ref()
             .expect("lookup credentials checked");
-        let query = query.signed(credentials, cx.now);
+        let query = query.signed_window(credentials, cx.now, self.options.recv_window);
         let request = cx.request(
             Method::Get,
             format!("{}{}?{query}", self.urls.account_rest, self.paths.order),

@@ -42,7 +42,7 @@ pub fn form(params: &[(&str, String)]) -> String {
 }
 pub struct Signer {
     secret: Zeroizing<Vec<u8>>,
-    nonce: u64,
+    identity: [u8; 32],
 }
 impl Signer {
     pub fn new(secret: &str) -> Result<Self, String> {
@@ -53,8 +53,8 @@ impl Signer {
             return Err("Kraken secret is empty".into());
         }
         Ok(Self {
+            identity: safe_cex_crypto::sha256(&bytes),
             secret: Zeroizing::new(bytes),
-            nonce: 0,
         })
     }
     pub fn nonce(&mut self, now: f64) -> Result<String, String> {
@@ -64,8 +64,8 @@ impl Signer {
         let clock = (now.floor() as u64)
             .checked_mul(1000)
             .ok_or("Kraken nonce overflow")?;
-        self.nonce = clock.max(self.nonce.checked_add(1).ok_or("Kraken nonce exhausted")?);
-        Ok(self.nonce.to_string())
+        safe_cex_crypto::nonce::next("kraken", self.identity, clock, u64::MAX)
+            .map(|nonce| nonce.to_string())
     }
     fn digest(&self, bytes: &[u8]) -> String {
         let hash = Sha256::digest(bytes);
@@ -106,6 +106,21 @@ impl Signer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn separate_signers_and_recreated_signers_never_reuse_nonces() {
+        let mut a = Signer::new("c2VjdXJpdHktbm9uY2UtdGVzdA==").unwrap();
+        let mut b = Signer::new("c2VjdXJpdHktbm9uY2UtdGVzdA==").unwrap();
+        let first: u64 = a.nonce(1700000000000.0).unwrap().parse().unwrap();
+        let second: u64 = b.nonce(1700000000000.0).unwrap().parse().unwrap();
+        drop(a);
+        let third: u64 = Signer::new("c2VjdXJpdHktbm9uY2UtdGVzdA==")
+            .unwrap()
+            .nonce(1.0)
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(second > first && third > second);
+    }
     #[test]
     fn nonce_remains_unique_across_clock_regression_and_more_than_thousand_calls() {
         let mut s = Signer::new("c2VjcmV0").unwrap();

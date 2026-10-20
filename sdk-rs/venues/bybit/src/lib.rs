@@ -43,8 +43,10 @@ const STARTUP_RETRY_MAX_MS: f64 = 60_000.0;
 const PRELAUNCH_STARTUP_GRACE_MS: f64 = 1_500.0;
 const MARKETS_PATH: &[&str] = &["result", "list"];
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
+    /// Optional tighter signing receive window in milliseconds.
+    pub recv_window: Option<u32>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub variant: Variant,
     pub endpoints: Option<Endpoints>,
@@ -55,6 +57,16 @@ pub struct Options {
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 /// One REST request as sent, kept so a rejected signature can be resent.
@@ -215,6 +227,7 @@ struct ProductState {
 }
 
 pub struct BybitLinear {
+    recv_window: Option<u32>,
     category: Category,
     primary_category: Category,
     products: Vec<ProductState>,
@@ -306,6 +319,7 @@ fn resendable(text: &str) -> Option<Option<f64>> {
 
 impl BybitLinear {
     pub fn new(options: Options) -> Self {
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         let category = match options.variant {
             Variant::Inverse => Category::Inverse,
             Variant::Spot => Category::Spot,
@@ -359,8 +373,9 @@ impl BybitLinear {
             variant: options.variant,
             paths,
             config_error,
+            recv_window: options.recv_window,
             credentials,
-            read_credentials: options.read_credentials,
+            read_credentials: options.read_credentials.take(),
             public: Connection::new(),
             private: Connection::new(),
             books: HashMap::new(),
@@ -508,9 +523,11 @@ impl BybitLinear {
             });
         let credentials = read_credentials.as_ref().or(self.credentials.as_ref());
         let headers = match (credentials, rest.signed) {
-            (Some(credentials), true) => {
-                credentials.headers(cx.now + self.clock_offset_ms, &rest.payload)
-            }
+            (Some(credentials), true) => credentials.headers_window(
+                cx.now + self.clock_offset_ms,
+                &rest.payload,
+                self.recv_window,
+            ),
             (None, true) => return,
             _ => Vec::new(),
         };
@@ -1906,3 +1923,11 @@ mod public_decoder_tests {
 
 #[cfg(test)]
 mod secondary_tests;
+
+impl Drop for BybitLinear {
+    fn drop(&mut self) {
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}

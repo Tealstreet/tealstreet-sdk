@@ -79,3 +79,5 @@ mod tests {
         assert_eq!(encode("a b/+"), "a%20b%2F%2B");
     }
 }
+
+safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret, passphrase);

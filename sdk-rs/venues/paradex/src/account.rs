@@ -136,7 +136,7 @@ struct Queued {
 }
 
 pub struct Account {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     started: bool,
     credentials: Option<Credentials>,
     token: Option<String>,
@@ -181,6 +181,7 @@ pub struct Account {
 
 impl Account {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             started: false,

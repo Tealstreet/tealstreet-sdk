@@ -26,6 +26,16 @@ pub struct Options {
     pub secret: Option<String>,
     pub recv_window: Option<f64>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
 
 pub enum Pending {
     Account(account::Request),
@@ -103,7 +113,7 @@ enum SeedRead {
 }
 
 pub struct Backpack {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     public: Connection,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, String), u32>,
@@ -152,6 +162,7 @@ impl Backpack {
         self.seed.retries.push((cx.set_timer(delay as f64), kind));
     }
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             public: Connection::default(),

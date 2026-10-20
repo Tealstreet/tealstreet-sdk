@@ -193,7 +193,7 @@ fn request_preserves_caller_id_and_confirm_executed_but_ack_never_fabricates_oid
     assert_eq!(body["action"]["orders"][0]["c"], "caller-Ä");
     assert_eq!(body["action"]["orders"][0]["a"], 1);
     assert_eq!(body["confirm"], "executed");
-    assert_eq!(body["nonce"], NOW as u64);
+    assert!(body["nonce"].as_u64().unwrap() >= NOW as u64);
     assert!(
         r.headers
             .iter()
@@ -463,4 +463,17 @@ fn caller_id_preflight_preserves_shared_shape_duplicate_and_split_errors() {
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:Err(error)}) if error == expected)), "{actions:?}");
     }
+}
+
+#[test]
+fn separate_engines_with_the_same_signer_cannot_reuse_action_nonces() {
+    let mut a = engine();
+    let mut b = engine();
+    place(&mut a, 901, vec![limit("same-engine-id")]);
+    place(&mut b, 901, vec![limit("same-engine-id")]);
+    let first: Value = serde_json::from_str(write(&mut a).body.as_deref().unwrap()).unwrap();
+    let first = first["nonce"].as_u64().unwrap();
+    let second: Value = serde_json::from_str(write(&mut b).body.as_deref().unwrap()).unwrap();
+    let second = second["nonce"].as_u64().unwrap();
+    assert!(second > first);
 }

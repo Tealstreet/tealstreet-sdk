@@ -875,9 +875,13 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         match event {
-            Event::TickIntervalChanged { interval_ms } => self
-                .venue
-                .on_tick_interval(&mut cx, bounded_tick_interval(interval_ms)),
+            Event::TickIntervalChanged { interval_ms } => {
+                // Invalid typed inputs retain the last policy, just as rejected JSON does.
+                if interval_ms > 0.0 {
+                    self.venue
+                        .on_tick_interval(&mut cx, bounded_tick_interval(interval_ms));
+                }
+            }
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
             Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
@@ -1318,13 +1322,20 @@ mod streaming_tests {
         let mut engine = frame_engine();
         for (input, expected) in [
             (0.00001, 1_000.0),
-            (-1.0, 1_000.0),
             (1e300, 120_000.0),
             (f64::INFINITY, f64::INFINITY),
-            (f64::NAN, f64::INFINITY),
         ] {
             engine.handle(0.0, Event::TickIntervalChanged { interval_ms: input });
             assert_eq!(engine.venue.interval, expected);
+        }
+        for invalid in [0.0, -1.0, f64::NEG_INFINITY, f64::NAN] {
+            engine.handle(
+                0.0,
+                Event::TickIntervalChanged {
+                    interval_ms: invalid,
+                },
+            );
+            assert_eq!(engine.venue.interval, f64::INFINITY);
         }
     }
 

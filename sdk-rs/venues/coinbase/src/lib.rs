@@ -22,6 +22,14 @@ pub struct Options {
     pub spot_only: bool,
     pub testnet: bool,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProductKind {
     Intx,
@@ -35,7 +43,7 @@ pub enum Pending {
     History(history::Request),
 }
 pub struct Coinbase {
-    pub(crate) options: Options,
+    pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) public: public::Public,
     pub(crate) credentials: Option<sign::Credentials>,
     rest: rest::Rest,
@@ -45,7 +53,7 @@ pub struct Coinbase {
 }
 impl Coinbase {
     pub fn new(options: Options) -> Result<Self, String> {
-        let mut options = options;
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         let raw_key = Zeroizing::new(std::mem::take(&mut options.key));
         let secret = Zeroizing::new(std::mem::take(&mut options.secret));
         let credentials = if options.public_data_only || raw_key.is_empty() {

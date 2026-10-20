@@ -16,7 +16,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use wire::*;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -26,6 +26,14 @@ pub struct Options {
     pub vault: Option<String>,
     pub builder: Option<Builder>,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Builder {
     pub b: String,
@@ -83,7 +91,7 @@ struct Ladder {
     book: Book,
 }
 pub struct Hyperliquid {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     spot: bool,
     spot_tokens: HashMap<u32, String>,
     account: account::Account,
@@ -99,6 +107,7 @@ pub struct Hyperliquid {
 }
 impl Hyperliquid {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             spot: false,

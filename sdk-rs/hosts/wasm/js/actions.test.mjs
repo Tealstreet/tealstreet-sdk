@@ -59,3 +59,9 @@ test('WASM optional string and byte actions preserve UTF-8 validation and authen
     for (const engine of engines) engine.free();
   }
 });
+
+test('WASM options parse errors do not echo secret-bearing malformed values', { skip: !existsSync(built) }, () => {
+  const { WasmEngine } = createRequire(import.meta.url)('../pkg/node/safe_cex_wasm.js');
+  assert.throws(() => new WasmEngine('binance', JSON.stringify({ key: 'sensitive-key', publicDataOnly: 'sensitive-secret' })),
+    (error) => error.message === 'Invalid engine options');
+});

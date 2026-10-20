@@ -97,6 +97,7 @@ serde.workspace = true
 serde_json.workspace = true
 wasm-bindgen.workspace = true
 js-sys.workspace = true
+zeroize.workspace = true
 
 [lints]
 workspace = true

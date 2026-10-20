@@ -21,7 +21,7 @@ use wire::*;
 const REST: &str = "https://api-futures.kucoin.com";
 const SNAPSHOT_SHARD: usize = 380;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub testnet: bool,
@@ -30,6 +30,20 @@ pub struct Options {
     pub secret: Option<String>,
     pub passphrase: Option<String>,
     pub broker: Option<sign::BrokerOptions>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+        if let Some(broker) = self.broker.as_mut() {
+            safe_cex_crypto::secrets::EraseSecrets::erase_secrets(broker);
+        }
+    }
 }
 
 pub enum Pending {
@@ -116,7 +130,7 @@ struct BookState {
 }
 
 pub struct Kucoin {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<sign::Credentials>,
     account: account::Account,
     trading: trading::Trading,
@@ -196,6 +210,7 @@ fn success(status: u16, body: &str) -> Result<Envelope<'_>, String> {
 
 impl Kucoin {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = if options.public_data_only {
             None
         } else {

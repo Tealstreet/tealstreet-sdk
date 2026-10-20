@@ -148,17 +148,21 @@ fn append_words(bytes: &mut Vec<u8>, words: &[u64]) {
     }
 }
 
-fn random_nonce() -> Result<SchnorrNonce, String> {
-    // Rejection sampling matches the scalar range without modulo bias.
-    let mut bytes = Zeroizing::new([0u8; 40]);
-    for _ in 0..32 {
-        getrandom::getrandom(bytes.as_mut()).map_err(|e| format!("Lighter entropy: {e}"))?;
-        bytes[39] &= 0x7f;
-        if let Ok(nonce) = SchnorrNonce::from_bytes(bytes.as_ref()) {
-            return Ok(nonce);
-        }
-    }
-    Err("Lighter entropy did not produce a valid signing nonce".into())
+fn hedged_sign(input: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
+    hedged_sign_with_entropy(input, key, |bytes| {
+        getrandom::getrandom(bytes).map_err(|_| ())
+    })
+}
+
+fn hedged_sign_with_entropy(
+    input: &[u8],
+    key: &[u8],
+    fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
+) -> Result<Vec<u8>, String> {
+    let mut entropy = Zeroizing::new([0u8; 32]);
+    fill(entropy.as_mut()).map_err(|_| "Lighter entropy unavailable")?;
+    let nonce = safe_cex_crypto::lighter::hedged_nonce(input, key, &entropy)?;
+    schnorr_sign(input, key, nonce)
 }
 
 impl OrderInfo {
@@ -284,7 +288,7 @@ impl Signer {
     }
 
     pub fn auth_token(&self, deadline_seconds: u64) -> Result<String, String> {
-        self.auth_token_with_nonce(deadline_seconds, random_nonce()?)
+        self.auth_token_inner(deadline_seconds, None)
     }
 
     /// The supplied nonce must come from fresh CSPRNG entropy and must never be reused.
@@ -293,6 +297,14 @@ impl Signer {
         deadline_seconds: u64,
         schnorr_nonce: SchnorrNonce,
     ) -> Result<String, String> {
+        self.auth_token_inner(deadline_seconds, Some(schnorr_nonce))
+    }
+
+    fn auth_token_inner(
+        &self,
+        deadline_seconds: u64,
+        schnorr_nonce: Option<SchnorrNonce>,
+    ) -> Result<String, String> {
         bounded(deadline_seconds, MAX_ORDER_VALUE, "authentication deadline")?;
         let message = format!(
             "{deadline_seconds}:{}:{}",
@@ -300,7 +312,10 @@ impl Signer {
         );
         let mut data = message.as_bytes().to_vec();
         data.resize(data.len().div_ceil(8) * 8, 0);
-        let signature = schnorr_sign(&data, self.key.as_ref(), schnorr_nonce)?;
+        let signature = match schnorr_nonce {
+            Some(nonce) => schnorr_sign(&data, self.key.as_ref(), nonce)?,
+            None => hedged_sign(&data, self.key.as_ref())?,
+        };
         Ok(format!("{message}:{}", safe_cex_crypto::hex(&signature)))
     }
 
@@ -310,7 +325,7 @@ impl Signer {
         nonce: u64,
         now_ms: u64,
     ) -> Result<SignedTransaction, String> {
-        self.sign_with_nonce(tx, nonce, now_ms, random_nonce()?)
+        self.sign_inner(tx, nonce, now_ms, None)
     }
 
     /// The supplied nonce must come from fresh CSPRNG entropy and must never be reused.
@@ -320,6 +335,16 @@ impl Signer {
         nonce: u64,
         now_ms: u64,
         schnorr_nonce: SchnorrNonce,
+    ) -> Result<SignedTransaction, String> {
+        self.sign_inner(tx, nonce, now_ms, Some(schnorr_nonce))
+    }
+
+    fn sign_inner(
+        &self,
+        tx: &Transaction,
+        nonce: u64,
+        now_ms: u64,
+        schnorr_nonce: Option<SchnorrNonce>,
     ) -> Result<SignedTransaction, String> {
         safe_integer(nonce, "transaction nonce")?;
         let expired_at = now_ms
@@ -382,7 +407,10 @@ impl Signer {
             }
         };
         let preimage = signing_preimage(&data, &attrs)?;
-        let signature_bytes = schnorr_sign(&preimage, self.key.as_ref(), schnorr_nonce)?;
+        let signature_bytes = match schnorr_nonce {
+            Some(nonce) => schnorr_sign(&preimage, self.key.as_ref(), nonce)?,
+            None => hedged_sign(&preimage, self.key.as_ref())?,
+        };
         let signature = safe_cex_crypto::hex(&signature_bytes);
         let encoded = safe_cex_crypto::encode(&signature_bytes, safe_cex_crypto::Encoding::Base64);
         let tx_info = match tx {
@@ -429,5 +457,35 @@ impl Signer {
             data,
             signature,
         })
+    }
+}
+
+#[cfg(test)]
+mod security_hedging {
+    use super::*;
+    #[test]
+    fn entropy_failure_never_produces_a_signature() {
+        let error = hedged_sign_with_entropy(&[1; 8], &[3; 40], |bytes| {
+            bytes.fill(7);
+            Err(())
+        })
+        .unwrap_err();
+        assert_eq!(error, "Lighter entropy unavailable");
+    }
+    #[test]
+    fn repeated_entropy_remains_safe_at_the_production_signing_boundary() {
+        let sign = |input: &[u8]| {
+            hedged_sign_with_entropy(input, &[3; 40], |bytes| {
+                bytes.fill(0);
+                Ok(())
+            })
+            .unwrap()
+        };
+        let first = sign(&[1; 8]);
+        let second = sign(&[2; 8]);
+        assert_ne!(first, second);
+        let public = safe_cex_crypto::lighter::public_key(&[3; 40]).unwrap();
+        assert!(safe_cex_crypto::lighter::schnorr_verify(&[1; 8], &public, &first).unwrap());
+        assert!(safe_cex_crypto::lighter::schnorr_verify(&[2; 8], &public, &second).unwrap());
     }
 }

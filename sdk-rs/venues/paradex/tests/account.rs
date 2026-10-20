@@ -83,7 +83,7 @@ fn config_precedes_signed_auth_and_all_private_reads_carry_the_cached_bearer() {
     for (name, value) in [
         ("PARADEX-STARKNET-ACCOUNT", "0x0123"),
         ("PARADEX-TIMESTAMP", "1700000000"),
-        ("PARADEX-SIGNATURE-EXPIRATION", "1700086400"),
+        ("PARADEX-SIGNATURE-EXPIRATION", "1700000300"),
     ] {
         assert!(auth.headers.iter().any(|(n, v)| *n == name && v == value));
     }

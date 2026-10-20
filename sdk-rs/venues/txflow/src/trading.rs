@@ -11,7 +11,6 @@ pub struct Trading {
     queue: VecDeque<Job>,
     active: Option<Job>,
     inflight: bool,
-    nonce: u64,
     last_write: Option<f64>,
     pace: Option<TimerId>,
     reconcile: Option<TimerId>,
@@ -659,7 +658,10 @@ impl TxFlow {
             self.finish_trade(cx, Err("TxFlow market is halted".into()));
             return;
         }
-        let nonce = match next_nonce(cx.now, self.trading.nonce) {
+        let nonce = match safe_cex_crypto::nonce::ethereum_agent(
+            self.options.secret.as_deref().unwrap_or(""),
+            cx.now,
+        ) {
             Ok(n) => n,
             Err(e) => {
                 self.finish_trade(cx, Err(e));
@@ -678,7 +680,6 @@ impl TxFlow {
                 return;
             }
         };
-        self.trading.nonce = nonce;
         let (kind, response_type) = action.kind();
         let body = serde_json::to_string(&Envelope {
             action: TypedAction {
@@ -839,16 +840,6 @@ impl TxFlow {
 pub(crate) fn valid_cloid(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && !id.starts_with("0x")
 }
-fn next_nonce(now: f64, previous: u64) -> Result<u64, String> {
-    if !now.is_finite() || !(0.0..=9_007_199_254_740_991.0).contains(&now) {
-        return Err("Invalid TxFlow signing time".into());
-    }
-    let nonce = (now.floor() as u64).max(previous.checked_add(1).ok_or("TxFlow nonce exhausted")?);
-    if nonce > 9_007_199_254_740_991 {
-        return Err("TxFlow nonce exhausted".into());
-    }
-    Ok(nonce)
-}
 fn checked_number(value: f64, step: f64) -> Result<String, String> {
     if !value.is_finite() || value <= 0.0 || !step.is_finite() || step <= 0.0 {
         return Err("Invalid TxFlow order number".into());
@@ -933,12 +924,7 @@ mod tests {
         assert!(!valid_cloid("0xcaller"));
         assert!(!valid_cloid(""));
     }
-    #[test]
-    fn nonce_monotonic_checked_and_clock_validated() {
-        assert_eq!(next_nonce(1000.9, 1001).unwrap(), 1002);
-        assert!(next_nonce(f64::NAN, 0).is_err());
-        assert!(next_nonce(1.0, u64::MAX).is_err());
-    }
+
     #[test]
     fn one_status_ack_applies_to_entire_action_and_never_yields_id() {
         let r = Response {

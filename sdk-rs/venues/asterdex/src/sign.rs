@@ -676,3 +676,5 @@ mod tests {
         assert!(query(&first, 1233.0).contains("nonce=1234002&signature="));
     }
 }
+
+safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);

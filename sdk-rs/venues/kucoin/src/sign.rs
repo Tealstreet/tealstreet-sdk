@@ -3,7 +3,7 @@ use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::Method;
 use serde::Deserialize;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrokerOptions {
     pub partner: String,
@@ -151,5 +151,23 @@ mod tests {
             "KC-API-SIGN",
             "wgkeALmBKfFSYSRNL+tgo/XH5cwGnkzyz5SQRRKgEnE=".into()
         )));
+    }
+}
+
+safe_cex_crypto::redacted_debug!(BrokerOptions);
+safe_cex_crypto::erase_credentials_on_drop!(BrokerOptions, broker_key);
+impl safe_cex_crypto::secrets::EraseSecrets for Credentials {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(broker) = self.broker.as_mut() {
+            safe_cex_crypto::secrets::EraseSecrets::erase_secrets(broker);
+        }
+    }
+}
+impl Drop for Credentials {
+    fn drop(&mut self) {
+        safe_cex_crypto::secrets::EraseSecrets::erase_secrets(self);
     }
 }

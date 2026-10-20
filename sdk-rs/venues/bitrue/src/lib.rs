@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use wire::{CandleWire, Contract, Message, Payload};
 const REST: &str = "https://fapi.bitrue.com";
 const PUBLIC: &str = "wss://fmarket-ws.bitrue.com/kline-api/ws";
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Options {
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
@@ -23,6 +23,17 @@ pub struct Options {
     pub secret: Option<String>,
     pub recv_window: u32,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
+
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -95,7 +106,7 @@ struct SocketRead {
     timer: TimerId,
 }
 pub struct Bitrue {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     contracts: HashMap<String, ContractInfo>,
@@ -215,6 +226,7 @@ fn candle(row: &CandleWire<'_>, multiplier: f64) -> Option<Candle> {
 }
 impl Bitrue {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::default(),

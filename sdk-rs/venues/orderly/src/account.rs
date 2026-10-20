@@ -310,16 +310,21 @@ impl Orderly {
             self.sync_setting(cx, &s);
         }
         self.account_poll(cx, true);
-        if self.account.tick.is_none() {
+        if self.account.tick.is_none() && self.poll_interval().is_finite() {
+            self.account.tick = Some(cx.set_timer(self.poll_interval()));
+        }
+    }
+    pub(crate) fn account_tick_interval(&mut self, cx: &mut Cx<'_, Pending>, interval: f64) {
+        self.options.tick_interval = Some(safe_cex_engine::engine::bounded_tick_interval(interval));
+        if let Some(timer) = self.account.tick.take() {
+            cx.clear_timer(timer);
+        }
+        if self.account.credentials.is_some() && self.poll_interval().is_finite() {
             self.account.tick = Some(cx.set_timer(self.poll_interval()));
         }
     }
     fn poll_interval(&self) -> f64 {
-        self.options
-            .tick_interval
-            .filter(|v| v.is_finite())
-            .unwrap_or(2000.0)
-            .clamp(1000.0, 3600000.0)
+        safe_cex_engine::engine::bounded_tick_interval(self.options.tick_interval.unwrap_or(2000.0))
     }
     pub(crate) fn sync_setting(&self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         let mode = self.selected_mode(cx, symbol);
@@ -1431,7 +1436,9 @@ impl Orderly {
             self.account.tick = None;
             self.account.ticks = self.account.ticks.wrapping_add(1);
             self.account_poll(cx, self.account.ticks.is_multiple_of(4));
-            self.account.tick = Some(cx.set_timer(self.poll_interval()));
+            if self.poll_interval().is_finite() {
+                self.account.tick = Some(cx.set_timer(self.poll_interval()));
+            }
             return true;
         }
         if self.account.socket.reconnect == Some(timer) {
@@ -1456,5 +1463,24 @@ impl Orderly {
             return true;
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod security_poll_interval {
+    use super::*;
+    #[test]
+    fn native_options_cannot_bypass_bounded_polling_or_pause_semantics() {
+        for (value, expected) in [
+            (0.001, 1000.0),
+            (1e20, 120000.0),
+            (f64::INFINITY, f64::INFINITY),
+        ] {
+            let venue = Orderly::new(crate::Options {
+                tick_interval: Some(value),
+                ..crate::Options::default()
+            });
+            assert_eq!(venue.poll_interval(), expected);
+        }
     }
 }

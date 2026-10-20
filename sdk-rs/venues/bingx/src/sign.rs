@@ -128,3 +128,13 @@ fn encode(value: &str) -> String {
     }
     out
 }
+
+impl Drop for Credentials {
+    fn drop(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}

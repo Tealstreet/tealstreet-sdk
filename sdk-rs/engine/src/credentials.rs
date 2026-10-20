@@ -1,4 +1,6 @@
 //! Optional credentials for the TS secondary client's GET-only identity.
+use zeroize::Zeroize;
+
 #[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadCredentials {
@@ -9,6 +11,13 @@ pub struct ReadCredentials {
 }
 
 impl ReadCredentials {
+    /// Erase an engine-owned copy before its containing options are released.
+    pub fn erase_secrets(&mut self) {
+        self.key.zeroize();
+        self.secret.zeroize();
+        self.passphrase.zeroize();
+    }
+
     pub fn validate_passphrase(&self, primary: Option<&str>) -> Result<(), &'static str> {
         if self
             .passphrase
@@ -64,5 +73,18 @@ mod tests {
         for part in ["test-key", "test-secret", "test-pass"] {
             assert!(!debug.contains(part));
         }
+    }
+
+    #[test]
+    fn secondary_credential_cleanup_erases_all_owned_fields() {
+        let mut read = ReadCredentials {
+            key: "secondary-key".into(),
+            secret: "secondary-secret".into(),
+            passphrase: Some("secondary-passphrase".into()),
+        };
+        read.erase_secrets();
+        assert!(read.key.is_empty());
+        assert!(read.secret.is_empty());
+        assert!(read.passphrase.as_deref().is_none_or(str::is_empty));
     }
 }

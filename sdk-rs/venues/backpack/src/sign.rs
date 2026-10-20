@@ -47,13 +47,17 @@ pub fn payload(instruction: &str, rows: &[Params], now: f64, window: u32) -> Str
 
 pub struct Credentials {
     pub key: String,
-    seed: Vec<u8>,
+    seed: zeroize::Zeroizing<Vec<u8>>,
     pub window: u32,
 }
 
 impl Credentials {
     pub fn new(key: String, secret: &str) -> Result<Self, String> {
-        let seed = STANDARD.decode(secret).map_err(|e| e.to_string())?;
+        let seed = zeroize::Zeroizing::new(
+            STANDARD
+                .decode(secret)
+                .map_err(|_| "Invalid Backpack base64 seed")?,
+        );
         if seed.len() != 32 {
             return Err("Ed25519 seed must be 32 bytes".into());
         }
