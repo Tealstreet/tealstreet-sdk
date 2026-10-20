@@ -159,6 +159,24 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  // Paired TS fixes: retain both rolling-volume sides and open price across
+  // ticker deltas; derive quote volume/change from current last; accept native
+  // empty-string clears and nanosecond funding timestamps in either JSON form.
+  // Rust also anchors sequences from subscribe ACKs and isolates candle intervals.
+  // Private reads preserve zero free collateral, exact native IDs/timestamps and
+  // CROSS margin metadata; failed/malformed/stale reads never clear live state.
+  // Successful revision-matching empty snapshots remove ghosts and retain
+  // tombstones against delayed stream events. Session code 1000 refreshes once
+  // even when delivered in an HTTP-200 error envelope.
+  // Orders use exact EIP-712 integers, distinct reducing bracket children,
+  // native symbol-cancel filters and remaining quantity on partial-fill amend.
+  // Conditional replacement retains native execution price separately from
+  // its trigger; mapped orders keep explicit client IDs. Refreshed cookies
+  // agree with proxy-session headers and reconnect the private socket.
+  // The private server ping receives pong rather than being ignored.
+  // Rust also refuses replacement after observed execution/lifecycle progress
+  // or stale cancellation proof, rechecking deferred/resigned dispatches.
+  grvt() {},
   polymarket() {
     // Reference repairs (not output normalization): preserve initial array books,
     // every sorted absolute depth change, dynamic ticks and event watermarks;
