@@ -1255,7 +1255,11 @@ impl Venue for Grvt {
 
 /// The native id of an instrument row that failed to decode, when it has one.
 fn instrument_id(item: &str) -> Option<String> {
-    let row: serde_json::Value = serde_json::from_str(item).ok()?;
-    let id = row.get("i").or_else(|| row.get("instrument"))?.as_str()?;
-    (!id.is_empty()).then(|| id.to_owned())
+    #[derive(serde::Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow, rename = "i", alias = "instrument")]
+        id: std::borrow::Cow<'a, str>,
+    }
+    let row: Identity<'_> = serde_json::from_str(item).ok()?;
+    (!row.id.is_empty()).then(|| row.id.into_owned())
 }

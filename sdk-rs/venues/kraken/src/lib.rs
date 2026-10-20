@@ -432,10 +432,22 @@ impl Kraken {
 }
 /// The PF_ symbol of an undecodable instrument row that was not marked untradeable.
 fn malformed_perpetual(item: &str) -> Option<String> {
-    let row: serde_json::Value = serde_json::from_str(item).ok()?;
-    let symbol = row.get("symbol")?.as_str()?;
-    (symbol.starts_with("PF_") && row.get("tradeable") != Some(&serde_json::Value::Bool(false)))
-        .then(|| symbol.to_owned())
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Flag {
+        Bool(bool),
+        Other(serde::de::IgnoredAny),
+    }
+    #[derive(serde::Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow)]
+        symbol: std::borrow::Cow<'a, str>,
+        #[serde(default)]
+        tradeable: Option<Flag>,
+    }
+    let row: Identity<'_> = serde_json::from_str(item).ok()?;
+    (row.symbol.starts_with("PF_") && !matches!(row.tradeable, Some(Flag::Bool(false))))
+        .then(|| row.symbol.into_owned())
 }
 fn interval_spec(interval: &str) -> (&str, f64) {
     match interval {
