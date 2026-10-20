@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
+use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_orderly::{Options, Orderly};
 pub type Driver = Engine<Orderly>;
 pub const MARKETS: &str = r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":20,"base_imr":0.01},{"symbol":"PERP_ETH_USDC","base_tick":0.001,"quote_tick":0.01,"base_min":0.001,"base_max":100,"base_imr":0.02}]}}"#;
@@ -8,6 +8,60 @@ pub const ORDER: &str = r#"{"order_id":9007199254740993,"symbol":"PERP_BTC_USDC"
 pub const POSITIONS: &str = r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","position_qty":1,"average_open_price":50000,"mark_price":51000,"margin_mode":"CROSS","leverage":10},{"symbol":"PERP_BTC_USDC","position_qty":-0.5,"average_open_price":52000,"mark_price":51000,"margin_mode":"ISOLATED","leverage":5,"margin":6000}],"total_collateral_value":10000,"free_collateral":7000}}"#;
 pub fn actions(e: &mut Driver) -> Vec<Action> {
     e.drain_actions().collect()
+}
+/// Tracks armed timers so tests can advance time instead of firing timer IDs.
+pub struct Clock {
+    pub now: f64,
+    timers: Vec<(TimerId, f64)>,
+}
+impl Clock {
+    pub fn new(now: f64) -> Self {
+        Self {
+            now,
+            timers: vec![],
+        }
+    }
+    pub fn track(&mut self, out: &[Action]) {
+        for action in out {
+            match action {
+                Action::SetTimer { timer, at_ms } => self.timers.push((*timer, *at_ms)),
+                Action::ClearTimer { timer } => self.timers.retain(|(t, _)| t != timer),
+                _ => {}
+            }
+        }
+    }
+    pub fn drain(&mut self, e: &mut Driver) -> Vec<Action> {
+        let out = actions(e);
+        self.track(&out);
+        out
+    }
+    pub fn handle(&mut self, e: &mut Driver, event: Event<'_>) -> Vec<Action> {
+        e.handle(self.now, event);
+        self.drain(e)
+    }
+    pub fn advance(&mut self, e: &mut Driver, until: f64) -> Vec<(f64, Action)> {
+        let mut fired = vec![];
+        while self.timers.iter().any(|(_, at)| *at <= until) {
+            fired.extend(self.next(e));
+        }
+        self.now = until;
+        fired
+    }
+    /// Fires only the earliest armed timer.
+    pub fn next(&mut self, e: &mut Driver) -> Vec<(f64, Action)> {
+        let Some((timer, at)) = self
+            .timers
+            .iter()
+            .copied()
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            return vec![];
+        };
+        self.timers.retain(|(t, _)| *t != timer);
+        self.now = self.now.max(at);
+        let out = self.handle(e, Event::TimerFired { timer });
+        out.into_iter().map(|a| (self.now, a)).collect()
+    }
 }
 pub fn requests(e: &mut Driver) -> Vec<HttpRequest> {
     actions(e)
@@ -60,26 +114,7 @@ pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketI
         for a in out {
             match a {
                 Action::Http(r) => {
-                    let body = if r.url.ends_with("/v1/client/info") {
-                        r#"{"success":true,"data":{"max_leverage":20}}"#.into()
-                    } else if r.url.ends_with("/v1/public/info") {
-                        MARKETS.into()
-                    } else if r.url.ends_with("/v1/public/futures") {
-                        TICKERS.into()
-                    } else if r.url.ends_with("/v1/client/margin_modes") {
-                        r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","default_margin_mode":"CROSS"},{"symbol":"PERP_ETH_USDC","default_margin_mode":"ISOLATED"}]}}"#.into()
-                    } else if r.url.ends_with("/v1/positions") {
-                        positions.into()
-                    } else if r.url.contains("/v1/algo/orders") {
-                        format!(
-                            r#"{{"success":true,"data":{{"rows":{algos},"meta":{{"total":{}}}}}}}"#,
-                            if algos == "[]" { 0 } else { 1 }
-                        )
-                    } else {
-                        format!(
-                            r#"{{"success":true,"data":{{"rows":[{order}],"meta":{{"total":1}}}}}}"#
-                        )
-                    };
+                    let body = account_body(&r.url, order, algos, positions);
                     reply(&mut e, &r, 200, &body);
                 }
                 Action::WsConnect { socket, url, .. } if url.contains("private") => {
@@ -94,6 +129,26 @@ pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketI
     actions(&mut e);
     ws(&mut e, socket, r#"{"event":"auth","success":true}"#);
     (e, socket)
+}
+pub fn account_body(url: &str, order: &str, algos: &str, positions: &str) -> String {
+    if url.ends_with("/v1/client/info") {
+        r#"{"success":true,"data":{"max_leverage":20}}"#.into()
+    } else if url.ends_with("/v1/public/info") {
+        MARKETS.into()
+    } else if url.ends_with("/v1/public/futures") {
+        TICKERS.into()
+    } else if url.ends_with("/v1/client/margin_modes") {
+        r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","default_margin_mode":"CROSS"},{"symbol":"PERP_ETH_USDC","default_margin_mode":"ISOLATED"}]}}"#.into()
+    } else if url.ends_with("/v1/positions") {
+        positions.into()
+    } else if url.contains("/v1/algo/orders") {
+        format!(
+            r#"{{"success":true,"data":{{"rows":{algos},"meta":{{"total":{}}}}}}}"#,
+            if algos == "[]" { 0 } else { 1 }
+        )
+    } else {
+        format!(r#"{{"success":true,"data":{{"rows":[{order}],"meta":{{"total":1}}}}}}"#)
+    }
 }
 pub fn fill_amounts(e: &mut Driver) -> Vec<f64> {
     let Some(bytes) = e.take_frame(2000.0) else {

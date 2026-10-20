@@ -111,6 +111,35 @@ fn candles_on_business_and_all_sockets_watch_silence() {
     assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: Ok(s), .. }) if s.contains("\"volume\":20.0"))));
 }
 
+type Timers = Vec<(safe_cex_engine::TimerId, f64)>;
+
+fn track(e: &mut Engine<Okx>, timers: &mut Timers) -> Vec<Action> {
+    let out = actions(e);
+    for a in &out {
+        match a {
+            Action::SetTimer { timer, at_ms } => timers.push((*timer, *at_ms)),
+            Action::ClearTimer { timer } => timers.retain(|(t, _)| t != timer),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn fire_until(e: &mut Engine<Okx>, timers: &mut Timers, until: f64) -> Vec<Action> {
+    let mut out = Vec::new();
+    while let Some((timer, at)) = timers
+        .iter()
+        .copied()
+        .filter(|(_, at)| *at <= until)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+    {
+        timers.retain(|(t, _)| *t != timer);
+        e.handle(at, Event::TimerFired { timer });
+        out.extend(track(e, timers));
+    }
+    out
+}
+
 #[test]
 fn every_open_socket_pings_times_out_and_reconnects() {
     let mut e = Engine::new(Okx::new(Options::default()));
@@ -119,8 +148,8 @@ fn every_open_socket_pings_times_out_and_reconnects() {
     reply(&mut e, &request, &envelope(MARKET), 1.0);
     let request = actions(&mut e).remove(0);
     reply(&mut e, &request, &envelope(TICKER), 2.0);
-    let initial = actions(&mut e);
-    let sockets: Vec<_> = initial
+    let mut timers = Timers::new();
+    let sockets: Vec<_> = track(&mut e, &mut timers)
         .iter()
         .filter_map(|a| {
             if let Action::WsConnect { socket, .. } = a {
@@ -130,48 +159,24 @@ fn every_open_socket_pings_times_out_and_reconnects() {
             }
         })
         .collect();
-    let timers: Vec<_> = initial
-        .iter()
-        .filter_map(|a| {
-            if let Action::SetTimer { timer, .. } = a {
-                Some(*timer)
-            } else {
-                None
-            }
-        })
-        .collect();
     assert_eq!(sockets.len(), 2);
     for socket in &sockets {
         e.handle(3.0, Event::WsOpened { socket: *socket });
     }
-    actions(&mut e);
-    for timer in timers {
-        e.handle(10_004.0, Event::TimerFired { timer });
-    }
-    let closed = actions(&mut e);
+    track(&mut e, &mut timers);
+    // Unanswered pings retire both sockets one 10s cadence after the last pong.
+    let out = fire_until(&mut e, &mut timers, 20_002.0);
+    assert!(!out.iter().any(|a| matches!(a, Action::WsClose { .. })));
+    let out = fire_until(&mut e, &mut timers, 20_003.0);
     assert_eq!(
-        closed
-            .iter()
+        out.iter()
             .filter(|a| matches!(a, Action::WsClose { .. }))
             .count(),
         2
     );
-    let timers: Vec<_> = closed
-        .iter()
-        .filter_map(|a| {
-            if let Action::SetTimer { timer, .. } = a {
-                Some(*timer)
-            } else {
-                None
-            }
-        })
-        .collect();
-    for timer in timers {
-        e.handle(12_000.0, Event::TimerFired { timer });
-    }
+    let out = fire_until(&mut e, &mut timers, 21_003.0);
     assert_eq!(
-        actions(&mut e)
-            .iter()
+        out.iter()
             .filter(|a| matches!(a, Action::WsConnect { .. }))
             .count(),
         2

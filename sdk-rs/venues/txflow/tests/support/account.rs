@@ -83,12 +83,14 @@ pub fn bootstrap_with_wallet(
             _ => None,
         })
         .unwrap();
+    // Socket connect deadlines share this instant; the account refresh is armed last.
     let refresh = actions
         .iter()
-        .find_map(|a| match a {
+        .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } if *at_ms == NOW + 5025.0 => Some(*timer),
             _ => None,
         })
+        .next_back()
         .unwrap();
     let reads = actions
         .into_iter()
