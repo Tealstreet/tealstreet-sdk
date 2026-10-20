@@ -591,8 +591,8 @@ fn partial_bracket_entry_fill_and_triggerless_leaf_do_not_finalize_live_root_sib
     );
 }
 
-// Drive the actual account loop through slow/fast updates, a parked stale callback,
-// and a resumed read. Other timers are deliberately not fired.
+// Drive the actual account loop through slow/fast (1s floor) updates, a parked
+// stale callback, and a resumed read. Other timers are deliberately not fired.
 fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine: &mut safe_cex_engine::Engine<V>,
     now: f64,
@@ -619,7 +619,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     engine.handle(
         now + 1.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1000.0 / POLL_MS,
         },
     );
     let fast: Vec<_> = engine
@@ -630,7 +630,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(fast.len(), 1);
-    assert_eq!(fast[0].1, now + 501.0);
+    assert_eq!(fast[0].1, now + 1001.0);
     engine.handle(
         now + 2.0,
         Event::PollScaleChanged {
@@ -644,12 +644,12 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
-    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    engine.handle(now + 1001.0, Event::TimerFired { timer: fast[0].0 });
     assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
-            scale: 500.0 / POLL_MS,
+            scale: 1000.0 / POLL_MS,
         },
     );
     let resumed: Vec<_> = engine
@@ -660,9 +660,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         })
         .collect();
     assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0].1, now + 90_500.0);
+    assert_eq!(resumed[0].1, now + 91_000.0);
     engine.handle(
-        now + 90_500.0,
+        now + 91_000.0,
         Event::TimerFired {
             timer: resumed[0].0,
         },
@@ -678,7 +678,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         reads.iter().any(|r| r.url.contains(endpoint)),
         "actual resumed account HTTP: {reads:?}"
     );
-    let completed_at = now + 90_501.0;
+    let completed_at = now + 91_001.0;
     engine.handle(
         completed_at,
         Event::PollScaleChanged {
@@ -779,4 +779,44 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
     }
     assert!(reads.is_empty(), "account cycle must complete");
     policy_poll_after_completion(engine, now);
+}
+
+#[test]
+fn host_poll_scale_cannot_drive_account_reads_below_one_second() {
+    use safe_cex_engine::Action;
+    let (mut e, _) = ready();
+    for _ in 0..12 {
+        let initial = requests(&mut e);
+        if initial.is_empty() {
+            break;
+        }
+        for r in initial {
+            let body = if r.url.contains("/positions") {
+                POSITIONS
+            } else {
+                r#"{"success":true,"data":{"rows":[],"meta":{"total":0}}}"#
+            };
+            e.handle(
+                2000.0,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+        }
+    }
+    e.drain_actions().for_each(drop);
+    e.handle(2000.0, Event::PollScaleChanged { scale: 0.05 });
+    let armed: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } => Some(at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(armed, vec![3000.0], "a 100ms scaled cadence is held at 1s");
 }

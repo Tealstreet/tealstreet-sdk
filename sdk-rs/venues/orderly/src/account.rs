@@ -5,6 +5,13 @@ use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+/// Orderly's account reads never poll faster than once a second, however the
+/// host scales the cadence.
+const POLL_FLOOR: safe_cex_engine::PollTimerBounds = safe_cex_engine::PollTimerBounds {
+    minimum_interval_ms: 1000.0,
+    not_before_ms: f64::NEG_INFINITY,
+};
+
 pub enum Request {
     Info,
     Modes {
@@ -313,7 +320,8 @@ impl Orderly {
         }
         self.account_poll(cx, true);
         if self.account.tick.is_none() {
-            self.account.tick = Some(cx.set_poll_timer(self.poll_interval()));
+            self.account.tick =
+                Some(cx.set_poll_timer_with_bounds(self.poll_interval(), POLL_FLOOR));
         }
     }
     fn poll_interval(&self) -> f64 {
@@ -1445,7 +1453,8 @@ impl Orderly {
             self.account.tick = None;
             self.account.ticks = self.account.ticks.wrapping_add(1);
             self.account_poll(cx, self.account.ticks.is_multiple_of(4));
-            self.account.tick = Some(cx.set_poll_timer(self.poll_interval()));
+            self.account.tick =
+                Some(cx.set_poll_timer_with_bounds(self.poll_interval(), POLL_FLOOR));
             return true;
         }
         if self.account.socket.reconnect == Some(timer) {
