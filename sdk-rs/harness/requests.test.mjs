@@ -11,6 +11,7 @@ import {
   isWriteRequest,
   requestKey,
   selectResponse,
+  subscriptionMessage,
   subscriptionKey,
   subscriptionKeys,
 } from './requests.mjs';
@@ -626,20 +627,25 @@ test('caller IDs are collected from every command shape without collecting tape 
   );
 });
 
-
 test('KuCoin topic batches and acknowledgement preferences retain exact token and channel identity', async () => {
   const { venueOf } = await import('./venues.mjs');
   const venue = venueOf('kucoin');
   const url = 'wss://bullet.test/socket?token=public&connectId=runtime';
-  const keys = (topic, response, route = url, type = 'subscribe') => subscriptionKeys(route,
-    { type, id: 'generated', topic, privateChannel: false, response }, new Set(), venue);
+  const keys = (topic, response, route = url, type = 'subscribe') =>
+    subscriptionKeys(route, { type, id: 'generated', topic, privateChannel: false, response }, new Set(), venue);
   assert.deepEqual(keys('/contractMarket/snapshot:A,B', false), [
     ...keys('/contractMarket/snapshot:A', true, url.replace('runtime', 'recorded')),
     ...keys('/contractMarket/snapshot:B', true),
   ]);
-  assert.notDeepEqual(keys('/contractMarket/snapshot:A', false), keys('/contractMarket/snapshot:A', false, url.replace('token=public', 'token=private')));
+  assert.notDeepEqual(
+    keys('/contractMarket/snapshot:A', false),
+    keys('/contractMarket/snapshot:A', false, url.replace('token=public', 'token=private')),
+  );
   assert.notDeepEqual(keys('/contractMarket/snapshot:A', false), keys('/contractMarket/level2:A', false));
-  assert.notDeepEqual(keys('/contractMarket/snapshot:A', false), keys('/contractMarket/snapshot:A', false, url, 'unsubscribe'));
+  assert.notDeepEqual(
+    keys('/contractMarket/snapshot:A', false),
+    keys('/contractMarket/snapshot:A', false, url, 'unsubscribe'),
+  );
   assert.deepEqual(subscriptionKeys(url, '{"type":"ping","id":1}', new Set(), venue), []);
 });
 
@@ -647,9 +653,44 @@ test('WOO native topics and auth identity remain exact while fresh clocks vary',
   const url = 'wss://wss.woox.io/v2/ws/private/stream/app';
   const options = { wooProtocol: true };
   const keys = (value) => subscriptionKeys(url, JSON.stringify(value), new Set(), options);
-  assert.notDeepEqual(keys({ event: 'subscribe', topic: 'executionreport' }), keys({ event: 'subscribe', topic: 'algoexecutionreportv2' }));
+  assert.notDeepEqual(
+    keys({ event: 'subscribe', topic: 'executionreport' }),
+    keys({ event: 'subscribe', topic: 'algoexecutionreportv2' }),
+  );
   for (const event of ['ping', 'pong']) assert.deepEqual(keys({ event }), []);
   const auth = (apikey, timestamp, sign) => keys({ event: 'auth', params: { apikey, timestamp, sign } });
   assert.deepEqual(auth('key', 1, 'a'), auth('key', 2, 'b'));
   assert.notDeepEqual(auth('key', 1, 'a'), auth('other', 1, 'a'));
+});
+
+test('Coinbase channel product arrays expand exact topics and batch identities', () => {
+  const url = 'wss://advanced-trade-ws.coinbase.com';
+  const batch = { type: 'subscribe', channel: 'level2', product_ids: ['BTC-USD', 'ETH-USD'] };
+  assert.deepEqual(subscriptionMessage(batch), { op: 'subscribe', topics: ['level2.BTC-USD', 'level2.ETH-USD'] });
+  assert.deepEqual(subscriptionMessage({ ...batch, type: 'unsubscribe', product_ids: ['ETH-USD'] }), {
+    op: 'unsubscribe',
+    topics: ['level2.ETH-USD'],
+  });
+  const batched = subscriptionKeys(url, JSON.stringify(batch)).sort();
+  const individual = ['BTC-USD', 'ETH-USD']
+    .flatMap((product) => subscriptionKeys(url, JSON.stringify({ ...batch, product_ids: [product] })))
+    .sort();
+  assert.deepEqual(batched, individual);
+  assert.notDeepEqual(batched, subscriptionKeys(url, JSON.stringify({ ...batch, channel: 'candles' })));
+  assert.notDeepEqual(
+    batched,
+    subscriptionKeys(url, JSON.stringify({ ...batch, product_ids: ['BTC-USD', 'SOL-USD'] })),
+  );
+  assert.deepEqual(
+    subscriptionMessage({ type: 'subscribe', channel: 'heartbeats', product_ids: ['BTC-USD', 'ETH-USD'] }),
+    { op: 'subscribe', topics: ['heartbeats'] },
+  );
+  assert.deepEqual(subscriptionMessage({ type: 'subscribe', channel: 'user' }), { op: 'subscribe', topics: ['user'] });
+  assert.equal(
+    subscriptionKeys(
+      url,
+      JSON.stringify({ type: 'subscribe', channel: 'heartbeats', product_ids: ['BTC-USD', 'ETH-USD'] }),
+    ).length,
+    1,
+  );
 });

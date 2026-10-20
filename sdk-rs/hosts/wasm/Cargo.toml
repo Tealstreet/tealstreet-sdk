@@ -8,6 +8,7 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+coinbase = ["dep:safe-cex-venue-coinbase"]
 paradex = ["dep:safe-cex-venue-paradex"]
 apexomni = ["dep:safe-cex-venue-apexomni"]
 txflow = ["dep:safe-cex-venue-txflow"]
@@ -24,6 +25,7 @@ bingx = ["dep:safe-cex-venue-bingx"]
 weex = ["dep:safe-cex-venue-weex"]
 phemex = ["dep:safe-cex-venue-phemex"]
 default = [
+    "coinbase",
     "paradex",
     "apexomni",
     "txflow",
@@ -56,6 +58,7 @@ okx = ["dep:safe-cex-venue-okx"]
 orderly = ["dep:safe-cex-venue-orderly"]
 
 [dependencies]
+safe-cex-venue-coinbase = { path = "../../venues/coinbase", optional = true }
 safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }
 safe-cex-venue-apexomni = { path = "../../venues/apexomni", optional = true }
 safe-cex-venue-txflow = { path = "../../venues/txflow", optional = true }

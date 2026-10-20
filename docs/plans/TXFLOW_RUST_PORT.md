@@ -330,3 +330,20 @@ books; CPU 194.9/95.5 ms, memory 24.7/3.2 MB); private PASS (14 frames).
 
 The final fetch exposed Coinbase landing `5c0e437faf`; merge its current host,
 transport and harness changes before PR creation and repeat affected checks.
+
+Coinbase integration review accepted the resolved union: both authentication
+paths, Wasm feature guards/constructors, routing, shared balance frame writer and
+reader, profiles, CI rows and replay contracts remain intact.
+
+### Production cutover after passing the replay gates
+
+The spec requires deleting the production TypeScript implementation when its
+Rust port ships. Move the new replay reference to
+`src/__tests__/reference/txflow`, preserving its implementation and comparison
+behavior; update its relative imports and audit-test/harness paths. Route both
+production registries to `RustEngineExchange`. Extract only the small shared
+client-ID validation/minting rule for the wrapper; no production dependency may
+point into the test reference. Keep availability/measurement flags disabled.
+Update the transport characterization to Rust's absence of Axios instances,
+add a registry cutover proof, and run an independent cutover review followed by
+root, Rust, host and replay checks on the merged result.

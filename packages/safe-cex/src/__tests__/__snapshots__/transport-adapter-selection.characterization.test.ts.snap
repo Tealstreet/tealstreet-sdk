@@ -1057,107 +1057,35 @@ exports[`transport adapter selection per exchange > bybitspot 1`] = `
 
 exports[`transport adapter selection per exchange > coinbase 1`] = `
 {
-  "private direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://api.coinbase.com",
-    "unlimitedXHR": "default https://api.coinbase.com",
-  },
-  "private proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "private proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "private tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "public direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://api.coinbase.com",
-    "unlimitedXHR": "default https://api.coinbase.com",
-  },
-  "public proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "public proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "public tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 
 exports[`transport adapter selection per exchange > coinbasespot 1`] = `
 {
-  "private direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://api.coinbase.com",
-    "unlimitedXHR": "default https://api.coinbase.com",
-  },
-  "private proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "private proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "private proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "private proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "private tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "public direct": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://api.coinbase.com",
-    "unlimitedXHR": "default https://api.coinbase.com",
-  },
-  "public proxy+tunnel-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "public proxy+tunnel-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
-  "public proxy-JA": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "public proxy-SG": {
-    "_primaryXhr = _secondaryXhr = xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-    "unlimitedXHR": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com",
-  },
-  "public tunnel-only": {
-    "_primaryXhr = _secondaryXhr = xhr": "how https://api.coinbase.com",
-    "unlimitedXHR": "how https://api.coinbase.com",
-  },
+  "private direct": {},
+  "private proxy+tunnel-JA": {},
+  "private proxy+tunnel-SG": {},
+  "private proxy-JA": {},
+  "private proxy-SG": {},
+  "private tunnel-only": {},
+  "public direct": {},
+  "public proxy+tunnel-JA": {},
+  "public proxy+tunnel-SG": {},
+  "public proxy-JA": {},
+  "public proxy-SG": {},
+  "public tunnel-only": {},
 }
 `;
 

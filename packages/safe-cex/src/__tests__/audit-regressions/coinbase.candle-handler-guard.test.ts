@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
+import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 describe('Coinbase candle-handler audit regression', () => {

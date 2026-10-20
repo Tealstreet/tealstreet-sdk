@@ -246,3 +246,20 @@ thresholds, normalizations or size budgets changed for this transport work.
 - Independent review is clear: every matrix permutation is retained, per-venue
   mock state is reset, and the socket token/relay absence checks now run for
   every venue. Commit the test-only correction and require the full CI rerun.
+
+### Coinbase native authorization integration
+
+- Coinbase venue code emits standard `Authorization: Bearer` JWTs bound to the
+  real venue method/host/path. Ordinary proxied HTTP needs a host-only move to
+  `Coinbase-Authorization`, reserving `Authorization` for the proxy context JWT.
+  Direct requests and HOW preserve the standard venue header.
+- The TS resolver serializes optional per-HTTP-route `headerAliases`; the native
+  host applies that generic policy before route authorization, without a venue
+  routing table. Missing aliases preserve compatibility with existing plans;
+  serialization omits empty maps. Conflicting destination headers fail closed
+  without echoing credential values. Signed request methods/URLs/bodies and
+  aliased credential values stay intact through the account transport.
+- Added both Coinbase aliases to the routing boundary tests and four resolved
+  policy golden cases (direct, REST proxy, spot proxy, HOW). Native loopback
+  assertions cover actual proxy packets, direct requests, and unchanged HOW
+  authorization. Existing routing cases remain part of the same golden matrix.
