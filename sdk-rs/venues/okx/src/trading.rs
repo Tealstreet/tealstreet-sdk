@@ -806,6 +806,19 @@ impl Okx {
             return;
         };
         let step = job.steps.front().expect("inflight step");
+        // OKX 50004 explicitly leaves execution unknown, including HTTP 200/400 replies.
+        let parsed = serde_json::from_str::<wire::Envelope<'_>>(response.body);
+        if response.status == 408
+            || (500..600).contains(&response.status)
+            || parsed.as_ref().is_ok_and(|reply| reply.code == "50004")
+        {
+            self.trade_lost(
+                cx,
+                request,
+                &format!("OKX HTTP {}: {}", response.status, response.body),
+            );
+            return;
+        }
         if !(200..300).contains(&response.status) {
             self.trade_failed(
                 cx,
@@ -814,10 +827,10 @@ impl Okx {
             );
             return;
         }
-        let envelope = match serde_json::from_str::<wire::Envelope<'_>>(response.body) {
+        let envelope = match parsed {
             Ok(envelope) => envelope,
             Err(e) => {
-                self.trade_failed(cx, request, &e.to_string());
+                self.trade_lost(cx, request, &e.to_string());
                 return;
             }
         };
@@ -827,7 +840,15 @@ impl Okx {
         {
             Some(acks) => acks,
             None => {
-                self.trade_failed(cx, request, "Malformed OKX write response");
+                if matches!(envelope.code, "0" | "2") {
+                    self.trade_lost(cx, request, "Malformed OKX write response");
+                } else {
+                    self.trade_failed(
+                        cx,
+                        request,
+                        &format!("OKX {}: {}", envelope.code, envelope.msg),
+                    );
+                }
                 return;
             }
         };
@@ -860,7 +881,7 @@ impl Okx {
                     ack.algo_id
                 };
                 if id.is_empty() {
-                    self.trade_failed(cx, request, "OKX placement response missing order ID");
+                    self.trade_lost(cx, request, "OKX placement response missing order ID");
                     return;
                 }
                 if !self.account.order_final(id)
@@ -878,6 +899,22 @@ impl Okx {
                 }
                 job.ids.push(id.into());
             }
+        }
+        if acks.iter().any(|ack| ack.s_code == "50004") {
+            self.trade_lost(cx, request, "OKX 50004: write execution status is unknown");
+            return;
+        }
+        if step.expected > 0
+            && acks.iter().any(|ack| {
+                matches!(ack.s_code, "" | "0") && ack.ord_id.is_empty() && ack.algo_id.is_empty()
+            })
+        {
+            self.trade_lost(
+                cx,
+                request,
+                "OKX success acknowledgement omitted native order identity",
+            );
+            return;
         }
         if step.collect_ids
             && acks.len() == step.expected
@@ -919,7 +956,7 @@ impl Okx {
             }
         }
         if step.expected > 0 && acks.len() != step.expected {
-            self.trade_failed(cx, request, "OKX write response row count mismatch");
+            self.trade_lost(cx, request, "OKX write response row count mismatch");
             return;
         }
         job.steps.pop_front();

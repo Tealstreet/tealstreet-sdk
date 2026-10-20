@@ -70,6 +70,39 @@ describe('Rust cancel-all placement scopes', () => {
     ]);
   });
 
+  it('attempts later acknowledged scopes after an invalid attempted symbol rejects cancellation', async () => {
+    const { exchange, command, store } = setup('phemex');
+    command.mockImplementation(async (call) => {
+      if (call.op === 'placeOrders' && (call.orders as PlaceOrderOpts[])[0].symbol === 'INVALID') {
+        throw new Error('unknown placement symbol');
+      }
+      if (call.op === 'cancelSymbolOrders' && call.symbol === 'INVALID') {
+        throw new Error('unknown cancellation symbol');
+      }
+      return ['native-order'];
+    });
+    await expect(exchange.placeOrder(order({ symbol: 'INVALID' }))).rejects.toThrow('unknown placement symbol');
+    await exchange.placeOrder(order());
+    expect(store.orders).toEqual([]);
+    await expect(exchange.cancelAllOrders()).rejects.toThrow('INVALID: unknown cancellation symbol');
+    expect(command.mock.calls.filter(([call]) => call.op === 'cancelSymbolOrders').map(([call]) => call.symbol))
+      .toEqual(['INVALID', 'BTCUSDT']);
+    // Failed scopes remain retained; a later call cannot silently forget uncertainty.
+    await expect(exchange.cancelAllOrders()).rejects.toThrow('INVALID: unknown cancellation symbol');
+    expect(command.mock.calls.filter(([call]) => call.op === 'cancelSymbolOrders')).toHaveLength(4);
+  });
+
+  it('reports every cancellation failure after attempting the complete scope set', async () => {
+    const { exchange, command } = setup('okx');
+    await exchange.placeOrders([order(), order({ symbol: 'ETHUSDT' }), order({ symbol: 'SOLUSDT' })]);
+    command.mockImplementation(async (call) => {
+      if (call.symbol !== 'SOLUSDT') throw new Error(`rejected ${call.symbol}`);
+      return [];
+    });
+    await expect(exchange.cancelAllOrders()).rejects.toThrow('BTCUSDT: rejected BTCUSDT; ETHUSDT: rejected ETHUSDT');
+    expect(command.mock.calls.slice(1).map(([call]) => call.symbol)).toEqual(['BTCUSDT', 'ETHUSDT', 'SOLUSDT']);
+  });
+
   it('unions stored and attempted scopes, deduplicates them, and awaits cancellations in order', async () => {
     const { exchange, command, store } = setup('okx');
     store.update({ orders: [{ id: 'external', symbol: 'ETHUSDT' }, { id: 'existing', symbol: 'BTCUSDT' }] as Order[] });
@@ -115,6 +148,19 @@ describe('Rust cancel-all placement scopes', () => {
     await exchange.cancelAllOrders();
     expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'cancelSymbolOrders', symbol: '' });
   });
+
+  it.each(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'] as const)(
+    '%s cancels every product through its native global endpoint even with an empty store', async (name) => {
+      const { exchange, command, store } = setup(name);
+      await exchange.cancelAllOrders();
+      store.update({ orders: [{ id: 'unrelated', symbol: 'ETHUSDT' }] as Order[] });
+      await exchange.cancelAllOrders();
+      expect(command.mock.calls.map(([call]) => call)).toEqual([
+        { op: 'cancelSymbolOrders', symbol: '' },
+        { op: 'cancelSymbolOrders', symbol: '' },
+      ]);
+    },
+  );
 
   it('skips every remaining scope if the account is disposed during cancellation', async () => {
     const { exchange, command } = setup('blofin');

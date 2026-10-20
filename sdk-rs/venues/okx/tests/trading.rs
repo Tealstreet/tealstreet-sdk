@@ -548,7 +548,16 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
         },
     );
     let out = actions(&mut e);
-    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get)),
+        "ambiguous server error must reconcile"
+    );
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)),
+        "write must not be retried"
+    );
     assert!(out.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone { result: Err(_), .. })
@@ -803,4 +812,244 @@ fn partial_batch_accepted_order_remains_cancelable_before_the_stream() {
         }),
     );
     assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/cancel-batch-orders") && r.body.as_ref().unwrap().contains("accepted"))));
+}
+
+fn ready_with_held_reconciliation() -> (
+    safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
+    Vec<Action>,
+) {
+    use safe_cex_engine::Engine;
+    use safe_cex_venue_okx::{Okx, Options};
+    let mut e = Engine::new(Okx::new(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("pass".into()),
+        ..Default::default()
+    }));
+    e.start(0.);
+    let request = http(&actions(&mut e)).clone();
+    reply(&mut e, &request, &envelope(MARKET), 1.);
+    let request = http(&actions(&mut e)).clone();
+    reply(&mut e, &request, &envelope(TICKER), 2.);
+    let out = actions(&mut e);
+    let config = out
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut e,
+        config,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.,
+    );
+    let out = actions(&mut e);
+    let private = out
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let mut reads: Vec<_> = out
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    while let Some(read) = reads.pop() {
+        let body = if matches!(&read, Action::Http(r) if r.url.contains("account-position-risk")) {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else {
+            envelope("")
+        };
+        reply(&mut e, &read, &body, 4.);
+        reads.extend(
+            actions(&mut e)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+    }
+    e.handle(5., Event::WsOpened { socket: private });
+    actions(&mut e);
+    ws(&mut e, private, r#"{"event":"login","code":"0","msg":""}"#);
+    let held: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    assert!(
+        held.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending")))
+    );
+    (e, held)
+}
+
+#[test]
+fn ambiguous_http_and_native_timeouts_preserve_writes_and_force_fresh_reconciliation() {
+    use safe_cex_engine::model::{OrderStatus, OrderType};
+    use safe_cex_engine::{Method, Response};
+    // https://www.okx.com/en-us/help/api-faq-eea: 50004 may succeed or fail.
+    for (status, body) in [
+        (408, "request timed out"),
+        (500, "internal error"),
+        (503, "unavailable"),
+        (504, "gateway timeout"),
+        (
+            200,
+            r#"{"code":"50004","msg":"Endpoint request timeout","data":[]}"#,
+        ),
+        (
+            400,
+            r#"{"code":"50004","msg":"Endpoint request timeout","data":[]}"#,
+        ),
+        (
+            200,
+            r#"{"code":"0","data":[{"ordId":"uncertain","sCode":"50004","sMsg":"Operation timeout"}]}"#,
+        ),
+        (200, "truncated"),
+        (200, r#"{"code":"0","data":{}}"#),
+        (200, r#"{"code":"0","data":[]}"#),
+        (200, r#"{"code":"0","data":[{}]}"#),
+    ] {
+        for amend in [false, true] {
+            let (mut e, held) = ready_with_held_reconciliation();
+            e.store_mut()
+                .upsert_order(stored("uncertain", OrderType::Limit));
+            e.handle(
+                5.,
+                Event::Command(if amend {
+                    Command::AmendOrder {
+                        command: 81,
+                        id: "uncertain".into(),
+                        price: Some(37000.),
+                        amount: None,
+                    }
+                } else {
+                    Command::CancelOrders {
+                        command: 81,
+                        ids: vec!["uncertain".into()],
+                    }
+                }),
+            );
+            let write = http(&actions(&mut e)).clone();
+            let Action::Http(write) = write else {
+                unreachable!()
+            };
+            e.handle(
+                6.,
+                Event::HttpResponse {
+                    request: write.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            let out = actions(&mut e);
+            let expected = if amend {
+                OrderStatus::Updating
+            } else {
+                OrderStatus::Canceling
+            };
+            assert_eq!(
+                e.store().order("uncertain").unwrap().status,
+                expected,
+                "{status}: {body}"
+            );
+            assert!(out.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone {
+                    command: 81,
+                    result: Err(_)
+                })
+            )));
+            assert!(
+                !out.iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+                "write was replayed"
+            );
+            let mut fresh: Vec<_> = out
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")))
+                .collect();
+            assert!(
+                !fresh.is_empty(),
+                "held snapshot cannot prevent a new order read"
+            );
+            for read in held {
+                reply(&mut e, &read, &envelope(""), 7.);
+            }
+            assert_eq!(
+                e.store().order("uncertain").unwrap().status,
+                expected,
+                "pre-write empty snapshot must not clear pending state"
+            );
+            actions(&mut e);
+            while let Some(read) = fresh.pop() {
+                reply(&mut e, &read, &envelope(""), 8.);
+                fresh.extend(
+                    actions(&mut e).into_iter().filter(
+                        |a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")),
+                    ),
+                );
+            }
+            assert!(
+                e.store().order("uncertain").is_none(),
+                "fresh complete empty reconciliation must retire the order"
+            );
+        }
+    }
+}
+
+#[test]
+fn definite_business_rejection_restores_cancel_or_amend_state() {
+    use safe_cex_engine::{
+        Response,
+        model::{OrderStatus, OrderType},
+    };
+    for amend in [false, true] {
+        let mut e = trading_engine();
+        e.store_mut()
+            .upsert_order(stored("rejected", OrderType::Limit));
+        e.handle(
+            5.,
+            Event::Command(if amend {
+                Command::AmendOrder {
+                    command: 82,
+                    id: "rejected".into(),
+                    price: Some(37000.),
+                    amount: None,
+                }
+            } else {
+                Command::CancelOrders {
+                    command: 82,
+                    ids: vec!["rejected".into()],
+                }
+            }),
+        );
+        let Action::Http(write) = http(&actions(&mut e)).clone() else {
+            unreachable!()
+        };
+        e.handle(
+            6.,
+            Event::HttpResponse {
+                request: write.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"code":"1","data":[{"sCode":"51000","sMsg":"Parameter error"}]}"#,
+                },
+            },
+        );
+        let out = actions(&mut e);
+        assert_eq!(
+            e.store().order("rejected").unwrap().status,
+            OrderStatus::Open
+        );
+        assert!(out.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 82,
+                result: Err(_)
+            })
+        )));
+    }
 }

@@ -299,7 +299,15 @@ fn bulk_cancel_attempts_both_families_after_a_failure() {
         503,
         r#"{"success":false,"message":"unavailable"}"#,
     );
-    let r = requests(&mut e).pop().unwrap();
+    let out = actions(&mut e);
+    assert!(out.iter().any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get && r.url.contains("orders?status=INCOMPLETE"))));
+    let r = out
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.method == safe_cex_engine::Method::Delete => Some(r),
+            _ => None,
+        })
+        .unwrap();
     assert!(r.url.contains("/v1/algo/orders?"));
     reply(
         &mut e,
@@ -773,32 +781,22 @@ fn finite_and_limit_protective_siblings_never_become_full_position_repairs() {
         ALGO.replace("CLOSE_POSITION", "LIMIT")
             .replace("\"quantity\":0", "\"price\":48500,\"quantity\":0"),
     ] {
-        for replace in [false, true] {
-            let (mut e, _) = ready_with(ORDER, &algos, POSITIONS);
-            assert!(e.store().loaded().orders);
-            requests(&mut e);
-            if replace {
-                place(
-                    &mut e,
-                    1,
-                    r#"[{"symbol":"BTCUSDC","type":"stop_market","side":"sell","amount":1,"price":48000}]"#,
-                );
-            } else {
-                e.handle(
-                    2000.0,
-                    Event::Command(Command::CancelOrders {
-                        command: 1,
-                        ids: vec!["101".into()],
-                    }),
-                );
-            }
-            let out = actions(&mut e);
-            assert!(
-                !out.iter().any(|a| matches!(a, Action::Http(_))),
-                "unsafe sibling repair sent a write"
-            );
-            assert!(done(out, 1).is_err());
-        }
+        let (mut e, _) = ready_with(ORDER, &algos, POSITIONS);
+        assert!(e.store().loaded().orders);
+        requests(&mut e);
+        e.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 1,
+                ids: vec!["101".into()],
+            }),
+        );
+        let out = actions(&mut e);
+        assert!(
+            !out.iter().any(|a| matches!(a, Action::Http(_))),
+            "unsafe sibling repair sent a write"
+        );
+        assert!(done(out, 1).is_err());
     }
 }
 
@@ -1191,4 +1189,348 @@ fn uncertain_placement_is_retired_only_by_a_successful_fresh_order_snapshot() {
             assert!(e.store().order("9007199254740994").is_some());
         }
     }
+}
+
+#[test]
+fn app_shaped_standalone_stops_accept_the_same_trigger_and_price() {
+    for (kind, native_kind, price) in [
+        ("stop_market", "STOP_LOSS", 48000),
+        ("take_profit_market", "TAKE_PROFIT", 56000),
+    ] {
+        let (mut e, _) = ready();
+        requests(&mut e);
+        place(
+            &mut e,
+            91,
+            &format!(
+                r#"[{{"symbol":"BTCUSDC","type":"{kind}","side":"sell","amount":1,"price":{price},"triggerPrice":{price},"reduceOnly":true,"close":true,"triggerType":"mark_price"}}]"#
+            ),
+        );
+        let writes = requests(&mut e);
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].method, safe_cex_engine::Method::Post);
+        assert!(writes[0].url.ends_with("/v1/algo/order"));
+        let payload = body(&writes[0]);
+        assert_eq!(payload["algo_type"], "POSITIONAL_TP_SL");
+        assert_eq!(payload["child_orders"].as_array().unwrap().len(), 1);
+        assert_eq!(payload["child_orders"][0]["algo_type"], native_kind);
+        assert_eq!(
+            payload["child_orders"][0]["trigger_price"],
+            price.to_string()
+        );
+        assert_eq!(payload["child_orders"][0]["type"], "CLOSE_POSITION");
+    }
+}
+
+#[test]
+fn positional_trigger_rejects_different_prices_and_opening_conditionals_before_writes() {
+    for order in [
+        r#"{"symbol":"BTCUSDC","type":"stop_market","side":"sell","amount":1,"price":48000,"triggerPrice":47999}"#,
+        r#"{"symbol":"BTCUSDC","type":"take_profit_market","side":"sell","amount":1,"price":56000,"triggerPrice":56001}"#,
+        r#"{"symbol":"BTCUSDC","type":"conditional","side":"sell","amount":1,"price":48000,"triggerPrice":48000}"#,
+        r#"{"symbol":"BTCUSDC","type":"limit","side":"sell","amount":1,"price":48000,"triggerPrice":48000}"#,
+    ] {
+        let (mut e, _) = ready();
+        requests(&mut e);
+        place(&mut e, 92, &format!("[{order}]"));
+        let out = actions(&mut e);
+        assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+        assert!(done(out, 92).is_err());
+    }
+}
+
+fn unrelated_protection(side: &str, margin: &str) -> String {
+    let finite = ALGO
+        .replace("POSITIONAL_TP_SL", "TP_SL")
+        .replace("CLOSE_POSITION", "MARKET")
+        .replace("\"quantity\":0", "\"quantity\":0.1")
+        .replace("100", "200")
+        .replace("101", "201")
+        .replace("102", "202")
+        .replace("SELL", side)
+        .replace("CROSS", margin);
+    let trailing = format!(
+        r#"{{"algo_order_id":700,"root_algo_order_id":700,"symbol":"PERP_BTC_USDC","algo_type":"TRAILING_STOP","algo_status":"NEW","margin_mode":"{margin}","side":"{side}","type":"MARKET","reduce_only":true,"quantity":0.25,"trigger_price":50000}}"#
+    );
+    format!("[{},{}]", &finite[1..finite.len() - 1], trailing)
+}
+
+#[test]
+fn standalone_sl_tp_leave_same_side_trailing_and_quantity_protections_untouched() {
+    for (side, margin) in [("SELL", "CROSS"), ("BUY", "ISOLATED")] {
+        for (kind, native_kind, price) in [
+            ("stop_market", "STOP_LOSS", 48000),
+            ("take_profit_market", "TAKE_PROFIT", 56000),
+        ] {
+            let algos = unrelated_protection(side, margin);
+            let (mut e, _) = ready_with(ORDER, &algos, POSITIONS);
+            assert!(e.store().loaded().orders);
+            assert!(e.store().order("700").is_some());
+            let before = e.store().orders().to_vec();
+            requests(&mut e);
+            place(
+                &mut e,
+                93,
+                &format!(
+                    r#"[{{"symbol":"BTCUSDC","type":"{kind}","side":"{}","amount":1,"price":{price},"triggerPrice":{price},"reduceOnly":true}}]"#,
+                    side.to_ascii_lowercase()
+                ),
+            );
+            let writes = requests(&mut e);
+            assert_eq!(writes.len(), 1);
+            assert_eq!(
+                writes[0].method,
+                safe_cex_engine::Method::Post,
+                "must not cancel unrelated protection"
+            );
+            assert_eq!(
+                body(&writes[0])["child_orders"][0]["algo_type"],
+                native_kind
+            );
+            for old in before {
+                let current = e.store().order(&old.id).unwrap();
+                assert_eq!(current.status, old.status);
+                assert_eq!(current.price, old.price);
+            }
+        }
+    }
+}
+
+#[test]
+fn replacing_full_position_pair_does_not_cancel_independent_finite_or_trailing_roots() {
+    for (side, margin) in [("SELL", "CROSS"), ("BUY", "ISOLATED")] {
+        for (kind, price) in [("stop_market", 48000), ("take_profit_market", 56000)] {
+            let unrelated = unrelated_protection(side, margin);
+            let full = ALGO.replace("SELL", side).replace("CROSS", margin);
+            let algos = format!(
+                "[{},{}]",
+                &full[1..full.len() - 1],
+                &unrelated[1..unrelated.len() - 1]
+            );
+            let (mut e, socket) = ready_with(ORDER, &algos, POSITIONS);
+            requests(&mut e);
+            place(
+                &mut e,
+                94,
+                &format!(
+                    r#"[{{"symbol":"BTCUSDC","type":"{kind}","side":"{}","amount":1,"price":{price},"triggerPrice":{price},"reduceOnly":true}}]"#,
+                    side.to_ascii_lowercase()
+                ),
+            );
+            let writes = requests(&mut e);
+            assert_eq!(writes.len(), 1);
+            assert_eq!(writes[0].method, safe_cex_engine::Method::Delete);
+            assert!(writes[0].url.contains("order_id=100&"));
+            reply(
+                &mut e,
+                &writes[0],
+                200,
+                r#"{"success":true,"data":{"status":"CANCEL_SENT"}}"#,
+            );
+            requests(&mut e);
+            ws(
+                &mut e,
+                socket,
+                r#"{"topic":"algoexecutionreportv2","ts":3000,"data":{"algoOrderId":100,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"POSITIONAL_TP_SL","algoStatus":"CANCELLED","seq":5}}"#,
+            );
+            let writes = requests(&mut e);
+            assert_eq!(writes.len(), 1);
+            assert_eq!(writes[0].method, safe_cex_engine::Method::Post);
+            let children = body(&writes[0])["child_orders"].as_array().unwrap().clone();
+            assert_eq!(children.len(), 2);
+            assert_eq!(
+                children[0]["trigger_price"],
+                if kind == "stop_market" {
+                    "48000"
+                } else {
+                    "49000"
+                }
+            );
+            assert_eq!(
+                children[1]["trigger_price"],
+                if kind == "take_profit_market" {
+                    "56000"
+                } else {
+                    "55000"
+                }
+            );
+            for id in ["201", "202", "700"] {
+                assert_eq!(
+                    e.store().order(id).unwrap().status,
+                    safe_cex_engine::model::OrderStatus::Open
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn mixed_full_and_quantity_siblings_cannot_be_dropped_by_parent_replacement() {
+    let algos = ALGO.replace("\"algo_type\":\"TAKE_PROFIT\",\"side\":\"SELL\",\"algo_status\":\"NEW\",\"trigger_price\":55000,\"type\":\"CLOSE_POSITION\",\"reduce_only\":true,\"quantity\":0", "\"algo_type\":\"TAKE_PROFIT\",\"side\":\"SELL\",\"algo_status\":\"NEW\",\"trigger_price\":55000,\"type\":\"MARKET\",\"reduce_only\":true,\"quantity\":0.1");
+    assert_ne!(algos, ALGO);
+    let (mut e, _) = ready_with(ORDER, &algos, POSITIONS);
+    requests(&mut e);
+    place(
+        &mut e,
+        95,
+        r#"[{"symbol":"BTCUSDC","type":"stop_market","side":"sell","amount":1,"price":48000,"triggerPrice":48000}]"#,
+    );
+    let out = actions(&mut e);
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+    assert!(done(out, 95).is_err());
+    assert_eq!(e.store().order("102").unwrap().amount, 0.1);
+    assert_eq!(
+        e.store().order("102").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+}
+
+#[test]
+fn ambiguous_http_or_success_ack_preserves_pending_writes_and_retires_stale_reads() {
+    use safe_cex_engine::model::OrderStatus;
+    use safe_cex_engine::{Method, Response};
+    for (status, body) in [
+        (408, "request timeout"),
+        (500, "internal error"),
+        (503, "unavailable"),
+        (504, "gateway timeout"),
+        (200, "truncated"),
+        (200, r#"{"success":true,"data":{}}"#),
+    ] {
+        for operation in [0, 1, 2] {
+            let (mut e, _) = ready();
+            let held: Vec<_> = requests(&mut e)
+                .into_iter()
+                .filter(|r| r.url.contains("/v1/orders?"))
+                .collect();
+            assert!(
+                !held.is_empty(),
+                "fixture must hold a pre-write authoritative read"
+            );
+            if operation == 0 {
+                place(
+                    &mut e,
+                    81,
+                    r#"[{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}]"#,
+                );
+            } else {
+                e.handle(
+                    2000.,
+                    Event::Command(if operation == 1 {
+                        Command::CancelOrders {
+                            command: 81,
+                            ids: vec!["9007199254740993".into()],
+                        }
+                    } else {
+                        Command::AmendOrder {
+                            command: 81,
+                            id: "9007199254740993".into(),
+                            price: Some(50001.),
+                            amount: None,
+                        }
+                    }),
+                );
+            }
+            let write = requests(&mut e).pop().unwrap();
+            let id = if operation == 0 {
+                "pending:81"
+            } else {
+                "9007199254740993"
+            };
+            e.handle(
+                2001.,
+                Event::HttpResponse {
+                    request: write.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            let out = actions(&mut e);
+            let expected = [
+                OrderStatus::Creating,
+                OrderStatus::Canceling,
+                OrderStatus::Updating,
+            ][operation];
+            assert_eq!(
+                e.store().order(id).unwrap().status,
+                expected,
+                "{status}: {body}"
+            );
+            assert!(
+                !out.iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+                "ambiguous write must never retry"
+            );
+            let fresh = out
+                .iter()
+                .find_map(|a| match a {
+                    Action::Http(r) if r.url.contains("/v1/orders?") => Some(r.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(done(out, 81).is_err());
+            for read in held {
+                e.handle(
+                    2002.,
+                    Event::HttpResponse {
+                        request: read.id,
+                        response: Response {
+                            status: 200,
+                            headers: "",
+                            body: r#"{"success":true,"data":{"rows":[],"meta":{"total":0}}}"#,
+                        },
+                    },
+                );
+            }
+            assert_eq!(
+                e.store().order(id).unwrap().status,
+                expected,
+                "pre-write read must remain stale"
+            );
+            e.handle(
+                2003.,
+                Event::HttpResponse {
+                    request: fresh.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: r#"{"success":true,"data":{"rows":[],"meta":{"total":0}}}"#,
+                    },
+                },
+            );
+            assert!(
+                e.store().order(id).is_none(),
+                "fresh complete read retires optimistic state"
+            );
+        }
+    }
+}
+
+#[test]
+fn definite_native_rejection_still_restores_optimistic_order_state() {
+    use safe_cex_engine::model::OrderStatus;
+    let (mut e, _) = ready();
+    requests(&mut e);
+    e.handle(
+        2000.,
+        Event::Command(Command::CancelOrders {
+            command: 82,
+            ids: vec!["9007199254740993".into()],
+        }),
+    );
+    let write = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &write,
+        400,
+        r#"{"success":false,"code":-1005,"message":"Invalid order id"}"#,
+    );
+    assert!(done(actions(&mut e), 82).is_err());
+    assert_eq!(
+        e.store().order("9007199254740993").unwrap().status,
+        OrderStatus::Open
+    );
 }

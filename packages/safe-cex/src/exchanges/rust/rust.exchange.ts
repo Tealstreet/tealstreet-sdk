@@ -271,9 +271,17 @@ export class RustEngineExchange extends BaseExchange {
         // Frames can lag placement ACKs. Keep attempted scopes for this account's
         // lifetime, including uncertain/rejected outcomes and races with later places.
         const symbols = new Set([...this.store.orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols]);
+        const failures: string[] = [];
         for (const symbol of symbols) {
-          if (!this.isDisposed) await this.cancelSymbolOrders(symbol);
+          if (this.isDisposed) continue;
+          try {
+            await this.cancelSymbolOrders(symbol);
+          } catch (error) {
+            // A rejected scope must not prevent cancellation of later live orders.
+            failures.push(`${symbol}: ${error instanceof Error ? error.message : String(error)}`);
+          }
         }
+        if (failures.length) throw new Error(`${this.name} cancel-all failed: ${failures.join('; ')}`);
       };
     }
     if (exchangeName === 'polymarket') {
@@ -341,7 +349,7 @@ export class RustEngineExchange extends BaseExchange {
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
-    if (['woo', 'grvt', 'kucoinspot'].includes(this.name)) {
+    if (['woo', 'grvt', 'kucoinspot'].includes(this.name) || orderlyNames.has(this.name)) {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       };

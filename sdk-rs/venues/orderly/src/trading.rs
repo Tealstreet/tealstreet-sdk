@@ -1,6 +1,6 @@
 use crate::{
     Orderly, Pending,
-    wire::{Id, N, checked},
+    wire::{Id, N, Rest, checked},
 };
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
@@ -255,16 +255,28 @@ impl Orderly {
             o.symbol == symbol
                 && o.side == side
                 && live(o)
-                && matches!(
-                    o.kind,
-                    OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
-                )
+                && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
         }) {
             let proof = self
                 .account
                 .proofs
                 .get(&o.id)
                 .ok_or("Orderly protective order lacks margin provenance")?;
+            // Quantity TP_SL and other external algos are independent protections.
+            // Only proven full-position legs participate in a parent rebuild.
+            if !proof.positional_repair {
+                if proof.close_compatible
+                    || o.parent_id
+                        .as_ref()
+                        .is_some_and(|root| self.account.created_pairs.contains_key(root))
+                {
+                    return Err(
+                        "Orderly positional parent lacks consistent full-position provenance"
+                            .into(),
+                    );
+                }
+                continue;
+            }
             if o.parent_id
                 .as_ref()
                 .and_then(|root| self.account.created_pairs.get(root))
@@ -275,9 +287,6 @@ impl Orderly {
                 );
             }
             if proof.mode == mode_ {
-                if !proof.positional_repair {
-                    return Err("Orderly replacement requires proven full-position CLOSE_POSITION siblings; cancel the whole parent first".into());
-                }
                 siblings.push(o.clone());
             }
         }
@@ -293,6 +302,18 @@ impl Orderly {
         {
             return Err(
                 "Orderly positional pair is ambiguous; cancel existing parents first".into(),
+            );
+        }
+        if cx.store.orders().iter().any(|order| {
+            live(order)
+                && order
+                    .parent_id
+                    .as_ref()
+                    .is_some_and(|parent| parents.contains(parent))
+                && !siblings.iter().any(|sibling| sibling.id == order.id)
+        }) {
+            return Err(
+                "Orderly cannot rebuild a parent containing unrelated protective siblings".into(),
             );
         }
         let mut seen = HashSet::new();
@@ -359,10 +380,11 @@ impl Orderly {
                 "Orderly opening triggers and trailing-stop placement are unsupported".into(),
             );
         }
-        if o.trigger_price.is_some() {
-            return Err(
-                "Orderly positional stops use price; standalone triggerPrice is unsupported".into(),
-            );
+        if o.trigger_price.is_some()
+            && !(matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                && o.trigger_price == o.price)
+        {
+            return Err("Orderly positional triggerPrice must equal price on SL/TP orders".into());
         }
         if o.close == Some(true) && matches!(o.kind, OrderType::Limit | OrderType::Market) {
             return Err("Orderly close flag is unsupported on ordinary orders".into());
@@ -1160,6 +1182,19 @@ impl Orderly {
         request: Request,
         response: Response<'_>,
     ) {
+        let write = request.step.method != Method::Get;
+        if write && (response.status == 408 || (500..600).contains(&response.status)) {
+            self.trade_lost(
+                cx,
+                request,
+                &format!("Orderly HTTP {}: {}", response.status, response.body),
+            );
+            return;
+        }
+        // A successful envelope with an unusable ACK cannot prove a write was rejected.
+        let unknown_ack = write
+            && (200..300).contains(&response.status)
+            && serde_json::from_str::<Rest<'_>>(response.body).map_or(true, |rest| rest.success);
         let result = (|| -> Result<(), String> {
             let rest = checked(response)?;
             let data = rest.data.map_or("{}", |d| d.get());
@@ -1274,6 +1309,14 @@ impl Orderly {
                         status: std::borrow::Cow<'a, str>,
                     }
                     let ack: Ack<'_> = serde_json::from_str(data).map_err(|e| e.to_string())?;
+                    if !matches!(
+                        ack.status.as_ref(),
+                        "CANCEL_SENT" | "CANCEL_ALL_SENT" | "CANCELED" | "CANCELLED"
+                    ) {
+                        return Err(
+                            "Orderly cancellation success omitted a valid native ACK".into()
+                        );
+                    }
                     self.account.order_revisions[0] += 1;
                     self.account.order_revisions[1] += 1;
                     if matches!(ack.status.as_ref(), "CANCELED" | "CANCELLED") {
@@ -1431,7 +1474,11 @@ impl Orderly {
             Ok(())
         })();
         if let Err(e) = result {
-            self.trade_failed(cx, request, &e);
+            if unknown_ack {
+                self.trade_lost(cx, request, &e);
+            } else {
+                self.trade_failed(cx, request, &e);
+            }
             return;
         }
         if self
@@ -1518,7 +1565,8 @@ impl Orderly {
         if job.error.is_none() {
             job.error = Some(error.into());
         }
-        if uncertain || !job.keep_going {
+        // Bulk cancellation's two families are independent writes, not replacements.
+        if !job.keep_going {
             job.steps.clear();
         }
         self.trade_next(cx);
