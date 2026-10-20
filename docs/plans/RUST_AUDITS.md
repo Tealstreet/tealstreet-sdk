@@ -4,6 +4,12 @@ Read-only Opus audits of `feat/rust-rewrite` at `df2d6a4a03` (after #1340).
 Findings land as fixes through lanes; strike an item when its PR merges. Line
 numbers are as of that commit.
 
+**Judging rule.** Rust need not match TS 1:1. Lifecycle (startup order, dispose,
+cleanup, retries, internal state) may differ freely. A divergence matters only
+by its production impact: wrong orders, positions, balances or fills; money or
+attribution lost; data silently missing or stale; a failure the user cannot see;
+or a downstream caller that breaks. Fix to that bar, not to TS's shape.
+
 ## Owner decisions (gate the cutover)
 
 1. **Engine delivery to tealstreet-next.** The Copybara glob has no `sdk-rs/**`,
@@ -290,3 +296,124 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
 - Low: Asterdex unsupported interval mapped to 1h breaks candle matching;
   `num::adjust` with step ≤ 0; no command deadline, `execute` drops the batch tail
   on an unknown action; candles drop `lastSide`, orders lack generic `triggerType`.
+
+### Kraken
+Futures matches TS on nearly every input; no high regression.
+- Medium: isolated positions flip to cross when a WS row omits
+  `maxFixedLeverage` (`kraken/src/account.rs:1056,1132`; confirm live);
+  `more_candles: true` fails the whole candle fetch, empty chart (`lib.rs:727`);
+  spot `EGeneral:Permission denied` on an order deactivates the account
+  (`spot/account.rs:513`).
+- Owner decision: market entry with attached TP/SL — TS silently drops the
+  legs, Rust rejects the order.
+- Low: income over 500 rows errors (TS partial); one bad row rejects
+  catalogue/tickers/open orders and blocks private start (startup lane);
+  missing funding field set to 0; raw error text; spot 3m candles.
+- Confirm (TS bugs Rust fixed): index trigger signal; full_fill not canceled;
+  live % change/volume/OI; stop amend racing a fill; spot fills over-reported
+  and mislabelled XBT/BTC.
+
+### Orderly and TxFlow (already default to Rust)
+TxFlow loses nothing (master TS was a placeholder).
+- High (Orderly, all six brokers): standalone SL/TP rejected because the app
+  always sends `triggerPrice: price` (`orderly/src/trading.rs:362`); master TS
+  ignored `triggerPrice`. Chart-drag stops, stop form and hotkeys all fail.
+- Medium: cancel-all only loops symbols in the store instead of the unscoped
+  DELETE (`rust.exchange.ts` has no Orderly override; engine supports
+  `symbol: ''`); SL/TP blocked when a trailing stop or quantity TP_SL exists on
+  that side (`trading.rs:254`).
+- Low: one bad market row or unknown order row fails closed (startup lane);
+  trailing-stop display price; cancels skipped for unknown/finished ids;
+  candle `from`/`to` filtering a latest-N fetch.
+
+### KuCoin
+- High: cancel-symbol also deletes the symbol's TP/SL stops
+  (`kucoin/src/trading.rs:515`; TS only `/api/v3/orders`); one failed or
+  malformed markets/tickers read stops the venue, and futures private REST
+  waits for the private socket `welcome` (`lib.rs:767,954,1026`).
+- Medium: one unknown id rejects the whole cancel batch (`trading.rs:505,1034`);
+  one malformed REST row freezes reconciliation (`account.rs:652`); caller client
+  id on attached TP/SL rejected (`trading.rs:120`).
+- Low: leverage sent as `10.0`; fill without `matchPrice` dropped; spot polls
+  5 s vs 500 ms; per-symbol cancel-all; partial balance rows ignored.
+- Confirm (TS bugs Rust fixed): stop side read-back, amend overfill, amend
+  keeping trigger type and post-only, standalone stop client id, open-order
+  paging, spot partial snapshot, swallowed cancel errors.
+
+### Cross-venue: app stop payloads
+The app sends stops with `triggerPrice` equal to `price`. Orderly rejected every
+such stop. Many venues test `trigger_price.is_some()` in placement (apexomni,
+backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
+…); each must accept the app's exact payloads.
+
+### Phemex
+- High: `SetPositionMode` has no symbol (`engine/src/command.rs:95`), so Phemex
+  loops PUTs over every market and can half-switch (`phemex/src/trading.rs:858`);
+  one unknown order status/type drops the whole private frame incl. positions
+  and balances (`account_wire.rs:298`, `account.rs:601`).
+- Medium: one bad public row stops startup; one bad position row freezes a
+  currency slice (`account.rs:286`); no fallback read when a symbol's mode or
+  leverage context is uncached (`trading.rs:229,713`).
+- Low: cancel batch refused on one uncached id; index triggers refused; daily
+  candle `to`; no 1 s REST resync after terminal events.
+- Confirm (TS bugs Rust fixed): filled from cumQty with exec dedupe; WS-closed
+  positions removed; amend re-places remainder; hedged margin per side; split
+  stops at first failure.
+
+### MEXC
+- High: live tickers only for the first 100 markets and `SetTickerSymbols`
+  ignored (`mexc/src/lib.rs:416`), so positions outside them keep startup prices
+  forever; one open order on an unloaded market blocks the order store for good
+  (`account.rs:618,850`).
+- Medium: full-position TP/SL `vol` not snapped to step (`trading.rs:342`); every
+  single order uses the batch path paced 1.5 s (`trading.rs:451`); startup halts
+  on tickers/markets/position-mode/plan-list failures.
+- Low: every plan order marked reduce-only; signed fill fee; `fetchOrderBook`
+  refused by the adapter.
+
+### Cross-venue: rows and subscriptions
+- One unmappable row discarding a whole snapshot/frame recurs (Bitget, Phemex,
+  MEXC, KuCoin, Kraken, Orderly, Bybit): skip and log the row, keep the store's
+  copy of that id.
+- Check every venue honours `SetTickerSymbols` (MEXC ignores it).
+
+### BingX
+Normal inputs send the same requests as TS; the risk is resilience.
+- High: one bad market/ticker row or failed funding read keeps the private side
+  from ever starting (`bingx/src/lib.rs:529,639`); one bad position/order row
+  freezes that list (`account.rs:491,557`). (startup/row-tolerance lane)
+- Medium: `TRIGGER_MARKET` stops (attached brackets) can't be moved
+  (`trading.rs:842`); no one-shot resend on signature error 100001; multi-order
+  cancel sends nothing if any id is unknown (`trading.rs:780`).
+- Low: hedge leverage sets both sides; `cancelRestrictions=ONLY_NEW` on amend;
+  per-symbol leverage/margin not read; trigger move requires trigger_type;
+  bracket `workingType`; history fails on one bad row; WS message with one bad
+  field dropped.
+
+### WEEX
+- High: one `null` numeric field in a public row stops the venue, private start
+  gated on tickers (`weex/src/wire.rs:73`, `lib.rs:671,727`); one unparsable
+  order/position row freezes the list, no `planType` fallback (`account.rs:335`).
+- Medium: failed config read backs off all polling to ~60 s (`account.rs:518`);
+  balance stops updating during active trading (revision discard,
+  `account.rs:408`); accepted conditional reported failed if the venue echoes
+  `clientAlgoId` (`trading.rs:1303`; verify live); imported limit with TP/SL
+  can't be amended (`trading.rs:343`); missing passphrase looks like a valid
+  empty account (`lib.rs:148`).
+- Low: isolated leverage sets both sides; index triggers rejected; fill without
+  `id` dropped; income row without asset fails the page; fetchLeverage returns max.
+
+### Coinbase (already defaults to Rust)
+- High: one unmappable open order (e.g. a bracket or TWAP placed on Coinbase's
+  site) rejects every snapshot and blocks all trading incl. cancel
+  (`coinbase/src/account.rs:336,1577,1842`, `trading.rs:1028`); a failed
+  placement leaves a reservation that breaks cancel-symbol for the session
+  (`trading.rs:1109,1283,1164`); CLI market orders with GTC rejected
+  (`trading.rs:264`, `cli-core/.../BaseBuySellCommand.ts:368`); browser-side
+  `signWsAuth`/HTTP signing lost (decision 2).
+- Medium: reduce-only capacity counts protective stops against TPs and spot
+  reduce-only always rejected (`trading.rs:654,676`); portfolio probe stalls on
+  404/other non-2xx (`account.rs:1322,1687`); one bad CFM position row rejects
+  the snapshot (`account.rs:1246`).
+- Low: CFM `upnl` and spot `total` sources differ (equity double-count risk);
+  OHLCV honours `from`; placement errors lose Coinbase's message.
