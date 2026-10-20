@@ -7,7 +7,7 @@ use safe_cex_engine::model::{
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, LogLevel, Method, Response, SocketId, TimerId, num,
+    Command, CommandId, Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, num,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -341,8 +341,9 @@ impl Woo {
         } else {
             "wss://wss.woox.io/v2/ws/private/stream/"
         };
-        self.account.connection.socket = Some(cx.connect(
+        self.account.connection.socket = Some(cx.connect_channel(
             format!("{host}{}",self.options.application_id.as_deref().unwrap_or("undefined")),
+            SocketChannel::Private,
         ));
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {

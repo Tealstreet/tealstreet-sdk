@@ -290,3 +290,11 @@ Pre-integration final WOO gates passed: 60 private frames/20 commands/144 record
 public CPU73.6 ->59.1 ms, steady35.3 ->27.9 ms, retained1.6 ->1.1 MB, wasm834024.
 Stopped the superseded root test run before mixed-version results could be used;
 rebuild and rerun integration gates after the merge and socket-role update.
+
+Socket-role update passes 110 WOO tests and clippy; independent integration
+review PASS for registration/options, routing authorization and exact signed
+bytes, channel/context propagation, validators, dead crypto cleanup, production
+and staging initial/reconnect roles. Host34 and harness159 PASS. Full combined
+build found Bitrue's newly landed explicit PlaceOrderOpts initializer missing
+WOO's shared optional max_slippage_pct; initialized it to None without changing
+Bitrue trading behavior. Rerun all combined/native gates after this compile fix.

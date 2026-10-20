@@ -9,7 +9,8 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+    num,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -321,8 +322,9 @@ impl Woo {
         } else {
             "wss://wss.woox.io/ws/stream/"
         };
-        self.public.socket = Some(cx.connect(
+        self.public.socket = Some(cx.connect_channel(
             format!("{host}{}", self.options.application_id.as_deref().unwrap_or("undefined")),
+            SocketChannel::Public,
         ));
     }
     fn topic(&self, cx: &mut Cx<'_, Pending>, topic: &str, subscribe: bool) {

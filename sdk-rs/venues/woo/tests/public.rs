@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Command, Engine, Event, Notice, Venue};
+use safe_cex_engine::{Action, Command, Engine, Event, Notice, SocketChannel, Venue};
 use safe_cex_venue_woo::{Options, Woo};
 use support::*;
 fn subscribe(e: &mut TestEngine) {
@@ -23,6 +23,50 @@ fn result(e: &mut TestEngine) -> Result<String, String> {
         .unwrap()
 }
 const UPDATE: &str = r#"{"topic":"PERP_BTC_USDT@orderbookupdate","ts":102,"data":{"bids":[[59000,4],[58000,5]],"asks":[[61000,0]]}}"#;
+
+#[test]
+fn initial_sockets_have_explicit_roles_and_unmodified_venue_urls_on_both_environments() {
+    for (testnet, host) in [(false, "wss.woox.io"), (true, "wss.staging.woox.io")] {
+        let mut e = Engine::new(Woo::new(Options {
+            testnet,
+            key: Some("fixture-key".into()),
+            secret: Some("fixture-secret".into()),
+            application_id: Some("socket-role-test".into()),
+            ..Default::default()
+        }));
+        e.start(0.0);
+        let r = requests(&mut e).remove(0);
+        response(&mut e, &r, 10.0, MARKETS);
+        let r = requests(&mut e).remove(0);
+        response(&mut e, &r, 20.0, TICKERS);
+        let sockets: Vec<_> = e
+            .drain_actions()
+            .filter_map(|action| {
+                if let Action::WsConnect {
+                    url,
+                    channel,
+                    context,
+                    ..
+                } = action
+                {
+                    assert!(context.is_none());
+                    Some((url, channel))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(sockets.len(), 2);
+        assert!(sockets.contains(&(
+            format!("wss://{host}/ws/stream/socket-role-test"),
+            Some(SocketChannel::Public)
+        )));
+        assert!(sockets.contains(&(
+            format!("wss://{host}/v2/ws/private/stream/socket-role-test"),
+            Some(SocketChannel::Private)
+        )));
+    }
+}
 
 #[test]
 fn seed_uses_native_perpetual_units_and_skips_irrelevant_rows() {
@@ -606,7 +650,16 @@ fn silence_closes_socket_then_reconnects_with_fresh_book_generation() {
     let new = e
         .drain_actions()
         .find_map(|a| {
-            if let Action::WsConnect { socket, .. } = a {
+            if let Action::WsConnect {
+                socket,
+                url,
+                channel,
+                context,
+            } = a
+            {
+                assert_eq!(channel, Some(SocketChannel::Public));
+                assert_eq!(url, "wss://wss.woox.io/ws/stream/undefined");
+                assert!(context.is_none());
                 Some(socket)
             } else {
                 None

@@ -1,6 +1,8 @@
 mod support;
 use safe_cex_engine::model::OrderStatus;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, SocketId, TimerId};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Notice, SocketChannel, SocketId, TimerId,
+};
 use safe_cex_venue_woo::{Options, Woo};
 use support::*;
 const INFO: &str = r#"{"success":true,"data":{"accountMode":"FUTURES","positionMode":"ONE_WAY","freeCollateral":"900.125","totalCollateral":"1000.125","totalAccountValue":"1100.125"}}"#;
@@ -33,7 +35,7 @@ fn start() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
     let socket = actions
         .iter()
         .find_map(|a| {
-            if let Action::WsConnect { socket, url } = a {
+            if let Action::WsConnect { socket, url, .. } = a {
                 url.contains("/private/").then_some(*socket)
             } else {
                 None
@@ -309,7 +311,7 @@ fn private_watchdog_closes_then_reconnects_with_capped_backoff() {
     e.handle(22000.0, Event::TimerFired { timer: reconnect });
     assert!(
         e.drain_actions()
-            .any(|a| matches!(a,Action::WsConnect{url,..}if url.contains("/private/stream/app")))
+            .any(|a| matches!(a,Action::WsConnect{url,channel:Some(SocketChannel::Private),context:None,..}if url == "wss://wss.woox.io/v2/ws/private/stream/app"))
     );
 }
 #[test]
