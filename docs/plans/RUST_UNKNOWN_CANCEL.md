@@ -18,7 +18,7 @@ race behavior belongs to the separate order-races lane and is unchanged here.
 | OKX: `okx`, `okxeu`, `okxdemo`, `okxeudemo` | **Fixed:** explicit error; instrument and algo family require stored order | `okx/src/trading.rs` `plan_cancel`; new `okx/tests/trading.rs` regression |
 | BloFin: `blofin` | **Fixed:** explicit error; symbol and trigger provenance are required | `blofin/src/trading.rs` `cancel_targets`; new `blofin/tests/trading.rs` regression |
 | Bitget: `bitget`, `bitgetusdc`, `bitgetinverse` | **Fixed:** explicit error before expanding shared native identities | `bitget/src/trading.rs` `CancelOrders`; new `bitget/tests/trading.rs` regression |
-| Bitrue: `bitrue` | **Fixed:** explicit error before cancel step planning | `bitrue/src/trading.rs` `CancelOrders`; new `bitrue/tests/trading.rs` regression |
+| Bitrue: `bitrue` | **Fixed:** known IDs are cancelled, then the command reports `Order … not found` for the unknown ones | `bitrue/src/trading.rs` `CancelOrders`; `bitrue/tests/trading.rs::cancellation_missing_from_store_reports_error_and_attempts_known_mixed_targets` |
 | Crypto.com: `cryptocom` | **Fixed:** explicit error; ordinary and advanced requests require different paths | `cryptocom/src/trading.rs` `CancelOrders`; new `cryptocom/tests/trading.rs` regression |
 | Hyperliquid: `hyperliquid`, `hyperliquidspot` | **Fixed:** explicit error; native action requires asset identity | `hyperliquid/src/trading.rs` `CancelOrders`; new `hyperliquid/tests/trading.rs` regression |
 | ApeX Omni: `apexomni` | Sends `/v3/delete-order` using the supplied validated ID | `apexomni/src/trading.rs` `CancelOrders` |
