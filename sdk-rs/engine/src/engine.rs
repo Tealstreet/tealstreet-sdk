@@ -827,10 +827,12 @@ impl<V: Venue> Engine<V> {
         }
         // Validate the complete update before changing state.
         update.validate()?;
+        let mut accepted_tickers = false;
         for ticker in update.tickers {
             if !ticker.has_values() || self.store.market(&ticker.symbol).is_none() {
                 continue;
             }
+            accepted_tickers = true;
             match self.shared_tickers.entry(ticker.symbol.clone()) {
                 std::collections::hash_map::Entry::Occupied(mut entry) => {
                     entry.get_mut().merge(ticker)
@@ -840,7 +842,9 @@ impl<V: Venue> Engine<V> {
                 }
             }
         }
-        self.restore_shared_tickers(true, now);
+        // Book/candle traffic must not replay quote-dependent account updates.
+        // Still restore independently changed native ticker revisions.
+        self.restore_shared_tickers(accepted_tickers, now);
         let mut cx = Cx {
             now,
             store: &mut self.store,

@@ -1,6 +1,6 @@
 use safe_cex_engine::book::Book;
 use safe_cex_engine::command::{HostInput, decode_host_input};
-use safe_cex_engine::model::{Balance, Limits, Market, MinMax, Precision};
+use safe_cex_engine::model::{Balance, Limits, Market, MinMax, Position, PositionSide, Precision};
 use safe_cex_engine::wire::{section, sections};
 use safe_cex_engine::{
     Action, Command, Cx, Engine, Event, Method, PublicFeedPolicy, PublicFeedUpdate, Response,
@@ -10,6 +10,8 @@ use safe_cex_engine::{
 #[derive(Default)]
 struct Feeds {
     public_commands: usize,
+    feed_updates: usize,
+    revalue_positions: bool,
     derived_bid: f64,
     derived_at: f64,
 }
@@ -47,8 +49,14 @@ impl Venue for Feeds {
         );
     }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, ()>) {
+        self.feed_updates += 1;
         self.derived_bid = cx.store.ticker("A").map_or(0., |ticker| ticker.bid);
         self.derived_at = cx.now;
+        if self.revalue_positions {
+            cx.store.update_positions(|position| {
+                position.unrealized_pnl = self.derived_bid - position.entry_price;
+            });
+        }
     }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
@@ -452,4 +460,106 @@ fn provider_fields_stay_authoritative_after_venue_polls_and_partial_updates() {
         Some(100.)
     );
     assert!(sections(engine.snapshot_frame(3.)).any(|(kind, _)| kind == section::TICKERS));
+}
+
+#[test]
+fn non_ticker_packets_do_not_replay_valuation_or_dirty_positions_but_pending_native_quotes_restore()
+{
+    let mut engine = Engine::new(Feeds {
+        revalue_positions: true,
+        ..Default::default()
+    });
+    engine
+        .set_public_feed_policy(PublicFeedPolicy::Shared)
+        .unwrap();
+    engine.store_mut().set_markets(vec![market("A")]);
+    engine.store_mut().set_positions(vec![Position {
+        id: "A-long".into(),
+        symbol: "A".into(),
+        side: PositionSide::Long,
+        entry_price: 100.,
+        notional: 100.,
+        leverage: 1.,
+        margin_type: None,
+        position_mode: None,
+        unrealized_pnl: 0.,
+        realized_pnl: None,
+        contracts: 1.,
+        liquidation_price: 0.,
+        margin_size: None,
+        last_update: None,
+    }]);
+    engine
+        .apply_public_feed(
+            1000.,
+            update(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","bid":123}]}"#),
+        )
+        .unwrap();
+    assert_eq!(engine.venue().feed_updates, 1);
+    assert_eq!(engine.store().positions()[0].unrealized_pnl, 23.);
+    engine.take_frame(1000.).unwrap();
+
+    for json in [
+        r#"{"op":"publicFeedUpdate","books":[{"symbol":"A","bids":[[122,2]],"asks":[[124,3]]}]}"#,
+        r#"{"op":"publicFeedUpdate","candles":[{"symbol":"A","interval":"1m","timestamp":1000,"open":123,"high":124,"low":122,"close":123,"volume":1}]}"#,
+        r#"{"op":"publicFeedUpdate"}"#,
+        r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"UNKNOWN","bid":999}]}"#,
+        r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A"}]}"#,
+    ] {
+        engine.apply_public_feed(1001., update(json)).unwrap();
+        assert_eq!(engine.venue().feed_updates, 1, "{json}");
+        assert_eq!(engine.venue().derived_at, 1000., "{json}");
+        assert_eq!(engine.store().positions()[0].unrealized_pnl, 23.);
+        if let Some(frame) = engine.take_frame(1001.) {
+            assert!(
+                !sections(frame).any(|(kind, _)| matches!(
+                    kind,
+                    section::POSITIONS | section::TICKERS | section::TICKER_DELTAS
+                )),
+                "non-ticker packet dirtied account/ticker sections: {json}"
+            );
+        }
+    }
+
+    // Valid provider quotes must still invoke the venue hook.
+    engine
+        .apply_public_feed(
+            1002.,
+            update(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","bid":124}]}"#),
+        )
+        .unwrap();
+    assert_eq!(engine.venue().feed_updates, 2);
+    assert_eq!(engine.store().positions()[0].unrealized_pnl, 24.);
+    assert!(
+        sections(engine.take_frame(1002.).unwrap()).any(|(kind, _)| kind == section::POSITIONS)
+    );
+
+    // A real venue poll restores provider quotes and valuation after dispatch.
+    engine.handle(
+        1003.,
+        Event::WsMessage {
+            socket: SocketId(999),
+            text: "poll",
+        },
+    );
+    assert_eq!(engine.venue().feed_updates, 3);
+    assert_eq!(engine.store().ticker("A").unwrap().bid, 124.);
+    assert_eq!(engine.store().positions()[0].unrealized_pnl, 24.);
+    assert_eq!(engine.store().balance().total, 999.);
+    engine.take_frame(1003.).unwrap();
+
+    // A pending native revision is independent of whether this packet has quotes.
+    engine
+        .store_mut()
+        .update_ticker("A", |ticker| ticker.bid = 456.);
+    engine
+        .apply_public_feed(
+            1004.,
+            update(r#"{"op":"publicFeedUpdate","books":[{"symbol":"A","bids":[],"asks":[]}]}"#),
+        )
+        .unwrap();
+    assert_eq!(engine.venue().feed_updates, 4);
+    assert_eq!(engine.venue().derived_at, 1004.);
+    assert_eq!(engine.store().ticker("A").unwrap().bid, 124.);
+    assert_eq!(engine.store().positions()[0].unrealized_pnl, 24.);
 }
