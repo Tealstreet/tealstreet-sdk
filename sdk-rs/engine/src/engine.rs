@@ -1594,6 +1594,17 @@ impl<V: Venue> Engine<V> {
         &self.io.snapshot
     }
 
+    /// Full private sections and any unflushed market catalog, without consuming
+    /// changes, queued events or public stream baselines.
+    pub fn account_snapshot_frame(&mut self, now: f64) -> &[u8] {
+        let buffer = std::mem::take(&mut self.io.snapshot);
+        let mut writer = FrameWriter::new(buffer, now);
+        self.store
+            .write(&self.store.account_snapshot(), &mut writer);
+        self.io.snapshot = writer.finish();
+        &self.io.snapshot
+    }
+
     /// Write everything that changed since the previous call as one flush
     /// frame. Returns `None` when nothing changed.
     pub fn take_frame(&mut self, now: f64) -> Option<&[u8]> {
@@ -2023,6 +2034,213 @@ mod streaming_tests {
             symbol_amend: false,
             commands: Vec::new(),
         })
+    }
+
+    #[test]
+    fn account_snapshot_has_complete_empty_private_sections_without_public_tables() {
+        let mut engine = frame_engine();
+        engine.store.set_markets(vec![market("A")]);
+        engine.take_frame(0.);
+        engine.store.set_balance(crate::model::Balance {
+            used: 1.,
+            free: 2.,
+            total: 3.,
+            upnl: 4.,
+        });
+        let snapshot = engine.account_snapshot_frame(1.).to_vec();
+        let sections = crate::wire::sections(&snapshot).collect::<Vec<_>>();
+        assert_eq!(
+            sections.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+            [
+                section::ORDERS,
+                section::POSITIONS,
+                section::BALANCE,
+                section::SETTINGS,
+                section::STATUS
+            ]
+        );
+        for kind in [section::ORDERS, section::POSITIONS, section::SETTINGS] {
+            let payload = sections.iter().find(|(id, _)| *id == kind).unwrap().1;
+            assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 0);
+        }
+        let balance = sections
+            .iter()
+            .find(|(id, _)| *id == section::BALANCE)
+            .unwrap()
+            .1;
+        assert_eq!(
+            balance[..32]
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|row| f64::from_le_bytes(*row))
+                .collect::<Vec<_>>(),
+            [1., 2., 3., 4.]
+        );
+        assert_eq!(engine.account_snapshot_frame(1.), snapshot);
+        assert!(
+            engine.take_frame(1.).is_some(),
+            "snapshot must leave dirty private state for the stream"
+        );
+        assert!(engine.take_frame(1.).is_none());
+        assert_eq!(
+            engine.account_snapshot_frame(1.),
+            snapshot,
+            "clean state remains readable"
+        );
+    }
+
+    #[test]
+    fn account_snapshot_carries_unflushed_catalog_reordering_before_private_indexes() {
+        let mut engine = frame_engine();
+        engine.store.set_markets(vec![market("A"), market("B")]);
+        engine.take_frame(0.);
+        engine.store.set_positions(vec![crate::model::Position {
+            id: "A:long".into(),
+            symbol: "A".into(),
+            side: crate::model::PositionSide::Long,
+            entry_price: 10.,
+            notional: 20.,
+            leverage: 2.,
+            margin_type: None,
+            position_mode: None,
+            unrealized_pnl: 0.,
+            realized_pnl: None,
+            contracts: 2.,
+            liquidation_price: 0.,
+            margin_size: None,
+            last_update: None,
+        }]);
+        engine.store.set_markets(vec![market("B"), market("A")]);
+        let snapshot = engine.account_snapshot_frame(1.).to_vec();
+        let sections = crate::wire::sections(&snapshot).collect::<Vec<_>>();
+        assert_eq!(sections[0].0, section::MARKETS);
+        let positions = sections
+            .iter()
+            .find(|(kind, _)| *kind == section::POSITIONS)
+            .unwrap()
+            .1;
+        assert_eq!(u32::from_le_bytes(positions[4..8].try_into().unwrap()), 1);
+        assert!(sections.iter().all(|(kind, _)| !matches!(
+            *kind,
+            section::TICKERS
+                | section::TICKER_DELTAS
+                | section::BOOK
+                | section::CANDLES
+                | section::FILLS
+        )));
+        assert_eq!(engine.account_snapshot_frame(1.), snapshot);
+        let normal = engine.take_frame(1.).unwrap().to_vec();
+        for kind in [section::MARKETS, section::POSITIONS] {
+            assert_eq!(
+                crate::wire::sections(&normal)
+                    .find(|(id, _)| *id == kind)
+                    .unwrap()
+                    .1,
+                sections.iter().find(|(id, _)| *id == kind).unwrap().1,
+                "account read must leave the catalog and private changes pending"
+            );
+        }
+        assert!(engine.take_frame(1.).is_none());
+        assert!(
+            crate::wire::sections(engine.account_snapshot_frame(1.))
+                .all(|(kind, _)| kind != section::MARKETS)
+        );
+    }
+
+    #[test]
+    fn account_snapshot_leaves_public_events_and_ticker_deltas_for_their_normal_flushes() {
+        let mut engine = frame_engine();
+        engine.store.set_markets(vec![market("A")]);
+        engine.store.set_tickers(vec![crate::model::Ticker {
+            symbol: "A".into(),
+            ..Default::default()
+        }]);
+        engine.take_frame(0.);
+        engine.store.update_ticker("A", |ticker| ticker.last = 99.);
+        engine.store.set_balance(crate::model::Balance {
+            free: 10.,
+            ..Default::default()
+        });
+        {
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            cx.book_changed("A");
+            cx.candle(
+                "A",
+                "1m",
+                crate::model::Candle {
+                    timestamp: 1.,
+                    open: 98.,
+                    high: 100.,
+                    low: 97.,
+                    close: 99.,
+                    volume: 2.,
+                },
+            );
+            cx.fill(Fill {
+                order_id: "9007199254740995".into(),
+                symbol: "A".into(),
+                side: OrderSide::Buy,
+                price: 99.,
+                amount: 1.,
+            });
+        }
+        let snapshot = engine.account_snapshot_frame(1.).to_vec();
+        assert!(crate::wire::sections(&snapshot).all(|(kind, _)| !matches!(
+            kind,
+            section::MARKETS
+                | section::TICKERS
+                | section::TICKER_DELTAS
+                | section::BOOK
+                | section::BOOK_DELTA
+                | section::CANDLES
+                | section::FILLS
+        )));
+        let market = engine.take_market_frame(1.).unwrap().to_vec();
+        let kinds = crate::wire::sections(&market)
+            .map(|(kind, _)| kind)
+            .collect::<Vec<_>>();
+        for kind in [section::BOOK, section::CANDLES, section::FILLS] {
+            assert!(kinds.contains(&kind));
+        }
+        assert!(
+            engine.take_market_frame(1.).is_none(),
+            "events must flush exactly once"
+        );
+        let normal = engine.take_frame(1.).unwrap().to_vec();
+        let kinds = crate::wire::sections(&normal)
+            .map(|(kind, _)| kind)
+            .collect::<Vec<_>>();
+        assert!(kinds.contains(&section::TICKER_DELTAS));
+        assert!(kinds.contains(&section::BALANCE));
+        assert!(engine.take_frame(1.).is_none());
+    }
+
+    #[cfg(feature = "book-deltas")]
+    #[test]
+    fn account_snapshots_do_not_advance_or_reset_the_book_delta_baseline() {
+        use crate::book::BookSide::Bids;
+        let mut engine = frame_engine();
+        engine.set_book_deltas(true);
+        engine.store.set_markets(vec![market("A")]);
+        change_book(&mut engine, Bids, 100., 1.);
+        engine.take_frame(0.);
+        change_book(&mut engine, Bids, 100., 2.);
+        engine.account_snapshot_frame(1.);
+        let rows = book_sections(engine.take_market_frame(1.).unwrap());
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, section::BOOK_DELTA);
+        change_book(&mut engine, Bids, 100., 3.);
+        engine.account_snapshot_frame(2.);
+        change_book(&mut engine, Bids, 100., 2.);
+        assert!(
+            engine.take_market_frame(2.).is_none(),
+            "baseline must remain the last flushed size"
+        );
     }
 
     #[test]

@@ -277,6 +277,15 @@ export class EngineHost {
     return frame.buffer;
   }
 
+  /** Current private state and unflushed catalog; caller applies/forwards it. */
+  accountSnapshot() {
+    if (this.disposed) throw this.deadError ?? new EngineDisposedError();
+    if (typeof this.engine.accountSnapshotFrame !== 'function') throw new Error('Engine does not support private account snapshots');
+    const frame = this.invoke(this.engine.accountSnapshotFrame, this.transport.now());
+    if (this.deadError) throw this.deadError;
+    return frame.buffer;
+  }
+
   accountId() {
     if (this.disposed) throw this.deadError ?? new EngineDisposedError();
     const id = this.engine.accountId ? this.invoke(this.engine.accountId) : undefined;

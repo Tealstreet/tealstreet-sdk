@@ -596,8 +596,9 @@ and actual account resync are still separate implementation work.
 
 Root owns this independent core/host slice while venue poll activation proceeds.
 `Store::account_snapshot()` selects full private ORDERS/POSITIONS/BALANCE/
-SETTINGS/STATUS with the existing position Greeks/prediction extensions; omit
-all public tables, books, candles and fills. `Engine::account_snapshot_frame`
+SETTINGS/STATUS with the existing position Greeks/prediction extensions. Carry
+an unflushed market catalog and its existing extensions before private indexes;
+otherwise omit public tables, books, candles and fills. `Engine::account_snapshot_frame`
 uses the existing encoder and reusable snapshot buffer without draining dirty
 tracking, queued events or ticker/book baselines. Expose it as WASM
 `accountSnapshotFrame` and guarded `EngineHost.accountSnapshot()` returning a
@@ -606,8 +607,9 @@ claim network refresh; unsupported older engines fail visibly.
 
 Frame headers contain no blanket snapshot-reset bit; only present sections are
 replaced by FrameApplier. Public state therefore survives account-only frames.
-Catalog readiness remains the SDK integration's prerequisite because native
-private rows use market indexes. The subsequent SDK slice must synchronize
+Consumers must first accept native catalog readiness; subsequent catalog
+updates travel with private reads so changed indexes cannot misattribute rows.
+The subsequent SDK slice must synchronize
 before private reads and bulk/direct CLI/chaser decisions, retain native close
 quantities and never treat this snapshot as successful REST resync.
 
@@ -629,3 +631,14 @@ Two new controls cover first delivery and floor-equivalent updates. The
 cooldown control also verifies a genuinely different cadence still rearms.
 All ten scheduler controls now pass; strict all-feature core Clippy passes.
 Independent source review PASS. No ordinary timer behavior changed.
+
+### Account-frame API checkpoint
+
+Implemented the typed native account frame and guarded host API. Independent
+review caught the unflushed catalog race; conditional catalog inclusion and a
+reordering regression close it without flushing public events. Final core
+all-feature checks pass 112 cases (95 unit, ten scheduler, seven shared-feed),
+including four new account-read controls. Host package passes 145 cases; selected
+Binance WASM host passes 13. Core and selected wasm32 strict Clippy pass; API
+source independently reviewed PASS twice. These are core/host evidence, not a
+rebuilt combined artifact or actual SDK consumer acceptance yet.

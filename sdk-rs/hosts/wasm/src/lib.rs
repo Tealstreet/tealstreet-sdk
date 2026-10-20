@@ -120,6 +120,7 @@ trait AnyEngine {
     fn drain(&mut self) -> Vec<Action>;
     fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]>;
     fn snapshot(&mut self, now: f64) -> &[u8];
+    fn account_snapshot(&mut self, now: f64) -> &[u8];
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
@@ -162,6 +163,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
     fn snapshot(&mut self, now: f64) -> &[u8] {
         self.snapshot_frame(now)
+    }
+    fn account_snapshot(&mut self, now: f64) -> &[u8] {
+        self.account_snapshot_frame(now)
     }
 }
 
@@ -1256,6 +1260,12 @@ impl WasmEngine {
         js_sys::Uint8Array::from(self.inner.snapshot(now))
     }
 
+    /// Full private sections; leaves pending deltas and public baselines intact.
+    #[wasm_bindgen(js_name = accountSnapshotFrame)]
+    pub fn account_snapshot_frame(&mut self, now: f64) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::from(self.inner.account_snapshot(now))
+    }
+
     /// Transfer `frame.buffer` to the consumer: it is copied once, straight
     /// out of the engine's reused frame buffer.
     /// With `market_only`, just books, candles and fills (for the venue's
@@ -1401,6 +1411,9 @@ mod tests {
                 None
             }
             fn snapshot(&mut self, _: f64) -> &[u8] {
+                &[]
+            }
+            fn account_snapshot(&mut self, _: f64) -> &[u8] {
                 &[]
             }
         }
@@ -1611,6 +1624,9 @@ mod tests {
             None
         }
         fn snapshot(&mut self, _now: f64) -> &[u8] {
+            &[]
+        }
+        fn account_snapshot(&mut self, _now: f64) -> &[u8] {
             &[]
         }
     }

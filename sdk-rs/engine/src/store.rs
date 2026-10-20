@@ -585,6 +585,23 @@ impl Store {
         }
     }
 
+    /// Full private state, including an unflushed catalog needed for its indexes.
+    /// Change tracking and public events are left alone.
+    pub fn account_snapshot(&self) -> Pending {
+        Pending {
+            changes: Changes {
+                markets: self.changes.markets,
+                orders: true,
+                positions: true,
+                balance: true,
+                settings: true,
+                status: true,
+                ..Changes::default()
+            },
+            ticker_deltas: Vec::new(),
+        }
+    }
+
     /// Drain change tracking for one frame.
     pub fn take_pending(&mut self) -> Pending {
         let changes = std::mem::take(&mut self.changes);
