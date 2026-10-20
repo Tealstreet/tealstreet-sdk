@@ -761,23 +761,20 @@ impl Venue for Backpack {
                     true,
                 );
             }
-            Pending::Daily { rows, .. } => {
+            Pending::Daily { mut rows, skipped } => {
                 self.seed.attempts[SeedRead::Daily as usize] = 0;
-                // Every market keeps a row so socket updates can fill one the read lacked.
-                let mut daily: HashMap<_, _> =
-                    rows.into_iter().map(|t| (t.symbol.clone(), t)).collect();
-                let rows = cx
-                    .store
-                    .markets()
-                    .iter()
-                    .map(|m| {
-                        daily.remove(&m.symbol).unwrap_or_else(|| Ticker {
+                // A malformed row keeps an empty ticker so socket updates can fill it.
+                for symbol in skipped {
+                    if let Some(m) = cx.store.market(&symbol)
+                        && !rows.iter().any(|t| t.symbol == symbol)
+                    {
+                        rows.push(Ticker {
                             id: m.id.clone(),
                             symbol: m.symbol.clone(),
                             ..Default::default()
-                        })
-                    })
-                    .collect();
+                        });
+                    }
+                }
                 self.seed.daily = Some(rows);
                 self.finish_seed(cx);
             }
