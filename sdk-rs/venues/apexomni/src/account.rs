@@ -521,7 +521,7 @@ impl ApexOmni {
         cx.store.set_hedged(true);
         self.connect_private(cx);
         self.refresh_account(cx);
-        self.account.tick = Some(cx.set_timer(self.tick_interval()));
+        self.account.tick = Some(cx.set_poll_timer(self.tick_interval()));
     }
 
     fn tick_interval(&self) -> f64 {
@@ -611,7 +611,7 @@ impl ApexOmni {
         if self.account.tick == Some(timer) {
             self.account.tick = None;
             self.refresh_account(cx);
-            self.account.tick = Some(cx.set_timer(self.tick_interval()));
+            self.account.tick = Some(cx.set_poll_timer(self.tick_interval()));
             return true;
         }
         if self.account.orders_heal == Some(timer) {

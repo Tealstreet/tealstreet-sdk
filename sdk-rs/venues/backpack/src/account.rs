@@ -381,7 +381,7 @@ impl Backpack {
                 if let Some(t) = self.account.tick.take() {
                     cx.clear_timer(t);
                 }
-                self.account.tick = Some(cx.set_timer(10000.0));
+                self.account.tick = Some(cx.set_poll_timer(10000.0));
             }
             Next::None => {}
         }
@@ -559,7 +559,7 @@ impl Backpack {
             cx.log(LogLevel::Error, e);
             self.next_account(cx, failure_next);
             if self.account.tick.is_none() {
-                self.account.tick = Some(cx.set_timer(10000.0));
+                self.account.tick = Some(cx.set_poll_timer(10000.0));
             }
         }
     }

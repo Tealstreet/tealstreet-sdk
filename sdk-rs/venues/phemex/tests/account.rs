@@ -1039,3 +1039,218 @@ fn rest_balance_accepts_new_native_version_behind_client_clock_and_fences_replay
     assert_eq!(e.store().balance().used, 49.);
     assert_eq!(e.store().balance().total, 4090.);
 }
+
+// Drive the actual account loop through slow/fast updates, a parked stale callback,
+// and a resumed read. Other timers are deliberately not fired.
+fn policy_poll_read<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+    endpoint: &str,
+) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
+    use safe_cex_engine::{Action, Event};
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::TickIntervalChanged {
+            interval_ms: 60_000.0,
+        },
+    );
+    let slow: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            Action::Http(_) => panic!("policy updates must not issue account reads"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(slow.len(), 1, "exactly one recurring account poll");
+    assert_eq!(slow[0].1, now + 60_000.0);
+    engine.handle(now + 1.0, Event::TickIntervalChanged { interval_ms: 500.0 });
+    let fast: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fast.len(), 1);
+    assert_eq!(fast[0].1, now + 501.0);
+    engine.handle(
+        now + 2.0,
+        Event::TickIntervalChanged {
+            interval_ms: f64::INFINITY,
+        },
+    );
+    let paused: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        paused
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == fast[0].0))
+    );
+    assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    engine.handle(now + 501.0, Event::TimerFired { timer: fast[0].0 });
+    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    engine.handle(
+        now + 90_000.0,
+        Event::TickIntervalChanged { interval_ms: 500.0 },
+    );
+    let resumed: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0].1, now + 90_500.0);
+    engine.handle(
+        now + 90_500.0,
+        Event::TimerFired {
+            timer: resumed[0].0,
+        },
+    );
+    let reads: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        reads.iter().any(|r| r.url.contains(endpoint)),
+        "actual resumed account HTTP: {reads:?}"
+    );
+    let completed_at = now + 90_501.0;
+    engine.handle(
+        completed_at,
+        Event::TickIntervalChanged {
+            interval_ms: f64::INFINITY,
+        },
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::SetTimer { .. }))
+    );
+    (completed_at, reads)
+}
+
+fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+    now: f64,
+) {
+    use safe_cex_engine::{Action, Event};
+    // A response may schedule an ordinary repair/deadline, but the parked poll
+    // itself must still be registered and adopt this newest policy.
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        now,
+        Event::TickIntervalChanged {
+            interval_ms: 30_000.0,
+        },
+    );
+    let times: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { at_ms, .. } => Some(at_ms),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(times, vec![now + 30_000.0]);
+}
+
+#[test]
+fn recurring_account_poll_obeys_live_policy_and_completion() {
+    let (mut e, initial, _) = started();
+    seed(&mut e, &initial);
+    let engine = &mut e;
+    let (now, mut reads) = policy_poll_read(engine, NOW, "accountPositions");
+    for _ in 0..12 {
+        if reads.is_empty() {
+            break;
+        }
+        for r in reads {
+            let body = if r.url.contains("USDT") {
+                envelope("USDT", 1000., 69., BTC)
+            } else {
+                envelope("USDC", 200., 19., ETH)
+            };
+            engine.handle(
+                now,
+                safe_cex_engine::Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body: &body,
+                    },
+                },
+            );
+        }
+        reads = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                safe_cex_engine::Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+    }
+    assert!(reads.is_empty(), "account cycle must complete");
+    policy_poll_after_completion(engine, now);
+}
+
+#[test]
+fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
+    let (mut e, initial, _) = started();
+    seed(&mut e, &initial);
+    let engine = &mut e;
+    let now = NOW;
+    engine.drain_actions().for_each(drop);
+    engine.handle(now, Event::TickIntervalChanged { interval_ms: 100.0 });
+    let timer = engine
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms == now + 100.0 => Some(timer),
+            _ => None,
+        })
+        .expect("fast account poll");
+    engine.handle(now + 100.0, Event::TimerFired { timer });
+    let output: Vec<_> = engine.drain_actions().collect();
+    let reads: Vec<_> = output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(!reads.is_empty());
+    // Keep any next periodic timer for a loop that rearms before HTTP completes.
+    for r in reads {
+        engine.handle(
+            now + 100.0,
+            Event::HttpFailed {
+                request: r.id,
+                error: "account unavailable",
+            },
+        );
+    }
+    engine.drain_actions().for_each(drop);
+    for (offset, interval_ms) in [(1.0, 1.0), (2.0, f64::INFINITY), (3.0, 500.0)] {
+        engine.handle(
+            now + 100.0 + offset,
+            Event::TickIntervalChanged { interval_ms },
+        );
+        let times: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+        if interval_ms.is_infinite() {
+            assert!(times.is_empty());
+        } else {
+            assert_eq!(times, vec![now + 2100.0]);
+        }
+    }
+}

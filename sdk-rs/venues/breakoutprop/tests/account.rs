@@ -3,6 +3,82 @@ use safe_cex_engine::Notice;
 use safe_cex_venue_breakoutprop::Options;
 use support::{QUOTES, Rig};
 const PORTFOLIO: &str = r#"{"portfolios":[{"account":"default:00002","version":86,"balances":[{"account":"default:00002","currency":"USD","value":4999.96}],"positions":[{"account":"default:00002","positionCode":"76515503","symbol":"ETHUSD","side":"BUY","quantity":0.01,"quantityNotional":0.01,"openPrice":3656.01,"marginRate":0.2,"lastUpdateTime":"2024-12-11T06:00:49.087Z"},{"account":"default:00002","positionCode":"76515542","symbol":"ETHUSD","side":"BUY","quantity":0.01,"quantityNotional":0.01,"openPrice":3660,"marginRate":0.2,"lastUpdateTime":"2024-12-11T05:56:26.400Z"}],"orders":[]}]}"#;
+
+#[test]
+fn periodic_account_policy_resumes_initially_paused_public_and_private_profiles() {
+    use safe_cex_engine::Event;
+    for public_data_only in [true, false] {
+        let mut h = Rig::new(Options {
+            key: "example-user".into(),
+            secret: "example-password".into(),
+            tick_interval: f64::INFINITY,
+            public_data_only,
+            ..Default::default()
+        });
+        h.boot();
+        if !public_data_only {
+            for _ in 0..2 {
+                let request = h.next_request();
+                assert!(request.url.ends_with("/portfolio"));
+                h.reply(&request, 200, PORTFOLIO);
+            }
+            let quote = h.next_request();
+            assert!(quote.url.ends_with("/marketdata"));
+            h.reply(&quote, 200, QUOTES);
+        }
+        assert!(h.timers.is_empty());
+        let mut old = Vec::new();
+        for interval in [20_000., 500.] {
+            h.engine.handle(
+                h.now,
+                Event::TickIntervalChanged {
+                    interval_ms: interval,
+                },
+            );
+            h.collect();
+            assert_eq!(h.timers.len(), 1);
+            let (&timer, &at) = h.timers.iter().next().unwrap();
+            assert_eq!(at, h.now + interval);
+            old.push(timer);
+        }
+        h.engine.handle(h.now, Event::TimerFired { timer: old[0] });
+        h.collect();
+        assert!(h.requests.is_empty());
+        h.fire_next_timer();
+        let request = h.next_request();
+        assert!(request.url.ends_with(if public_data_only {
+            "/marketdata"
+        } else {
+            "/portfolio"
+        }));
+        // Completion must register against the current paused policy.
+        h.engine.handle(
+            h.now,
+            Event::TickIntervalChanged {
+                interval_ms: f64::INFINITY,
+            },
+        );
+        h.collect();
+        h.reply(
+            &request,
+            200,
+            if public_data_only { QUOTES } else { PORTFOLIO },
+        );
+        if !public_data_only {
+            let quote = h.next_request();
+            assert!(quote.url.ends_with("/marketdata"));
+            h.reply(&quote, 200, QUOTES);
+        }
+        assert!(h.timers.is_empty());
+        h.engine
+            .handle(h.now, Event::TickIntervalChanged { interval_ms: 1000. });
+        h.collect();
+        assert_eq!(
+            h.timers.values().copied().collect::<Vec<_>>(),
+            [h.now + 1000.]
+        );
+    }
+}
 const ZERO_CLOSE: &str = r#"{"account":"default:00002","orderId":76515504,"orderCode":"4471153:55640","clientOrderId":"55640","instrument":"ETHUSD","type":"STOP","status":"WORKING","finalStatus":false,"transactionTime":"2024-12-11T05:55:49.900Z","legs":[{"instrument":"ETHUSD","side":"SELL","positionEffect":"CLOSE","price":3500,"quantity":0,"filledQuantity":0,"remainingQuantity":0}]}"#;
 fn rig() -> Rig {
     let mut rig = Rig::new(Options {

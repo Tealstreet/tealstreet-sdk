@@ -959,7 +959,7 @@ impl BybitLinear {
             self.account.handshake = None;
             self.account.snapshot_attempts = 0;
             self.start_hyro_snapshot(cx);
-            self.account.tick_timer = Some(cx.set_timer(RECONCILE_INTERVAL_MS));
+            self.account.tick_timer = Some(cx.set_poll_timer(RECONCILE_INTERVAL_MS));
         }
     }
 
@@ -1101,7 +1101,7 @@ impl BybitLinear {
         self.fetch_orders(cx);
         self.fetch_positions(cx);
         self.fetch_wallet(cx);
-        self.account.tick_timer = Some(cx.set_timer(RECONCILE_INTERVAL_MS));
+        self.account.tick_timer = Some(cx.set_poll_timer(RECONCILE_INTERVAL_MS));
     }
 
     fn page_query(&self, coin: &str, limit: u32, cursor: &str) -> Query {
@@ -1239,7 +1239,7 @@ impl BybitLinear {
             return;
         }
         let now = cx.now;
-        self.account.tick_timer = Some(cx.set_timer(RECONCILE_INTERVAL_MS));
+        self.account.tick_timer = Some(cx.set_poll_timer(RECONCILE_INTERVAL_MS));
         if self.variant.is_hyro() {
             if self.account.authed
                 && self.account.handshake.is_none()

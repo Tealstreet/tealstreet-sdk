@@ -663,3 +663,24 @@ published position quantity. Interrupted/unknown writes must not be retried.
 Verify before-flush changes, native empties clearing stale mirrors, filters,
 frame forwarding without fills/books replay, and wrong-size close regressions.
 Network completion/resync and getAccount identity queries remain separate.
+
+### Poll activation checkpoint
+
+All recurring native account loops now use logical configurable polls: 14 paths
+in slice A and 13 in slice B, with OKX's non-network valuation/GC left ordinary.
+34 new controls cover actual requests, obsolete callbacks, pause/resume,
+completion under a changed policy, urgent repair and absolute failure floors.
+Final native runs pass 2,688 tests (1,326 A plus 1,362 B); the final A rerun also
+passes against the equivalent-deadline core correction. Strict all-target/
+all-feature Clippy, bans and scoped fmt pass for all 26 venue crates. Both
+native slices received independent cross-reviews PASS.
+
+The SDK sends the resolved interval to every registered Rust name before start,
+awaiting a newer policy if it changes during initial delivery. Infinity is
+explicit null, duplicate policies are suppressed, failed delivery is retryable,
+and disposal removes listeners. SDK checks: 354 wrapper cases, final 56 polling
+cases (overlapping the wrapper run except its final added reentry case), 44
+additional consumer cases, types and strict scoped lint pass. Independent
+source and fixture-preservation review PASS. Actual native credential outcome
+feedback remains phase 6b; manually invoking Base auth methods proves only
+resolved-policy propagation. No combined-WASM acceptance claimed yet.

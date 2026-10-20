@@ -1246,7 +1246,7 @@ impl Grvt {
                     self.sync_balance_upnl(cx);
                 }
                 if self.account.tick.is_none() {
-                    self.account.tick = Some(cx.set_timer(60_000.));
+                    self.account.tick = Some(cx.set_poll_timer(60_000.));
                 }
             }
             Request::Positions {
@@ -1570,7 +1570,7 @@ impl Grvt {
                 cx.store.set_balance(cx.store.balance().clone());
                 self.start_private_account(cx);
                 if self.account.tick.is_none() {
-                    self.account.tick = Some(cx.set_timer(60_000.));
+                    self.account.tick = Some(cx.set_poll_timer(60_000.));
                 }
             }
             Request::Positions { .. } => {

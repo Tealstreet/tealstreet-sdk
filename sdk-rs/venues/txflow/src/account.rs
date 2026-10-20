@@ -365,7 +365,7 @@ impl TxFlow {
         self.account.startup_at = cx.now.floor().max(0.0);
         cx.store.set_hedged(false);
         self.account_refresh(cx);
-        self.account.refresh_timer = Some(cx.set_timer(5000.0));
+        self.account.refresh_timer = Some(cx.set_poll_timer(5000.0));
     }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
         self.refresh_account(cx);
@@ -498,7 +498,7 @@ impl TxFlow {
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if self.account.refresh_timer == Some(timer) {
-            self.account.refresh_timer = Some(cx.set_timer(5000.0));
+            self.account.refresh_timer = Some(cx.set_poll_timer(5000.0));
             self.refresh_account(cx);
         }
         if self.account.setting_timer == Some(timer) {

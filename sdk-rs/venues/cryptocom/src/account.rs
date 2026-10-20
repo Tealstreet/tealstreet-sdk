@@ -331,7 +331,7 @@ impl Cryptocom {
         if let Some(timer) = self.account.timer.take() {
             cx.clear_timer(timer);
         }
-        self.account.timer = Some(cx.set_timer(10_000.0));
+        self.account.timer = Some(cx.set_poll_timer(10_000.0));
     }
     pub(crate) fn account_failed(
         &mut self,

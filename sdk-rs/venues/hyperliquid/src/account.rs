@@ -315,7 +315,13 @@ impl Hyperliquid {
             self.account.builder_approved = Some(false);
             if !self.options.public_data_only && self.user().is_some() {
                 self.refresh_spot(cx, true);
-                self.account.sync_timer = Some(cx.set_timer(10_000.0));
+                self.account.sync_timer = Some(cx.set_poll_timer_with_bounds(
+                    10_000.0,
+                    safe_cex_engine::PollTimerBounds {
+                        minimum_interval_ms: 10_000.0,
+                        ..Default::default()
+                    },
+                ));
             }
             return;
         }
@@ -351,7 +357,13 @@ impl Hyperliquid {
         self.check_builder(cx);
         self.refresh_account(cx);
         if !self.dex_names.is_empty() {
-            self.account.sync_timer = Some(cx.set_timer(120_000.0));
+            self.account.sync_timer = Some(cx.set_poll_timer_with_bounds(
+                120_000.0,
+                safe_cex_engine::PollTimerBounds {
+                    minimum_interval_ms: 120_000.0,
+                    ..Default::default()
+                },
+            ));
         }
     }
     pub(crate) fn check_builder(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -886,14 +898,26 @@ impl Hyperliquid {
         }
         if self.account.sync_timer == Some(timer) && self.spot {
             self.refresh_spot(cx, false);
-            self.account.sync_timer = Some(cx.set_timer(10_000.0));
+            self.account.sync_timer = Some(cx.set_poll_timer_with_bounds(
+                10_000.0,
+                safe_cex_engine::PollTimerBounds {
+                    minimum_interval_ms: 10_000.0,
+                    ..Default::default()
+                },
+            ));
             return;
         }
         if self.account.sync_timer == Some(timer) {
             for dex in self.dex_names.clone() {
                 self.refresh_state(cx, &dex);
             }
-            self.account.sync_timer = Some(cx.set_timer(120_000.0));
+            self.account.sync_timer = Some(cx.set_poll_timer_with_bounds(
+                120_000.0,
+                safe_cex_engine::PollTimerBounds {
+                    minimum_interval_ms: 120_000.0,
+                    ..Default::default()
+                },
+            ));
         }
     }
     fn dex_of<'a>(&self, cx: &'a Cx<'_, Pending>, symbol: &str) -> &'a str {

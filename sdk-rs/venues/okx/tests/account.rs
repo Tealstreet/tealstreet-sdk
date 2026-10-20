@@ -7,6 +7,61 @@ use support::*;
 const POSITION: &str = r#"{"instId":"BTC-USDT-SWAP","pos":"5","posSide":"net","avgPx":"39000","lever":"10","upl":"50","liqPx":"30000","mgnMode":"cross","imr":"200","mmr":"20"}"#;
 const ORDER: &str = r#"{"instId":"BTC-USDT-SWAP","ordId":"123","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"1","px":"38000","lever":"10","reduceOnly":"false","clOrdId":"caller123"}"#;
 
+#[test]
+fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
+    let mut e = Engine::new(Okx::new(Options {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..Default::default()
+    }));
+    e.start(0.);
+    let market = actions(&mut e).remove(0);
+    reply(&mut e, &market, &envelope(MARKET), 1.);
+    let ticker = actions(&mut e).remove(0);
+    reply(&mut e, &ticker, &envelope(TICKER), 2.);
+    let config = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut e,
+        &config,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.,
+    );
+    let pending = actions(&mut e);
+    let timer = pending
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 2003. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    complete(&mut e, pending, ORDER);
+    let expected = e.store().balance().clone();
+    for interval_ms in [f64::INFINITY, 30_000., 500.] {
+        e.handle(100., Event::TickIntervalChanged { interval_ms });
+        assert!(actions(&mut e).is_empty());
+    }
+    e.handle(
+        100.,
+        Event::TickIntervalChanged {
+            interval_ms: f64::INFINITY,
+        },
+    );
+    e.store_mut().set_balance(Default::default());
+    e.handle(2003., Event::TimerFired { timer });
+    assert_eq!(e.store().balance(), &expected);
+    let after = actions(&mut e);
+    assert!(!after.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        after
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 4003.))
+    );
+}
+
 fn startup() -> (
     Engine<Okx>,
     safe_cex_engine::SocketId,

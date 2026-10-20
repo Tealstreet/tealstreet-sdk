@@ -230,7 +230,7 @@ impl BinanceFutures {
         self.fetch_orders(cx);
         self.account.last_risk_at = cx.now;
         self.account.last_account_at = cx.now;
-        self.account.tick_timer = Some(cx.set_timer(HEALTH_CHECK_MS));
+        self.account.tick_timer = Some(cx.set_poll_timer(HEALTH_CHECK_MS));
     }
 
     pub(crate) fn request_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -436,7 +436,7 @@ impl BinanceFutures {
 
     fn tick(&mut self, cx: &mut Cx<'_, Pending>) {
         let now = cx.now;
-        self.account.tick_timer = Some(cx.set_timer(HEALTH_CHECK_MS));
+        self.account.tick_timer = Some(cx.set_poll_timer(HEALTH_CHECK_MS));
         if self.account.orders_stale && now - self.account.last_orders_retry_at >= ORDERS_RETRY_MS {
             self.account.last_orders_retry_at = now;
             self.fetch_orders(cx);

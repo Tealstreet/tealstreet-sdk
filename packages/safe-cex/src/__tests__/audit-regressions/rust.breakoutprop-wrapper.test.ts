@@ -46,14 +46,15 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
     expect(isRustVenue('breakoutprop')).toBe(true);
     await exchange.start();
     expect(construct.mock.calls[0][0]).toBe('breakoutprop');
-    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ key: 'username', secret: 'password', subaccount: '00002', tickInterval: 5000, recvWindow: 9000 });
+    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ key: 'username', secret: 'password', subaccount: '00002', recvWindow: 9000 });
+    expect(commands[0]).toEqual({ op: 'setTickInterval', interval: 5000 });
     expect(commands).toContainEqual({ op: 'setTickerSymbols', symbols: [] });
   });
   it('forwards initial and live incident slowdowns and unsubscribes on disposal', async () => {
     setTickIntervalMultipliers({ '*': 4 });
-    const { exchange, construct, commands } = fixture({ extra: { tickInterval: 5000 } });
+    const { exchange, commands } = fixture({ extra: { tickInterval: 5000 } });
     await exchange.start();
-    expect(JSON.parse(construct.mock.calls[0][1]).tickInterval).toBe(20000);
+    expect(commands[0]).toEqual({ op: 'setTickInterval', interval: 20000 });
     setTickIntervalMultipliers({ '*': 4, breakoutprop: 2 });
     expect(commands.at(-1)).toEqual({ op: 'setTickInterval', interval: 10000 });
     setTickIntervalMultipliers(undefined);
@@ -64,9 +65,10 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
     expect(commands).toHaveLength(count);
   });
   it('preserves an explicitly paused polling interval across JSON', async () => {
-    const { exchange, construct } = fixture({ extra: { tickInterval: Number.POSITIVE_INFINITY } });
+    const { exchange, construct, commands } = fixture({ extra: { tickInterval: Number.POSITIVE_INFINITY } });
     await exchange.start();
-    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ pollingEnabled: false, tickInterval: null });
+    expect(commands[0]).toEqual({ op: 'setTickInterval', interval: null });
+    expect(JSON.parse(construct.mock.calls[0][1])).not.toHaveProperty('pollingEnabled');
   });
   it('requires session credentials even for market-data-only mode', async () => {
     const { exchange, construct } = fixture({ key: '', secret: '', publicDataOnly: true });
@@ -112,6 +114,6 @@ describe('BreakoutProp Rust wrapper session and account boundary', () => {
       { symbol: 'ETHUSD', side: OrderSide.Buy, type: OrderType.Market, amount: 1 },
       { symbol: 'ETHUSD', side: OrderSide.Buy, type: OrderType.Market, amount: 1, clientOrderId: 'caller' },
     ])).rejects.toThrow(/clientOrderId/i);
-    expect(commands.every(({ op }) => op === 'setTickerSymbols')).toBe(true);
+    expect(commands.every(({ op }) => op === 'setTickerSymbols' || op === 'setTickInterval')).toBe(true);
   });
 });

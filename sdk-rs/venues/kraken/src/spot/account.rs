@@ -289,7 +289,7 @@ impl KrakenSpot {
         self.account.connection.watchdog = Some(cx.set_timer(15_000.));
         self.balance_read(cx, None);
         self.orders_read(cx);
-        self.account.poll = Some(cx.set_timer(10_000.));
+        self.account.poll = Some(cx.set_poll_timer(10_000.));
     }
     fn spot_settings(&self, cx: &mut Cx<'_, Pending>) {
         let settings: Vec<_> = cx
@@ -644,7 +644,7 @@ impl KrakenSpot {
             return true;
         }
         if self.account.poll == Some(timer) {
-            self.account.poll = Some(cx.set_timer(10_000.));
+            self.account.poll = Some(cx.set_poll_timer(10_000.));
             self.balance_read(cx, None);
             self.orders_read(cx);
             return true;

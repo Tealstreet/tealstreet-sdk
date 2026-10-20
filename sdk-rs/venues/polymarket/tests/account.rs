@@ -7,6 +7,38 @@ const SIGNER: &str = "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf";
 const MARKETS: &str = r#"[{"conditionId":"0x123","slug":"election","question":"Who wins?","clobTokenIds":"[\"1\",\"2\"]","outcomes":"[\"Yes\",\"No\"]","orderPriceMinTickSize":0.01,"orderMinSize":5,"active":true,"closed":false}]"#;
 const ORDER: &str = r#"{"id":"o1","asset_id":"1","side":"BUY","price":"0.5","original_size":"10","size_matched":"2","status":"LIVE","order_type":"GTC","created_at":"1700000000"}"#;
 const POSITIONS: &str = r#"[{"asset":"1","size":10,"avgPrice":0.5,"curPrice":0,"cashPnl":-5,"redeemable":true,"mergeable":false}]"#;
+
+#[test]
+fn periodic_pause_keeps_dirty_snapshot_repair_active() {
+    let mut h = H::new();
+    h.initial();
+    h.event(Event::TickIntervalChanged {
+        interval_ms: f64::INFINITY,
+    });
+    // Opening the private stream starts reconciliation; another authenticated
+    // event while it is busy makes the current snapshot dirty.
+    h.ws(r#"{"event_type":"authenticated"}"#);
+    h.initial();
+    let &(timer, at) = h
+        .timers
+        .iter()
+        .find(|(_, at)| *at == h.now + 250.)
+        .expect("urgent dirty repair");
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    assert!(h.http.iter().any(|r| r.url.contains("/balance-allowance")));
+    h.initial();
+    // Ordinary repair completes, then returns to a parked recurring poll.
+    h.e.handle(h.now, Event::TickIntervalChanged { interval_ms: 500. });
+    let resumed: Vec<_> =
+        h.e.drain_actions()
+            .filter_map(|a| match a {
+                Action::SetTimer { at_ms, .. } => Some(at_ms),
+                _ => None,
+            })
+            .collect();
+    assert_eq!(resumed, [h.now + 500.]);
+}
 struct H {
     e: Engine<Polymarket>,
     now: f64,
@@ -523,4 +555,126 @@ fn authoritative_empty_orders_cannot_be_reopened_by_older_live_event() {
         h.e.store().orders().is_empty(),
         "old LIVE notification reopened an order absent from authoritative snapshot"
     );
+}
+
+#[test]
+fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
+    let mut h = H::new();
+    h.initial();
+    let mut e = h.e;
+    let now = 1_700_000_001_000.;
+    e.drain_actions().for_each(drop);
+    e.handle(
+        now,
+        Event::TickIntervalChanged {
+            interval_ms: f64::INFINITY,
+        },
+    );
+    let stale: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ClearTimer { timer } => Some(timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stale.len(), 1, "one recurring account registration");
+    let mut obsolete = stale;
+    let mut current = None;
+    for interval in [200_000_f64, 500.] {
+        e.handle(
+            now,
+            Event::TickIntervalChanged {
+                interval_ms: interval,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].1, now + interval.max(0.0));
+        if let Some((timer, _)) = current.replace(timers[0]) {
+            obsolete.push(timer);
+        }
+    }
+    for timer in obsolete {
+        e.handle(now, Event::TimerFired { timer });
+        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    }
+    let (timer, due) = current.unwrap();
+    e.handle(due, Event::TimerFired { timer });
+    let mut pending: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        pending.iter().any(|r| r.url.contains("/balance-allowance")),
+        "actual native account request"
+    );
+    // Pause while REST is in flight. Completion may finish the current read
+    // chain, but must not recreate an active recurring host timer.
+    e.handle(
+        due,
+        Event::TickIntervalChanged {
+            interval_ms: f64::INFINITY,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    for _ in 0..12 {
+        if pending.is_empty() {
+            break;
+        }
+        for r in std::mem::take(&mut pending) {
+            let body = if r.url.contains("/balance-allowance") {
+                r#"{"balance":"12345678","allowances":{}}"#
+            } else if r.url.contains("/data/orders") {
+                r#"{"data":[],"next_cursor":"LTE="}"#
+            } else {
+                POSITIONS
+            };
+            e.handle(
+                due + 1.,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            pending.extend(e.drain_actions().filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            }));
+        }
+    }
+    assert!(pending.is_empty(), "all fixture account reads complete");
+    e.handle(
+        due + 2.,
+        Event::TickIntervalChanged {
+            interval_ms: 10_000.,
+        },
+    );
+    let resumed: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resumed.len(),
+        1,
+        "completion retains one paused registration"
+    );
+    assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
 }

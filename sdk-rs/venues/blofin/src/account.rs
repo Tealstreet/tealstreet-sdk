@@ -235,7 +235,7 @@ impl Blofin {
             return;
         }
         self.private_connect(cx);
-        self.account.tick = Some(cx.set_timer(10_000.0));
+        self.account.tick = Some(cx.set_poll_timer(10_000.0));
         self.private_read(
             cx,
             "/api/v1/account/margin-mode",
@@ -1334,8 +1334,18 @@ impl Blofin {
                 self.refresh_account(cx);
                 self.refresh_orders(cx, 1);
             }
-            self.account.tick = Some(cx.set_timer(
-                (10_000.0 * 2f64.powi(self.account.auth_failures.min(3) as i32)).min(60_000.0),
+            let not_before_ms = if self.account.auth_failures > 0 {
+                cx.now
+                    + (10_000.0 * 2f64.powi(self.account.auth_failures.min(3) as i32)).min(60_000.0)
+            } else {
+                f64::NEG_INFINITY
+            };
+            self.account.tick = Some(cx.set_poll_timer_with_bounds(
+                10_000.0,
+                safe_cex_engine::PollTimerBounds {
+                    not_before_ms,
+                    ..Default::default()
+                },
             ));
             return true;
         }

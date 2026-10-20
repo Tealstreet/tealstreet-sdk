@@ -23,7 +23,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'a
     start: noActions,
     command(json) {
       const command = JSON.parse(json);
-      if (command.op === 'setTickerSymbols') return '[]';
+      if (command.op === 'setTickerSymbols' || command.op === 'setTickInterval') return '[]';
       commands.push(command);
       return JSON.stringify([
         {

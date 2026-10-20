@@ -461,12 +461,8 @@ impl BreakoutProp {
     }
 
     pub(crate) fn arm_poll(&mut self, cx: &mut Cx<'_, Pending>) {
-        if !self.auth_failed
-            && !self.auth_draining
-            && self.options.tick_interval.is_finite()
-            && self.poll_timer.is_none()
-        {
-            self.poll_timer = Some(cx.set_timer(self.options.tick_interval));
+        if !self.auth_failed && !self.auth_draining && self.poll_timer.is_none() {
+            self.poll_timer = Some(cx.set_poll_timer(self.options.tick_interval));
         }
     }
 
@@ -1064,17 +1060,6 @@ impl Venue for BreakoutProp {
             self.poll_timer = None;
             self.poll(cx);
         }
-    }
-
-    fn on_tick_interval(&mut self, cx: &mut Cx<'_, Pending>, interval_ms: f64) {
-        if interval_ms.is_nan() || interval_ms <= 0.0 || interval_ms == self.options.tick_interval {
-            return;
-        }
-        self.options.tick_interval = interval_ms;
-        if let Some(timer) = self.poll_timer.take() {
-            cx.clear_timer(timer);
-        }
-        self.arm_poll(cx);
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {

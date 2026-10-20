@@ -311,7 +311,7 @@ impl Orderly {
         }
         self.account_poll(cx, true);
         if self.account.tick.is_none() {
-            self.account.tick = Some(cx.set_timer(self.poll_interval()));
+            self.account.tick = Some(cx.set_poll_timer(self.poll_interval()));
         }
     }
     fn poll_interval(&self) -> f64 {
@@ -1431,7 +1431,7 @@ impl Orderly {
             self.account.tick = None;
             self.account.ticks = self.account.ticks.wrapping_add(1);
             self.account_poll(cx, self.account.ticks.is_multiple_of(4));
-            self.account.tick = Some(cx.set_timer(self.poll_interval()));
+            self.account.tick = Some(cx.set_poll_timer(self.poll_interval()));
             return true;
         }
         if self.account.socket.reconnect == Some(timer) {

@@ -606,7 +606,9 @@ impl Kucoin {
         if self.account.busy != 0 {
             return;
         }
-        self.account.timer = None;
+        if let Some(timer) = self.account.timer.take() {
+            cx.clear_timer(timer);
+        }
         let mut reads = vec![Read::Positions, Read::Orders(false), Read::Orders(true)];
         if self.account.count.is_multiple_of(4) {
             reads.push(Read::Balance);
@@ -991,7 +993,7 @@ impl Kucoin {
     fn account_finished(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.busy = self.account.busy.saturating_sub(1);
         if self.account.busy == 0 && self.account.timer.is_none() {
-            self.account.timer = Some(cx.set_timer(500.0));
+            self.account.timer = Some(cx.set_poll_timer(500.0));
         }
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {

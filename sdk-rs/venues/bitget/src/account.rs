@@ -232,7 +232,7 @@ impl BitgetFutures {
         self.refresh_balance(cx);
         self.refresh_orders(cx, false);
         if self.account.poll.is_none() {
-            self.account.poll = Some(cx.set_timer(2_000.0));
+            self.account.poll = Some(cx.set_poll_timer(2_000.0));
         }
     }
 
@@ -1555,7 +1555,7 @@ impl BitgetFutures {
             if self.account.tick.is_multiple_of(4) {
                 self.refresh_orders(cx, !self.account.uta);
             }
-            self.account.poll = Some(cx.set_timer(2_000.0));
+            self.account.poll = Some(cx.set_poll_timer(2_000.0));
             self.account
                 .filled
                 .retain(|id, (_, at)| cx.now - *at < 600_000.0 || cx.store.order(id).is_some());

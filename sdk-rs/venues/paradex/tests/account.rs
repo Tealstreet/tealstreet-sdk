@@ -832,3 +832,124 @@ fn amend_invalidation_keeps_fill_watermarks_and_exact_decimal_size_changes_remai
             .contains("\"price\":\"100\"")
     );
 }
+
+#[test]
+fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
+    let (h, _) = loaded();
+    let mut e = h.e;
+    let now = 1_700_000_001_000.;
+    e.drain_actions().for_each(drop);
+    e.handle(
+        now,
+        Event::TickIntervalChanged {
+            interval_ms: f64::INFINITY,
+        },
+    );
+    let stale: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ClearTimer { timer } => Some(timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stale.len(), 1, "one recurring account registration");
+    let mut obsolete = stale;
+    let mut current = None;
+    for interval in [200_000_f64, 500.] {
+        e.handle(
+            now,
+            Event::TickIntervalChanged {
+                interval_ms: interval,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        let timers: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].1, now + interval.max(0.0));
+        if let Some((timer, _)) = current.replace(timers[0]) {
+            obsolete.push(timer);
+        }
+    }
+    for timer in obsolete {
+        e.handle(now, Event::TimerFired { timer });
+        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    }
+    let (timer, due) = current.unwrap();
+    e.handle(due, Event::TimerFired { timer });
+    let mut pending: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        pending.iter().any(|r| r.url.ends_with("/positions")),
+        "actual native account request"
+    );
+    // Pause while REST is in flight. Completion may finish the current read
+    // chain, but must not recreate an active recurring host timer.
+    e.handle(
+        due,
+        Event::TickIntervalChanged {
+            interval_ms: f64::INFINITY,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    for _ in 0..12 {
+        if pending.is_empty() {
+            break;
+        }
+        for r in std::mem::take(&mut pending) {
+            let body = if r.url.ends_with("/positions") || r.url.ends_with("/orders") {
+                r#"{"results":[]}"#
+            } else if r.url.ends_with("/account/margin") {
+                r#"{"configs":[]}"#
+            } else {
+                r#"{"total_collateral":"1000","free_collateral":"800","initial_margin_requirement":"200"}"#
+            };
+            e.handle(
+                due + 1.,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            pending.extend(e.drain_actions().filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            }));
+        }
+    }
+    assert!(pending.is_empty(), "all fixture account reads complete");
+    e.handle(
+        due + 2.,
+        Event::TickIntervalChanged {
+            interval_ms: 10_000.,
+        },
+    );
+    let resumed: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resumed.len(),
+        1,
+        "completion retains one paused registration"
+    );
+    assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
+}

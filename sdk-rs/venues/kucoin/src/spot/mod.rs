@@ -796,7 +796,7 @@ impl Venue for KucoinSpot {
                     self.bullet(cx, 1);
                     self.balance(cx);
                     self.orders(cx);
-                    self.poll = Some(cx.set_timer(5000.0));
+                    self.poll = Some(cx.set_poll_timer(5000.0));
                 } else {
                     cx.store.set_orders(vec![]);
                     cx.store.set_balance(Balance::default());
@@ -1112,7 +1112,7 @@ impl Venue for KucoinSpot {
         } else if self.poll == Some(timer) {
             self.orders(cx);
             self.balance(cx);
-            self.poll = Some(cx.set_timer(5000.0));
+            self.poll = Some(cx.set_poll_timer(5000.0));
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {

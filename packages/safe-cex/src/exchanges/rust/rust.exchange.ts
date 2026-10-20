@@ -293,6 +293,7 @@ export class RustEngineExchange extends BaseExchange {
    */
   onFrame?: (frame: ArrayBuffer) => void;
   private stopPollingConfig?: () => void;
+  private pollingPolicy?: { interval: number | null; promise?: Promise<void> };
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
@@ -350,10 +351,8 @@ export class RustEngineExchange extends BaseExchange {
       this.name === 'binanceinverse',
     );
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
+    this.stopPollingConfig = subscribeTickIntervalMultipliers(this.updatePollingPolicy);
     if (this.name === 'breakoutprop') {
-      this.stopPollingConfig = subscribeTickIntervalMultipliers(() => {
-        this.subscriptionCommand({ op: 'setTickInterval', interval: this.getTickInterval() });
-      });
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
@@ -426,6 +425,36 @@ export class RustEngineExchange extends BaseExchange {
   private updateTickerSymbols = () => {
     this.sharedPublicFeed?.send({ op: 'tickerSymbols', symbols: this.getActiveTickerSymbols() });
     this.subscriptionCommand({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
+  };
+
+  override recordAuthFailure(): void {
+    super.recordAuthFailure();
+    this.updatePollingPolicy();
+  }
+
+  override recordAuthSuccess(): void {
+    super.recordAuthSuccess();
+    this.updatePollingPolicy();
+  }
+
+  private syncPollingPolicy = (): Promise<void> | undefined => {
+    if (!this.host || this.isDisposed || this.engineFailure) return;
+    const resolved = this.getTickInterval();
+    if (resolved === undefined) return;
+    const interval = resolved === Number.POSITIVE_INFINITY ? null : resolved;
+    if (this.pollingPolicy?.interval === interval) return this.pollingPolicy.promise;
+    // Install before dispatch: native actions can synchronously change policy again.
+    const policy: NonNullable<RustEngineExchange['pollingPolicy']> = { interval };
+    this.pollingPolicy = policy;
+    policy.promise = this.command<void>({ op: 'setTickInterval', interval }).catch((error) => {
+      if (this.pollingPolicy === policy) this.pollingPolicy = undefined;
+      throw error;
+    });
+    return policy.promise;
+  };
+
+  private updatePollingPolicy = (): void => {
+    void this.syncPollingPolicy()?.catch(() => { /* command() owns error reporting; the next check can retry. */ });
   };
 
   /** Startup is single-use; metadata factories can replace an already-started instance. */
@@ -584,14 +613,9 @@ export class RustEngineExchange extends BaseExchange {
           ? { recvWindow: this.options.extra?.recvWindow }
           : {}),
         applicationId,
-        ...(orderlyNames.has(this.name) || this.name === 'breakoutprop'
-          ? { tickInterval: this.options.extra?.tickInterval }
-          : {}),
         ...(this.name === 'breakoutprop'
           ? {
               subaccount: this.options.subaccount,
-              tickInterval: this.getTickInterval(),
-              pollingEnabled: this.getTickInterval() !== Number.POSITIVE_INFINITY,
             }
           : {}),
         ...(['lighter', 'lighter-robinhood'].includes(this.name)
@@ -738,6 +762,20 @@ export class RustEngineExchange extends BaseExchange {
     // A fresh engine's full native snapshot clears the previous worker stream's
     // catalog/book baselines before any new deltas reach the main consumer.
     if (this.onFrame) this.receiveFrame(this.host.snapshot());
+    try {
+      let applied: Promise<void> | undefined;
+      for (;;) {
+        const latest = this.syncPollingPolicy();
+        if (!latest || latest === applied) break;
+        await latest;
+        applied = latest;
+        this.assertEngineAlive();
+      }
+    } catch (error) {
+      this.startupFailure = error instanceof Error ? error : new Error(String(error));
+      this.dispose();
+      throw error;
+    }
     this.host?.start();
     if (this.engineFailure) throw this.engineFailure;
     if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
@@ -747,7 +785,10 @@ export class RustEngineExchange extends BaseExchange {
     // at the store's, matching what the TS worker posts today.
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
     const bookMs = (exchangeMetadata[this.name]?.orderbookTickDelay || STORE_FLUSH_MS) * multiplier;
-    this.flushTimers.push(setInterval(() => this.host?.flush(), STORE_FLUSH_MS * multiplier));
+    this.flushTimers.push(setInterval(() => {
+      this.updatePollingPolicy();
+      this.host?.flush();
+    }, STORE_FLUSH_MS * multiplier));
     if (bookMs < STORE_FLUSH_MS * multiplier) {
       this.flushTimers.push(setInterval(() => this.host?.flush(true), bookMs));
     }

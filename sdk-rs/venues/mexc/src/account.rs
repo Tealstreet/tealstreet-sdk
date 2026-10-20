@@ -1216,7 +1216,7 @@ impl MexcFutures {
             }
         }
         if self.account.poll.is_none() {
-            self.account.poll = Some(cx.set_timer(2000.0));
+            self.account.poll = Some(cx.set_poll_timer(2000.0));
         }
     }
     pub fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
@@ -1236,7 +1236,7 @@ impl MexcFutures {
             }
         }
         if self.account.poll.is_none() {
-            self.account.poll = Some(cx.set_timer(2000.0));
+            self.account.poll = Some(cx.set_poll_timer(2000.0));
         }
     }
     pub fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1253,10 +1253,10 @@ impl MexcFutures {
                     false,
                     Pending::Account(Request::Mode),
                 );
-                self.account.poll = Some(cx.set_timer(2000.0));
+                self.account.poll = Some(cx.set_poll_timer(2000.0));
             }
             if self.account.poll.is_none() {
-                self.account.poll = Some(cx.set_timer(2000.0));
+                self.account.poll = Some(cx.set_poll_timer(2000.0));
             }
             self.account
                 .terminal

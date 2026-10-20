@@ -352,7 +352,7 @@ impl Woo {
         }
         self.account_connect(cx);
         self.account_refresh(cx);
-        self.account.timer = Some(cx.set_timer(2000.0));
+        self.account.timer = Some(cx.set_poll_timer(2000.0));
     }
     fn account_info_read(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.info_pending {
@@ -1563,7 +1563,7 @@ impl Woo {
             return true;
         }
         if self.account.timer == Some(timer) {
-            self.account.timer = Some(cx.set_timer(2000.0));
+            self.account.timer = Some(cx.set_poll_timer(2000.0));
             self.account.tick += 1;
             self.account
                 .terminal

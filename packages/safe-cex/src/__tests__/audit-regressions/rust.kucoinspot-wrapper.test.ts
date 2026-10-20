@@ -27,7 +27,7 @@ describe('KuCoin spot Rust SDK boundary', () => {
       start: noActions,
       command: (json) => {
         const command = JSON.parse(json);
-        if (command.op === 'setTickerSymbols') return '[]';
+        if (command.op === 'setTickerSymbols' || command.op === 'setTickInterval') return '[]';
         commands.push(command);
         const result = command.op === 'getAccount' ? { userId: 'user', subId: null, affiliateId: null }
           : command.op === 'findOrderByClientOrderId' ? { found: false, definitive: false }

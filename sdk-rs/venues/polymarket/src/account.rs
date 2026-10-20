@@ -489,8 +489,13 @@ impl Polymarket {
     fn account_finished(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.busy = self.account.busy.saturating_sub(1);
         if self.account.busy == 0 && self.account.timer.is_none() {
-            self.account.timer =
-                Some(cx.set_timer(if self.account.dirty { 250.0 } else { 10000.0 }));
+            self.account.timer = Some(if self.account.dirty {
+                // An event/write arrived during the snapshot: this is urgent
+                // repair, independent of the periodic polling policy.
+                cx.set_timer(250.0)
+            } else {
+                cx.set_poll_timer(10000.0)
+            });
         }
     }
     pub(crate) fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
