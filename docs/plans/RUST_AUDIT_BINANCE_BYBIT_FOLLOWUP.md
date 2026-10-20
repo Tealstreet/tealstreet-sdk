@@ -206,7 +206,8 @@ No new error architecture or unrelated engine helper migration belongs here.
 
 ## Integrated replay evidence
 
-All 23 venue replay gates pass: 11 documented/scripted private replays and 12
+At initial PR head 23a106668a, all 23 venue replay gates pass: 11
+documented/scripted private replays and 12
 public replays (three runs each), including two fresh anonymous 20-second
 captures. No executable oracle, threshold or committed fixture changed.
 Combined verification passed: 455 compiled SDK tests/17 files, host 89,
@@ -253,7 +254,7 @@ on green CI, write the remaining assignment to the requested handoff and stop.
 The next Bybit assignment below is unstarted and must not begin during wind-down.
 
 Owner confirmed the Partial cancel/recreate decision against TS, including
-the missing-mark path. After this follow-up merges green, cut a fresh branch
+the missing-mark path. Before wind-down, the next assignment was a fresh branch
 from landing for the Bybit highs and mediums in RUST_AUDITS.md: Brazil routing,
 per-coin balances, funding/settlement rows in fills, hedge funding dedupe, then
 the medium findings excluding the settled Partial TP/SL item. Reverify current
@@ -280,7 +281,26 @@ fill processing runs before the publication fence; other execution topics are
 independent. The new stream test covers all five profiles and proves late
 Closed/filled state updates, without claiming emitted-FILL proof from that
 assertion. Two independent source reviews passed the snapshot and stream fix.
-Affected native, selected Bybit replay and combined WASM checks are rerunning.
+Affected native verification passes: 564 tests (engine 102, Binance 181, Bybit
+182, AsterDEX 99), bans, format, strict native all-target Clippy and default /
+Binance-only WASM Clippy. Latest landing PR #1352 merged cleanly at 0eeb54ad80;
+its shared listener isolation is independently source-reviewed for our
+fill/error contracts. Integrated JS checks pass: typecheck 44, lint 28,
+other-package tests 25 and SDK unit 7,851 tests / 531 files. Network/teardown
+warnings did not fail the SDK suite. All 40 CI checks at 0eeb54ad80 pass.
+Final integration replay and compiled-suite evidence is posted on PR #1354
+before merge; no executable gate policy is changed. Bybit selected WASM is
+1,196,681 bytes, SHA256
+`c6fe81237533f92c60b1aec776056c9a14ae7a40a0ccbc629e292698236c8105`.
+
+Independent Bybit evidence review at 0eeb54ad80 passes all 11 replay gates and
+46 actual JSON outputs: exact run counts, matching frames and zero unserved
+requests, missing/unused writes, invalid signatures or protocol errors. Build,
+hash and replay timestamps prove the reviewed selected artifact was used
+throughout, before the next Binance build. The final fresh 20-second Bybit
+capture has 12,782 replay frames: CPU TS/Rust 687.1/401.6 ms main and
+458.1/215.0 ms steady; retained memory 22.6/5.2 MB. Hyro public steady CPU is
+10.2/4.8 ms with unchanged thresholds. No private funded verification is claimed.
 
 Boundary review caveat: the resync tests prove explicit full-snapshot empty
 BOOK delivery and subsequent recovery. They do not prove an ordinary gap clear
