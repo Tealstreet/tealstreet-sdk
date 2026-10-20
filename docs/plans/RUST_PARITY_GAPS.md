@@ -313,3 +313,6 @@ earlier proofs above remain attributed to their historical sources.
 This integration checkpoint passes 44 typecheck tasks, 28 lint tasks and all
 540 harness tests. Independent review passes for the live-smoke refusal and
 Spot frame assertion; native/full repository tests and artifact refresh remain.
+The replay gate now prints its exact output directory before running. Final
+proofs bind PASS logs to that directory rather than choosing files by recency;
+an independent review confirms this diagnostic changes no gate criteria.

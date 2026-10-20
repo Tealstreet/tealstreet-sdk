@@ -48,6 +48,7 @@ const smokeResult = assertLiveSmokeComplete(tapeRecords);
 if (smokeResult) values.books = smokeResult.symbol;
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
+console.log(`Replay output: ${outDir}`);
 
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
