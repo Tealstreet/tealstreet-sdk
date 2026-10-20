@@ -28,6 +28,14 @@ test('inverse minimum notional uses quote contracts', () => {
     precisionAmount: 1, minAmount: 1, contractSize: 10 }, book, { minNotional: 21, notionalKnown: true }).amount, 3);
 });
 
+test('native lot rules override display quantities and bound the native maximum', () => {
+  const rules = { notionalKnown: true, minNotional: 100, minimumAmount: 1, amountStep: 1,
+    maximumAmount: 2, notionalPerAmount: 0.001, quoteQuantity: false };
+  assert.equal(smokeOrder({ ...market, minAmount: 0.001, maxAmount: 0.002 }, book, rules).amount, 2);
+  assert.throws(() => smokeOrder(market, book, { ...rules, minNotional: 200 }), /minimum-exceeds/);
+  assert.equal(smokeOrder({ ...market, minAmount: 0 }, book, { ...rules, minNotional: 0 }).amount, 1);
+});
+
 test('invalid, stale-compatible shapes and no valid far price fail before orders', () => {
   for (const change of [{ flags: 0 }, { flags: 1 | MARKET_FLAG.READ_ONLY }, { precisionPrice: 0 }, { precisionAmount: NaN }, { minAmount: 0 }, { maxAmount: 0.0001 }])
     assert.throws(() => smokeOrder({ ...market, ...change }, book, { notionalKnown: true }));
@@ -38,11 +46,15 @@ test('invalid, stale-compatible shapes and no valid far price fail before orders
 });
 
 test('instrument rules are selected by exact native or display market identity', () => {
-  const records = [{ type: 'http', status: 200, body: JSON.stringify({ symbols: [
+  const records = [{ type: 'http', method: 'GET', url: 'https://fapi.binance.com/fapi/v1/exchangeInfo', status: 200, body: JSON.stringify({ symbols: [
     { symbol: 'ETHUSDT', filters: [{ filterType: 'MIN_NOTIONAL', notional: '99999' }] },
-    { symbol: 'BTCUSDT', filters: [{ filterType: 'MIN_NOTIONAL', notional: '100' }, { filterType: 'PERCENT_PRICE', multiplierDown: '0.8' }] },
+    { symbol: 'BTCUSDT', filters: [{ filterType: 'LOT_SIZE', minQty: '0.001', stepSize: '0.001', maxQty: '1000' },
+      { filterType: 'MIN_NOTIONAL', notional: '100' }, { filterType: 'PERCENT_PRICE', multiplierDown: '0.8' }] },
   ] }) }];
-  assert.deepEqual(marketRules(records, market), { minNotional: 100, lowerMultiplier: 0.8, notionalKnown: true });
+  const rules = marketRules(records, market);
+  assert.equal(rules.minNotional, 100);
+  assert.equal(rules.lowerMultiplier, 0.8);
+  assert.equal(rules.notionalKnown, true);
 });
 
 test('transport fences run before every HTTP, socket and outbound WS write', async () => {

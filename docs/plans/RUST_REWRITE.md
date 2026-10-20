@@ -387,6 +387,9 @@ round-trips through that gate; other profiles still need credentialed proof on
 their actual products. The runner never silently upgrades size after rejection
 or closes an unexpected fill. SIGINT/SIGTERM requests bounded pending-write drain
 and cleanup; incomplete cleanup remains a failure.
+After cancel-all, mutable leverage is lowered by one (bounded by the market
+minimum) and restored to its captured value, exercising both writes. Fixed or
+already-minimum leverage is set to its original value without increasing risk.
 
 All variables below have the exact prefix `RUST_LIVE_SMOKE_`; concatenate the
 family and suffix, for example `RUST_LIVE_SMOKE_BINANCE_KEY`. Credentials are read
@@ -425,11 +428,19 @@ overrides and refuse unsupported environments before reading credentials.
 | `kucoin` | `KUCOIN` | `KEY`, `SECRET`, `PASSPHRASE` | None wired; engine explicitly rejects testnet. Explicit `--mainnet` only. Bullet-derived sockets are limited to the reviewed `ws-api-futures.kucoin.com` origin. |
 | `polymarket` | `POLYMARKET` | `PRIVATE_KEY` | None wired; explicit `--mainnet` only. Optional complete L2 tuple: `API_KEY`, `API_SECRET`, `API_PASSPHRASE`; absent tuple derives credentials with L1 auth. Optional `FUNDER_ADDRESS`, `SIGNER_TYPE` (`0`–`3`; default `0`). |
 | `hyrotrader` | — | — | No reviewed built-in profile; refused, including with `--mainnet`. Simulation URLs cannot be inferred safely from caller-supplied endpoints. |
+| `grvt` | — | — | Newly landed during this harness change. Engine has testnet endpoints, but its pinned replay auth/routing contract currently accepts production origins only. No reviewed live-smoke profile yet; refused before credential access. |
 
 The environment table and credential option mapping live in
 `sdk-rs/harness/live-smoke-venues.mjs`; add a reviewed profile before enabling
 another venue or endpoint. A supported endpoint profile does not itself prove
 that every lifecycle command is available for every product/account type.
+Polymarket's optional `RUST_LIVE_SMOKE_POLYMARKET_MARKET_SLUGS` is a comma-separated
+list of 1–100 distinct market slugs to bound discovery; pair it with `--symbol`
+for the desired outcome. It is public selection metadata, not a credential.
+Sizing currently refuses Phemex PerpetualV2 and Crypto.com because quantity ticks
+alone do not establish the monetary floor. Bybit inverse likewise requires an
+explicit monetary floor in discovery. These profiles can read accounts but will
+refuse trading before placing until their complete rules can be established.
 
 ## Repository layout
 

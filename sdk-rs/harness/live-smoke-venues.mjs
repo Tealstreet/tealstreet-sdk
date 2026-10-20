@@ -115,7 +115,7 @@ register('polymarket', 'POLYMARKET', {
   optionalFields: {
     'polymarket.apiKey': 'API_KEY', 'polymarket.apiSecret': 'API_SECRET',
     'polymarket.apiPassphrase': 'API_PASSPHRASE', 'polymarket.funderAddress': 'FUNDER_ADDRESS',
-    'polymarket.signerType': 'SIGNER_TYPE',
+    'polymarket.signerType': 'SIGNER_TYPE', 'polymarket.marketSlugs': 'MARKET_SLUGS',
   },
 });
 
@@ -152,7 +152,12 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
       return;
     }
     if (typeof value !== 'string' || !value.trim()) throw new Error(`Invalid environment variable ${variable}`);
-    if (path === 'polymarket.signerType') {
+    if (path === 'polymarket.marketSlugs') {
+      const slugs = value.split(',').map((slug) => slug.trim());
+      if (!slugs.length || slugs.length > 100 || slugs.some((slug) => !slug) || new Set(slugs).size !== slugs.length)
+        throw new Error(`Invalid environment variable ${variable}`);
+      setOption(options, path, slugs);
+    } else if (path === 'polymarket.signerType') {
       if (!/^[0-3]$/.test(value)) throw new Error(`Invalid environment variable ${variable}`);
       setOption(options, path, Number(value));
     } else if (path === 'asterdex.apiVersion') {

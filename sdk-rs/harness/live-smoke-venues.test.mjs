@@ -7,7 +7,7 @@ const env = new Proxy({}, { get: (_, key) => key.endsWith('SIGNER_TYPE') ? '0' :
 
 test('every registry name has an explicitly reviewed environment or fails closed', () => {
   for (const venue of LIVE_SMOKE_VENUES) {
-    if (venue === 'hyrotrader') {
+    if (['hyrotrader', 'grvt'].includes(venue)) {
       assert.throws(() => liveSmokeProfile(venue, 'mainnet', env), /no reviewed/);
       continue;
     }
@@ -126,4 +126,13 @@ test('fresh profile mutation cannot change another profile allowlist or options'
   assert.equal(second.options.testnet, true);
   assert.equal(second.endpoints.http.includes('https://example.com'), false);
   assert.throws(() => liveSmokeProfile('__proto__', 'mainnet', env), /Unknown/);
+});
+
+test('Polymarket discovery can be scoped to a bounded public market selection', () => {
+  const env = { RUST_LIVE_SMOKE_POLYMARKET_PRIVATE_KEY: 'fake-private-key',
+    RUST_LIVE_SMOKE_POLYMARKET_MARKET_SLUGS: 'first-market,second-market' };
+  const profile = liveSmokeProfile('polymarket', 'mainnet', env);
+  assert.deepEqual(profile.options.polymarket.marketSlugs, ['first-market', 'second-market']);
+  assert.equal(profile.secrets['polymarket.marketSlugs'], undefined);
+  assert.throws(() => liveSmokeProfile('polymarket', 'mainnet', { ...env, RUST_LIVE_SMOKE_POLYMARKET_MARKET_SLUGS: 'first-market,first-market' }), /Invalid environment variable/);
 });

@@ -89,3 +89,16 @@ native network primitives provide its transport. No engine shapes change.
   pass. KNOWN_TS_FIXES documents the fixed reference without output rewriting.
 - Merged landing `5d7589f296` (GRVT and memory-baseline changes) as `88b5c3c805`.
   GRVT has no reviewed capture/replay profile yet and refuses before credentials.
+- Final local gates: 471 harness cases; 9 real-Wasm fake lifecycle scenarios
+  including an actual captured-tape TS/Rust gate; 3 TS leverage regressions;
+  103 Wasm SDK cases, 65 JS host cases, 38 native host cases and 29 native
+  Binance cases. Bans, workspace fmt, native/wasm clippy pass. Root 44 typecheck,
+  28 lint and 27 test tasks pass after the TS repair.
+- Binance public gate, 3 runs/873 frames/917 markets/783 tickers/3 books: TS/Rust
+  CPU 289.4/161.3 ms, steady CPU 165.6/79.4 ms, retained memory 16.3/3.2 MB.
+  Existing Binance private gate PASS (14 frames/2 markets) and captured fake
+  lifecycle gate PASS. Private performance is informational. No real account
+  was contacted; there is no credentialed live proof claim.
+- All phase reviews pass after repairs. Next: final secret scan and landing
+  refresh, PR into feat/rust-rewrite, posted adversarial reviews, exact-head green
+  CI, normal merge and fresh follow-up branch.

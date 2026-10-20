@@ -82,7 +82,10 @@ function fakeBinance({ startupOrders = [], losePlacement = false, failAmend = fa
       } else if (path.endsWith('/allOpenOrders') || path.endsWith('/algoOpenOrders')) {
         if (!lyingCancel) for (const row of orders.values()) notify(row, 'CANCELED');
         if (!lyingCancel) orders.clear(); body = { code: 200, msg: 'success' };
-      } else if (path.endsWith('/leverage')) body = { symbol: 'BTCUSDT', leverage: Number(p.get('leverage')), maxNotionalValue: '1000000' };
+      } else if (path.endsWith('/leverage')) {
+        if (!staleLeverage) remoteLeverage = Number(p.get('leverage'));
+        body = { symbol: 'BTCUSDT', leverage: Number(p.get('leverage')), maxNotionalValue: '1000000' };
+      }
       else throw new Error(`Unscripted fake request: ${request.method} ${path}`);
       return { status: 200, headers: '', body: new TextEncoder().encode(JSON.stringify(body)) };
     },
@@ -103,7 +106,8 @@ test('real Wasm lifecycle through fake transport records a TS/Rust-replayable pr
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.cleanupComplete, true);
   assert.equal(fake.orders.size, 0);
-  assert.deepEqual(records.filter((r) => r.type === 'command').map((r) => r.op), ['placeOrders', 'amendOrder', 'cancelOrders', 'cancelSymbolOrders', 'setLeverage']);
+  assert.deepEqual(records.filter((r) => r.type === 'command').map((r) => r.op), ['placeOrders', 'amendOrder', 'cancelOrders', 'cancelSymbolOrders', 'setLeverage', 'setLeverage']);
+  assert.deepEqual(fake.calls.filter((r) => new URL(r.url).pathname.endsWith('/leverage')).map((r) => new URL(r.url).searchParams.get('leverage')), ['19', '20']);
   assert.equal(records.find((r) => r.type === 'command' && r.op === 'cancelSymbolOrders').symbol, 'BTCUSDT');
   const serialized = records.map((r) => JSON.stringify(r)).join('\n') + '\n';
   for (const secret of [...Object.values(profile.secrets), 'fake-session-token-that-must-be-redacted']) assert.equal(serialized.includes(secret), false);
@@ -195,7 +199,8 @@ test('a fill first exposed by the final flush overrides lifecycle success', asyn
       return actions;
     }
     command(text, now) {
-      if (JSON.parse(text).op === 'setLeverage') this.injectFill = true;
+      const command = JSON.parse(text);
+      if (command.op === 'setLeverage' && command.leverage === 20) this.injectFill = true;
       return super.command(text, now);
     }
     takeFrame(now, marketOnly) {

@@ -11,10 +11,12 @@ import { loadEngine } from './engine.mjs';
 import { venueOf } from './venues.mjs';
 import { liveSmokeProfile } from './live-smoke-venues.mjs';
 import { createPrivateRecorder } from './live-smoke-tape.mjs';
+import { venueMarketRules } from './live-smoke-rules.mjs';
 
 const REQUIRED = Object.values(LOADED_FLAG).reduce((mask, bit) => mask | bit, 0);
 const positive = (value) => Number.isFinite(value) && value > 0;
-const fail = (code) => { throw new Error(code); };
+class SmokeFailure extends Error {}
+const fail = (code) => { throw new SmokeFailure(code); };
 const snap = (value) => Number(value.toPrecision(14));
 const units = (value, step, ceil = false) => snap((ceil ? Math.ceil(value / step - 1e-10) : Math.floor(value / step + 1e-10)) * step);
 
@@ -22,12 +24,13 @@ export function accountSnapshot(buffer) {
   const frame = new Frame(buffer);
   const table = frame.markets();
   const markets = Array.from({ length: table?.count ?? 0 }, (_, i) => ({
-    index: i, id: table.id(i), symbol: table.symbol(i), quote: table.quote(i), flags: table.flags[i],
+    index: i, id: table.id(i), symbol: table.symbol(i), base: table.base(i), quote: table.quote(i), flags: table.flags[i],
     ...Object.fromEntries(MARKET_COLUMNS.map((column) => [column, table[column][i]])),
   }));
   const orderTable = frame.orders();
   const allOrders = Array.from({ length: orderTable?.count ?? 0 }, (_, i) => ({
     id: orderTable.id(i), symbol: markets[orderTable.market[i]]?.symbol,
+    price: orderTable.price[i], amount: orderTable.amount[i],
     filled: orderTable.filled[i], remaining: orderTable.remaining[i], ...orderEnums(orderTable.enums[i]),
   }));
   const settings = frame.settings();
@@ -44,44 +47,15 @@ export function accountSnapshot(buffer) {
 
 // Inspect discovery replies, not guessed per-venue monetary defaults. The
 // selected minimum is never increased after a venue rejection.
-export function marketRules(records, market) {
-  let minNotional = 0;
-  let lowerMultiplier = 0;
-  let notionalKnown = false;
-  const visit = (value) => {
-    if (!value || typeof value !== 'object') return;
-    if (Array.isArray(value)) { for (const row of value) visit(row); return; }
-    if ([value.symbol, value.instId, value.name, value.id, value.market].some((id) => id === market.symbol || id === market.id)) {
-      for (const key of ['minNotional', 'minNotionalValue', 'minOrderValue', 'minTradeUSDT', 'minOrderAmt', 'min_notional', 'min_order_value']) {
-        const raw = value[key] ?? value.lotSizeFilter?.[key];
-        const n = Number(raw);
-        if (raw !== undefined && raw !== '' && raw !== null && Number.isFinite(n) && n >= 0) {
-          notionalKnown = true;
-          minNotional = Math.max(minNotional, n);
-        }
-      }
-      for (const filter of value.filters ?? []) {
-        if (['MIN_NOTIONAL', 'NOTIONAL'].includes(filter.filterType)) {
-          const n = Number(filter.notional ?? filter.minNotional);
-          if (positive(n)) { minNotional = Math.max(minNotional, n); notionalKnown = true; }
-        }
-        if (filter.filterType === 'PERCENT_PRICE' && positive(Number(filter.multiplierDown)))
-          lowerMultiplier = Math.max(lowerMultiplier, Number(filter.multiplierDown));
-      }
-    }
-    for (const nested of Object.values(value)) if (typeof nested === 'object') visit(nested);
-  };
-  for (const record of records) {
-    if (record.type !== 'http' || record.status < 200 || record.status >= 300) continue;
-    try { visit(JSON.parse(record.body)); } catch { /* Non-JSON replies have no discovery rules. */ }
-  }
-  return { minNotional, lowerMultiplier, notionalKnown };
-}
+export const marketRules = (records, market, venue = 'binance') => venueMarketRules(venue, records, market);
 
 export function smokeOrder(market, book, rules = {}) {
   if (rules.notionalKnown !== true) fail('unknown-minimum-notional');
   if (!(market.flags & MARKET_FLAG.ACTIVE) || market.flags & (MARKET_FLAG.READ_ONLY | MARKET_FLAG.EXPIRING)) fail('market-unavailable');
-  const { precisionPrice: tick, precisionAmount: step, minAmount, maxAmount } = market;
+  const tick = market.precisionPrice;
+  const step = rules.amountStep ?? market.precisionAmount;
+  const minAmount = rules.minimumAmount ?? market.minAmount;
+  const maxAmount = rules.maximumAmount ?? market.maxAmount;
   if (![tick, step, minAmount].every(positive) || !positive(maxAmount) || maxAmount < minAmount) fail('unknown-market-limits');
   const bid = book?.bids?.[0], ask = book?.asks?.[0];
   if (!positive(bid) || !positive(ask) || bid >= ask) fail('invalid-book');
@@ -89,9 +63,10 @@ export function smokeOrder(market, book, rules = {}) {
   const price = units(Math.max(bid * 0.9, floor + tick * 2), tick);
   const amendPrice = units(Math.max(bid * 0.89, floor + tick), tick);
   if (!positive(price) || !positive(amendPrice) || price >= bid * 0.98 || amendPrice >= price || amendPrice < floor) fail('no-resting-price');
-  // Inverse quantities are quote contracts. Linear/spot/outcome sizes are the
-  // engine's base units; contract multipliers are applied inside the venue.
-  const perUnit = market.flags & MARKET_FLAG.INVERSE ? (positive(market.contractSize) ? market.contractSize : 1) : amendPrice;
+  const quoteQuantity = rules.quoteQuantity ?? Boolean(market.flags & MARKET_FLAG.INVERSE);
+  const scale = rules.notionalPerAmount ?? (quoteQuantity && positive(market.contractSize) ? market.contractSize : 1);
+  if (!positive(scale)) fail('unknown-placement-units');
+  const perUnit = quoteQuantity ? scale : amendPrice * scale;
   const amount = units(Math.max(minAmount, (rules.minNotional ?? 0) / perUnit), step, true);
   if (!positive(amount) || amount > maxAmount) fail('minimum-exceeds-market-limit');
   return { symbol: market.symbol, type: 'limit', side: 'buy', amount, price, amendPrice };
@@ -127,6 +102,7 @@ const deadline = async (promise, ms, stage, signal) => {
 
 export async function runLiveSmoke({ venue, profile, transport, write, symbol, timeoutMs = 30000, WasmEngine, signal }) {
   let stage = 'connect', host, flush, selected, originalLeverage;
+  let reason;
   let wrote = false, filled = false, successful = false, cleanupComplete = false, stopped = false, cleaning = false;
   const ids = new Set(), books = new Map();
   const pending = new Set();
@@ -208,7 +184,7 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
     stage = 'book';
     await host.command({ op: 'subscribeOrderBook', symbol: selected.symbol });
     await wait(() => books.has(selected.symbol));
-    const rules = marketRules(recorder.records, selected);
+    const rules = marketRules(recorder.records, selected, venue);
     const { amendPrice, ...order } = smokeOrder(selected, currentBook(), rules);
     if (snapshot().orders.length || snapshot().positions) fail('account-changed-before-placement');
     healthy();
@@ -227,13 +203,24 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
     if (replacements !== undefined && (!Array.isArray(replacements) || replacements.some((id) => typeof id !== 'string' || !id))) fail('unproven-amendment');
     for (const id of replacements ?? []) ids.add(id);
     const amendedIds = replacements?.length ? replacements : [placed[0]];
-    await wait(() => snapshot().orders.some((o) => amendedIds.includes(o.id) && o.status === 'open'));
+    await wait(() => snapshot().orders.some((o) => amendedIds.includes(o.id) && o.status === 'open' &&
+      Math.abs(o.price - amendPrice) < selected.precisionPrice / 10));
     healthy();
     stage = 'cancel';
     const liveIds = snapshot().orders.filter((o) => ids.has(o.id) && o.status === 'open').map((o) => o.id);
     await command({ op: 'cancelOrders', ids: liveIds.length ? liveIds : [...ids].slice(-1) });
     stage = 'cancel-all';
     await cancelAll();
+    await wait(() => snapshot().orders.length === 0);
+    healthy();
+    // Exercise a real configuration write when a lower leverage is available,
+    // after all smoke orders have gone. Fixed/minimum leverage stays unchanged.
+    if (profile.leverage !== 'fixed' && originalLeverage > selected.minLeverage) {
+      stage = 'lower-leverage';
+      const lower = Math.max(selected.minLeverage, Math.floor(originalLeverage - 1));
+      await command({ op: 'setLeverage', symbol: selected.symbol, leverage: lower });
+      healthy();
+    }
     stage = 'restore-leverage';
     await command({ op: 'setLeverage', symbol: selected.symbol, leverage: originalLeverage });
     stage = 'verify-cleanup';
@@ -245,6 +232,7 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
     successful = true;
     stage = 'complete';
   } catch (error) {
+    reason = error instanceof SmokeFailure ? error.message : 'engine-or-transport-failed';
     cleaning = true;
     for (const id of error?.partialOrderIds ?? []) if (typeof id === 'string') ids.add(id);
     // No write retry: even a lost placement acknowledgement can leave an order.
@@ -272,9 +260,11 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
   if (successful && (filled || recorder.failure || !authoritative)) {
     successful = false;
     stage = filled ? 'unexpected-execution' : 'verify-readback';
+    reason = stage;
   }
   cleanupComplete = cleanupComplete && !filled && authoritative;
-  const result = recorder.redact({ ok: successful, stage, cleanupComplete, authoritative, ...(selected ? { symbol: selected.symbol } : {}), commands });
+  const result = recorder.redact({ ok: successful, stage, ...(successful ? {} : { reason }),
+    cleanupComplete, authoritative, ...(selected ? { symbol: selected.symbol } : {}), commands });
   write({ t: Math.max(0, transport.now() - recorder.epoch), type: 'live-smoke-result', ...result });
   return result;
 }
