@@ -75,6 +75,7 @@ fn opts(id: &str) -> PlaceOrderOpts {
         sl_trigger_type: None,
         client_order_id: (!id.is_empty()).then(|| id.to_owned()),
         close: None,
+        stp_mode: None,
     }
 }
 fn order(id: &str, kind: OrderType) -> Order {

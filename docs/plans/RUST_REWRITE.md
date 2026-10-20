@@ -358,3 +358,12 @@ appended zero count explicitly clears them. Bitget inverse frames carry native
 order amount/filled and display remaining; their position notional is the native
 contract quantity. The worker adapter retains these native quantities in the
 existing TS `extra` fields alongside coin balances.
+
+After the optional coin columns, a `BALANCE` payload may append full per-currency
+balances: `u32 count`, `u32 currency[count]` string references, 8-byte padding,
+then f64 columns `used[count]`, `free[count]`, `total[count]`, `upnl[count]`.
+Currency-only frames first emit the empty coin extension. Absent currency tails
+leave that table unspecified; an appended zero count explicitly clears it.
+Legacy scalar and coin-only payloads retain their exact layout. The host exposes
+the full values as `currencies: Record<string, Balance>` alongside aggregate
+values and the existing optional `coins` table.

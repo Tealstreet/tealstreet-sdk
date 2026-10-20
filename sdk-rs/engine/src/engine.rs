@@ -175,6 +175,13 @@ pub enum Command {
         command: CommandId,
         hedged: bool,
     },
+    FetchStpMode {
+        command: CommandId,
+    },
+    SetStpMode {
+        command: CommandId,
+        mode: crate::model::StpMode,
+    },
     /// Refresh account-specific leverage rails and margin mode for a symbol.
     FetchLeverage {
         command: CommandId,

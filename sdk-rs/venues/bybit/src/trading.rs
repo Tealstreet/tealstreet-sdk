@@ -911,6 +911,7 @@ impl BybitLinear {
                 sl_trigger_type: None,
                 client_order_id: None,
                 close: None,
+                stp_mode: None,
             };
             return Ok(trading_stop_job(self.trailing_stop(cx, &opts)?));
         }

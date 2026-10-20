@@ -241,7 +241,21 @@ export class Frame {
       const base = this.string(refs[i]);
       Object.defineProperty(coins, base, { value: { base, amount: amounts[i], notional: notionals[i] }, enumerable: true, configurable: true });
     }
-    return { used, free, total, upnl, coins };
+    const currencyOffset = at + count * 16;
+    if (currencyOffset >= section.offset + section.length) return { used, free, total, upnl, coins };
+    const currencyCount = new Uint32Array(this.buffer, currencyOffset, 1)[0];
+    const currencyRefs = new Uint32Array(this.buffer, currencyOffset + 4, currencyCount);
+    const currencyAt = align8(currencyOffset + 4 + currencyCount * 4);
+    const currencyValues = new Float64Array(this.buffer, currencyAt, currencyCount * 4);
+    const currencies = {};
+    for (let i = 0; i < currencyCount; i++) {
+      const currency = this.string(currencyRefs[i]);
+      Object.defineProperty(currencies, currency, {
+        value: { used: currencyValues[i], free: currencyValues[currencyCount + i], total: currencyValues[currencyCount * 2 + i], upnl: currencyValues[currencyCount * 3 + i] },
+        enumerable: true, configurable: true,
+      });
+    }
+    return { used, free, total, upnl, coins, currencies };
   }
 
   status() {

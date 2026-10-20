@@ -699,6 +699,7 @@ impl Okx {
                     tp_trigger_type: o.trigger_type,
                     client_order_id: None,
                     close: o.close,
+                    stp_mode: None,
                 }],
             )?;
             result.steps.extend(replacement.steps);

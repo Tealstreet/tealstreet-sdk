@@ -442,6 +442,7 @@ impl Backpack {
                         sl_trigger_type: None,
                         client_order_id: None,
                         close: None,
+                        stp_mode: None,
                     };
                     let mut steps = self.placement_steps(cx, &o)?;
                     steps.insert(

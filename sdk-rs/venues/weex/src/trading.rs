@@ -795,6 +795,7 @@ impl WeexFutures {
                             sl_trigger_type: brackets.sl,
                             client_order_id: None,
                             close: o.close,
+                            stp_mode: None,
                         };
                         // Replacement preflight runs before the destructive cancel.
                         let mut replacement = self.plan_orders(cx, vec![opts])?;

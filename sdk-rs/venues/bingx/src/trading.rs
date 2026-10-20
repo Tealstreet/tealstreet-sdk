@@ -896,6 +896,7 @@ impl Trading {
                 trigger_type: o.trigger_type,
                 tp_trigger_type: o.trigger_type,
                 sl_trigger_type: o.trigger_type,
+                stp_mode: None,
             };
             let mut replacement = self.format(cx, &opts)?;
             for step in &mut replacement {

@@ -992,6 +992,7 @@ impl Bitrue {
                     sl_trigger_type: None,
                     client_order_id: None,
                     close: amend.order.close,
+                    stp_mode: None,
                 };
                 if protective {
                     if detail.trigger_type.map(|n| n.0)

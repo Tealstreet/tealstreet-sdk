@@ -83,12 +83,15 @@ export type OrderTable = { count: number; market: Uint32Array; enums: Uint32Arra
 };
 export type PositionTable = { count: number; market: Uint32Array; enums: Uint32Array } & Columns<PositionColumn>;
 export interface CoinBalance { base: string; amount: number; notional: number }
-export interface Balance {
-  coins?: Record<string, CoinBalance>;
+export interface CurrencyBalance {
   used: number;
   free: number;
   total: number;
   upnl: number;
+}
+export interface Balance extends CurrencyBalance {
+  coins?: Record<string, CoinBalance>;
+  currencies?: Record<string, CurrencyBalance>;
 }
 export interface Status {
   loaded: number;

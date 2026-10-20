@@ -61,6 +61,25 @@ pub enum StopTriggerType {
     IndexPrice,
 }
 
+/// Account or per-order self-trade prevention policy where supported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StpMode {
+    ExpireTaker,
+    ExpireMaker,
+    ExpireBoth,
+}
+
+impl StpMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExpireTaker => "EXPIRE_TAKER",
+            Self::ExpireMaker => "EXPIRE_MAKER",
+            Self::ExpireBoth => "EXPIRE_BOTH",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RejectReason {
     PostOnly,
@@ -260,6 +279,13 @@ pub struct CoinBalance {
     pub notional: f64,
 }
 
+/// Full per-currency account balances, alongside the aggregate balance.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct CurrencyBalance {
+    pub currency: String,
+    pub balance: Balance,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 pub struct Loaded {
     pub balance: bool,
@@ -316,6 +342,8 @@ pub struct PlaceOrderOpts {
     pub client_order_id: Option<String>,
     #[serde(default)]
     pub close: Option<bool>,
+    #[serde(default)]
+    pub stp_mode: Option<StpMode>,
 }
 
 fn caller_client_order_id<'de, D: serde::Deserializer<'de>>(

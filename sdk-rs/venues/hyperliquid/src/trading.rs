@@ -212,6 +212,7 @@ impl Hyperliquid {
                     sl_trigger_type: None,
                     client_order_id: None,
                     close: None,
+                    stp_mode: None,
                 };
                 if opts.kind == OrderType::TakeProfit
                     && let Some(t) = cx.store.ticker(&opts.symbol)

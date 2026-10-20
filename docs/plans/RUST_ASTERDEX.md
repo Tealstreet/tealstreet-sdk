@@ -75,3 +75,15 @@ for green CI, merge, and cut a fresh follow-up branch.
   matched the actual HTTP serializer rather than normalizing requests.
 - Private/trading/queries implementation underway; their reviews and full gates
   are not yet claimed.
+
+### Shared frame and command preparation
+
+- Added optional typed currency balances after the existing collateral tail;
+  scalar and coin-only frames retain their byte layout. Engine tests50/50 and
+  decoder compatibility/value/clear tests pass. Combined host suite needs the
+  combined WASM rebuild (the prior Bitget-only artifact cannot run Binance).
+- Added typed STP policy/commands and optional placement field. Existing venue
+  literal construction defaults to no policy; workspace all-target check passes.
+- Private/trading phase code-correctness reviews caught and fixed flip-side,
+  account overlap, fill identity, terminal cancel races, and hedge closure bugs.
+  Trading review is clear; final integration gates remain pending.
