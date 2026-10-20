@@ -1107,15 +1107,16 @@ impl Account {
                 invalid,
                 ..
             } => {
+                // Out-of-scope rows drop first; a repeat among them proves nothing.
+                if registered == Ok(false) {
+                    return;
+                }
                 let row = serde_json::from_str::<NativeOrder>(item);
                 if let Ok(row) = &row
                     && !row.id.is_empty()
                     && !seen.insert(row.id.clone())
                 {
                     *invalid = true;
-                    return;
-                }
-                if registered == Ok(false) {
                     return;
                 }
                 if let Ok(row) = row

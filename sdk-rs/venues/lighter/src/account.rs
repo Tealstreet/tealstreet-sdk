@@ -135,6 +135,8 @@ pub struct Snapshot {
     equity: f64,
     free: f64,
     coverage: SnapshotCoverage<String>,
+    /// Each skipped owned row's identity and native PnL, as far as they parsed.
+    skipped: Vec<(Option<String>, Option<f64>)>,
 }
 
 #[derive(Default, Deserialize)]
@@ -1124,9 +1126,15 @@ impl Lighter {
             margin_type,
         ))
     }
-    /// Stored positions are keyed by symbol; an unknown market keeps its native
-    /// id, which protects no stored row but still identifies the skipped one.
-    fn position_key(&self, symbol: &str, market_id: &str, hint: Option<&str>) -> Option<String> {
+    /// Stored positions are keyed by symbol, so a native id resolves through the
+    /// catalogue, then the store's markets; an id neither knows stays as itself.
+    fn position_key(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        market_id: &str,
+        hint: Option<&str>,
+    ) -> Option<String> {
         if !symbol.is_empty() {
             return Some(symbol.into());
         }
@@ -1135,7 +1143,18 @@ impl Lighter {
         } else {
             market_id
         };
-        (!id.is_empty()).then(|| self.symbol_for_id(id).unwrap_or(id).into())
+        (!id.is_empty()).then(|| {
+            self.symbol_for_id(id)
+                .or_else(|| {
+                    cx.store
+                        .markets()
+                        .iter()
+                        .find(|m| m.id == id)
+                        .map(|m| m.symbol.as_str())
+                })
+                .unwrap_or(id)
+                .into()
+        })
     }
     fn snapshot_row(
         &self,
@@ -1174,10 +1193,28 @@ impl Lighter {
                         market_id: Atom<'a>,
                         #[serde(default, borrow)]
                         symbol: Cow<'a, str>,
+                        #[serde(default, borrow, alias = "position", alias = "qty")]
+                        size: Option<&'a RawValue>,
+                        #[serde(default, borrow, alias = "unrealizedPnl")]
+                        unrealized_pnl: Option<&'a RawValue>,
                     }
-                    let identity = serde_json::from_str::<Identity<'_>>(row.get())
-                        .ok()
-                        .and_then(|row| self.position_key(&row.symbol, &row.market_id.0, hint));
+                    let num = |raw: Option<&RawValue>| {
+                        raw.and_then(|raw| serde_json::from_str::<Num>(raw.get()).ok())
+                            .map(|n| n.0)
+                    };
+                    let (identity, size, pnl) =
+                        match serde_json::from_str::<Identity<'_>>(row.get()) {
+                            Ok(row) => (
+                                self.position_key(cx, &row.symbol, &row.market_id.0, hint),
+                                num(row.size),
+                                num(row.unrealized_pnl),
+                            ),
+                            Err(_) => (None, None, None),
+                        };
+                    // A flat row of a known market is a closure whatever else failed.
+                    if identity.is_some() && size == Some(0.0) {
+                        return;
+                    }
                     cx.log(
                         LogLevel::Warning,
                         match &identity {
@@ -1185,10 +1222,12 @@ impl Lighter {
                             None => "Lighter skipped malformed position without a market".into(),
                         },
                     );
+                    snapshot.skipped.push((identity.clone(), pnl));
                     snapshot.coverage.reject(identity);
                     return;
                 };
                 let owned = row.size.as_ref().is_some_and(|n| n.0 != 0.0);
+                let pnl = row.unrealized_pnl.as_ref().map(|n| n.0);
                 let market_id = if row.market_id.0.is_empty() {
                     hint.unwrap_or_default()
                 } else {
@@ -1202,7 +1241,7 @@ impl Lighter {
                 } else {
                     self.symbol_for_id(market_id)
                 };
-                let identity = self.position_key(&row.symbol, &row.market_id.0, hint);
+                let identity = self.position_key(cx, &row.symbol, &row.market_id.0, hint);
                 if symbol
                     .and_then(|symbol| cx.store.market(symbol))
                     .is_some_and(|market| {
@@ -1242,6 +1281,7 @@ impl Lighter {
                             None => "Lighter skipped position without a market".into(),
                         },
                     );
+                    snapshot.skipped.push((identity.clone(), pnl));
                     snapshot.coverage.reject(identity);
                 }
             })?;
@@ -1370,7 +1410,10 @@ impl Lighter {
             .find(|o| o.id == id)
             .or_else(|| self.account.records.get(&id));
         let mut kind = match normalized(&wire.kind.0).as_str() {
-            "0" | "LIMIT" => OrderType::Limit,
+            // TWAP, its slices and liquidations rest like limits, as the stream maps them.
+            "0" | "6" | "7" | "8" | "LIMIT" | "TWAP" | "TWAP_SUB" | "LIQUIDATION" => {
+                OrderType::Limit
+            }
             "1" | "MARKET" => OrderType::Market,
             "2" | "3" | "STOP_LOSS" | "STOP_MARKET" | "STOP_LIMIT" | "STOP_LOSS_LIMIT" => {
                 OrderType::StopLoss
@@ -1694,12 +1737,28 @@ impl Lighter {
                 s.margin_type = Some(margin);
             });
         }
-        // Equity nets every position's PnL, so a partial set cannot value it.
-        if snapshot.coverage.rejected() == 0 {
-            let upnl = cx.store.positions().iter().try_fold(0.0, |sum, position| {
-                let value = sum + position.unrealized_pnl;
-                value.is_finite().then_some(value)
-            });
+        // Equity, free and used are native aggregates. PnL sums the committed rows
+        // (retained copies included) plus each skipped row with no copy; a skipped
+        // row without a copy or a parsed PnL leaves the split unknown, so it holds.
+        let skipped_pnl = snapshot.skipped.iter().try_fold(0.0, |sum, (key, pnl)| {
+            if key
+                .as_ref()
+                .is_some_and(|key| cx.store.positions().iter().any(|p| &p.symbol == key))
+            {
+                Some(sum)
+            } else {
+                pnl.map(|pnl| sum + pnl)
+            }
+        });
+        if let Some(skipped_pnl) = skipped_pnl {
+            let upnl = cx
+                .store
+                .positions()
+                .iter()
+                .try_fold(skipped_pnl, |sum, position| {
+                    let value = sum + position.unrealized_pnl;
+                    value.is_finite().then_some(value)
+                });
             let Some(upnl) = upnl else {
                 cx.log(
                     LogLevel::Warning,

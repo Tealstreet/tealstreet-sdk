@@ -697,3 +697,53 @@ fn bad_position_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
     assert_eq!(contracts(&e, "ETH-PERP"), None);
     assert_eq!(e.store().positions().len(), 1);
 }
+
+#[test]
+fn owned_position_on_a_market_gone_from_the_catalogue_keeps_its_stored_copy() {
+    use safe_cex_engine::model::{MarginType, Position, PositionMode, PositionSide};
+    let (mut e, s) = ready("disabled");
+    let mut positions = e.store().positions().to_vec();
+    positions.push(Position {
+        id: "SOL-PERP".into(),
+        symbol: "SOL-PERP".into(),
+        side: PositionSide::Long,
+        entry_price: 20.0,
+        notional: 60.0,
+        leverage: 10.0,
+        margin_type: Some(MarginType::Cross),
+        position_mode: Some(PositionMode::Oneway),
+        unrealized_pnl: 50.0,
+        realized_pnl: None,
+        contracts: 3.0,
+        liquidation_price: 0.0,
+        margin_size: Some(6.0),
+        last_update: None,
+    });
+    e.store_mut().set_positions(positions);
+    let state = r#"{"assetPositions":[{"position":{"coin":"SOL","szi":"3","entryPx":"20","positionValue":"90","unrealizedPnl":"10","marginUsed":"6","leverage":{"type":"cross","value":10}}},{"position":{"coin":"BTC","szi":"2","entryPx":"100","positionValue":"200","unrealizedPnl":"0","marginUsed":"20","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"26"},"time":2000}"#;
+    let logs = resync(&mut e, s, 2000.0, state, "[]");
+    assert!(logs.contains(&"Hyperliquid skipped position sol on an unknown market".to_owned()));
+    assert_eq!(e.store().position("SOL-PERP").unwrap().contracts, 3.0);
+    assert_eq!(e.store().position("BTC-PERP").unwrap().contracts, 2.0);
+    // The wallet total nets the native row PnL (10), not the stale stored copy (50).
+    assert_eq!(e.store().balance().total, 990.0);
+    let logs = resync(&mut e, s, 3000.0, &state.replace("2000}", "3000}"), "[]");
+    assert!(!logs.iter().any(|m| m.contains("unknown market")));
+    assert_eq!(e.store().position("SOL-PERP").unwrap().contracts, 3.0);
+}
+
+#[test]
+fn malformed_position_row_holds_the_wallet_total() {
+    let (mut e, s) = ready("disabled");
+    assert_eq!(e.store().balance().total, 1000.0);
+    resync(
+        &mut e,
+        s,
+        2000.0,
+        r#"{"assetPositions":[{"position":{"coin":"BTC","szi":"2","entryPx":"100","positionValue":"260","unrealizedPnl":"30","marginUsed":"20","leverage":{"type":"cross","value":10}}},{"position":{"coin":"ETH","szi":"bad"}}],"marginSummary":{"accountValue":"1100","totalMarginUsed":"40"},"time":2000}"#,
+        "[]",
+    );
+    assert_eq!(e.store().position("BTC-PERP").unwrap().notional, 260.0);
+    assert_eq!(e.store().balance().total, 1000.0);
+    assert_eq!(e.store().balance().used, 40.0);
+}

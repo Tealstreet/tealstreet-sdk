@@ -23,6 +23,8 @@ pub enum Request {
         issued: u64,
         stamps: HashMap<String, (Option<u64>, u64)>,
         coverage: SnapshotCoverage<String>,
+        /// Each skipped row's symbol and PnL, as far as they parsed.
+        skipped: Vec<(Option<String>, Option<f64>)>,
     },
     Orders {
         algo: bool,
@@ -399,6 +401,7 @@ impl Orderly {
                     issued: self.account.positions_issued,
                     stamps: HashMap::new(),
                     coverage: SnapshotCoverage::default(),
+                    skipped: Vec::new(),
                 },
             );
         }
@@ -859,29 +862,55 @@ impl Orderly {
                     rows,
                     stamps,
                     coverage,
+                    skipped,
                     ..
                 } => {
-                    let symbol = match serde_json::from_str::<PositionRow<'_>>(item) {
+                    let (symbol, pnl) = match serde_json::from_str::<PositionRow<'_>>(item) {
                         Ok(r) => match self.position(cx, &r) {
                             Ok(Some(p)) => {
                                 stamps.insert(p.id.clone(), (r.seq, r.timestamp.unwrap_or(0)));
                                 rows.push(p);
                                 return Ok(());
                             }
+                            // A flat row closes its symbol even when its mode is unknown.
                             Ok(None) => return Ok(()),
-                            Err(_) => Some(position_key(&r.symbol)),
+                            Err(_) if r.position_qty == 0.0 => return Ok(()),
+                            Err(_) => (
+                                Some(position_key(&r.symbol)),
+                                Some(r.mark_price)
+                                    .filter(|price| price.is_finite() && *price > 0.0)
+                                    .map(|mark| {
+                                        safe_cex_engine::num::round_half_up(
+                                            (mark - r.average_open_price) * r.position_qty * 100.0,
+                                        ) / 100.0
+                                    }),
+                            ),
                         },
                         Err(_) => {
                             #[derive(serde::Deserialize)]
                             struct Identity<'a> {
                                 #[serde(borrow)]
                                 symbol: std::borrow::Cow<'a, str>,
+                                #[serde(alias = "positionQty", default, borrow)]
+                                position_qty: Option<&'a serde_json::value::RawValue>,
                             }
-                            serde_json::from_str::<Identity<'_>>(item)
-                                .ok()
-                                .map(|r| position_key(&r.symbol))
+                            #[derive(serde::Deserialize)]
+                            struct Qty(#[serde(deserialize_with = "number")] f64);
+                            if let Ok(r) = serde_json::from_str::<Identity<'_>>(item) {
+                                let flat = r.position_qty.is_some_and(|raw| {
+                                    serde_json::from_str::<Qty>(raw.get())
+                                        .is_ok_and(|qty| qty.0 == 0.0)
+                                });
+                                if flat {
+                                    return Ok(());
+                                }
+                                (Some(position_key(&r.symbol)), None)
+                            } else {
+                                (None, None)
+                            }
                         }
                     };
+                    skipped.push((symbol.clone(), pnl));
                     cx.log(
                         LogLevel::Warning,
                         match &symbol {
@@ -1024,6 +1053,7 @@ impl Orderly {
                 issued,
                 stamps,
                 coverage,
+                skipped,
             } => {
                 self.account.inflight[1] = false;
                 if invalid {
@@ -1041,19 +1071,44 @@ impl Orderly {
                     cx.log(LogLevel::Error, "Orderly invalid collateral response");
                     return;
                 };
-                let upnl = safe_cex_engine::num::round_half_up(
-                    rows.iter().map(|p| p.unrealized_pnl).sum::<f64>() * 100.0,
-                ) / 100.0;
-                let balance = Balance {
-                    total: meta.total_collateral_value - upnl,
-                    free: meta.free_collateral,
-                    used: meta.total_collateral_value - meta.free_collateral - upnl,
-                    upnl,
-                };
+                let kept = cx
+                    .store
+                    .positions()
+                    .iter()
+                    .filter(|p| {
+                        !coverage.allows_absence(&p.symbol) && !rows.iter().any(|q| q.id == p.id)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                rows.extend(kept);
+                // Collateral is a native aggregate; its PnL split sums the rows plus
+                // retained copies, plus each skipped row with no copy. A skipped row
+                // with neither a copy nor a known PnL leaves the split unknown.
+                let skipped_pnl = skipped.iter().try_fold(0.0, |sum, (symbol, pnl)| {
+                    if symbol
+                        .as_ref()
+                        .is_some_and(|symbol| rows.iter().any(|p| &p.symbol == symbol))
+                    {
+                        Some(sum)
+                    } else {
+                        pnl.map(|pnl| sum + pnl)
+                    }
+                });
+                let balance = skipped_pnl.map(|skipped_pnl| {
+                    let upnl = safe_cex_engine::num::round_half_up(
+                        (skipped_pnl + rows.iter().map(|p| p.unrealized_pnl).sum::<f64>()) * 100.0,
+                    ) / 100.0;
+                    Balance {
+                        total: meta.total_collateral_value - upnl,
+                        free: meta.free_collateral,
+                        used: meta.total_collateral_value - meta.free_collateral - upnl,
+                        upnl,
+                    }
+                });
                 // Positions are pushed, so a stale read only commits the REST-only
                 // balance; stale rows could drop a position opened mid-read.
                 if !current {
-                    if coverage.rejected() == 0 {
+                    if let Some(balance) = balance {
                         cx.store.set_balance(balance);
                     }
                     self.account_poll(cx, false);
@@ -1075,19 +1130,8 @@ impl Orderly {
                 for (id, new) in stamps {
                     merge_stamp(&mut self.account.position_stamps, id, new);
                 }
-                let kept = cx
-                    .store
-                    .positions()
-                    .iter()
-                    .filter(|p| {
-                        !coverage.allows_absence(&p.symbol) && !rows.iter().any(|q| q.id == p.id)
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-                rows.extend(kept);
                 cx.store.set_positions(rows);
-                // The balance nets every row's PnL, so a partial snapshot keeps the last one.
-                if coverage.rejected() == 0 {
+                if let Some(balance) = balance {
                     cx.store.set_balance(balance);
                 }
                 for s in cx

@@ -538,6 +538,9 @@ fn skipped_rest_rows_keep_their_stored_copy_until_a_valid_snapshot_omits_them() 
     assert_eq!(store.positions().len(), 1);
     assert!(store.order("1").is_none() && store.order("3").is_none());
     assert!(store.order("2").is_some());
+    // Classic polls keep any open SL/TP absent from REST (pre-existing), so the
+    // removed parent's preset legs remain until the venue reports them closed.
+    assert!(store.order("3__stop_loss").is_some() && store.order("3__take_profit").is_some());
 }
 
 #[test]

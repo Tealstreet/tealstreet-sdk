@@ -504,3 +504,20 @@ fn inverse_native_amend_keeps_remaining_in_display_units_and_native_extra_curren
         );
     }
 }
+
+#[test]
+fn inverse_position_zero_row_mark_falls_through_to_the_row_market_price() {
+    let mut h = started(r#"{"code":"00000","data":[{"symbol":"ETHUSD","lastPr":"2500"}]}"#);
+    let mut btc = position("BTCUSD", "1000", "25000", "100");
+    btc["markPrice"] = json!("0");
+    btc["marketPrice"] = json!("50000");
+    positions(&mut h, btc, position("ETHUSD", "0", "2000", "100"));
+    let p = h
+        .engine
+        .store()
+        .positions()
+        .iter()
+        .find(|p| p.symbol == "BTCUSD")
+        .unwrap();
+    assert_eq!(p.contracts, 0.02);
+}

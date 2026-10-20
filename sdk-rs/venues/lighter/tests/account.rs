@@ -604,47 +604,56 @@ fn unmapped_working_order_is_skipped_with_a_warning_and_terminal_unknown_rows_ar
     }
 }
 #[test]
-fn unmapped_initial_position_commits_positions_but_never_claims_a_balance() {
-    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_lighter::Lighter::new(options()));
-    e.start(NOW);
-    let bad = ACCOUNT.replace("\"market_id\":1", "\"market_id\":999");
-    let mut warning = false;
-    for _ in 0..20 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
-        if actions.is_empty() {
-            break;
+fn unmapped_initial_position_values_the_balance_only_with_its_native_pnl() {
+    for pnl in [true, false] {
+        let mut e = safe_cex_engine::Engine::new(safe_cex_venue_lighter::Lighter::new(options()));
+        e.start(NOW);
+        let mut bad = ACCOUNT.replace("\"market_id\":1", "\"market_id\":999");
+        if !pnl {
+            bad = bad.replace(r#""unrealized_pnl":"0","#, "");
         }
-        for action in actions {
-            match action {
-                Action::Http(r) => {
-                    let body = if r.url.contains("orderBookDetails") || r.url.contains("orderBooks")
-                    {
-                        META
-                    } else if r.url.contains("exchangeStats") {
-                        r#"{"code":200,"order_book_stats":[]}"#
-                    } else if r.url.contains("accountActiveOrders") {
-                        OPEN
-                    } else if r.url.contains("/account?") {
-                        &bad
-                    } else {
-                        panic!("unexpected request {}", r.url)
-                    };
-                    reply(&mut e, &r, 200, body);
+        let mut warning = false;
+        for _ in 0..20 {
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            if actions.is_empty() {
+                break;
+            }
+            for action in actions {
+                match action {
+                    Action::Http(r) => {
+                        let body =
+                            if r.url.contains("orderBookDetails") || r.url.contains("orderBooks") {
+                                META
+                            } else if r.url.contains("exchangeStats") {
+                                r#"{"code":200,"order_book_stats":[]}"#
+                            } else if r.url.contains("accountActiveOrders") {
+                                OPEN
+                            } else if r.url.contains("/account?") {
+                                &bad
+                            } else {
+                                panic!("unexpected request {}", r.url)
+                            };
+                        reply(&mut e, &r, 200, body);
+                    }
+                    Action::Notice(safe_cex_engine::Notice::Log {
+                        level: safe_cex_engine::LogLevel::Warning,
+                        message,
+                    }) if message == "Lighter skipped position 999 on an unknown market" => {
+                        warning = true
+                    }
+                    _ => {}
                 }
-                Action::Notice(safe_cex_engine::Notice::Log {
-                    level: safe_cex_engine::LogLevel::Warning,
-                    message,
-                }) if message == "Lighter skipped position 999 on an unknown market" => {
-                    warning = true
-                }
-                _ => {}
             }
         }
+        assert!(warning);
+        assert!(e.store().loaded().positions);
+        assert!(e.store().positions().is_empty());
+        assert_eq!(e.store().loaded().balance, pnl);
+        if pnl {
+            assert_eq!(e.store().balance().total, 1000.0);
+            assert_eq!(e.store().balance().free, 900.0);
+        }
     }
-    assert!(warning);
-    assert!(e.store().loaded().positions);
-    assert!(!e.store().loaded().balance);
-    assert!(e.store().positions().is_empty());
 }
 
 #[test]
@@ -975,7 +984,7 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
         &[
             order(42, 1, "limit", "91"),
             order(43, 2, "limit", "bad"),
-            order(44, 1, "twap", "71"),
+            order(44, 1, "mystery", "71"),
         ],
         &[position(1, "3"), position(2, "bad")],
     );
@@ -1003,7 +1012,11 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
     ] {
         assert!(logs.iter().any(|m| m == expected), "{expected}: {logs:?}");
     }
-    assert!(!logs.iter().any(|m| m.contains("bad") || m.contains("twap")));
+    assert!(
+        !logs
+            .iter()
+            .any(|m| m.contains("bad") || m.contains("mystery"))
+    );
     resync(
         &mut e,
         NOW + 3.0,
@@ -1029,7 +1042,7 @@ fn unknown_snapshot_order_type_is_never_invented_as_a_limit() {
         200,
         &OPEN
             .replace(r#""order_index":"42""#, r#""order_index":"47""#)
-            .replace(r#""type":"limit""#, r#""type":"twap""#),
+            .replace(r#""type":"limit""#, r#""type":"mystery""#),
     );
     assert!(e.store().order("47").is_none());
     assert!(e.store().order("42").is_none());
@@ -1083,4 +1096,120 @@ fn spot_rows_in_private_snapshots_are_skipped_silently_and_perp_rows_commit() {
     );
     assert_eq!(e.store().positions().len(), 1);
     assert_eq!(e.store().balance().free, 850.0);
+}
+#[test]
+fn twap_and_liquidation_orders_map_alike_from_the_stream_and_rest() {
+    for kind in [
+        r#""twap""#,
+        r#""twap-sub""#,
+        r#""liquidation""#,
+        "6",
+        "7",
+        "8",
+    ] {
+        let (mut e, s) = ready();
+        let row = |id: u32, price: &str| {
+            format!(
+                r#"{{"order_index":"{id}","market_id":1,"status":"open","type":{kind},"time_in_force":1,"is_ask":false,"initial_base_amount":"2","filled_base_amount":"0","remaining_base_amount":"2","price":"{price}"}}"#
+            )
+        };
+        message(
+            &mut e,
+            s,
+            NOW + 1.0,
+            &format!(
+                r#"{{"channel":"account_all_orders:718895","orders":{{"1":[{}]}}}}"#,
+                row(60, "80")
+            ),
+        );
+        assert_eq!(
+            e.store().order("60").map(|o| o.kind),
+            Some(OrderType::Limit),
+            "{kind}"
+        );
+        e.handle(NOW + 2.0, Event::WsOpened { socket: s });
+        let r = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("ActiveOrders"))
+            .unwrap();
+        reply_at(
+            &mut e,
+            NOW + 3.0,
+            &r,
+            200,
+            &format!(
+                r#"{{"code":200,"orders":[{},{}]}}"#,
+                row(60, "81"),
+                row(61, "82")
+            ),
+        );
+        for (id, price) in [("60", 81.0), ("61", 82.0)] {
+            assert_eq!(
+                e.store().order(id).map(|o| (o.kind, o.price)),
+                Some((OrderType::Limit, price)),
+                "{kind} {id}"
+            );
+        }
+    }
+}
+#[test]
+fn skipped_position_row_with_only_a_market_id_keeps_the_stored_copy() {
+    let (mut e, socket) = ready();
+    let mut market = e.store().market("ETH").unwrap().clone();
+    market.id = "999".into();
+    market.symbol = "SOL".into();
+    let mut markets = e.store().markets().to_vec();
+    markets.push(market);
+    e.store_mut().set_markets(markets);
+    let mut sol = e.store().position("ETH").unwrap().clone();
+    sol.id = "SOL".into();
+    sol.symbol = "SOL".into();
+    sol.contracts = 5.0;
+    let mut positions = e.store().positions().to_vec();
+    positions.push(sol);
+    e.store_mut().set_positions(positions);
+    e.handle(NOW + 1., Event::WsOpened { socket });
+    let request = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("/account?"))
+        .unwrap();
+    let body = ACCOUNT.replace(
+        "\"positions\":[",
+        r#""positions":[{"market_id":999,"position":"5"},"#,
+    );
+    reply_at(&mut e, NOW + 2., &request, 200, &body);
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message == "Lighter skipped position SOL on an unknown market")));
+    assert_eq!(e.store().position("SOL").map(|p| p.contracts), Some(5.0));
+    assert_eq!(e.store().position("ETH").map(|p| p.contracts), Some(2.0));
+}
+#[test]
+fn skipped_position_rows_keep_the_balance_updating() {
+    for (row, eth) in [
+        // Malformed owned row: its stored copy stays and carries its PnL.
+        (r#"{"market_id":1,"position":"bad"}"#, Some(2.0)),
+        // Flat row that fails mapping: a valid closure, not a skip.
+        (
+            r#"{"market_id":1,"position":"0","avg_entry_price":"bad"}"#,
+            None,
+        ),
+    ] {
+        let (mut e, socket) = ready();
+        assert_eq!(e.store().balance().free, 900.0);
+        e.handle(NOW + 1., Event::WsOpened { socket });
+        let request = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("/account?"))
+            .unwrap();
+        let body = format!(
+            r#"{{"code":200,"accounts":[{{"index":718895,"collateral":"1100","total_asset_value":"1100","available_balance":"850","positions":[{row}]}}]}}"#
+        );
+        reply_at(&mut e, NOW + 2., &request, 200, &body);
+        assert_eq!(e.store().position("ETH").map(|p| p.contracts), eth, "{row}");
+        let balance = e.store().balance();
+        assert_eq!(
+            (balance.total, balance.free, balance.used),
+            (1100.0, 850.0, 250.0),
+            "{row}"
+        );
+    }
 }

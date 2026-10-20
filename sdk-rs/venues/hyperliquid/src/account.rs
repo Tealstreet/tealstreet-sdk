@@ -117,6 +117,8 @@ pub struct Account {
     pub pending: HashMap<String, Placement>,
     pub builder_approved: Option<bool>,
     valuation_warned: bool,
+    /// `position:coin` / `order:coin` keys already warned as on an unknown market.
+    unknown_warned: HashSet<String>,
 }
 #[derive(Default, PartialEq, Eq)]
 enum Mode {
@@ -836,10 +838,16 @@ impl Hyperliquid {
                     } else if spot_coin(&row.coin) != self.spot || self.excluded_coin(&row.coin) {
                         // The main-dex read also lists the other product's orders.
                     } else if self.discovery_settled() {
-                        cx.log(
-                            LogLevel::Warning,
-                            format!("Hyperliquid skipped order {id} on an unknown market"),
-                        );
+                        if self
+                            .account
+                            .unknown_warned
+                            .insert(format!("order:{}", row.coin.to_ascii_lowercase()))
+                        {
+                            cx.log(
+                                LogLevel::Warning,
+                                format!("Hyperliquid skipped order {id} on an unknown market"),
+                            );
+                        }
                         coverage.reject(Some(id));
                     } else {
                         *valid = false;
@@ -1057,10 +1065,12 @@ impl Hyperliquid {
         // design (delisted, unquoted) are skipped, as in TS.
         let mut coverage = SnapshotCoverage::default();
         let mut rows = Vec::with_capacity(state.asset_positions.len());
+        let mut malformed = false;
         for raw in &state.asset_positions {
             match serde_json::from_str::<AssetPosition>(raw.get()) {
                 Ok(row) => rows.push(row),
                 Err(_) => {
+                    malformed = true;
                     #[derive(serde::Deserialize)]
                     struct Identity<'a> {
                         #[serde(borrow)]
@@ -1097,10 +1107,16 @@ impl Hyperliquid {
                 return;
             }
             let coin = coin.to_ascii_lowercase();
-            cx.log(
-                LogLevel::Warning,
-                format!("Hyperliquid skipped position {coin} on an unknown market"),
-            );
+            if self
+                .account
+                .unknown_warned
+                .insert(format!("position:{coin}"))
+            {
+                cx.log(
+                    LogLevel::Warning,
+                    format!("Hyperliquid skipped position {coin} on an unknown market"),
+                );
+            }
             coverage.reject(Some(coin));
         }
         let source_time = state.server_time.or(state.time);
@@ -1147,8 +1163,7 @@ impl Hyperliquid {
                         || !coverage.allows_absence(
                             &self
                                 .coin(cx, &p.symbol)
-                                .unwrap_or(&p.symbol)
-                                .to_ascii_lowercase(),
+                                .map_or_else(|| perp_coin(&p.symbol), str::to_ascii_lowercase),
                         )
                 })
                 .cloned()
@@ -1237,13 +1252,24 @@ impl Hyperliquid {
                 .as_ref()
                 .or(state.cross_margin_summary.as_ref())
         {
-            self.account.core_loaded = true;
-            self.account.core_value = summary.account_value
-                - cx.store
+            // Native row PnL, not stored copies: a retained copy is stale and a skipped
+            // row has none. A malformed row's PnL is unknown, so the last value holds.
+            if !malformed {
+                let native = rows
+                    .iter()
+                    .filter(|row| !self.excluded_coin(&row.position.coin))
+                    .map(|row| row.position.unrealized_pnl)
+                    .sum::<f64>();
+                let other_dexes = cx
+                    .store
                     .positions()
                     .iter()
+                    .filter(|p| !self.dex_of(cx, &p.symbol).is_empty())
                     .map(|p| p.unrealized_pnl)
                     .sum::<f64>();
+                self.account.core_loaded = true;
+                self.account.core_value = summary.account_value - native - other_dexes;
+            }
             self.account.core_used = summary.total_margin_used;
         }
         self.live_balance(cx);
@@ -1986,6 +2012,14 @@ pub(crate) fn tif(tif: &str) -> Option<TimeInForce> {
         "Gtc" => Some(TimeInForce::GoodTillCancel),
         _ => None,
     }
+}
+/// Lowercase coin a perp symbol was built from, for a market no longer listed.
+fn perp_coin(symbol: &str) -> String {
+    symbol
+        .strip_suffix("-PERP")
+        .unwrap_or(symbol)
+        .replacen('|', ":", 1)
+        .to_ascii_lowercase()
 }
 /// Spot pairs are `@index` or `BASE/QUOTE`; perp coins are bare or `dex:COIN`.
 fn spot_coin(coin: &str) -> bool {

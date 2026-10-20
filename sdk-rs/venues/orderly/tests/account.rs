@@ -669,12 +669,24 @@ fn private_native_mark_works_without_public_tickers_and_missing_marks_preserve_s
 }
 
 #[test]
-fn owned_position_outside_the_catalogue_is_skipped_and_never_claims_a_balance() {
-    let body = POSITIONS.replace("PERP_BTC_USDC", "PERP_MISSING_USDC");
-    let (e, _) = ready_with(ORDER, "[]", &body);
-    assert!(e.store().loaded().positions);
-    assert!(e.store().positions().is_empty());
-    assert!(!e.store().loaded().balance);
+fn owned_position_outside_the_catalogue_is_skipped_and_values_the_balance_only_with_its_pnl() {
+    for marked in [true, false] {
+        let mut body = POSITIONS.replace("PERP_BTC_USDC", "PERP_MISSING_USDC");
+        if !marked {
+            body = body.replace(r#""mark_price":51000,"#, "");
+        }
+        let (e, _) = ready_with(ORDER, "[]", &body);
+        assert!(e.store().loaded().positions);
+        assert!(e.store().positions().is_empty());
+        assert_eq!(e.store().loaded().balance, marked);
+        if marked {
+            let balance = e.store().balance();
+            assert_eq!(
+                (balance.upnl, balance.total, balance.free),
+                (1500.0, 8500.0, 7000.0)
+            );
+        }
+    }
 }
 
 #[test]
@@ -809,17 +821,18 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
             position("PERP_NOPE_USDC_broker", "1"),
             position("PERP_ZZZ_USDC", "0"),
         ],
-        12000,
+        14000,
     );
     assert_eq!(price(&e, "1001"), Some(50100.0));
     assert_eq!(price(&e, "1002"), Some(49000.0));
     assert_eq!(price(&e, "1003"), None);
     assert_eq!(size(&e, "BTCUSDC"), Some(3.0));
     assert_eq!(size(&e, "ETHUSDC"), Some(2.0));
+    // BTC 3000 + retained ETH copy 2000 + unknown-market NOPE row 1000.
+    let partial = e.store().balance();
     assert_eq!(
-        e.store().balance(),
-        &balance,
-        "a partial snapshot cannot recompute PnL"
+        (partial.upnl, partial.total, partial.free, partial.used),
+        (6000.0, 8000.0, 7000.0, 1000.0)
     );
     for expected in [
         "Orderly skipped unmappable order 1002",
@@ -840,4 +853,77 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
     assert_eq!(size(&e, "ETHUSDC"), None);
     assert_eq!(e.store().positions().len(), 1);
     assert_ne!(e.store().balance(), &balance);
+}
+
+#[test]
+fn skipped_position_rows_keep_the_balance_updating() {
+    let positions = |rows: &str| {
+        format!(
+            r#"{{"success":true,"data":{{"rows":[{rows}],"total_collateral_value":9000,"free_collateral":8000}}}}"#
+        )
+    };
+    // A flat row that fails mapping closes its symbol, whatever failed.
+    for flat in [
+        r#"{"symbol":"PERP_BTC_USDC","position_qty":0,"margin_mode":"WEIRD"}"#,
+        r#"{"symbol":"PERP_BTC_USDC","position_qty":0,"leverage":"bad"}"#,
+    ] {
+        let (mut e, _) = ready();
+        assert_eq!(e.store().positions().len(), 2);
+        let poll = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("/v1/positions"))
+            .unwrap();
+        reply(&mut e, &poll, 200, &positions(flat));
+        assert!(e.store().positions().is_empty(), "{flat}");
+        let balance = e.store().balance();
+        assert_eq!(
+            (balance.upnl, balance.total, balance.free),
+            (0.0, 9000.0, 8000.0),
+            "{flat}"
+        );
+    }
+    // A stale read still values collateral when the skipped row has a stored copy.
+    let (mut e, s, mut tick) = ready_ticking(ORDER, "[]", POSITIONS);
+    let mut poll = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/v1/positions"))
+        .unwrap();
+    // The guard admits a stale read after two discarded ones.
+    for seq in 0..3u64 {
+        ws(
+            &mut e,
+            s,
+            &format!(
+                r#"{{"topic":"position","ts":{},"data":{{"positions":[{{"symbol":"PERP_BTC_USDC","positionQty":2,"averageOpenPrice":50000,"markPrice":51000,"marginMode":"CROSS","leverage":10,"seq":{}}}]}}}}"#,
+                2000 + seq,
+                9007199254740993 + seq
+            ),
+        );
+        reply(
+            &mut e,
+            &poll,
+            200,
+            &positions(
+                r#"{"symbol":"PERP_BTC_USDC","position_qty":1,"average_open_price":50000,"mark_price":51000,"margin_mode":"WEIRD"}"#,
+            ),
+        );
+        if seq < 2 {
+            e.handle(3000.0, Event::TimerFired { timer: tick });
+            let mut next = None;
+            for a in actions(&mut e) {
+                match a {
+                    Action::Http(r) if r.url.ends_with("/v1/positions") => next = Some(r),
+                    Action::SetTimer { timer, .. } => tick = timer,
+                    _ => {}
+                }
+            }
+            poll = next.unwrap();
+        }
+    }
+    assert_eq!(e.store().position("BTCUSDC").unwrap().contracts, 2.0);
+    let balance = e.store().balance();
+    assert_eq!(
+        (balance.upnl, balance.total, balance.free),
+        (2500.0, 6500.0, 8000.0)
+    );
 }

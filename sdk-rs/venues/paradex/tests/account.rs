@@ -1271,3 +1271,32 @@ fn bad_snapshot_rows_keep_their_stored_copies_until_a_valid_snapshot_omits_them(
     assert_eq!(price(&h, "124"), None);
     assert_eq!(h.e.store().orders().len(), 1);
 }
+
+#[test]
+fn duplicated_out_of_scope_order_rows_do_not_invalidate_the_snapshot() {
+    let (mut h, _) = loaded();
+    let order = |id: &str, market: &str, price: &str| {
+        ORDER
+            .replace(r#""id":"123""#, &format!(r#""id":"{id}""#))
+            .replace("BTC-USD-PERP", market)
+            .replace(r#""price":"99""#, &format!(r#""price":"{price}""#))
+    };
+    poll(
+        &mut h,
+        &[POSITION.into()],
+        &[
+            order("123", "BTC-USD-PERP", "99"),
+            order("124", "BTC-USD-PERP", "98"),
+        ],
+    );
+    assert!(h.e.store().order("124").is_some());
+    let option = order("126", "BTC-USD-250101-100000-C", "4");
+    poll(
+        &mut h,
+        &[POSITION.into()],
+        &[order("123", "BTC-USD-PERP", "97"), option.clone(), option],
+    );
+    assert_eq!(h.e.store().order("123").map(|o| o.price), Some(97.));
+    assert!(h.e.store().order("124").is_none());
+    assert!(h.e.store().order("126").is_none());
+}

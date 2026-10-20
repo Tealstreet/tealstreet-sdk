@@ -1870,8 +1870,10 @@ impl BitgetFutures {
         };
         let contracts = if self.inverse() {
             // The row's own mark sizes first snapshots read before tickers load.
-            let reference = first(&[raw.mark_price, raw.market_price])
-                .filter(|p| p.is_finite() && *p > 0.0)
+            let reference = [raw.mark_price, raw.market_price]
+                .into_iter()
+                .filter_map(|price| price.0)
+                .find(|p| p.is_finite() && *p > 0.0)
                 .or_else(|| {
                     cx.store
                         .ticker(&symbol)
