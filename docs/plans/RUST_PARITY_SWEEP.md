@@ -168,3 +168,23 @@ with evidence, plus each gate's counts and CPU/memory/artifact measurements.
   typecheck/lint PASS; earlier root44typecheck/28lint/27test tasks PASS.
 - Single-venue OKX size + three public gates now running; remaining touched
   venues/Binance and Aster routing regression batch follows serially before PR.
+
+### GRVT landing refresh
+
+- GRVT#1321 merged while the final batch was starting. Refreshed `gh pr view`
+  receipt and independent TS census:25/27 requested PRs now merged; Bitunix
+  #1309 remains open and #1315 remains a master/CLI PR. GRVT perpetuals
+  declared limitations add no supported perpetual mutation/query gap. Its
+  excluded derivatives and broader undeclared account/book APIs are recorded
+  honestly in the census, not mislabeled TS unsupported or live-key-only.
+- Paused runner cleanly after Backpack/Binance public/private PASS; those
+  measurements are preserved as pre-GRVT evidence, not final new-source scores.
+- Merged landing5d7589f296 in e191a54b8d. Wrapper conflict retains the complete
+  lookup union, GRVT fill helper and fourth OKX frame flag. Independent merge
+  review288/288 PASS; root typecheck44/44 and lint28/28 PASS.
+- Landing includes shared sampler cleanup/measurement repairs and a verified
+  Bybit numeric fast path. Rebuild all-venue artifact and rerun public metrics
+  on that merged harness. Comparisons, financial output and byte limits stay
+  strict; do not reuse old sampler scores as current measurements.
+- Updated final plan:49 local replays (23public/26private),7contract controls,
+  all24per-feature size limits; CI83replays(30public/53private),29Rustjobs.

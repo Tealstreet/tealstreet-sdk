@@ -165,3 +165,53 @@ Some paths intentionally bypass the dynamic client: Binance definitive client-ID
 - REST book snapshots: wrapper rejects except Aster (`rust.exchange.ts:717`), while TS Backpack:407, MEXC:654, WEEX:460, Crypto.com:343, Paradex:1339 support explicit fetchOrderBook.
 
 These observed issues should be retained in an honest census/follow-up if not addressed; none can be excused as phase-9 deletion or live-key-only validation. Primary directed scope closure census to merged PR stated limitations and roster, so no implementation changes are made here.
+
+
+# GRVT merged-PR census refresh
+
+Reviewed current origin/feat/rust-rewrite 5d7589f296 (GRVT PR merge), via git show without checkout or source edits. PR #1321 is MERGED into feat/rust-rewrite at 2026-10-20T04:23:07Z: https://github.com/Tealstreet/tealstreet-sdk/pull/1321 . Fresh gh body/comments evidence is /tmp/parity-pr-1321-merged.json. The original #1298–#1324 census now contains 25 merged PRs into the landing branch out of 27; Bitunix #1309 remains OPEN and non-venue #1315 remains outside landing. This supersedes the earlier report's exclusion of then-OPEN GRVT #1321.
+
+## Scope and independent disposition
+
+The parent confirmed the same scope boundary used for the other venues: close TS-supported limitations declared in merged PRs, plus explicitly assigned Phemex/lookup regressions; record broader undeclared API differences honestly rather than claiming a complete SDK capability audit. On that boundary, GRVT introduces no additional declared TS-supported perpetuals gap requiring implementation. This is a source review, not a live-account certification.
+
+| Declared limitation | Actual current TS evidence | Disposition |
+| --- | --- | --- |
+| Native margin-mode mutation unsupported | grvt.exchange.ts has no changeMarginType override; inherited base.ts:838–840 rejects Not implemented. GRVT native trading.rs:830–835 rejects SetMarginType. CLAUDE.md:619 describes reading native CROSS/ISOLATED metadata, which is separate from mutation. | TS unsupported mutation. Preserve native margin settings reads; do not invent an exchange write. |
+| Hedged position-mode mutation unsupported | No GRVT changePositionMode override; inherited base.ts:834–836 rejects Not implemented. Native trading.rs:837–844 rejects hedged=true, and acknowledges local one-way=false as a no-op. | TS unsupported hedge mutation. No missing working TS hedge endpoint. |
+| Per-order/account STP unsupported | No STP/self-trade code exists in actual GRVT exchange adapter. Its submit shape at grvt.exchange.ts:1556 onward contains subaccount, market/TIF/post-only/reduce-only, legs, signature and metadata without STP. Native trading.rs:360–361 rejects stp_mode; lib.rs:1178–1179 rejects FetchStpMode/SetStpMode. Vendored API potential is not current TS capability. | TS unsupported integration capability. |
+| Sequential bracket children without atomic/OCO guarantees | grvt.exchange.ts:1351–1367 recursively submits the entry, then separate opposite-side reducing SL and TP, reporting IDs created if a child fails. grvt/CLAUDE.md:427–431 explicitly describes this behavior. | Same TS semantics; no native atomic/OCO parity gap. |
+| Stricter native amendment proof | TS CLAUDE.md:433–435 describes cancel/recreate and desired total minus fills; native additionally requires final cancellation and unchanged execution/lifecycle evidence, as final PR body discloses. | Correctness guard, not missing a safe supported endpoint. No relaxation justified. |
+| Options and dated futures excluded | Actual TS fetchMarkets maps every returned instrument, setting isPerpetual = inst.k === PERPETUAL (grvt.exchange.ts:745–782); native lib.rs:730 filters to PERPETUAL. TS CLAUDE's broad derivatives/product descriptions therefore must not be interpreted as TS-unsupported. | Deliberately outside this perpetuals port and sweep scope. Disclose as excluded products, not TS unsupported. |
+| STABLE_PERP excluded in port plan | docs/plans/GRVT_RUST_PORT.md query checkpoint explicitly excludes STABLE_PERP. TS catalog also maps this as non-PERPETUAL under the exact test above. | Separate non-PERPETUAL product scope; not silently counted as supported native PERPETUAL. |
+| Transfers and vaults excluded | grvt/CLAUDE.md:794–798 lists transfers and vault operations as unchecked Future Enhancements. Actual grvt.exchange.ts defines no transfer/vault methods. | TS unsupported integration operations; also outside perpetual trading scope. |
+| Funding/income completeness/derived PnL | Native history.rs includes funding, native fill commission/realized-PnL, closed orders, filtered fills and exact lookup. TS adapter has no fetchHistoricalFills/fetchHistoricalOrders/fetchIncomeHistory/Range overrides; only fetchFillsForOrderIds at2266 onward, whose cap is20pages vs native50. Native terminal-cursor/cap INCOMPLETE errors do not replace a more complete TS read. | No declared TS-supported history capability lost. Native coverage exceeds TS generic history surface. |
+| Funded live validation | Final PR gives independent signature/session/execution/cancellation private replay proof and all-green CI; it does not establish every live account configuration. | Validation evidence only. Do not describe any functioning TS capability as live-key-only without a specific key-dependent requirement. |
+
+## Additional undeclared SDK API differences (recorded, outside this sweep's declared-limitations scope)
+
+1. **GRVT getAccount is TS-supported and native unsupported.** TS grvt.exchange.ts:622–636 posts /lite/v1/account_summary with sub_account_id, then returns authenticated apiExtras.accountId as userId and affiliateId:null. Endpoint spelling is grvt.types.ts:36. Native lib.rs:1180 explicitly groups FetchAccount with unsupported commands; landing wrapper rust.exchange.ts:709–718 rejects GRVT getAccount before dispatch (the PR's comment about an alias concerns the lower host command). This is neither TS unsupported nor a live-key-only implementation blocker. Existing native account.rs already stores authenticated Session.account_id and subaccount, so a separate account-summary command can be planned without inventing identity. Parent asked to keep this in broader getAccount/API follow-up census alongside the previously identified Phemex/Binance/WOO cases.
+
+2. **GRVT one-shot REST fetchOrderBook is TS-supported and native unsupported.** TS grvt.exchange.ts:2001–2053 posts ENDPOINTS.ORDERBOOK (/lite/v1/book, grvt.types.ts:29) and parses bids/asks with cumulative totals; Rust wrapper rust.exchange.ts:787–789 dispatches FetchOrderBook and native lib.rs:1181 rejects it. Live streaming complete sequenced books do work in Rust; that does not supply this one-shot command. This is another undeclared SDK API gap, not a declared limitation requiring broadening this sweep.
+
+The PR body should explicitly describe the sweep as closing the audited declared limitations and assigned Phemex/lookup gaps, retaining these additional API differences in a transparent follow-up list. Do not assert all TS SDK APIs are now implemented.
+
+## Shared sampler review (read-only): PASS within inspected change
+
+- memory.mjs:10–13 adds baselineBeforeSetup, which awaits the baseline before prepareReplay/initializeReplay; replay.mjs invokes the same helper in Rust at175 and TS at495. Setup allocations and later releases are within measured lifecycle on both paths.
+- memory.mjs:49–55 awaits asynchronous major last-resort collection and retains the landed five-second settling deadline. The PR plan/body explicitly acknowledges the old one-second cap became five seconds via prior Phemex landing; do not claim the numeric setup deadline was unchanged.
+- memory.mjs:70–93 checks the real deadline after collection, requires the unchanged100-ms backing-buffer quiet window plus100-ms since the last new heap low, and returns the actual current sample. It neither picks the heap minimum nor clamps negative components. Heap increases need not reset the low timer; the contract is delayed-cleanup quieting, not a claim that every heap sample is constant.
+- memory.mjs:18–44 still rejects nonfinite/negative absolute and retained counters and requires exact retained arithmetic. gate.mjs:735 consumes those errors; gate.mjs:920–921 still requires strictly lower Rust steady CPU and retained memory. Existing total CPU and byte budgets remain unchanged.
+- memory.test.mjs covers ordering/failure propagation, negative and inconsistent counters, delayed loader/buffer/heap release, current sample rather than minimum, continuously falling heap, awaited/failed collection, real time under virtual timers, cleanup1600ms and deadline rejection5100ms, and longest-collection diagnostics. These were inspected; no new runs were launched while parent owned the artifact/gate sequence.
+- Implication: retained-memory samples may legitimately differ from earlier gates because imported-code cleanup is awaited and oracle allocation lifecycle is included. Prior metrics must retain their exact artifact/source context; final merged-source gates remain mandatory. No specific new correctness or gate-weakening defect found.
+
+## Bybit numeric fast path review (read-only): PASS within inspected change
+
+- bybit/src/wire.rs:22–31 recognizes only nonempty ASCII unsigned integer strings of at most15digits. The maximum999999999999999 is below2^50, so u64 accumulation is overflow-free and conversion to f64 is exact; the result matches standard parsing bitwise.
+- All signs, signed zero, whitespace, decimals, exponent forms, Unicode digits, invalid suffixes and16+-digit integers take the unchanged trim().parse::<f64>().unwrap_or(NaN) fallback. This optimization does not newly approximate prices/quantities or broaden the prior parseFloat-like semantics.
+- Tests wire.rs:779 onward compare0..999, repeated digits1..15, leading zeros and boundaries bitwise; fallback cases include negative zero,2^53 boundaries and invalid spellings. No unsafe parse, SIMD fast-math, rounding or parser-normalization path was added.
+- Scope is Bybit only; Phemex/GRVT typed financial/signing parsing is unaffected. Parent's final affected-venue/Bybit controls still establish merged-artifact behavior. No source edits or redundant builds performed here.
+
+## Receipt
+
+Read current merged PR body/comments, relevant GRVT CLAUDE/actual TS/native methods/port plan, shared sampler diff/tests, Bybit fast-path diff/tests using gh and git show. Independent declared-limitations census PASS with no newly actionable TS-supported declared perpetuals gap; two undeclared account/book APIs are honestly recorded for follow-up. Report-only write; no production edits, checkout, staging, commits or builds.
