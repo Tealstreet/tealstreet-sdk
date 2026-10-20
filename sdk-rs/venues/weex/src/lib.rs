@@ -446,6 +446,8 @@ impl WeexFutures {
             Task::Daily | Task::BookTickers => {
                 self.seed.failed = true;
                 self.discovery.failed(cx, true);
+                // Markets are loaded; account state does not depend on tickers.
+                self.start_account(cx);
             }
             Task::Depth { symbol, generation } => {
                 if self
@@ -782,7 +784,6 @@ impl Venue for WeexFutures {
                 }
                 self.discovery.succeeded(cx, &false);
                 cx.store.set_markets(markets);
-                self.start_account(cx);
                 self.seed = Seed {
                     rows: cx
                         .store
@@ -811,6 +812,7 @@ impl Venue for WeexFutures {
                 if self.seed.finished == 3 && !self.seed.failed {
                     if !self.seed.reported.iter().any(|mask| mask & 1 != 0) {
                         self.discovery.failed(cx, true);
+                        self.start_account(cx);
                         return;
                     }
                     let rows = std::mem::take(&mut self.seed.rows)
@@ -822,6 +824,8 @@ impl Venue for WeexFutures {
                     cx.store.set_tickers(rows);
                     self.discovery.succeeded(cx, &true);
                     self.connect_public(cx);
+                    // After the ticker seed so account rows map against seeded prices.
+                    self.start_account(cx);
                 }
             }
             Task::Depth { symbol, generation } => {

@@ -4,6 +4,7 @@ mod wire;
 use crate::wire::{Bullet, Number};
 use crate::{Options, encoded_path, interval, sign, success};
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
@@ -17,6 +18,7 @@ use serde_json::value::RawValue;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use wire::*;
 const REST: &str = "https://api.kucoin.com";
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 pub enum Pending {
     Markets {
@@ -100,6 +102,7 @@ pub struct KucoinSpot {
     balance_revision: u64,
     orders_loading: bool,
     balance_loading: bool,
+    balance_guard: StaleGuard,
     wallet_valuation_pending: bool,
     tickers_applied: bool,
     wallet_unquoted_warned: bool,
@@ -141,6 +144,7 @@ impl KucoinSpot {
             balance_revision: 0,
             orders_loading: false,
             balance_loading: false,
+            balance_guard: StaleGuard::default(),
             wallet_valuation_pending: false,
             tickers_applied: false,
             wallet_unquoted_warned: false,
@@ -973,11 +977,13 @@ impl Venue for KucoinSpot {
             }
             Pending::Balance(revision) => {
                 self.balance_loading = false;
-                if revision == self.balance_revision {
-                    if let Err(e) = self.account_balance(cx, data) {
-                        cx.log(LogLevel::Error, e);
-                    }
-                } else {
+                let current = revision == self.balance_revision;
+                if self.balance_guard.admit(current, STALE_SNAPSHOT_LIMIT)
+                    && let Err(e) = self.account_balance(cx, data)
+                {
+                    cx.log(LogLevel::Error, e);
+                }
+                if !current {
                     self.heal(cx, true);
                 }
             }

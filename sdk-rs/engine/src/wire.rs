@@ -40,6 +40,8 @@ pub mod section {
     pub const INSTRUMENT_CLASSIFICATIONS: u16 = 16;
     pub const DERIVATIVE_PRODUCTS: u16 = 17;
     pub const POSITION_GREEKS: u16 = 18;
+    /// The venue's capability record; snapshot frames only.
+    pub const CAPABILITIES: u16 = 19;
 }
 
 pub mod status_flag {
@@ -53,6 +55,8 @@ pub mod market_flag {
     pub const PERPETUAL: u32 = 1 << 3;
     pub const EXPIRING: u32 = 1 << 4;
     pub const READ_ONLY: u32 = 1 << 5;
+    /// Bits 8..12 hold the market's `QuantityUnits`.
+    pub const UNITS_SHIFT: u32 = 8;
 }
 
 pub mod loaded_flag {
