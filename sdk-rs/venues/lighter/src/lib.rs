@@ -623,6 +623,12 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account_tier: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -1276,6 +1282,14 @@ impl Venue for Lighter {
                 self.fetch_candles(cx, None, s, i, Some(1), None, None);
             }
         }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        self.tier_action(cx, command, action);
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {

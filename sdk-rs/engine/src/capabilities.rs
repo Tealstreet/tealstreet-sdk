@@ -33,6 +33,8 @@ pub struct Capabilities {
     pub options: bool,
     /// The quantity convention of every market's orders and positions.
     pub quantity_units: QuantityUnits,
+    /// `FetchAccountTier` / `SetAccountTier` venue actions (Lighter).
+    pub account_tier: bool,
 }
 
 /// How a market's order and position quantities relate to its placement units.
@@ -112,6 +114,7 @@ impl Capabilities {
         order_book_query: false,
         options: false,
         quantity_units: QuantityUnits::Base,
+        account_tier: false,
     };
 
     /// No history axis: fills, orders and income are all unavailable.
@@ -144,6 +147,7 @@ impl Capabilities {
             self.amend_with_symbol,
             self.order_book_query,
             self.options,
+            self.account_tier,
         ]
         .iter()
         .enumerate()

@@ -795,6 +795,7 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     amendWithSymbol: false,
     orderBookQuery: false,
     options: true,
+    accountTier: false,
     account: 'afterLoad',
     cancelAll: 'eachPlacedSymbol',
     leverageQuery: 'onMetadata',

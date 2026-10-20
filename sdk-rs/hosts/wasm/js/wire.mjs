@@ -51,7 +51,7 @@ export const marketQuantityUnits = (flags) => {
 // CAPABILITIES: a flag word (bit order below), then four-bit enum fields.
 const CAPABILITY_FLAGS = [
   'clientOrderLookup', 'fillHistory', 'orderHistory', 'incomeHistory', 'fillsByOrderId', 'accountLeverage',
-  'accountMarginType', 'cancelWithSymbols', 'amendWithSymbol', 'orderBookQuery', 'options',
+  'accountMarginType', 'cancelWithSymbols', 'amendWithSymbol', 'orderBookQuery', 'options', 'accountTier',
 ];
 const CAPABILITY_ENUMS = [
   ['account', ['unsupported', 'query', 'afterLoad']],

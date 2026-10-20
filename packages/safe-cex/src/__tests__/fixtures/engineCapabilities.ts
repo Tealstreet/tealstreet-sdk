@@ -51,6 +51,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
           : is('binanceinverse')
             ? 'inverseContractSized'
             : 'base',
+    accountTier: is('lighter', 'lighter-robinhood'),
     ...overrides,
   };
   return JSON.stringify(record);

@@ -4,7 +4,7 @@ use crate::account::OrderRow;
 use crate::sign::{self, OrderSigning};
 use crate::{Pending, Polymarket, encode, success};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response};
+use safe_cex_engine::{Command, CommandId, Cx, Method, Response, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -323,29 +323,15 @@ impl Polymarket {
             if let Some(scope) = job.scope {
                 self.trading.scopes.remove(&scope);
             }
-            let result = result.map_err(|message| {
-                if job.ids.is_empty() {
-                    return message;
-                }
-                #[derive(Serialize)]
-                #[serde(rename_all = "camelCase")]
-                struct Partial<'a> {
-                    message: &'a str,
-                    partial_order_ids: &'a [String],
-                    partial_order_count: usize,
-                    total_order_count: usize,
-                    failed_order_index: usize,
-                }
-                serde_json::to_string(&Partial {
-                    message: &message,
-                    partial_order_ids: &job.ids,
-                    partial_order_count: job.ids.len(),
-                    total_order_count: job.total,
-                    failed_order_index: job.ids.len(),
-                })
-                .expect("partial placement result")
-            });
-            cx.done(command, result);
+            match result {
+                // Whole failures still use the plain path until Polymarket migrates to `fail`.
+                Err(message) if job.ids.is_empty() => cx.done(command, Err(message)),
+                Ok(result) => cx.done(command, Ok(result)),
+                Err(message) => cx.fail(
+                    command,
+                    VenueError::new(message).partial(&job.ids, job.total, job.ids.len()),
+                ),
+            }
         }
     }
     fn trading_next(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {

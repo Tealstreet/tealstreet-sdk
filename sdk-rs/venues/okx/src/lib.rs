@@ -603,12 +603,19 @@ impl Okx {
                         t.volume = num::parse(p.vol_ccy24h);
                         t.quote_volume = num::parse(p.vol24h);
                     }
-                    "mark-price" => t.mark = num::parse(p.mark_px),
-                    "index-tickers" => t.index = num::parse(p.idx_px),
-                    "open-interest" => t.open_interest = num::parse(p.oi_ccy),
+                    // A blank or null live value keeps the last good one.
+                    "mark-price" if !p.mark_px.is_empty() => t.mark = num::parse(p.mark_px),
+                    "index-tickers" if !p.idx_px.is_empty() => t.index = num::parse(p.idx_px),
+                    "open-interest" if !p.oi_ccy.is_empty() => {
+                        t.open_interest = num::parse(p.oi_ccy)
+                    }
                     "funding-rate" => {
-                        t.funding_rate = num::parse(p.funding_rate);
-                        t.funding_time = num::parse(p.funding_time);
+                        if !p.funding_rate.is_empty() {
+                            t.funding_rate = num::parse(p.funding_rate);
+                        }
+                        if !p.funding_time.is_empty() {
+                            t.funding_time = num::parse(p.funding_time);
+                        }
                     }
                     _ => {}
                 });
@@ -747,13 +754,19 @@ impl Venue for Okx {
                 skipped,
             } => match serde_json::from_str::<wire::Instrument<'_>>(item) {
                 Ok(m) => {
-                    if !matches!(m.ct_type, "linear" | "inverse")
+                    if (!m.ct_type.is_empty() && !matches!(m.ct_type, "linear" | "inverse"))
                         || (!m.inst_type.is_empty() && m.inst_type != kind.as_str())
-                        || (*kind == InstrumentType::Futures && m.rule_type != "xperp")
+                        || (*kind == InstrumentType::Futures
+                            && !m.rule_type.is_empty()
+                            && m.rule_type != "xperp")
                     {
                         return;
                     }
-                    if m.inst_type.is_empty() {
+                    // A blank or null classifier is malformed, not a different product.
+                    if m.inst_type.is_empty()
+                        || m.ct_type.is_empty()
+                        || (*kind == InstrumentType::Futures && m.rule_type.is_empty())
+                    {
                         *skipped += 1;
                         self.skipped_instruments.insert(m.inst_id.into());
                         return;
@@ -885,7 +898,14 @@ impl Venue for Okx {
                         maker_fee: None,
                     });
                 }
-                Err(_) => *skipped += 1,
+                Err(_) => {
+                    *skipped += 1;
+                    if let Ok(row) = serde_json::from_str::<wire::InstrumentId<'_>>(item)
+                        && !row.inst_id.is_empty()
+                    {
+                        self.skipped_instruments.insert(row.inst_id.into());
+                    }
+                }
             },
             Pending::Tickers {
                 kind,
@@ -1011,10 +1031,17 @@ impl Venue for Okx {
                     self.load_tickers(cx, next, rows, skipped);
                     return;
                 }
+                if rows.is_empty() && skipped > 0 {
+                    self.retry_startup(
+                        cx,
+                        &format!("OKX tickers had no usable rows ({skipped} skipped)"),
+                    );
+                    return;
+                }
                 if skipped > 0 {
                     cx.log(
                         LogLevel::Warning,
-                        format!("OKX seeded {skipped} malformed ticker rows as zero"),
+                        format!("OKX had {skipped} malformed ticker rows (seeded zero or skipped)"),
                     );
                 }
                 self.startup_failures = 0;
@@ -1371,31 +1398,7 @@ fn subtract_bars(end: f64, interval: &str, count: u32) -> Option<f64> {
         "12h" => 43_200_000.0,
         "1d" => 86_400_000.0,
         "1w" => 604_800_000.0,
-        "1M" => {
-            let ms = end.floor() as i64;
-            let (year, month, day) = sign::civil_date(ms.div_euclid(86_400_000));
-            let months = year * 12 + month - 1 - i64::from(count);
-            let year = months.div_euclid(12);
-            let month = months.rem_euclid(12) + 1;
-            let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-            let days = match month {
-                2 => {
-                    if leap {
-                        29
-                    } else {
-                        28
-                    }
-                }
-                4 | 6 | 9 | 11 => 30,
-                _ => 31,
-            };
-            let year = year - i64::from(month <= 2);
-            let era = year.div_euclid(400);
-            let yoe = year - era * 400;
-            let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day.min(days) - 1;
-            let day = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
-            return Some((day * 86_400_000 + ms.rem_euclid(86_400_000)) as f64);
-        }
+        "1M" => return Some(safe_cex_engine::time::sub_months(end.floor() as i64, count) as f64),
         _ => return None,
     };
     Some(end - duration * f64::from(count))

@@ -158,6 +158,14 @@ test('timeouts preserve only caller identity, do not cancel transport I/O or ret
   assert.equal(r.calls.length, 2);
 });
 
+test('an interrupted Lighter account-tier change is an unknown write outcome', async () => {
+  const r = rig({ commandTimeoutMs: 10 });
+  const tier = r.host.command({ op: 'setAccountTier', tier: 'premium' });
+  r.advance(10);
+  await assert.rejects(tier, (error) => error instanceof CommandTimeoutError
+    && error.command === 'setAccountTier' && error.outcome === 'unknown');
+});
+
 test('known completion wins once, clears its deadline, and ignores malformed duplicate done', async () => {
   const r = rig({ commandTimeoutMs: 10 });
   const result = r.host.command({ op: 'placeOrders', orders: [{ clientOrderId: 'one' }] });
