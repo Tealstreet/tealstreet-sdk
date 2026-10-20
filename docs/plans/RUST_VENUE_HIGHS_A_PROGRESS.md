@@ -177,3 +177,25 @@ Bans, fmt, workspace all-target clippy and WASM clippy pass. Clean combined
 WASM has the new command and dependency paths exclusively in this worktree;
 all 444 compiled SDK tests and 76 host tests pass before the final mini change.
 Compiled replay/consumer and per-venue gates continue below.
+
+### Landing wire integration (gates being repeated)
+
+Before the wire integration, all seven canonical public gates passed (three
+runs each): MEXC, Bitrue, BloFin, Binance and its Spot/COIN-M/PM profiles. All
+seven unique private gates passed, plus the four primary combined-build private
+gates. Four isolated sizes passed the unchanged 1,258,291-byte budget: MEXC
+879,508; Bitrue 889,649; BloFin 871,085; Binance 1,005,059. All compiled
+SDK/host/wire/server/consumer/harness/scripted lifecycle checks passed. These
+remain pre-wire evidence, not final numbers for the merged head.
+
+Informational process CPU did not beat TS on Bitrue (216.9 / 217.4 ms TS/Rust)
+or BloFin (345.2 / 374.4 ms). The required main-thread CPU, steady CPU and
+retained-memory gates passed for every venue; no claim that every process CPU
+metric wins. Full metrics/logs were archived under `/tmp/highs-pre-wire-evidence`.
+
+Fetched and merged landing `c44f22bd8e` (PR #1345 wire/consumer fixes), preserving
+the new maximum-leverage command and SDK/native routing. The pending final gate
+pipeline was canceled before accepting its evidence because its source base
+was superseded. Full quality checks, combined WASM/SDK/consumer checks and all
+seven paired public/private gates are running again on the merged code. Three
+independent source reviews also audit this integration; no PR opened yet.
