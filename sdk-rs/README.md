@@ -24,6 +24,21 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 
 CI runs all of these (`.github/workflows/rust.yml`).
 
+## Account transport routing
+
+Venues emit real URLs and logical socket roles; the core never chooses a proxy.
+`RustEngineExchange` applies the registered safe-cex transport through
+`createEngineTransport`, reusing TS routing, proxy authorization and HOW/relay.
+Explicit headless/direct options stay direct. `createEngineObject` accepts the
+same factory as `createTransport` for account-backed Workers deployments and
+refuses proxy/tunnel flags when no factory is configured.
+
+Native launchers serialize the TS-resolved, token-free routing policy and supply
+a context token callback to `NetworkTransport::with_routing`; see
+[`hosts/native/README.md`](hosts/native/README.md). No routing table is compiled
+into the native host. Secondary signing keys remain unsupported and fail before
+engine startup, so the host cannot silently bypass their distinct read egress.
+
 From the repository root, `corepack yarn rust:build-wasm` builds the combined
 host. Use `corepack yarn rust:build-wasm --venue hyperliquid` (or `bitget` / `backpack` / `blofin` / `mexc` / `bingx` / `binance` / `bybit` / `cryptocom` / `okx` / `weex`) to
 build a single-venue browser/Workers bundle. Each build replaces the bindings

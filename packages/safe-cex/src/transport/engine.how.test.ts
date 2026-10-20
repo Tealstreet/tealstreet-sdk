@@ -1,0 +1,136 @@
+import type { Transport } from '@tealstreet/safe-cex-wasm/host';
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { SINGAPORE_HOW_EGRESS, TOKYO_HOW_EGRESS } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
+import { createEngineTransport } from './engine';
+import { tealstreetTransport } from './tealstreet/tealstreetTransport';
+
+const tunnels = vi.hoisted(
+  () =>
+    new Map<
+      string,
+      {
+        sent: Array<Record<string, any>>;
+        reply: { status: number; data_raw: string; headers: Record<string, string> };
+      }
+    >(),
+);
+
+// Exercise the real HOW adapter and its RPC envelope; replace only the wire.
+vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
+  HOWWebSocket: class {
+    isOpen = true;
+    isInitialized = true;
+    isTimeSynced = true;
+    isTokenSent = true;
+    authState = 'Good';
+    listeners = new Map<string, (data: unknown) => void>();
+    state = { sent: [] as Array<Record<string, any>>, reply: { status: 200, data_raw: '', headers: {} } };
+    constructor(url: string) {
+      tunnels.set(url, this.state);
+    }
+    once(event: string, listener: (data: unknown) => void) {
+      this.listeners.set(event, listener);
+    }
+    off(event: string) {
+      this.listeners.delete(event);
+    }
+    send(message: Record<string, any>) {
+      this.state.sent.push(message);
+      queueMicrotask(() => {
+        this.listeners.get(`sub:${message.nonce}`)?.(this.state.reply);
+        this.listeners.delete(`sub:${message.nonce}`);
+      });
+    }
+  },
+}));
+vi.mock('../accessToken', () => ({ getProxyToken: vi.fn(async () => 'proxy-fixture'), isTokenExpired: () => false }));
+
+const rawTransport = (): Transport => ({
+  now: () => 0,
+  setTimeout,
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  connect: vi.fn(() => ({ send: vi.fn(), close: vi.fn() })),
+  request: vi.fn(async () => {
+    throw new Error('unexpected direct HTTP');
+  }),
+});
+
+describe('engine through the real HOW package', () => {
+  beforeEach(() => {
+    for (const state of tunnels.values()) {
+      state.sent.length = 0;
+      state.reply = { status: 200, data_raw: '', headers: {} };
+    }
+  });
+
+  it.each([
+    ['bingx', {}, SINGAPORE_HOW_EGRESS],
+    ['bybit', { tealstreetTunnel: true, proxyRegion: 'JA' }, TOKYO_HOW_EGRESS],
+    ['bybit', { tealstreetTunnel: true, proxyRegion: 'SG' }, SINGAPORE_HOW_EGRESS],
+    ['okx', { tealstreetTunnel: true }, SINGAPORE_HOW_EGRESS],
+  ] as const)('sends %s to the resolved tunnel with signed bytes intact', async (exchange, options, host) => {
+    const raw = rawTransport();
+    const route = createEngineTransport(
+      exchange,
+      { key: 'fixture-key', secret: 'fixture-secret', ...options, transport: tealstreetTransport },
+      raw,
+    );
+    const state = tunnels.get(host)!;
+    const responseBody = ' { "orderId": 900719925474099312345, "price": 1.2300 }\n';
+    state.reply = { status: 429, data_raw: responseBody, headers: { 'retry-after': '2' } };
+    const url = 'https://api.example.com/order?a=1&a=2&encoded=%2F+%20&signature=abc';
+    const body = ' {"id":900719925474099312345, "price":1.2300}\n';
+    const response = await route.request({
+      method: 'POST',
+      url,
+      body,
+      headers: { 'Content-Type': 'application/json', 'X-Venue-Signature': 'signed' },
+    });
+    expect(raw.request).not.toHaveBeenCalled();
+    expect(state.sent).toHaveLength(1);
+    expect(state.sent[0]).toEqual({
+      type: 'rpc.http',
+      rpc_version: 4,
+      format: 'raw',
+      accept_encoding: ['gzip'],
+      accept_binary: true,
+      nonce: expect.any(String),
+      arg: {
+        url,
+        method: 'POST',
+        params: {},
+        data: body,
+        headers: { 'Content-Type': 'application/json', 'X-Venue-Signature': 'signed' },
+      },
+    });
+    expect(response.status).toBe(429);
+    expect(response.headers).toBe('retry-after: 2');
+    expect(new TextDecoder().decode(response.body as Uint8Array)).toBe(responseBody);
+  });
+
+  it('keeps overrideProxyUrl and Brazil headers inside the selected HOW RPC', async () => {
+    const route = createEngineTransport(
+      'bybit',
+      {
+        key: 'fixture-key',
+        secret: 'fixture-secret',
+        transport: tealstreetTransport,
+        tealstreetProxy: true,
+        tealstreetTunnel: true,
+        overrideProxyUrl: 'https://override.example',
+        bybitSiteId: 'BRA_BTL',
+      },
+      rawTransport(),
+    );
+    await route.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?category=linear', headers: {} });
+    expect(tunnels.get(SINGAPORE_HOW_EGRESS)!.sent[0].arg).toEqual({
+      url: 'https://override.example/https://api.bybit.com/v5/market/kline?category=linear',
+      method: 'GET',
+      params: {},
+      data: {},
+      headers: { 'x-site-id': 'BRA_BTL' },
+    });
+  });
+});

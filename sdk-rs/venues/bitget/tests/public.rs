@@ -307,3 +307,23 @@ fn inverse_public_contracts_keep_native_precision_and_coin_product() {
         );
     }
 }
+
+#[test]
+fn shared_public_socket_urls_keep_independent_feed_identities() {
+    let h = Harness::public();
+    let feeds: std::collections::HashSet<_> = h
+        .socket_contexts
+        .iter()
+        .filter(|(_, url, _)| url == "wss://ws.bitget.com/v2/ws/public")
+        .map(|(_, _, context)| context.as_ref().expect("feed context").feed)
+        .collect();
+    assert_eq!(
+        feeds,
+        std::collections::HashSet::from(["primary", "secondary-1", "secondary-2"])
+    );
+    assert!(
+        h.socket_contexts
+            .iter()
+            .all(|(_, _, context)| !context.as_ref().unwrap().recover)
+    );
+}

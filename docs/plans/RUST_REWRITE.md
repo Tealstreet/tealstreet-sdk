@@ -218,6 +218,18 @@ memory.
 
 ### 4. Hosts
 
+Account-backed hosts reuse safe-cex's TS transport provider and routing resolver.
+Venues emit real URLs and explicit public/private/business socket roles. Stable
+feed identities isolate parallel sockets sharing a role and URL; protocol-health
+recovery hints let hosts prefer a declared fallback. The JS
+host applies proxy prefixes and per-operation authorization, package HOW/relay,
+and sticky fallback selection. Workers provide a header-capable raw socket
+constructor to those same protocol clients. Native launchers consume the
+serialized TS `resolveEngineRoutingPlan` output through
+`NetworkTransport::with_routing`, with a context JWT callback; no native venue
+routing table or credentials are embedded in the policy. Disposal and deadlines
+cancel token acquisition before a stale write can be sent.
+
 - Browser worker: `hosts/wasm` + `host.mjs` — done.
 - Native: `hosts/native` (`safe-cex-native`), tokio + tokio-tungstenite + reqwest over a
   pluggable transport, driving the same engine — done (`examples/watch.rs`
@@ -293,7 +305,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Backpack | done (#1299) |
 | Bitget (USDT-M, USDC) | done (#1308); inverse sizing and UTA ledger/trailing parity next |
 | Bitunix | wave 1, PR in review |
-| Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | lane running |
+| Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | Implemented; [PR #1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313) |
 | KuCoin, Phemex, WOO, Bitrue, Orderly family, Bybit inverse/spot/demo/Hyro, Bitget parity | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | Lighter, Paradex, GRVT, AsterDEX, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
