@@ -59,3 +59,11 @@ hand-roll windows, cursors and pages in their `history.rs`. History reads only.
   the oldest window's rows; windows now run newest first. Not changed: Bitget
   applies its limit as the page size only; the UTA private tape shows the TS
   reference also follows the cursor past the limit and returns every row.
+- Batch 3: `OffsetWalk` (row offsets or page numbers, advancing by rows
+  returned or a fixed page size, with page and offset budgets and opt-in
+  stalls). TxFlow and Backpack use it, each with a pin written and passing
+  first. TxFlow keeps its fixed 2000-row step: the TS reference also steps by
+  the page size, and no TxFlow contract shows short pages that report more.
+  Orderly and WOO stay hand-rolled: completion follows the server's total and
+  Orderly's budget spans its regular and algo stages, so the helper would only
+  grow special cases without fixing anything.
