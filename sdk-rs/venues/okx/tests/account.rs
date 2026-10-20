@@ -18,9 +18,12 @@ fn periodic_policy_does_not_suppress_local_valuation_or_create_network_polls() {
     e.start(0.);
     let market = actions(&mut e).remove(0);
     reply(&mut e, &market, &envelope(MARKET), 1.);
-    let ticker = actions(&mut e).remove(0);
+    // Account config is requested alongside the ticker seed once markets load.
+    let mut initial = actions(&mut e);
+    let ticker = initial.remove(0);
     reply(&mut e, &ticker, &envelope(TICKER), 2.);
-    let config = actions(&mut e)
+    initial.extend(actions(&mut e));
+    let config = initial
         .into_iter()
         .find(|a| is_get(a, "/api/v5/account/config"))
         .unwrap();
