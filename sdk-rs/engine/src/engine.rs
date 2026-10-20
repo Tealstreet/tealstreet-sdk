@@ -730,6 +730,8 @@ pub struct Engine<V: Venue> {
     store: Store,
     io: Io<V::Pending>,
     started: bool,
+    #[cfg(feature = "command-tracking")]
+    commands_received: bool,
     #[cfg(feature = "book-deltas")]
     book_deltas: bool,
     #[cfg(feature = "book-deltas")]
@@ -752,6 +754,8 @@ impl<V: Venue> Engine<V> {
             store: Store::default(),
             io: Io::default(),
             started: false,
+            #[cfg(feature = "command-tracking")]
+            commands_received: false,
             #[cfg(feature = "book-deltas")]
             book_deltas: false,
             #[cfg(feature = "book-deltas")]
@@ -805,6 +809,12 @@ impl<V: Venue> Engine<V> {
         cx.book_changed(symbol);
     }
 
+    /// Hosts that allocate command IDs require a fresh command boundary.
+    #[cfg(feature = "command-tracking")]
+    pub fn has_received_commands(&self) -> bool {
+        self.commands_received
+    }
+
     pub fn account_id(&self) -> Option<&str> {
         self.venue.account_id()
     }
@@ -822,6 +832,10 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        #[cfg(feature = "command-tracking")]
+        if matches!(&event, Event::Command(_)) {
+            self.commands_received = true;
+        }
         #[cfg(feature = "book-deltas")]
         match &event {
             Event::Command(Command::SubscribeOrderBook { symbol }) => {
@@ -1231,6 +1245,38 @@ mod streaming_tests {
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(self.book.iter().map(|book| ("A", book)))
         }
+    }
+
+    #[cfg(feature = "command-tracking")]
+    #[test]
+    fn command_boundary_allows_startup_but_records_commands_before_dispatch() {
+        let mut engine = frame_engine();
+        assert!(!engine.has_received_commands());
+        engine.start(0.);
+        assert!(
+            !engine.has_received_commands(),
+            "startup is outside the command ID domain"
+        );
+        engine.handle(
+            1.,
+            Event::WsOpened {
+                socket: SocketId(999),
+            },
+        );
+        assert!(!engine.has_received_commands());
+        engine.handle(
+            2.,
+            Event::Command(Command::SubscribeOrderBook { symbol: "A".into() }),
+        );
+        assert!(
+            engine.has_received_commands(),
+            "subscription commands also close the boundary"
+        );
+        engine.start(3.);
+        assert!(
+            engine.has_received_commands(),
+            "start never resets prior command history"
+        );
     }
 
     fn stream(at: ArrayAt, body: &[u8]) -> StreamVenue {

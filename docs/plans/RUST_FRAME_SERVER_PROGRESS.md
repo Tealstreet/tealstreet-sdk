@@ -263,3 +263,35 @@ lint28 pass. Full workspace native tests: 2,100 across 170 groups, zero failed
 or ignored. Workspace all-target clippy, workspace WASM build/clippy, bans and
 fmt pass. One local linker environment failure was repaired by setting the
 Rust1.99 library path in the child environment; the successful rerun is recorded.
+
+### Command namespace correctness closure
+
+An additional independent review confirmed a reachable registration collision:
+an application could issue command1 on Engine before Host::new, then register
+it; a delayed preissued completion could match the first client's server ID1.
+The server now rejects engines that have received any command before registration.
+A default-off `command-tracking` engine feature records this sticky boundary;
+native enables it only on its native target, so default WASM gains no field or
+branch. Startup and Store seeding remain allowed, and no pending write is
+executed, retried or canceled to resolve a collision. All client commands must
+enter through the server.
+
+The public regression creates a held preissued command1/HTTP effect, verifies
+rejection without startup/transport activity or ID/token reservation, then
+accepts a command-free pre-started replacement with startup exactly once. The
+engine regression covers start/noncommand events and the sticky command flag.
+Independent plan and concrete implementation reviews pass. Default, tracking
+and tracking-plus-delta engine tests and all-target clippy profiles pass; native
+and incoming-GRVT checks follow.
+
+Incoming-base note, outside this frame-server diff: GRVT's default TS class still
+implements getAccount, but explicit Rust opt-in uses RustEngineExchange whose
+generic getAccount rejects GRVT; the Rust GRVT venue also rejects FetchAccount.
+That upstream port parity gap is recorded without expanding this PR into GRVT
+session/account-query implementation. FrameServer documents that individual
+venues can reject commands they do not implement.
+
+Registration fix checks pass: default engine68 tests, tracking-only69, both
+native features72; all three all-target clippy profiles; full native host54
+tests and all-target clippy. New registration test runs among13 real loopback
+and lifecycle cases. Incoming-GRVT/default-WASM and final replay checks continue.

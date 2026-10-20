@@ -64,6 +64,11 @@ credentials, transport/routing plan and account token. The library can register
 heterogeneous venues with `add_account`; it does not accept account creation or
 credentials over the client protocol.
 
+Register engines before sending them any commands, including subscriptions. All
+commands must enter through the server so its internal IDs cannot collide with
+pre-existing venue jobs. Registration rejects an engine that has received any
+command. Store seeding and command-free startup are allowed.
+
 Run the Binance example with an opaque base64url-style token in
 `FRAME_SERVER_TOKEN`:
 

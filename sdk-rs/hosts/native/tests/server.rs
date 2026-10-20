@@ -4,10 +4,12 @@ use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::wire::{book_top, section, sections};
-use safe_cex_engine::{Command, Cx, Engine, HttpRequest, Response, SocketId, TimerId, Venue};
+use safe_cex_engine::{
+    Command, Cx, Engine, Event, HttpRequest, Method, Response, SocketId, TimerId, Venue,
+};
 use safe_cex_native::{Events, FrameServer, Host, HostEvent, ServerConfig, Transport};
 use serde::Deserialize;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
@@ -53,10 +55,12 @@ struct TestVenue {
     observed: Rc<RefCell<Vec<Command>>>,
     pending: Vec<u32>,
     received: Rc<RefCell<Vec<String>>>,
+    started: Rc<Cell<usize>>,
 }
 impl Venue for TestVenue {
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
+        self.started.set(self.started.get() + 1);
         cx.store.set_markets(vec![Market {
             id: "BTCUSDT".into(),
             symbol: "BTCUSDT".into(),
@@ -112,7 +116,18 @@ impl Venue for TestVenue {
             Command::FetchAccount { command } => {
                 cx.done(command, Ok(format!("\"{}\"", self.label)))
             }
-            Command::FetchLeverage { command, .. } => self.pending.push(command),
+            Command::FetchLeverage { command, symbol } => {
+                self.pending.push(command);
+                if symbol == "queued" {
+                    cx.request(
+                        Method::Post,
+                        "https://venue.test/held".into(),
+                        vec![],
+                        None,
+                        (),
+                    );
+                }
+            }
             _ => {}
         }
     }
@@ -156,6 +171,7 @@ impl Fixture {
                             observed: commands,
                             pending: Vec::new(),
                             received: received.clone(),
+                            started: Rc::default(),
                         }),
                         tape,
                     ),
@@ -589,6 +605,78 @@ async fn aborting_server_future_drops_account_transport_and_connections() {
                 .unwrap();
             let ended = tokio::time::timeout(DEADLINE, socket.next()).await.unwrap();
             assert!(ended.is_none() || matches!(ended, Some(Err(_)) | Some(Ok(Message::Close(_)))));
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn registration_rejects_preissued_jobs_before_startup_or_transport_execution() {
+    struct CountingTransport(Rc<Cell<usize>>);
+    impl Transport for CountingTransport {
+        fn connect(&self, _: SocketId, _: String, _: Events) -> mpsc::UnboundedSender<String> {
+            self.0.set(self.0.get() + 1);
+            mpsc::unbounded_channel().0
+        }
+        fn request(&self, _: HttpRequest, _: Events) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+    LocalSet::new()
+        .run_until(async {
+            let started = Rc::new(Cell::new(0));
+            let observed = Rc::new(RefCell::new(Vec::new()));
+            let venue = || TestVenue {
+                label: "preconfigured",
+                book: Book::default(),
+                observed: observed.clone(),
+                pending: Vec::new(),
+                received: Rc::default(),
+                started: started.clone(),
+            };
+            let transport_calls = Rc::new(Cell::new(0));
+            let mut engine = Engine::new(venue());
+            // A legal engine call creates an unfinished command1 and queued HTTP
+            // effect before the server can allocate the same internal ID.
+            engine.handle(
+                0.,
+                Event::Command(Command::FetchLeverage {
+                    command: 1,
+                    symbol: "queued".into(),
+                }),
+            );
+            assert_eq!(observed.borrow().len(), 1);
+            let mut server = FrameServer::new(config()).unwrap();
+            let error = server
+                .add_account(
+                    "account",
+                    "account-token",
+                    Host::new(engine, CountingTransport(transport_calls.clone())),
+                )
+                .unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+            assert!(error.to_string().contains("must not receive commands"));
+            tokio::task::yield_now().await;
+            assert_eq!(started.get(), 0, "rejected account never starts");
+            assert_eq!(transport_calls.get(), 0, "queued HTTP is never executed");
+
+            // Rejection reserves neither the account name nor token. Existing
+            // command-free startup remains valid and runs its queued effects once.
+            let mut fresh = Engine::new(venue());
+            fresh.start(1.);
+            server
+                .add_account(
+                    "account",
+                    "account-token",
+                    Host::new(fresh, CountingTransport(transport_calls.clone())),
+                )
+                .unwrap();
+            tokio::task::yield_now().await;
+            assert_eq!(started.get(), 1, "server must not repeat startup");
+            assert_eq!(
+                transport_calls.get(),
+                1,
+                "only fresh startup socket executes"
+            );
         })
         .await;
 }

@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [features]
+command-tracking = []
 book-deltas = []
 command-asterdex = []
 command-apexomni = []

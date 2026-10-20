@@ -103,12 +103,18 @@ impl FrameServer {
 
     /// Tokens grant full access to one preconfigured account. They must be
     /// distinct, nonempty opaque strings without whitespace. Never put them in URLs.
+    /// Engines must not have received commands; startup and Store seeding are allowed.
     pub fn add_account<V: Venue + 'static, T: Transport + 'static>(
         &mut self,
         id: &str,
         token: &str,
         host: Host<V, T>,
     ) -> io::Result<()> {
+        if host.engine.has_received_commands() {
+            return Err(invalid(
+                "account engine must not receive commands before server registration",
+            ));
+        }
         if id.is_empty()
             || id.len() > 128
             || !id
