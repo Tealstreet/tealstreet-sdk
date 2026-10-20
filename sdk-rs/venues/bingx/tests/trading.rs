@@ -1269,6 +1269,10 @@ fn a_failed_bracket_replacement_says_the_original_was_cancelled() {
         error.starts_with("original bracket cancelled; replacement failed: BingX 101204"),
         "{error}"
     );
+    assert_eq!(
+        h.failures[0].outcome, None,
+        "the cancel already took effect"
+    );
 
     // A failed cancellation is not reported as a cancelled bracket.
     let mut stop = order();
@@ -1313,6 +1317,7 @@ fn write_failures_are_classified_without_changing_their_text() {
             Some(Outcome::Unknown),
         ),
         ("not json", None, Some(Outcome::Unknown)),
+        (r#"{"code":109500,"msg":"system busy"}"#, None, None),
     ] {
         let mut h = Harness::new(None);
         h.place(vec![opts()]);

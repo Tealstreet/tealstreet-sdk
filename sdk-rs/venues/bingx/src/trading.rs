@@ -240,19 +240,25 @@ fn response_data<'a>(
     Ok((envelope.data.unwrap_or_default(), absent))
 }
 /// A BingX coded failure; internal errors may follow execution.
+/// Codes not listed here (e.g. 80001 "request failed", 109500 "busy") leave
+/// the outcome unclassified rather than claim the write did not execute.
 fn rejection(code: i64, message: String, venue_message: &str) -> VenueError {
     let (kind, outcome) = match code {
-        100001 | 100413 | 100412 | 100419 => (Some(ErrorKind::AuthInvalid), Outcome::Rejected),
-        100410 | 100411 => (Some(ErrorKind::RateLimited), Outcome::Rejected),
-        80014 | 100400 => (Some(ErrorKind::InvalidInput), Outcome::Rejected),
-        80012 | 100500 | 100503 => (Some(ErrorKind::VenueUnavailable), Outcome::Unknown),
-        _ => (Some(ErrorKind::Rejected), Outcome::Rejected),
+        100001 | 100412 | 100413 => (Some(ErrorKind::AuthInvalid), Some(Outcome::Rejected)),
+        100004 | 100419 => (Some(ErrorKind::AuthPermission), Some(Outcome::Rejected)),
+        100410 => (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+        80014 | 100400 => (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        80016 | 80020 | 100202 | 100440 | 101204 => {
+            (Some(ErrorKind::Rejected), Some(Outcome::Rejected))
+        }
+        80012 | 100500 | 100503 => (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
+        _ => (None, None),
     };
     let mut error = VenueError::new(message)
-        .outcome(outcome)
         .venue_code(code.to_string())
         .venue_message(venue_message);
     error.kind = kind;
+    error.outcome = outcome;
     error
 }
 /// The write may have executed; reconcile before resending.
@@ -460,7 +466,14 @@ impl Trading {
                     ..
                 }
             );
-            let (data, absent) = response_data(response, absent_ok)?;
+            let replace = matches!(&request.call, Call::Replace { .. });
+            let (data, absent) = response_data(response, absent_ok).map_err(|mut error| {
+                // STOP_ON_FAILURE can cancel the original before the new order fails.
+                if replace && error.outcome == Some(Outcome::Rejected) {
+                    error.outcome = None;
+                }
+                error
+            })?;
             match request.call {
                 Call::Place => Ok(vec![placement_id(&data)?]),
                 Call::Cancel { ids, .. } => {
