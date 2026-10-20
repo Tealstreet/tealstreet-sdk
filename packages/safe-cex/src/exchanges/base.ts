@@ -1622,7 +1622,7 @@ export class BaseExchange implements Exchange {
     });
   };
 
-  protected workerCommandTimeoutMs = () => 5000;
+  protected workerCommandTimeoutMs = (_method: CallableMethodsInWorker) => 5000;
 
   protected workerCommandTimeoutError = (_method: CallableMethodsInWorker, _args: unknown[]): Error =>
     new Error('Timeout callMethodInWorker');
@@ -1639,7 +1639,7 @@ export class BaseExchange implements Exchange {
         // call leaks a handleDone closure permanently attached to the emitter.
         this.emitter.off('callMethod:done', handleDone);
         reject(this.workerCommandTimeoutError(method, args));
-      }, this.workerCommandTimeoutMs());
+      }, this.workerCommandTimeoutMs(method));
       const handleDone = (event: any) => {
         if (event.requestId === requestId) {
           clearTimeout(timeout);

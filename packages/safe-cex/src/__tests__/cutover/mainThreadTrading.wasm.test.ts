@@ -5,7 +5,6 @@ import type { ExchangeMetadataWorkerType } from '../../webworker/ExchangeMetadat
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { replacementClientOrderIdOf } from '../../exchanges/clientOrderId';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
@@ -63,9 +62,9 @@ const RESPONSES: Record<string, string> = {
   symbolConfig: '[{"symbol":"BTCUSDT","marginType":"CROSSED","leverage":20}]',
   account:
     '{"assets":[{"asset":"USDT","walletBalance":"1000","availableBalance":"900","initialMargin":"100","unrealizedProfit":"0"}]}',
-  openOrders: JSON.stringify([
-    {
-      orderId: 777,
+  openOrders: JSON.stringify(
+    [777, 778].map((orderId) => ({
+      orderId,
       symbol: 'BTCUSDT',
       type: 'LIMIT',
       side: 'BUY',
@@ -74,13 +73,14 @@ const RESPONSES: Record<string, string> = {
       executedQty: '0',
       reduceOnly: false,
       timeInForce: 'GTC',
-      clientOrderId: 'resting-777',
+      clientOrderId: `resting-${orderId}`,
       updateTime: 1700000000000,
-    },
-  ]),
+    })),
+  ),
   openAlgoOrders: '[]',
   order: '{"orderId":4242,"status":"NEW","clientOrderId":"x"}',
   allOpenOrders: '{"code":200,"msg":"The operation of cancel all open order is done."}',
+  algoOpenOrders: '{"code":200,"msg":"success"}',
 };
 
 /** Canned Binance USD-M venue; records every request the worker's engine sends. */
@@ -94,7 +94,19 @@ const venue = () => {
     },
     request: async ({ method, url }) => {
       requests.push(`${method} ${url}`);
-      const body = RESPONSES[new URL(url).pathname.split('/').pop()!];
+      const parsed = new URL(url);
+      const name = parsed.pathname.split('/').pop()!;
+      // A single cancel is acknowledged with the cancelled order, as Binance USD-M does.
+      const body =
+        method === 'DELETE' && name === 'order'
+          ? JSON.stringify({
+              orderId: Number(parsed.searchParams.get('orderId')),
+              symbol: parsed.searchParams.get('symbol'),
+              status: 'CANCELED',
+              origQty: '0.01',
+              executedQty: '0',
+            })
+          : RESPONSES[name];
       return { status: body ? 200 : 404, headers: '', body: new TextEncoder().encode(body ?? '{}') };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -155,7 +167,7 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
     expect(worker.exchange).not.toBe(main);
     const view = frames ? main.store : worker.store;
     await vi.waitFor(() => {
-      expect(view.orders.map((order) => order.id)).toEqual(['777']);
+      expect(view.orders.map((order) => order.id).sort()).toEqual(['777', '778']);
       expect(view.positions.find((position) => position.contracts > 0)?.contracts).toBe(0.5);
     });
     return { tape, view };
@@ -191,20 +203,20 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
       expect(placed).toEqual({ orderIds: ['4242'], clientOrderId: 'main-thread-01' });
       expect(tape.writes()[1]).toContain('newClientOrderId=main-thread-01');
 
-      const resting = store.orders.find((order) => order.id === '777')!;
-      const amended = await main!.updateOrder({ order: resting, update: { price: 91.5 } });
-      expect([...amended]).toEqual(expect.arrayContaining([expect.any(String)]));
-      const amendWrites = tape.writes().slice(2);
-      expect(amendWrites.length).toBeGreaterThan(0);
-      expect(amendWrites.join('\n')).toContain('91.5');
-      if (amendWrites.some((write) => write.startsWith('POST')))
-        expect(replacementClientOrderIdOf(amended)).toBeTruthy();
+      // Binance USD-M has no amend: the engine cancels, then places the replacement.
+      const amended = store.orders.find((order) => order.id === '777')!;
+      const beforeAmend = tape.writes().length;
+      expect([...(await main!.updateOrder({ order: amended, update: { price: 91.5 } }))]).toEqual(['4242']);
+      const amend = tape.writes().slice(beforeAmend);
+      expect(amend[0]).toMatch(/^DELETE .*\/fapi\/v1\/order\?.*orderId=777/);
+      expect(amend.at(-1)).toMatch(/^POST .*\/fapi\/v1\/order\?.*price=91\.5/);
 
+      const cancelled = store.orders.find((order) => order.id === '778')!;
       const beforeCancel = tape.writes().length;
-      await main!.cancelOrders([resting]);
+      await main!.cancelOrders([cancelled]);
       const cancel = tape.writes().slice(beforeCancel);
       expect(cancel).toHaveLength(1);
-      expect(cancel[0]).toMatch(/^DELETE .*\/fapi\/v1\/(order|batchOrders)\?.*777/);
+      expect(cancel[0]).toMatch(/^DELETE .*\/fapi\/v1\/order\?.*orderId=778/);
 
       const beforeNuke = tape.writes().length;
       await main!.nuke();

@@ -244,6 +244,14 @@ const placementScopedCancelAllNames = new Set<ExchangeName>([
   'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue',
 ]);
 
+const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
+  'cancelAllOrders',
+  'nuke',
+  'nukePositions',
+  'nukeOrders',
+]);
+const MULTI_COMMAND_WAIT_FACTOR = 5;
+
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
 
@@ -720,7 +728,12 @@ export class RustEngineExchange extends BaseExchange {
     );
   };
 
-  protected override workerCommandTimeoutMs = () => this.commandTimeoutMs + 1000;
+  // Nuke and cancel-all run several engine commands in sequence on the worker.
+  protected override workerCommandTimeoutMs = (method: CallableMethodsInWorker) =>
+    Math.min(
+      (MULTI_COMMAND_WORKER_METHODS.has(method) ? MULTI_COMMAND_WAIT_FACTOR : 1) * this.commandTimeoutMs + 1000,
+      2_147_483_647,
+    );
 
   protected override workerCommandTimeoutError = (method: CallableMethodsInWorker, args: unknown[]): Error => {
     const clientOrderIds = workerCallClientOrderIds(method, args);
@@ -733,13 +746,13 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   /**
-   * A main-thread instance is never started and has a worker bridge listening
-   * for `callMethod`; the worker's instance owns the engine. Its trading methods
-   * run there whole, so preflight, placement scopes and nuke retries see the
-   * authoritative state. Without a bridge, an unstarted instance rejects locally.
+   * The host's worker bridge listens for `callMethod` on a main-thread instance;
+   * the worker's instance owns the engine and never has that listener. Trading
+   * runs there whole, so preflight, placement scopes and nuke retries see the
+   * authoritative state, even if a main-thread read started a local engine.
    */
   private get routesToWorker(): boolean {
-    return !this.startup && !this.host && this.emitter.hasListeners('callMethod');
+    return this.emitter.hasListeners('callMethod');
   }
 
   private forwardTradingToWorker() {

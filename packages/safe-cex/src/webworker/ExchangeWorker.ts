@@ -779,7 +779,7 @@ export class ExchangeWorker {
       name: 'EngineDisposedError',
       code: 'ENGINE_DISPOSED',
     });
-    this._messageBuffer = [];
+    this._dropMessageBuffer();
     // Bump the token so any in-flight start() observes the change after its
     // next await and bails instead of proceeding to clobber state.
     this._startupToken++;
@@ -836,6 +836,7 @@ export class ExchangeWorker {
       if (this._messageBuffer.length < MAX_BUFFER_SIZE) {
         this._messageBuffer.push(payload);
       } else {
+        this._rejectNeverSent(payload);
         // Send warning through proper logging infrastructure
         this.logError(
           `Message buffer full for ${this._exchangeName}, dropping message`,
@@ -983,6 +984,25 @@ export class ExchangeWorker {
     }, 0);
   }
 
+  /** A request still buffered when the account stops was never dispatched; answer it rather than leave it pending. */
+  private _rejectNeverSent(payload: StoreWorkerPayload) {
+    if (!this._requestKey(payload)) return;
+    const method = payload.op === 'callMethod' ? payload.data?.method : undefined;
+    const message = 'Exchange stopped before this operation was sent; nothing was sent.';
+    this._rejectUnavailablePayload(payload, message, {
+      message,
+      name: 'EngineUnavailableError',
+      outcome: 'notSent',
+      ...(typeof method === 'string' && { command: method }),
+    });
+  }
+
+  private _dropMessageBuffer() {
+    const dropped = this._messageBuffer;
+    this._messageBuffer = [];
+    for (const payload of dropped) this._rejectNeverSent(payload);
+  }
+
   private _rejectUnavailablePayload(
     payload: StoreWorkerPayload,
     message = 'Rust engine unavailable; operation was not replayed. Reinitialize the account if recovery failed.',
@@ -1076,7 +1096,7 @@ export class ExchangeWorker {
       chaserOrderManagerInstance.cleanupExchange(this._exchange);
       this._exchange.dispose();
     }
-    this._messageBuffer = [];
+    this._dropMessageBuffer();
     this._invalidateReadiness();
     this.log('warn', 'Rust engine stopped; interrupted writes may have an unknown outcome and will not be replayed.', {
       reason: error.message,
