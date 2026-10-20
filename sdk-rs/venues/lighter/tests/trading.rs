@@ -1,7 +1,7 @@
 //! Behavioral contracts use the documented native transaction fields.
 mod support;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, TimerId};
+use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Outcome, TimerId};
 use safe_cex_venue_lighter::Lighter;
 use serde_json::{Value, json};
 use support::*;
@@ -84,6 +84,7 @@ fn failure(e: &mut Engine<Lighter>) -> String {
             Action::Notice(Notice::CommandDone {
                 result: Err(error), ..
             }) => Some(error),
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.message),
             _ => None,
         })
         .expect("command rejection")
@@ -255,7 +256,10 @@ fn lost_write_response_never_replays_and_next_command_refreshes_nonce() {
             .iter()
             .any(|a| matches!(a,Action::Http(r) if r.url.contains("sendTx")))
     );
-    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone { result:Err(error),.. }) if error.contains("Uncertain"))));
+    assert!(actions.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
+        if error.message.contains("Uncertain") && error.outcome == Some(Outcome::Unknown))
+    ));
     place(&mut e, vec![limit()]);
     assert!(http(&mut e, "nextNonce").url.contains("api_key_index=1"));
 }
@@ -693,6 +697,42 @@ fn amend_infers_protection_from_requested_price() {
             } else {
                 0
             }
+        );
+    }
+}
+
+fn completion(e: &mut Engine<Lighter>) -> (String, Option<Outcome>) {
+    e.drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone {
+                result: Err(error), ..
+            }) => Some((error, None)),
+            Action::Notice(Notice::CommandFailed { error, .. }) => {
+                Some((error.message, error.outcome))
+            }
+            _ => None,
+        })
+        .expect("command completion")
+}
+
+#[test]
+fn only_uncertain_submissions_report_an_unknown_outcome() {
+    for (status, body, unknown) in [
+        (503, r#"{"code":503,"message":"service unavailable"}"#, true),
+        (200, "not json", true),
+        (200, r#"{"code":200,"tx_hash":[]}"#, true),
+        (400, r#"{"message":"missing code"}"#, true),
+        (400, r#"{"code":21132,"message":"margin mode"}"#, false),
+        (400, r#"{"code":21600,"message":"invalid order"}"#, false),
+    ] {
+        let (mut e, _) = ready_unattributed();
+        let r = begin(&mut e, vec![limit()]);
+        reply(&mut e, &r, status, body);
+        let (message, outcome) = completion(&mut e);
+        assert_eq!(
+            outcome == Some(Outcome::Unknown),
+            unknown,
+            "{status} {body}: {message}"
         );
     }
 }

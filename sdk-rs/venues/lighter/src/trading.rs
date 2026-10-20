@@ -1,7 +1,9 @@
 //! Serialized nonce allocation and submissions. Transport failures never replay writes.
 use crate::{Lighter, Pending, sign};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response, TimerId, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, Method, Outcome, Response, TimerId, VenueError, num,
+};
 use serde::Deserialize;
 use std::collections::{HashMap, VecDeque};
 
@@ -367,10 +369,7 @@ impl Lighter {
             return;
         }
         if self.account.signer.is_none() {
-            self.trade_finish(
-                cx,
-                "Lighter signer unavailable; execution is disabled".into(),
-            );
+            self.trade_finish(cx, "Lighter signer unavailable; execution is disabled");
             return;
         }
         if let Some(Step::Position {
@@ -386,7 +385,7 @@ impl Lighter {
             } else if *requested {
                 self.trade_finish(
                     cx,
-                    "No open position available for this Lighter reduce-only limit order".into(),
+                    "No open position available for this Lighter reduce-only limit order",
                 );
             } else {
                 if let Some(Step::Position { requested, .. }) =
@@ -410,7 +409,7 @@ impl Lighter {
         {
             self.trade_finish(
                 cx,
-                "Lighter source order filled during amendment; replacement was not placed".into(),
+                "Lighter source order filled during amendment; replacement was not placed",
             );
             return;
         }
@@ -424,7 +423,7 @@ impl Lighter {
                     return;
                 }
                 if self.limits_standard() {
-                    self.trade_finish(cx, TIER_MESSAGE.into());
+                    self.trade_finish(cx, TIER_MESSAGE);
                     return;
                 }
                 self.trading.active.as_mut().unwrap().builder_stage = 1;
@@ -644,7 +643,7 @@ impl Lighter {
                                     .is_some_and(|fee| fee >= u64::from(builder.taker_fee))
                         });
                     if !valid {
-                        self.trade_finish(cx, APPROVAL_MESSAGE.into());
+                        self.trade_finish(cx, APPROVAL_MESSAGE);
                         return;
                     }
                 }
@@ -664,15 +663,12 @@ impl Lighter {
                             .and_then(Number::integer)
                             .filter(|n| *n < i64::MAX as u64);
                         if self.trading.next_nonce.is_none() {
-                            self.trade_finish(
-                                cx,
-                                "Lighter returned an invalid transaction nonce".into(),
-                            );
+                            self.trade_finish(cx, "Lighter returned an invalid transaction nonce");
                         } else {
                             self.trade_kick(cx);
                         }
                     }
-                    _ => self.trade_finish(cx, "Failed to fetch Lighter transaction nonce".into()),
+                    _ => self.trade_finish(cx, "Failed to fetch Lighter transaction nonce"),
                 }
             }
             Request::Submit(submission) => {
@@ -681,7 +677,7 @@ impl Lighter {
                     Ok(reply) => reply,
                     Err(_) => {
                         self.submission_uncertain(cx, &submission.effect);
-                        self.trade_finish(cx, "Uncertain Lighter transaction result; check open orders before retrying".into());
+                        self.trade_finish(cx, uncertain(UNCERTAIN_RESULT));
                         return;
                     }
                 };
@@ -703,7 +699,8 @@ impl Lighter {
                 };
                 if response.status >= 300 || code != Some(200) || hash_count != submission.count {
                     self.trading.next_nonce = None;
-                    if response.status >= 500 || code.is_none() || code == Some(200) {
+                    let unknown = response.status >= 500 || code.is_none() || code == Some(200);
+                    if unknown {
                         self.submission_uncertain(cx, &submission.effect);
                     } else if matches!(submission.effect, Effect::Setting { .. }) {
                         self.refresh_account(cx);
@@ -713,10 +710,18 @@ impl Lighter {
                         Some(21149) => APPROVAL_MESSAGE.into(),
                         Some(21132) => "Lighter rejected margin mode switch: close open positions and orders on this market first".into(),
                         _ if !reply.message.is_empty() => reply.message,
-                        _ => "Uncertain Lighter transaction result; check open orders before retrying".into(),
+                        _ => UNCERTAIN_RESULT.into(),
                     };
                     self.refresh_orders(cx);
-                    self.trade_finish(cx, message);
+                    let error = VenueError::new(message);
+                    self.trade_finish(
+                        cx,
+                        if unknown {
+                            error.outcome(Outcome::Unknown)
+                        } else {
+                            error
+                        },
+                    );
                     return;
                 }
                 let step = self
@@ -813,10 +818,10 @@ impl Lighter {
                 self.trading.active.as_mut().unwrap().builder_stage = 2;
                 self.trade_kick(cx);
             }
-            Request::Nonce => self.trade_finish(cx, error.into()),
+            Request::Nonce => self.trade_finish(cx, error),
             Request::Submit(s) => {
                 self.submission_uncertain(cx, &s.effect);
-                self.trade_finish(cx, format!("Uncertain Lighter transaction result: {error}; check open orders before retrying"));
+                self.trade_finish(cx, uncertain(format!("Uncertain Lighter transaction result: {error}; check open orders before retrying")));
             }
         }
     }
@@ -836,7 +841,7 @@ impl Lighter {
     pub(crate) fn trade_limits_ready(&mut self, cx: &mut Cx<'_, Pending>) {
         if std::mem::take(&mut self.trading.waiting_limits) {
             if self.limits_standard() {
-                self.trade_finish(cx, TIER_MESSAGE.into());
+                self.trade_finish(cx, TIER_MESSAGE);
                 return;
             }
             if let Some(job) = self.trading.active.as_mut() {
@@ -846,15 +851,23 @@ impl Lighter {
         self.trade_kick(cx);
     }
 
-    fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, error: String) {
+    fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, error: impl Into<VenueError>) {
         self.trading.waiting_limits = false;
         if let Some(job) = self.trading.active.take() {
-            let partial = if job.ids.is_empty() {
-                String::new()
+            let mut error = error.into();
+            if !job.ids.is_empty() {
+                let indexes = job.ids.join(",");
+                error.message = format!(
+                    "{}; previously placed order indexes: {indexes}",
+                    error.message
+                );
+            }
+            // Unclassified failures keep the plain path until Lighter migrates to `fail`.
+            if error.outcome.is_some() {
+                cx.fail(job.command, error);
             } else {
-                format!("; previously placed order indexes: {}", job.ids.join(","))
-            };
-            cx.done(job.command, Err(format!("{error}{partial}")));
+                cx.done(job.command, Err(error.message));
+            }
         }
         self.trade_kick(cx);
     }
@@ -1208,4 +1221,12 @@ fn encode(text: &str) -> String {
         }
     }
     out
+}
+
+const UNCERTAIN_RESULT: &str =
+    "Uncertain Lighter transaction result; check open orders before retrying";
+
+/// The submission may have executed; callers must reconcile before resending.
+fn uncertain(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::Unknown)
 }
