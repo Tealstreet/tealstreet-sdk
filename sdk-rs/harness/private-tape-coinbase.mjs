@@ -22,7 +22,12 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
   const credentials = algorithm === 'ES256' ? COINBASE_ES256_REPLAY : COINBASE_REPLAY;
   const records = [
     { t: 0, type: 'meta', private: true, epoch, venue, profile, algorithm },
-    { t: 0, type: 'config', private: true, options: { ...credentials, spotOnly: profile === 'spot', testnet: false } },
+    {
+      t: 0,
+      type: 'config',
+      private: true,
+      options: { ...credentials, spotOnly: venue === 'coinbasespot', testnet: false },
+    },
   ];
   let clock = 0,
     commandCount = 0,
@@ -170,6 +175,14 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
         },
       ],
     });
+  } else if (profile === 'spot' && venue === 'coinbase') {
+    http(
+      'GET',
+      root + '/cfm/balance_summary',
+      { error: 'PERMISSION_DENIED', message: 'CFM account is not enabled' },
+      undefined,
+      { status: 403 },
+    );
   } else if (profile === 'intx') {
     http('GET', root + '/intx/portfolio/replay-portfolio', {
       summary: { total_balance: { value: '1000', currency: 'USDC' }, buying_power: { value: '800', currency: 'USDC' } },
@@ -503,7 +516,7 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
         trade_id: 'public-1',
         product_id: main,
         price: '110',
-        size:profile==='cfm'?'1':'0.1',
+        size: profile === 'cfm' ? '1' : '0.1',
         side: 'BUY',
         time: new Date(epoch + 10).toISOString(),
       },
@@ -511,7 +524,7 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
         trade_id: 'public-2',
         product_id: main,
         price: '109',
-        size:profile==='cfm'?'2':'0.2',
+        size: profile === 'cfm' ? '2' : '0.2',
         side: 'SELL',
         time: new Date(epoch + 20).toISOString(),
       },

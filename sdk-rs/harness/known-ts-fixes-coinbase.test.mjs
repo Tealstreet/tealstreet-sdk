@@ -79,7 +79,7 @@ test('tapes cover every product profile and native JWT algorithm with bounded ex
         ),
       );
       const config = tape.records.find((r) => r.type === 'config');
-      assert.equal(config.options.spotOnly, profile === 'spot');
+      assert.equal(config.options.spotOnly, false);
       const privateFrames = tape.records
         .filter((r) => r.type === 'ws' && r.url.includes('-ws-user.'))
         .map((r) => JSON.parse(r.text));
@@ -87,10 +87,23 @@ test('tapes cover every product profile and native JWT algorithm with bounded ex
         privateFrames.map((r) => r.sequence_num),
         privateFrames.map((_, i) => i),
       );
-      if (profile === 'spot')
-        assert.ok(tape.records.filter((r) => r.type === 'http').every((r) => !r.url.includes('/cfm/')));
+      if (profile === 'spot') {
+        const probes = tape.records.filter((r) => r.type === 'http' && r.url.includes('/cfm/'));
+        assert.equal(probes.length, 1);
+        assert.equal(probes[0].status, 403);
+        assert.ok(probes[0].url.endsWith('/cfm/balance_summary'));
+      }
     }
-  assert.equal(coinbasePrivateTape({ profile: 'spot', venue: 'coinbasespot' }).venue, 'coinbasespot');
+  for (const algorithm of ['ES256', 'EdDSA']) {
+    const saved = coinbasePrivateTape({ profile: 'spot', venue: 'coinbasespot', algorithm });
+    assert.equal(saved.venue, 'coinbasespot');
+    assert.equal(saved.records.find((r) => r.type === 'config').options.spotOnly, true);
+    assert.ok(
+      saved.records
+        .filter((r) => r.type === 'http')
+        .every((r) => !r.url.includes('/cfm/') && !r.url.includes('/intx/')),
+    );
+  }
   assert.throws(() => coinbasePrivateTape({ profile: 'cfm', venue: 'coinbasespot' }), /requires the spot/);
   assert.throws(() => coinbasePrivateTape({ algorithm: 'none' }), /Expected algorithm/);
 });

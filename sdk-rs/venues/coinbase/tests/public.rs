@@ -570,3 +570,146 @@ fn future_product_without_native_details_cannot_become_spot() {
     assert!(e.store().markets().is_empty());
     assert!(!e.store().loaded().markets);
 }
+
+#[test]
+fn book_subscriptions_before_discovery_are_replayed_for_both_products() {
+    let mut e = Engine::new(
+        Coinbase::new(Options {
+            public_data_only: true,
+            spot_only: true,
+            ..Options::default()
+        })
+        .unwrap(),
+    );
+    e.start(1000.);
+    let request = requests(&mut e).pop().unwrap();
+    for symbol in ["BTC-USD", "ETH-USD"] {
+        e.handle(
+            1000.,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: symbol.into(),
+            }),
+        );
+    }
+    let btc = r#"{"product_type":"SPOT","product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"1","price_percentage_change_24h":"0"}"#;
+    let eth = btc
+        .replace("BTC-USD", "ETH-USD")
+        .replace("\"BTC\"", "\"ETH\"");
+    reply(
+        &mut e,
+        &request,
+        200,
+        &format!(r#"{{"products":[{btc},{eth}]}}"#),
+    );
+    let socket = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::WsConnect { socket, .. } = a {
+                Some(socket)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(1000., Event::WsOpened { socket });
+    let subscriptions = e
+        .drain_actions()
+        .filter_map(|a| {
+            if let Action::WsSend { text, .. } = a {
+                Some(text)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let depth = subscriptions.iter().find(|s| s.contains("level2")).unwrap();
+    assert!(depth.contains("BTC-USD") && depth.contains("ETH-USD"));
+    for (sequence, symbol) in ["BTC-USD", "ETH-USD"].iter().enumerate() {
+        message(
+            &mut e,
+            socket,
+            &format!(
+                r#"{{"channel":"l2_data","sequence_num":{sequence},"events":[{{"type":"snapshot","product_id":"{symbol}","updates":[{{"side":"bid","price_level":"100","new_quantity":"2"}}]}}]}}"#
+            ),
+        );
+        assert_eq!(e.venue().book(symbol).unwrap().bids(), [(100., 2.)]);
+    }
+}
+#[test]
+fn unsubscribe_before_discovery_does_not_leave_a_pending_book() {
+    let mut e = Engine::new(
+        Coinbase::new(Options {
+            public_data_only: true,
+            ..Options::default()
+        })
+        .unwrap(),
+    );
+    e.start(1000.);
+    let request = requests(&mut e).pop().unwrap();
+    e.handle(
+        1000.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: SYMBOL.into(),
+        }),
+    );
+    e.handle(
+        1000.,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: SYMBOL.into(),
+        }),
+    );
+    reply(&mut e, &request, 200, INSTRUMENTS);
+    let socket = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::WsConnect { socket, .. } = a {
+                Some(socket)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(1000., Event::WsOpened { socket });
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a,Action::WsSend{text,..} if text.contains("level2")))
+    );
+}
+
+#[test]
+fn product_online_status_respects_disabled_flags_and_unknown_statuses() {
+    let mut e = Engine::new(
+        Coinbase::new(Options {
+            public_data_only: true,
+            spot_only: true,
+            ..Options::default()
+        })
+        .unwrap(),
+    );
+    e.start(1000.);
+    let r = requests(&mut e).pop().unwrap();
+    let rows = [
+        ("BTC", "online", false, false, true),
+        ("ETH", "TRADING", false, false, true),
+        ("SOL", "online", true, false, false),
+        ("LTC", "TRADING", false, true, false),
+        ("ADA", "delisted", false, false, false),
+        ("DOGE", "unknown", false, false, false),
+    ];
+    let body = format!("{{\"products\":[{}],\"pagination\":{{\"has_next\":false}}}}", rows.iter().map(|(base,status,disabled,trading,_)| format!(r#"{{"product_type":"SPOT","product_id":"{base}-USD","base_currency_id":"{base}","quote_currency_id":"USD","status":"{status}","is_disabled":{disabled},"trading_disabled":{trading},"base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"10000"}}"#)).collect::<Vec<_>>().join(","));
+    reply(&mut e, &r, 200, &body);
+    assert_eq!(e.store().markets().len(), rows.len());
+    for (base, _, _, _, active) in rows {
+        assert_eq!(
+            e.store().market(&format!("{base}-USD")).unwrap().active,
+            active
+        );
+        assert_eq!(
+            e.store()
+                .ticker(&format!("{base}-USD"))
+                .unwrap()
+                .funding_time,
+            0.
+        );
+    }
+}

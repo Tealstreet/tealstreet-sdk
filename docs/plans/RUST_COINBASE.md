@@ -261,3 +261,21 @@ the fills sort cursor as unstable under concurrent activity. Conflicting repeate
 IDs reject, but no client can claim a server snapshot across external account
 changes. Crypto audit found no newly unused first-port helper from this port;
 the shared ES256 and Ed25519 modules are both used directly.
+
+### Paced startup correction
+
+Live recording fixed deferred book subscriptions, current `online` product
+status/disabled flags, and spot's zero funding-time sentinel. Private CFM replay
+exposed recurring reads starving its initial eleven-page order scan. Recurring
+account reads now run every five seconds, CFM product polling every five seconds,
+and CFM fallback order scans at least ten seconds apart. Initial order scans
+suppress background polls but retry transient failures under backoff; debounced
+postwrite repair remains two seconds and public spot/INTX polling remains one.
+Two timer-driven ninety-second regressions verify startup within twelve seconds,
+initial 503 recovery, three-per-second pacing and sustained bounded scan progress.
+Independent review is clear; all 86 venue tests and strict Clippy pass.
+
+Main Coinbase's spot tape now proves the real 403 futures-permission fallback;
+the saved spot alias has no futures probe. Four private variants passed before
+these corrections (both legacy INTX and both saved-spot algorithms); the full
+eight-profile rerun is in progress. No final gate claim yet.

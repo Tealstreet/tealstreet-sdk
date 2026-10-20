@@ -74,6 +74,7 @@ pub(crate) struct Public {
     seeds_left: usize,
     seed_markets: Vec<Market>,
     seed_tickers: Vec<Ticker>,
+    deferred: Vec<Command>,
 }
 #[allow(clippy::too_many_arguments)]
 fn market(
@@ -204,6 +205,13 @@ pub(crate) fn timestamp(text: &str) -> Option<f64> {
     Some((days * 86400 + hour * 3600 + min * 60) as f64 + sec)
 }
 impl Coinbase {
+    fn public_poll_interval(&self) -> f64 {
+        if self.public.kind == Some(ProductKind::Cfm) {
+            5000.0
+        } else {
+            1000.0
+        }
+    }
     pub(crate) fn public_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.options.spot_only {
             self.private_ready(ProductKind::Spot, cx);
@@ -316,6 +324,11 @@ impl Coinbase {
                 },
                 &error,
             );
+        }
+    }
+    fn public_pending(&mut self, cx: &mut Cx<'_, Pending>) {
+        for command in std::mem::take(&mut self.public.deferred) {
+            self.public_command(cx, command);
         }
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -671,7 +684,9 @@ impl Coinbase {
                         Some(spot),
                         Some(expiring),
                     );
-                    m.active = row.status == "TRADING";
+                    m.active = matches!(row.status.as_str(), "TRADING" | "online")
+                        && !row.is_disabled
+                        && !row.trading_disabled;
                     markets.push(m);
                     let price = safe_cex_engine::num::parse(&row.price);
                     let volume = safe_cex_engine::num::parse(&row.volume_24h);
@@ -697,7 +712,7 @@ impl Coinbase {
                         quote_volume: display_round(price * volume * contract),
                         funding_time: p
                             .and_then(|p| timestamp(&p.funding_time))
-                            .map_or(f64::NAN, |n| n * 1000.),
+                            .map_or(if p.is_none() { 0. } else { f64::NAN }, |n| n * 1000.),
                         open_interest: p.map_or(f64::NAN, |p| {
                             safe_cex_engine::num::parse(&p.open_interest) * contract
                         }),
@@ -774,6 +789,7 @@ impl Coinbase {
                 if initial {
                     cx.store.set_markets(markets);
                     cx.store.set_tickers(tickers);
+                    self.public_pending(cx);
                     self.connect_public(cx);
                     if self.options.public_data_only || self.options.key.is_empty() {
                         cx.store.set_orders(vec![]);
@@ -894,6 +910,7 @@ impl Coinbase {
                             .set_markets(std::mem::take(&mut self.public.seed_markets));
                         cx.store
                             .set_tickers(std::mem::take(&mut self.public.seed_tickers));
+                        self.public_pending(cx);
                         self.connect_public(cx);
                         if self.options.public_data_only || self.options.key.is_empty() {
                             cx.store.set_orders(vec![]);
@@ -912,7 +929,7 @@ impl Coinbase {
                     }
                 }
                 if !self.public.seeding && self.public.poll.is_none() {
-                    self.public.poll = Some(cx.set_timer(1000.));
+                    self.public.poll = Some(cx.set_timer(self.public_poll_interval()));
                 }
             }
             Request::Daily {
@@ -1046,6 +1063,12 @@ impl Coinbase {
         if self.public.poll == Some(timer) || self.public.retry == Some(timer) {
             if self.public.poll == Some(timer) {
                 self.public.poll = None;
+                // Initial private reconciliation scans every working status and
+                // account family through the same paced REST queue.
+                if self.credentials.is_some() && !cx.store.loaded().orders {
+                    self.public.poll = Some(cx.set_timer(self.public_poll_interval()));
+                    return true;
+                }
             }
             if self.public.retry == Some(timer) {
                 self.public.retry = None;
@@ -1284,6 +1307,32 @@ impl Coinbase {
         cx: &mut Cx<'_, Pending>,
         command: Command,
     ) -> Option<Command> {
+        if !cx.store.loaded().markets
+            && matches!(
+                &command,
+                Command::SubscribeOrderBook { .. }
+                    | Command::UnsubscribeOrderBook { .. }
+                    | Command::SubscribeCandles { .. }
+                    | Command::UnsubscribeCandles { .. }
+                    | Command::FetchCandles { .. }
+            )
+        {
+            if self.public.deferred.len() >= 256 {
+                if let Command::FetchCandles { command, .. } = command {
+                    cx.done(
+                        command,
+                        Err("Coinbase public startup command queue is full".into()),
+                    );
+                }
+                cx.log(
+                    LogLevel::Warning,
+                    "Coinbase public startup command queue is full",
+                );
+                return None;
+            }
+            self.public.deferred.push(command);
+            return None;
+        }
         match command {
             Command::SubscribeOrderBook { symbol } => {
                 cx.store.market(&symbol)?;

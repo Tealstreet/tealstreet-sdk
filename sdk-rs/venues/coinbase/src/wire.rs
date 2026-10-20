@@ -70,6 +70,10 @@ pub(crate) struct Product {
     pub base_currency_id: String,
     pub quote_currency_id: String,
     pub status: String,
+    #[serde(default)]
+    pub is_disabled: bool,
+    #[serde(default)]
+    pub trading_disabled: bool,
     #[serde(deserialize_with = "number")]
     pub base_increment: f64,
     #[serde(deserialize_with = "number")]

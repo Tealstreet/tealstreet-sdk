@@ -545,7 +545,7 @@ impl Coinbase {
         }
         self.private_connect(cx);
         self.account_poll(cx, true);
-        self.account.tick = Some(cx.set_timer(1000.0));
+        self.account.tick = Some(cx.set_timer(5000.0));
     }
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.opened = false;
@@ -781,13 +781,23 @@ impl Coinbase {
         }
         if self.account.tick == Some(timer) {
             self.account.tick = None;
-            let gap = if self.account.opened && self.account.snapshot.is_none() {
+            let gap = if self.account.kind == Some(ProductKind::Cfm)
+                || (self.account.opened && self.account.snapshot.is_none())
+            {
                 10000.0
             } else {
                 3000.0
             };
-            self.account_poll(cx, cx.now - self.account.last_orders >= gap);
-            self.account.tick = Some(cx.set_timer(1000.0));
+            // Finish the initial multi-status scan before recurring reads consume
+            // the shared three-request-per-second budget. Write repairs remain
+            // independently debounced, and initial reads were already queued.
+            if cx.store.loaded().orders || !self.account.inflight[3] {
+                self.account_poll(
+                    cx,
+                    !cx.store.loaded().orders || cx.now - self.account.last_orders >= gap,
+                );
+            }
+            self.account.tick = Some(cx.set_timer(5000.0));
             return true;
         }
         false

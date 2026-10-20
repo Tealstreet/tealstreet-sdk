@@ -439,3 +439,152 @@ fn incomplete_execution_price_does_not_consume_later_valid_fill() {
     s.message(2, "update", &format!("[{valid}]"));
     assert_eq!(fills(&mut s.e), vec![1.0]);
 }
+
+#[test]
+fn cfm_automatic_timers_finish_initial_and_fallback_scans_within_the_request_budget() {
+    cfm_timed_scans(false);
+}
+
+#[test]
+fn cfm_automatic_timers_retry_an_initial_order_scan_failure() {
+    cfm_timed_scans(true);
+}
+
+fn cfm_timed_scans(fail_initial_scan: bool) {
+    // Exercise the actual paced scheduler: dispatch every scheduled timer in
+    // deadline order, without granting order continuations priority. Withhold
+    // user snapshots so REST must keep reconciling both account families.
+    let mut s = Session::new("DEFAULT", false);
+    let started = s.now;
+    let mut loaded_at = None;
+    let mut last_http = None;
+    let mut scan_started = None;
+    let mut scan_pages = 0;
+    let mut completed = Vec::new();
+    let mut initial_reads = Vec::new();
+    let mut failure = None;
+    let mut private_sequence = 0u64;
+    let mut opened_socket = None;
+    while s.now - started < 90000.0 {
+        let requests = s.collect();
+        if requests.is_empty() {
+            s.fire();
+            if let Some(socket) = s.private {
+                if opened_socket != Some(socket) {
+                    s.e.handle(s.now, Event::WsOpened { socket });
+                    opened_socket = Some(socket);
+                    private_sequence = 0;
+                }
+                // Initial order retries must not depend on a socket watchdog.
+                // Keep the connection healthy without providing user snapshots.
+                let text = format!(
+                    r#"{{"channel":"heartbeats","sequence_num":{private_sequence},"events":[]}}"#
+                );
+                private_sequence += 1;
+                s.e.handle(
+                    s.now,
+                    Event::WsMessage {
+                        socket,
+                        text: &text,
+                    },
+                );
+            }
+            continue;
+        }
+        for request in requests {
+            if let Some(previous) = last_http {
+                assert!(s.now - previous >= 334.0, "shared REST pacing violated");
+            }
+            last_http = Some(s.now);
+            if loaded_at.is_none() {
+                initial_reads.push(request.url.clone());
+            }
+            if request.url.contains("/orders/historical/batch") {
+                if fail_initial_scan && failure.is_none() {
+                    failure = Some(s.now);
+                    s.reply(request, 503, "temporary failure");
+                    continue;
+                }
+                if request.url.contains("product_type=FUTURE")
+                    && request.url.contains("order_status=PENDING")
+                {
+                    assert!(scan_started.is_none(), "overlapping REST order scans");
+                    scan_started = Some(s.now);
+                    scan_pages = 0;
+                }
+                scan_pages += 1;
+                let first_open_page = request.url.contains("product_type=FUTURE")
+                    && request.url.contains("order_status=OPEN")
+                    && !request.url.contains("cursor=");
+                let last_page = request.url.contains("product_type=SPOT")
+                    && request.url.contains("order_status=EDIT_QUEUED");
+                let body = if first_open_page {
+                    format!(
+                        r#"{{"orders":[{}],"has_next":true,"cursor":"second-open-page"}}"#,
+                        user_order("resting", "BTC-CDE", "OPEN", "0", "1")
+                    )
+                } else {
+                    r#"{"orders":[],"has_next":false,"cursor":""}"#.into()
+                };
+                s.reply(request, 200, &body);
+                if last_page {
+                    assert_eq!(scan_pages, 11, "must scan every status and both families");
+                    let duration = s.now - scan_started.take().unwrap();
+                    assert!(
+                        duration <= 9000.0,
+                        "order continuation starved: {duration}ms"
+                    );
+                    completed.push((s.now, duration));
+                }
+            } else {
+                s.answer(request);
+            }
+            if s.e.store().loaded().orders && loaded_at.is_none() {
+                loaded_at = Some(s.now);
+            }
+        }
+    }
+    assert!(loaded_at.unwrap() - started <= 12000.0);
+    // No periodic product/balance/position poll may compete with the initial
+    // eleven-page scan. Each initial startup read appears exactly once (CFM
+    // balance has a separate discovery probe and its initial account read).
+    if fail_initial_scan {
+        assert!(failure.is_some());
+        assert!(
+            completed[0].0 - failure.unwrap() <= 10000.0,
+            "initial scan did not retry independently of socket failure"
+        );
+    } else {
+        assert_eq!(
+            initial_reads
+                .iter()
+                .filter(|u| u.contains("/products?"))
+                .count(),
+            2
+        );
+        assert_eq!(
+            initial_reads
+                .iter()
+                .filter(|u| u.contains("/cfm/positions"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            initial_reads
+                .iter()
+                .filter(|u| u.contains("/cfm/balance_summary"))
+                .count(),
+            2
+        );
+    }
+    assert!(
+        completed.len() >= 5,
+        "fallback scans stopped making progress"
+    );
+    for pair in completed.windows(2) {
+        assert!(
+            pair[1].0 - pair[0].0 <= 20000.0,
+            "poll queue grew without bound"
+        );
+    }
+}
