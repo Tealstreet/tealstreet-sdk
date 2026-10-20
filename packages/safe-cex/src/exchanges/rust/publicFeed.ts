@@ -19,7 +19,18 @@ type Request =
 type FeedMarket = Pick<
   Market,
   'id' | 'symbol' | 'contractSize' | 'isSpot' | 'isPerpetual' | 'isInverse' | 'isExpiring'
->;
+> & {
+  symbolType?: string;
+  marketRegion?: string;
+  underlyingTicker?: string;
+  instrumentKind?: string;
+  underlying?: string;
+  expiry?: number;
+  strike?: number;
+  option?: Market['option'];
+};
+const stringValue = (value: unknown) => (typeof value === 'string' ? value : undefined);
+const numberValue = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
 const feedMarket = (market: Market): FeedMarket => ({
   id: market.id,
   symbol: market.symbol,
@@ -28,6 +39,25 @@ const feedMarket = (market: Market): FeedMarket => ({
   isPerpetual: Boolean(market.isPerpetual),
   isInverse: Boolean(market.isInverse),
   isExpiring: Boolean(market.isExpiring),
+  symbolType: stringValue(market.info?.symbolType),
+  marketRegion: stringValue(market.info?.marketRegion),
+  underlyingTicker: stringValue(market.info?.underlyingTicker),
+  instrumentKind: stringValue(market.info?.instrumentKind),
+  underlying: stringValue(market.info?.underlying),
+  expiry: numberValue(market.info?.expiry),
+  strike: numberValue(market.info?.strike),
+  ...(market.option && {
+    option: {
+      underlying: market.option.underlying,
+      expiry: market.option.expiry,
+      strike: market.option.strike,
+      right: market.option.right,
+      style: market.option.style,
+      settlement: market.option.settlement,
+      settleAsset: market.option.settleAsset,
+      premiumAsset: market.option.premiumAsset,
+    },
+  }),
 });
 type Reply = { op: 'ready'; markets: FeedMarket[] } | { op: 'pong' } | { op: 'error'; message: string } | FeedUpdate;
 

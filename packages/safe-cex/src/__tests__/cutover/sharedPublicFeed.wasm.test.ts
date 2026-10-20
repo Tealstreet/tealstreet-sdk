@@ -1,6 +1,6 @@
 // @vitest-environment node
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
-import type { Candle, ExchangeOptions, OrderBook } from '../../types';
+import type { Candle, ExchangeOptions, Market, OrderBook } from '../../types';
 import type { AppSettingsWorkerType } from '../../webworker/AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../../webworker/ExchangeMetadataWorkerType';
 
@@ -433,7 +433,30 @@ describe('native public-feed ownership through real private workers', () => {
     await expect(waiting.startup).rejects.toThrow(/disposed/);
   });
 
-  it('fails closed when a changed catalog crosses the SDK frame boundary after readiness', async () => {
+  it.each([
+    ['contract size', (market: Market): Market => ({ ...market, contractSize: (market.contractSize ?? 1) * 2 })],
+    ['classification', (market: Market): Market => ({
+      ...market,
+      info: { ...market.info, symbolType: '', marketRegion: 'US', underlyingTicker: 'AAPL' },
+    })],
+    ['future terms', (market: Market): Market => ({
+      ...market,
+      info: { ...market.info, instrumentKind: 'FUTURE', underlying: 'BTC', expiry: 1_800_000_000_000 },
+    })],
+    ['option terms', (market: Market): Market => ({
+      ...market,
+      option: {
+        underlying: 'BTC',
+        expiry: 1_800_000_000_000,
+        strike: 60_000,
+        right: 'call',
+        style: 'european',
+        settlement: 'cash',
+        settleAsset: 'USDC',
+        premiumAsset: 'USDC',
+      },
+    })],
+  ] as const)('fails closed when changed %s cross the SDK frame boundary after readiness', async (_label, change) => {
     const source = await exchange({ key: '', secret: '', publicDataOnly: true });
     await source.startup;
     const provider = new RustPublicFeedProvider(source.account);
@@ -452,20 +475,42 @@ describe('native public-feed ownership through real private workers', () => {
     // control-boundary case injects an independently encoded MARKETS frame;
     // startup and the account remain real WASM, with no claimed venue refresh.
     const boundary = source.account as unknown as { receiveFrame(buffer: ArrayBuffer): void };
+    const before = source.account.store.markets;
     boundary.receiveFrame(
       consumerFrame({
-        markets: source.account.store.markets.map((market) => ({
-          ...market,
-          contractSize: (market.contractSize ?? 1) * 2,
-        })),
+        markets: before.map(change),
       }),
     );
     await waitFor(() => expect(privateSide.account.isDisposed).toBe(true));
     expect(privateSide.input.failures.some((failure) => failure.includes('catalog changed'))).toBe(true);
     expect(privateSide.input.sockets.every((socket) => socket.closed)).toBe(true);
     expect(source.account.isDisposed).toBe(false);
-    expect(source.account.store.marketsBySymbol['BTC-USD'].contractSize).toBe(2);
+    expect(source.account.store.markets).not.toEqual(before);
     expect(new Frame(source.account.snapshotFrame()!).markets()!.contractSize[0]).toBe(1);
+  }, 15_000);
+
+  it('rejects same-ID semantic catalog mismatches before shared account readiness', async () => {
+    const source = await exchange({ key: '', secret: '', publicDataOnly: true });
+    await source.startup;
+    const boundary = source.account as unknown as { receiveFrame(buffer: ArrayBuffer): void };
+    boundary.receiveFrame(consumerFrame({
+      markets: source.account.store.markets.map((market) => ({
+        ...market,
+        info: { ...market.info, symbolType: '', marketRegion: 'US', underlyingTicker: 'AAPL' },
+      })),
+    }));
+    const provider = new RustPublicFeedProvider(source.account);
+    cleanups.push(() => provider.dispose());
+    const channel = new MessageChannel();
+    provider.attach(channel.port1 as unknown as MessagePort);
+    const receiver = await exchange({
+      ...COINBASE_REPLAY,
+      privateOnly: true,
+      publicFeed: { mode: 'shared', port: channel.port2 as unknown as MessagePort },
+    });
+    await waitFor(() => expect(receiver.account.isDisposed).toBe(true));
+    await expect(receiver.startup).rejects.toThrow('catalog/product mismatch');
+    expect(receiver.input.sockets.every((socket) => socket.closed)).toBe(true);
   }, 15_000);
 
   it('requires a loaded direct provider', () => {
