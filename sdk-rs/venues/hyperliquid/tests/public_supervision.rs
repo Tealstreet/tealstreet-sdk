@@ -147,7 +147,7 @@ fn reconnect_resubscribes_live_topics_and_ignores_retired_socket() {
         },
         Command::SubscribeCandles {
             symbol: "BTC-PERP".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         },
     ] {
         h.event(Event::Command(command));

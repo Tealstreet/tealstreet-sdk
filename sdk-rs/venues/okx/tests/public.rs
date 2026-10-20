@@ -86,7 +86,7 @@ fn candles_on_business_and_all_sockets_watch_silence() {
         4.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTCUSDT".into(),
-            interval: "1M".into(),
+            interval: safe_cex_engine::model::Interval::Mo1,
         }),
     );
     assert!(actions(&mut e).iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text.contains("candle1Mutc"))));
@@ -95,7 +95,7 @@ fn candles_on_business_and_all_sockets_watch_silence() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             from_ms: None,
             to_ms: None,
             limit: Some(10),
@@ -337,7 +337,7 @@ fn candle_reads_use_ts_bounds_limit_and_historical_fallback() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: None,
             from_ms: None,
             to_ms: None,
@@ -364,7 +364,7 @@ fn month_candle_bounds_clamp_day_in_leap_february() {
         Event::Command(Command::FetchCandles {
             command: 1,
             symbol: "BTCUSDT".into(),
-            interval: "1M".into(),
+            interval: safe_cex_engine::model::Interval::Mo1,
             limit: Some(1),
             from_ms: None,
             to_ms: Some(1_711_886_400_000.0),
@@ -382,7 +382,7 @@ fn business_candle_stream_emits_a_candle_frame() {
         5.0,
         Event::Command(Command::SubscribeCandles {
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
         }),
     );
     ws(
