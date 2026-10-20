@@ -682,9 +682,51 @@ fn unmappable_order_id_preserves_known_copy_but_empty_full_snapshot_clears_it() 
         "BTCUSDT"
     );
     e.drain_actions().for_each(drop);
-    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
-    for request in requests(&mut e) {
-        response(&mut e, &request, r#"{"success":true,"code":0,"data":[]}"#);
+    e.handle(300.0, Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .expect("private reconnect timer");
+    e.handle(at, Event::TimerFired { timer });
+    let replacement = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .expect("replacement private socket");
+    assert_ne!(replacement, socket);
+    e.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        at + 1.0,
+        Event::WsMessage {
+            socket: replacement,
+            text: r#"{"channel":"rs.login","data":"success"}"#,
+        },
+    );
+    let reads = requests(&mut e);
+    assert_eq!(reads.len(), 5, "reconnect must request the full snapshot");
+    for request in reads {
+        e.handle(
+            at + 2.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"success":true,"code":0,"data":[]}"#,
+                },
+            },
+        );
     }
     assert!(e.store().loaded().orders);
     assert!(e.store().orders().is_empty());

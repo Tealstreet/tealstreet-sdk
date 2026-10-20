@@ -263,3 +263,12 @@ and auth-recovery documentation) and appended Bitrue tests (kept both suites).
 Production auto-merges now receive independent integration reviews and affected
 checks; final CI must pass again before merge. The current final root checkpoint
 is 44/28/27 tasks, safe-cex 7,854 tests per runner; pre-supervisor native is 2,959.
+
+CI on the supervisor merge caught one test-only lifecycle assumption: the
+unmappable-order regression sent a second `rs.login` to force another full read.
+The supervisor correctly ignores duplicate successful logins. Updated the test
+to close/retry/open a distinct socket, authenticate it, assert all five reads,
+and supply empty responses at the new monotonic clock. Independent review PASS;
+production code is unchanged. Native verification continues on this correction.
+GRVT's install-stage HTTP 502 and the recurring tiny Hyro CPU measurement are
+recorded separately from correctness failures; no thresholds are weakened.
