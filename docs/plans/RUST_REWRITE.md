@@ -312,7 +312,8 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | KuCoin, Phemex, Orderly family | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
-| Paradex, GRVT, AsterDEX, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
+| Polymarket CLOB V2 | port in progress (`feat/rust-polymarket`); prediction metadata/signing plan in `venue-ports/POLYMARKET.md` |
+| Paradex, GRVT, AsterDEX, ApeX Omni, Kraken, Coinbase, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 
