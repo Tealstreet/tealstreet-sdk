@@ -122,3 +122,48 @@ fn usd_m_and_pm_history_maps_stp_expiration_as_canceled_without_changing_filled(
         );
     }
 }
+
+#[test]
+fn best_effort_history_error_stays_visible_before_empty_success_without_capturing_background_logs()
+{
+    let mut h = Harness::started(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Options::default()
+    });
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    // A startup ticker failure remains an ordinary diagnostic with no command owner.
+    h.respond(
+        "/fapi/v1/ticker/24hr",
+        500,
+        r#"{"code":-1,"msg":"background quote unavailable"}"#,
+    );
+    assert!(
+        h.logs
+            .iter()
+            .any(|message| message.contains("background quote unavailable"))
+    );
+    assert!(h.command_errors.is_empty());
+    h.event(Event::Command(Command::Query {
+        command: 91,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    }));
+    let request = h.take("/fapi/v1/userTrades");
+    h.reply(
+        request.id,
+        500,
+        "",
+        r#"{"code":-1,"msg":"history unavailable"}"#,
+    );
+    assert_eq!(h.result(91), Some(&Ok("[]".into())));
+    assert_eq!(h.command_errors.len(), 1);
+    assert_eq!(h.command_errors[0].0, 91);
+    assert!(h.command_errors[0].1.contains("history unavailable"));
+    assert_eq!(h.command_notices, [(91, "error"), (91, "done")]);
+}

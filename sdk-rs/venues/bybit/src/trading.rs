@@ -6,11 +6,11 @@ use crate::sign::Body;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Pending, Rest, Then, venue_error};
 use safe_cex_engine::model::{
-    MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide,
-    StopTriggerType, TimeInForce,
+    MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
+    PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Outcome, Response, SocketId, TimerId, VenueError, num,
+    Command, CommandId, Cx, Outcome, Response, SocketId, TimerId, VenueError, num,
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -52,7 +52,7 @@ enum Call {
     /// Single-order bodies to place one by one if the venue refuses the
     /// whole batch (a refusal places nothing, so this cannot double-place).
     PlaceBatch {
-        fallback: Vec<String>,
+        fallback: Vec<(String, Vec<OrderIdentityReceipt>)>,
     },
     TradingStop,
     PartialStop,
@@ -80,6 +80,7 @@ enum Call {
 }
 
 struct Planned {
+    receipts: Vec<OrderIdentityReceipt>,
     path: &'static str,
     body: String,
     call: Call,
@@ -313,7 +314,12 @@ fn single(path: &'static str, body: String, call: Call) -> Job {
     Job {
         steps: VecDeque::from([Step {
             delay_ms: 0.0,
-            requests: vec![Planned { path, body, call }],
+            requests: vec![Planned {
+                path,
+                body,
+                call,
+                receipts: Vec::new(),
+            }],
         }]),
         ..Job::default()
     }
@@ -321,6 +327,7 @@ fn single(path: &'static str, body: String, call: Call) -> Job {
 
 /// One order's fields, for a batch item and, with `category`, a single create.
 pub(crate) struct Lot {
+    receipts: Vec<OrderIdentityReceipt>,
     category: Category,
     item: Body,
     pub(crate) single: Body,
@@ -574,6 +581,7 @@ impl BybitLinear {
                         job.steps.push_back(Step {
                             delay_ms: 0.0,
                             requests: vec![Planned {
+                                receipts: Vec::new(),
                                 path: "/v5/order/cancel-all",
                                 body: Body::new()
                                     .str("category", self.paths.category)
@@ -645,6 +653,7 @@ impl BybitLinear {
                         job.steps.push_back(Step {
                             delay_ms: 0.0,
                             requests: vec![Planned {
+                                receipts: Vec::new(),
                                 path: "/v5/position/switch-mode",
                                 body,
                                 call: Call::PositionMode { hedged },
@@ -683,7 +692,7 @@ impl BybitLinear {
                 self.advance(cx, id);
             }
             Err(message) => {
-                cx.log(LogLevel::Error, message.clone());
+                cx.command_error(id, message.clone());
                 cx.done(id, Err(message));
             }
         }
@@ -742,6 +751,7 @@ impl BybitLinear {
                         }
                         self.note_hyro_write();
                     }
+                    cx.command_progress(command, planned.receipts);
                     self.send(
                         cx,
                         Rest::post(planned.path, planned.body),
@@ -857,7 +867,7 @@ impl BybitLinear {
                         self.on_trade_command(cx, *deferred);
                     }
                     Err(message) => {
-                        cx.log(LogLevel::Error, message.clone());
+                        cx.command_error(command, message.clone());
                         cx.done(command, Err(message));
                     }
                 }
@@ -1116,7 +1126,7 @@ impl BybitLinear {
         }
         unknown |= http_unknown && !errors.is_empty();
         for message in &errors {
-            cx.log(LogLevel::Error, message.clone());
+            cx.command_error(command, message.clone());
         }
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
@@ -1127,14 +1137,18 @@ impl BybitLinear {
         job.unknown |= unknown;
         job.ids.extend(ids);
         if !fallback_steps.is_empty() {
-            let steps = fallback_steps.into_iter().rev().map(|body| Step {
-                delay_ms: 0.0,
-                requests: vec![Planned {
-                    path: "/v5/order/create",
-                    body,
-                    call: Call::PlaceOne,
-                }],
-            });
+            let steps = fallback_steps
+                .into_iter()
+                .rev()
+                .map(|(body, receipts)| Step {
+                    delay_ms: 0.0,
+                    requests: vec![Planned {
+                        receipts,
+                        path: "/v5/order/create",
+                        body,
+                        call: Call::PlaceOne,
+                    }],
+                });
             for step in steps {
                 job.steps.push_front(step);
             }
@@ -1205,6 +1219,7 @@ impl BybitLinear {
                     job.steps.push_back(Step {
                         delay_ms: 0.0,
                         requests: vec![Planned {
+                            receipts: lot.receipts,
                             path: "/v5/order/create",
                             body: lot.single.finish(),
                             call: Call::PlaceOne,
@@ -1235,6 +1250,7 @@ impl BybitLinear {
                     job.steps.push_back(Step {
                         delay_ms: 0.0,
                         requests: vec![Planned {
+                            receipts: lot.receipts,
                             path: "/v5/order/create",
                             body: lot.single.finish(),
                             call: Call::PlaceOne,
@@ -1250,6 +1266,7 @@ impl BybitLinear {
                 job.steps.push_back(Step {
                     delay_ms: 0.0,
                     requests: vec![Planned {
+                        receipts: lot.receipts,
                         path: "/v5/order/create",
                         body: lot.single.finish(),
                         call: Call::PlaceOne,
@@ -1270,11 +1287,12 @@ impl BybitLinear {
                     .finish();
                 let fallback = chunk
                     .iter()
-                    .map(|lot| lot.single.clone().finish())
+                    .map(|lot| (lot.single.clone().finish(), lot.receipts.clone()))
                     .collect();
                 job.steps.push_back(Step {
                     delay_ms: if index > 0 { PLACE_BATCH_DELAY_MS } else { 0.0 },
                     requests: vec![Planned {
+                        receipts: chunk.iter().flat_map(|lot| lot.receipts.clone()).collect(),
                         path: "/v5/order/create-batch",
                         body,
                         call: Call::PlaceBatch { fallback },
@@ -1483,6 +1501,15 @@ impl BybitLinear {
             .iter()
             .enumerate()
             .map(|(index, &qty)| Lot {
+                receipts: opts
+                    .client_order_id
+                    .iter()
+                    .map(|identity| OrderIdentityReceipt {
+                        symbol: opts.symbol.clone(),
+                        kind: OrderIdentityKind::ClientOrderId,
+                        identity: identity.clone(),
+                    })
+                    .collect(),
                 category: self.category_for(&opts.symbol),
                 item: lot(qty, index == 0, false),
                 single: lot(qty, index == 0, true),
@@ -1580,6 +1607,16 @@ impl BybitLinear {
                     .expect("option identity"),
             );
         Ok(vec![Lot {
+            receipts: vec![OrderIdentityReceipt {
+                symbol: opts.symbol.clone(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: opts
+                    .client_order_id
+                    .as_ref()
+                    .or(generated.as_ref())
+                    .expect("option identity")
+                    .clone(),
+            }],
             category: Category::Option,
             item: body.clone(),
             single: body,
@@ -1733,6 +1770,7 @@ impl BybitLinear {
             job.steps.push_back(Step {
                 delay_ms: 0.0,
                 requests: vec![Planned {
+                    receipts: Vec::new(),
                     path: "/v5/position/trading-stop",
                     body,
                     call: Call::PartialStop,
@@ -1894,6 +1932,7 @@ fn trading_stop_step(body: String) -> Step {
     Step {
         delay_ms: 0.0,
         requests: vec![Planned {
+            receipts: Vec::new(),
             path: "/v5/position/trading-stop",
             body,
             call: Call::TradingStop,
@@ -1934,6 +1973,7 @@ impl BybitLinear {
                 job.steps.push_back(Step {
                     delay_ms: 0.0,
                     requests: vec![Planned {
+                        receipts: Vec::new(),
                         path: "/v5/order/cancel",
                         body,
                         call: Call::Cancel {
@@ -1971,6 +2011,7 @@ impl BybitLinear {
                         0.0
                     },
                     requests: vec![Planned {
+                        receipts: Vec::new(),
                         path: "/v5/order/cancel-batch",
                         body,
                         call: Call::Cancel {
@@ -2202,7 +2243,7 @@ struct LocalOrder {
 }
 
 impl BybitLinear {
-    fn apply_local_write(&self, cx: &mut Cx<'_, Pending>, local: &LocalWrite, response: &str) {
+    fn apply_local_write(&mut self, cx: &mut Cx<'_, Pending>, local: &LocalWrite, response: &str) {
         // A later authoritative snapshot or private session supersedes an ack.
         if local.socket != self.private.socket
             || local.snapshot != self.account.orders_snapshot_version
@@ -2281,7 +2322,7 @@ impl BybitLinear {
         }
     }
 
-    fn publish_local_create(&self, cx: &mut Cx<'_, Pending>, input: &LocalOrder, id: &str) {
+    fn publish_local_create(&mut self, cx: &mut Cx<'_, Pending>, input: &LocalOrder, id: &str) {
         if id.is_empty()
             || cx.store.order(id).is_some()
             || (input.order_type.as_deref() == Some("Market") && input.trigger_price.is_none())
@@ -2310,6 +2351,12 @@ impl BybitLinear {
         {
             for order in mapped.orders {
                 cx.store.upsert_order(order);
+            }
+            if input.reduce_only == Some(true)
+                && input.order_type.as_deref() == Some("Limit")
+                && input.trigger_price.is_none()
+            {
+                self.schedule_fill_repair(cx, id, &input.symbol);
             }
         }
     }

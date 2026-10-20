@@ -1023,6 +1023,10 @@ fn hyro_trailing_stop_noop_succeeds_and_definitive_rejection_allows_retry() {
     assert!(h.result(2).unwrap().is_err());
     place(&mut h, 3, vec![opts]);
     assert!(h.has_request("/v5/position/trading-stop"));
+    assert!(
+        h.progress.is_empty(),
+        "locally allocated links are not transmitted by position-stop writes"
+    );
 }
 
 #[test]
@@ -1242,6 +1246,210 @@ fn hyro_invalid_nonfinite_option_cannot_alias_pending_intent() {
     created(&mut h, "first");
     assert_eq!(h.result(1), Some(&Ok("[\"first\"]".into())));
     assert!(h.requests.is_empty());
+}
+
+#[test]
+fn hyro_receipts_cover_shared_write_late_waiter_and_retained_accepted_lots() {
+    let mut h = ready(Variant::Hyrotrader);
+    let orders = vec![order("BTCUSDT", 1.0), order("ETHUSDT", 1.0)];
+    place(&mut h, 91, orders.clone());
+    let first = link(h.requests.first().unwrap());
+    place(&mut h, 92, orders.clone());
+    assert_eq!(h.requests.len(), 1);
+    for command in [91, 92] {
+        assert_eq!(
+            h.progress
+                .iter()
+                .filter(|(c, _)| *c == command)
+                .flat_map(|(_, r)| r)
+                .map(|r| r.identity.as_str())
+                .collect::<Vec<_>>(),
+            [first.as_str()]
+        );
+    }
+    created(&mut h, "first");
+    let second = link(h.requests.first().unwrap());
+    place(&mut h, 93, orders);
+    let late: Vec<_> = h
+        .progress
+        .iter()
+        .filter(|(c, _)| *c == 93)
+        .flat_map(|(_, r)| r)
+        .collect();
+    assert_eq!(
+        late.iter().map(|r| r.symbol.as_str()).collect::<Vec<_>>(),
+        ["BTCUSDT", "ETHUSDT"]
+    );
+    assert_eq!(
+        late.iter().map(|r| r.identity.as_str()).collect::<Vec<_>>(),
+        [first.as_str(), second.as_str()]
+    );
+    assert_eq!(h.requests.len(), 1);
+    assert_eq!(
+        h.progress_at_request
+            .iter()
+            .find(|(id, _)| *id == h.requests[0].id)
+            .unwrap()
+            .1,
+        4
+    );
+}
+#[test]
+fn ordinary_bybit_receipts_preserve_absence_and_caller_identity_through_batch_fallback() {
+    let mut h = ready(Variant::Linear);
+    let mut supplied = order("BTCUSDT", 1.0);
+    supplied.client_order_id = Some("Caller91".into());
+    place(&mut h, 91, vec![supplied, order("ETHUSDT", 1.0)]);
+    while h.has_request("/v5/position/list") {
+        h.respond("/v5/position/list", 200, r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0},{"symbol":"ETHUSDT","positionIdx":0}]}}"#);
+    }
+    let batch = h.take("/v5/order/create-batch");
+    assert_eq!(h.progress.len(), 1);
+    assert_eq!(h.progress[0].1.len(), 1);
+    assert_eq!(h.progress[0].1[0].identity, "Caller91");
+    assert_eq!(
+        h.progress_at_request
+            .iter()
+            .find(|(id, _)| *id == batch.id)
+            .unwrap()
+            .1,
+        1
+    );
+    h.reply(
+        batch.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"batch rejected"}"#,
+    );
+    let first = h.take("/v5/order/create");
+    assert!(body(&first).contains("Caller91"));
+    assert_eq!(h.progress[1], h.progress[0]);
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"first"}}"#,
+    );
+    let second = h.take("/v5/order/create");
+    assert!(!body(&second).contains("orderLinkId"));
+    assert_eq!(h.progress.len(), 2);
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"second"}}"#,
+    );
+    assert_eq!(h.result(91), Some(&Ok("[\"first\",\"second\"]".into())));
+    assert_eq!(
+        h.command_errors.len(),
+        1,
+        "partial success keeps its diagnostic"
+    );
+    assert_eq!(h.command_errors[0].0, 91);
+    assert!(
+        h.command_errors[0]
+            .1
+            .contains("Failed to place batch orders")
+    );
+    assert_eq!(h.command_notices, [(91, "error"), (91, "done")]);
+}
+
+#[test]
+fn hyro_rejected_later_link_is_not_replayed_as_a_new_waiters_identity() {
+    let mut h = ready(Variant::Hyrotrader);
+    let orders = vec![order("BTCUSDT", 1.0), order("ETHUSDT", 1.0)];
+    place(&mut h, 91, orders.clone());
+    let first = link(h.requests.first().unwrap());
+    created(&mut h, "first");
+    let second = h.take("/v5/order/create");
+    let rejected = link(&second);
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+    );
+    place(&mut h, 92, orders);
+    let replacement = link(h.requests.first().unwrap());
+    assert_ne!(replacement, rejected);
+    let rows: Vec<_> = h
+        .progress
+        .iter()
+        .filter(|(command, _)| *command == 92)
+        .flat_map(|(_, rows)| rows)
+        .collect();
+    assert_eq!(
+        rows.iter().map(|r| r.identity.as_str()).collect::<Vec<_>>(),
+        [first.as_str(), replacement.as_str()]
+    );
+    assert!(
+        h.progress
+            .iter()
+            .filter(|(command, _)| *command == 91)
+            .flat_map(|(_, rows)| rows)
+            .any(|r| r.identity == rejected)
+    );
+}
+
+#[test]
+fn spot_single_create_receipt_preserves_exact_caller_identity() {
+    let mut h = ready(Variant::Spot);
+    let mut opts = order("BTCUSDT", 1.0);
+    opts.client_order_id = Some("Exact_Caller-92".into());
+    place(&mut h, 92, vec![opts]);
+    let request = h.take("/v5/order/create");
+    assert_eq!(link(&request), "Exact_Caller-92");
+    assert_eq!(h.progress.len(), 1);
+    assert_eq!(h.progress[0].0, 92);
+    assert_eq!(h.progress[0].1.len(), 1);
+    assert_eq!(h.progress[0].1[0].identity, "Exact_Caller-92");
+    assert_eq!(
+        h.progress_at_request
+            .iter()
+            .find(|(id, _)| *id == request.id)
+            .unwrap()
+            .1,
+        1
+    );
+}
+
+#[test]
+fn shared_hyro_failure_is_correlated_to_each_waiter_before_its_completion() {
+    let mut h = ready(Variant::Hyrotrader);
+    let orders = vec![order("BTCUSDT", 1.0)];
+    place(&mut h, 91, orders.clone());
+    place(&mut h, 92, orders);
+    let write = h.take("/v5/order/create");
+    h.reply(
+        write.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+    );
+    assert_eq!(h.command_errors.len(), 2);
+    assert_eq!(h.command_errors[0].0, 91);
+    assert_eq!(h.command_errors[1].0, 92);
+    assert_eq!(h.command_errors[0].1, h.command_errors[1].1);
+    assert_eq!(
+        h.command_notices,
+        [(91, "error"), (91, "done"), (92, "error"), (92, "done")]
+    );
+    assert!(h.result(91).unwrap().is_err());
+    assert!(h.result(92).unwrap().is_err());
+}
+
+#[test]
+fn identical_independent_validation_failures_keep_distinct_command_owners() {
+    let mut h = ready(Variant::Spot);
+    for command in [91, 92] {
+        let mut opts = order("BTCUSDT", 1.0);
+        opts.client_order_id = Some("invalid whitespace".into());
+        place(&mut h, command, vec![opts]);
+    }
+    assert!(h.requests.is_empty());
+    assert_eq!(h.command_errors.len(), 2);
+    assert_eq!(h.command_errors[0].0, 91);
+    assert_eq!(h.command_errors[1].0, 92);
+    assert_eq!(h.command_errors[0].1, h.command_errors[1].1);
+    assert_eq!(
+        h.command_notices,
+        [(91, "error"), (91, "done"), (92, "error"), (92, "done")]
+    );
 }
 
 // V5 acknowledgement and realtime shapes:
@@ -1610,4 +1818,93 @@ fn lost_or_server_failed_creates_are_unknown_but_venue_rejections_are_not() {
         );
         assert_eq!(h.unknown == [2], unknown, "{case}");
     }
+}
+
+fn demo_reduce_only_resting(h: &mut Harness) {
+    let mut opts = order("BTCUSDT", 1.0);
+    opts.reduce_only = Some(true);
+    opts.side = OrderSide::Sell;
+    place(h, 1, vec![opts]);
+    resolve_mode(h, "BTCUSDT");
+    let create = h.take("create-batch");
+    h.reply(
+        create.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":"ro-1","orderLinkId":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+    );
+    assert!(
+        h.engine.store().order("ro-1").is_some(),
+        "local Demo row published"
+    );
+}
+
+#[test]
+fn demo_reduce_only_limit_filled_without_stream_events_is_retired_by_its_executions() {
+    let mut h = ready(Variant::Demo);
+    demo_reduce_only_resting(&mut h);
+    h.requests.clear();
+    h.advance(1_000.0);
+    let check = h.take("/v5/execution/list");
+    assert!(
+        check.url.contains("orderId=ro-1") && check.url.contains("symbol=BTCUSDT"),
+        "{}",
+        check.url
+    );
+    h.reply(
+        check.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"nextPageCursor":"page2","list":[{"symbol":"BTCUSDT","orderId":"ro-1","execId":"e1","side":"Sell","execPrice":"100","execQty":"0.4","execType":"Trade","execTime":"1"},{"symbol":"BTCUSDT","orderId":"ro-1","execId":"e2","side":"Sell","execPrice":"100","execQty":"0.6","execType":"Trade","execTime":"2"}]}}"#,
+    );
+    // Bybit returns a cursor even on a short page; the walk follows it.
+    assert!(h.engine.store().order("ro-1").is_some());
+    let next = h.take("/v5/execution/list");
+    assert!(next.url.contains("cursor=page2"), "{}", next.url);
+    h.reply(
+        next.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"nextPageCursor":"","list":[]}}"#,
+    );
+    assert!(
+        h.engine.store().order("ro-1").is_none(),
+        "a fully filled order stayed on the chart"
+    );
+    // A stale replica cannot reopen it.
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"ro-1","orderStatus":"New","orderType":"Limit","side":"Sell","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1","reduceOnly":true}]}"#);
+    assert!(h.engine.store().order("ro-1").is_none());
+}
+
+#[test]
+fn demo_reduce_only_partial_or_failed_check_never_proves_a_fill() {
+    let mut h = ready(Variant::Demo);
+    demo_reduce_only_resting(&mut h);
+    h.requests.clear();
+    h.advance(1_000.0);
+    let check = h.take("/v5/execution/list");
+    h.reply(
+        check.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"nextPageCursor":"","list":[{"symbol":"BTCUSDT","orderId":"ro-1","execId":"e1","side":"Sell","execPrice":"100","execQty":"0.4","execType":"Trade","execTime":"1"}]}}"#,
+    );
+    assert!(h.engine.store().order("ro-1").is_some());
+    h.advance(2_000.0);
+    let check = h.take("/v5/execution/list");
+    h.reply(check.id, 500, "upstream");
+    assert!(h.engine.store().order("ro-1").is_some());
+    // After the placement grace an inconclusive check re-reads open orders instead.
+    h.requests.clear();
+    h.advance(5_250.0);
+    let check = h.take("/v5/execution/list");
+    h.reply(
+        check.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"nextPageCursor":"more","list":[{"symbol":"BTCUSDT","orderId":"ro-1","execId":"e1","side":"Sell","execPrice":"100","execQty":"1","execType":"Trade","execTime":"1"}]}}"#,
+    );
+    // The next page fails, so the walk is incomplete.
+    let next = h.take("/v5/execution/list");
+    h.reply(next.id, 500, "upstream");
+    assert!(
+        h.engine.store().order("ro-1").is_some(),
+        "an incomplete page proved a full fill"
+    );
+    assert!(h.has_request("/v5/order/realtime"));
 }

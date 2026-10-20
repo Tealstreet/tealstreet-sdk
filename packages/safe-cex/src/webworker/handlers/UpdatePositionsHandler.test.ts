@@ -1,11 +1,13 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { UpdatePositionsHandler } from './UpdatePositionsHandler';
 import type { Exchange } from '../../exchanges/base';
 import type { ExchangeName } from '../../types';
-import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 import type { AppSettingsWorkerType } from '../AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
+import type { StoreWorkerPayload } from '../StoreWorkerPayload';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { OrderStopTriggerType } from '../../types';
+import { UpdatePositionsHandler } from './UpdatePositionsHandler';
 
 describe('UpdatePositionsHandler', () => {
   let handler: UpdatePositionsHandler;
@@ -198,7 +200,12 @@ describe('UpdatePositionsHandler', () => {
         await vi.waitFor(() => {
           expect(mockPostMessage).toHaveBeenCalledWith({
             op: 'updatePositions:done',
-            data: { requestId: 'req-5', success: false, reason: 'Error: API Error' },
+            data: {
+              requestId: 'req-5',
+              success: false,
+              reason: 'Error: API Error',
+              errorDetails: { message: 'API Error', name: 'Error', stack: expect.any(String) },
+            },
           });
         });
       });
@@ -217,7 +224,12 @@ describe('UpdatePositionsHandler', () => {
         await vi.waitFor(() => {
           expect(mockPostMessage).toHaveBeenCalledWith({
             op: 'updatePositions:done',
-            data: { requestId: 'req-6', success: false, reason: 'Error: API Error' },
+            data: {
+              requestId: 'req-6',
+              success: false,
+              reason: 'Error: API Error',
+              errorDetails: { message: 'API Error', name: 'Error', stack: expect.any(String) },
+            },
           });
         });
 
