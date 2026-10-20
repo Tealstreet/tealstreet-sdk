@@ -3,7 +3,9 @@ use crate::{
     wire::{Id, N, Rest, checked},
 };
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, VenueError, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, LogLevel, Method, Outcome, Response, VenueError, num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
@@ -51,7 +53,7 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     keep_going: bool,
-    error: Option<String>,
+    error: Option<VenueError>,
     collect: bool,
     total: usize,
     waiting: Option<Waiting>,
@@ -1095,14 +1097,15 @@ impl Orderly {
         };
         let Some(mut step) = job.steps.pop_front() else {
             let job = self.trading.active.take().unwrap();
-            if let Some(message) = job.error {
-                // Whole failures still use the plain path until Orderly migrates to `fail`.
-                if job.ids.is_empty() {
-                    cx.done(job.command, Err(message));
+            if let Some(error) = job.error {
+                // Unclassified whole failures keep the plain path until Orderly migrates to `fail`.
+                if job.ids.is_empty() && error.outcome.is_none() {
+                    cx.done(job.command, Err(error.message));
                 } else {
-                    let error =
-                        VenueError::new(message).partial(&job.ids, job.total, job.ids.len());
-                    cx.fail(job.command, error);
+                    cx.fail(
+                        job.command,
+                        error.partial(&job.ids, job.total, job.ids.len()),
+                    );
                 }
             } else {
                 cx.done(
@@ -1562,8 +1565,10 @@ impl Orderly {
         else {
             return;
         };
-        if job.error.is_none() {
-            job.error = Some(error.into());
+        // The first failure names the error; any lost leg makes the outcome unknown.
+        let error = job.error.get_or_insert_with(|| error.into());
+        if uncertain {
+            error.outcome = Some(Outcome::Unknown);
         }
         // Bulk cancellation's two families are independent writes, not replacements.
         if !job.keep_going {
@@ -1664,7 +1669,10 @@ impl Orderly {
             self.trading.detached.push((wait, job.scopes.clone()));
             job.steps.clear();
             job.error = Some(
-                "Orderly protective state is unconfirmed; no subsequent write was sent".into(),
+                VenueError::new(
+                    "Orderly protective state is unconfirmed; no subsequent write was sent",
+                )
+                .outcome(Outcome::Unknown),
             );
             self.trade_next(cx);
         } else if self.wait_satisfied(cx) {

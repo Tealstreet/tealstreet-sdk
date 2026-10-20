@@ -1661,3 +1661,53 @@ fn accepted_global_leverage_continues_past_invalid_market_limits() {
         isolated.leverage
     );
 }
+
+fn outcome(out: Vec<Action>, id: u32) -> Option<Option<safe_cex_engine::Outcome>> {
+    out.into_iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandDone {
+            command,
+            result: Err(_),
+        }) if command == id => Some(None),
+        Action::Notice(Notice::CommandFailed { command, error }) if command == id => {
+            Some(error.outcome)
+        }
+        _ => None,
+    })
+}
+
+#[test]
+fn lost_and_server_failed_writes_are_unknown_but_rejections_are_not() {
+    use safe_cex_engine::Outcome;
+    let order = r#"[{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}]"#;
+    let (mut e, _) = ready();
+    requests(&mut e);
+    place(&mut e, 1, order);
+    let r = requests(&mut e).pop().unwrap();
+    e.handle(
+        2000.0,
+        Event::HttpFailed {
+            request: r.id,
+            error: "response lost",
+        },
+    );
+    assert_eq!(outcome(actions(&mut e), 1), Some(Some(Outcome::Unknown)));
+
+    let (mut e, _) = ready();
+    requests(&mut e);
+    place(&mut e, 2, order);
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, 502, "bad gateway");
+    assert_eq!(outcome(actions(&mut e), 2), Some(Some(Outcome::Unknown)));
+
+    let (mut e, _) = ready();
+    requests(&mut e);
+    place(&mut e, 3, order);
+    let r = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &r,
+        400,
+        r#"{"success":false,"code":-1103,"message":"price out of range"}"#,
+    );
+    assert_eq!(outcome(actions(&mut e), 3), Some(None));
+}
