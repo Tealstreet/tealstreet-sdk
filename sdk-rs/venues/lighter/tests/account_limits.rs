@@ -435,3 +435,14 @@ fn rejected_or_invalid_tier_changes_report_the_reason() {
         ))
     );
 }
+#[test]
+fn reading_the_cached_tier_never_starts_a_limits_read() {
+    let mut client = Client::new(options());
+    let actions = client.action(NOW, 65, safe_cex_engine::VenueAction::FetchAccountTier);
+    assert_eq!(done(&actions, 65), Some(&Ok("null".into())));
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+}
