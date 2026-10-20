@@ -41,6 +41,8 @@ pub struct Coinbase {
     pub(crate) public: public::Public,
     pub(crate) credentials: Option<sign::Credentials>,
     pub(crate) read_credentials: Option<sign::Credentials>,
+    /// The host routes GETs through the read key's egress unless told otherwise.
+    pub(crate) read_supplied: bool,
     rest: rest::Rest,
     pub(crate) account: account::Account,
     pub(crate) trading: trading::Trading,
@@ -73,6 +75,7 @@ impl Coinbase {
             options,
             public: public::Public::default(),
             credentials,
+            read_supplied: read_credentials.is_some(),
             read_credentials,
             rest: rest::Rest::default(),
             account: account::Account::default(),

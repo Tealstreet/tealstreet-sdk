@@ -902,14 +902,22 @@ impl Coinbase {
     }
     fn reconcile_reductions(&mut self, cx: &Cx<'_, Pending>) {
         let committed = self.account.committed_orders_revision();
+        let positions = self.account.position_read_revision();
         let expired = self
             .trading
             .reductions
             .iter()
             .filter(|(_, f)| {
+                // A derivative fill must also be visible in a later position read.
+                let spot = cx
+                    .store
+                    .market(&f.symbol)
+                    .is_some_and(|m| m.is_spot == Some(true));
                 f.native_id.is_none()
                     && f.unresolved.is_some_and(|(at, revision)| {
-                        cx.now >= at + UNRESOLVED_PLACEMENT_MS && committed >= revision
+                        cx.now >= at + UNRESOLVED_PLACEMENT_MS
+                            && committed >= revision
+                            && (spot || positions.is_some_and(|read| read >= revision))
                     })
             })
             .map(|(client, _)| client.clone())

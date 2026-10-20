@@ -42,6 +42,10 @@ pub struct Orders {
 }
 #[derive(Clone)]
 pub enum Request {
+    /// `None` reads the trading key's portfolio, then `Some` compares the read key's.
+    KeyPermissions {
+        trading_portfolio: Option<String>,
+    },
     Portfolios,
     Probe {
         portfolios: Vec<wire::Portfolio>,
@@ -801,11 +805,29 @@ impl Coinbase {
         if self.credentials.is_none() {
             return;
         }
+        if self.read_credentials.is_some() {
+            self.account_read(
+                cx,
+                Request::KeyPermissions {
+                    trading_portfolio: None,
+                },
+            );
+        } else {
+            self.account_read(cx, Request::Portfolios);
+        }
+    }
+    fn read_key_unverified(&mut self, cx: &mut Cx<'_, Pending>, reason: &str) {
+        cx.log(
+            LogLevel::Error,
+            format!("Coinbase read-only key {reason}; reads use the trading key"),
+        );
+        self.read_credentials = None;
         self.account_read(cx, Request::Portfolios);
     }
     fn account_read(&mut self, cx: &mut Cx<'_, Pending>, req: Request) {
         let id = self.account.portfolio_id.as_deref().unwrap_or("");
         let (path, at) = match &req {
+            Request::KeyPermissions { .. } => (format!("{ROOT}/key_permissions"), None),
             Request::Portfolios => (format!("{ROOT}/portfolios"), None),
             Request::Probe { portfolios, index } => (
                 format!("{ROOT}/portfolios/{}", portfolios[*index].uuid),
@@ -872,7 +894,11 @@ impl Coinbase {
             Request::Orders(_) => Some(3),
             _ => None,
         };
-        let detail = matches!(req, Request::OrderDetails { .. }).then(|| req.clone());
+        let detail = matches!(
+            req,
+            Request::OrderDetails { .. } | Request::KeyPermissions { .. }
+        )
+        .then(|| req.clone());
         if let Err(e) = self.request(cx, Method::Get, path, None, at, Pending::Account(req)) {
             if let Some(req) = retry {
                 self.private_failed(cx, req, &e)
@@ -1297,12 +1323,14 @@ impl Coinbase {
         {
             let r: wire::IntxPosition<'_> =
                 serde_json::from_str(text).map_err(|e| e.to_string())?;
+            let size = r.net_size.0.abs();
             let side = match r.position_side.as_ref() {
                 "POSITION_SIDE_LONG" => PositionSide::Long,
                 "POSITION_SIDE_SHORT" => PositionSide::Short,
+                // A flat row carries no side; it must still clear the position.
+                _ if size == 0.0 => PositionSide::Long,
                 _ => return Err("Coinbase invalid position side".into()),
             };
-            let size = r.net_size.0.abs();
             let entry = r.entry_vwap.value.0;
             let mark = r.mark_price.value.0;
             let pnl = size
@@ -1335,6 +1363,7 @@ impl Coinbase {
             let side = match r.side.as_ref() {
                 "LONG" => PositionSide::Long,
                 "SHORT" => PositionSide::Short,
+                _ if r.number_of_contracts.0 == 0.0 => PositionSide::Long,
                 _ => return Err("Coinbase invalid CFM side".into()),
             };
             (
@@ -1385,6 +1414,37 @@ impl Coinbase {
         if let Request::OrderDetails { id, socket } = &req
             && (self.account.socket != Some(*socket) || !self.account.deferred.contains_key(id))
         {
+            return;
+        }
+        if let Request::KeyPermissions { trading_portfolio } = req {
+            let portfolio = (200..300)
+                .contains(&response.status)
+                .then(|| serde_json::from_str::<wire::KeyPermissions>(response.body).ok())
+                .flatten()
+                .map(|k| k.portfolio_uuid)
+                .filter(|p| !p.is_empty());
+            match (trading_portfolio, portfolio) {
+                (None, Some(portfolio)) => self.account_read(
+                    cx,
+                    Request::KeyPermissions {
+                        trading_portfolio: Some(portfolio),
+                    },
+                ),
+                (Some(trading), Some(read)) if trading == read => {
+                    self.account_read(cx, Request::Portfolios)
+                }
+                (Some(_), Some(_)) => {
+                    self.read_key_unverified(cx, "belongs to a different portfolio")
+                }
+                (None, None) if response.status == 401 => {
+                    cx.log(LogLevel::Error, "Coinbase credentials rejected");
+                    cx.deactivate();
+                }
+                _ => self.read_key_unverified(
+                    cx,
+                    &format!("could not be verified (HTTP {})", response.status),
+                ),
+            }
             return;
         }
         if !(200..300).contains(&response.status) {
@@ -1478,15 +1538,15 @@ impl Coinbase {
                                 LogLevel::Warning,
                                 format!("Coinbase skipped unmappable order {id}: {error}"),
                             );
-                            let symbol = market(cx.store, &row.product_id)
-                                .map(|m| m.symbol.clone())
-                                .unwrap_or_default();
                             for pending in self.take_deferred(&id) {
                                 if pending.snapshot
                                     && let Some(s) = &mut self.account.snapshot
                                 {
                                     s.pending -= 1;
-                                    s.skipped.insert(id.clone(), symbol.clone());
+                                    let symbol = skipped_row(cx.store, &pending.text)
+                                        .map(|(_, symbol)| symbol)
+                                        .unwrap_or_default();
+                                    s.skipped.insert(id.clone(), symbol);
                                 }
                             }
                             self.finish_user_snapshot(cx);
@@ -1545,6 +1605,7 @@ impl Coinbase {
                     }
                     self.finish_user_snapshot(cx);
                 }
+                Request::KeyPermissions { .. } => unreachable!(),
                 Request::Portfolios => {
                     let data: wire::Portfolios =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
@@ -1656,12 +1717,11 @@ impl Coinbase {
                     if invalid {
                         return Err("Coinbase rejected partial position snapshot".into());
                     }
-                    let unmapped = rows.is_empty() && !skipped.is_empty();
                     rows.extend(
                         cx.store
                             .positions()
                             .iter()
-                            .filter(|p| unmapped || skipped.contains(&p.symbol))
+                            .filter(|p| skipped.contains(&p.symbol))
                             .cloned(),
                     );
                     #[derive(serde::Deserialize)]
@@ -1805,8 +1865,8 @@ impl Coinbase {
                 }
             }
         }
-        // A snapshot with no mappable row says nothing about the other orders.
-        let unmapped = s.rows.is_empty() && !s.skipped.is_empty();
+        // A snapshot whose only rows lack a live identity says nothing about other orders.
+        let unmapped = s.rows.is_empty() && s.skipped.values().any(String::is_empty);
         for o in cx.store.orders() {
             if (unmapped || s.skipped.contains_key(&o.id)) && !s.rows.contains_key(&o.id) {
                 s.rows.insert(o.id.clone(), o.clone());
@@ -1860,6 +1920,9 @@ impl Coinbase {
             Request::Positions { .. } => self.account.inflight[2] = false,
             Request::Orders(_) => self.account.inflight[3] = false,
             Request::OrderDetails { id, socket } => self.fail_details(cx, &id, socket),
+            Request::KeyPermissions { .. } => {
+                self.read_key_unverified(cx, &format!("could not be verified ({error})"))
+            }
         }
     }
     pub(crate) fn private_on_message(
@@ -1963,9 +2026,18 @@ impl Coinbase {
                     }
                     Ok(None) => {}
                     Err(error) => {
-                        let skipped = snapshot
-                            .then(|| skipped_row(cx.store, text.get()))
-                            .flatten();
+                        let skipped = skipped_row(cx.store, text.get());
+                        if !snapshot
+                            && let Some((id, _)) = &skipped
+                            && cx.store.order(id).is_none()
+                        {
+                            cx.log(
+                                LogLevel::Warning,
+                                format!("Coinbase ignored unmappable order update {id}: {error}"),
+                            );
+                            continue;
+                        }
+                        let skipped = skipped.filter(|_| snapshot);
                         if let Some(s) = &mut self.account.snapshot {
                             if let Some((id, symbol)) = skipped {
                                 cx.log(

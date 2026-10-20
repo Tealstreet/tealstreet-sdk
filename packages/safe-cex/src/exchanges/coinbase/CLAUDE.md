@@ -32,8 +32,10 @@ Failed or partially invalid snapshots preserve the previous account state;
 user cumulative fills emit only positive increments at the incremental price.
 An order or position row that cannot map (a bracket or TWAP placed on
 Coinbase's site, an unknown side) is skipped and logged; the store keeps its
-copy of that ID, a snapshot where no row maps keeps all known rows, and a
-skipped position never becomes a synthesized flat one. Skipped live orders are
+copy of that ID (a snapshot whose only rows lack any live identity keeps all
+known orders), and a skipped position never becomes a synthesized flat one. A
+flat position row without a side still clears the position. Unmappable updates
+for orders the engine never held are ignored. Skipped live orders are
 still included in cancel-symbol. Portfolio discovery retries a probe only on
 408/429/5xx; any other failure moves to the next portfolio.
 
@@ -51,8 +53,10 @@ cannot prevent concurrent external account writes; no native reduce-only flag
 exists. Spot reduce-only is sent as a plain order. A definite 4xx placement
 rejection releases its reservation with Coinbase's message; a lost response,
 408 or 5xx keeps it until the client ID appears or 30 s pass with a later order
-snapshot. Saved read-only keys sign REST reads; writes and the user stream keep
-the trading key.
+snapshot (and, for derivatives, a later position read). Saved read-only keys
+sign REST reads once `key_permissions` shows both keys on the same portfolio;
+otherwise the read key is refused with an error and reads use the trading key
+on the primary route. Writes and the user stream keep the trading key.
 Caller IDs are nonempty strings of at most 128 characters without whitespace
 or control characters, preserved verbatim for one plain Limit/Market order.
 Spot edits require exact current zero-fill LIMIT decimal provenance. INTX

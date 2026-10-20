@@ -1,6 +1,6 @@
 use crate::{Coinbase, Pending};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::{Cx, Method, TimerId, Venue};
+use safe_cex_engine::{Cx, Method, RequestRoute, TimerId, Venue};
 use std::collections::VecDeque;
 
 struct Outbound {
@@ -65,10 +65,21 @@ impl Coinbase {
             .path
             .starts_with("https://api.international.coinbase.com/")
             || request.path.starts_with("/api/v3/brokerage/market/");
+        let trading_key_check = matches!(
+            request.pending,
+            Pending::Account(crate::account::Request::KeyPermissions {
+                trading_portfolio: None
+            })
+        );
+        let read = request.method == Method::Get && !trading_key_check;
+        let primary_route = request.method == Method::Get
+            && !public
+            && self.read_supplied
+            && (trading_key_check || self.read_credentials.is_none());
         let headers = if public {
             Ok(vec![])
         } else {
-            let credentials = if request.method == Method::Get {
+            let credentials = if read {
                 self.read_credentials.as_ref().or(self.credentials.as_ref())
             } else {
                 self.credentials.as_ref()
@@ -98,6 +109,9 @@ impl Coinbase {
             format!("https://api.coinbase.com{}", request.path)
         };
         let id = cx.request(request.method, url, headers, request.body, request.pending);
+        if primary_route {
+            cx.route_request(id, RequestRoute::Primary);
+        }
         if let Some(at) = request.at {
             cx.stream_response(id, at);
         }

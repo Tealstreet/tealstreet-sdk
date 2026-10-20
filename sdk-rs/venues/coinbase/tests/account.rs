@@ -99,7 +99,9 @@ impl Session {
         } else if url.contains("/intx/portfolio/") {
             INTX_BALANCE.into()
         } else if url.contains("/intx/positions/") {
-            INTX_POSITIONS.into()
+            self.positions
+                .clone()
+                .unwrap_or_else(|| INTX_POSITIONS.into())
         } else if url.contains("/cfm/positions") {
             self.positions
                 .clone()
@@ -942,4 +944,44 @@ fn portfolio_probe_retries_the_same_portfolio_on_server_failure() {
     s.reply(r, 503, "unavailable");
     let r = s.next_request();
     assert!(r.url.ends_with("/portfolios/busy"), "{}", r.url);
+}
+#[test]
+fn flat_intx_row_without_a_side_clears_the_position() {
+    let mut s = Session::new("INTX", false).ready();
+    assert_eq!(
+        s.e.store().position("BTC-PERP-INTX").unwrap().contracts,
+        2.0
+    );
+    s.positions = Some(
+        r#"{"positions":[{"symbol":"BTC-PERP-INTX","position_side":"POSITION_SIDE_UNKNOWN","net_size":"0","entry_vwap":{"value":"0"},"mark_price":{"value":"110"},"liquidation_price":{"value":"0"},"leverage":"10"}]}"#.into(),
+    );
+    for _ in 0..20 {
+        for r in s.collect() {
+            s.answer(r);
+        }
+        if s.e.store().position("BTC-PERP-INTX").unwrap().contracts == 0.0 {
+            return;
+        }
+        s.fire();
+    }
+    panic!("flat position row was not applied");
+}
+#[test]
+fn unmappable_update_for_an_unknown_order_does_not_spoil_the_user_snapshot() {
+    let mut s = Session::new("INTX", false).ready();
+    let site = r#"{"order_id":"twap-1","client_order_id":"","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"SELL","order_type":"Twap","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"120","stop_price":"0","avg_price":"0"}"#;
+    s.message(0, "update", &format!("[{site}]"));
+    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    s.message(1, "snapshot", &format!("[{row}]"));
+    assert!(s.e.store().order("order-a").is_some());
+}
+#[test]
+fn snapshot_holding_only_a_site_order_still_removes_ended_orders() {
+    let mut s = Session::new("INTX", false).ready();
+    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    s.message(0, "snapshot", &format!("[{row}]"));
+    assert!(s.e.store().order("order-a").is_some());
+    let site = r#"{"order_id":"twap-1","client_order_id":"","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"SELL","order_type":"Twap","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"120","stop_price":"0","avg_price":"0"}"#;
+    s.message(1, "snapshot", &format!("[{site}]"));
+    assert!(s.e.store().order("order-a").is_none());
 }
