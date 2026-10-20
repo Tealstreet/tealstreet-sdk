@@ -473,6 +473,8 @@ pub struct AlgoUpdate<'a> {
 
 #[derive(Deserialize)]
 pub struct AccountUpdateEvent<'a> {
+    #[serde(borrow, default)]
+    pub fs: Option<Str<'a>>,
     #[serde(borrow)]
     pub a: AccountUpdate<'a>,
 }
