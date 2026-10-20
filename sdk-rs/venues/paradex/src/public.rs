@@ -628,11 +628,11 @@ impl Paradex {
                 rows,
                 bands,
                 excluded,
-                invalid: _,
+                invalid,
             } => {
-                let Ok(identity) = serde_json::from_str::<InstrumentIdentity<'_>>(item) else {
-                    safe_cex_engine::startup::skipped_row(cx);
-                    return;
+                let identity = match serde_json::from_str::<InstrumentIdentity<'_>>(item) {
+                    Ok(identity) => identity,
+                    Err(e) => return skip_or_reject(cx, invalid, &e),
                 };
                 let kind = identity.asset_kind.to_ascii_uppercase();
                 let option = kind.contains("OPTION")
@@ -699,10 +699,10 @@ impl Paradex {
                     maker_fee: Some(m.maker_fee.0),
                 });
             }
-            Request::Tickers { rows, invalid: _ } => {
-                let Ok(identity) = serde_json::from_str::<MarketIdentity<'_>>(item) else {
-                    safe_cex_engine::startup::skipped_row(cx);
-                    return;
+            Request::Tickers { rows, invalid } => {
+                let identity = match serde_json::from_str::<MarketIdentity<'_>>(item) {
+                    Ok(identity) => identity,
+                    Err(e) => return skip_or_reject(cx, invalid, &e),
                 };
                 if !identity.symbol.ends_with("-PERP")
                     || cx.store.market(&identity.symbol).is_none()
@@ -1232,6 +1232,17 @@ impl Paradex {
             other => return Some(other),
         }
         None
+    }
+}
+
+// Rows reach the venue unvalidated (venue item check), so a JSON syntax error
+// means the stream itself is untrustworthy: reject the read and retry. A
+// well-formed row with unusable fields is skipped so its peers still load.
+fn skip_or_reject(cx: &mut Cx<'_, Pending>, invalid: &mut bool, e: &serde_json::Error) {
+    if e.is_syntax() || e.is_eof() {
+        *invalid = true;
+    } else {
+        safe_cex_engine::startup::skipped_row(cx);
     }
 }
 
