@@ -5,9 +5,11 @@ mod trading;
 mod wire;
 use crate::{Options, sign};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue,
     book::{Book, BookSide},
     model::*,
+    socket::{Config, Supervisor, Tick},
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -28,14 +30,25 @@ pub enum Pending {
         retries: u8,
     },
 }
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 45_000.,
+                idle_timeout_ms: 45_000.,
+                ping_interval_ms: Some(15_000.),
+                backoff_cap_ms: 16_000.,
+                ..Config::default()
+            }),
+        }
+    }
 }
 #[derive(Default)]
 struct DepthState {
@@ -126,11 +139,13 @@ impl KrakenSpot {
         }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket =
             Some(cx.connect_channel("wss://ws.kraken.com/v2", SocketChannel::Public));
         self.public.open = false;
-        self.public.received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(15_000.));
     }
     fn subscribe(
         &self,
@@ -342,8 +357,7 @@ impl Venue for KrakenSpot {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.received = cx.now;
+        self.public.supervisor.opened(cx);
         self.ticker_subscribe(cx, "subscribe");
         for symbol in self.books.keys() {
             self.subscribe(cx, "subscribe", "book", std::slice::from_ref(symbol), None)
@@ -370,7 +384,7 @@ impl Venue for KrakenSpot {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.received = cx.now;
+        self.public.supervisor.received(cx.now);
         let Ok(msg) = serde_json::from_str::<Ws<'_>>(text) else {
             return;
         };
@@ -504,19 +518,13 @@ impl Venue for KrakenSpot {
         }
         self.public.socket = None;
         self.public.open = false;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t)
-        }
         for (symbol, s) in &mut self.books {
             s.book.clear();
             s.checksum.clear();
             s.synced = false;
             cx.book_changed(symbol);
         }
-        self.public.attempts = self.public.attempts.saturating_add(1);
-        self.public.reconnect = Some(
-            cx.set_timer((1000. * 2f64.powi(self.public.attempts.min(5) as i32 - 1)).min(30_000.)),
-        );
+        self.public.supervisor.retry(cx);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if let Pending::Private(request) = pending {
@@ -631,23 +639,25 @@ impl Venue for KrakenSpot {
         if self.private_timer(cx, timer) {
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect(cx)
-        } else if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.received >= 45_000. {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => (),
+            Tick::Reconnect => return self.connect(cx),
+            Tick::Ping => {
+                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
+                    cx.send(s, "{\"method\":\"ping\"}");
+                }
+                return;
+            }
+            Tick::TimedOut(_) => {
                 if let Some(s) = self.public.socket {
                     cx.close(s);
                     self.on_close(cx, s, 1006)
                 }
-            } else {
-                if let Some(s) = self.public.socket.filter(|_| self.public.open) {
-                    cx.send(s, "{\"method\":\"ping\"}");
-                }
-                self.public.watchdog = Some(cx.set_timer(15_000.));
+                return;
             }
-        } else if self.poll == Some(timer) {
+            Tick::Handled => return,
+        }
+        if self.poll == Some(timer) {
             self.poll = None;
             if !cx.store.loaded().markets {
                 self.markets(cx)

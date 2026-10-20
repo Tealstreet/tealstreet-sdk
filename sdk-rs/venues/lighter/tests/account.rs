@@ -485,58 +485,65 @@ fn direct_account_fill_arrays_accept_both_fill_and_trade_ids_without_duplicate_f
 }
 #[test]
 fn initial_and_reconnecting_private_handshakes_have_watchdogs_before_open() {
-    use safe_cex_engine::Engine;
+    use safe_cex_engine::{Engine, SocketChannel};
     use safe_cex_venue_lighter::Lighter;
+    let mut timers = Timers::new();
     let mut e = Engine::new(Lighter::new(options()));
     e.start(NOW);
     let meta = requests(&mut e).pop().unwrap();
     reply(&mut e, &meta, 200, META);
-    let lookup = requests(&mut e)
+    let lookup = drain(&mut e, &mut timers)
         .into_iter()
-        .find(|r| r.url.contains("/account?"))
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains("/account?") => Some(r),
+            _ => None,
+        })
         .unwrap();
     reply(&mut e, &lookup, 200, ACCOUNT);
-    for cycle in 0..2 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
+    let mut connected_at = NOW;
+    let mut actions = drain(&mut e, &mut timers);
+    for _ in 0..2 {
         let socket = actions
             .iter()
-            .find_map(|a| {
-                if let Action::WsConnect { socket, .. } = a {
-                    Some(*socket)
-                } else {
-                    None
-                }
+            .find_map(|a| match a {
+                Action::WsConnect {
+                    socket,
+                    channel: Some(SocketChannel::Private),
+                    ..
+                } => Some(*socket),
+                _ => None,
             })
             .expect("private connection");
-        let watchdog = actions
-            .iter()
-            .find_map(|a| {
-                if let Action::SetTimer { timer, at_ms } = a {
-                    (*at_ms == NOW + cycle as f64 * 181_000.0 + 10_000.0).then_some(*timer)
-                } else {
-                    None
-                }
-            })
-            .expect("handshake watchdog");
-        let timeout = NOW + (cycle + 1) as f64 * 180_000.0 + cycle as f64 * 1000.0;
-        e.handle(timeout, Event::TimerFired { timer: watchdog });
-        let actions = e.drain_actions().collect::<Vec<_>>();
-        assert!(
+        let closed = |actions: &[Action]| {
             actions
                 .iter()
-                .any(|a| matches!(a,Action::WsClose{socket:s}if *s==socket))
-        );
-        let reconnect = actions
-            .iter()
-            .find_map(|a| {
-                if let Action::SetTimer { timer, .. } = a {
-                    Some(*timer)
-                } else {
-                    None
+                .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+        };
+        assert!(!closed(&advance(
+            &mut e,
+            &mut timers,
+            connected_at + 179_999.0
+        )));
+        assert!(closed(&advance(
+            &mut e,
+            &mut timers,
+            connected_at + 180_000.0
+        )));
+        connected_at += 180_000.0;
+        actions = Vec::new();
+        while !actions.iter().any(|a| {
+            matches!(
+                a,
+                Action::WsConnect {
+                    channel: Some(SocketChannel::Private),
+                    ..
                 }
-            })
-            .unwrap();
-        e.handle(timeout + 1000.0, Event::TimerFired { timer: reconnect });
+            )
+        }) {
+            connected_at += 1.0;
+            assert!(connected_at < NOW + 400_000.0, "private reconnect");
+            actions = advance(&mut e, &mut timers, connected_at);
+        }
     }
 }
 

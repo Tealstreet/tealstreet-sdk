@@ -436,12 +436,12 @@ fn failed_seed_reads_retry_independently_and_start_the_socket_after_recovery() {
     );
     let timer = actions
         .into_iter()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, .. } = a {
-                Some(timer)
-            } else {
-                None
-            }
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1000.0,
+            } => Some(timer),
+            _ => None,
         })
         .unwrap();
     e.handle(2000.0, Event::TimerFired { timer });
