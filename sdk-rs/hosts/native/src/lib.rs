@@ -27,6 +27,7 @@ use tokio::task::AbortHandle;
 pub enum HostEvent {
     WsOpened(SocketId),
     WsMessage(SocketId, String),
+    WsBinary(SocketId, Vec<u8>),
     WsClosed(SocketId, u16),
     HttpStart {
         request: RequestId,
@@ -115,6 +116,13 @@ impl<V: Venue, T: Transport> Host<V, T> {
         let engine = &mut self.engine;
         match event {
             HostEvent::WsOpened(socket) => engine.handle(now, Event::WsOpened { socket }),
+            HostEvent::WsBinary(socket, data) => engine.handle(
+                now,
+                Event::WsBinary {
+                    socket,
+                    data: &data,
+                },
+            ),
             HostEvent::WsMessage(socket, text) => engine.handle(
                 now,
                 Event::WsMessage {
@@ -165,12 +173,14 @@ impl<V: Venue, T: Transport> Host<V, T> {
         for action in actions {
             match action {
                 Action::WsConnect {
+                    binary,
                     socket,
                     url,
                     channel,
                     context,
                 } => {
-                    let outgoing = self.transport.connect_context(
+                    let outgoing = self.transport.connect_encoding(
+                        binary,
                         socket,
                         url,
                         vec![],
