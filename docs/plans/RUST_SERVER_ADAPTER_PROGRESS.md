@@ -65,6 +65,11 @@ refresh or disposal logic is introduced. Coordination messages sent to the
 consumer-blockers owner (`codex-c6nf4w`); inspected its current contract, which
 keeps get/handle signatures and may replace handle.exchange after Rust refresh.
 Callers re-read that field. No PublicExchangeFactory implementation edits here.
+Owner explicitly confirmed this seam in coordination thread
+`thread-dmajcoys5cu7`: cached hits stay lazy; cold misses await native startup;
+successful refresh swaps the engine only after cache persistence, failure keeps
+the good handle, and dispose fences in-flight creation/refresh. The overseer
+recorded the agreed boundary. The adapter delegates all those policies unchanged.
 
 Plan audit caught inherited registry names reaching the resolver; added own-key
 validation and regressions. Disconnect must be wired before awaiting open;
@@ -91,3 +96,31 @@ Phase-4 sub-agent audit confirmed this gate set; added explicit CI fixture
 prebuild so cold native/TLS compilation uses the existing job budget rather
 than the integration runner's 120-second fixture deadline. No budgets, thresholds
 or timeouts changed. No additional production correctness findings.
+
+Final local acceptance (landing `0063068241` integrated):
+
+- Root typecheck **44/44**, lint **28/28**, tests **27/27** tasks. Each SDK
+  runner passed **7,328 tests / 505 files**; server **127 tests / 10 files**.
+- Rust workspace **2,370 tests / 190 groups**, no failures/ignored; workspace
+  all-target clippy, wasm32 clippy, fmt and banned-pattern checks PASS.
+- Combined release WASM build PASS. SDK/WASM **376 tests / 11 files**; host
+  **68/68**, Rust writer → JS/FrameApplier **1/1**, harness **533/533**.
+  An initial parallel WASM run hit the existing five-second KuCoin startup
+  deadline and was interrupted; the full suite passed with one worker and
+  unchanged deadlines. CI will also run its normal WASM suite.
+- Offline real native WebSocket adapter integration **1/1 PASS**. Fixture JSON
+  serialization uses typed structs; native all-target clippy and integration
+  rechecked after that change. No external venue requests in this fixture.
+- Binance public **PASS**: **873 frames, 917 markets, 783 tickers, 3 books**;
+  main-thread CPU TS **299.2** / Rust **159.6 ms** (**1.88x**), steady
+  **175.9 / 76.7 ms** (**2.29x**), retained **16.4 / 3.3 MB** (**4.92x**).
+- Generated Binance private **PASS**: **14 frames, 2 markets, 2 tickers**, no
+  books. Private CPU/memory are informational only.
+- Isolated Binance WASM **902,790 bytes**, existing budget **1,258,291**.
+  Built with the same release/features/bindgen flags to a temporary binding
+  directory, preserving the combined local bindings. No size budget changes.
+
+No TS venue bugs fixed, no TS venues removed, no provably unused crypto helpers
+introduced. No deploys, live private trading, or changes to the other lane's
+factory implementation. Application authorization/provisioning, deployed route
+adoption and TS shell features remain application-owned as documented.

@@ -4,11 +4,26 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::{Command, Cx, Engine, HttpRequest, Response, SocketId, TimerId, Venue};
 use safe_cex_native::{Events, FrameServer, Host, ServerConfig, Transport};
+use serde::Serialize;
 use std::io::Read;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 struct Offline;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Counters<'a> {
+    symbol: &'a str,
+    writes: u32,
+    timer_firings: u32,
+}
+
+#[derive(Serialize)]
+struct Endpoint {
+    url: String,
+}
+
 impl Transport for Offline {
     fn connect(&self, _: SocketId, _: String, _: Events) -> mpsc::UnboundedSender<String> {
         panic!("offline fixture must not open venue sockets")
@@ -115,26 +130,46 @@ impl Venue for FixtureVenue {
 }
 impl FixtureVenue {
     fn counters(&self, symbol: &str) -> String {
-        serde_json::json!({ "symbol": symbol, "writes": self.writes, "timerFirings": self.timer_firings }).to_string()
+        serde_json::to_string(&Counters {
+            symbol,
+            writes: self.writes,
+            timer_firings: self.timer_firings,
+        })
+        .expect("fixture counters are serializable")
     }
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tokio::task::LocalSet::new().run_until(async {
-        let mut server = FrameServer::new(ServerConfig {
-            flush_every: Duration::from_millis(10),
-            ..ServerConfig::default()
-        })?;
-        server.add_account("fixture", "offline-test-token", Host::new(Engine::new(FixtureVenue::default()), Offline))?;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        println!("{}", serde_json::json!({ "url": format!("ws://{}/accounts/fixture", listener.local_addr()?) }));
-        let (shutdown, stopping) = oneshot::channel();
-        std::thread::spawn(move || {
-            let _ = std::io::stdin().read_to_end(&mut Vec::new());
-            let _ = shutdown.send(());
-        });
-        server.serve(listener, async { let _ = stopping.await; }).await
-    }).await?;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut server = FrameServer::new(ServerConfig {
+                flush_every: Duration::from_millis(10),
+                ..ServerConfig::default()
+            })?;
+            server.add_account(
+                "fixture",
+                "offline-test-token",
+                Host::new(Engine::new(FixtureVenue::default()), Offline),
+            )?;
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            println!(
+                "{}",
+                serde_json::to_string(&Endpoint {
+                    url: format!("ws://{}/accounts/fixture", listener.local_addr()?),
+                })?
+            );
+            let (shutdown, stopping) = oneshot::channel();
+            std::thread::spawn(move || {
+                let _ = std::io::stdin().read_to_end(&mut Vec::new());
+                let _ = shutdown.send(());
+            });
+            server
+                .serve(listener, async {
+                    let _ = stopping.await;
+                })
+                .await
+        })
+        .await?;
     Ok(())
 }
