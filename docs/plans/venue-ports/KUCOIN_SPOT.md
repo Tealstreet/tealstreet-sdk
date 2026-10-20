@@ -70,4 +70,19 @@ fixed settings, account identity, and fresh-token watchdog recovery.
 `sdk-rs/harness/private-tape-kucoinspot.mjs` emits a deterministic forty-six-record,
 thirteen-command private tape. `sdk-rs/harness/kucoinspot.mjs` independently
 checks signing and bullet/subscription protocol; it performs no financial
-output rewriting. Final gate evidence is recorded in the parity-gaps plan/PR.
+output rewriting.
+
+Both public gates pass three runs with standard egress on fresh twenty-second
+captures. The [gate evidence](KUCOIN_GATES.json) records exact source, artifact,
+tape hashes, audit results, and median measurements:
+
+| Venue | Main CPU TS / Rust (ms) | Steady CPU TS / Rust (ms) | Retained TS / Rust (bytes) | WASM bytes |
+| --- | --- | --- | --- | --- |
+| Spot | 822.038 / 697.728 | 548.043 / 476.942 | 16,705,601 / 3,302,492 | 672,731 |
+| Futures | 1,085.112 / 772.439 | 728.631 / 487.446 | 18,952,785 / 3,291,556 | 775,102 |
+
+Spot private correctness passes twenty-two frames and thirteen commands; futures
+passes thirty-two frames and seventeen commands. Every request, write,
+signature and protocol audit is clean. The actual Spot SDK/WASM boundary test
+passes, and the focused native suite passes 137 tests, including 38 Spot tests,
+with all-target Clippy warnings denied. The fixed 1,258,291-byte budget is unchanged.

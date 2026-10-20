@@ -1,5 +1,5 @@
 {
-  "status": "Historical checkpoint before the next landing merge; final current-source refresh remains pending.",
+  "status": "PASS for the standard artifacts and harness sources recorded per gate.",
   "toolchain": "1.99.0",
   "wasmByteBudget": 1258291,
   "normalEgress": true,
@@ -22,8 +22,9 @@
   "sdkBoundary": {
     "command": "corepack yarn workspace @tealstreet/safe-cex test-wasm src/__tests__/audit-regressions/kucoinspot.rust-boundary.wasm.test.ts",
     "passed": 1,
-    "artifactSha256": "93aed781f3d2097bd1b8aa09540e4ecec8212b7c8dc8f5bb386f2108b008812f",
-    "log": "/tmp/kucoin-parity-gates/kucoinspot-sdk.log"
+    "artifactSha256": "f092c863bc28a89e6a445b7d75662668f38125f653e65b2866bded6aeeef7dc8",
+    "log": "/tmp/kucoin-parity-gates/kucoinspot-sdk.log",
+    "source": "db87bfb00d14456599864eaa562f1fde788f2cda"
   },
   "capture": {
     "kucoinspot": {
@@ -59,19 +60,21 @@
     {
       "venue": "kucoinspot",
       "stage": "public",
+      "harnessSource": "db87bfb00d14456599864eaa562f1fde788f2cda",
+      "proofWrittenAt": "2026-10-20T05:14:17.372620+00:00",
       "standardEgress": true,
       "tape": "sdk-rs/harness/fixtures/kucoinspot-public.jsonl.gz",
       "tapeBytes": 1591824,
       "tapeSha256": "72c38d8bcff802c12497fe3074d50b54dec5d74ce2b0aa436441fde04c04f8a0",
       "records": 26431,
-      "outputDirectory": "sdk-rs/harness/out/kucoinspot-84240",
+      "outputDirectory": "sdk-rs/harness/out/kucoinspot-24669",
       "log": "/tmp/kucoin-parity-gates/kucoinspot-public.log",
       "artifact": {
         "venue": "kucoinspot",
-        "source": "b0fb89f6cc7262f3a2d5894a38ecc5f54ef2e9b9",
+        "source": "db87bfb00d14456599864eaa562f1fde788f2cda",
         "artifact": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
         "bytes": 672731,
-        "sha256": "93aed781f3d2097bd1b8aa09540e4ecec8212b7c8dc8f5bb386f2108b008812f",
+        "sha256": "f092c863bc28a89e6a445b7d75662668f38125f653e65b2866bded6aeeef7dc8",
         "budget": 1258291,
         "standardBuild": true
       },
@@ -85,10 +88,10 @@
           "books": 2,
           "commands": 0,
           "median": {
-            "cpuMs": 924.078,
-            "steadyCpuMs": 626.704,
-            "processCpuMs": 1237.607,
-            "retainedBytes": 16646745
+            "cpuMs": 822.038,
+            "steadyCpuMs": 548.043,
+            "processCpuMs": 1170.636,
+            "retainedBytes": 16705601
           },
           "bookDepth": {
             "ETH-USDT": {
@@ -116,10 +119,10 @@
           "books": 2,
           "commands": 0,
           "median": {
-            "cpuMs": 811.831,
-            "steadyCpuMs": 566.178,
-            "processCpuMs": 996.664,
-            "retainedBytes": 3295436
+            "cpuMs": 697.728,
+            "steadyCpuMs": 476.942,
+            "processCpuMs": 889.762,
+            "retainedBytes": 3302492
           },
           "bookDepth": {
             "ETH-USDT": {
@@ -140,25 +143,26 @@
           }
         }
       },
-      "harnessSource": "b0fb89f6cc7262f3a2d5894a38ecc5f54ef2e9b9",
       "command": "corepack yarn -s rust:gate --venue kucoinspot --tape sdk-rs/harness/fixtures/kucoinspot-public.jsonl.gz --runs 3 --books BTC-USDT,ETH-USDT"
     },
     {
       "venue": "kucoinspot",
       "stage": "private",
+      "harnessSource": "db87bfb00d14456599864eaa562f1fde788f2cda",
+      "proofWrittenAt": "2026-10-20T05:14:28.985749+00:00",
       "standardEgress": true,
       "tape": "sdk-rs/harness/tapes/kucoinspot-private.jsonl",
       "tapeBytes": 11845,
       "tapeSha256": "631ddaee04f31d326745d2badae5f67d2593617238ef601f6c098b832d9c3320",
       "records": 46,
-      "outputDirectory": "sdk-rs/harness/out/kucoinspot-86045",
+      "outputDirectory": "sdk-rs/harness/out/kucoinspot-25531",
       "log": "/tmp/kucoin-parity-gates/kucoinspot-private.log",
       "artifact": {
         "venue": "kucoinspot",
-        "source": "b0fb89f6cc7262f3a2d5894a38ecc5f54ef2e9b9",
+        "source": "db87bfb00d14456599864eaa562f1fde788f2cda",
         "artifact": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
         "bytes": 672731,
-        "sha256": "93aed781f3d2097bd1b8aa09540e4ecec8212b7c8dc8f5bb386f2108b008812f",
+        "sha256": "f092c863bc28a89e6a445b7d75662668f38125f653e65b2866bded6aeeef7dc8",
         "budget": 1258291,
         "standardBuild": true
       },
@@ -172,10 +176,10 @@
           "books": 0,
           "commands": 13,
           "median": {
-            "cpuMs": 67.079,
-            "steadyCpuMs": 15.756,
-            "processCpuMs": 136.014,
-            "retainedBytes": 12953697
+            "cpuMs": 71.055,
+            "steadyCpuMs": 16.636,
+            "processCpuMs": 145.898,
+            "retainedBytes": 12964913
           },
           "bookDepth": {},
           "requestAudit": {
@@ -194,10 +198,10 @@
           "books": 0,
           "commands": 13,
           "median": {
-            "cpuMs": 28.947,
-            "steadyCpuMs": 10.96,
-            "processCpuMs": 29.066,
-            "retainedBytes": 941996
+            "cpuMs": 48.699,
+            "steadyCpuMs": 18.266,
+            "processCpuMs": 48.976,
+            "retainedBytes": 961628
           },
           "bookDepth": {},
           "requestAudit": {
@@ -209,24 +213,23 @@
           }
         }
       },
-      "harnessSource": "b0fb89f6cc7262f3a2d5894a38ecc5f54ef2e9b9",
       "command": "corepack yarn -s rust:gate --venue kucoinspot --tape sdk-rs/harness/tapes/kucoinspot-private.jsonl --runs 1 --books ''"
     },
     {
       "venue": "kucoin",
       "stage": "public",
-      "harnessSource": "92507c71c18ca8821edb1b9ba7d7294ae5623cbc",
-      "proofWrittenAt": "2026-10-20T05:04:53.355141+00:00",
+      "harnessSource": "db87bfb00d14456599864eaa562f1fde788f2cda",
+      "proofWrittenAt": "2026-10-20T05:13:28.198960+00:00",
       "standardEgress": true,
       "tape": "sdk-rs/harness/fixtures/kucoin-public.jsonl.gz",
       "tapeBytes": 488852,
       "tapeSha256": "6830bc02106fb6b4d05db9a3c4e535ea3c6937f39498fc980755facaa44f16b5",
       "records": 8322,
-      "outputDirectory": "sdk-rs/harness/out/kucoin-67281",
+      "outputDirectory": "sdk-rs/harness/out/kucoin-11949",
       "log": "/tmp/kucoin-parity-gates/kucoin-public.log",
       "artifact": {
         "venue": "kucoin",
-        "source": "2741ad7411751be572270e9fcd47805dd9aa8315",
+        "source": "0d705cee3889fc58bb9e07f559b9a67956407229",
         "artifact": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
         "bytes": 775102,
         "sha256": "5fe19957eca948aca3668979a09abd73d67cd34f23764e83b8bc2267c4de17a2",
@@ -243,10 +246,10 @@
           "books": 2,
           "commands": 0,
           "median": {
-            "cpuMs": 442.266,
-            "steadyCpuMs": 268.092,
-            "processCpuMs": 622.894,
-            "retainedBytes": 18896049
+            "cpuMs": 1085.112,
+            "steadyCpuMs": 728.631,
+            "processCpuMs": 1281.468,
+            "retainedBytes": 18952785
           },
           "bookDepth": {
             "BTCUSDT": {
@@ -274,10 +277,10 @@
           "books": 2,
           "commands": 0,
           "median": {
-            "cpuMs": 249.202,
-            "steadyCpuMs": 145.506,
-            "processCpuMs": 422.233,
-            "retainedBytes": 3316316
+            "cpuMs": 772.439,
+            "steadyCpuMs": 487.446,
+            "processCpuMs": 970.544,
+            "retainedBytes": 3291556
           },
           "bookDepth": {
             "BTCUSDT": {
@@ -303,18 +306,18 @@
     {
       "venue": "kucoin",
       "stage": "private",
-      "harnessSource": "08a875e77c4168a384a6ac4f0fb69524dc9b0323",
-      "proofWrittenAt": "2026-10-20T05:02:20.979883+00:00",
+      "harnessSource": "0d705cee3889fc58bb9e07f559b9a67956407229",
+      "proofWrittenAt": "2026-10-20T05:07:48.912768+00:00",
       "standardEgress": true,
       "tape": "sdk-rs/harness/tapes/kucoin-private.jsonl",
       "tapeBytes": 26347,
       "tapeSha256": "31eaff8fcb6de28468ba8724923c891650d2734d02b401e200b277bdfc9b20e7",
       "records": 77,
-      "outputDirectory": "sdk-rs/harness/out/kucoin-51704",
+      "outputDirectory": "sdk-rs/harness/out/kucoin-85796",
       "log": "/tmp/kucoin-parity-gates/kucoin-private.log",
       "artifact": {
         "venue": "kucoin",
-        "source": "2741ad7411751be572270e9fcd47805dd9aa8315",
+        "source": "0d705cee3889fc58bb9e07f559b9a67956407229",
         "artifact": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
         "bytes": 775102,
         "sha256": "5fe19957eca948aca3668979a09abd73d67cd34f23764e83b8bc2267c4de17a2",
@@ -331,10 +334,10 @@
           "books": 0,
           "commands": 17,
           "median": {
-            "cpuMs": 124.628,
-            "steadyCpuMs": 38.729,
-            "processCpuMs": 294.14,
-            "retainedBytes": 15776593
+            "cpuMs": 109.142,
+            "steadyCpuMs": 40.755,
+            "processCpuMs": 167.502,
+            "retainedBytes": 15908113
           },
           "bookDepth": {},
           "requestAudit": {
@@ -353,10 +356,10 @@
           "books": 0,
           "commands": 17,
           "median": {
-            "cpuMs": 58.86,
-            "steadyCpuMs": 26.067,
-            "processCpuMs": 70.994,
-            "retainedBytes": 1052092
+            "cpuMs": 50.506,
+            "steadyCpuMs": 24.628,
+            "processCpuMs": 61.54,
+            "retainedBytes": 1055988
           },
           "bookDepth": {},
           "requestAudit": {
@@ -382,5 +385,17 @@
       "fixCommit": "6ba4327e4a",
       "correction": "The generic recorder assigns requestOrdinal before awaiting I/O; replay orders each explicit queue by request initiation. The replacement futures capture exercises reversed completion order."
     }
-  ]
+  ],
+  "validationHead": "db87bfb00d14456599864eaa562f1fde788f2cda",
+  "privatePerformanceIsInformational": true,
+  "harnessFilesSha256": {
+    "sdk-rs/harness/gate.mjs": "9838142e705d74c9e8ccf68a0b35dd195466278821e3d3f47939e7b55636f8bb",
+    "sdk-rs/harness/replay.mjs": "c7a810ebf20ddf6dde43bdfaa0fd883d569113995923e3f73ec1ba4171a8bb50",
+    "sdk-rs/harness/responses.mjs": "c185de2632561867775f5a5605369259351e3fd263a6ac8a993d572147752fc7",
+    "sdk-rs/harness/tape.mjs": "ed7d15fda560d9b09d990e45d9384d04ed7584c730969ae73639fbf981b53617",
+    "sdk-rs/harness/kucoin.mjs": "6f1aeaea34cd13a05f9c812a52f9acb11de811d9e5377ad826dab345c7b18384",
+    "sdk-rs/harness/kucoinspot.mjs": "743ebe1596044e7e4d385e0e8197b911c8de843234e42a7a4c54b04502bdfb3b",
+    "sdk-rs/harness/account-shapes.mjs": "4b8af322b7401fecf29f406d0621b89b65cc8f9ec59ecaec5242acd8d2490dc5",
+    "sdk-rs/hosts/wasm/js/host.mjs": "718ce1b0b5bfa8cf0273ce752cc336ddd0ee8a83a0d9c34be2e9087844586e75"
+  }
 }
