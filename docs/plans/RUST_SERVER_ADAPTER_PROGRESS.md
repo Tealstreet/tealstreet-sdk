@@ -46,3 +46,12 @@ never stack another lossy/coalescing delta layer downstream. PublicExchangeFacto
 remains its owner's contract; native sessions do not seed or mutate that TS store.
 
 Progress: initial plan recorded; consumer-blockers coordination requested.
+
+## Phase 2
+
+Implemented the bounded native session with no TS engine/store, command replay
+or automatic reconnect. Independent sub-agent review found synchronous abort
+inside an injected socket factory could leak its returned socket; fixed by
+closing a late-acquired resource before installing listeners. Added regression.
+AbortSignal also cancels handshake and pending snapshot delivery. Review now
+passes. Focused tests: **92/92**; package typecheck and lint PASS.
