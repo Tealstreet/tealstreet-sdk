@@ -4,7 +4,7 @@
 # place of the combined engine, for gates; --families builds every family into
 # pkg/{web,node}/<family>, which browser and Worker loaders fetch per venue.
 set -euo pipefail
-venues="breakoutprop, asterdex, binance, kucoin, kucoinspot, bybit, hyperliquid, hyperliquidspot, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, phemex, woo, lighter, lighter-robinhood, apexomni, kraken, krakenspot, paradex, coinbase, orderly or polymarket"
+venues="breakoutprop, asterdex, binance, kucoin, kucoinspot, bybit, hyperliquid, hyperliquidspot, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitgetusdc, bitrue, phemex, woo, lighter, lighter-robinhood, apexomni, kraken, krakenspot, paradex, coinbase, orderly or polymarket"
 if [[ $# -gt 0 && ! ( $# -eq 2 && $1 == --venue ) && ! ( $# -eq 1 && $1 == --families ) ]]; then
   echo "Usage: $0 [--venue VENUE | --families]" >&2
   exit 2
@@ -13,6 +13,7 @@ fi
 family_args() {
   case "$1" in
     breakoutprop|asterdex|binance|kucoin|kucoinspot|bybit|hyperliquid|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|paradex|polymarket|coinbase|orderly) family=$1 ;;
+    bitgetusdc) family=bitget ;;
     lighter-robinhood) family=lighter ;;
     hyperliquidspot) family=hyperliquid ;;
     krakenspot) family=kraken ;;

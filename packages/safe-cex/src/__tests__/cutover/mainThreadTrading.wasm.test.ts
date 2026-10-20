@@ -83,6 +83,7 @@ const RESPONSES: Record<string, string> = {
   order: '{"orderId":4242,"status":"NEW","clientOrderId":"x"}',
   allOpenOrders: '{"code":200,"msg":"The operation of cancel all open order is done."}',
   algoOpenOrders: '{"code":200,"msg":"success"}',
+  trades: '[{"id":1,"price":"100.5","qty":"0.2","quoteQty":"20.1","time":1700000000000,"isBuyerMaker":true}]',
 };
 
 /** Canned Binance USD-M venue; records every request the worker's engine sends. */
@@ -157,7 +158,8 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
     // client order IDs from the first crypto source it finds there.
     Object.defineProperty(window, 'crypto', { configurable: true, value: webcrypto });
     const tape = venue();
-    setWasmEngineLoader(loadNodeEngine);
+    const loader = vi.fn(loadNodeEngine);
+    setWasmEngineLoader(loader);
     setRustEngineTransport(() => tape.transport);
     setMainAcceptsFrames(frames);
     const options = { key: 'k', secret: 's' };
@@ -181,7 +183,7 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
       expect(view.orders.map((order) => order.id).sort()).toEqual(['777', '778']);
       expect(view.positions.find((position) => position.contracts > 0)?.contracts).toBe(0.5);
     });
-    return { tape, view };
+    return { tape, view, loader };
   };
 
   it.each([
@@ -239,6 +241,21 @@ describe('main-thread Rust exchange trades through the worker engine', () => {
       expect(nuke.some((write) => write.startsWith('DELETE') && write.includes('BTCUSDT'))).toBe(true);
     },
   );
+
+  it('reads public trades and adopts capabilities from the worker without a main-thread engine', async () => {
+    const { tape, loader } = await start(true);
+    await expect(main!.fetchPublicTrades('BTCUSDT')).resolves.toEqual([
+      expect.objectContaining({ id: '1', symbol: 'BTCUSDT', price: 100.5, side: 'sell' }),
+    ]);
+    expect(tape.requests.filter((request) => request.includes('/fapi/v1/trades?'))).toHaveLength(1);
+    await vi.waitFor(() =>
+      expect(main!.engineCapabilities).toEqual((worker!.exchange as RustEngineExchange).engineCapabilities),
+    );
+    await expect(main!.loadCapabilities()).resolves.toEqual(worker!.exchange!.capabilities);
+    expect(main!.hasStarted).toBe(false);
+    // Only the worker built an engine.
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
 
   it('reports a worker-side preflight rejection once and sends nothing', async () => {
     const { tape } = await start(true);

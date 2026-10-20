@@ -1090,7 +1090,7 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
                 },
             }),
         );
-        let actions = h.engine.drain_actions().collect::<Vec<_>>();
+        let actions = plain(h.engine.drain_actions());
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             actions.iter().any(|a| matches!(
@@ -1129,7 +1129,7 @@ fn acknowledged_cancel_route_survives_missing_store_preflight_but_not_an_unknown
                 },
             }),
         );
-        let out = h.engine.drain_actions().collect::<Vec<_>>();
+        let out = plain(h.engine.drain_actions());
         if mixed {
             assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
             assert!(out.iter().any(|a| matches!(
@@ -1184,4 +1184,84 @@ fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
         assert!(h.done[0].1.is_err());
         assert!(h.requests.iter().all(|r| r.method == Method::Get));
     }
+}
+
+/// Failures as the plain text the host renders.
+fn plain(actions: impl Iterator<Item = safe_cex_engine::Action>) -> Vec<safe_cex_engine::Action> {
+    actions
+        .map(|a| match a {
+            safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandFailed {
+                command,
+                error,
+            }) => safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandDone {
+                command,
+                result: Err(error.legacy_text()),
+            }),
+            a => a,
+        })
+        .collect()
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let unknown = (None, Some(Outcome::Unknown));
+    for (status, body, classified) in [
+        (
+            400,
+            r#"{"code":"40762","msg":"The order amount exceeds the balance"}"#,
+            (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
+        ),
+        (
+            429,
+            r#"{"code":"429","msg":"Too Many Requests"}"#,
+            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+        ),
+        (503, r#"{"code":"50000","msg":"busy"}"#, unknown),
+        (200, r#"{"code":"45001","msg":"unknown"}"#, unknown),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"balance"}]}}"#,
+            (None, None),
+        ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[]}}"#,
+            unknown,
+        ),
+    ] {
+        let mut h = Harness::classic();
+        place(&mut h, vec![limit()]);
+        let request = h.take("/batch-place-order");
+        h.reply(request.id, status, body);
+        let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+        assert_eq!(
+            (error.kind, error.outcome),
+            classified,
+            "{status} {body}: {}",
+            error.message
+        );
+        assert_eq!(h.done.last().unwrap().1, Err(error.legacy_text()));
+        if status == 400 {
+            assert_eq!(error.venue_code.as_deref(), Some("40762"));
+        }
+    }
+    // Transport loss on a write is Unknown.
+    let mut h = Harness::classic();
+    place(&mut h, vec![limit()]);
+    let request = h.take("/batch-place-order");
+    h.event(Event::HttpFailed {
+        request: request.id,
+        error: "reset",
+    });
+    assert_eq!(
+        (h.failures[0].kind, h.failures[0].outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
+    // Preflight refusals were never sent.
+    let mut h = Harness::classic();
+    let mut bad = limit();
+    bad["clientOrderId"] = json!("bad id");
+    place(&mut h, vec![bad]);
+    assert_eq!(h.failures[0].outcome, Some(Outcome::NotSent));
 }
