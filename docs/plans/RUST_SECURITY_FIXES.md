@@ -401,3 +401,22 @@ live trading, weakened parity oracle, or performance threshold changes.
   `/tmp/security-v4-gates.json` and `/tmp/security-v4-artifacts/`. The combined
   bundle is rebuilding for the 18 host/consumer/integration checks; it has no
   isolated size budget. Public correctness/CPU/memory and PR/CI remain pending.
+
+### Combined SDK diagnostic regression update
+
+- Rebuilt combined host suite passes 100/100. The Wasm SDK suite exposes one
+  stale assertion: 443/444 pass, while Polymarket's partial-batch test still
+  expects a raw custom transport exception. The intended fixed diagnostic is
+  present and every partial-order metadata field matches. Original failure
+  remains in `/tmp/security-v4-combined-wasm-tests.log`.
+- Only that integration test changes: inject all synthetic API credentials
+  and a signed URL into the exception, require the exact fixed message and no
+  credential/URL in Error text/JSON, retain every partial-identity/write/store
+  assertion. Removing the HTTP boundary reproduces failure; restoring it
+  passes all 16 Polymarket Wasm tests. Package typecheck/lint pass; independent
+  review accepted the test. Production, build and fixture inputs are unchanged.
+- Preserve all 30 immutable isolated/private/size receipts. The external guard
+  may permit exactly this reviewed test path at its pinned post-commit hash;
+  no runtime/build/fixture path is excluded. Recheck artifact manifests and
+  rerun the full Wasm suite plus all remaining combined checks before public
+  timing. No performance, semantic or partial-write assertion is relaxed.
