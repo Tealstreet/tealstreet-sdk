@@ -248,3 +248,18 @@ than treating the original port boundary as a waiver.
 - Independent index-dispatch review PASS with no findings
   (`/tmp/parity-okx-index-review.md`); only committed current-market IDs enter
   the derived map, and incomplete catalogs do not publish a new index.
+
+### GRVT harness checkpoint
+
+- Eight documented-pattern catalog IDs span two perps, stable perp, two dated
+  futures, two call strikes and a put; removed the GRVT PERP-only projection.
+  Independent EIP-712 controls assert exact per-product hashes and economics.
+- Expanded private tape130records/17commands: six derivative placements, true
+  individual partial fills, and exact snapshot-based cancellation with other
+  expiry/strike/kind siblings present. The single global cancel remains `{sa}`.
+- Independent harness review found and verified repairs to signed position
+  notionals/PnL/short liquidation prices and fills above a BUY limit. Final
+  Decimal inspection confirms all14position rows and six derivative fills.
+- Harness387/387 PASS; independent fixture/source review PASS
+  (`/tmp/parity-grvt-harness-review.md`). Actual mixed-product replay follows
+  the native trading checkpoint and final merged build; it is not yet claimed.

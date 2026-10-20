@@ -176,13 +176,17 @@ const KNOWN_TS_FIXES = {
   // tombstones against delayed stream events. Session code 1000 refreshes once
   // even when delivered in an HTTP-200 error envelope.
   // Orders use exact EIP-712 integers, distinct reducing bracket children,
-  // native symbol-cancel filters and remaining quantity on partial-fill amend.
+  // exact-instrument cancellation and remaining quantity on partial-fill amend.
   // Conditional replacement retains native execution price separately from
   // its trigger; mapped orders keep explicit client IDs. Refreshed cookies
   // agree with proxy-session headers and reconnect the private socket.
   // The private server ping receives pong rather than being ignored.
   // Rust also refuses replacement after observed execution/lifecycle progress
   // or stale cancellation proof, rechecking deferred/resigned dispatches.
+  // Mixed products retain native kind/hash; full raw open-order validation
+  // precedes individual symbol cancellations and preserves sibling contracts.
+  // Raw ACK checks stop rejected/ambiguous writes; client-only cancellations
+  // cannot silently reauthenticate and retarget a reused client identity.
   grvt() {},
   polymarket() {
     // Reference repairs (not output normalization): preserve initial array books,

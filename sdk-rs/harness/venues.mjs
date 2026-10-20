@@ -586,6 +586,12 @@ export const VENUES = {
     const instruments = {
       BTC_USDT_Perp: { hash: '0x030501', decimals: 9 },
       ETH_USDT_Perp: { hash: '0x030502', decimals: 9 },
+      BTC_USDT_StablePerp: { hash: '0x030508', decimals: 9 },
+      BTC_USDT_Fut_25Dec26: { hash: '0x030503', decimals: 9 },
+      BTC_USDT_Fut_26Mar27: { hash: '0x030504', decimals: 9 },
+      BTC_USDT_Call_25Dec26_50000: { hash: '0x030505', decimals: 9 },
+      BTC_USDT_Call_25Dec26_60000: { hash: '0x030506', decimals: 9 },
+      BTC_USDT_Put_25Dec26_50000: { hash: '0x030507', decimals: 9 },
     };
     // This schema is independent of the venue encoder and the GRVT SDK signer.
     const types = {
@@ -611,7 +617,6 @@ export const VENUES = {
       tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((k) => k.startsWith('orderbook.')).length >= count,
       options: { grvtSessionProxy: true, grvtTradingAccountId: '777' },
       replayCredentials: { key: 'grvt-replay-key', secret },
-      marketFilter: (row) => row.symbol.endsWith('_PERP'),
       requestBodies: true,
       generatedId: () => false,
       compareClientIds: true,
