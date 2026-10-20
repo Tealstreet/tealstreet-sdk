@@ -91,7 +91,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | --- | --- | --- |
 | 1 | `STRINGS` | `u32 n`, `u32 offsets[n + 1]`, UTF-8 bytes |
 | 2 | `MARKETS` (replace) | `u32 n`; `u32 strings[n][4]` (id, symbol, base, quote); `u32 flags[n]`; f64 columns: precisionAmount, precisionPrice, minAmount, maxAmount, minLeverage, maxLeverage, minPrice, contractSize, takerFee, makerFee |
-| 3 | `TICKERS` (replace) | `u32 n`; `u32 market[n]`; 11 f64 columns in ticker field order |
+| 3 | `TICKERS` (replace) | `u32 n`; `u32 market[n]`; 11 f64 columns in ticker field order; optional appended `u32 symbol[n]`, `u32 id[n]` string references |
 | 4 | `TICKER_DELTAS` | f64 `[ticker, mask, ...changed values]` repeated |
 | 5 | `BOOK` | `u32 market`, `u32 bids`, `u32 asks`, `u32 0`; f64 rows `[price, amount, total]` for bids then asks |
 | 6 | `CANDLES` | `u32 n`; `u32 market[n]`; `u32 interval[n]` (string); f64 rows `[time, open, high, low, close, volume]` |
@@ -101,6 +101,11 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
 | 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
 | 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]`; optional appended f64 `buyLeverage[n]`, `sellLeverage[n]` |
+
+`TICKERS` appends identity string references only when a ticker has no current
+market row. Those rows retain market index `0xFFFFFFFF`; consumers use the tail
+to preserve their native symbol and ID. The eleven numeric columns and packed
+delta row indexes retain their existing offsets. No market is synthesized.
 
 Venues with independent hedge leverage append f64 `buyLeverage[n]` and
 `sellLeverage[n]` columns to `SETTINGS`. Section length distinguishes this

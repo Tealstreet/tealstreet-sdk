@@ -6,6 +6,7 @@
 #[cfg(not(any(
     feature = "bitrue",
     feature = "binance",
+    feature = "asterdex",
     feature = "blofin",
     feature = "bybit",
     feature = "cryptocom",
@@ -21,10 +22,12 @@ compile_error!(
     "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx or weex"
 );
 
-use safe_cex_engine::model::PlaceOrderOpts;
+use safe_cex_engine::model::{PlaceOrderOpts, StpMode};
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
+#[cfg(feature = "asterdex")]
+use safe_cex_venue_asterdex::{AsterDex, Options as AsterOptions};
 #[cfg(feature = "backpack")]
 use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 #[cfg(feature = "binance")]
@@ -88,6 +91,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
 #[cfg(any(
     feature = "binance",
+    feature = "asterdex",
     feature = "blofin",
     feature = "bybit",
     feature = "cryptocom",
@@ -105,6 +109,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 struct EngineOptions {
     #[cfg(any(
         feature = "binance",
+        feature = "asterdex",
         feature = "blofin",
         feature = "bybit",
         feature = "cryptocom",
@@ -131,7 +136,7 @@ struct EngineOptions {
     ))]
     #[serde(default)]
     passphrase: Option<String>,
-    #[cfg(feature = "hyperliquid")]
+    #[cfg(any(feature = "hyperliquid", feature = "asterdex"))]
     #[serde(default)]
     application_id: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -143,10 +148,29 @@ struct EngineOptions {
     #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     enable_spot_markets: bool,
+    #[cfg(feature = "asterdex")]
+    #[serde(default)]
+    asterdex: AsterConfig,
+
     #[cfg(feature = "weex")]
     #[serde(default)]
     private_ws_headers: bool,
 }
+#[cfg(feature = "asterdex")]
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AsterConfig {
+    api_version: Option<safe_cex_venue_asterdex::sign::Version>,
+    user_address: Option<String>,
+    signer_address: Option<String>,
+    private_key: Option<String>,
+    builder_address: Option<String>,
+    builder_fee_rate_maker: Option<String>,
+    builder_fee_rate_taker: Option<String>,
+    read_key: Option<String>,
+    read_secret: Option<String>,
+}
+
 #[cfg(feature = "hyperliquid")]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -338,6 +362,22 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
+    FetchStpMode {
+        command: u32,
+    },
+    FetchAccount {
+        command: u32,
+    },
+    FetchOrderBook {
+        command: u32,
+        symbol: String,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    SetStpMode {
+        command: u32,
+        mode: StpMode,
+    },
     FetchLeverage {
         command: u32,
         symbol: String,
@@ -455,6 +495,18 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
+            CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
+            CommandIn::FetchAccount { command } => Self::FetchAccount { command },
+            CommandIn::FetchOrderBook {
+                command,
+                symbol,
+                limit,
+            } => Self::FetchOrderBook {
+                command,
+                symbol,
+                limit,
+            },
+            CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
                 command,
@@ -566,6 +618,7 @@ pub struct WasmEngine {
 impl WasmEngine {
     #[cfg(any(
         feature = "binance",
+        feature = "asterdex",
         feature = "blofin",
         feature = "bybit",
         feature = "cryptocom",
@@ -589,6 +642,23 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "asterdex")]
+            "asterdex" => Box::new(Engine::new(AsterDex::new(AsterOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+                auth_user_address: options.asterdex.user_address,
+                auth_signer_address: options.asterdex.signer_address,
+                auth_private_key: options.asterdex.private_key,
+                api_version: options.asterdex.api_version,
+                builder_address: options.asterdex.builder_address,
+                builder_fee_rate_maker: options.asterdex.builder_fee_rate_maker,
+                builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker,
+                read_key: options.asterdex.read_key,
+                read_secret: options.asterdex.read_secret,
+            }))),
             #[cfg(feature = "bitrue")]
             "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
                 public_data_only: options.public_data_only,

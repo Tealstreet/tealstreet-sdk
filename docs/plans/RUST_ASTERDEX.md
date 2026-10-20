@@ -87,3 +87,34 @@ for green CI, merge, and cut a fresh follow-up branch.
 - Private/trading phase code-correctness reviews caught and fixed flip-side,
   account overlap, fill identity, terminal cancel races, and hedge closure bugs.
   Trading review is clear; final integration gates remain pending.
+
+### Private, trading and queries checkpoint
+
+- Private implementation and independent review complete: V1/V3 auth, listen
+  keys/watchdogs, strict account event time, per-domain repairs, terminal races,
+  currencies and settings. Native private tests16/16 pass (including account
+  identity and configured leverage commands).
+- Trading phase independently reviewed and fixed: sequential split/bracket
+  orders, builder/STP policy, cancel/replace fill races, idempotent unknown cancel,
+  settings ACK versus stale REST. Native trading22/22 plus decimal unit pass.
+- Query phase independently reviewed:16 native tests pass. Documented string
+  ledger IDs, PnL normalization before invalid-size filtering and overflow,
+  V3 account-wide history, complete/deduplicated/paced income range walks.
+- Public native tests12/12 and strict Aster all-target clippy pass. REST depth
+  read preserves the existing standalone quote-total contract; stream totals
+  retain their base-quantity contract. Public ticker identity tail preserves
+  orphan rows with no active market; Store11/11, decoder7/7 and hydration/delta
+  regression pass. No synthetic markets or result filtering.
+- Secondary routing:192 TS transport tests, native selector test, package
+  typecheck and source lint pass. Root typecheck44/44 and lint28/28 pass.
+- Initial artifact977616bytes (budget1258291). V1 and V3 private gates pass on
+  documented tapes; native V3 contracts pass before latest metadata commands.
+  Live public recording20seconds:383WSframes/twobooks,608markets/631tickers.
+  First public gate failed only23 orphan ticker identities; performance passed
+  (TS/Rust main134.1/86.2ms, steady60.9/38.6ms, retained8.1/1.9MB). Correctness
+  fix is implemented; final artifact rebuild/gates remain pending.
+- Intentional TS corrections: hedge-zero closes only the reported rail;
+  historical candles use shared seconds; amendments stop after a fill during
+  cancel; nonce state is per agent (official V3 contract), not per owner+agent.
+- Remaining phase5: public read retry and exact direct/CORS clock fallback
+  review findings, final rebuilt replay/host/Binance gates, CI and PR reviews.

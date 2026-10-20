@@ -55,6 +55,7 @@ impl Harness {
             self.reply("/time", 200, r#"{"serverTime":1700000000000}"#);
         }
         self.reply("/exchangeInfo", 200, MARKETS);
+        self.reply("/leverageBracket", 200, "[]");
         self.reply("/ticker/24hr", 200, DAILY);
         self.reply(
             "/openInterest",
@@ -429,7 +430,9 @@ fn failed_optional_interest_does_not_block_public_start() {
         public_data_only: true,
         ..Options::default()
     });
+    h.reply("/time", 200, r#"{"serverTime":1700000000000}"#);
     h.reply("/exchangeInfo", 200, MARKETS);
+    h.reply("/leverageBracket", 200, "[]");
     h.reply("/ticker/24hr", 200, DAILY);
     h.reply(
         "/openInterest",
@@ -452,4 +455,43 @@ fn failed_optional_interest_does_not_block_public_start() {
             .iter()
             .any(|request| request.url.ends_with("openInterest?symbol=BTCUSDT"))
     );
+}
+
+#[test]
+fn one_off_rest_depth_sorts_levels_and_preserves_quote_totals() {
+    let mut h = Harness::ready();
+    h.command(Command::FetchOrderBook {
+        command: 50,
+        symbol: "BTCUSDT".into(),
+        limit: Some(100),
+    });
+    h.reply("/depth",200,r#"{"lastUpdateId":1027024,"bids":[["100","2"],["101","1"]],"asks":[["103","2"],["102","1"]]}"#);
+    let result = h
+        .done
+        .iter()
+        .find(|(id, _)| *id == 50)
+        .unwrap()
+        .1
+        .as_ref()
+        .unwrap();
+    let result: serde_json::Value = serde_json::from_str(result).unwrap();
+    assert_eq!(
+        result,
+        serde_json::json!({"bids":[{"price":101.0,"amount":1.0,"total":101.0},{"price":100.0,"amount":2.0,"total":301.0}],"asks":[{"price":102.0,"amount":1.0,"total":102.0},{"price":103.0,"amount":2.0,"total":308.0}]})
+    );
+}
+#[test]
+fn ticker_seed_retains_native_rows_without_active_market_metadata() {
+    let mut h = Harness::start(Options {
+        public_data_only: true,
+        ..Default::default()
+    });
+    h.reply("/time", 200, r#"{"serverTime":1700000000000}"#);
+    h.reply("/exchangeInfo", 200, MARKETS);
+    h.reply("/leverageBracket", 200, "[]");
+    h.reply("/ticker/24hr",200,r#"[{"symbol":"OLDUSDT","lastPrice":"1","priceChangePercent":"0","volume":"2","quoteVolume":"2"}]"#);
+    h.reply("/openInterest", 200, "[]");
+    assert_eq!(h.engine.store().markets().len(), 1);
+    assert_eq!(h.engine.store().tickers().len(), 1);
+    assert_eq!(h.engine.store().tickers()[0].symbol, "OLDUSDT");
 }

@@ -41,6 +41,7 @@ export interface EngineWsRoute {
 export interface EngineRoutingPlan {
   http: EngineHttpRoute;
   publicHttp?: EngineHttpRoute;
+  readHttp?: EngineHttpRoute;
   publicHeader?: string;
   ws: { public: EngineWsRoute; private: EngineWsRoute; business: EngineWsRoute };
   wsHeaders: Record<string, string>;
@@ -50,11 +51,21 @@ export interface EngineRoutingPlan {
 
 type Request = Parameters<Transport['request']>[0];
 
-export const assertEngineAccountRouting = (options: ExchangeOptions): void => {
+export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: ExchangeName): void => {
+  if (exchange === 'asterdex' && options.secondary_key && options.secondary_secret) return;
   if (options.secondary_key || options.secondary_secret) {
     throw new Error('Rust engine secondary signing keys are unsupported; use a primary-key account');
   }
 };
+
+const asterReadOptions = (options: ExchangeOptions, provider: TransportProvider): ExchangeOptions => ({
+  ...options,
+  key: options.secondary_key!,
+  secret: options.secondary_secret!,
+  secondary_key: undefined,
+  secondary_secret: undefined,
+  overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy(),
+});
 
 const venueHeaders = (exchange: ExchangeName, options: ExchangeOptions): Record<string, string> =>
   isBybitSiteIdExchange(exchange) ? getBybitSiteHeaders(options) : {};
@@ -92,7 +103,7 @@ export const resolveEngineRoutingPlan = (
   options: ExchangeOptions,
   baseURL: string,
 ): EngineRoutingPlan => {
-  assertEngineAccountRouting(options);
+  assertEngineAccountRouting(options, exchange);
   const provider = getTransport(options);
   if (provider !== directTransport && provider !== tealstreetTransport) {
     throw new Error('Custom transports must supply their own native host routing plan');
@@ -118,6 +129,12 @@ export const resolveEngineRoutingPlan = (
   };
   return {
     http: http(exchange.startsWith('binance') ? { 'X-MBX-APIKEY': options.key ?? '' } : {}),
+    ...(exchange === 'asterdex' && options.secondary_key
+      ? {
+          publicHeader: 'X-MBX-APIKEY',
+          readHttp: resolveEngineRoutingPlan(exchange, asterReadOptions(options, provider), baseURL).http,
+        }
+      : {}),
     ...(exchange.startsWith('binance') ? { publicHeader: 'X-MBX-APIKEY', publicHttp: http({}) } : {}),
     ws: {
       public: wsRoute(routing.wsPublic),
@@ -308,7 +325,7 @@ export const createEngineTransport = (
   options: ExchangeOptions,
   transport: Transport,
 ): Transport => {
-  assertEngineAccountRouting(options);
+  assertEngineAccountRouting(options, exchange);
   const provider = getTransport(options);
   const { routing, restRouting } = resolved(exchange, options, provider);
   const routes = {
@@ -318,14 +335,23 @@ export const createEngineTransport = (
   };
   const fallbacks = new Map<string, WsDirectFallback>();
   const http = httpTransport(exchange, options, transport, provider, restRouting);
+  const readOptions =
+    exchange === 'asterdex' && options.secondary_key ? asterReadOptions(options, provider) : undefined;
+  const readHttp = readOptions
+    ? httpTransport(exchange, readOptions, transport, provider, resolved(exchange, readOptions, provider).restRouting)
+    : undefined;
   return {
     webSocketHeaders: transport.webSocketHeaders,
     now: () => transport.now(),
     setTimeout: (fn, ms) => transport.setTimeout(fn, ms),
     clearTimeout: (handle) => transport.clearTimeout(handle),
-    request: http.request,
+    request: (request) =>
+      readHttp && request.method.toUpperCase() === 'GET' && hasHeader(request.headers, 'X-MBX-APIKEY')
+        ? readHttp.request(request)
+        : http.request(request),
     dispose: () => {
       http.dispose();
+      readHttp?.dispose();
       transport.dispose?.();
     },
     connect: (url, handlers) => {

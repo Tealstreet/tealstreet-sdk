@@ -10,6 +10,11 @@ arithmetic retains its native-volume contract. `SETTINGS` optionally carries
 separate buy/sell leverage columns; do not collapse these hedge rails to the
 single representative leverage value when applying frames.
 
+Aggregate venue ticker streams may still contain delisted symbols absent from
+the current market table. `TICKERS` then carries optional symbol/ID references;
+`FrameApplier` uses those identities for orphan rows and preserves packed delta
+indexes. Keep those ticker rows without synthesizing markets or filtering them.
+
 `serialize()` carries every derived display bridge field, including
 `displayedPositions` and `displayedMargin`. Hosted or force-full-store paths
 must not depend on postprocessors happening to reconstruct a field after

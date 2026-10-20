@@ -289,7 +289,7 @@ for public multiplexed traffic and `/ws/<listenKey>` for private user data.
 - `NEW`: Adds order to store via `addOrUpdateOrder`
 - `PARTIALLY_FILLED` / `FILLED`: Mirrors cumulative `filled` / `remaining`
   onto the existing store order immediately, then emits the `fill` event
-  with `ap` (average price) and `l` (last filled qty). Do not remove the
+  with `L` (last execution price, `ap` fallback) and `l` (last filled qty). Do not remove the
   immediate store update — chasers and order rows should not wait for the
   slower REST order refresh to see partial fill size.
 - `FILLED`: Updates status to `Closed`, remaining to 0
@@ -500,7 +500,7 @@ Four API instances with different rate limits (`createAPIInstances`):
   pending timer and one in-flight repair; additional `ACCOUNT_UPDATE` frames
   coalesce, and stale REST responses are discarded when a newer WS position
   version arrived during the request.
-- **Fake positions**: Created for all active non-spot markets with both Long and Short sides, 0 contracts, leverage 10
+- **Fake positions**: Created for all active non-spot markets with both Long and Short sides, 0 contracts, leverage from positionRisk or 0
 
 ### Balance State
 
@@ -608,7 +608,7 @@ the dedicated Aster clock uses the same REST constant.
 - **WS error forwarding**: public WS error events route through close/reconnect flow.
 - **Position flip cleanup**: one-way mode updates remove stale opposite-side positions.
 - **O(1) ticker lookup**: uses `tickersBySymbol` map instead of linear scans.
-- **Fake position baseline leverage**: synthetic empty positions use hardcoded leverage `10`.
+- **Fake position baseline leverage**: synthetic empty positions use positionRisk leverage or `0`; Rust stores these settings without empty position rows.
 
 ## Error Handling
 
@@ -683,3 +683,32 @@ Aster is available in CCXT (`ts/src/aster.ts`). This implementation follows Bina
 ## Client order ID
 
 This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.
+
+## Rust engine port
+
+`sdk-rs/venues/asterdex` implements the sans-I/O runtime for `engine: 'rust'`.
+It shares identical Binance-family wire records, not Binance socket/depth/auth
+or order-lifecycle policy. Public books retain the documented depth20 snapshot
+contract. Native URLs carry socket roles; host transports apply account routing.
+
+- Both V1 and V3 are supported. The exact standard-V3 ABI/EIP-191 versus Code
+  EIP-712 split above is preserved, with independent ethers signature vectors.
+- The wrapper forwards explicit auth/version, builder policy, and secondary
+  read agent options. GET requests use the read agent and its CORS route;
+  writes/listen keys retain the primary agent. Other venues retain their prior
+  explicit secondary-key rejection.
+- Private reconciliation commits each domain atomically and rejects stale
+  snapshots. Order fills retain native execution identities/prices; terminal
+  cancellation cannot overwrite a filled order. Typed currency balances cross
+  the binary frame alongside aggregate balances.
+- Conditional, split and bracket placements remain sequential. Amendments
+  preflight before cancel and stop if the original fills during cancellation.
+  Caller client IDs and trailing placement remain explicitly unsupported.
+- V3 STP uses typed account read/write commands and per-order overrides.
+  Browser owner-wallet builder approval and agent onboarding stay outside the
+  exchange engine; ordinary placement never synthesizes owner consent.
+- Rust fixes TS's hedge-zero event behavior by closing only the reported leg,
+  and returns historical candle timestamps in the shared seconds contract.
+  These intentional differences are recorded in the harness known-fix notes.
+
+Port plan, phase reviews and gate evidence: `docs/plans/RUST_ASTERDEX.md`.

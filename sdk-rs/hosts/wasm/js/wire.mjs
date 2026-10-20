@@ -163,7 +163,14 @@ export class Frame {
     const { buffer } = this;
     const count = new Uint32Array(buffer, section.offset, 1)[0];
     const market = new Uint32Array(buffer, section.offset + 4, count);
-    return { count, market, ...columns(buffer, align8(section.offset + 4 + count * 4), count, TICKER_FIELDS) };
+    const at = align8(section.offset + 4 + count * 4);
+    const tail = at + count * TICKER_FIELDS.length * 8;
+    const table = { count, market, ...columns(buffer, at, count, TICKER_FIELDS) };
+    if (count > 0 && tail + count * 8 <= section.offset + section.length) {
+      const refs = new Uint32Array(buffer, tail, count * 2);
+      table.identity = (i) => ({ symbol: this.string(refs[i]), id: this.string(refs[count + i]) });
+    }
+    return table;
   }
 
   /** Packed `[ticker, mask, ...values]` deltas against the current ticker table. */
@@ -304,6 +311,7 @@ export class TickerState {
     this.count = 0;
     this.market = new Uint32Array(0);
     this.columns = {};
+    this.identity = undefined;
   }
 
   apply(frame) {
@@ -311,6 +319,7 @@ export class TickerState {
     if (table) {
       this.count = table.count;
       this.market = table.market;
+      this.identity = table.identity;
       for (const field of TICKER_FIELDS) this.columns[field] = table[field];
     }
     const deltas = frame.tickerDeltas();

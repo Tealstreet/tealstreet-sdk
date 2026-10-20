@@ -178,6 +178,14 @@ pub enum Command {
     FetchStpMode {
         command: CommandId,
     },
+    FetchAccount {
+        command: CommandId,
+    },
+    FetchOrderBook {
+        command: CommandId,
+        symbol: String,
+        limit: Option<u32>,
+    },
     SetStpMode {
         command: CommandId,
         mode: crate::model::StpMode,

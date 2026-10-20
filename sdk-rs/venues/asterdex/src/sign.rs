@@ -49,6 +49,9 @@ impl Credentials {
             return Err("Missing required credentials: API key".into());
         }
         if self.version == Version::V1 {
+            if is_address(&self.key) && is_private_key(&self.secret) && self.user.is_none() {
+                return Err("Aster API Wallet/vault keys require the Main Wallet Address. Fill Main Wallet Address with your login wallet — do not replace the main wallet with the API/vault wallet.".into());
+            }
             if self.secret.is_empty() {
                 return Err("Missing required credentials: API secret".into());
             }
@@ -145,9 +148,9 @@ impl Query {
             );
             return Ok(join(&self.str("signature", &signature).0, true));
         }
-        let user = ethereum::get_address(credentials.user.as_deref().unwrap())?;
         let signer = ethereum::get_address(credentials.signer.as_deref().unwrap())?;
-        let nonce = next_nonce(&format!("{user}:{signer}"), now_ms.floor() as u64)?;
+        // Aster's replay protection belongs to the agent address, across users.
+        let nonce = next_nonce(&signer, now_ms.floor() as u64)?;
         self.signed_v3(credentials, method, path, now_ms, testnet, nonce)
     }
 
@@ -513,6 +516,11 @@ mod tests {
     fn validation_nonce_freshness_and_unsigned_fields() {
         let case = corpus().remove(0);
         let mut creds = credentials(&case);
+        // Isolate this agent from concurrently running lifecycle tests.
+        creds.secret = format!("0x{}", "91".repeat(32));
+        let signer = ethereum::private_key_address(&creds.secret).unwrap();
+        creds.key = signer.clone();
+        creds.signer = Some(signer);
         let first = Query::new()
             .str("symbol", "BTCUSDT")
             .signed(&creds, Method::Post, "/fapi/v3/order", 200.0, false)
@@ -569,5 +577,35 @@ mod tests {
             "a=2&c=3&e=1.25"
         );
         assert_eq!(Query::new().str("a", "1").str("a", "").as_str(), "");
+    }
+
+    #[test]
+    fn engines_with_different_owners_share_the_agent_nonce_sequence() {
+        let secret = format!("0x{}", "92".repeat(32));
+        let signer = ethereum::private_key_address(&secret).unwrap();
+        let engine = |owner: &str| {
+            crate::AsterDex::new(crate::Options {
+                key: Some(signer.clone()),
+                secret: Some(secret.clone()),
+                application_id: Some(owner.into()),
+                ..crate::Options::default()
+            })
+        };
+        let first = engine("0x0000000000000000000000000000000000000111");
+        let second = engine("0x0000000000000000000000000000000000000222");
+        let query = |engine: &crate::AsterDex, now| {
+            Query::new()
+                .signed(
+                    engine.credentials.as_ref().unwrap(),
+                    Method::Get,
+                    "/fapi/v3/account",
+                    now,
+                    false,
+                )
+                .unwrap()
+        };
+        assert!(query(&first, 1234.0).contains("nonce=1234000&signature="));
+        assert!(query(&second, 1234.0).contains("nonce=1234001&signature="));
+        assert!(query(&first, 1233.0).contains("nonce=1234002&signature="));
     }
 }

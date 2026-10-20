@@ -17,7 +17,12 @@ import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
 import { setDefaultTransport } from './registry';
 import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
-import { PRIVATE_PROXY_ASIA, PRIVATE_PROXY_GRVT_TINY, PRIVATE_PROXY_JP } from './tealstreet/transportResolution';
+import {
+  AWS_PUBLIC_CORS_PROXY,
+  PRIVATE_PROXY_ASIA,
+  PRIVATE_PROXY_GRVT_TINY,
+  PRIVATE_PROXY_JP,
+} from './tealstreet/transportResolution';
 import { setWsRelayEnabled } from './tealstreet/wsRelay';
 
 const mocks = vi.hoisted(() => ({
@@ -917,5 +922,111 @@ describe('Hyperliquid uses the factories original publicDataOnly option', () => 
     expect(mocks.adapter).toHaveBeenCalledTimes(1);
     expect(raw.request).not.toHaveBeenCalled();
     expect(resolveEngineRoutingPlan('hyperliquid', opts, 'https://api.hyperliquid.xyz').http.mode).toBe('how');
+  });
+});
+
+describe('Aster secondary signer HTTP routing', () => {
+  const baseURL = 'https://fapi.asterdex.com';
+  const privateRequest = (method: string): Request => ({
+    method,
+    url: `${baseURL}/fapi/v3/order?quantity=0.0010&signature=exact%2Bbytes`,
+    headers: { 'x-mbx-apikey': 'read-wallet' },
+  });
+
+  it.each(['GET', 'get'])(
+    'routes signed %s to the secondary CORS egress and every write to primary',
+    async (method) => {
+      const opts = options({
+        tealstreetProxy: true,
+        tealstreetTunnel: false,
+        secondary_key: 'read-wallet',
+        secondary_secret: 'read-private-key',
+      });
+      const raw = makeRaw();
+      const routed = createEngineTransport('asterdex', opts, raw);
+      await routed.request(privateRequest(method));
+      expect(raw.request.mock.lastCall![0].url).toBe(`${AWS_PUBLIC_CORS_PROXY}/${privateRequest(method).url}`);
+      expect(raw.request.mock.lastCall![0].headers['x-mbx-apikey']).toBe('read-wallet');
+      for (const write of ['POST', 'PUT', 'DELETE']) {
+        await routed.request(privateRequest(write));
+        expect(raw.request.mock.lastCall![0].url).toBe(`${PRIVATE_PROXY_ASIA}/${privateRequest(write).url}`);
+      }
+      await routed.request({ ...privateRequest('GET'), headers: {} });
+      expect(raw.request.mock.lastCall![0].url).toBe(`${PRIVATE_PROXY_ASIA}/${privateRequest('GET').url}`);
+      routed.dispose!();
+    },
+  );
+
+  it('retains the primary HOW path and puts secondary CORS inside only its read RPC', async () => {
+    const opts = options({
+      tealstreetTunnel: true,
+      secondary_key: 'read-wallet',
+      secondary_secret: 'read-private-key',
+    });
+    const raw = makeRaw();
+    const routed = createEngineTransport('asterdex', opts, raw);
+    await routed.request(privateRequest('GET'));
+    expect(mocks.adapter.mock.lastCall![0].url).toBe(`${AWS_PUBLIC_CORS_PROXY}/${privateRequest('GET').url}`);
+    await routed.request(privateRequest('POST'));
+    expect(mocks.adapter.mock.lastCall![0].url).toBe(privateRequest('POST').url);
+    expect(raw.request).not.toHaveBeenCalled();
+    const plan = resolveEngineRoutingPlan('asterdex', opts, baseURL);
+    expect(plan.http).toMatchObject({ mode: 'how', prefix: '', authorize: false });
+    expect(plan.readHttp).toMatchObject({ mode: 'how', prefix: AWS_PUBLIC_CORS_PROXY, authorize: false });
+    expect(plan.readHttp?.tunnelUrl).toBe(plan.http.tunnelUrl);
+    expect(JSON.stringify(plan)).not.toMatch(/read-wallet|read-private-key|venue-key|venue-secret|proxy-jwt/);
+    routed.dispose!();
+  });
+
+  it('honors a secondary proxy override while preserving primary-only defaults', async () => {
+    const raw = makeRaw();
+    const opts = options({
+      tealstreetProxy: true,
+      tealstreetTunnel: false,
+      secondary_key: 'read-wallet',
+      secondary_secret: 'read-private-key',
+      secondaryProxyUrl: 'https://secondary.example/proxy',
+    });
+    const routed = createEngineTransport('asterdex', opts, raw);
+    await routed.request(privateRequest('GET'));
+    expect(raw.request.mock.lastCall![0].url).toBe(`https://secondary.example/proxy/${privateRequest('GET').url}`);
+    const plan = resolveEngineRoutingPlan('asterdex', opts, baseURL);
+    expect(plan.readHttp?.prefix).toBe('https://secondary.example/proxy');
+    expect(plan.http.prefix).toBe(PRIVATE_PROXY_ASIA);
+    const primaryOptions = options({ tealstreetProxy: true, tealstreetTunnel: false });
+    const primaryPlan = resolveEngineRoutingPlan('asterdex', primaryOptions, baseURL);
+    expect(primaryPlan).not.toHaveProperty('readHttp');
+    expect(primaryPlan).not.toHaveProperty('publicHeader');
+    const primary = createEngineTransport('asterdex', primaryOptions, raw);
+    await primary.request(privateRequest('GET'));
+    expect(raw.request.mock.lastCall![0].url).toBe(`${PRIVATE_PROXY_ASIA}/${privateRequest('GET').url}`);
+    routed.dispose!();
+    primary.dispose!();
+  });
+
+  it.each([{ secondary_key: 'read-wallet' }, { secondary_secret: 'read-private-key' }])(
+    'rejects partial secondary credentials %o',
+    (partial) => {
+      const opts = options(partial);
+      expect(() => createEngineTransport('asterdex', opts, makeRaw())).toThrow('secondary signing keys');
+      expect(() => resolveEngineRoutingPlan('asterdex', opts, baseURL)).toThrow('secondary signing keys');
+    },
+  );
+
+  it('keeps direct transport direct when no secondary egress is configured', async () => {
+    const raw = makeRaw();
+    const opts = options({
+      transport: directTransport,
+      secondary_key: 'read-wallet',
+      secondary_secret: 'read-private-key',
+    });
+    const routed = createEngineTransport('asterdex', opts, raw);
+    await routed.request(privateRequest('GET'));
+    expect(raw.request.mock.lastCall![0].url).toBe(privateRequest('GET').url);
+    expect(mocks.token).not.toHaveBeenCalled();
+    expect(resolveEngineRoutingPlan('asterdex', opts, baseURL).readHttp).toEqual(
+      resolveEngineRoutingPlan('asterdex', opts, baseURL).http,
+    );
+    routed.dispose!();
   });
 });

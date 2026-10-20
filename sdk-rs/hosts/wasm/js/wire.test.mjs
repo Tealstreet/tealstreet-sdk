@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { Frame, NONE, SECTION } from './wire.mjs';
+import { Frame, NONE, SECTION, TICKER_FIELDS, TickerState } from './wire.mjs';
 
 const stringFrame = (strings) => {
   const encoder = new TextEncoder();
@@ -165,4 +165,52 @@ test('optional currency balances preserve full values, coexist with coins, and c
   assert.deepEqual(Object.keys(decoded), ['__proto__']);
   assert.deepEqual(decoded.__proto__, currencies.USDT);
   assert.equal(Object.getPrototypeOf(decoded), Object.prototype);
+});
+
+function tickerFrame(identities) {
+  const count = 2;
+  const strings = ['LIVEUSDT', 'OLDUSDT', 'native-retired-id'];
+  const stringBuffer = stringFrame(strings).buffer;
+  const at = (4 + count * 4 + 7) & ~7;
+  const tail = at + count * TICKER_FIELDS.length * 8;
+  const length = tail + (identities ? count * 8 : 0);
+  const result = new ArrayBuffer(24 + length + stringBuffer.byteLength - 16);
+  const view = new DataView(result);
+  new Uint8Array(result).set(new Uint8Array(stringBuffer, 0, 16));
+  view.setUint16(6, 2, true);
+  view.setUint16(16, SECTION.TICKERS, true);
+  view.setUint32(20, length, true);
+  view.setUint32(24, count, true);
+  view.setUint32(28, 0, true);
+  view.setUint32(32, identities ? NONE : 1, true);
+  TICKER_FIELDS.forEach((_, column) => {
+    view.setFloat64(24 + at + column * count * 8, column + 1, true);
+    view.setFloat64(24 + at + column * count * 8 + 8, column + 100, true);
+  });
+  if (identities) {
+    [0, 1, 0, 2].forEach((reference, i) => view.setUint32(24 + tail + i * 4, reference, true));
+  }
+  new Uint8Array(result, 24 + length).set(new Uint8Array(stringBuffer, 16));
+  return result;
+}
+
+test('orphan ticker identities survive transfer and packed deltas without changing legacy tables', () => {
+  const legacy = new Frame(tickerFrame(false)).tickers();
+  assert.equal(legacy.identity, undefined);
+  assert.deepEqual([...legacy.last], [3, 102]);
+  const buffer = tickerFrame(true);
+  const frame = new Frame(structuredClone(buffer, { transfer: [buffer] }));
+  assert.equal(buffer.byteLength, 0);
+  const tickers = frame.tickers();
+  assert.deepEqual([...tickers.market], [0, NONE]);
+  assert.deepEqual(tickers.identity(0), { symbol: 'LIVEUSDT', id: 'LIVEUSDT' });
+  assert.deepEqual(tickers.identity(1), { symbol: 'OLDUSDT', id: 'native-retired-id' });
+  assert.deepEqual([...tickers.last], [3, 102]);
+  const state = new TickerState();
+  state.apply(frame);
+  state.apply({ tickers: () => undefined, tickerDeltas: () => Float64Array.of(1, 4, 500) });
+  assert.equal(state.columns.last[1], 500);
+  assert.deepEqual(state.identity(1), { symbol: 'OLDUSDT', id: 'native-retired-id' });
+  state.apply(new Frame(tickerFrame(false)));
+  assert.equal(state.identity, undefined, 'a later legacy replacement clears the old identity closure');
 });

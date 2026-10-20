@@ -62,7 +62,8 @@ export type MarketTable = { count: number; flags: Uint32Array } & Columns<Market
   base(i: number): string;
   quote(i: number): string;
 };
-export type TickerTable = { count: number; market: Uint32Array } & Columns<TickerField>;
+export interface TickerIdentity { id: string; symbol: string }
+export type TickerTable = { count: number; market: Uint32Array; identity?(i: number): TickerIdentity } & Columns<TickerField>;
 export interface BookRows {
   market: number;
   /** `[price, amount, total]` per level, best first. */
@@ -139,5 +140,6 @@ export class TickerState {
   count: number;
   market: Uint32Array;
   columns: Partial<Columns<TickerField>>;
+  identity?: (i: number) => TickerIdentity;
   apply(frame: Frame): void;
 }

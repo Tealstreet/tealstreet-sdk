@@ -1,5 +1,9 @@
 //! Aster perpetuals: typed public streams and versioned REST on the sans-I/O engine.
+mod account;
+mod history;
+mod request;
 pub mod sign;
+mod trading;
 mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
@@ -29,6 +33,8 @@ pub struct Options {
     pub auth_signer_address: Option<String>,
     pub auth_private_key: Option<String>,
     pub api_version: Option<Version>,
+    pub read_key: Option<String>,
+    pub read_secret: Option<String>,
     pub builder_address: Option<String>,
     pub builder_fee_rate_maker: Option<String>,
     pub builder_fee_rate_taker: Option<String>,
@@ -62,6 +68,17 @@ pub struct MarketRule {
 }
 
 pub enum Pending {
+    DepthRead {
+        command: CommandId,
+    },
+    MarketBrackets {
+        rows: HashMap<String, f64>,
+    },
+    Account(account::Request),
+    Trade(trading::Request),
+    History(history::Request),
+    Signed(Box<request::SignedRequest>),
+    Clock(request::ClockRequest),
     ExchangeInfo {
         rows: Vec<(Market, MarketRule)>,
         malformed: bool,
@@ -104,6 +121,11 @@ pub struct AsterDex {
     options: Options,
     version: Version,
     credentials: Option<Credentials>,
+    read_credentials: Option<Credentials>,
+    account: account::AccountState,
+    trading: trading::TradingState,
+    history: history::HistoryState,
+    requests: request::RequestState,
     urls: Urls,
     public: Connection,
     books: HashMap<String, BookState>,
@@ -157,11 +179,33 @@ impl AsterDex {
         } else {
             None
         };
+        let read_credentials = options
+            .read_key
+            .as_ref()
+            .zip(options.read_secret.as_ref())
+            .map(|(key, secret)| Credentials {
+                version,
+                key: key.clone(),
+                secret: nonempty(options.auth_private_key.as_deref())
+                    .unwrap_or(secret)
+                    .to_owned(),
+                user: credentials.as_ref().and_then(|c| c.user.clone()),
+                signer: Some(
+                    nonempty(options.auth_signer_address.as_deref())
+                        .unwrap_or(key)
+                        .to_owned(),
+                ),
+            });
         Self {
             urls: Urls::new(options.testnet),
             options,
             version,
             credentials,
+            read_credentials,
+            account: account::AccountState::default(),
+            trading: trading::TradingState::default(),
+            history: history::HistoryState::default(),
+            requests: request::RequestState::default(),
             public: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -216,7 +260,21 @@ impl AsterDex {
         );
     }
 
+    fn seed_daily(&self, cx: &mut Cx<'_, Pending>) {
+        self.get_streamed(
+            cx,
+            &self.path("ticker/24hr"),
+            ArrayAt::Root,
+            Pending::Daily {
+                rows: Vec::new(),
+                malformed: false,
+            },
+        );
+    }
     fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_private() {
+            self.start_account(cx);
+        }
         self.connect_public(cx);
     }
 
@@ -517,6 +575,15 @@ fn collect_interest(body: &str, output: &mut HashMap<String, f64>) {
     }
 }
 
+fn candle_interval(value: &str) -> &str {
+    match value {
+        "1m" | "3m" | "5m" | "15m" | "30m" | "1h" | "2h" | "4h" | "6h" | "12h" | "1d" | "1w" => {
+            value
+        }
+        _ => "1h",
+    }
+}
+
 fn candle(time: f64, o: &str, h: &str, l: &str, c: &str, v: &str) -> Candle {
     Candle {
         timestamp: time / 1000.0,
@@ -583,10 +650,19 @@ impl Venue for AsterDex {
     type Pending = Pending;
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.bootstrap(cx);
+        if let Some(credentials) = &self.credentials
+            && let Err(error) = credentials.validate()
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
+        self.start_requests(cx);
     }
 
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        if self.on_account_open(cx, socket) {
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -607,6 +683,9 @@ impl Venue for AsterDex {
     }
 
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        if self.on_account_message(cx, socket, text) {
+            return;
+        }
         if self.public.socket == Some(socket) {
             self.public.last_received = cx.now;
             self.on_public_frame(cx, text);
@@ -614,6 +693,9 @@ impl Venue for AsterDex {
     }
 
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
+        if self.on_account_close(cx, socket) {
+            return;
+        }
         if self.public.socket == Some(socket) {
             self.close_public(cx);
         }
@@ -621,6 +703,85 @@ impl Venue for AsterDex {
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         match pending {
+            Pending::DepthRead { command } => {
+                #[derive(serde::Serialize)]
+                struct Level {
+                    price: f64,
+                    amount: f64,
+                    total: f64,
+                }
+                #[derive(serde::Serialize)]
+                struct Output {
+                    bids: Vec<Level>,
+                    asks: Vec<Level>,
+                }
+                let result = if let Some((_, error)) = account::venue_error(&response) {
+                    Err(error)
+                } else {
+                    serde_json::from_str::<safe_cex_venue_binance::wire::DepthSnapshot>(
+                        response.body,
+                    )
+                    .map_err(|e| e.to_string())
+                    .and_then(|depth| {
+                        let levels = |raw: Vec<[std::borrow::Cow<'_, str>; 2]>,
+                                      bid: bool|
+                         -> Result<Vec<Level>, String> {
+                            let mut levels = raw
+                                .into_iter()
+                                .map(|l| {
+                                    Ok(Level {
+                                        price: l[0].parse::<f64>().map_err(|e| e.to_string())?,
+                                        amount: l[1].parse::<f64>().map_err(|e| e.to_string())?,
+                                        total: 0.0,
+                                    })
+                                })
+                                .collect::<Result<Vec<_>, String>>()?;
+                            if levels.iter().any(|l| {
+                                !l.price.is_finite()
+                                    || !l.amount.is_finite()
+                                    || l.price <= 0.0
+                                    || l.amount < 0.0
+                            }) {
+                                return Err("Malformed Aster depth level".into());
+                            }
+                            levels.sort_by(|a, b| {
+                                if bid {
+                                    b.price.total_cmp(&a.price)
+                                } else {
+                                    a.price.total_cmp(&b.price)
+                                }
+                            });
+                            let mut total = 0.0;
+                            for l in &mut levels {
+                                total += l.price * l.amount;
+                                l.total = total;
+                            }
+                            Ok(levels)
+                        };
+                        serde_json::to_string(&Output {
+                            bids: levels(depth.bids, true)?,
+                            asks: levels(depth.asks, false)?,
+                        })
+                        .map_err(|e| e.to_string())
+                    })
+                };
+                cx.done(command, result);
+            }
+            Pending::MarketBrackets { rows } => {
+                if account::venue_error(&response).is_none() {
+                    cx.store.update_markets(|m| {
+                        if let Some(max) = rows.get(&m.symbol) {
+                            m.limits.leverage.max = *max;
+                        }
+                    });
+                }
+                self.seed_daily(cx);
+            }
+            Pending::Signed(req) => self.on_signed_response(cx, req, Ok(response)),
+            Pending::Clock(req) => self.on_clock_response(cx, req, Ok(response)),
+            Pending::Account(req) => self.on_account_response(cx, req, Ok(response)),
+            Pending::Trade(req) => self.on_trade_response(cx, req, Ok(response)),
+            Pending::History(req) => self.on_history_response(cx, req, Ok(response)),
             Pending::ExchangeInfo { rows, malformed } => {
                 if response.status != 200 || malformed {
                     cx.log(LogLevel::Error, "Aster market bootstrap failed");
@@ -632,15 +793,15 @@ impl Venue for AsterDex {
                     markets.push(market);
                 }
                 cx.store.set_markets(markets);
-                self.get_streamed(
-                    cx,
-                    &self.path("ticker/24hr"),
-                    ArrayAt::Root,
-                    Pending::Daily {
-                        rows: Vec::new(),
-                        malformed: false,
-                    },
-                );
+                let path = self.path("leverageBracket");
+                let pending = Pending::MarketBrackets {
+                    rows: HashMap::new(),
+                };
+                if self.is_private() {
+                    self.signed_streamed(cx, &path, sign::Query::new(), pending);
+                } else {
+                    self.get_streamed(cx, &path, ArrayAt::Root, pending);
+                }
             }
             Pending::Daily { rows, malformed } => {
                 if response.status != 200 || malformed {
@@ -675,6 +836,19 @@ impl Venue for AsterDex {
 
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::DepthRead { .. } => {}
+            Pending::MarketBrackets { rows } => {
+                if let Ok(row) =
+                    serde_json::from_str::<safe_cex_venue_binance::wire::LeverageBracket>(item)
+                    && let Some(bracket) = row.brackets.first()
+                {
+                    rows.insert(row.symbol.to_string(), bracket.initial_leverage);
+                }
+            }
+            Pending::Signed(req) => self.on_signed_item(cx, req, item),
+            Pending::Account(req) => self.on_account_item(cx, req, item),
+            Pending::History(req) => self.on_history_item(cx, req, item),
+            Pending::Clock(_) | Pending::Trade(_) => {}
             Pending::ExchangeInfo { rows, malformed } => {
                 match serde_json::from_str::<SymbolInfo>(item) {
                     Ok(row) if row.status == "TRADING" => rows.push(market_from_wire(row)),
@@ -683,7 +857,7 @@ impl Venue for AsterDex {
                 }
             }
             Pending::Daily { rows, malformed } => match serde_json::from_str::<Daily>(item) {
-                Ok(row) if cx.store.market(&row.symbol).is_some() => rows.push(Ticker {
+                Ok(row) => rows.push(Ticker {
                     id: row.symbol.to_string(),
                     symbol: row.symbol.into_owned(),
                     last: num::parse(&row.last_price),
@@ -692,7 +866,6 @@ impl Venue for AsterDex {
                     quote_volume: num::parse(&row.quote_volume),
                     ..Ticker::default()
                 }),
-                Ok(_) => {}
                 Err(_) => *malformed = true,
             },
             Pending::OpenInterest { rows, .. } => collect_interest(item, rows),
@@ -711,6 +884,10 @@ impl Venue for AsterDex {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Pending::Signed(req) = pending {
+            self.on_signed_stream_error(cx, req, response);
+            return;
+        }
         if let Pending::OpenInterest {
             rows,
             initial,
@@ -725,6 +902,13 @@ impl Venue for AsterDex {
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::DepthRead { command } => cx.done(command, Err(error.into())),
+            Pending::MarketBrackets { .. } => self.seed_daily(cx),
+            Pending::Signed(req) => self.on_signed_response(cx, req, Err(error)),
+            Pending::Clock(req) => self.on_clock_response(cx, req, Err(error)),
+            Pending::Account(req) => self.on_account_response(cx, req, Err(error)),
+            Pending::Trade(req) => self.on_trade_response(cx, req, Err(error)),
+            Pending::History(req) => self.on_history_response(cx, req, Err(error)),
             Pending::OpenInterest {
                 initial, single, ..
             } => self.finish_interest(cx, HashMap::new(), initial, single, None),
@@ -737,6 +921,12 @@ impl Venue for AsterDex {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.on_request_timer(cx, timer)
+            || self.on_account_timer(cx, timer)
+            || self.on_history_timer(cx, timer)
+        {
+            return;
+        }
         if self.public.reconnect == Some(timer) {
             self.public.reconnect = None;
             self.connect_public(cx);
@@ -787,6 +977,7 @@ impl Venue for AsterDex {
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
+                let interval = candle_interval(&interval).to_owned();
                 let count = self
                     .candles
                     .entry((symbol.clone(), interval.clone()))
@@ -801,6 +992,7 @@ impl Venue for AsterDex {
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
+                let interval = candle_interval(&interval).to_owned();
                 let key = (symbol, interval);
                 if let Some(count) = self.candles.get_mut(&key) {
                     *count -= 1;
@@ -822,6 +1014,7 @@ impl Venue for AsterDex {
                 from_ms,
                 to_ms,
             } => {
+                let interval = candle_interval(&interval);
                 let mut path = format!(
                     "{}?symbol={symbol}&interval={interval}&limit={}",
                     self.path("klines"),
@@ -844,10 +1037,39 @@ impl Venue for AsterDex {
                     },
                 );
             }
-            _ => cx.log(
-                LogLevel::Error,
-                "Aster private command unavailable during public phase",
-            ),
+            Command::FetchOrderBook {
+                command,
+                symbol,
+                limit,
+            } => {
+                let path = format!(
+                    "{}?{}",
+                    self.path("depth"),
+                    sign::Query::new()
+                        .str("symbol", &symbol)
+                        .num("limit", f64::from(limit.unwrap_or(100)))
+                        .as_str()
+                );
+                self.get(cx, &path, Pending::DepthRead { command });
+            }
+            Command::FetchAccount { command } => self.fetch_account_info(cx, command),
+            Command::FetchLeverage { command, symbol } => {
+                let result = cx
+                    .store
+                    .setting(&symbol)
+                    .filter(|s| s.leverage.is_finite() && s.leverage > 0.0)
+                    .map(|s| {
+                        format!(
+                            "{{\"long\":{},\"short\":{}}}",
+                            num::format(s.leverage),
+                            num::format(s.leverage)
+                        )
+                    })
+                    .ok_or_else(|| format!("Aster leverage is not loaded for {symbol}"));
+                cx.done(command, result);
+            }
+            Command::Query { command, query } => self.start_query(cx, command, query),
+            command => self.on_trade_command(cx, command),
         }
     }
 
@@ -864,5 +1086,27 @@ impl Venue for AsterDex {
                 .filter(|(_, state)| !state.book.is_empty())
                 .map(|(symbol, state)| (symbol.as_str(), &state.book)),
         )
+    }
+}
+
+fn reset_pending(pending: &mut Pending) {
+    match pending {
+        Pending::Account(account::Request::Positions {
+            rows,
+            settings,
+            invalid,
+            ..
+        }) => {
+            rows.clear();
+            settings.clear();
+            *invalid = false;
+        }
+        Pending::Account(account::Request::Orders { rows, invalid, .. }) => {
+            rows.clear();
+            *invalid = false;
+        }
+        Pending::History(req) => req.reset(),
+        Pending::MarketBrackets { rows } => rows.clear(),
+        _ => {}
     }
 }

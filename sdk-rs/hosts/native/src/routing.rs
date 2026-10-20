@@ -97,6 +97,8 @@ pub struct RoutingPlan {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_http: Option<HttpRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_http: Option<HttpRoute>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_header: Option<String>,
     pub ws: WsRoutes,
     pub ws_headers: BTreeMap<String, String>,
@@ -145,6 +147,8 @@ impl RoutingState {
         });
         if public {
             self.plan.public_http.as_ref().unwrap_or(&self.plan.http)
+        } else if request.method == safe_cex_engine::Method::Get {
+            self.plan.read_http.as_ref().unwrap_or(&self.plan.http)
         } else {
             &self.plan.http
         }
@@ -697,6 +701,46 @@ mod tests {
         assert_eq!(state.http(&request).prefix, "public");
         request.headers[0].1 = "venue-key".into();
         assert_eq!(state.http(&request).prefix, "private");
+    }
+
+    #[test]
+    fn secondary_read_route_applies_only_to_signed_gets() {
+        let state = state(RoutingPlan {
+            http: HttpRoute {
+                prefix: "primary".into(),
+                ..HttpRoute::default()
+            },
+            read_http: Some(HttpRoute {
+                prefix: "secondary-cors".into(),
+                mode: HttpRouteMode::How,
+                tunnel_url: Some("wss://read-tunnel.example".into()),
+                ..HttpRoute::default()
+            }),
+            public_http: Some(HttpRoute {
+                prefix: "public".into(),
+                ..HttpRoute::default()
+            }),
+            public_header: Some("X-MBX-APIKEY".into()),
+            ..RoutingPlan::default()
+        });
+        let mut request = HttpRequest {
+            id: RequestId(0),
+            method: Method::Get,
+            url: "https://fapi.asterdex.com/fapi/v3/account?signature=exact".into(),
+            headers: vec![("x-mbx-apikey", "read-wallet".into())],
+            body: None,
+        };
+        assert_eq!(state.http(&request).prefix, "secondary-cors");
+        assert_eq!(state.http(&request).mode, HttpRouteMode::How);
+        for method in [Method::Post, Method::Put, Method::Delete] {
+            request.method = method;
+            assert_eq!(state.http(&request).prefix, "primary");
+        }
+        request.method = Method::Get;
+        request.headers.clear();
+        assert_eq!(state.http(&request).prefix, "public");
+        request.headers.push(("X-MBX-APIKEY", String::new()));
+        assert_eq!(state.http(&request).prefix, "public");
     }
 
     #[test]
