@@ -767,3 +767,13 @@ startup, deactivation wakes accountwaiters and customregisteredloader control
 is preserved. Defaultloader4 and OrderlySDKtransport38tests pass after adapting
 new mocks to the required venue and wsMessages interface. Freeze/review this
 merge before15-family builds, baseline and the new predeclaredcomparison.
+
+
+Checkpoint before Bybit variant landing: merge0f771c14b2 passes44typecheck
+and28lint tasks. New15comparison protocol is independently reviewed before
+any sample, includes32private variants and allpaired metric deltas. New Node
+loader regression checks actualdefault/explicit moduleidentity across aliases.
+No15public/profile samples exist. While15release/control builds were running,
+origin advanced to922b5fdc89 with Bybitspot/inverse/demo/Hyro and sharedengine
+changes. Hold sampling, retain partial15builds/logs and merge again before
+freezing the final source/baseline; this checkpoint is not performance evidence.

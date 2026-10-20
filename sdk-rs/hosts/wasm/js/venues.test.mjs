@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import { venueFamily } from './venues.mjs';
+import { loadEngine } from './engine.node.mjs';
 
 const require = createRequire(import.meta.url);
 const aliases = {
@@ -35,6 +36,17 @@ for (const [family, names] of Object.entries(aliases)) {
     }
   });
 }
+
+test('default Node loader shares each selected family with explicit requires', async () => {
+  const modules = new Set();
+  for (const [family, names] of Object.entries(aliases)) {
+    const explicit = require(`../pkg/node/${family}/safe_cex_wasm.js`);
+    const defaults = await Promise.all(names.map(loadEngine));
+    for (const selected of defaults) assert.equal(selected, explicit);
+    modules.add(explicit);
+  }
+  assert.equal(modules.size, Object.keys(aliases).length);
+});
 
 test('unknown aliases fail before resolving a module', () => {
   for (const name of ['', 'unknown', 'constructor', '__proto__', 'okx/../../binance']) {
