@@ -35,10 +35,16 @@ describe('resolveLighterBuilderFeeConfig', () => {
     expect(config).toBeUndefined();
   });
 
-  it('does not reuse the zkLighter integrator account for Robinhood by default', () => {
+  it('uses the Robinhood-specific integrator account by default', () => {
     const config = resolveLighterBuilderFeeConfig(createOptions(), 'lighter-robinhood');
 
-    expect(config).toBeUndefined();
+    expect(config).toEqual({
+      integratorAccountIndex: 47296n,
+      integratorMakerFee: LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
+      integratorTakerFee: LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
+      mode: 'dynamic',
+    });
+    expect(config?.integratorAccountIndex).not.toBe(158385n);
   });
 
   it('allows an explicit Robinhood integrator account index override', () => {

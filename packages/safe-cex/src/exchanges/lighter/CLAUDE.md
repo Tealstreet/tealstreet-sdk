@@ -703,7 +703,7 @@ This section supersedes older notes that reference direct `transactionClient` us
   - globally via constants in `lighter.builder-fee.ts`, or
   - per-account via `options.extra.lighterIntegratorAccountIndex`.
 - Integrator account index must be a numeric `accountIndex` value (not API key or API key index).
-- `lighter-robinhood` intentionally has no default Tealstreet integrator index yet. Do not reuse the zkLighter mainnet index; only attach attribution when a Robinhood-specific index is explicitly configured.
+- `lighter-robinhood` uses the Robinhood-specific Tealstreet integrator account index `47296`. Do not reuse the ordinary zkLighter mainnet index (`158385`) for Robinhood.
 - `ApproveIntegrator` flow now has local SDK signing + transport support (`tx_type = 45`).
 - Existing/legacy saved Lighter accounts may predate Tealstreet's builder-fee approval flow. Do not assume an account is approved just because it can trade or has an API key.
 - Lighter rejects attributed create-order transactions with `21149 integrator is not approved` when `L2TxAttributes` are present but the account has no valid approval for the configured integrator/fee caps.
