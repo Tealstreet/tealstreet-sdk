@@ -352,3 +352,29 @@ live trading, weakened parity oracle, or performance threshold changes.
 - All final quality, private/public replay, isolated size and combined consumer
   receipts are regenerated on this integration. Earlier results remain
   checkpoints; no performance or replay acceptance condition changes.
+
+### Integrated security gate checkpoint (v4)
+
+- Runtime source is `9fe87d1eed`; documentation head `c788d598f3`. Fresh
+  formatting/bans, strict native workspace Clippy, 2876 native tests across
+  248 suites, and 93 engine tests without default features pass. Actual
+  workspace Wasm compilation and strict Wasm Clippy pass. Root typecheck
+  44/44 and lint 28/28 pass; the first safe-cex runner passes 7769 tests
+  across 527 files. The full root task run remains active, with its second
+  safe-cex runner making progress under host contention.
+- The first actual Wasm-build attempt failed because macOS stripped inherited
+  DYLD_LIBRARY_PATH before the external Python runner started; rust-lld could
+  not load libLLVM. Preserve `/tmp/security-v4-quality-attempt1.json` and its
+  logs. The runner now sets the pinned Rust sysroot library path inside its
+  subprocess environment. Only that environment-failed stage and unexecuted
+  stages resume; the five successful source-valid receipts remain intact.
+  No SDK source, test assertion, timeout or replay threshold changed.
+- Fresh source export against landing 702a62050c: 156 files, zero scanner
+  findings, exit 0 (`/tmp/security-v4-gitleaks-receipt.json`), no new exemptions.
+  Fixture proof again confirms all 39 captures / 304201 records, with only
+  145 Set-Cookie headers removed across 120 HTTP records in 12 captures.
+- External v4 orchestration checks indexed, unstaged and untracked runtime
+  source before and after stages, stops on failed prerequisites, retains full
+  Node/web artifact manifests, and gives the combined bundle no size budget.
+  All 30 fresh primary private/public replay receipts, combined consumer
+  checks, PR reviews and hosted CI remain pending; no final gate claim yet.
