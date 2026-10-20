@@ -131,12 +131,20 @@ export const realVenue = (name: ExchangeName) => {
   const tape = new Tape(records, venue, false, 2000, 'rust', [], options);
   const requests: string[] = [];
   const errors: string[] = [];
+  const connectedSocketUrls: string[] = [];
+  const canonicalConnectedSocketUrls = new Set<string>();
+  const fixtureSocketUrls = new Set(
+    records.filter((record) => record.type === 'ws').map((record) => canonicalUrl(record.url!, tape.callerIds, venue)),
+  );
+  const replayedSocketUrls = new Set<string>();
   const sockets: Array<{ url: string; ordinal: number; onMessage(data: string | Uint8Array): void; closed: boolean }> =
     [];
   const transport: Transport = {
     now: () => Date.now(),
     webSocketHeaders: true,
     connect(url, handlers) {
+      connectedSocketUrls.push(url);
+      canonicalConnectedSocketUrls.add(canonicalUrl(url, tape.callerIds, venue));
       const socket = tape.connect(
         url,
         handlers.onOpen,
@@ -165,6 +173,10 @@ export const realVenue = (name: ExchangeName) => {
     requests,
     errors,
     source,
+    connectedSocketUrls,
+    canonicalConnectedSocketUrls,
+    fixtureSocketUrls,
+    replayedSocketUrls,
     /** Deliver captured input to matching live native sockets; the native
      * parser decides which subscribed channels it consumes. No store seeding. */
     async replayPublicFrames(limit = 512) {
@@ -190,6 +202,7 @@ export const realVenue = (name: ExchangeName) => {
           const data =
             record.binary === undefined ? record.text! : Uint8Array.from(Buffer.from(record.binary, 'base64'));
           socket.onMessage(data);
+          replayedSocketUrls.add(canonicalUrl(socket.url, tape.callerIds, venue));
           delivered++;
         }
         await new Promise<void>((resolve) => setImmediate(resolve));

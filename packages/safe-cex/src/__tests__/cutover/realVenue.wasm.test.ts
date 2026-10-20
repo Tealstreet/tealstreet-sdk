@@ -76,7 +76,10 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
         'cutover-session',
       );
       const startup = worker.start();
-      await input.replayPublicFrames();
+      const framesBeforeReplay = frames.length;
+      const delivered = await input.replayPublicFrames();
+      expect(delivered, `${name}: no fixture input reached a matching native socket`).toBeGreaterThan(0);
+      expect(input.replayedSocketUrls.size).toBeGreaterThan(0);
       expect(await startup, `${name}: ${JSON.stringify(input.errors)} ${JSON.stringify(errors)}`).toBe(true);
       expect(worker.exchange).toBeInstanceOf(RustEngineExchange);
       expect(worker.store.markets.length, input.source).toBeGreaterThan(0);
@@ -86,6 +89,20 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       // Engine input is immediate; the shipping worker exposes store snapshots
       // on its normal 250 ms flush cadence.
       await new Promise((resolve) => setTimeout(resolve, 275));
+      for (const url of input.connectedSocketUrls) expect(new URL(url).protocol).toBe('wss:');
+      for (const url of input.canonicalConnectedSocketUrls)
+        expect(input.fixtureSocketUrls.has(url), `${name}: untaped native socket ${url}`).toBe(true);
+      for (const url of input.replayedSocketUrls) expect(input.fixtureSocketUrls.has(url), url).toBe(true);
+      // Public input and startup may interleave: require a real native public
+      // table/delta frame before requesting the later full snapshot. A fixture
+      // need not change an existing quote to prove startup and frame delivery.
+      expect(
+        frames.slice(framesBeforeReplay).some((buffer) => {
+          const frame = new Frame(buffer);
+          return (frame.tickers()?.count ?? 0) > 0 || (frame.tickerDeltas()?.length ?? 0) > 0;
+        }),
+        `${name}: no native public ticker frame during replay/startup`,
+      ).toBe(true);
       expect(input.requests.length).toBeGreaterThan(0);
       expect(input.errors).toEqual([]);
       expect(errors).toEqual([]);
@@ -95,10 +112,15 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       expect(frames.length).toBeGreaterThan(before);
       const lateStore = new DefaultStore();
       new FrameApplier(lateStore).apply(new Frame(frames.at(-1)!));
+      // A late HTTP reply may update native state just after the periodic
+      // flush. Wait for the real store mirror to catch up with the snapshot;
+      // this is bounded eventual consistency, not an artificial local flush.
+      await vi.waitFor(() => {
+        expect(lateStore.tickers.map((row) => [row.id, row.last, row.bid, row.ask])).toEqual(
+          worker!.store.tickers.map((row) => [row.id, row.last, row.bid, row.ask]),
+        );
+      }, { timeout: 3000, interval: 25 });
       expect(lateStore.markets.map((row) => row.id)).toEqual(worker.store.markets.map((row) => row.id));
-      expect(lateStore.tickers.map((row) => [row.id, row.last, row.bid, row.ask])).toEqual(
-        worker.store.tickers.map((row) => [row.id, row.last, row.bid, row.ask]),
-      );
       expect(lateStore.tickers.some((row) => row.last > 0 || row.bid > 0 || row.ask > 0)).toBe(true);
       expect(lateStore.loaded.markets).toBe(true);
       expect(lateStore.loaded.tickers).toBe(true);

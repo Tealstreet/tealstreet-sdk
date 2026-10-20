@@ -65,3 +65,20 @@ consumer adoption remain explicit blockers.
   aliases and 11 absent names, and required six explicit consumer/product
   blockers. Main plan and inventory pass the second documentation review.
   No TS implementation has been deleted.
+- PR correctness review round 1: production changes reviewed clear. Fixed two
+  proof gaps: the inventory now includes all frozen-reference callers (79
+  imports across 40 files), and the real-venue suite rejects zero websocket
+  delivery or any connected URL outside its recorded fixture. It also requires
+  a native ticker/delta frame before snapshot and compares an immutable snapshot
+  with the worker's regular store-flush catch-up. All 38 strengthened native
+  cases pass; independent re-review is clear.
+- Baseline acceptance at the Coinbase landing: full SDK/WASM 321 tests, harness
+  359, JS host 63 and native workspace 1,992 tests/163 suites pass. Root
+  typecheck (44 tasks) and lint (28 tasks) pass. Binance public/private controls
+  pass: public main CPU TS/Rust 284.3/174.2 ms, steady 157.2/81.6 ms,
+  retained memory 19.8/3.6 MB (2.0 MB Rust linear memory included). Combined
+  WASM is 9,579,478 bytes. Resource-concurrent full unit tests timed out in
+  existing import-heavy cases; a bounded full package rerun is pending.
+- Polymarket landed during acceptance. Integrate its landing commit, extend
+  the automatically enumerated matrix and caller readiness, rebuild combined
+  WASM and repeat affected gates before the PR is ready to merge.
