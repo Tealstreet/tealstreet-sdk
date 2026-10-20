@@ -33,6 +33,32 @@ test('Binance REST verifies original bytes, header, clock and unsigned public/li
   assert.throws(() => validateBinanceRequest({...request,url:'https://papi.binance.com/papi/v1/listenKey?signature=bad'}));
 });
 
+test('Binance testnet listen-key requests require fresh signed bytes while production stays unsigned', () => {
+  const profiles = [
+    ['https://demo-fapi.binance.com/fapi/v1/listenKey', 'https://fapi.binance.com/fapi/v1/listenKey'],
+    ['https://demo-fapi.binance.com/papi/v1/listenKey', 'https://papi.binance.com/papi/v1/listenKey'],
+    ['https://demo-dapi.binance.com/dapi/v1/listenKey', 'https://dapi.binance.com/dapi/v1/listenKey'],
+  ];
+  const headers = { 'X-MBX-APIKEY': 'replay-key' };
+  for (const [testnet, production] of profiles) for (const method of ['POST', 'PUT']) {
+    const signed = (query) => ({ method, headers, url: `${testnet}?${query}&signature=${hmac(query)}` });
+    const query = `timestamp=${Date.now()}&recvWindow=20000`;
+    const request = signed(query);
+    assert.doesNotThrow(() => validateBinanceRequest(request));
+    for (const bad of [
+      { ...request, url: `${testnet}?${query}&signature=${'0'.repeat(64)}` },
+      { ...request, url: `${testnet}?${query}` },
+      signed(`timestamp=${Date.now() - 60001}&recvWindow=20000`),
+      signed(`timestamp=${Date.now()}&recvWindow=60001`),
+      signed(`${query}&timestamp=${Date.now()}`),
+      { ...request, headers: {} },
+      { method, headers, url: testnet },
+      { ...request, url: request.url.replace(testnet, production) },
+    ]) assert.throws(() => validateBinanceRequest(bad));
+    assert.doesNotThrow(() => validateBinanceRequest({ method, headers, url: production }));
+  }
+});
+
 test('Spot signature and raw-method oracle rejects each independent corruption', () => {
   for (const corrupt of [
     (m) => {m.params.signature = '0'.repeat(64);}, (m) => {m.params.apiKey = 'wrong';},
