@@ -7,6 +7,11 @@ export const diagnosticKey = (failure) => failure
   .replace(/ performance run \d+/g, ' performance run')
   .split(': ts=')[0].split(' (ts=')[0];
 
+// Group exact paths sharing a rationale without repeating prose thousands of
+// times for catalogue/depth rows. This never introduces patterns or ranges.
+const declaredDiagnostics = (entry) => (entry?.diagnostics ?? []).flatMap((item) =>
+  (item.keys ?? [item.key]).map((key) => ({ key, divergence: item.divergence })));
+
 export function validateKnownFailures(manifest) {
   const errors = [];
   if (manifest?.schema !== 1 || !Array.isArray(manifest.failures)) return ['invalid known-failure manifest'];
@@ -24,10 +29,18 @@ export function validateKnownFailures(manifest) {
     const keys = new Set();
     for (const diagnostic of entry.diagnostics ?? []) {
       if (!diagnostic || typeof diagnostic !== 'object') { errors.push(`invalid diagnostic declaration ${identity}`); continue; }
-      if (typeof diagnostic.key !== 'string' || !diagnostic.key || diagnostic.key.includes('*') ||
-          typeof diagnostic.divergence !== 'string' || !diagnostic.divergence.trim() || keys.has(diagnostic.key))
+      const grouped = Object.hasOwn(diagnostic, 'keys');
+      const paths = grouped ? diagnostic.keys : [diagnostic.key];
+      if ((grouped && Object.hasOwn(diagnostic, 'key')) || !Array.isArray(paths) || !paths.length ||
+          typeof diagnostic.divergence !== 'string' || !diagnostic.divergence.trim()) {
         errors.push(`invalid diagnostic declaration ${identity}`);
-      keys.add(diagnostic.key);
+        continue;
+      }
+      for (const path of paths) {
+        if (typeof path !== 'string' || !path || path.includes('*') || keys.has(path))
+          errors.push(`invalid diagnostic declaration ${identity}`);
+        keys.add(path);
+      }
     }
   }
   return errors;
@@ -42,7 +55,7 @@ export function assessGateReport(report, manifest) {
       typeof report.private !== 'boolean' || !/^[a-f0-9]{64}$/.test(report.tapeSha256 ?? ''))
     return { errors: [...errors, 'invalid strict gate report'], known: [], resolved: [] };
   const entry = manifest.failures.find((candidate) => candidate.venue === report.venue && candidate.tapeSha256 === report.tapeSha256);
-  const declarations = new Map((entry?.diagnostics ?? []).map((item) => [item.key, item]));
+  const declarations = new Map(declaredDiagnostics(entry).map((item) => [item.key, item]));
   if (report.replayFailure) {
     const { kind, impl, command } = report.replayFailure;
     const key = `${impl} replay: command ${command} did not complete`;

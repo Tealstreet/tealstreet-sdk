@@ -55,6 +55,29 @@ test('manifest rejects wildcards, unnamed exceptions, duplicates and malformed d
   ]) { const value = manifest(); mutate(value); assert.ok(validateKnownFailures(value).length); }
 });
 
+test('grouped declarations enumerate exact paths and preserve all exception boundaries', () => {
+  const declared = manifest();
+  declared.failures[0].diagnostics = [{
+    keys: ['account orders[0].clientOrderId', 'account orders[1].clientOrderId'],
+    divergence: 'The same native identity omission affects these exact two rows.',
+  }];
+  assert.deepEqual(assessGateReport(report(), declared).errors, []);
+  const value = report();
+  value.failures = ['account orders[2].clientOrderId: ts="caller" rust=null'];
+  assert.match(assessGateReport(value, declared).errors.join('\n'), /unexpected/);
+  for (const mutate of [
+    (value) => { value.failures[0].diagnostics[0].keys = []; },
+    (value) => { value.failures[0].diagnostics[0].keys = ['account.*']; },
+    (value) => { value.failures[0].diagnostics[0].keys = ['same', 'same']; },
+    (value) => { value.failures[0].diagnostics[0].keys = 'account.orders'; },
+    (value) => { value.failures[0].diagnostics[0].key = 'ambiguous'; },
+    (value) => { value.failures[0].diagnostics.push({ key: 'account orders[0].clientOrderId', divergence: 'duplicate across groups' }); },
+  ]) { const changed = structuredClone(declared); mutate(changed); assert.ok(validateKnownFailures(changed).length); }
+  declared.failures[0].diagnostics[0].keys.push('checkpoint coverage rust: missing checkpoint 2');
+  value.failures = ['checkpoint coverage rust: missing checkpoint 2'];
+  assert.match(assessGateReport(value, declared).errors.join('\n'), /unexpected/);
+});
+
 test('invalid baselines or incomplete workloads cannot become known exceptions', () => {
   const value = report();
   value.failures.push('rust performance run 7: incomplete replay workload');

@@ -213,3 +213,9 @@ never retry an unchanged failed performance measurement to obtain a pass.
   Existing Orderly missing-value corrections now accept the serialized null
   spelling only under the same native limit/zero-market payload evidence;
   unexpected populated values still fail. No additional correction fields.
+- Independent grouped-declaration review PASS: all 49,262 literal keys match
+  collected evidence; adjacent row/field/prefix substitutions and grouped
+  integrity exemptions are rejected. The sole extra historical diagnostic is
+  the verified Hyro steady-CPU miss. Human routing report names every one of
+  the 49 failing venue aliases in RUST_GATE_HONESTY_RESULTS.md; no full private
+  parity is claimed. Final 107-case/head certification remains pending.
