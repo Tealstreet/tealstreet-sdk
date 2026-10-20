@@ -3,8 +3,8 @@ use crate::wire::{Number, Text};
 use crate::{Bitrue, Job, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
-    Balance, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position, PositionMode,
-    PositionSide, StopTriggerType, TimeInForce,
+    Balance, CurrencyBalance, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
+    PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
@@ -29,6 +29,10 @@ fn matches_lookup(order: &Order, symbol: &str, client_order_id: &str) -> bool {
 }
 
 pub enum Request {
+    Brackets {
+        command: CommandId,
+        symbol: String,
+    },
     Listen {
         generation: u64,
     },
@@ -79,6 +83,7 @@ pub struct Account {
     pub(crate) loaded: bool,
     pub(crate) settings_revision: u64,
     pub(crate) orders_revision: u64,
+    pub(crate) bracket_limits: HashMap<String, f64>,
     pub(crate) socket: Option<SocketId>,
     generation: u64,
     listen_key: Option<String>,
@@ -95,6 +100,9 @@ pub struct Account {
     initial_orders: HashSet<String>,
     progress: HashMap<String, OrderProgress>,
     quotes: HashMap<String, (f64, f64)>,
+    execution_fills: HashMap<String, f64>,
+    execution_quotes: HashMap<String, (f64, f64)>,
+    execution_intervals: HashMap<String, Executions>,
     leverage_queries: Vec<(CommandId, String)>,
     progress_queue: VecDeque<String>,
     terminal: HashMap<String, OrderStatus>,
@@ -105,6 +113,40 @@ struct OrderProgress {
     filled: f64,
     amount: f64,
     time: f64,
+}
+#[derive(Default)]
+struct Executions {
+    floor: f64,
+    intervals: Vec<(f64, f64)>,
+}
+impl Executions {
+    fn take(&mut self, start: f64, end: f64) -> f64 {
+        let start = start.max(self.floor);
+        if end <= start {
+            return 0.0;
+        }
+        let mut amount = end - start;
+        for &(from, to) in &self.intervals {
+            amount -= (end.min(to) - start.max(from)).max(0.0);
+        }
+        self.intervals.push((start, end));
+        self.intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut merged = 0;
+        for index in 0..self.intervals.len() {
+            let interval = self.intervals[index];
+            if merged > 0 && interval.0 <= self.intervals[merged - 1].1 {
+                self.intervals[merged - 1].1 = self.intervals[merged - 1].1.max(interval.1);
+            } else {
+                self.intervals[merged] = interval;
+                merged += 1;
+            }
+        }
+        self.intervals.truncate(merged);
+        if self.intervals.len() > HISTORY_LIMIT {
+            self.floor = self.intervals.remove(0).1;
+        }
+        decimal(amount.max(0.0))
+    }
 }
 
 #[derive(Deserialize)]
@@ -167,6 +209,7 @@ struct PositionRow<'a> {
     side: Cow<'a, str>,
     volume: Number,
     open_price: Number,
+    #[serde(default)]
     leverage_level: Number,
     position_type: Number,
     #[serde(default)]
@@ -259,6 +302,8 @@ struct OrderEvent<'a> {
     #[serde(default, alias = "executedQty")]
     z: Number,
     #[serde(default)]
+    l: Option<Number>,
+    #[serde(default)]
     p: Number,
     #[serde(default)]
     ap: Number,
@@ -315,6 +360,16 @@ fn trigger(value: f64) -> Option<StopTriggerType> {
     }
 }
 impl Account {
+    fn execution_amount(&mut self, id: &str, start: f64, end: f64) -> f64 {
+        let baseline = self.execution_fills.get(id).copied().unwrap_or(0.0);
+        self.execution_intervals
+            .entry(id.to_owned())
+            .or_insert_with(|| Executions {
+                floor: baseline,
+                intervals: vec![],
+            })
+            .take(start, end)
+    }
     fn progress(&mut self, id: &str, filled: f64, amount: f64, time: f64) {
         if !self.progress.contains_key(id) {
             self.progress_queue.push_back(id.to_owned());
@@ -335,6 +390,9 @@ impl Account {
             if let Some(old) = self.progress_queue.pop_front() {
                 self.progress.remove(&old);
                 self.quotes.remove(&old);
+                self.execution_fills.remove(&old);
+                self.execution_quotes.remove(&old);
+                self.execution_intervals.remove(&old);
             }
         }
     }
@@ -482,9 +540,10 @@ impl Bitrue {
     }
     fn order_finished(&mut self, cx: &mut Cx<'_, Pending>, symbol: String, success: bool) {
         self.account.order_active = None;
-        if success {
-            self.account.initial_orders.remove(&symbol);
-        } else if !self.account.order_queue.contains(&symbol) {
+        // Loaded means the initial sweep finished, including visibly failed reads.
+        // A failed symbol retains its snapshot and continues retrying independently.
+        self.account.initial_orders.remove(&symbol);
+        if !success && !self.account.order_queue.contains(&symbol) {
             self.account.order_queue.push_back(symbol);
         }
         if self.account.initial_orders.is_empty() {
@@ -766,55 +825,105 @@ impl Bitrue {
             .max(existing.as_ref().map_or(0.0, |o| o.amount))
             .max(watermark.amount)
             .max(filled);
-        let prior_quote = self
+        // REST progress describes order state, not executions already delivered to the caller.
+        let reported = self
             .account
-            .quotes
+            .execution_fills
             .get(&id)
-            .filter(|(qty, _)| *qty == previous)
+            .copied()
+            .unwrap_or(0.0);
+        // Beyond a blind REST interval, only the new suffix has an execution-price proof.
+        let execution_previous = if filled > previous {
+            reported.max(previous)
+        } else {
+            reported
+        };
+        let execution_quotes = if execution_previous > reported {
+            &self.account.quotes
+        } else {
+            &self.account.execution_quotes
+        };
+        let prior_quote = execution_quotes
+            .get(&id)
+            .filter(|(qty, _)| *qty == execution_previous)
             .map(|(_, value)| *value);
+        let last_quantity = row.l.map(|quantity| decimal(quantity.0 * scale));
         let quote = (row.ap.0 > 0.0).then_some(filled * row.ap.0).or_else(|| {
             (row.execution_price.0 > 0.0
-                && filled > previous
-                && (previous == 0.0 || prior_quote.is_some()))
-            .then_some(prior_quote.unwrap_or(0.0) + (filled - previous) * row.execution_price.0)
+                && filled > execution_previous
+                && last_quantity.is_some_and(|last| {
+                    last > 0.0 && last <= filled && last >= filled - execution_previous
+                })
+                && (execution_previous == 0.0 || prior_quote.is_some()))
+            .then_some(
+                prior_quote.unwrap_or(0.0) + (filled - execution_previous) * row.execution_price.0,
+            )
         });
-        let execution_price = if row.execution_price.0 > 0.0 {
+        let execution_price = if row.execution_price.0 > 0.0 && last_quantity.is_some() {
             row.execution_price.0
-        } else if filled > previous
-            && (previous == 0.0
-                || self
-                    .account
-                    .quotes
+        } else if filled > execution_previous
+            && (execution_previous == 0.0
+                || execution_quotes
                     .get(&id)
-                    .is_some_and(|(qty, _)| *qty == previous))
+                    .is_some_and(|(qty, _)| *qty == execution_previous))
         {
             quote.map_or(0.0, |value| {
-                (value
-                    - self
-                        .account
-                        .quotes
-                        .get(&id)
-                        .map_or(0.0, |(_, value)| *value))
-                    / (filled - previous)
+                (value - execution_quotes.get(&id).map_or(0.0, |(_, value)| *value))
+                    / (filled - execution_previous)
             })
         } else {
             0.0
         };
+        let mut delivery_known = false;
+        if row.x == "TRADE" && execution_price.is_finite() && execution_price > 0.0 {
+            let start = match last_quantity {
+                // L prices only this execution, never a blind cumulative gap.
+                Some(last) if last > 0.0 && last <= filled && row.execution_price.0 > 0.0 => {
+                    Some(decimal(filled - last))
+                }
+                Some(last)
+                    if row.execution_price.0 <= 0.0
+                        && last > 0.0
+                        && last <= filled
+                        && last >= filled - execution_previous
+                        && filled > execution_previous =>
+                {
+                    Some(execution_previous)
+                }
+                None if filled > execution_previous => Some(execution_previous),
+                _ => None,
+            };
+            if let Some(start) = start {
+                delivery_known = true;
+                let amount = self.account.execution_amount(&id, start, filled);
+                if amount > 0.0 {
+                    cx.fill(Fill {
+                        order_id: id.clone(),
+                        symbol: market.symbol.clone(),
+                        side,
+                        price: decimal(execution_price),
+                        amount,
+                    });
+                }
+            }
+        }
         if row.x == "TRADE"
-            && filled > previous
-            && execution_price.is_finite()
+            && delivery_known
             && execution_price > 0.0
+            && filled >= execution_previous
+            && let Some(quote) = quote.filter(|v| v.is_finite())
         {
-            cx.fill(Fill {
-                order_id: id.clone(),
-                symbol: market.symbol.clone(),
-                side,
-                price: decimal(execution_price),
-                amount: decimal(filled - previous),
-            });
+            self.account
+                .execution_quotes
+                .insert(id.clone(), (filled, quote));
+        }
+        if row.x == "TRADE" && delivery_known {
+            self.account
+                .execution_fills
+                .insert(id.clone(), filled.max(execution_previous));
         }
         if filled >= previous
-            && let Some(quote) = quote.filter(|v| v.is_finite())
+            && let Some(quote) = quote
         {
             self.account.quotes.insert(id.clone(), (filled, quote));
         }
@@ -941,11 +1050,19 @@ impl Bitrue {
                     2.0 => safe_cex_engine::model::MarginType::Isolated,
                     _ => return Err(()),
                 };
-                if row.volume.0 < 0.0 || row.open_price.0 < 0.0 || row.leverage_level.0 <= 0.0 {
+                if row.volume.0 < 0.0 || row.open_price.0 < 0.0 || row.leverage_level.0 < 0.0 {
+                    return Err(());
+                }
+                let leverage = if row.leverage_level.0 > 0.0 {
+                    row.leverage_level.0
+                } else {
+                    cx.store.setting(&market.symbol).map_or(0.0, |s| s.leverage)
+                };
+                if row.volume.0 > 0.0 && leverage <= 0.0 {
                     return Err(());
                 }
                 let setting = MarketSetting {
-                    leverage: row.leverage_level.0,
+                    leverage,
                     margin_type: Some(margin_type),
                     ..MarketSetting::default()
                 };
@@ -981,7 +1098,7 @@ impl Bitrue {
                     side,
                     entry_price: row.open_price.0,
                     notional: row.position_balance.0,
-                    leverage: row.leverage_level.0,
+                    leverage,
                     margin_type: Some(margin_type),
                     position_mode: Some(PositionMode::Oneway),
                     unrealized_pnl: (if side == PositionSide::Long {
@@ -1124,6 +1241,32 @@ impl Bitrue {
         Ok(rows)
     }
     pub(crate) fn account_command(&mut self, cx: &mut Cx<'_, Pending>, command: &Command) -> bool {
+        if let Command::FetchMaxLeverage { command, symbol } = command {
+            let Some(symbol) = self.resolve_symbol(cx, symbol) else {
+                cx.done(*command, Err("Unknown Bitrue market".into()));
+                return true;
+            };
+            if !self.authenticated() {
+                cx.done(*command, Err("Bitrue private credentials required".into()));
+                return true;
+            }
+            let contract = &cx.store.market(&symbol).expect("resolved market").id;
+            self.send(
+                cx,
+                Method::Get,
+                &format!(
+                    "/fapi/v2/leverageBracket?contractName={}",
+                    crate::history::query_component(contract)
+                ),
+                None,
+                None,
+                Job::Account(Request::Brackets {
+                    command: *command,
+                    symbol,
+                }),
+            );
+            return true;
+        }
         let Command::FetchLeverage { command, symbol } = command else {
             return false;
         };
@@ -1156,8 +1299,14 @@ impl Bitrue {
         }
         for (command, symbol) in std::mem::take(&mut self.account.leverage_queries) {
             let result = settings
-                .and_then(|rows| rows.iter().find(|(s, _)| *s == symbol))
-                .and_then(|(_, s)| {
+                .and_then(|rows| {
+                    rows.iter()
+                        .find(|(s, _)| *s == symbol)
+                        .map(|(_, s)| *s)
+                        .or_else(|| cx.store.setting(&symbol))
+                })
+                .filter(|s| s.leverage > 0.0)
+                .and_then(|s| {
                     s.margin_type.map(|margin_type| Leverage {
                         buy_leverage: s.leverage,
                         sell_leverage: s.leverage,
@@ -1249,6 +1398,64 @@ impl Bitrue {
             return;
         }
         match request {
+            Request::Brackets { command, symbol } => {
+                #[derive(Deserialize)]
+                struct Reply {
+                    data: BracketData,
+                }
+                #[derive(Deserialize)]
+                #[serde(untagged)]
+                enum BracketData {
+                    One(Bracket),
+                    Many(Vec<Bracket>),
+                }
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Bracket {
+                    contract_name: String,
+                    brackets: Vec<Tier>,
+                }
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Tier {
+                    initial_leverage: Number,
+                }
+                let parsed = serde_json::from_str::<Reply>(response.body)
+                    .ok()
+                    .and_then(|reply| {
+                        let rows = match reply.data {
+                            BracketData::One(row) => vec![row],
+                            BracketData::Many(rows) => rows,
+                        };
+                        let contract = &cx.store.market(&symbol)?.id;
+                        let mut matching = rows
+                            .into_iter()
+                            .filter(|row| row.contract_name == *contract);
+                        let row = matching.next()?;
+                        if matching.next().is_some() || row.brackets.is_empty() {
+                            return None;
+                        }
+                        row.brackets.into_iter().try_fold(0.0_f64, |max, tier| {
+                            let value = tier.initial_leverage.0;
+                            (value > 0.0 && value <= 125.0 && value.fract() == 0.0)
+                                .then_some(max.max(value))
+                        })
+                    });
+                if let Some(max) = parsed {
+                    self.account.bracket_limits.insert(symbol.clone(), max);
+                    cx.store.update_markets(|market| {
+                        if market.symbol == symbol {
+                            market.limits.leverage.max = max;
+                        }
+                    });
+                    cx.done(command, Ok(safe_cex_engine::num::format(max)));
+                } else {
+                    cx.done(
+                        command,
+                        Err("Malformed Bitrue leverage brackets; retaining known limit".into()),
+                    );
+                }
+            }
             Request::Listen { generation } => {
                 if generation != self.account.generation {
                     return;
@@ -1326,7 +1533,14 @@ impl Bitrue {
                         .or_else(|| data.balances.get("USDC"))
                         .cloned()
                         .unwrap();
+                    let mut currencies = data
+                        .balances
+                        .into_iter()
+                        .map(|(currency, balance)| CurrencyBalance { currency, balance })
+                        .collect::<Vec<_>>();
+                    currencies.sort_by(|a, b| a.currency.cmp(&b.currency));
                     cx.store.set_balance(balance);
+                    cx.store.set_currency_balances(currencies);
                     cx.store.set_positions(data.positions);
                     cx.store.set_hedged(false);
                     self.account.loaded = true;
@@ -1395,6 +1609,18 @@ impl Bitrue {
                             }
                             continue;
                         }
+                        if self.account.initial_orders.contains(&symbol) {
+                            self.account
+                                .execution_fills
+                                .entry(row.id.clone())
+                                .or_insert(row.filled);
+                            if let Some(value) = quotes.get(&row.id) {
+                                self.account
+                                    .execution_quotes
+                                    .entry(row.id.clone())
+                                    .or_insert((row.filled, *value));
+                            }
+                        }
                         self.account
                             .progress(&row.id, row.filled, row.amount, row.last_update);
                         if let Some(value) = quotes.get(&row.id) {
@@ -1425,6 +1651,10 @@ impl Bitrue {
                         "Bitrue order snapshot incomplete or superseded; retaining previous state",
                     );
                 }
+                let success = self.trade_census(cx, &symbol, revision, success);
+                if success {
+                    cx.orders_reconciled(Some(&symbol));
+                }
                 self.order_finished(cx, symbol, success);
             }
         }
@@ -1443,6 +1673,7 @@ impl Bitrue {
         error: &str,
     ) {
         match request {
+            Request::Brackets { command, .. } => cx.done(command, Err(error.into())),
             Request::Listen { generation } if generation == self.account.generation => {
                 self.listen_failed(cx, error)
             }
@@ -1464,7 +1695,12 @@ impl Bitrue {
                     self.refresh_account(cx);
                 }
             }
-            Request::Orders { symbol, lookup, .. } => {
+            Request::Orders {
+                symbol,
+                revision,
+                lookup,
+                ..
+            } => {
                 cx.log(
                     LogLevel::Error,
                     format!("Bitrue order read failed: {error}"),
@@ -1472,6 +1708,7 @@ impl Bitrue {
                 if let Some((command, client_order_id)) = lookup {
                     Self::finish_lookup(cx, command, &symbol, &client_order_id, None);
                 } else {
+                    self.trade_census(cx, &symbol, revision, false);
                     self.order_finished(cx, symbol, false);
                 }
             }
