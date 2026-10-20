@@ -219,3 +219,11 @@ never retry an unchanged failed performance measurement to obtain a pass.
   the verified Hyro steady-CPU miss. Human routing report names every one of
   the 49 failing venue aliases in RUST_GATE_HONESTY_RESULTS.md; no full private
   parity is claimed. Final 107-case/head certification remains pending.
+- Landing advanced again to `702a62050c` (broker/cancel fixes, Bitrue private TIF
+  and signing-clock setup). Merged as `2b10e43733`, resolving the extracted oracle
+  conflict without restoring its old Rust-access API; preserved incoming notes
+  in the isolated module and incoming post-load signing-clock resets together
+  with deterministic startup. Independent merge audit PASS, 38/38 controls.
+  Post-merge full harness 766/766, typecheck 44/44, lint 28/28 and repository test
+  27/27 tasks PASS. New full matrix is run `39422195309`; declaration updates
+  require its exact new evidence, not exemptions for a changed workload.
