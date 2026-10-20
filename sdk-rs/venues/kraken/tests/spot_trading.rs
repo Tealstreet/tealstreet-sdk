@@ -337,3 +337,92 @@ fn inherited_history_lookup_and_settings_settle_explicitly() {
     );
     assert!(done(&mut e, 12).is_err());
 }
+
+#[test]
+fn queued_amend_rechecks_reconciled_native_kind_before_write() {
+    let (mut e, _, private) = ready(false);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 40,
+            orders: vec![opts("limit", 99.)],
+        }),
+    );
+    let first = requests(&mut e).pop().unwrap();
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 41,
+            id: "O-100".into(),
+            price: Some(98.),
+            amount: None,
+        }),
+    );
+    assert!(requests(&mut e).is_empty());
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","side":"buy","order_type":"stop-loss-limit","order_qty":2,"cum_qty":0.5,"exec_type":"amended","limit_price":98,"timestamp":"2023-11-14T22:13:21Z"}]}"#,
+    );
+    e.drain_actions().for_each(drop);
+    reply(
+        &mut e,
+        &first,
+        r#"{"error":[],"result":{"txid":["ENTRY"]}}"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 41,
+            result: Err(_)
+        })
+    )));
+}
+
+#[test]
+fn trailing_quantizes_the_distance_from_unrounded_chart_price() {
+    let (mut e, s, _) = ready(false);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"ticker","type":"update","data":[{"symbol":"BTC/USD","last":100.04}]}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 42,
+            orders: vec![opts("trailing_stop_market", 99.96)],
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    assert!(r.body.unwrap().contains("price=%2B0.1"));
+}
+
+#[test]
+fn zero_disabled_brackets_match_ts_without_a_protective_write() {
+    let (mut e, _, _) = ready(false);
+    let mut o = opts("limit", 99.);
+    o.stop_loss = Some(0.);
+    o.take_profit = Some(0.);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 43,
+            orders: vec![o],
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, r#"{"error":[],"result":{"txid":["ENTRY"]}}"#);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 43,
+            result: Ok(_)
+        })
+    )));
+}

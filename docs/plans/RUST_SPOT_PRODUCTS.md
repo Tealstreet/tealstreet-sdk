@@ -61,14 +61,29 @@ documented positive relative distance; ambiguous edits fail before writes.
   retries. Initial Hyperliquid suite: 77 tests including 19 spot tests; strict
   crate Clippy/format passed. SDK caller-ID/fallback tests: 18 passed. TS spot
   metadata/ACK/public protocol regression subset: 34 passed.
-- Follow-up private/trading/query review found a Hyperliquid fill-before-ACK
-  resurrection race; fix and new race tests remain required. Private snapshot
-  and query/fallback review found no additional confirmed defect.
+- Follow-up private/trading/query review found and verified the fix for a
+  Hyperliquid fill-before-ACK resurrection race, including partial/duplicate
+  fills. Kraken's current typed triggers object and externally placed iceberg
+  read compatibility were also repaired and independently checked. Spot uses
+  open-only positions and fixed settings, as the global specification requires.
 - Initial Hyperliquid live public capture failed with 1006 reconnect loops and
   no accepted books. This is not a fixture candidate. Check spot socket URL
   and replace unsupported nSigFigs 1/6 subscriptions with documented supported
-  variants, then recapture. No live public gate is claimed yet.
-- Kraken public tests: 4 passed. Private/trading tests and hardening were in
-  progress at the quota checkpoint; rerun before claiming phase completion.
-- Work-in-progress checkpoint committed before syncing the landing branch;
-  no PR exists yet. Remaining gates, measurements and PR are pending.
+  variants. Corrected live capture reached two books, then its replay exposed
+  another real defect: HYPE is listed against USDC, USDT0, USDH and USDE, while
+  TS forced every quote to USDC. Both implementations now resolve the actual
+  quote token, preserving every pair and native action/book/candle identity.
+  USD balance valuation must prefer a direct USDC market or convert quote units
+  through a bounded price path, keeping unpriced raw holdings. Duplicate-base
+  identity/conversion tests and fresh public recapture are required. No live
+  public gate is claimed yet.
+- Kraken frozen full crate: 120 tests (93 existing futures, 27 spot) pass;
+  strict crate Clippy, formatting and diff checks pass. Public/private/trading/
+  query review findings are resolved, with focused independent regressions.
+- Hyperliquid frozen full crate: 83 tests (25 spot) pass; strict crate Clippy,
+  formatting and diff checks pass. New quote identity and valuation changes
+  receive another independent review before gates.
+- Work-in-progress checkpoint `3972cc5f54` committed before merging the landing
+  branch cleanly at `16e4fa340e`. No PR exists yet. Selected Kraken WASM build,
+  private/public/parent-venue/Binance gates, final repository checks, independent
+  harness review, measurements and PR remain pending.

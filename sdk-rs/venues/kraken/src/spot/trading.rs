@@ -13,6 +13,7 @@ pub enum Step {
     },
     Amend {
         id: String,
+        native_kind: String,
         params: Vec<(&'static str, String)>,
     },
     Cancel {
@@ -88,10 +89,12 @@ impl KrakenSpot {
             ("cl_ord_id", client_id),
         ];
         if o.kind != OrderType::Market {
-            let price = num::adjust(
-                o.price.ok_or("Kraken Spot order requires price")?,
-                m.precision.price,
-            );
+            let input_price = o.price.ok_or("Kraken Spot order requires price")?;
+            let price = if o.kind == OrderType::TrailingStopLoss {
+                input_price
+            } else {
+                num::adjust(input_price, m.precision.price)
+            };
             if !price.is_finite() || price <= 0. {
                 return Err("Kraken Spot invalid price".into());
             }
@@ -137,7 +140,9 @@ impl KrakenSpot {
                     (OrderType::StopLoss, o.stop_loss),
                     (OrderType::TakeProfit, o.take_profit),
                 ] {
-                    if let Some(price) = price {
+                    if let Some(price) = price
+                        && price != 0.
+                    {
                         let mut child = o.clone();
                         child.kind = kind;
                         child.side = o.side.opposite();
@@ -209,6 +214,7 @@ impl KrakenSpot {
         }
         Ok(Step::Amend {
             id: id.into(),
+            native_kind: raw.clone(),
             params,
         })
     }
@@ -251,12 +257,16 @@ impl KrakenSpot {
             return;
         };
         // A queued edit can become terminal before it is sent.
-        if let Step::Amend { id, .. } = &step
+        if let Step::Amend {
+            id, native_kind, ..
+        } = &step
             && (self.account.terminal.contains(id)
-                || !cx
-                    .store
-                    .order(id)
-                    .is_some_and(|o| o.status == OrderStatus::Open))
+                || self.account.provenance.get(id) != Some(native_kind)
+                || !cx.store.order(id).is_some_and(|o| {
+                    o.status == OrderStatus::Open
+                        && Some(o.kind) == order_kind(native_kind)
+                        && o.time_in_force != Some(TimeInForce::ImmediateOrCancel)
+                }))
         {
             self.trade_failed(cx, "Kraken Spot order closed before amend");
             return;

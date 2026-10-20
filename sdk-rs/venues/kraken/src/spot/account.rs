@@ -37,7 +37,7 @@ pub struct Account {
     pub revision: u64,
     native_times: HashMap<String, f64>,
     pub balance_revision: u64,
-    balance_flight: bool,
+    balance_flight: HashSet<u64>,
     orders_flight: bool,
     pub provenance: HashMap<String, String>,
     pub terminal: HashSet<String>,
@@ -86,6 +86,24 @@ struct Token<'a> {
 #[derive(Deserialize)]
 struct Amount(#[serde(deserialize_with = "number")] f64);
 #[derive(Deserialize)]
+struct Triggers<'a> {
+    #[serde(default, deserialize_with = "optional_number")]
+    actual_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    price: Option<f64>,
+    #[serde(default, borrow)]
+    price_type: Cow<'a, str>,
+}
+impl Triggers<'_> {
+    fn effective(&self) -> Option<f64> {
+        self.actual_price.or_else(|| {
+            (self.price_type == "static")
+                .then_some(self.price)
+                .flatten()
+        })
+    }
+}
+#[derive(Deserialize)]
 struct Execution<'a> {
     #[serde(default, borrow)]
     order_id: Cow<'a, str>,
@@ -121,10 +139,12 @@ struct Execution<'a> {
     stop_price: Option<f64>,
     #[serde(default, deserialize_with = "optional_number")]
     trigger_price: Option<f64>,
+    #[serde(default, borrow)]
+    triggers: Option<Triggers<'a>>,
 }
 pub(super) fn order_kind(s: &str) -> Option<OrderType> {
     Some(match s {
-        "limit" => OrderType::Limit,
+        "limit" | "iceberg" | "settle-position" => OrderType::Limit,
         "market" => OrderType::Market,
         "stop-loss" | "stop-loss-limit" => OrderType::StopLoss,
         "take-profit" | "take-profit-limit" => OrderType::TakeProfit,
@@ -253,7 +273,7 @@ impl KrakenSpot {
             cx.store.set_positions(vec![]);
             return;
         }
-        self.fake_positions(cx);
+        self.spot_settings(cx);
         self.account.connection.socket =
             Some(cx.connect_channel("wss://ws-auth.kraken.com/v2", SocketChannel::Private));
         self.account.connection.received = cx.now;
@@ -262,50 +282,41 @@ impl KrakenSpot {
         self.orders_read(cx);
         self.account.poll = Some(cx.set_timer(10_000.));
     }
-    fn fake_positions(&self, cx: &mut Cx<'_, Pending>) {
-        let rows = cx
+    fn spot_settings(&self, cx: &mut Cx<'_, Pending>) {
+        let settings: Vec<_> = cx
             .store
             .markets()
             .iter()
-            .filter(|m| m.active)
-            .flat_map(|m| {
-                [PositionSide::Long, PositionSide::Short].map(|side| Position {
-                    id: format!(
-                        "{}:{}",
-                        m.symbol,
-                        if side == PositionSide::Long {
-                            "long"
-                        } else {
-                            "short"
-                        }
-                    ),
-                    symbol: m.symbol.clone(),
-                    side,
-                    entry_price: 0.,
-                    notional: 0.,
-                    leverage: 1.,
-                    margin_type: Some(MarginType::Isolated),
-                    position_mode: Some(PositionMode::Oneway),
-                    unrealized_pnl: 0.,
-                    realized_pnl: None,
-                    contracts: 0.,
-                    liquidation_price: 0.,
-                    margin_size: None,
-                    last_update: None,
-                })
+            .enumerate()
+            .filter(|(_, m)| m.active)
+            .map(|(i, _)| {
+                (
+                    i as u32,
+                    safe_cex_engine::store::MarketSetting {
+                        leverage: 1.,
+                        margin_type: Some(MarginType::Isolated),
+                        buy_leverage: None,
+                        sell_leverage: None,
+                    },
+                )
             })
             .collect();
-        cx.store.set_positions(rows);
+        cx.store.set_positions(vec![]);
+        cx.store.set_settings(settings);
+        cx.store.set_hedged(false);
     }
     pub(super) fn balance_read(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         command: Option<safe_cex_engine::CommandId>,
     ) {
-        if self.account.balance_flight && command.is_none() {
+        if !self.account.balance_flight.is_empty() && command.is_none() {
             return;
         }
-        self.account.balance_flight = true;
+        self.account.balance_revision += 1;
+        self.account
+            .balance_flight
+            .insert(self.account.balance_revision);
         self.request_private(
             cx,
             "/0/private/Balance",
@@ -350,6 +361,8 @@ impl KrakenSpot {
         }
         self.account.connection.socket = None;
         self.account.connection.open = false;
+        self.account.revision += 1;
+        self.account.balance_revision += 1;
         if let Some(t) = self.account.connection.watchdog.take() {
             cx.clear_timer(t)
         }
@@ -500,8 +513,13 @@ impl KrakenSpot {
         };
         let r = match &request.kind {
             Kind::Balance { revision, command } => {
-                self.account.balance_flight = false;
+                self.account.balance_flight.remove(revision);
                 let r = self.balance_response(cx, text, *revision);
+                if *revision != self.account.balance_revision
+                    && self.account.balance_flight.is_empty()
+                {
+                    self.balance_read(cx, None);
+                }
                 if let Some(c) = command {
                     cx.done(*c, r.as_ref().map(|_| "null".into()).map_err(Clone::clone));
                 }
@@ -578,8 +596,8 @@ impl KrakenSpot {
         error: &str,
     ) {
         match request.kind {
-            Kind::Balance { command, .. } => {
-                self.account.balance_flight = false;
+            Kind::Balance { command, revision } => {
+                self.account.balance_flight.remove(&revision);
                 if let Some(c) = command {
                     cx.done(c, Err(error.into()))
                 }
@@ -740,7 +758,7 @@ impl KrakenSpot {
                     .unwrap_or_else(|| e.symbol.to_string())
             };
             if cx.store.market(&symbol).is_none() {
-                invalid = true;
+                times.remove(&*e.order_id);
                 return;
             }
             let kind = order_kind(&e.order_type).or_else(|| existing.map(|o| o.kind));
@@ -771,12 +789,24 @@ impl KrakenSpot {
                     side
                 }
             };
-            let price = e
-                .limit_price
-                .or(e.stop_price)
-                .or(e.trigger_price)
-                .or_else(|| existing.map(|o| o.price))
-                .unwrap_or(0.);
+            let trigger = e.triggers.as_ref().and_then(Triggers::effective);
+            if trigger.is_some_and(|p| p <= 0.) {
+                invalid = true;
+                return;
+            }
+            let price = if matches!(
+                kind,
+                OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+            ) {
+                trigger
+                    .or(e.stop_price)
+                    .or(e.trigger_price)
+                    .or(e.limit_price)
+            } else {
+                e.limit_price
+            }
+            .or_else(|| existing.map(|o| o.price))
+            .unwrap_or(0.);
             let mut o = order(
                 e.order_id.to_string(),
                 symbol.clone(),
@@ -840,6 +870,9 @@ impl KrakenSpot {
             });
             cx.store.set_orders(rows);
             self.account.provenance = provenance;
+            self.account
+                .native_times
+                .retain(|id, _| self.account.terminal.contains(id) || cx.store.order(id).is_some());
         } else {
             for o in rows {
                 cx.store.upsert_order(o);

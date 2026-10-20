@@ -1,7 +1,7 @@
 mod spot_support;
 use safe_cex_engine::{
     Action, Command, Event, Notice,
-    model::{OrderStatus, PositionSide},
+    model::{MarginType, OrderStatus},
 };
 use safe_cex_venue_kraken::sign::Signer;
 use spot_support::*;
@@ -28,16 +28,18 @@ fn official_spot_auth_vector_and_form_nonce_are_exact() {
     );
 }
 #[test]
-fn multi_asset_balance_open_order_aliases_and_fake_positions() {
+fn multi_asset_balance_open_order_aliases_and_spot_settings() {
     let (e, _, _) = ready(false);
     let b = e.store().balance();
     assert_eq!((b.total, b.free, b.used), (1355., 1355., 0.));
     assert_eq!(e.store().currency_balances().unwrap().len(), 4);
-    assert_eq!(e.store().positions().len(), 4);
-    assert!(e.store().positions().iter().any(|p| p.id == "XBT/USD:long"
-        && p.side == PositionSide::Long
-        && p.contracts == 0.
-        && p.leverage == 1.));
+    assert!(e.store().positions().is_empty());
+    assert!(e.store().loaded().positions);
+    for symbol in ["XBT/USD", "ETH/USD"] {
+        let setting = e.store().setting(symbol).unwrap();
+        assert_eq!(setting.leverage, 1.);
+        assert_eq!(setting.margin_type, Some(MarginType::Isolated));
+    }
     let o = e.store().order("O-100").unwrap();
     assert_eq!(o.symbol, "XBT/USD");
     assert_eq!((o.amount, o.filled, o.remaining), (2., 0.5, 1.5));
@@ -219,4 +221,121 @@ fn balance_read_signature_rejection_resigns_once_and_network_retry_is_bounded() 
         .unwrap();
     e.handle(NOW + 400., Event::TimerFired { timer: t });
     assert_eq!(requests(&mut e).len(), 1);
+}
+
+#[test]
+fn parallel_balance_reads_cannot_rollback_newer_response() {
+    let (mut e, _, _) = ready(false);
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 20 }));
+    let old = requests(&mut e).pop().unwrap();
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 21 }));
+    let new = requests(&mut e).pop().unwrap();
+    reply(&mut e, &new, r#"{"error":[],"result":{"ZUSD":"2222"}}"#);
+    e.drain_actions().for_each(drop);
+    reply(&mut e, &old, r#"{"error":[],"result":{"ZUSD":"1111"}}"#);
+    assert_eq!(e.store().balance().total, 2222.);
+}
+#[test]
+fn posted_read_network_retry_stops_after_three_resends() {
+    let (mut e, _, _) = ready(false);
+    e.handle(NOW, Event::Command(Command::FetchAccount { command: 22 }));
+    let mut request = requests(&mut e).pop().unwrap();
+    let mut lastnonce = 0u64;
+    for attempt in 0..4 {
+        let nonce = request
+            .body
+            .as_ref()
+            .unwrap()
+            .split('&')
+            .find_map(|p| p.strip_prefix("nonce="))
+            .unwrap()
+            .parse::<u64>()
+            .unwrap();
+        assert!(nonce > lastnonce);
+        lastnonce = nonce;
+        e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: request.id,
+                error: "connection reset",
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        if attempt < 3 {
+            let timer = actions
+                .into_iter()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } if at_ms == NOW => Some(timer),
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(NOW, Event::TimerFired { timer });
+            request = requests(&mut e).pop().unwrap();
+        } else {
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+            );
+            assert!(actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone {
+                    command: 22,
+                    result: Err(_)
+                })
+            )));
+        }
+    }
+}
+
+#[test]
+fn documented_native_trigger_object_maps_effective_price_without_treating_relative_offset_as_absolute()
+ {
+    let (mut e, _, private) = ready(false);
+    let s = private.unwrap();
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"executions","type":"snapshot","data":[{"order_id":"STOP","symbol":"BTC/USD","side":"sell","order_type":"stop-loss","order_qty":2,"cum_qty":0,"triggers":{"price":90,"price_type":"static","actual_price":91}},{"order_id":"TP","symbol":"ETH/USD","side":"sell","order_type":"take-profit","order_qty":1,"cum_qty":0,"triggers":{"price":60,"price_type":"static"}},{"order_id":"TRAIL","symbol":"BTC/USD","side":"sell","order_type":"trailing-stop","order_qty":1,"cum_qty":0,"triggers":{"price":5,"price_type":"pct","actual_price":95}}]}"#,
+    );
+    assert_eq!(e.store().order("STOP").unwrap().price, 91.);
+    assert_eq!(e.store().order("TP").unwrap().price, 60.);
+    assert_eq!(e.store().order("TRAIL").unwrap().price, 95.);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"TRAIL","symbol":"BTC/USD","order_type":"trailing-stop","order_qty":1,"cum_qty":0,"triggers":{"price":5,"price_type":"pct"}}]}"#,
+    );
+    assert_eq!(e.store().order("TRAIL").unwrap().price, 95.);
+}
+
+#[test]
+fn externally_placed_iceberg_does_not_poison_mixed_order_snapshot() {
+    let (mut e, _, private) = ready(false);
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"snapshot","data":[{"order_id":"LIMIT","symbol":"BTC/USD","side":"buy","order_type":"limit","order_qty":1,"cum_qty":0,"limit_price":99},{"order_id":"ICEBERG","symbol":"ETH/USD","side":"buy","order_type":"iceberg","order_qty":2,"cum_qty":0,"limit_price":49,"display_qty":0.5},{"order_id":"EXTERNAL-EUR","symbol":"ETH/EUR","side":"buy","order_type":"limit","order_qty":1,"cum_qty":0,"limit_price":40}]}"#,
+    );
+    assert_eq!(e.store().orders().len(), 2);
+    assert_eq!(e.store().order("ICEBERG").unwrap().price, 49.);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 50,
+            id: "ICEBERG".into(),
+            price: Some(48.),
+            amount: None,
+        }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 50,
+            result: Err(_)
+        })
+    )));
 }

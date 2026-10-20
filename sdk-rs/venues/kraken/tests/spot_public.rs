@@ -130,3 +130,80 @@ fn disconnect_clears_book_and_ignores_old_socket() {
     assert_eq!(e.store().ticker("ETH/USD").unwrap().last, 50.);
 }
 use safe_cex_engine::Venue;
+
+#[test]
+fn public_candle_network_read_retries_three_times_and_settles() {
+    let (mut e, _, _) = ready(true);
+    e.handle(
+        NOW,
+        Event::Command(Command::FetchCandles {
+            command: 30,
+            symbol: "XBT/USD".into(),
+            interval: "1m".into(),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        }),
+    );
+    let mut request = requests(&mut e).pop().unwrap();
+    for attempt in 0..4 {
+        e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: request.id,
+                error: "reset",
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        if attempt < 3 {
+            let timer = actions
+                .into_iter()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, .. } => Some(timer),
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(NOW, Event::TimerFired { timer });
+            let next = requests(&mut e).pop().unwrap();
+            assert_eq!(request.url, next.url);
+            request = next;
+        } else {
+            assert!(actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone {
+                    command: 30,
+                    result: Err(_)
+                })
+            )));
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+            );
+        }
+    }
+}
+
+#[test]
+fn missing_credentials_automatically_select_public_only_like_ts() {
+    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_kraken::KrakenSpot::new(
+        safe_cex_venue_kraken::Options::default(),
+    ));
+    e.start(NOW);
+    let m = requests(&mut e).pop().unwrap();
+    reply(&mut e, &m, META);
+    let t = requests(&mut e).pop().unwrap();
+    reply(&mut e, &t, TICKERS);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Http(_)
+            | Action::WsConnect {
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            }
+    )));
+    assert!(
+        e.store().loaded().balance && e.store().loaded().orders && e.store().loaded().positions
+    );
+}

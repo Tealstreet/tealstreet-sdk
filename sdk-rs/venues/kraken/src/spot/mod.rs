@@ -61,7 +61,9 @@ pub struct KrakenSpot {
     retries: Vec<(TimerId, Pending)>,
 }
 impl KrakenSpot {
-    pub fn new(options: Options) -> Self {
+    pub fn new(mut options: Options) -> Self {
+        options.public_data_only |= options.key.as_ref().is_none_or(String::is_empty)
+            || options.secret.as_ref().is_none_or(String::is_empty);
         let signer =
             if !options.public_data_only && options.key.as_ref().is_some_and(|k| !k.is_empty()) {
                 options
