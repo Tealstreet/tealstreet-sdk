@@ -282,3 +282,13 @@ installed account/public transport adapters. The focused characterization now
 passes. The full root suite and Rust workspace tests are running again.
 `KNOWN_TS_FIXES.txflow` documents paired fixes without normalizing replay output.
 The committed feature range passes the credential scan.
+
+Pre-Phemex release checkpoint: TxFlow-only Wasm is 871,564 bytes. Public gate
+passes (125 frames, 78 markets/tickers, two books; three runs): CPU TS 93.7 ms /
+Rust 61.1 ms (1.53x), retained memory TS 14.0 MB / Rust 1.2 MB (11.35x).
+Private gate passes all 35 frames, 15 commands, eight writes and one execution.
+Its first rebuilt attempt exposed a harness representation error: TxFlow stores
+buy/sell leverage, but its profile selected scalar comparison. Enabling the
+existing independent-leverage comparison preserves and compares both rails;
+neither implementation nor its output is rewritten. Merge Phemex next, retain
+the reviewed union, then rerun combined TxFlow/Binance and host gates.

@@ -517,6 +517,7 @@ export const mexcRequestUrl = (url) => {
 export const VENUES = {
   txflow: {
     rust: 'txflow',
+    independentLeverage: true,
     options: { testnet: true },
     virtualPrivateClock: true,
     recordPublicCorsDirect: true,
