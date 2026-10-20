@@ -85,8 +85,9 @@ impl VenueError {
         self
     }
 
+    /// A non-finite delay is dropped rather than serialized as `null`.
     pub fn retry_after_ms(mut self, ms: f64) -> Self {
-        self.retry_after_ms = Some(ms);
+        self.retry_after_ms = ms.is_finite().then_some(ms);
         self
     }
 
@@ -187,6 +188,15 @@ mod tests {
         let error = VenueError::new("rejected").partial(&[], 3, 0);
         assert_eq!(error.partial, None);
         assert_eq!(error.legacy_text(), "rejected");
+    }
+
+    #[test]
+    fn a_non_finite_retry_delay_is_left_out() {
+        let error = VenueError::new("busy").retry_after_ms(f64::NAN);
+        assert_eq!(
+            serde_json::to_string(&error).unwrap(),
+            r#"{"message":"busy"}"#
+        );
     }
 
     #[test]
