@@ -177,3 +177,14 @@ those before final artifacts/gates. Integration review requires retaining curren
 unknown-owned snapshot safety alongside incoming side settings, especially
 Bitget's all-unmappable-only guard, and preserving native wallet valuation
 alongside incoming Binance execution/identity fences.
+
+Binance final wallet recovery: 129 native cases / 13 targets and exact-source
+12/12 wallet cases passed, plus strict all-target/all-feature Clippy. Native
+asset caches are fenced when a newer private account event makes them stale;
+existing health cadence obtains a fresh account response. A clean native
+catalogue census distinguishes unsupported routes from rejected metadata,
+without imposing a new barrier for unvalued dust or BTC-only spot pairs.
+Initial catalogue publication remains linear; repair retains market indices,
+settings, live quotes, books and socket ownership. A provisional combined
+Wasm SDK run after wallet fixes passed all 444 cases / 16 files. Rebuild and
+repeat against the merged landing source before final proof.

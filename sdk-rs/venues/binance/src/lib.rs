@@ -13,7 +13,7 @@ use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
 use sign::{Credentials, Query};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
 
 const MAX_RECONNECT_DELAY_MS: f64 = 30_000.0;
@@ -82,7 +82,10 @@ impl Urls {
 /// Startup lists and klines stream in element by element (see
 /// `Cx::request_streamed`); their continuations collect the decoded rows.
 pub enum Pending {
-    ExchangeInfo(Vec<Market>),
+    ExchangeInfo {
+        rows: Vec<Market>,
+        rejected: bool,
+    },
     Daily,
     BookTickers,
     PremiumIndex,
@@ -210,6 +213,11 @@ pub struct BinanceFutures {
     candles: HashMap<(String, String), u32>,
     ticker_seed: TickerSeed,
     discovery: safe_cex_engine::startup::Backoff<u8>,
+    catalogue_partial: bool,
+    catalogue_symbols: HashSet<String>,
+    ticker_reading: bool,
+    ticker_refresh_pending: bool,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
     /// Depth snapshots are paused until this time after a 418 or 429.
     rest_paused_until: f64,
     /// Background account reads pause until this time near the weight limit.
@@ -255,6 +263,11 @@ impl BinanceFutures {
             candles: HashMap::new(),
             ticker_seed: TickerSeed::default(),
             discovery: Default::default(),
+            catalogue_partial: false,
+            catalogue_symbols: HashSet::new(),
+            ticker_reading: false,
+            ticker_refresh_pending: false,
+            live_tickers: Default::default(),
             rest_paused_until: 0.0,
             background_paused_until: 0.0,
             account: account::AccountState::default(),
@@ -606,39 +619,97 @@ impl BinanceFutures {
         cx: &mut Cx<'_, Pending>,
         markets: Vec<Market>,
         response: Response<'_>,
+        rejected: bool,
     ) {
         if response.status != 200 || markets.is_empty() {
             cx.log(
-                LogLevel::Error,
+                LogLevel::Warning,
                 format!(
-                    "Binance exchangeInfo HTTP {}: {}",
-                    response.status, response.body
+                    "Binance exchangeInfo read unavailable (HTTP {})",
+                    response.status
                 ),
             );
             self.discovery.failed(cx, 0);
             return;
         }
-        self.ticker_seed = TickerSeed {
-            tickers: markets
+        let was_loaded = cx.store.loaded().markets;
+        let previous_len = cx.store.markets().len();
+        self.catalogue_symbols = markets.iter().map(|market| market.symbol.clone()).collect();
+        if !was_loaded {
+            cx.store.set_markets(markets);
+        } else {
+            let mut merged = cx.store.markets().to_vec();
+            let mut indices: HashMap<String, usize> = merged
                 .iter()
-                .map(|m| Ticker {
-                    id: m.id.clone(),
-                    symbol: m.symbol.clone(),
-                    ..Ticker::default()
-                })
-                .collect(),
-            reported: vec![0; markets.len()],
-            finished: 0,
-            failed: false,
-        };
-        cx.store.set_markets(markets);
-        self.discovery.succeeded(cx, &0);
+                .enumerate()
+                .map(|(index, market)| (market.symbol.clone(), index))
+                .collect();
+            for mut market in markets {
+                if let Some(index) = indices.get(&market.symbol).copied() {
+                    // Leverage brackets are private native metadata, fetched once.
+                    market.limits.leverage = merged[index].limits.leverage;
+                    merged[index] = market;
+                } else {
+                    indices.insert(market.symbol.clone(), merged.len());
+                    merged.push(market);
+                }
+            }
+            cx.store.set_markets(merged);
+        }
+        self.catalogue_partial = rejected;
+        if rejected {
+            self.discovery.failed(cx, 0);
+        } else {
+            self.discovery.succeeded(cx, &0);
+        }
         if self.credentials.is_some() {
             self.start_account(cx);
         }
-        if self.credentials.is_some() && !self.is_spot() {
+        if was_loaded {
+            self.catalogue_wallet_repair(cx);
+            if self.is_spot() {
+                for index in previous_len..cx.store.markets().len() {
+                    let shard = index / 1_024;
+                    if self
+                        .spot_tickers
+                        .get(shard)
+                        .is_some_and(|connection| connection.open)
+                    {
+                        let topic =
+                            format!("{}@ticker", cx.store.markets()[index].symbol.to_lowercase());
+                        self.send_subscribe(cx, Channel::SpotTicker(shard), "SUBSCRIBE", &[topic]);
+                    }
+                }
+            }
+        }
+        if !was_loaded && self.credentials.is_some() && !self.is_spot() {
             self.request_leverage_brackets(cx);
         }
+        self.start_ticker_seed(cx);
+    }
+
+    fn start_ticker_seed(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.ticker_reading {
+            self.ticker_refresh_pending = true;
+            return;
+        }
+        self.ticker_reading = true;
+        self.live_tickers.begin();
+        self.ticker_seed = TickerSeed {
+            tickers: cx
+                .store
+                .markets()
+                .iter()
+                .map(|market| Ticker {
+                    id: market.id.clone(),
+                    symbol: market.symbol.clone(),
+                    ..Ticker::default()
+                })
+                .collect(),
+            reported: vec![0; cx.store.markets().len()],
+            finished: 0,
+            failed: false,
+        };
         self.get_streamed(cx, self.paths.daily, ArrayAt::Root, Pending::Daily);
         if self.is_spot() {
             return;
@@ -716,7 +787,9 @@ impl BinanceFutures {
             return;
         }
         let seed = std::mem::take(&mut self.ticker_seed);
-        let tickers: Vec<Ticker> = if seed.failed {
+        self.ticker_reading = false;
+        let refresh = std::mem::take(&mut self.ticker_refresh_pending);
+        let mut tickers: Vec<Ticker> = if seed.failed {
             Vec::new()
         } else {
             seed.tickers
@@ -733,22 +806,31 @@ impl BinanceFutures {
                 tickers.len().min(cx.store.markets().len())
             ),
         );
+        self.live_tickers.finish(cx.store, &mut tickers);
         cx.store.set_tickers(tickers);
+        self.revalue_pending_wallet(cx);
         if self.credentials.is_none() {
             cx.store.set_orders(Vec::new());
             cx.store.set_positions(Vec::new());
             cx.store.set_balance(Default::default());
         }
-        self.connect(cx, Channel::Public);
+        if self.public.socket.is_none() && self.public.reconnect.is_none() {
+            self.connect(cx, Channel::Public);
+        }
         if self.is_spot() {
-            self.spot_tickers = (0..cx.store.markets().len().div_ceil(1_024))
-                .map(|_| Connection::new())
-                .collect();
-            for index in 0..self.spot_tickers.len() {
+            while self.spot_tickers.len() < cx.store.markets().len().div_ceil(1_024) {
+                let index = self.spot_tickers.len();
+                self.spot_tickers.push(Connection::new());
                 self.connect(cx, Channel::SpotTicker(index));
             }
-        } else if !self.shared_public_socket() {
+        } else if !self.shared_public_socket()
+            && self.market.socket.is_none()
+            && self.market.reconnect.is_none()
+        {
             self.connect(cx, Channel::Market);
+        }
+        if refresh {
+            self.start_ticker_seed(cx);
         }
     }
 
@@ -761,6 +843,7 @@ impl BinanceFutures {
                         t.bid = bid;
                         t.ask = ask;
                     });
+                    self.live_tickers.record(cx.store, &event.s, 3);
                 }
             }
             Some("depthUpdate") => {
@@ -772,7 +855,7 @@ impl BinanceFutures {
         }
     }
 
-    fn apply_ticker(&self, cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
+    fn apply_ticker(&mut self, cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
         let last = num::parse(&event.c);
         let percentage = num::parse(&event.percentage);
         let volume = num::parse(&event.v);
@@ -799,6 +882,17 @@ impl BinanceFutures {
             t.volume = volume;
             t.quote_volume = quote_volume;
         });
+        let mut mask = (1 << 2) | (1 << 5) | (1 << 9) | (1 << 10);
+        if self.is_spot() {
+            mask |= (1 << 3) | (1 << 4);
+            if event.bid.is_some() {
+                mask |= 1;
+            }
+            if event.ask.is_some() {
+                mask |= 2;
+            }
+        }
+        self.live_tickers.record(cx.store, &event.s, mask);
     }
 
     fn on_market_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
@@ -826,6 +920,11 @@ impl BinanceFutures {
                             t.funding_rate = funding_rate;
                             t.funding_time = event.funding_time;
                         });
+                        self.live_tickers.record(
+                            cx.store,
+                            &event.s,
+                            (1 << 3) | (1 << 4) | (1 << 7) | (1 << 8),
+                        );
                     }
                 }
             }
@@ -842,6 +941,7 @@ impl BinanceFutures {
             }
             _ => {}
         }
+        self.revalue_pending_wallet(cx);
     }
 
     fn on_depth(&mut self, cx: &mut Cx<'_, Pending>, event: DepthEvent<'_>) {
@@ -1179,8 +1279,15 @@ impl Venue for BinanceFutures {
             cx,
             self.paths.exchange_info,
             ArrayAt::Field("symbols"),
-            Pending::ExchangeInfo(Vec::new()),
+            Pending::ExchangeInfo {
+                rows: Vec::new(),
+                rejected: false,
+            },
         );
+    }
+
+    fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.revalue_pending_wallet(cx);
     }
 
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -1287,7 +1394,9 @@ impl Venue for BinanceFutures {
         self.observe_weight(cx, &response);
         let Response { status, body, .. } = response;
         match pending {
-            Pending::ExchangeInfo(markets) => self.on_markets(cx, markets, response),
+            Pending::ExchangeInfo { rows, rejected } => {
+                self.on_markets(cx, rows, response, rejected)
+            }
             Pending::Daily => self.source_finished(cx, source::DAILY, Ok(response)),
             Pending::BookTickers => self.source_finished(cx, source::BOOK, Ok(response)),
             Pending::PremiumIndex => self.source_finished(cx, source::PREMIUM, Ok(response)),
@@ -1303,8 +1412,12 @@ impl Venue for BinanceFutures {
 
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::ExchangeInfo(markets) => {
+            Pending::ExchangeInfo {
+                rows: markets,
+                rejected,
+            } => {
                 let Ok(m) = serde_json::from_str::<SymbolInfo>(item) else {
+                    *rejected = true;
                     safe_cex_engine::startup::skipped_row(cx);
                     return;
                 };
@@ -1392,7 +1505,7 @@ impl Venue for BinanceFutures {
                 }
             }
             Pending::Account(request) => self.on_account_failed(cx, request, error),
-            Pending::ExchangeInfo(_) => self.discovery.failed(cx, 0),
+            Pending::ExchangeInfo { .. } => self.discovery.failed(cx, 0),
             Pending::Daily => self.source_finished(cx, source::DAILY, Err(error)),
             Pending::BookTickers => self.source_finished(cx, source::BOOK, Err(error)),
             Pending::PremiumIndex => self.source_finished(cx, source::PREMIUM, Err(error)),
@@ -1408,7 +1521,10 @@ impl Venue for BinanceFutures {
                     cx,
                     self.paths.exchange_info,
                     ArrayAt::Field("symbols"),
-                    Pending::ExchangeInfo(Vec::new()),
+                    Pending::ExchangeInfo {
+                        rows: Vec::new(),
+                        rejected: false,
+                    },
                 ),
                 source::DAILY => {
                     self.get_streamed(cx, self.paths.daily, ArrayAt::Root, Pending::Daily)

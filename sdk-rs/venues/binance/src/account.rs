@@ -4,8 +4,9 @@ use crate::sign::Query;
 use crate::wire::*;
 use crate::{BinanceFutures, Channel, Pending};
 use safe_cex_engine::model::{
-    Balance, CoinBalance, CurrencyBalance, MarginType, Order, OrderExtra, OrderSide, OrderStatus,
-    OrderType, Position, PositionMode, PositionSide, RejectReason, StopTriggerType, TimeInForce,
+    Balance, CoinBalance, CurrencyBalance, MarginType, Market, Order, OrderExtra, OrderSide,
+    OrderStatus, OrderType, Position, PositionMode, PositionSide, RejectReason, StopTriggerType,
+    TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
@@ -38,6 +39,7 @@ pub enum Request {
     PositionRisk {
         generation: u32,
         rows: Vec<Position>,
+        marks: Vec<(String, f64)>,
     },
     SymbolConfig {
         generation: u32,
@@ -71,6 +73,14 @@ struct OrdersJoin {
     regular: Option<Vec<Order>>,
     algo: Option<Vec<Order>>,
     failed: bool,
+}
+
+struct WalletAsset {
+    asset: String,
+    wallet: f64,
+    available: f64,
+    initial: f64,
+    unrealized: f64,
 }
 
 #[derive(Default)]
@@ -109,6 +119,12 @@ pub struct AccountState {
     orders_stale: bool,
     last_orders_retry_at: f64,
     logged_balance: bool,
+    wallet_assets: Option<Vec<WalletAsset>>,
+    valuation_pending: bool,
+    valuation_refresh_required: bool,
+    valuation_warned: bool,
+    valuation_repair_pending: bool,
+    native_asset_marks: HashMap<String, f64>,
 }
 
 pub fn order_type(text: &str) -> Option<OrderType> {
@@ -209,7 +225,7 @@ impl BinanceFutures {
         );
     }
 
-    /// Private startup once markets and tickers are loaded.
+    /// Private startup once the catalogue supplies native market identities.
     pub(crate) fn start_account(&mut self, cx: &mut Cx<'_, Pending>) {
         if std::mem::replace(&mut self.account.started, true) {
             return;
@@ -293,6 +309,7 @@ impl BinanceFutures {
             Pending::Account(Request::PositionRisk {
                 generation,
                 rows: Vec::new(),
+                marks: Vec::new(),
             }),
         );
         if let Some(path) = symbol_config {
@@ -453,7 +470,8 @@ impl BinanceFutures {
         } else {
             DEGRADED_ACCOUNT_INTERVAL_MS
         };
-        if now - self.account.last_account_at >= interval {
+        if self.account.valuation_refresh_required || now - self.account.last_account_at >= interval
+        {
             self.account.last_account_at = now;
             self.fetch_account(cx);
         }
@@ -550,7 +568,11 @@ impl BinanceFutures {
                     max_by_symbol.insert(b.symbol.into_owned(), first.initial_leverage);
                 }
             }
-            Request::PositionRisk { rows, generation } => {
+            Request::PositionRisk {
+                rows,
+                generation,
+                marks,
+            } => {
                 let Ok(p) = serde_json::from_str::<PositionSnapshot>(item) else {
                     if let Some(join) = &mut self.account.positions
                         && join.generation == *generation
@@ -587,6 +609,16 @@ impl BinanceFutures {
                         ..MarketSetting::default()
                     };
                     configs.push((p.symbol.to_string(), setting));
+                }
+                if let Some(mark) = p
+                    .mark_price
+                    .as_deref()
+                    .and_then(|price| price.parse::<f64>().ok())
+                    .filter(|price| price.is_finite() && *price > 0.0)
+                    && let Some(market) = _cx.store.market(&p.symbol)
+                    && (market.quote == "USD" || STABLECOINS.contains(&market.quote.as_str()))
+                {
+                    marks.push((market.base.clone(), mark));
                 }
                 let signed = num::parse(&p.position_amt);
                 if signed == 0.0 && !self.is_inverse() {
@@ -720,12 +752,20 @@ impl BinanceFutures {
                     cx.store.set_hedged(mode.dual_side_position);
                 }
             }
-            Request::PositionRisk { generation, rows } => {
+            Request::PositionRisk {
+                generation,
+                rows,
+                marks,
+            } => {
                 if let Some(join) = &mut self.account.positions
                     && join.generation == generation
                 {
+                    if !join.failed {
+                        self.account.native_asset_marks.extend(marks);
+                    }
                     join.rows = Some(rows);
                 }
+                self.revalue_pending_wallet(cx);
                 self.finish_positions(cx);
             }
             Request::SymbolConfig {
@@ -767,6 +807,8 @@ impl BinanceFutures {
                 if version != self.account.account_version {
                     if self.is_spot() && self.account.spot_subscription.is_some() {
                         self.fetch_account(cx);
+                    } else if !self.is_spot() {
+                        self.account.valuation_refresh_required = true;
                     }
                     return;
                 }
@@ -776,8 +818,23 @@ impl BinanceFutures {
                 }
                 match serde_json::from_str::<Account>(body) {
                     Ok(account) => {
-                        let balance = self.aggregate_balance(cx, &account);
-                        cx.store.set_balance(balance);
+                        self.account.valuation_refresh_required = false;
+                        self.account.wallet_assets = Some(
+                            account
+                                .assets
+                                .iter()
+                                .map(|asset| WalletAsset {
+                                    asset: asset.asset.to_string(),
+                                    wallet: opt(&asset.wallet_balance),
+                                    available: opt(&asset.available_balance),
+                                    initial: opt(&asset.initial_margin),
+                                    unrealized: opt(&asset.unrealized_profit),
+                                })
+                                .collect(),
+                        );
+                        self.account.valuation_pending = true;
+                        self.account.valuation_warned = false;
+                        self.revalue_pending_wallet(cx);
                     }
                     Err(error) => cx.log(LogLevel::Error, format!("Binance account: {error}")),
                 }
@@ -993,7 +1050,9 @@ impl BinanceFutures {
                 .collect();
             cx.store.set_settings(rows);
         }
-        if self.account.pending_position_events {
+        if std::mem::take(&mut self.account.valuation_repair_pending) {
+            self.fetch_positions(cx);
+        } else if self.account.pending_position_events {
             self.schedule_position_repair(cx);
         }
     }
@@ -1059,34 +1118,81 @@ impl BinanceFutures {
 
     /// USD totals over every asset: stablecoins at par, others priced by their
     /// USDT/USDC/BUSD market, or through BTC.
-    fn aggregate_balance(&mut self, cx: &mut Cx<'_, Pending>, account: &Account<'_>) -> Balance {
+    pub(crate) fn catalogue_wallet_repair(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.revalue_pending_wallet(cx);
+        if !self.is_spot() && self.account.valuation_pending && self.account.wallet_assets.is_some()
+        {
+            if self.account.positions.is_some() {
+                self.account.valuation_repair_pending = true;
+            } else {
+                self.fetch_positions(cx);
+            }
+        }
+    }
+    pub(crate) fn revalue_pending_wallet(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.valuation_pending {
+            return;
+        }
+        if self.is_spot() {
+            self.commit_spot_balance(cx);
+            return;
+        }
+        let Some(assets) = &self.account.wallet_assets else {
+            return;
+        };
+        let mut missing_price = false;
+        let mut native_price_used = false;
         let mut balance = Balance::default();
         let mut details = Vec::new();
         let mut coins = Vec::new();
-        for asset in &account.assets {
-            let wallet = opt(&asset.wallet_balance);
-            let available = opt(&asset.available_balance);
-            let initial = opt(&asset.initial_margin);
-            let unrealized = opt(&asset.unrealized_profit);
+        for asset in assets {
+            let wallet = asset.wallet;
+            let available = asset.available;
+            let initial = asset.initial;
+            let unrealized = asset.unrealized;
             if wallet == 0.0 && available == 0.0 && initial == 0.0 && unrealized == 0.0 {
                 continue;
             }
-            let price = if STABLECOINS.contains(&asset.asset.as_ref()) {
+            let price = if STABLECOINS.contains(&asset.asset.as_str()) {
                 1.0
             } else {
-                self.asset_usd_price(cx.store, &asset.asset)
+                let public = self.public_asset_usd_price(cx.store, &asset.asset);
+                if public.is_finite() && public > 0.0 {
+                    public
+                } else {
+                    let private = self
+                        .account
+                        .native_asset_marks
+                        .get(&asset.asset)
+                        .copied()
+                        .unwrap_or(0.0);
+                    native_price_used |= private > 0.0;
+                    private
+                }
             };
-            if price > 0.0 {
+            if price.is_finite() && price > 0.0 {
                 balance.total += wallet * price;
                 balance.free += available * price;
                 balance.used += initial * price;
                 balance.upnl += unrealized * price;
+            } else if self.asset_has_valuation_market(cx.store, &asset.asset) {
+                missing_price = true;
+            } else if !self.account.valuation_warned {
+                cx.log(LogLevel::Warning, "Binance wallet asset has no supported valuation market; native amount retained");
+                self.account.valuation_warned = true;
             }
             if self.is_inverse() {
                 coins.push(CoinBalance {
                     base: asset.asset.to_string(),
                     amount: wallet,
-                    notional: wallet * price,
+                    notional: if price.is_finite() && price > 0.0 {
+                        wallet * price
+                    } else {
+                        cx.store
+                            .coin_balances()
+                            .and_then(|coins| coins.iter().find(|coin| coin.base == asset.asset))
+                            .map_or(0.0, |coin| coin.notional)
+                    },
                 });
             }
             if wallet > 0.0 {
@@ -1096,6 +1202,18 @@ impl BinanceFutures {
         if self.is_inverse() {
             cx.store.set_coin_balances(coins);
         }
+        if missing_price {
+            if !self.account.valuation_warned {
+                cx.log(
+                    LogLevel::Warning,
+                    "Binance wallet valuation price unavailable; preserving previous USD balance",
+                );
+                self.account.valuation_warned = true;
+            }
+            return;
+        }
+        self.account.valuation_pending = native_price_used;
+        cx.store.set_balance(balance.clone());
         if !self.account.logged_balance && !details.is_empty() {
             self.account.logged_balance = true;
             cx.log(
@@ -1110,7 +1228,6 @@ impl BinanceFutures {
                 ),
             );
         }
-        balance
     }
 
     pub(crate) fn on_user_event(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
@@ -1391,6 +1508,20 @@ impl BinanceFutures {
     /// Quantity and PnL apply at once; leverage, margin type and liquidation
     /// price come from the REST repair this schedules.
     fn on_account_update(&mut self, cx: &mut Cx<'_, Pending>, update: AccountUpdate<'_>) {
+        // A pending valuation must never replay an older wallet after a newer
+        // private balance/position event. Reconcile at the existing health tick;
+        // settled accounts keep their usual REST cadence.
+        let changed = !update.positions.is_empty()
+            || update
+                .balances
+                .is_some_and(|rows| !matches!(rows.get().trim(), "[]" | "null"));
+        if changed && (self.account.valuation_pending || self.account.account_in_flight) {
+            self.account.account_version += 1;
+            self.account.wallet_assets = None;
+            self.account.valuation_pending = false;
+            self.account.valuation_refresh_required = true;
+            cx.log(LogLevel::Warning, "Binance pending wallet valuation superseded by private update; awaiting fresh wallet");
+        }
         if update.positions.is_empty() {
             return;
         }
@@ -1658,7 +1789,42 @@ impl BinanceFutures {
             .filter(|p| *p > 0.0)
             .unwrap_or(fallback)
     }
+    fn asset_has_valuation_market(&self, store: &safe_cex_engine::Store, asset: &str) -> bool {
+        if self.catalogue_partial {
+            return true;
+        }
+        let current = |market: &&Market| self.catalogue_symbols.contains(&market.symbol);
+        if self.is_spot() {
+            return store.markets().iter().filter(current).any(|market| {
+                market.base == asset && matches!(market.quote.as_str(), "USD" | "USDT" | "USDC")
+            });
+        }
+        let direct =
+            |market: &Market| market.quote == "USD" || STABLECOINS.contains(&market.quote.as_str());
+        let btc_route = store
+            .markets()
+            .iter()
+            .filter(current)
+            .any(|market| matches!(market.symbol.as_str(), "BTCUSDT" | "BTCUSDC"));
+        store.markets().iter().filter(current).any(|market| {
+            market.base == asset
+                && (direct(market) || (!self.is_inverse() && market.quote == "BTC" && btc_route))
+        })
+    }
+
     fn asset_usd_price(&self, store: &safe_cex_engine::Store, asset: &str) -> f64 {
+        let public = self.public_asset_usd_price(store, asset);
+        if public.is_finite() && public > 0.0 {
+            public
+        } else {
+            self.account
+                .native_asset_marks
+                .get(asset)
+                .copied()
+                .unwrap_or(0.0)
+        }
+    }
+    fn public_asset_usd_price(&self, store: &safe_cex_engine::Store, asset: &str) -> f64 {
         if self.is_spot() {
             if matches!(asset, "USD" | "USDT" | "USDC") {
                 return 1.0;
@@ -1690,7 +1856,22 @@ impl BinanceFutures {
             }
             return 0.0;
         }
-        usd_price(store, asset)
+        let public = usd_price(store, asset);
+        if public > 0.0 {
+            return public;
+        }
+        for market in store.markets().iter().filter(|market| {
+            market.base == asset
+                && (market.quote == "USD" || STABLECOINS.contains(&market.quote.as_str()))
+        }) {
+            if let Some(ticker) = store.ticker(&market.symbol)
+                && ticker.mark.is_finite()
+                && ticker.mark > 0.0
+            {
+                return ticker.mark;
+            }
+        }
+        0.0
     }
     pub(crate) fn reset_spot_subscription(&mut self, _cx: &mut Cx<'_, Pending>) {
         if !self.is_spot() {
@@ -1881,19 +2062,30 @@ impl BinanceFutures {
         }
     }
     fn commit_spot_balance(&mut self, cx: &mut Cx<'_, Pending>) {
+        let mut missing_price = false;
         let mut balance = Balance::default();
         let mut coins = Vec::with_capacity(self.account.spot_balances.len());
         let mut currencies = Vec::with_capacity(self.account.spot_balances.len());
         for (asset, &(free, used)) in &self.account.spot_balances {
             let price = self.asset_usd_price(cx.store, asset);
             let total = free + used;
+            missing_price |= (free != 0.0 || used != 0.0)
+                && !(price.is_finite() && price > 0.0)
+                && self.asset_has_valuation_market(cx.store, asset);
             balance.free += free * price;
             balance.used += used * price;
             balance.total += total * price;
             coins.push(CoinBalance {
                 base: asset.clone(),
                 amount: total,
-                notional: total * price,
+                notional: if price.is_finite() && price > 0.0 {
+                    total * price
+                } else {
+                    cx.store
+                        .coin_balances()
+                        .and_then(|coins| coins.iter().find(|coin| coin.base == *asset))
+                        .map_or(0.0, |coin| coin.notional)
+                },
             });
             currencies.push(CurrencyBalance {
                 currency: asset.clone(),
@@ -1909,7 +2101,16 @@ impl BinanceFutures {
         currencies.sort_by(|a, b| a.currency.cmp(&b.currency));
         cx.store.set_coin_balances(coins);
         cx.store.set_currency_balances(currencies);
-        cx.store.set_balance(balance);
+        self.account.valuation_pending = missing_price;
+        if missing_price {
+            if !self.account.valuation_warned {
+                cx.log(LogLevel::Warning, "Binance Spot wallet valuation price unavailable; preserving previous USD balance");
+                self.account.valuation_warned = true;
+            }
+        } else {
+            self.account.valuation_warned = false;
+            cx.store.set_balance(balance);
+        }
     }
     fn on_spot_order(&mut self, cx: &mut Cx<'_, Pending>, event: SpotEvent<'_>) {
         if event.c.is_empty() || event.s.is_empty() {

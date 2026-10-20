@@ -494,6 +494,8 @@ pub struct AccountUpdateEvent<'a> {
 
 #[derive(Deserialize)]
 pub struct AccountUpdate<'a> {
+    #[serde(rename = "B", borrow, default)]
+    pub balances: Option<&'a serde_json::value::RawValue>,
     #[serde(rename = "P", borrow, default)]
     pub positions: Vec<AccountPosition<'a>>,
 }
