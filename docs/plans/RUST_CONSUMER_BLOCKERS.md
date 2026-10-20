@@ -212,6 +212,14 @@ publish an empty snapshot or dispose the previous good engine.
   Current-artifact replay follows. This adds Robinhood public/mainnet/testnet
   controls to the prior twelve public/nineteen private control set.
 
+- Integrated final replay batch PASS: 13 public timing/memory controls and 22
+  private correctness controls on `eb2f1751…b3359`, including all four Binance
+  profiles, every protocol-touched venue, Coinbase INTX/CFM/spot × ES256/EdDSA
+  plus its spot-only alias, and both Lighter deployments on mainnet/testnet.
+  Public timing runs were sequential with all other lane checks quiet; private
+  correctness ran in pairs. Landing remained `02e9db0e8b` at final fetch.
+  All local phase gates/reviews pass; PR correctness review and green CI follow.
+
 ## Final public replay metrics
 
 Three-run medians on the integrated `eb2f1751…b3359` combined binary. Values are
