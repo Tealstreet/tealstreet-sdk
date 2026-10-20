@@ -19,15 +19,37 @@ fn borrow_optional_str<'de, D: serde::Deserializer<'de>>(
 
 /// A decimal string as JavaScript's `parseFloat` reads it: empty or malformed is NaN.
 pub fn float(text: &str) -> f64 {
-    // Every unsigned integer of at most 15 digits is represented exactly by f64.
-    if !text.is_empty()
-        && text.len() <= 15
-        && let Some(integer) = text.bytes().try_fold(0u64, |integer, byte| {
-            let digit = byte.wrapping_sub(b'0');
-            (digit <= 9).then(|| integer * 10 + u64::from(digit))
-        })
-    {
-        return integer as f64;
+    // At most 15 digits keep both the numerator and decimal divisor exact in f64.
+    // One division then rounds the same rational as the full decimal parser.
+    if !text.is_empty() && text.len() <= 16 {
+        let short = || {
+            let (mut integer, mut divisor, mut digits) = (0u64, 0u64, 0);
+            for byte in text.bytes() {
+                if byte == b'.' && divisor == 0 {
+                    divisor = 1;
+                    continue;
+                }
+                let digit = byte.wrapping_sub(b'0');
+                if digit > 9 || digits == 15 {
+                    return None;
+                }
+                integer = integer * 10 + u64::from(digit);
+                digits += 1;
+                if divisor != 0 {
+                    divisor *= 10;
+                }
+            }
+            (digits != 0).then(|| {
+                if divisor <= 1 {
+                    integer as f64
+                } else {
+                    integer as f64 / divisor as f64
+                }
+            })
+        };
+        if let Some(value) = short() {
+            return value;
+        }
     }
     text.trim().parse::<f64>().unwrap_or(f64::NAN)
 }
@@ -880,6 +902,48 @@ mod tests {
             );
         }
         assert_eq!(float("-0").to_bits(), (-0.0f64).to_bits());
+    }
+
+    #[test]
+    fn short_decimal_float_matches_standard_parser_bitwise() {
+        let mut state = 0x5afe_ce12_u64;
+        for width in 1..=16 {
+            let ceiling = 10u64.pow(width);
+            let mut values = vec![0, 1, ceiling - 1, ceiling / 10, ceiling / 2];
+            for _ in 0..128 {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1);
+                values.push(state % ceiling);
+            }
+            for value in values {
+                let digits = format!("{value:0width$}", width = width as usize);
+                for dot in 0..=digits.len() {
+                    let mut text = digits.clone();
+                    text.insert(dot, '.');
+                    assert_eq!(
+                        float(&text).to_bits(),
+                        text.parse::<f64>().unwrap().to_bits(),
+                        "changed {text:?}"
+                    );
+                }
+            }
+        }
+        for text in [
+            ".",
+            "..",
+            "1.2.3",
+            "1..",
+            "0.000000000000001",
+            "-0.000",
+            "+0.0",
+        ] {
+            assert_eq!(
+                float(text).to_bits(),
+                text.trim().parse::<f64>().unwrap_or(f64::NAN).to_bits(),
+                "changed {text:?}"
+            );
+        }
     }
 
     #[test]

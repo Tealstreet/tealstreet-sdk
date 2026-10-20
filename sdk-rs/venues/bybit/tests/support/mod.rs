@@ -76,6 +76,9 @@ impl Harness {
         for action in self.engine.drain_actions().collect::<Vec<_>>() {
             match action {
                 Action::Http(request) => self.requests.push(request),
+                Action::SignPayload { .. } => {
+                    panic!("Bybit signs requests locally")
+                }
                 Action::WsConnect {
                     socket,
                     url,

@@ -596,6 +596,20 @@ Fresh deterministic Bitrue regressions live under `src/__tests__/audit-regressio
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `clientOrderId` on the regular payload, rule 1-31 characters (Bitrue: shorter than 32).
+- Lookup follows `BaseExchange.findOrderByClientOrderId`: match the exact symbol
+  and client ID in the store first, then read that symbol's `/fapi/v2/openOrders`.
+  It retains the shared helper's native-order/parent-ID aliases and rejects
+  the unset ID sentinels `''`, `'0'` and `'undefined'`.
+  It does not mutate reconciliation state. Failed reads fall back to the cache;
+  every miss is non-definitive because closed orders were not queried. The Rust
+  lane uses the same typed open-order mapper and preserves large native IDs.
+- Current TS has no complete historical-order, closed-PnL or income/funding
+  implementations: those methods retain the branded BaseExchange fallbacks.
+  `fetchHistoricalFills` reads one `myTrades` page and reports `INCOMPLETE` when
+  local filtering reduces a full native page below the requested limit.
+  Do not treat transfer or force-order histories as a complete financial ledger.
+- Hedge mode changes are unsupported; margin changes explicitly reject and
+  direct the user to bitrue.com. Neither capability is a missing Rust port.
 
 ## Rust private snapshot corrections
 

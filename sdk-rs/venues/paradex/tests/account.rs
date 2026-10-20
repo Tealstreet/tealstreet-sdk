@@ -79,6 +79,7 @@ fn config_precedes_signed_auth_and_all_private_reads_carry_the_cached_bearer() {
     let (mut h, socket) = seed();
     let auth = h.take("/auth/");
     assert_eq!(auth.url, "https://api.prod.paradex.trade/v1/auth/0x456");
+    assert_eq!(auth.route, Some(safe_cex_engine::RequestRoute::Direct));
     assert!(auth.body.is_none());
     for (name, value) in [
         ("PARADEX-STARKNET-ACCOUNT", "0x0123"),
