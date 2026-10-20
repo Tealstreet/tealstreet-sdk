@@ -275,6 +275,11 @@ pub enum Command {
         command: CommandId,
         symbol: String,
     },
+    /// Refresh the venue/account's maximum leverage without assuming flat leverage.
+    FetchMaxLeverage {
+        command: CommandId,
+        symbol: String,
+    },
     /// A rare request/response read (history, income, trades); the result is
     /// JSON in [`Notice::CommandDone`] and never enters the frame.
     Query {

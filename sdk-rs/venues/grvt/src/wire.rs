@@ -169,25 +169,68 @@ pub struct Message<'a> {
 pub struct Error<'a> {
     #[serde(borrow, rename = "c", alias = "code", default)]
     pub code: Text<'a>,
+    #[serde(
+        borrow,
+        rename = "m",
+        alias = "message",
+        default,
+        deserialize_with = "text_or_none"
+    )]
+    pub message: Option<Str<'a>>,
 }
 #[derive(Default, Deserialize)]
 pub struct Envelope<'a> {
     #[serde(borrow, rename = "c", alias = "code", default)]
     pub code: Text<'a>,
+    #[serde(
+        borrow,
+        rename = "m",
+        alias = "message",
+        default,
+        deserialize_with = "text_or_none"
+    )]
+    pub message: Option<Str<'a>>,
     #[serde(borrow, rename = "e", alias = "error", default)]
     pub error: Option<Error<'a>>,
+}
+/// A null or non-string message is absent, never a reason to misread the envelope.
+fn text_or_none<'de: 'a, 'a, D: Deserializer<'de>>(d: D) -> Result<Option<Str<'a>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Message<'a> {
+        Text(#[serde(borrow)] Str<'a>),
+        Other(de::IgnoredAny),
+    }
+    Ok(match Option::<Message<'a>>::deserialize(d)? {
+        Some(Message::Text(text)) => Some(text),
+        _ => None,
+    })
 }
 pub fn check(response: &safe_cex_engine::Response<'_>) -> Result<(), String> {
     let env: Envelope<'_> =
         serde_json::from_str(response.body).map_err(|_| "Invalid GRVT response")?;
-    let code = env.error.as_ref().map_or(&*env.code, |e| &*e.code);
+    let (code, message) = env.error.as_ref().map_or(
+        (&*env.code, env.message.as_deref().unwrap_or_default()),
+        |e| (&*e.code, e.message.as_deref().unwrap_or_default()),
+    );
     if !(200..300).contains(&response.status) || (!code.is_empty() && code != "0") {
-        return Err(format!(
+        let mut error = format!(
             "GRVT rejected request (HTTP {}, code {})",
             response.status, code
-        ));
+        );
+        if !message.is_empty() {
+            error.push_str(": ");
+            error.extend(message.chars().take(200));
+        }
+        return Err(error);
     }
     Ok(())
+}
+/// True only when GRVT answered a non-5xx status with its own error code, so a write was
+/// definitively not applied. Server/gateway failures and unparseable bodies stay unknown.
+pub fn venue_rejected(response: &safe_cex_engine::Response<'_>) -> bool {
+    let code = code(response);
+    response.status < 500 && !code.is_empty() && code != "0"
 }
 impl Feed<'_> {
     pub fn candle(&self) -> Option<safe_cex_engine::model::Candle> {
