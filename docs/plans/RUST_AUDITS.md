@@ -423,17 +423,30 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 ### Bybit family
 - High: Brazil inverse/option sockets routed to the linear host (engine
   transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
-  `bybit/src/lib.rs:407`); per-coin balances never set (`account.rs:662`);
-  fills history includes funding/settlement rows (`history.rs:564`); income
-  dedupe drops hedge-mode funding legs (`history.rs:131`).
-- Medium: option failures stall linear startup (`lib.rs:857`); option catalog
-  `baseCoin=All` unverified; live candles lack trade aggregation and seconds
-  intervals; option WS ticker field names likely wrong; no UNIFIED retry on the
-  wallet call; demo reduce-only fill check missing; Hyro tears down on one bad
-  poll (`account.rs:1838`); order/income history caps; ~~Partial TP/SL amend
-  semantics — decided: match TS (flip SL/TP on drag), do not amend in place~~
-  ([owner-selected cancel/recreate regressions](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)); spot create params (`marketUnit`); one unmappable
-  order invalidates every later snapshot (`account.rs:1569`).
+  `bybit/src/lib.rs:407`).
+- High: per-coin balances never set (`account.rs:662`).
+- ~~High: fills history includes funding/settlement rows (`history.rs:564`).~~
+  Fixed: Funding/Settle/Settlement/Delivery/SessionSettlePnl (any case) and rows
+  without a valid side, price, quantity or time are excluded from REST fills.
+- ~~High: income dedupe drops hedge-mode funding legs (`history.rs:131`).~~ Fixed:
+  income ids use the native transaction id, side and signed size, so same-instant
+  hedge legs stay distinct and repeated page rows still collapse.
+- Medium: option failures stall linear startup (`lib.rs:857`).
+- ~~Medium: option catalog `baseCoin=All` unverified.~~ Dropped: the instruments
+  documentation explicitly permits `baseCoin=All` for `category=option`.
+- Medium: live candles lack trade aggregation and seconds intervals.
+- Medium: option WS ticker field names likely wrong.
+- Medium: no UNIFIED retry on the wallet call.
+- Medium: demo reduce-only fill check missing.
+- Medium: Hyro tears down on one bad poll (`account.rs:1838`).
+- ~~Medium: order/income history caps.~~ Fixed for orders: an omitted limit reads
+  every page (up to TS's 20 × 50 per window) instead of truncating to 50; explicit
+  limits still cap after every category. Income caps match TS (unchanged).
+- ~~Medium: Partial TP/SL amend semantics — decided: match TS (flip SL/TP on drag),
+  do not amend in place~~ ([owner-selected cancel/recreate regressions](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)).
+- ~~Medium: spot create params (`marketUnit`).~~ Kept: `baseCoin` for market orders
+  is a documented TS correction in `harness/gate.mjs` `KNOWN_TS_FIXES`.
+- Medium: one unmappable order invalidates every later snapshot (`account.rs:1569`).
 - Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
   breadth; split-lot error handling; classic upnl; inverse reference price;
   demo key hint, recvWindow, rate limiter; Hyro early pings.
