@@ -749,9 +749,10 @@ See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regress
 
 ## Rust startup valuation
 
-The Rust engine keeps reported private `unrealisedPnl` authoritative for positions
-and the balance aggregate. Public ticker placeholders, zero, non-finite or
-conflicting quotes cannot manufacture a funded-account loss. When a private
+The Rust balance aggregate values each position from the live `ticker.last` like
+TS whenever that price is finite and positive (native PnL lags). Only with a
+placeholder, zero or non-finite quote does it fall back to reported private
+`unrealisedPnl`, so a placeholder cannot manufacture a funded-account loss. When a private
 position omits PnL, Rust retains that position's prior finite valuation and warns;
 new exposure remains visible with unavailable PnL represented as zero. Realized
 PnL stays separate. Wallet total remains `totalEquityValue - upnl`, with native
