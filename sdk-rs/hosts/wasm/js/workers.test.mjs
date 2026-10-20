@@ -117,10 +117,10 @@ test('the transport opens client sockets with an https upgrade', async () => {
 });
 
 test('the Durable Object runs an engine and streams frames to its clients', async () => {
-  const EngineObject = createEngineObject({ loadEngine, flush: { store: 20, books: 20 } });
+  const EngineObject = createEngineObject({ accountToken: () => 'account-a-token', loadEngine, flush: { store: 20, books: 20 } });
   const alarms = [];
   const object = new EngineObject({ storage: { setAlarm: async (at) => alarms.push(at) } });
-  const response = await object.fetch({ headers: new Map([['Upgrade', 'websocket']]) });
+  const response = await object.fetch({ headers: new Map([['Upgrade', 'websocket'], ['Authorization', 'Bearer account-a-token']]) });
   assert.equal(response.status, 101);
   const client = response.webSocket;
   const received = [];
@@ -143,12 +143,13 @@ test('the Durable Object runs an engine and streams frames to its clients', asyn
 
 test('Workers derives private upgrade capability from its transport', async () => {
   let options;
-  const EngineObject = createEngineObject({ loadEngine: async () => ({ WasmEngine: class {
+  const EngineObject = createEngineObject({ accountToken: () => 'account-a-token', loadEngine: async () => ({ WasmEngine: class {
     constructor(_, json) { options = JSON.parse(json); }
     start() { return ''; }
   } }) });
   const object = new EngineObject({ storage: { setAlarm() {} } });
   const client = { send() {} };
+  object.clients.add(client);
   try {
     await object.receive(client, JSON.stringify({ op: 'start', venue: 'weex', options: { key: 'replay-key' } }));
     assert.equal(options.privateWsHeaders, true);
@@ -158,7 +159,7 @@ test('Workers derives private upgrade capability from its transport', async () =
 
 test('Workers runs engine effects through its configured account transport', async () => {
   const destinations = [];
-  const EngineObject = createEngineObject({
+  const EngineObject = createEngineObject({ accountToken: () => 'account-a-token',
     loadEngine: async () => ({ WasmEngine: class {
       start() { return JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://venue.test/shared', channel: 'private' }]); }
     } }),
@@ -173,6 +174,7 @@ test('Workers runs engine effects through its configured account transport', asy
   });
   const object = new EngineObject({ storage: { setAlarm() {} } });
   const client = { send() {} };
+  object.clients.add(client);
   try {
     await object.receive(client, JSON.stringify({ op: 'start', venue: 'okx', options: { tealstreetProxy: true } }));
     assert.deepEqual(destinations, [['wss://venue.test/shared', 'private']]);
@@ -181,13 +183,15 @@ test('Workers runs engine effects through its configured account transport', asy
 
 test('Workers refuses requested routing without an account transport factory', async () => {
   const messages = [];
-  const EngineObject = createEngineObject({ loadEngine: async () => ({ WasmEngine: class {
+  const EngineObject = createEngineObject({ accountToken: () => 'account-a-token', loadEngine: async () => ({ WasmEngine: class {
     constructor() { throw new Error('must not construct an unrouted engine'); }
   } }) });
   const object = new EngineObject({ storage: { setAlarm() {} } });
   for (const options of [{ tealstreetProxy: true }, { tealstreetTunnel: true }, { tealstreetWsRoute: true },
     { overrideProxyUrl: 'https://proxy.test' }, { bybitSiteId: 'BRA_BTL' }]) {
-    await object.receive({ send: (text) => messages.push(JSON.parse(text)) }, JSON.stringify({
+    const client = { send: (text) => messages.push(JSON.parse(text)) };
+    object.clients.add(client);
+    await object.receive(client, JSON.stringify({
       op: 'start', venue: 'bingx', options,
     }));
   }
@@ -262,7 +266,7 @@ test('a Workers raw socket failure reports one abnormal close despite a followin
 test('Workers applies factory protocol options after caller flags while retaining upgrade capability', async () => {
   for (const sessionProxy of [true, false]) {
     let received;
-    const EngineObject = createEngineObject({
+    const EngineObject = createEngineObject({ accountToken: () => 'account-a-token',
       loadEngine: async () => ({ WasmEngine: class {
         constructor(_venue, json) { received = JSON.parse(json); }
         start() { return ''; }
@@ -274,6 +278,7 @@ test('Workers applies factory protocol options after caller flags while retainin
     });
     const object = new EngineObject({ storage: { setAlarm() {} } });
     const client = { send() {} };
+  object.clients.add(client);
     try {
       await object.receive(client, JSON.stringify({ op: 'start', venue: 'grvt', options: {
         key: 'fixture-key', grvtSessionProxy: !sessionProxy, privateWsHeaders: false,
@@ -332,4 +337,118 @@ test('standalone Workers reject unconfigured CORS before fetching or allocating 
   }), /Public CORS request routing is not configured/);
   assert.equal(fetch.mock.callCount(), 0);
   assert.equal(timeout.mock.callCount(), 0);
+});
+
+test('Workers upgrades fail closed without deployment auth and cannot select another account token', async () => {
+  const request = (token) => ({ headers: new Map([['Upgrade', 'websocket'], ['Authorization', `Bearer ${token}`]]) });
+  for (const accountToken of [undefined, () => '', () => { throw Error('secret'); }, () => 'account-b-token']) {
+    const Object = createEngineObject({ loadEngine, accountToken });
+    const object = new Object({ storage: { setAlarm() {} } });
+    assert.equal((await object.fetch(request('account-a-token'))).status, 401);
+    assert.equal(object.clients.size, 0);
+  }
+  const Object = createEngineObject({ loadEngine, accountToken: (_state, env) => env.token });
+  const object = new Object({ storage: { setAlarm() {} } }, { token: 'account-a-token' });
+  const response = await object.fetch(request('account-a-token'));
+  assert.equal(response.status, 101);
+  response.webSocket.close();
+});
+
+test('Workers permits one pending start and rejects reconfiguration of a running account', async () => {
+  let finish;
+  let constructed = 0;
+  const messages = [];
+  const Object = createEngineObject({
+    loadEngine: () => new Promise((resolve) => { finish = resolve; }),
+    accountToken: () => 'fixture-token',
+  });
+  const object = new Object({ storage: { setAlarm() {} } });
+  const client = { send: (text) => messages.push(JSON.parse(text)) };
+  object.clients.add(client);
+  const start = JSON.stringify({ op: 'start', venue: 'binance', options: { key: 'first-account' } });
+  const pending = object.receive(client, start);
+  await object.receive(client, JSON.stringify({ op: 'start', venue: 'kraken', options: { key: 'other-account' } }));
+  finish({ WasmEngine: class { constructor() { constructed++; } start() { return ''; } } });
+  await pending;
+  await object.receive(client, start);
+  assert.equal(constructed, 1);
+  assert.equal(messages.length, 2);
+  assert.ok(messages.every((message) => /already started or starting/.test(message.message)));
+  object.leave(client);
+});
+
+test('Workers late start resolution never revives a disconnected client or a superseded lifetime', async () => {
+  const loads = [];
+  let constructed = 0;
+  const Object = createEngineObject({ accountToken: () => 'fixture-token', loadEngine: () => new Promise((resolve) => loads.push(resolve)) });
+  const object = new Object({ storage: { setAlarm() {} } });
+  const first = { send: assert.fail };
+  object.clients.add(first);
+  const old = object.receive(first, '{"op":"start","venue":"binance"}');
+  object.leave(first);
+  const next = { send: assert.fail };
+  object.clients.add(next);
+  const current = object.receive(next, '{"op":"start","venue":"binance"}');
+  const module = { WasmEngine: class { constructor() { constructed++; } start() { return ''; } } };
+  loads[0](module);
+  await old;
+  assert.equal(constructed, 0);
+  assert.equal(object.host, undefined);
+  loads[1](module);
+  await current;
+  assert.equal(constructed, 1);
+  object.leave(next);
+});
+
+test('Workers ignores foreign clients, malformed JSON and null; failed starts do not echo options', async () => {
+  const messages = [];
+  let loads = 0;
+  const Object = createEngineObject({ accountToken: () => 'fixture-token', loadEngine: async () => {
+    loads++;
+    throw Error('private-secret');
+  } });
+  const object = new Object({ storage: { setAlarm() {} } });
+  const client = { send: (text) => messages.push(text) };
+  await object.receive(client, '{"op":"start","venue":"binance"}');
+  assert.equal(loads, 0);
+  object.clients.add(client);
+  for (const message of ['{', 'null', '[]', '42', '{"op":"start","venue":"binance","options":"private-secret"}',
+    '{"op":"start","venue":"binance","options":{"secret":"private-secret"}}']) await object.receive(client, message);
+  assert.equal(loads, 1);
+  assert.equal(messages.length, 3);
+  assert.ok(messages.every((text) => !text.includes('private-secret')));
+  object.leave(client);
+});
+
+test('Workers discards command completions after client departure or host replacement', async () => {
+  for (const reject of [false, true]) for (const replace of [false, true]) {
+    let complete;
+    const Object = createEngineObject({ accountToken: () => 'fixture-token', loadEngine });
+    const object = new Object({ storage: { setAlarm() {} } });
+    const client = { send: assert.fail };
+    const other = { send() {} };
+    object.clients.add(client);
+    object.clients.add(other);
+    object.host = { command: () => new Promise((resolve, fail) => { complete = reject ? fail : resolve; }), dispose() {} };
+    const pending = object.receive(client, '{"op":"command","id":1,"command":{}}');
+    if (replace) object.host = { dispose() {} };
+    else object.leave(client);
+    complete('private result');
+    await pending;
+    object.leave(client);
+    object.leave(other);
+  }
+});
+
+test('Workers HTTP requests and upgrade requests forbid redirects with private headers', async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(init);
+    if (init.headers.Upgrade) return { webSocket: new FakeSocket() };
+    return { status: 200, headers: new Map(), body: null };
+  });
+  const socket = new WorkersWebSocket('wss://venue.test/private?token=sensitive', [], { headers: { 'X-Api-Key': 'sensitive' } });
+  await workersTransport().request({ method: 'GET', url: 'https://venue.test/private', headers: { 'X-Api-Key': 'sensitive' } });
+  assert.deepEqual(requests.map((init) => init.redirect), ['error', 'error']);
+  socket.close();
 });

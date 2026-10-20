@@ -59,3 +59,17 @@ live trading, weakened parity oracle, or performance threshold changes.
 - All six Medium findings and listed Low categories remain present on this
   baseline. Receive-window subcases will be compared to current TS rather
   than shortened speculatively.
+
+### Hosts checkpoint
+
+- M1–M4 implemented with token-before-upgrade, one pending/running start,
+  post-load membership/generation checks, generic client errors, no redirects,
+  and URL-free native HTTP errors. Gzip/zlib output capped at 16 MiB.
+- Poll interval command and native typed-event paths clamp to 1000–120000 ms;
+  positive infinity/null still pause. Startup-option forwarding follow-up is
+  part of the integration/credential phase (the shared bound is exported).
+- Independent phase review accepted the host fixes, and identified that
+  startup forwarding gap for correction. Native engine 86 tests, native host
+  64 tests, JS host 34 tests, TS account transport 257 tests pass. Full JS had
+  78 passing before the new generic Wasm parse-error assertion; that assertion
+  is deliberately committed with its rebuilt Wasm implementation later.

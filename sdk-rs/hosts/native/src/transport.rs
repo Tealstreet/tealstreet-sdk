@@ -100,6 +100,7 @@ impl NetworkTransport {
         Self {
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(20))
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .expect("an HTTP client with the default configuration"),
             routing: None,
@@ -138,6 +139,27 @@ async fn open_socket(
         .await
         .map(|(socket, _)| socket)
         .map_err(|error| error.to_string())
+}
+
+const MAX_DECOMPRESSED_BYTES: usize = 16 * 1024 * 1024;
+
+fn decode_message(bytes: &[u8]) -> std::io::Result<String> {
+    let mut decoded = Vec::new();
+    let mut reader: Box<dyn Read + '_> = if bytes.starts_with(&[0x1f, 0x8b]) {
+        Box::new(flate2::read::GzDecoder::new(bytes))
+    } else if bytes.first() == Some(&0x78) {
+        Box::new(flate2::read::ZlibDecoder::new(bytes))
+    } else {
+        Box::new(bytes)
+    };
+    reader
+        .by_ref()
+        .take((MAX_DECOMPRESSED_BYTES + 1) as u64)
+        .read_to_end(&mut decoded)?;
+    if decoded.len() > MAX_DECOMPRESSED_BYTES {
+        return Err(std::io::Error::other("WebSocket message exceeds limit"));
+    }
+    String::from_utf8(decoded).map_err(std::io::Error::other)
 }
 
 impl Transport for NetworkTransport {
@@ -273,11 +295,7 @@ impl Transport for NetworkTransport {
                                 let _ = events.send(HostEvent::WsBinary(socket, bytes.to_vec()));
                             }
                             Some(Ok(Message::Binary(bytes))) => {
-                                let mut decoded = Vec::new();
-                                let result = if bytes.starts_with(&[0x1f, 0x8b]) { flate2::read::GzDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
-                                    else if bytes.first() == Some(&0x78) { flate2::read::ZlibDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
-                                    else { decoded.extend_from_slice(&bytes); Ok(decoded.len()) };
-                                let Ok(text) = result.and_then(|_| String::from_utf8(decoded).map_err(std::io::Error::other)) else { break 1007 };
+                                let Ok(text) = decode_message(&bytes) else { break 1007 };
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
                                 let _ = events.send(HostEvent::WsMessage(socket, text));
                             }
@@ -387,7 +405,10 @@ impl Transport for NetworkTransport {
                 if let Some(body) = request.body {
                     builder = builder.body(body);
                 }
-                let response = builder.send().await.map_err(|error| error.to_string())?;
+                let response = builder
+                    .send()
+                    .await
+                    .map_err(|error| error.without_url().to_string())?;
                 let headers = response
                     .headers()
                     .iter()
@@ -401,7 +422,7 @@ impl Transport for NetworkTransport {
                 });
                 let mut body = response.bytes_stream();
                 while let Some(chunk) = body.next().await {
-                    let chunk = chunk.map_err(|error| error.to_string())?;
+                    let chunk = chunk.map_err(|error| error.without_url().to_string())?;
                     for piece in chunk.chunks(16 * 1024) {
                         let _ = events.send(HostEvent::HttpChunk(id, piece.to_vec()));
                     }
@@ -423,5 +444,31 @@ impl Transport for NetworkTransport {
                 let _ = events.send(HostEvent::HttpFailed(id, error));
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn compressed_messages_cannot_expand_past_limit() {
+        for gzip in [false, true] {
+            let data = vec![b'x'; MAX_DECOMPRESSED_BYTES + 1];
+            let compressed = if gzip {
+                let mut encoder =
+                    flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+                encoder.write_all(&data).unwrap();
+                encoder.finish().unwrap()
+            } else {
+                let mut encoder =
+                    flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+                encoder.write_all(&data).unwrap();
+                encoder.finish().unwrap()
+            };
+            assert!(decode_message(&compressed).is_err());
+        }
+        assert_eq!(decode_message(b"valid text").unwrap(), "valid text");
     }
 }

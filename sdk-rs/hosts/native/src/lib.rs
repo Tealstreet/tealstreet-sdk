@@ -276,7 +276,9 @@ mod timer_tests {
     }
     impl Venue for TimerVenue {
         type Pending = ();
-        fn start(&mut self, _: &mut Cx<'_, ()>) {}
+        fn start(&mut self, cx: &mut Cx<'_, ()>) {
+            self.timer = Some(cx.set_timer(1e308));
+        }
         fn on_tick_interval(&mut self, cx: &mut Cx<'_, ()>, interval_ms: f64) {
             if let Some(timer) = self.timer.take() {
                 cx.clear_timer(timer);
@@ -315,8 +317,8 @@ mod timer_tests {
     async fn huge_future_timer_stays_alive_until_cleared_then_normal_timers_fire() {
         let mut host = Host::new(Engine::new(TimerVenue::default()), NoNetwork);
         host.clock = || 0.;
-        host.engine
-            .handle(0., Event::TickIntervalChanged { interval_ms: 1e308 });
+        // Exercise raw venue timers independently of the clamped polling control.
+        host.engine.start(0.);
         host.execute(&mut |_| {});
         let parked = host.timers.values().next().unwrap().clone();
         // Let the spawned task run: a conversion panic would finish it while
@@ -336,11 +338,15 @@ mod timer_tests {
         tokio::time::sleep(Duration::from_millis(1)).await;
         assert!(parked.is_finished(), "ClearTimer aborts the parked task");
 
-        host.engine
-            .handle(0., Event::TickIntervalChanged { interval_ms: 5. });
+        host.engine.handle(
+            0.,
+            Event::TickIntervalChanged {
+                interval_ms: 1_000.,
+            },
+        );
         host.execute(&mut |_| {});
         let normal = *host.timers.keys().next().unwrap();
-        let event = tokio::time::timeout(Duration::from_secs(1), host.inbox.recv())
+        let event = tokio::time::timeout(Duration::from_secs(2), host.inbox.recv())
             .await
             .unwrap()
             .unwrap();

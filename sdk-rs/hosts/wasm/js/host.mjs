@@ -13,6 +13,7 @@
 // }
 
 const CHUNK_BYTES = 16 * 1024;
+const MAX_DECOMPRESSED_BYTES = 16 * 1024 * 1024;
 
 export class EngineHost {
   constructor(engine, transport, handlers = {}) {
@@ -25,13 +26,15 @@ export class EngineHost {
     this.requests = new Map();
     this.nextCommand = 1;
     this.disposed = false;
+    this.started = false;
     this.wsEncoder = undefined;
     this.wsScratch = undefined;
     this.wsScratchBusy = false;
   }
 
   start() {
-    if (this.disposed) return;
+    if (this.disposed || this.started) return;
+    this.started = true;
     this.run(this.engine.start(this.transport.now()));
   }
 
@@ -307,7 +310,26 @@ export const socketMessages = (onMessage, onError, binary = false) => {
       : bytes[0] === 0x78 ? 'deflate' : undefined;
     if (!format) return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format));
-    return new TextDecoder('utf-8', { fatal: true }).decode(await new Response(stream).arrayBuffer());
+    const reader = stream.getReader();
+    const parts = [];
+    let length = 0;
+    let complete = false;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) { complete = true; break; }
+        length += value.byteLength;
+        if (length > MAX_DECOMPRESSED_BYTES) throw new Error('Decompressed WebSocket message exceeds limit');
+        parts.push(value);
+      }
+    } finally {
+      if (!complete) await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+    const decoded = new Uint8Array(length);
+    let offset = 0;
+    for (const part of parts) { decoded.set(part, offset); offset += part.byteLength; }
+    return new TextDecoder('utf-8', { fatal: true }).decode(decoded);
   };
   return (data) => {
     if (typeof data === 'string' && !pending) return onMessage(data);
@@ -349,7 +371,7 @@ export const nativeTransport = () => {
   async request({ method, url, headers, body, signal, route, timeoutMs }) {
     if (route === 'publicCors') throw new Error('Public CORS request routing is not configured');
     const deadline = AbortSignal.timeout(Math.max(1,timeoutMs ?? 20_000));
-    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
+    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline, redirect: 'error' });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
     return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };

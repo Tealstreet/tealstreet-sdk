@@ -875,9 +875,9 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         match event {
-            Event::TickIntervalChanged { interval_ms } => {
-                self.venue.on_tick_interval(&mut cx, interval_ms)
-            }
+            Event::TickIntervalChanged { interval_ms } => self
+                .venue
+                .on_tick_interval(&mut cx, bounded_tick_interval(interval_ms)),
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
             Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
@@ -1232,12 +1232,22 @@ impl<V: Venue> Engine<V> {
     }
 }
 
+/// Bound account polling pressure; positive infinity explicitly pauses polling.
+pub fn bounded_tick_interval(interval_ms: f64) -> f64 {
+    if interval_ms.is_finite() {
+        interval_ms.clamp(1_000.0, 120_000.0)
+    } else {
+        f64::INFINITY
+    }
+}
+
 #[cfg(test)]
 mod streaming_tests {
     use super::*;
 
     struct StreamVenue {
         commands: u32,
+        interval: f64,
         at: ArrayAt,
         rows: Vec<String>,
         body: Option<String>,
@@ -1288,6 +1298,9 @@ mod streaming_tests {
         ) {
             self.failure = Some(error.to_owned());
         }
+        fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, interval_ms: f64) {
+            self.interval = interval_ms;
+        }
         fn on_timer(&mut self, _cx: &mut Cx<'_, Self::Pending>, _timer: TimerId) {}
         fn on_command(&mut self, _cx: &mut Cx<'_, Self::Pending>, _command: Command) {
             self.commands += 1;
@@ -1297,6 +1310,21 @@ mod streaming_tests {
         }
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(self.book.iter().map(|book| ("A", book)))
+        }
+    }
+
+    #[test]
+    fn typed_native_tick_events_obey_the_same_bounds_as_host_commands() {
+        let mut engine = frame_engine();
+        for (input, expected) in [
+            (0.00001, 1_000.0),
+            (-1.0, 1_000.0),
+            (1e300, 120_000.0),
+            (f64::INFINITY, f64::INFINITY),
+            (f64::NAN, f64::INFINITY),
+        ] {
+            engine.handle(0.0, Event::TickIntervalChanged { interval_ms: input });
+            assert_eq!(engine.venue.interval, expected);
         }
     }
 
@@ -1345,6 +1373,7 @@ mod streaming_tests {
     fn stream(at: ArrayAt, body: &[u8]) -> StreamVenue {
         let mut engine = Engine::new(StreamVenue {
             commands: 0,
+            interval: 0.0,
             at,
             rows: Vec::new(),
             body: None,
@@ -1377,6 +1406,7 @@ mod streaming_tests {
     fn frame_engine() -> Engine<StreamVenue> {
         Engine::new(StreamVenue {
             commands: 0,
+            interval: 0.0,
             at: ArrayAt::Root,
             rows: Vec::new(),
             body: None,

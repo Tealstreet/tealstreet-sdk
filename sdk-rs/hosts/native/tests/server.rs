@@ -749,7 +749,7 @@ async fn invalid_websocket_polling_controls_have_no_venue_effects() {
 }
 
 #[tokio::test]
-async fn huge_positive_polling_deadlines_park_and_remain_cancelable() {
+async fn polling_deadlines_clamp_at_both_bounds_and_remain_cancelable() {
     LocalSet::new()
         .run_until(async {
             let fixture = Fixture::new(config()).await;
@@ -761,8 +761,9 @@ async fn huge_positive_polling_deadlines_park_and_remain_cancelable() {
                 matches!(reply(&mut socket).await, Reply::Done { command: 1, .. }),
                 "host must continue serving commands around a huge deadline"
             );
-            assert_eq!(*fixture.tick_intervals.borrow(), [1e308]);
-            // Null emits ClearTimer for the parked deadline, then a normal future
+            assert_eq!(*fixture.tick_intervals.borrow(), [120_000.]);
+            send(&mut socket, r#"{"op":"setTickInterval","interval":0.001}"#).await;
+            // Null emits ClearTimer for the bounded deadline, then a normal future
             // timer must still work. Account shutdown cancels that timer as usual.
             send(&mut socket, r#"{"op":"setTickInterval","interval":null}"#).await;
             send(&mut socket, r#"{"op":"setTickInterval","interval":2500}"#).await;
@@ -773,7 +774,7 @@ async fn huge_positive_polling_deadlines_park_and_remain_cancelable() {
             ));
             assert_eq!(
                 *fixture.tick_intervals.borrow(),
-                [1e308, f64::INFINITY, 2500.]
+                [120_000., 1_000., f64::INFINITY, 2500.]
             );
             fixture.stop().await;
         })

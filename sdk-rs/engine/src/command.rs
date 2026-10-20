@@ -435,6 +435,8 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
             "Polling interval must be positive or null to pause",
         ));
     }
+    // Bound request pressure and timer arithmetic; null still explicitly pauses.
+    let interval_ms = crate::engine::bounded_tick_interval(interval_ms);
     Ok(HostInput::TickIntervalChanged { interval_ms })
 }
 
@@ -555,7 +557,9 @@ mod tests {
     fn host_configuration_accepts_positive_milliseconds_and_explicit_pause() {
         assert_eq!(
             decode_host_input(r#"{"op":"setTickInterval","interval":123.5}"#).unwrap(),
-            HostInput::TickIntervalChanged { interval_ms: 123.5 }
+            HostInput::TickIntervalChanged {
+                interval_ms: 1_000.0
+            }
         );
         assert_eq!(
             decode_host_input(r#"{"op":"setTick\u0049nterval","interval":null}"#).unwrap(),
@@ -563,6 +567,24 @@ mod tests {
                 interval_ms: f64::INFINITY
             }
         );
+    }
+
+    #[test]
+    fn polling_intervals_cannot_create_request_floods_or_overflow_timers() {
+        for (input, expected) in [
+            (0.00001, 1_000.0),
+            (1.0, 1_000.0),
+            (2_000.0, 2_000.0),
+            (1e300, 120_000.0),
+        ] {
+            let json = format!(r#"{{"op":"setTickInterval","interval":{input}}}"#);
+            assert_eq!(
+                decode_host_input(&json).unwrap(),
+                HostInput::TickIntervalChanged {
+                    interval_ms: expected
+                }
+            );
+        }
     }
 
     #[test]

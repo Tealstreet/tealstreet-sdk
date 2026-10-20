@@ -537,3 +537,44 @@ test('public HTTP routing metadata survives actions without changing ordinary re
 test('the raw host rejects unconfigured CORS routing before touching the network', async () => {
   await assert.rejects(nativeTransport().request({method:'GET',route:'publicCors',url:'https://venue.test/time',headers:{}}),/not configured/);
 });
+
+test('EngineHost starts only once even when start is called repeatedly', () => {
+  let starts = 0;
+  const host = new EngineHost({ start() { starts++; return ''; } }, { now: () => 0 });
+  host.start();
+  host.start();
+  host.dispose();
+  host.start();
+  assert.equal(starts, 1);
+});
+
+test('native JS requests forbid redirects with credential headers', async (t) => {
+  let options;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    options = init;
+    return { status: 302, headers: new Map(), body: null };
+  });
+  await nativeTransport().request({ method: 'GET', url: 'https://venue.test/private', headers: { 'X-Api-Key': 'sensitive' } });
+  assert.equal(options.redirect, 'error');
+});
+
+test('native JS transport never forwards private headers to a redirect target', async () => {
+  let leaked = 0;
+  const target = createServer((socket) => { leaked++; socket.end('HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n'); });
+  target.listen(0, '127.0.0.1');
+  await once(target, 'listening');
+  const source = createServer((socket) => socket.once('data', (request) => {
+    assert.match(request.toString(), /sensitive-private-key/);
+    socket.end(`HTTP/1.1 307 Temporary Redirect\r\nlocation: http://127.0.0.1:${target.address().port}/stolen\r\ncontent-length: 0\r\nconnection: close\r\n\r\n`);
+  }));
+  source.listen(0, '127.0.0.1');
+  await once(source, 'listening');
+  try {
+    await assert.rejects(nativeTransport().request({ method: 'POST', url: `http://127.0.0.1:${source.address().port}/private`, headers: { 'X-Api-Key': 'sensitive-private-key' } }));
+    assert.equal(leaked, 0);
+  } finally {
+    source.close();
+    target.close();
+    await Promise.all([once(source, 'close'), once(target, 'close')]);
+  }
+});
