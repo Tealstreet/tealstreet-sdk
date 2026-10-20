@@ -4,7 +4,8 @@
 //
 //   corepack yarn rust:gate --tape sdk-rs/harness/tapes/binance.jsonl
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
@@ -16,14 +17,16 @@ import { requestKey, callerIdsOf } from './requests.mjs';
 import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
 import { runAuditedFixer } from './oracle-audit.mjs';
 import { createTsFixes } from './ts-oracle.mjs';
-import { duplicateSymbols, compareCheckpoints, valueDifferences } from './snapshot-compare.mjs';
+import { duplicateSymbols, compareCheckpoints, compareSnapshots, valueDifferences } from './snapshot-compare.mjs';
+import { median, performanceFailures, performanceMetricErrors, performanceOrder, replayRunCount } from './performance-policy.mjs';
 
 const { values } = parseArgs({
   options: {
     venue: { type: 'string', default: 'binance' },
     tape: { type: 'string' },
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
-    runs: { type: 'string', default: '3' },
+    runs: { type: 'string' },
+    report: { type: 'string' },
     'no-egress': { type: 'boolean', default: false },
   },
 });
@@ -40,9 +43,12 @@ if (smokeResult) values.books = smokeResult.symbol;
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 console.log(`Replay output: ${outDir}`);
+const artifacts = [];
+const fixerReports = [];
 
-const replay = (impl, run) => {
-  const out = `${outDir}/${impl}-${run}.json`;
+const replay = (impl, run, performanceRun = false) => {
+  const out = `${outDir}/${impl}-${performanceRun ? "perf" : "audit"}-${run}.json`;
+  artifacts.push({ impl, mode: performanceRun ? 'performance' : 'correctness', run, path: out });
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
   args.push(
     'sdk-rs/harness/replay.mjs',
@@ -58,6 +64,7 @@ const replay = (impl, run) => {
     out,
   );
   if (values['no-egress']) args.push('--no-egress');
+  if (performanceRun) args.push('--performance');
   // TSX's compiler worker retains shared buffers independently of engine work.
   const result = spawnSync(process.execPath, args, {
     encoding: 'utf8',
@@ -73,8 +80,6 @@ const replay = (impl, run) => {
   return output;
 };
 
-const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
-
 const differences = [];
 const compare = (label, a, b) => {
   const keyed = (rows) => new Map(rows.map((row) => [row.symbol, row]));
@@ -87,27 +92,24 @@ const compare = (label, a, b) => {
   }
 };
 
-const runs = Number(values.runs);
-const results = { ts: [], rust: [] };
-for (let run = 0; run < runs; run++) {
-  for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
-}
-const [ts, rust] = [results.ts[0], results.rust[0]];
-
 const venue = venueOf(values.venue);
 const isPrivate =
   tapeRecords.find((record) => record.type === 'config')?.private ??
   tapeRecords.find((record) => record.type === 'meta')?.private ??
-  tapeRecords.some((record) =>
-    venue.isPrivateRecord
-      ? venue.isPrivateRecord(record)
-      : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
-  );
-const records = tapeRecords;
-const instrumentRows = tapeRecords
-  .filter((r) => r.type === 'http' && new URL(r.url).pathname === '/v5/market/instruments-info')
-  .flatMap((r) => JSON.parse(r.body).result?.list ?? []);
-const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
+  tapeRecords.some((record) => venue.isPrivateRecord ? venue.isPrivateRecord(record)
+    : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)));
+const runs = replayRunCount(values.runs, isPrivate);
+const correctnessRuns = isPrivate ? runs : 1;
+const results = { ts: [], rust: [] };
+for (let run = 0; run < correctnessRuns; run++) {
+  for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
+}
+const performanceResults = { ts: [], rust: [] };
+if (!isPrivate) for (let run = 0; run < runs; run++) {
+  for (const impl of performanceOrder(run)) performanceResults[impl].push(replay(impl, run, true));
+}
+const [ts, rust] = [results.ts[0], results.rust[0]];
+const rawAudited = { ts: structuredClone(ts), rust: structuredClone(rust) };
 
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 // BingX additionally fixes write/read defects covered by native contract tests:
@@ -171,7 +173,7 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // that cache may contain another account's orders. TS and Rust both query
 // the primary account; native tests retain PM's canonical client-ID identity.
 const { KNOWN_TS_FIXES, applyTsCorrections } = createTsFixes(values, tapeRecords);
-for (let run = 0; run < runs; run++) {
+for (let run = 0; run < correctnessRuns; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
 
@@ -191,7 +193,7 @@ for (let run = 0; run < runs; run++) {
     if (Boolean(output.account) !== isPrivate)
       differences.push(impl + ': account presence differs from tape classification');
     // Invalid baselines fail on every run, including informational private metrics.
-    for (const error of memoryMetricErrors(output.metrics)) differences.push(`${impl}: ${error}; baseline is invalid`);
+    for (const error of [...memoryMetricErrors(output.metrics), ...performanceMetricErrors(output.metrics, 'correctness')]) differences.push(`${impl}: ${error}; baseline is invalid`);
     if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
     for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
     for (const symbol of values.books.split(',').filter(Boolean)) {
@@ -210,6 +212,7 @@ for (let run = 0; run < runs; run++) {
     );
   const candidateBefore = structuredClone(rust);
   const overwritten = runAuditedFixer(values.venue, ts, applyTsCorrections);
+  fixerReports.push({ run, ...overwritten });
   differences.push(...overwritten.errors);
   for (const [field, count] of Object.entries(overwritten.counts))
     console.log(`fixer ${values.venue} ${field}: ${count} overwritten field(s)`);
@@ -258,12 +261,29 @@ for (let run = 0; run < runs; run++) {
   }
 }
 
+// Performance artifacts are separate from the fully audited correctness pair.
+// A fast but incomplete workload cannot substitute for the measured tape.
+if (!isPrivate) for (const impl of ['ts', 'rust']) for (const [run, output] of performanceResults[impl].entries()) {
+  for (const error of [...memoryMetricErrors(output.metrics), ...performanceMetricErrors(output.metrics, 'performance')])
+    differences.push(`${impl} performance run ${run + 1}: ${error}`);
+  if (output.frames !== results[impl][0].frames || output.commands.length !== results[impl][0].commands.length ||
+      output.unserved || output.missingWrites || output.unusedWrites)
+    differences.push(`${impl} performance run ${run + 1}: incomplete replay workload`);
+  differences.push(...compareSnapshots(rawAudited[impl], output, `${impl} performance run ${run + 1}`));
+  if (!sameCommandResults(rawAudited[impl].commands, output.commands))
+    differences.push(`${impl} performance run ${run + 1}: command workload differs from audited replay`);
+  if (!output.transportReceipt || !isDeepStrictEqual(rawAudited[impl].transportReceipt, output.transportReceipt))
+    differences.push(`${impl} performance run ${run + 1}: transport workload differs from audited replay`);
+}
+const measuredResults = isPrivate ? results : performanceResults;
 const summary = (impl) => ({
-  cpuMs: median(results[impl].map((r) => r.metrics.cpuMs)),
-  steadyCpuMs: median(results[impl].map((r) => r.metrics.steadyCpuMs)),
-  processCpuMs: median(results[impl].map((r) => r.metrics.processCpuMs)),
-  retainedMB: median(results[impl].map((r) => r.metrics.retainedBytes)) / 1e6,
-  wasmMB: median(results[impl].map((r) => r.metrics.wasmBytes ?? 0)) / 1e6,
+  cpuMs: median(measuredResults[impl].map((r) => r.metrics.cpuMs)),
+  idleLoadCpuMs: median(measuredResults[impl].map((r) => r.metrics.idleLoadCpuMs)),
+  runtimeCpuMs: median(measuredResults[impl].map((r) => r.metrics.runtimeCpuMs)),
+  steadyCpuMs: median(measuredResults[impl].map((r) => r.metrics.steadyCpuMs)),
+  processCpuMs: median(measuredResults[impl].map((r) => r.metrics.processCpuMs)),
+  retainedMB: median(measuredResults[impl].map((r) => r.metrics.retainedBytes)) / 1e6,
+  wasmMB: median(measuredResults[impl].map((r) => r.metrics.wasmBytes ?? 0)) / 1e6,
 });
 const t = summary('ts');
 const r = summary('rust');
@@ -275,10 +295,13 @@ const row = (label, a, b, unit = 'ms') =>
     `${label.padEnd(16)} ts ${a.toFixed(1).padStart(8)} ${unit}   rust ${b.toFixed(1).padStart(8)} ${unit}   ${(a / b).toFixed(2)}x`,
   );
 row('main-thread cpu', t.cpuMs, r.cpuMs);
+row('cold-load cpu', t.idleLoadCpuMs, r.idleLoadCpuMs);
+row('runtime cpu', t.runtimeCpuMs, r.runtimeCpuMs);
 row('steady cpu', t.steadyCpuMs, r.steadyCpuMs);
 row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
-console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
+console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB; idle-loaded baseline; ${isPrivate ? 0 : runs} interleaved performance pairs; required improvement 10%)`);
+console.log('(CPU includes cold implementation load and replay transport; audit snapshots, validators and baseline GC are excluded from performance runs)');
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
 if (venue.family === 'orderly')
   console.log(
@@ -296,11 +319,16 @@ if (venue.family === 'coinbase')
 
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.
-if (!isPrivate) {
-  if (!(r.cpuMs < t.cpuMs)) failures.push('Rust main-thread CPU is not below TS');
-  if (!(r.steadyCpuMs < t.steadyCpuMs)) failures.push('Rust steady-state CPU is not below TS');
-  if (!(r.retainedMB < t.retainedMB)) failures.push('Rust retained memory is not below TS');
-}
+if (!isPrivate) failures.push(...performanceFailures(
+  performanceResults.ts.map((output) => output.metrics), performanceResults.rust.map((output) => output.metrics)));
+writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
+  schema: 1, venue: values.venue, tape: values.tape,
+  tapeSha256: createHash('sha256').update(tapeBytes).digest('hex'),
+  private: isPrivate, books: values.books, runs: isPrivate ? 0 : runs, correctnessRuns, requiredImprovement: 0.10,
+  status: failures.length ? 'FAIL' : 'PASS', failures, artifacts, fixers: fixerReports,
+  summary: { ts: t, rust: r },
+  samples: { ts: measuredResults.ts.map((output) => output.metrics), rust: measuredResults.rust.map((output) => output.metrics) },
+}, null, 2) + '\n');
 if (failures.length) {
   console.log(`FAIL (${failures.length})`);
   for (const failure of failures.slice(0, 40)) console.log(`  ${failure}`);

@@ -92,23 +92,29 @@ const gate = (venue, isPrivate = false, defect) => {
     process.env.ESBUILD_WORKER_THREADS = '1';
     process.env.HARNESS_TEST_INHERITED = 'retained';
     process.argv = ['node', 'gate.mjs', '--venue', venue, '--tape', ${JSON.stringify(tape)},
-      '--books', 'BTCUSDT', '--runs', '2'];
+      '--books', 'BTCUSDT', '--runs', isPrivate ? '2' : '7'];
     const spawned = new Set();
+    const calls = [];
     childProcess.spawnSync = (_executable, args, options) => {
       assert.equal(options.env.ESBUILD_WORKER_THREADS, '0');
       assert.equal(options.env.HARNESS_TEST_INHERITED, 'retained');
       const out = args[args.indexOf('--out') + 1];
       const impl = args[args.indexOf('--impl') + 1];
       spawned.add(impl);
+      calls.push([args.includes('--performance') ? 'performance' : 'correctness', impl]);
       const rust = impl === 'rust';
       const output = {
         frames: 1, unserved: 0, missingWrites: 0, unusedWrites: 0,
         invalidSignatures: 0, protocolErrors: [], wsRequests: [], subscriptions: [], requests: [], writes: [], writeCount: 0,
         metrics: {
+          baselineKind: 'idle-loaded', measuredMode: args.includes('--performance') ? 'performance' : 'correctness',
           cpuMs: rust ? 1 : 2, steadyCpuMs: rust ? 1 : 2, processCpuMs: rust ? 1 : 2,
+          idleLoadCpuMs: 0, idleLoadProcessCpuMs: 0, idleLoadWallMs: 0,
+          runtimeCpuMs: rust ? 1 : 2, runtimeProcessCpuMs: rust ? 1 : 2,
+          runtimeWallMs: 1, wallMs: 1,
           heapBeforeBytes: 100, heapUsedBytes: rust ? 110 : 120, buffersBefore: 100, buffersAfter: 100,
           retainedBytes: rust ? 10 : 20, heapRetainedBytes: rust ? 10 : 20,
-          bufferRetainedBytes: 0, wasmBytes: 0,
+          bufferRetainedBytes: 0, wasmBytes: 0, wasmBeforeBytes: 0, wasmRetainedBytes: 0,
         },
         // Different insertion order must compare equal, including nested rows.
         markets: [rust
@@ -121,6 +127,7 @@ const gate = (venue, isPrivate = false, defect) => {
         // This smoke tape has none; populated command comparisons run below.
         commands: strictCommandCount ? [] : [{ ok: { count: 1, ids: ['one', 'two'] } }],
         checkpoints: [{ ordinal: 0, recordIndex: -1, t: 0, markets: [], tickers: [], books: {} }],
+        transportReceipt: {},
         ...(isPrivate ? { account: {
           hedged: ['backpack', 'cryptocom'].includes(venue),
           balance: { used: 0, free: 100, total: 100, upnl: 0 },
@@ -159,9 +166,17 @@ const gate = (venue, isPrivate = false, defect) => {
         output.writeCount = 1;
       }
       if (rust && defect === 'memory-arithmetic') output.metrics.heapBeforeBytes--;
+      if (rust && args.includes('--performance')) {
+        if (defect === 'process-cpu') output.metrics.processCpuMs = output.metrics.runtimeProcessCpuMs = 3;
+        if (defect === 'marginal-cpu') output.metrics.cpuMs = output.metrics.runtimeCpuMs = 1.9;
+        if (defect === 'late-invalid-cpu' && out.endsWith('-6.json')) output.metrics.cpuMs = null;
+        if (defect === 'incomplete-perf' && out.endsWith('-6.json')) output.frames = 0;
+        if (defect === 'dropped-perf-output' && out.endsWith('-6.json')) output.tickers[0].last = 0;
+        if (defect === 'changed-perf-transport' && out.endsWith('-6.json')) output.transportReceipt = { changed: true };
+      }
       // A later private run must reject invalid individual memory components
       // even though its aggregate and informational performance otherwise pass.
-      if (rust && defect?.startsWith('memory:') && out.endsWith('rust-1.json'))
+      if (rust && defect?.startsWith('memory:') && out.endsWith('rust-audit-1.json'))
         output.metrics[defect.slice('memory:'.length)] = -1;
       writeFileSync(out, JSON.stringify(output));
       return { status: 0, stderr: '' };
@@ -169,6 +184,12 @@ const gate = (venue, isPrivate = false, defect) => {
     syncBuiltinESMExports();
     await import(${JSON.stringify(new URL('./gate.mjs', import.meta.url).href)});
     assert.deepEqual([...spawned].sort(), ['rust', 'ts']);
+    if (!isPrivate) {
+      assert.deepEqual(calls.slice(0, 2), [['correctness', 'ts'], ['correctness', 'rust']]);
+      assert.equal(calls.length, 16);
+      for (let run = 0; run < 7; run++)
+        assert.deepEqual(calls.slice(2 + run * 2, 4 + run * 2), (run % 2 ? ['rust', 'ts'] : ['ts', 'rust']).map((impl) => ['performance', impl]));
+    } else assert.equal(calls.length, 4);
   `;
   try {
     const runner = join(cwd, 'run.mjs');
@@ -209,6 +230,18 @@ test('gate CLI rejects duplicates and transient checkpoint divergences', () => {
   }
 });
 
+test('gate CLI independently enforces process CPU, ten percent margin and every performance sample', () => {
+  for (const [defect, message] of [
+    ['process-cpu', /performance process CPU/], ['marginal-cpu', /performance main-thread CPU/],
+    ['late-invalid-cpu', /rust performance run 7: invalid cpuMs/], ['incomplete-perf', /incomplete replay workload/],
+    ['dropped-perf-output', /rust performance run 7 tickers/], ['changed-perf-transport', /transport workload differs/],
+  ]) {
+    const result = gate('bybitinverse', false, defect);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, message);
+  }
+});
+
 test('gate CLI retains the strict Orderly command count oracle', () => {
   for (const defect of ['orderly-extra-result', 'orderly-missing-result']) {
     const result = gate('tealstreet-dex', true, defect);
@@ -231,7 +264,8 @@ test('gate CLI validates every memory component on later private runs', () => {
   for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
     const result = gate('bybitinverse', true, `memory:${field}`);
     assert.equal(result.status, 1, result.stderr);
-    assert.ok(result.stdout.includes(`rust: invalid ${field} (-1); baseline is invalid`), result.stdout);
+    const category = field === 'wasmBytes' ? 'invalid' : 'inconsistent';
+    assert.ok(result.stdout.includes(`rust: ${category} ${field} (-1`), result.stdout);
   }
 });
 

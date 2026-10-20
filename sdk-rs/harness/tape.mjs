@@ -188,7 +188,13 @@ export const checkpointOrdinals = (frames) => new Set([
 ]);
 
 export class Tape {
-  constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = 30000, impl, books = [], options) {
+  constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = 30000, impl, books = [], options, settings = {}) {
+    this.auditEnabled = settings.performance !== true;
+    // Minimal receipts share the same recorder in both modes. They retain
+    // routing-computed keys and send references, with all normalization after
+    // performance sampling. Their small recording cost remains in both runs.
+    this.receiptRequests = [];
+    this.receiptSends = [];
     const originalIndices = new Map(records.map((record, index) => [record, index]));
     if (impl !== undefined && !['ts', 'rust'].includes(impl)) throw new Error('Unknown replay implementation');
     records = records.filter((record) => {
@@ -216,7 +222,9 @@ export class Tape {
       ...venue.replayCredentials,
     };
     this.callerIds = callerIdsOf(records);
-    this.validateRequest = venue.createRequestValidator?.(this.options, { callerIds: this.callerIds }) ?? venue.validateRequest;
+    this.validateRequest = this.auditEnabled
+      ? venue.createRequestValidator?.(this.options, { callerIds: this.callerIds }) ?? venue.validateRequest
+      : undefined;
     this.bookSymbols = books;
     this.bitget = venue.rust?.startsWith('bitget') ?? false;
     this.generated = new Set();
@@ -242,18 +250,18 @@ export class Tape {
       )
       .map((record) => this.keyFor(record.method, record.url, record.requestBody));
     this.publicTickers = this.venue.publicTickers?.(this.records) ?? [];
-    this.requestAudit = this.venue.createRequestAudit?.(impl, { isPrivate: this.isPrivate });
-    this.audit = this.venue.createSocketAudit?.(impl, {
+    this.requestAudit = this.auditEnabled ? this.venue.createRequestAudit?.(impl, { isPrivate: this.isPrivate }) : undefined;
+    this.audit = this.auditEnabled ? this.venue.createSocketAudit?.(impl, {
       isPrivate: this.isPrivate,
       books: this.bookSymbols,
       tickers: this.publicTickers,
       requestAudit: this.requestAudit,
       records: this.records,
-    });
+    }) : undefined;
     this.responses = new Responses(
       this.records,
       this.keyFor,
-      this.venue.checkRequest,
+      this.auditEnabled ? this.venue.checkRequest : undefined,
       (method, url) => this.venue.isWrite?.(method, url) ?? isWriteRequest(method, url),
       true,
       impl,
@@ -359,13 +367,16 @@ export class Tape {
         } else visit(item);
       }
     };
-    visit(sent);
-    const retry = String(JSON.parse(record.body).code) === '40009';
-    if (!retry) {
-      if (new Set(ids).size !== ids.length) throw new Error('generated client ID reused within batch');
-      for (const id of ids) if (this.generated.has(id)) throw new Error(`generated client ID reused: ${id}`);
-      for (const id of ids) this.generated.add(id);
+    if (this.auditEnabled) {
+      visit(sent);
+      const retry = String(JSON.parse(record.body).code) === '40009';
+      if (!retry) {
+        if (new Set(ids).size !== ids.length) throw new Error('generated client ID reused within batch');
+        for (const id of ids) if (this.generated.has(id)) throw new Error(`generated client ID reused: ${id}`);
+        for (const id of ids) this.generated.add(id);
+      }
     }
+    // Alias binding is transport simulation, required even without auditing.
     const bind = (expected, actual) => {
       if (!expected || !actual || typeof expected !== 'object' || typeof actual !== 'object') return;
       for (const key of Object.keys(expected)) {
@@ -406,7 +417,7 @@ export class Tape {
       this.pollingFence?.reject(error);
       throw error;
     }
-    if (this.isPrivate && this.venue.verifyRequest) {
+    if (this.auditEnabled && this.isPrivate && this.venue.verifyRequest) {
       this.verifySignature(
         this.venue.verifyRequest,
         { method, url, body, headers },
@@ -415,8 +426,11 @@ export class Tape {
     }
     const actualKey = this.keyFor(method, url, body);
     const key = this.wireAliases.get(actualKey) ?? actualKey;
-    this.requests.add(key);
-    if (this.responses.isWrite(method, url)) this.writes.push(key);
+    this.receiptRequests.push([key, this.responses.isWrite(method, url)]);
+    if (this.auditEnabled) {
+      this.requests.add(key);
+      if (this.responses.isWrite(method, url)) this.writes.push(key);
+    }
     if (this.responses.isWrite(method, url) && this.venue.compareWriteOrder && this.expectedWrites[0] !== key) {
       if (process.env.RUST_REQUEST_TRACE) console.error('unexpected write', key, 'expected', this.expectedWrites[0]);
       this.responses.unserved++;
@@ -427,10 +441,10 @@ export class Tape {
     const unservedBefore = this.responses.unserved;
     let response;
     try {
-      response = this.bitget || this.venue.validateMatchedRequest || this.selectedPollingResponses
+      response = this.bitget || (this.auditEnabled && this.venue.validateMatchedRequest) || this.selectedPollingResponses
         ? this.responses.respond(method, url, body, this.commandIndex, (record) => {
           this.validateBitgetMatch(record, method, url, body);
-          this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
+          if (this.auditEnabled) this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
           if (this.selectedPollingResponses && !this.responses.isWrite(method, url)) {
             this.polledRequestKeys.add(actualKey);
             this.selectedPollingResponses.add(record);
@@ -533,7 +547,8 @@ export class Tape {
   }
 
   send(socket, text) {
-    try { this.venue.validateSocketMessage?.(socket, text); }
+    this.receiptSends.push({ url: socket.url, text, generation: socket.generation });
+    try { if (this.auditEnabled) this.venue.validateSocketMessage?.(socket, text); }
     catch(error) { this.invalidSignatures++; throw error; }
     let message;
     try {
@@ -543,13 +558,13 @@ export class Tape {
     }
     if (this.venue.bootstrapPrivateFromTape && message?.op && message?.req_id)
       socket.requests.set(message.op, message.req_id);
-    if (message && this.isPrivate && this.venue.verifySubscribe) {
+    if (this.auditEnabled && message && this.isPrivate && this.venue.verifySubscribe) {
       this.verifySignature(this.venue.verifySubscribe, message, 'invalid replay websocket signature');
     }
     if (message) {
       const request = this.venue.socketRequest?.(message);
       if (request) {
-        if (socket.requestIds.has(request.id)) throw new Error(`duplicate websocket request ${request.key}`);
+        if (this.auditEnabled && socket.requestIds.has(request.id)) throw new Error(`duplicate websocket request ${request.key}`);
         if (this.recordedSocketRequests.size || this.venue.requireSocketRequestRecords) {
           const queueKey = `${canonicalUrl(socket.url, this.callerIds, this.venue)} ${socket.ordinal} ${request.key}`;
           const count = socket.requestCounts.get(request.key) ?? 0;
@@ -559,8 +574,10 @@ export class Tape {
           socket.mappedRequests.set(recordedId, request.id);
         }
         socket.requests.set(request.id, request.key);
-        socket.requestIds.add(request.id);
-        this.sentRequests.add(JSON.stringify(stable({ url: socket.url, request: request.key })));
+        if (this.auditEnabled) {
+          socket.requestIds.add(request.id);
+          this.sentRequests.add(JSON.stringify(stable({ url: socket.url, request: request.key })));
+        }
       }
       if (message.event || this.venue.family === 'coinbase') {
         const subscription = subscriptionMessage(message);
@@ -582,18 +599,20 @@ export class Tape {
     this.venue.onSocketSend?.(socket, text);
     // Authentication may classify a shared-URL socket after its open callback.
     this.waiters = this.waiters.filter((waiter) => !waiter());
-    this.sent(socket.url, text);
+    if (this.auditEnabled) this.sent(socket.url, text);
     this.audit?.sent(socket.url, text, socket.generation);
     for (const reply of this.venue.socketReplies?.(socket.url, message) ?? []) {
       setImmediate(() => { if (!socket.closed) this.deliver(socket, reply); });
     }
     const compared = this.venue.marketFilter && Array.isArray(message?.params)
       ? { ...message, params: message.params.filter((topic) => topic.startsWith('account.') || this.venue.marketFilter({ symbol: topic.split('.').at(-1) })) } : text;
-    for (const key of subscriptionKeys(socket.url, compared, this.callerIds, this.venue)) {
-      this.subscriptions.add(this.venue.subscriptionGenerations ? `${socket.generation} ${key}` : key);
-      if (this.startupSubscriptions.get(key) === false) {
-        this.startupSubscriptions.set(key, true);
-        this.pendingStartupSubscriptions--;
+    if (this.auditEnabled || this.pendingStartupSubscriptions) {
+      for (const key of subscriptionKeys(socket.url, compared, this.callerIds, this.venue)) {
+        if (this.auditEnabled) this.subscriptions.add(this.venue.subscriptionGenerations ? `${socket.generation} ${key}` : key);
+        if (this.startupSubscriptions.get(key) === false) {
+          this.startupSubscriptions.set(key, true);
+          this.pendingStartupSubscriptions--;
+        }
       }
     }
     if (this.venue.pingReply) {
@@ -618,12 +637,15 @@ export class Tape {
     if (text === 'ping' || text === 'pong') return;
     message = JSON.parse(text);
     if (validateTopics && ['subscribe', 'unsubscribe'].includes(message.op)) {
-      if (!Array.isArray(message.args)) throw new Error(`Invalid subscription on ${socket.url}`);
+      if (!Array.isArray(message.args)) {
+        if (this.auditEnabled) throw new Error(`Invalid subscription on ${socket.url}`);
+        return;
+      }
       for (const topic of message.args) {
         if (
-          !topic ||
+          this.auditEnabled && (!topic ||
           typeof (topic.channel ?? (this.bitget ? topic.topic : undefined)) !== 'string' ||
-          !(topic.channel ?? topic.topic)
+          !(topic.channel ?? topic.topic))
         )
           throw new Error(`Invalid subscription topic on ${socket.url}`);
         const key = this.bitget
@@ -636,6 +658,11 @@ export class Tape {
     }
     if (!this.venue.validateLogin || !/\/(private|business)$/.test(new URL(socket.url).pathname)) return;
     if (message.op !== 'login') return;
+    if (!this.auditEnabled) {
+      // Retain authentication state transitions while excluding verifier work.
+      socket.loginVerified = true;
+      return;
+    }
     const arg = message.args?.length === 1 ? message.args[0] : undefined;
     const timestamp = String(arg?.timestamp ?? '');
     if (
@@ -720,23 +747,23 @@ export class Tape {
     }
     const response = this.venue.socketResponse(message);
     if (!response) return text;
-    if (socket.responseIds.has(response.id)) throw new Error('duplicate websocket response');
+    if (this.auditEnabled && socket.responseIds.has(response.id)) throw new Error('duplicate websocket response');
     const scope = `${canonicalUrl(socket.url, this.callerIds, this.venue)} ${socket.ordinal}`;
     const recordedKey = `${scope} ${response.id}`;
     const recorded = this.recordedSocketRequests.get(recordedKey);
     if ((this.recordedSocketRequests.size || this.venue.requireSocketRequestRecords) && recorded === undefined)
       throw new Error('websocket response has no taped request');
-    if (recorded !== undefined && response.key !== undefined && recorded !== response.key)
+    if (this.auditEnabled && recorded !== undefined && response.key !== undefined && recorded !== response.key)
       throw new Error('websocket response symbol differs from taped request');
     const key = recorded ?? response.key;
     const id = this.recordedSocketRequests.size
       ? socket.mappedRequests.get(response.id)
       : [...socket.requests].find(([, requestKey]) => requestKey === key)?.[0];
     if (id === undefined) throw new Error(`unsolicited websocket response ${key ?? response.id}`);
-    if (socket.requests.get(id) !== key) throw new Error('websocket response differs from pending request');
+    if (this.auditEnabled && socket.requests.get(id) !== key) throw new Error('websocket response differs from pending request');
     socket.requests.delete(id);
     socket.mappedRequests.delete(response.id);
-    socket.responseIds.add(response.id);
+    if (this.auditEnabled) socket.responseIds.add(response.id);
     return JSON.stringify({ ...message, id });
   }
 
@@ -790,7 +817,7 @@ export class Tape {
 
   deliver(socket, text) {
     if (text === undefined && socket.text !== undefined) return this.deliverFrame(socket);
-    if ((this.venue.validateLogin || this.venue.validateSubscriptions) && typeof text === 'string' && text.trimStart().startsWith('{')) {
+    if (this.auditEnabled && (this.venue.validateLogin || this.venue.validateSubscriptions) && typeof text === 'string' && text.trimStart().startsWith('{')) {
       const message = JSON.parse(text);
       if (
         this.venue.validateLogin &&
@@ -801,7 +828,7 @@ export class Tape {
         throw new Error(`Taped login success preceded a valid login on ${socket.url}`);
       this.assertSubscribed(socket, message);
     }
-    try { deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame); }
+    try { deliverSocketFrame(socket, text, this.audit, this.auditEnabled ? this.venue.validateSocketFrame : undefined); }
     catch(error) { this.invalidSignatures++; throw error; }
   }
 
@@ -928,6 +955,37 @@ export class Tape {
     return delivered;
   }
 
+  // Called outside the performance CPU and memory windows. Preserve request
+  // multiplicity and mutation order; canonicalize generated transport IDs only
+  // using the same input-side routing rules as the audited replay.
+  transportReceipt() {
+    const counts = (values) => {
+      const rows = new Map();
+      for (const value of values) rows.set(value, (rows.get(value) ?? 0) + 1);
+      return [...rows].sort(([a], [b]) => a.localeCompare(b));
+    };
+    const subscriptions = [];
+    const socketRequests = [];
+    for (const { url, text, generation } of this.receiptSends) {
+      for (const key of subscriptionKeys(url, text, this.callerIds, this.venue))
+        subscriptions.push(`${generation} ${key}`);
+      let message;
+      try { message = JSON.parse(text); } catch { continue; }
+      const request = this.venue.socketRequest?.(message);
+      if (request) socketRequests.push(`${generation} ${canonicalUrl(url, this.callerIds, this.venue)} ${request.key}`);
+    }
+    const connections = [...this.open.values()].flatMap((sockets) => [...sockets].map((socket) => ({
+      url: canonicalUrl(socket.url, this.callerIds, this.venue), ordinal: socket.ordinal, closed: socket.closed,
+    }))).sort((a, b) => a.url.localeCompare(b.url) || a.ordinal - b.ordinal);
+    return {
+      requests: counts(this.receiptRequests.map(([key]) => key)),
+      writes: this.receiptRequests.filter(([, write]) => write).map(([key]) => key),
+      subscriptions: counts(subscriptions),
+      socketRequests: counts(socketRequests),
+      connections,
+    };
+  }
+
   unusedWrites() {
     return this.responses.unusedWrites();
   }
@@ -949,6 +1007,7 @@ export class Tape {
   sentRequests = new Set();
   sent(url, text) {
     if (typeof url !== 'string') return this.send(url, text);
+    if (!this.auditEnabled) return;
     if (!this.venue.requestBodies || text === 'ping' || text === 'pong') return;
     let message;
     try {
@@ -981,4 +1040,5 @@ export const createTape = (records, venue, isPrivate, settings = {}) =>
     settings.impl,
     settings.books ?? [],
     settings.credentials,
+    settings,
   );

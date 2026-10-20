@@ -61,3 +61,19 @@ never retry an unchanged failed performance measurement to obtain a pass.
   provides a second check. Review found and corrected directional-array,
   reorder and proxy-reference escapes. Current targeted tests: 31/31 PASS;
   previous full suite before these review fixes: 625/625 PASS.
+- Phase 3 final independent re-review: PASS, including descriptor/accessor and
+  temporary-write controls. Commit `127bb37a07`.
+- Phase 4: one fully audited public correctness pair, then at least seven fresh
+  interleaved TS/Rust performance pairs with alternating first implementation.
+  Main/steady/process CPU and retained memory require at least 10% improvement.
+  Cold implementation imports and WASM compilation are included in load+runtime
+  CPU totals; baseline GC, validators, audit checkpoints and final projection are
+  excluded from performance intervals. Minimal replay routing/receipt recording
+  remains measured symmetrically. Memory subtracts an idle-loaded baseline and
+  counts WASM growth exactly once; finite negative JS deltas stay signed.
+  Every performance result must match its own raw audited final state, commands
+  and exact transport receipt after timing stops. Independent review PASS,
+  including the cold-load follow-up. Full harness: 657/657 PASS
+  (`/tmp/gate-honesty-phase4-all-tests.log`). Real Bitrue functional controls:
+  3,238 frames in each mode/implementation, five audited checkpoints and no
+  performance checkpoints; no performance-pass claim from these single pairs.

@@ -10,7 +10,7 @@ import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from
 import { axiosClients, venueOf } from './venues.mjs';
 import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
-import { baselineBeforeSetup, retainedMemory, settledMemory } from './memory.mjs';
+import { idleLoadedBaseline, measureBeforeCapture, retainedMemory, settledMemory } from './memory.mjs';
 import { currencyBalances, lookupResult } from './account-shapes.mjs';
 import { finalizeReplay } from './replay-finalize.mjs';
 import { deterministicReplay, replayTransportReady } from './polling.mjs';
@@ -86,6 +86,7 @@ const isPrivate =
       ? venue.isPrivateRecord(record)
       : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
   );
+if (values.performance && isPrivate) throw new Error('Performance mode requires a public tape; private tapes gate correctness only');
 const options = {
   ...venue.options,
   ...metadata?.options,
@@ -96,6 +97,10 @@ const options = {
   ...config.options,
 };
 const initializeReplay = async () => {
+  // Public performance loads production implementations cold. These harness
+  // initializers construct independent signing verifiers (or return early for
+  // public accounts); running them would preload dependencies such as ethers.
+  if (values.performance) return;
   await venue.prepareReplay?.({ isPrivate, options });
   await venue.initializeReplay?.(values.impl, options);
 };
@@ -113,21 +118,30 @@ const until = async (predicate, label) => {
   }
 };
 
-const measure = async (cpuStart, wallStart, heapBefore, wasmMemory = 0, warmMark) => {
+const measure = async (cpuStart, wallStart, heapBefore, wasmMemory = 0, warmMark, wasmBeforeBytes = 0, loadMetrics) => {
   const cpu = process.cpuUsage(cpuStart.process);
   const thread = process.threadCpuUsage(cpuStart.thread);
   const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
-  const wallMs = performance.now() - wallStart;
+  const runtimeWallMs = performance.now() - wallStart;
+  const runtimeCpuMs = (thread.user + thread.system) / 1000;
+  const runtimeProcessCpuMs = (cpu.user + cpu.system) / 1000;
   const memory = await baseline();
   const wasmBytes = typeof wasmMemory === 'function' ? wasmMemory() : wasmMemory;
   return {
-    // The worker's own thread: what competes with its message handling.
-    cpuMs: (thread.user + thread.system) / 1000,
+    baselineKind: 'idle-loaded',
+    measuredMode: values.performance ? 'performance' : 'correctness',
+    // Cold implementation loading plus runtime main-thread work. Baseline GC
+    // is excluded as a separate interval; neither import nor WASM compile is.
+    cpuMs: loadMetrics.idleLoadCpuMs + runtimeCpuMs,
+    runtimeCpuMs,
     // Main thread after the first quarter of frames: startup and JIT excluded.
     steadyCpuMs: (steady.user + steady.system) / 1000,
-    // All threads, including V8 background compilation and GC helpers.
-    processCpuMs: (cpu.user + cpu.system) / 1000,
-    wallMs,
+    // All threads across both intervals, including background compilation.
+    processCpuMs: loadMetrics.idleLoadProcessCpuMs + runtimeProcessCpuMs,
+    runtimeProcessCpuMs,
+    ...loadMetrics,
+    runtimeWallMs,
+    wallMs: loadMetrics.idleLoadWallMs + runtimeWallMs,
     rssBytes: memory.rss,
     heapBeforeBytes: heapBefore.heapUsed,
     heapUsedBytes: memory.heapUsed,
@@ -136,12 +150,14 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmMemory = 0, warmMark
     buffersBefore: heapBefore.arrayBuffers,
     buffersAfter: memory.arrayBuffers,
     wasmBytes,
-    // Include implementation modules, retained frames and reserved wasm symmetrically.
-    retainedBytes: retainedMemory(heapBefore, memory, wasmBytes),
+    wasmBeforeBytes,
+    wasmRetainedBytes: wasmBytes - wasmBeforeBytes,
+    // Runtime retention above the idle-loaded implementation, including egress.
+    retainedBytes: retainedMemory(heapBefore, memory, wasmBytes, wasmBeforeBytes),
   };
 };
 
-/** Include implementation modules; collect until backing buffers settle. */
+/** Settle the loaded implementation and then its live runtime state symmetrically. */
 const baseline = () => settledMemory({ pause: () => new Promise((resolve) => realTimeout(resolve, 10)) });
 
 const sortBook = (book) => ({
@@ -183,16 +199,20 @@ const marketFields = (m) => ({
 });
 
 async function runRust() {
-  const heapBefore = await baselineBeforeSetup({
+  const { memory: heapBefore, loadMetrics, loaded: { EngineHost, Frame, TickerState, MARKET_COLUMNS, WasmEngine, wasmMemoryBytes, tape, encoder } } = await idleLoadedBaseline({
     baseline,
-    initialize: initializeReplay,
+    load: async () => {
+      await initializeReplay();
+      const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
+      const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
+      const { loadEngine } = await import('./engine.mjs');
+      const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust, options);
+      const tape = new Tape(records, venue, isPrivate, 30000, 'rust', bookSymbols, options, { performance: values.performance });
+      const encoder = new TextEncoder();
+      return { EngineHost, Frame, TickerState, MARKET_COLUMNS, WasmEngine, wasmMemoryBytes, tape, encoder };
+    },
   });
-  const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
-  const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
-  const { loadEngine } = await import('./engine.mjs');
-  const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust, options);
-  const tape = new Tape(records, venue, isPrivate, 30000, 'rust', bookSymbols, options);
-  const encoder = new TextEncoder();
+  const wasmBeforeBytes = wasmMemoryBytes();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
 
@@ -215,7 +235,7 @@ async function runRust() {
     now: () => Date.now(),
     webSocketHeaders: true,
     connect: (url, { headers, onOpen, onMessage, onBinary, onClose }) => {
-      venue.validateSocket?.(url, headers);
+      if (!values.performance) venue.validateSocket?.(url, headers);
       const socket = tape.connect(
         url,
         onOpen,
@@ -372,6 +392,7 @@ async function runRust() {
       books: bookRows,
       account,
       commands: tape.results,
+      transportReceipt: tape.transportReceipt(),
     };
   };
   const checkpoints = [];
@@ -401,10 +422,12 @@ async function runRust() {
     },
   );
   await settle();
-  tape.assertWritesConsumed();
+  if (!values.performance) tape.assertWritesConsumed();
   clearInterval(flushTimer);
   host.flush();
-  const result = await finalizeReplay(() => ({ ...capture(frames), checkpoints }), () => measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark));
+  const finish = values.performance ? measureBeforeCapture : finalizeReplay;
+  const result = await finish(() => ({ ...capture(frames), checkpoints }), () => measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark, wasmBeforeBytes, loadMetrics));
+  if (values.performance) tape.assertWritesConsumed();
   host.dispose();
   clock?.restore();
   return result;
@@ -552,120 +575,123 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
 }
 
 async function runTs() {
-  const heapBefore = await baselineBeforeSetup({
+  const { memory: heapBefore, loadMetrics, loaded: { tape, TapeWebSocket, Exchange, DefaultStore, ExchangeWorker, adapter } } = await idleLoadedBaseline({
     baseline,
-    initialize: initializeReplay,
-  });
-  const tape = new Tape(records, venue, isPrivate, 30000, 'ts', bookSymbols, options);
-  class TapeWebSocket {
-    static CONNECTING = 0;
-    static OPEN = 1;
-    static CLOSING = 2;
-    static CLOSED = 3;
-    constructor(url, _protocols, options = {}) {
-      venue.validateSocket?.(url, options.headers);
-      this.url = url;
-      this.readyState = 0;
-      this.listeners = { open: [], message: [], close: [], error: [] };
-      this.socket = tape.connect(
-        url,
-        () => {
-          this.readyState = 1;
-          for (const fn of this.listeners.open) fn({});
-          this.onopen?.({});
-        },
-        (data) => {
-          for (const fn of this.listeners.message) fn({ data });
-          this.onmessage?.({ data });
-          venue.afterTsFrame?.(exchange);
-        },
-        (code) => {
+    load: async () => {
+      await initializeReplay();
+      const tape = new Tape(records, venue, isPrivate, 30000, 'ts', bookSymbols, options, { performance: values.performance });
+      class TapeWebSocket {
+        static CONNECTING = 0;
+        static OPEN = 1;
+        static CLOSING = 2;
+        static CLOSED = 3;
+        constructor(url, _protocols, options = {}) {
+          if (!values.performance) venue.validateSocket?.(url, options.headers);
+          this.url = url;
+          this.readyState = 0;
+          this.listeners = { open: [], message: [], close: [], error: [] };
+          this.socket = tape.connect(
+            url,
+            () => {
+              this.readyState = 1;
+              for (const fn of this.listeners.open) fn({});
+              this.onopen?.({});
+            },
+            (data) => {
+              for (const fn of this.listeners.message) fn({ data });
+              this.onmessage?.({ data });
+              venue.afterTsFrame?.(exchange);
+            },
+            (code) => {
+              this.readyState = 3;
+              for (const fn of this.listeners.close) fn({ code });
+              this.onclose?.({ code });
+            },
+          );
+        }
+        addEventListener(type, fn) {
+          this.listeners[type]?.push(fn);
+        }
+        removeEventListener(type, fn) {
+          this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
+        }
+        send(text) {
+          tape.send(this.socket, text);
+        }
+        close() {
           this.readyState = 3;
-          for (const fn of this.listeners.close) fn({ code });
-          this.onclose?.({ code });
-        },
-      );
-    }
-    addEventListener(type, fn) {
-      this.listeners[type]?.push(fn);
-    }
-    removeEventListener(type, fn) {
-      this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
-    }
-    send(text) {
-      tape.send(this.socket, text);
-    }
-    close() {
-      this.readyState = 3;
-      tape.close(this.socket);
-    }
-  }
-  globalThis.WebSocket = TapeWebSocket;
-  globalThis.fetch = async (input, init = {}) => {
-    const request = input instanceof Request ? input : undefined;
-    const method = init.method ?? request?.method ?? 'GET';
-    const requestBody =
-      init.body ??
-      (request && !['GET', 'HEAD'].includes(method.toUpperCase()) ? await request.clone().text() : undefined);
-    const headers = Object.fromEntries(new Headers(init.headers ?? request?.headers).entries());
-    const { status, body } = tape.respond(method, request?.url ?? String(input), requestBody, headers);
-    return new Response([204, 205, 304].includes(status) ? null : body, { status });
-  };
-  // Header-capable Node sockets resolve `ws` directly instead of the global.
-  const { createRequire } = await import('node:module');
-  const require = createRequire(new URL('../../packages/safe-cex/src/exchanges/base.ws.ts', import.meta.url));
-  const wsModule = require.resolve('ws');
-  require.cache[wsModule] = { id: wsModule, filename: wsModule, loaded: true, exports: TapeWebSocket };
-  const { [venue.ts.className]: Exchange } = await import(venue.ts.module);
-  const { DefaultStore } = await import('../../packages/safe-cex/src/store/store.base.ts');
-  const adapter = async (config) => {
-    const base = config.baseURL ?? '';
-    const url = new URL(config.url.startsWith('http') ? config.url : `${base.replace(/\/+$/, '')}/${config.url.replace(/^\/+/, '')}`);
-    const serializer = typeof config.paramsSerializer === 'function' ? config.paramsSerializer : config.paramsSerializer?.serialize;
-    if (serializer) {
-      for (const [key, value] of new URLSearchParams(serializer(config.params ?? {}))) url.searchParams.append(key, value);
-    } else {
-      for (const [key, value] of Object.entries(config.params ?? {})) {
-        if (value !== undefined) url.searchParams.set(key, String(value));
+          tape.close(this.socket);
+        }
       }
-    }
-    const {
-      status,
-      body,
-      headers: responseHeaders,
-    } = tape.respond(
-      (config.method ?? 'get').toUpperCase(),
-      url.toString(),
-      config.data,
-      config.headers?.toJSON?.() ?? config.headers,
-    );
-    // The raw body: the client's own transformResponse parses it, big ids included.
-    const response = {
-      data: body,
-      status,
-      statusText: String(status),
-      headers: Object.fromEntries(
-        (responseHeaders ?? '')
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => {
-            const colon = line.indexOf(':');
-            return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()];
-          }),
-      ),
-      config,
-      request: {},
-    };
-    if (status >= 400) {
-      const error = new Error(`Request failed with status code ${status}`);
-      error.response = response;
-      error.config = config;
-      throw error;
-    }
-    return response;
-  };
-  const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
-  await venue.loadTs?.({ isPrivate });
+      globalThis.WebSocket = TapeWebSocket;
+      globalThis.fetch = async (input, init = {}) => {
+        const request = input instanceof Request ? input : undefined;
+        const method = init.method ?? request?.method ?? 'GET';
+        const requestBody =
+          init.body ??
+          (request && !['GET', 'HEAD'].includes(method.toUpperCase()) ? await request.clone().text() : undefined);
+        const headers = Object.fromEntries(new Headers(init.headers ?? request?.headers).entries());
+        const { status, body } = tape.respond(method, request?.url ?? String(input), requestBody, headers);
+        return new Response([204, 205, 304].includes(status) ? null : body, { status });
+      };
+      // Header-capable Node sockets resolve `ws` directly instead of the global.
+      const { createRequire } = await import('node:module');
+      const require = createRequire(new URL('../../packages/safe-cex/src/exchanges/base.ws.ts', import.meta.url));
+      const wsModule = require.resolve('ws');
+      require.cache[wsModule] = { id: wsModule, filename: wsModule, loaded: true, exports: TapeWebSocket };
+      const { [venue.ts.className]: Exchange } = await import(venue.ts.module);
+      const { DefaultStore } = await import('../../packages/safe-cex/src/store/store.base.ts');
+      const adapter = async (config) => {
+        const base = config.baseURL ?? '';
+        const url = new URL(config.url.startsWith('http') ? config.url : `${base.replace(/\/+$/, '')}/${config.url.replace(/^\/+/, '')}`);
+        const serializer = typeof config.paramsSerializer === 'function' ? config.paramsSerializer : config.paramsSerializer?.serialize;
+        if (serializer) {
+          for (const [key, value] of new URLSearchParams(serializer(config.params ?? {}))) url.searchParams.append(key, value);
+        } else {
+          for (const [key, value] of Object.entries(config.params ?? {})) {
+            if (value !== undefined) url.searchParams.set(key, String(value));
+          }
+        }
+        const {
+          status,
+          body,
+          headers: responseHeaders,
+        } = tape.respond(
+          (config.method ?? 'get').toUpperCase(),
+          url.toString(),
+          config.data,
+          config.headers?.toJSON?.() ?? config.headers,
+        );
+        // The raw body: the client's own transformResponse parses it, big ids included.
+        const response = {
+          data: body,
+          status,
+          statusText: String(status),
+          headers: Object.fromEntries(
+            (responseHeaders ?? '')
+              .split('\n')
+              .filter(Boolean)
+              .map((line) => {
+                const colon = line.indexOf(':');
+                return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()];
+              }),
+          ),
+          config,
+          request: {},
+        };
+        if (status >= 400) {
+          const error = new Error(`Request failed with status code ${status}`);
+          error.response = response;
+          error.config = config;
+          throw error;
+        }
+        return response;
+      };
+      const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
+      await venue.loadTs?.({ isPrivate });
+      return { tape, TapeWebSocket, Exchange, DefaultStore, ExchangeWorker, adapter };
+    },
+  });
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), isPrivate && venue.virtualPrivateClock === true) : undefined;
@@ -779,6 +805,7 @@ async function runTs() {
       books: bookCopies,
       account,
       commands: tape.results,
+      transportReceipt: tape.transportReceipt(),
     };
   };
   const checkpoints = [];
@@ -817,11 +844,13 @@ async function runTs() {
     await until(() => venue.tsReplaySettled(exchange, bookSymbols.length), 'TS pending book snapshots');
   await within(venue.settleTs?.(exchange, { isPrivate, clock }) ?? Promise.resolve(), 15_000, 'TS pending venue reads');
   await settle();
-  tape.assertWritesConsumed();
+  if (!values.performance) tape.assertWritesConsumed();
   postStore();
   if (!values['no-egress'])
     for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
-  const result = await finalizeReplay(() => ({ ...capture(frames), checkpoints }), () => measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark));
+  const finish = values.performance ? measureBeforeCapture : finalizeReplay;
+  const result = await finish(() => ({ ...capture(frames), checkpoints }), () => measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark, 0, loadMetrics));
+  if (values.performance) tape.assertWritesConsumed();
   exchange.dispose();
   clock?.restore();
   return result;
@@ -863,6 +892,7 @@ writeFileSync(
     protocolErrors: result.protocolErrors,
     wsRequests: result.wsRequests,
     metrics: result.metrics,
+    transportReceipt: result.transportReceipt,
     ...comparisonSnapshot(result),
     checkpoints: result.checkpoints,
     commands: result.commands.map((result, index) => {
