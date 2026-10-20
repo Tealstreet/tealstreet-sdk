@@ -375,7 +375,7 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
     }
-    if (this.name === 'hyperliquidspot' || this.name === 'krakenspot') {
+    if (['hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse'].includes(this.name)) {
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
@@ -590,7 +590,7 @@ export class RustEngineExchange extends BaseExchange {
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
-        ...(['backpack', 'bitrue', 'breakoutprop'].includes(this.name)
+        ...(['backpack', 'bitrue', 'breakoutprop', 'binance', 'binancepm', 'binancespot', 'binanceinverse'].includes(this.name)
           ? { recvWindow: this.options.extra?.recvWindow }
           : {}),
         applicationId,
