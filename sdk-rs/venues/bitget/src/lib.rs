@@ -468,6 +468,13 @@ fn candle(row: &CandleRow) -> Candle {
 }
 
 impl Venue for BitgetFutures {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -845,9 +852,7 @@ impl Venue for BitgetFutures {
                 let limit = limit.unwrap_or(500).clamp(1, 1000);
                 let mut end = to_ms.unwrap_or(cx.now);
                 if let Some(start) = from_ms {
-                    end = end.min(
-                        start + (value.ms() * f64::from(limit)).min(90.0 * 86_400_000.0),
-                    );
+                    end = end.min(start + (value.ms() * f64::from(limit)).min(90.0 * 86_400_000.0));
                 }
                 let mut path = format!(
                     "{}?symbol={symbol}&granularity={native}&endTime={}&productType={}&limit={limit}",
@@ -876,12 +881,7 @@ impl Venue for BitgetFutures {
         self.books.get(symbol).filter(|b| b.synced).map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, b)| b.synced)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
 

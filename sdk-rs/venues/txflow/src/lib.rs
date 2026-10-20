@@ -468,10 +468,7 @@ impl TxFlow {
         if cx.store.loaded().markets && !self.assets.contains_key(&symbol) {
             return;
         }
-        let count = self
-            .candles
-            .entry((symbol.clone(), interval))
-            .or_default();
+        let count = self.candles.entry((symbol.clone(), interval)).or_default();
         if add {
             *count += 1;
             if *count > 1 {
@@ -569,6 +566,10 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Err(error) = self.options.validate() {
@@ -625,9 +626,7 @@ impl Venue for TxFlow {
                 .candles
                 .keys()
                 .filter_map(|(symbol, interval)| {
-                    self.assets
-                        .get(symbol)
-                        .map(|asset| (*asset, *interval))
+                    self.assets.get(symbol).map(|asset| (*asset, *interval))
                 })
                 .collect::<Vec<_>>();
             for (asset, interval) in candles {
@@ -1020,7 +1019,6 @@ impl Venue for TxFlow {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, l)| l.time.is_some())
                 .map(|(symbol, ladder)| (symbol.as_str(), &ladder.book)),
         )
     }
@@ -1028,5 +1026,8 @@ impl Venue for TxFlow {
 // TxFlow's candle codes are the TS spellings.
 fn supported(interval: Interval) -> bool {
     use Interval::*;
-    matches!(interval, M1 | M3 | M5 | M15 | M30 | H1 | H2 | H4 | H8 | H12 | D1)
+    matches!(
+        interval,
+        M1 | M3 | M5 | M15 | M30 | H1 | H2 | H4 | H8 | H12 | D1
+    )
 }

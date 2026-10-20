@@ -1,5 +1,6 @@
 //! Binance market and account families on the sans-I/O engine.
 mod account;
+mod candles;
 mod history;
 mod paths;
 mod sign;
@@ -44,6 +45,7 @@ pub struct Options {
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+    pub recv_window: Option<f64>,
     /// A portfolio margin account (`papi`) rather than USD-M futures.
     pub portfolio_margin: bool,
 }
@@ -380,7 +382,7 @@ impl BinanceFutures {
         let Some(credentials) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
             return;
         };
-        let query = query.signed(credentials, cx.now);
+        let query = query.signed(credentials, cx.now, self.options.recv_window);
         let url = format!("{}{path}?{query}", self.urls.account_rest);
         let headers = vec![("X-MBX-APIKEY", credentials.key.clone())];
         match stream {
@@ -829,7 +831,11 @@ impl BinanceFutures {
                     if let Some(interval) = Interval::parse(&k.i)
                         && self.candles.contains_key(&(k.s.to_string(), interval))
                     {
-                        cx.candle(&k.s, interval, kline_candle(k.t, &k.o, &k.h, &k.l, &k.c, &k.v));
+                        cx.candle(
+                            &k.s,
+                            interval,
+                            kline_candle(k.t, &k.o, &k.h, &k.l, &k.c, &k.v),
+                        );
                     }
                 }
             }
@@ -1420,18 +1426,13 @@ impl Venue for BinanceFutures {
                     return;
                 }
                 if self.is_spot()
-                    && !self
-                        .candles
-                        .contains_key(&(symbol.clone(), interval))
+                    && !self.candles.contains_key(&(symbol.clone(), interval))
                     && self.books.len() + self.candles.len() >= 1_024
                 {
                     cx.log(LogLevel::Error, "Binance Spot supports at most 1024 combined book/candle streams per account");
                     return;
                 }
-                let count = self
-                    .candles
-                    .entry((symbol.clone(), interval))
-                    .or_insert(0);
+                let count = self.candles.entry((symbol.clone(), interval)).or_insert(0);
                 *count += 1;
                 if *count == 1 {
                     let topic = format!("{}@kline_{interval}", symbol.to_lowercase());
@@ -1461,17 +1462,14 @@ impl Venue for BinanceFutures {
                     cx.done(command, Err(interval.unsupported("Binance")));
                     return;
                 }
-                let mut path = format!(
-                    "{}?symbol={symbol}&interval={interval}&limit={}",
-                    self.paths.klines,
-                    limit.unwrap_or(500)
-                );
-                if let Some(from) = from_ms {
-                    path.push_str(&format!("&startTime={}", num::format(from)));
-                }
-                if let Some(to) = to_ms {
-                    path.push_str(&format!("&endTime={}", num::format(to)));
-                }
+                let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
+                    Ok(query) => query,
+                    Err(error) => {
+                        cx.done(command, Err(error.into()));
+                        return;
+                    }
+                };
+                let path = format!("{}?{}", self.paths.klines, query.unsigned());
                 let candles = Vec::new();
                 self.get_streamed(
                     cx,
@@ -1496,7 +1494,6 @@ impl Venue for BinanceFutures {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, state)| matches!(state.sync, Sync::Synced { .. }))
                 .map(|(symbol, state)| (symbol.as_str(), &state.book)),
         )
     }

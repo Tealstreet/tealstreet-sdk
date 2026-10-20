@@ -675,3 +675,106 @@ fn silence_closes_socket_then_reconnects_with_fresh_book_generation() {
     snapshot(&mut e, &r, 26030.0, 200);
     assert!(e.venue().book("BTCUSDT").is_some());
 }
+
+fn empty_book_frame(frame: &[u8]) -> bool {
+    safe_cex_engine::wire::sections(frame).any(|(kind, payload)| {
+        kind == safe_cex_engine::wire::section::BOOK && payload[4..12] == [0; 8]
+    })
+}
+
+#[test]
+fn prev_ts_gap_hides_book_and_publishes_clear_until_new_snapshot() {
+    let (mut e, s) = started();
+    subscribe(&mut e);
+    let r = requests(&mut e).remove(0);
+    snapshot(&mut e, &r, 70.0, 100);
+    ws(
+        &mut e,
+        s,
+        80.0,
+        &UPDATE.replace("\"bids\"", "\"prevTs\":100,\"bids\""),
+    );
+    assert!(e.book("BTCUSDT").is_some());
+    // Repeated delivery of the same linked event is stale, not a new gap.
+    ws(
+        &mut e,
+        s,
+        80.5,
+        &UPDATE.replace("\"bids\"", "\"prevTs\":100,\"bids\""),
+    );
+    assert!(e.book("BTCUSDT").is_some());
+    e.take_frame(81.0);
+    ws(
+        &mut e,
+        s,
+        90.0,
+        &UPDATE
+            .replace("\"ts\":102", "\"ts\":104")
+            .replace("\"bids\"", "\"prevTs\":103,\"bids\""),
+    );
+    assert!(e.book("BTCUSDT").is_none());
+    assert!(empty_book_frame(e.take_frame(91.0).unwrap()));
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1090.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1090.0, Event::TimerFired { timer });
+    let r = requests(&mut e).remove(0);
+    snapshot(&mut e, &r, 1100.0, 105);
+    assert!(e.book("BTCUSDT").is_some());
+}
+
+#[test]
+fn buffered_prev_ts_gap_rejects_snapshot_but_overlap_can_bridge() {
+    for (previous, visible) in [(99, true), (101, false)] {
+        let (mut e, s) = started();
+        subscribe(&mut e);
+        let r = requests(&mut e).remove(0);
+        ws(
+            &mut e,
+            s,
+            60.0,
+            &UPDATE.replace("\"bids\"", &format!("\"prevTs\":{previous},\"bids\"")),
+        );
+        snapshot(&mut e, &r, 70.0, 100);
+        assert_eq!(e.book("BTCUSDT").is_some(), visible);
+    }
+}
+
+#[test]
+fn disconnect_publishes_clear_before_reconnect_snapshot() {
+    let (mut e, s) = started();
+    subscribe(&mut e);
+    let r = requests(&mut e).remove(0);
+    snapshot(&mut e, &r, 70.0, 100);
+    e.take_frame(71.0);
+    e.handle(
+        80.0,
+        Event::WsClosed {
+            socket: s,
+            code: 1006,
+        },
+    );
+    assert!(e.book("BTCUSDT").is_none());
+    assert!(empty_book_frame(e.take_frame(81.0).unwrap()));
+    assert!(
+        empty_book_frame(e.snapshot_frame(82.0)),
+        "a consumer may have missed the clear flush"
+    );
+    e.handle(
+        83.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert!(
+        !safe_cex_engine::wire::sections(e.snapshot_frame(84.0))
+            .any(|(kind, _)| kind == safe_cex_engine::wire::section::BOOK)
+    );
+}

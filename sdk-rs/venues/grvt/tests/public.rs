@@ -120,7 +120,14 @@ fn mapper_only_products_do_not_become_markets_tickers_or_book_subscriptions() {
         );
     }
     assert_eq!(e.store().ticker("BTC_USDT_PERP").unwrap().last, 0.);
-    assert!(e.venue().books().next().is_none());
+    let subscriptions = e.venue().books().collect::<Vec<_>>();
+    assert_eq!(subscriptions.len(), 3);
+    for (symbol, book) in subscriptions {
+        assert!(e.store().market(symbol).is_none());
+        assert!(e.venue().book(symbol).is_none());
+        assert!(book.bids().is_empty());
+        assert!(book.asks().is_empty());
+    }
 }
 #[test]
 fn delta_fields_retain_sides_and_derive_totals_from_current_price() {

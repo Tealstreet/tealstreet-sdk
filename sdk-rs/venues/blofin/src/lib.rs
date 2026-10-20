@@ -230,7 +230,12 @@ impl Blofin {
         }
         for (symbol, i) in self.candles.keys() {
             if let Some(bar) = interval(*i) {
-                self.subscription(cx, "subscribe", symbol, &[&format!("candle{bar}"), "books5"]);
+                self.subscription(
+                    cx,
+                    "subscribe",
+                    symbol,
+                    &[&format!("candle{bar}"), "books5"],
+                );
             }
         }
     }
@@ -378,6 +383,13 @@ impl Blofin {
     }
 }
 impl Venue for Blofin {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -741,12 +753,7 @@ impl Venue for Blofin {
                     state.subscribers = state.subscribers.saturating_sub(1);
                     if state.subscribers == 0 {
                         self.candles.remove(&(symbol.clone(), i));
-                        self.subscription(
-                            cx,
-                            "unsubscribe",
-                            &symbol,
-                            &[&format!("candle{bar}")],
-                        );
+                        self.subscription(cx, "unsubscribe", &symbol, &[&format!("candle{bar}")]);
                         if !self.books.contains_key(&symbol)
                             && !self.candles.keys().any(|(s, _)| *s == symbol)
                         {

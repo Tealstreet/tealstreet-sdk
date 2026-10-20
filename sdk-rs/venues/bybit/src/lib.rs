@@ -13,9 +13,8 @@ pub use paths::{Category, Endpoints, Variant};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
-    Interval,
-    Candle, DerivativeProduct, InstrumentClassification, Limits, Market, MinMax, Precision,
-    ProductKind, Ticker,
+    Candle, DerivativeProduct, InstrumentClassification, Interval, Limits, Market, MinMax,
+    Precision, ProductKind, Ticker,
 };
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
@@ -1844,7 +1843,6 @@ impl Venue for BybitLinear {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, state)| matches!(state.sync, Sync::Synced { .. }))
                 .map(|(symbol, state)| (symbol.as_str(), &state.book)),
         )
     }

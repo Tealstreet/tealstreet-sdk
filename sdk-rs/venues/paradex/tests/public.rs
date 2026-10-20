@@ -189,6 +189,74 @@ fn streamed_chunks_are_not_committed_until_complete() {
     assert!(h.pending[0].url.ends_with("summary?market=ALL"));
 }
 #[test]
+fn syntactically_malformed_rows_reject_streamed_seeds_even_when_filtered() {
+    // The venue's identity parse is the only syntax check on these streams.
+    for row in [
+        r#"{"symbol":"BTC-USD-100000-C","asset_kind":"OPTION",}"#,
+        r#"{"symbol":"BTC-USD-100000-C" "asset_kind":"OPTION"}"#,
+        r#"{"symbol":"BTC-USD-100000-C","asset_kind":"OPTION","fee_config":{"x":tru}}"#,
+        r#"{"symbol":"BTC-USD-PERP","asset_kind":"PERP","tags":[1,]}"#,
+    ] {
+        let markets = format!(
+            r#"{{"results":[{row},{}]}}"#,
+            &MARKETS[12..MARKETS.len() - 2]
+        );
+        for chunk in [7, 4096] {
+            let mut h = Harness::empty(Options {
+                public_data_only: true,
+                ..Options::default()
+            });
+            let r = h.take("/markets");
+            h.e.handle(
+                h.now,
+                Event::HttpStart {
+                    request: r.id,
+                    status: 200,
+                    headers: "",
+                },
+            );
+            for data in markets.as_bytes().chunks(chunk) {
+                h.e.handle(
+                    h.now,
+                    Event::HttpChunk {
+                        request: r.id,
+                        data,
+                    },
+                );
+            }
+            h.e.handle(h.now, Event::HttpEnd { request: r.id });
+            h.collect();
+            assert!(!h.e.store().loaded().markets, "{row} chunk {chunk}");
+            assert!(h.e.store().markets().is_empty(), "{row} chunk {chunk}");
+        }
+        let mut h = Harness::empty(Options {
+            public_data_only: true,
+            ..Options::default()
+        });
+        h.reply("/markets", MARKETS);
+        let summary = format!(r#"{{"results":[{row}]}}"#);
+        let r = h.take("summary");
+        h.e.handle(
+            h.now,
+            Event::HttpStart {
+                request: r.id,
+                status: 200,
+                headers: "",
+            },
+        );
+        h.e.handle(
+            h.now,
+            Event::HttpChunk {
+                request: r.id,
+                data: summary.as_bytes(),
+            },
+        );
+        h.e.handle(h.now, Event::HttpEnd { request: r.id });
+        h.collect();
+        assert!(!h.e.store().loaded().tickers, "{row}");
+    }
+}
+#[test]
 fn documented_klines_and_fallback_preserve_time_units() {
     let mut h = Harness::new();
     h.command(Command::FetchCandles {

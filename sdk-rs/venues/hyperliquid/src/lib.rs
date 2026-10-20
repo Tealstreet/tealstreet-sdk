@@ -692,6 +692,10 @@ fn spot_rows(
 }
 
 impl Venue for Hyperliquid {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.spot && !self.options.public_data_only {
@@ -1096,10 +1100,7 @@ impl Venue for Hyperliquid {
                     cx.log(LogLevel::Error, interval.unsupported("Hyperliquid"));
                     return;
                 }
-                let count = self
-                    .candles
-                    .entry((symbol.clone(), interval))
-                    .or_default();
+                let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
                 if *count == 1
                     && let Some(coin) = self.coin(cx, &symbol).map(str::to_owned)
@@ -1209,12 +1210,7 @@ impl Venue for Hyperliquid {
             .map(|l| &l.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, l)| l.depth_time.is_some())
-                .map(|(s, l)| (s.as_str(), &l.book)),
-        )
+        Box::new(self.books.iter().map(|(s, l)| (s.as_str(), &l.book)))
     }
 }
 // Hyperliquid's candle codes are the TS spellings.

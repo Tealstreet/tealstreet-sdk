@@ -100,15 +100,45 @@ pub struct WsTicker<'a> {
     #[serde(default, deserialize_with = "optional_number")]
     pub change_pct: Option<f64>,
 }
+pub struct Decimal {
+    pub value: f64,
+    pub digits: String,
+}
+impl<'de> Deserialize<'de> for Decimal {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = Box::<RawValue>::deserialize(d)?;
+        let token = raw.get().trim_matches('"');
+        let value = token
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .ok_or_else(|| serde::de::Error::custom("Invalid book decimal"))?;
+        let (mantissa, exponent) = token.split_once(['e', 'E']).map_or((token, 0), |(m, e)| {
+            (m, e.parse::<i32>().unwrap_or(i32::MAX))
+        });
+        if mantissa.len() > 128
+            || !(-128..=128).contains(&exponent)
+            || !mantissa.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+        {
+            return Err(serde::de::Error::custom("Invalid book decimal"));
+        }
+        let mut digits = mantissa.replace('.', "");
+        let decimal = mantissa.find('.').unwrap_or(mantissa.len()) as i32 + exponent;
+        if decimal > digits.len() as i32 {
+            digits.extend(std::iter::repeat_n('0', decimal as usize - digits.len()));
+        }
+        let digits = digits.trim_start_matches('0').to_owned();
+        Ok(Self { value, digits })
+    }
+}
 #[derive(Deserialize)]
 pub struct Level {
-    #[serde(deserialize_with = "number")]
-    pub price: f64,
-    #[serde(deserialize_with = "number")]
-    pub qty: f64,
+    pub price: Decimal,
+    pub qty: Decimal,
 }
 #[derive(Deserialize)]
 pub struct Depth<'a> {
+    pub checksum: Option<u32>,
     #[serde(borrow)]
     pub symbol: Cow<'a, str>,
     #[serde(default)]
