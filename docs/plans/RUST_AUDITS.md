@@ -427,17 +427,32 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 ### Bybit family
 - High: Brazil inverse/option sockets routed to the linear host (engine
   transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
-  `bybit/src/lib.rs:407`); per-coin balances never set (`account.rs:662`);
-  fills history includes funding/settlement rows (`history.rs:564`); income
-  dedupe drops hedge-mode funding legs (`history.rs:131`).
-- Medium: option failures stall linear startup (`lib.rs:857`); option catalog
-  `baseCoin=All` unverified; live candles lack trade aggregation and seconds
-  intervals; option WS ticker field names likely wrong; no UNIFIED retry on the
-  wallet call; demo reduce-only fill check missing; Hyro tears down on one bad
-  poll (`account.rs:1838`); order/income history caps; ~~Partial TP/SL amend
-  semantics — decided: match TS (flip SL/TP on drag), do not amend in place~~
-  ([owner-selected cancel/recreate regressions](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)); spot create params (`marketUnit`); one unmappable
-  order invalidates every later snapshot (`account.rs:1569`).
+  `bybit/src/lib.rs:407`).
+- High: per-coin balances never set (`account.rs:662`).
+- ~~High: fills history includes funding/settlement rows (`history.rs:564`).~~
+  Fixed: Funding/Settle/Settlement/Delivery/SessionSettlePnl (any case) and rows
+  without a valid side, price, quantity or time are excluded from REST fills.
+- ~~High: income dedupe drops hedge-mode funding legs (`history.rs:131`).~~ Fixed:
+  income ids keep TS's shape; distinct native rows that would share one (same-
+  instant hedge legs) get their native id, side and signed size appended, and
+  exact page repeats still collapse.
+- Medium: option failures stall linear startup (`lib.rs:857`).
+- ~~Medium: option catalog `baseCoin=All` unverified.~~ Dropped: the instruments
+  documentation explicitly permits `baseCoin=All` for `category=option`.
+- Medium: live candles lack trade aggregation and seconds intervals.
+- Medium: option WS ticker field names likely wrong.
+- Medium: no UNIFIED retry on the wallet call.
+- Medium: demo reduce-only fill check missing.
+- Medium: Hyro tears down on one bad poll (`account.rs:1838`).
+- ~~Medium: order/income history caps.~~ Fixed for orders: an omitted limit reads
+  every page up to TS's 20 × 50 per window (then warns and keeps the rows, as TS)
+  instead of truncating to 50; explicit
+  limits still cap after every category. Income caps match TS (unchanged).
+- ~~Medium: Partial TP/SL amend semantics — decided: match TS (flip SL/TP on drag),
+  do not amend in place~~ ([owner-selected cancel/recreate regressions](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)).
+- ~~Medium: spot create params (`marketUnit`).~~ Kept: `baseCoin` for market orders
+  is a documented TS correction in `harness/gate.mjs` `KNOWN_TS_FIXES`.
+- Medium: one unmappable order invalidates every later snapshot (`account.rs:1569`).
 - Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
   breadth; split-lot error handling; classic upnl; inverse reference price;
   demo key hint, recvWindow, rate limiter; Hyro early pings.
@@ -685,10 +700,12 @@ Signing, integer scaling, tx encoding and nonces match TS.
 
 ### WOO
 No confirmed highs; valid data matches TS.
-- Medium: algo child rows don't inherit the parent's side/status/reduceOnly, so
+- Medium: ~~algo child rows don't inherit the parent's side/status/reduceOnly, so
   fills can be lost (`woo/src/account.rs:700`; verify one live frame); one bad
   position row freezes positions (`account.rs:749,949`); one unmappable
-  fill/order-history/instrument/ticker row fails the read or startup.
+  fill/order-history/instrument/ticker row fails the read or startup.~~
+  Children inherit missing parent fields (snapshot and stream); bad rows are
+  skipped keeping stored copies; hidden exposure on unknown markets warns once.
 - Low: SL trigger falls back to `triggerType`; algo reduceOnly default; leverage
   readback can report a false error; isolated warning; stop without reference
   price rejects the snapshot.
@@ -741,12 +758,14 @@ Mostly matches TS.
 
 ### ApeX Omni
 Signing and payloads match; no confirmed highs.
-- Medium: cancelled ids hidden for good (terminal map, `apexomni/src/account.rs:150`;
+- Medium: ~~cancelled ids hidden for good (terminal map, `apexomni/src/account.rs:150`;
   cancel-all marks untriggered stops terminal, `trading.rs:928`); one bad
   open-order row leaves the account side dead incl. signing state
   (`account.rs:975`); null fields drop whole private frames incl. fills
   (`private_wire.rs:205`); one odd `/v3/symbols` row blocks private start; a bad
-  omni key seed kills read-only monitoring (`account.rs:504`).
+  omni key seed kills read-only monitoring (`account.rs:504`).~~ Cancels fence by
+  version with a 5 s hide (kept orders reappear with a warning); bad rows are
+  skipped per row keeping stored copies and fills; a bad seed disables only placement.
 - Low: caller client id rejected on stops/brackets/splits; float remaining size;
   zero-price candle rejects batch; leverage always sent. Unchecked: private
   socket via Tealstreet proxy.
