@@ -2,6 +2,7 @@
 pub mod account;
 pub mod account_wire;
 mod history;
+mod identity;
 pub mod paths;
 pub mod sign;
 mod trading;
@@ -27,6 +28,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    Identity(CommandId),
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
@@ -483,6 +485,7 @@ impl Venue for Bingx {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Identity(_) => {}
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history.on_item(cx, request, item),
@@ -572,6 +575,10 @@ impl Venue for Bingx {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Identity(command) = pending {
+            self.identity_response(cx, command, response);
+            return;
+        }
         let pending = match pending {
             Pending::History(request) => {
                 self.history
@@ -672,6 +679,10 @@ impl Venue for Bingx {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Identity(command) => {
+                self.identity_failed(cx, command, error);
+                return;
+            }
             Pending::History(request) => {
                 self.history.on_failed(cx, request, error);
                 return;
@@ -745,6 +756,10 @@ impl Venue for Bingx {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         match command {
             Command::Query { command, query } => {
                 self.history

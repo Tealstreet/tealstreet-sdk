@@ -366,7 +366,6 @@ fn unsupported_shared_commands_complete_with_error_without_io() {
             command: 1,
             mode: StpMode::ExpireTaker,
         },
-        Command::FetchAccount { command: 1 },
         Command::FetchOrderBook {
             command: 1,
             symbol: "BTCUSDT".into(),

@@ -1,6 +1,7 @@
 //! WOO perpetuals on the active legacy-public/V1/V3 protocol.
 mod account;
 mod history;
+mod identity;
 mod sign;
 mod trading;
 mod wire;
@@ -26,6 +27,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    Identity(CommandId),
     Trade(trading::Request),
     History(history::Request),
     Account(account::Request),
@@ -723,6 +725,7 @@ impl Venue for Woo {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Identity(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Trade(_) => (),
             Pending::Account(request) => self.account_item(cx, request, item),
@@ -858,6 +861,10 @@ impl Venue for Woo {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Identity(command) = pending {
+            self.identity_response(cx, command, response);
+            return;
+        }
         let pending = match pending {
             Pending::Trade(request) => {
                 self.trade_response(cx, request, response);
@@ -878,7 +885,7 @@ impl Venue for Woo {
             return;
         }
         match pending {
-            Pending::History(_) | Pending::Trade(_) => unreachable!(),
+            Pending::Identity(_) | Pending::History(_) | Pending::Trade(_) => unreachable!(),
             Pending::Account(_) => unreachable!(),
             Pending::Markets { rows, ranges, bad } => {
                 if bad || rows.is_empty() {
@@ -1000,6 +1007,7 @@ impl Venue for Woo {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Account(request) => self.account_failed(cx, request, error),
@@ -1075,6 +1083,10 @@ impl Venue for Woo {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            return;
+        }
         if self.account_command(cx, &command) {
             return;
         }

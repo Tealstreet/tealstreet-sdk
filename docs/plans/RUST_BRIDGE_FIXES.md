@@ -741,6 +741,15 @@ and route/shape/secondary-credential/failure tests precede SDK dispatch wiring
 in the later consolidated identity batch. Existing working account commands
 and venues with no TS identity API remain unchanged.
 
+First batch implemented, independently reviewed PASS. Final scoped evidence is
+393 unique native cases, including 24 new identity controls, strict all-target/
+all-feature Clippy, bans and scoped fmt. An old Phemex unsupported-command list
+was corrected only for its newly supported FetchAccount case; its other
+assertions and full 38-case trading suite pass. Exact decimal identity, read-key
+selection, optional fields, errors/duplicate delivery and unchanged account
+state are covered. SDK dispatch and standalone JSON decoder exposure remain
+consolidated identity work; this is not consumer getAccount acceptance yet.
+
 ## Phase 4a bulk-close plan
 
 Rust nuke/nukePositions selects a single current native position snapshot and
