@@ -5,7 +5,7 @@ import { NativeFrameSession } from './NativeFrameSession';
 import { ServerSessionFactory, type NativeAccountRequest } from './ServerSessionFactory';
 
 vi.mock('@tealstreet/safe-cex/src/exchanges/rust/rust.exchange', () => ({
-  RUST_VENUES: { binance: 'binance' },
+  isRustVenue: (name: string) => name === 'binance',
 }));
 vi.mock('./NativeFrameSession', () => ({ NativeFrameSession: { connect: vi.fn() } }));
 
