@@ -121,5 +121,9 @@ opt-level = 3
 [profile.release.package.safe-cex-engine]
 opt-level = 3
 
+# Keep GRVT ticker decoding optimized for throughput within its solo-WASM budget.
 [profile.release.package.safe-cex-venue-grvt]
+opt-level = 3
+
+[profile.release.package.safe-cex-venue-coinbase]
 opt-level = "z"

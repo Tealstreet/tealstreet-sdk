@@ -2,6 +2,7 @@
 import type { WasmEngineLike } from './host.mjs';
 
 export class WasmEngine implements WasmEngineLike {
+  accountId(): string | undefined;
   constructor(venue: string, optionsJson: string);
   start(now: number): string;
   command(json: string, now: number): string;

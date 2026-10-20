@@ -1,4 +1,4 @@
-import { OrderSide, OrderTimeInForce, OrderType, PositionSide } from '../../types';
+import { OrderSide, OrderTimeInForce, OrderType, PositionSide } from '../../../types';
 
 export const RECV_WINDOW = 20_000;
 export const BASE_URL = {

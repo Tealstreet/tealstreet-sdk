@@ -104,6 +104,67 @@ afterEach(() => {
 });
 
 describe('engine HTTP routing at the raw transport boundary', () => {
+  it.each(['coinbase', 'coinbasespot'] as const)('preserves %s venue JWT separately from REST proxy authorization', async (exchange) => {
+    const raw = makeRaw();
+    const opts = options({ tealstreetProxy: true, tealstreetTunnel: false });
+    const input = { ...request('https://api.coinbase.com/api/v3/brokerage/orders?cursor=a%2Fb'), headers: { authorization: 'Bearer venue-jwt', 'Content-Type': 'application/json' } };
+    await createEngineTransport(exchange, opts, raw).request(input);
+    const output = raw.request.mock.lastCall![0];
+    expect(output.headers['Coinbase-Authorization']).toBe('Bearer venue-jwt');
+    expect(output.headers.Authorization).toBe('Bearer proxy-jwt');
+    expect(output.headers.authorization).toBeUndefined();
+    expect(output.url).toBe(`${PRIVATE_PROXY_ASIA}/${input.url}`);
+    expect(output.body).toBe(input.body);
+    expect(input.headers.authorization).toBe('Bearer venue-jwt');
+    const plan = resolveEngineRoutingPlan(exchange, opts, 'https://api.coinbase.com');
+    expect(plan.http.headerAliases).toEqual({ Authorization: 'Coinbase-Authorization' });
+    expect(JSON.stringify(plan)).not.toMatch(/venue-jwt|proxy-jwt|venue-secret/);
+  });
+
+  it.each(['coinbase', 'coinbasespot'] as const)('keeps standard %s Authorization for direct and HOW routes', async (exchange) => {
+    for (const mode of ['direct', 'HOW'] as const) {
+      const raw = makeRaw();
+      const opts = options({ tealstreetProxy: mode === 'HOW', tealstreetTunnel: mode === 'HOW' });
+      const input = { ...request('https://api.coinbase.com/api/v3/brokerage/orders'), headers: { Authorization: 'Bearer venue-jwt' } };
+      await createEngineTransport(exchange, opts, raw).request(input);
+      const headers = mode === 'HOW' ? mocks.adapter.mock.lastCall![0].headers.toJSON() : raw.request.mock.lastCall![0].headers;
+      expect(headers.Authorization).toBe('Bearer venue-jwt');
+      expect(headers['Coinbase-Authorization']).toBeUndefined();
+      expect(resolveEngineRoutingPlan(exchange, opts, 'https://api.coinbase.com').http.headerAliases).toBeUndefined();
+    }
+  });
+
+  it('does not invent Coinbase venue authorization for unsigned public proxy requests', async () => {
+    const raw = makeRaw();
+    await createEngineTransport('coinbase', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw)
+      .request({ ...request('https://api.international.coinbase.com/api/v1/instruments/'), headers: {} });
+    expect(raw.request.mock.lastCall![0].headers['Coinbase-Authorization']).toBeUndefined();
+    expect(raw.request.mock.lastCall![0].headers.Authorization).toBe('Bearer proxy-jwt');
+  });
+
+  it('fails closed on conflicting Coinbase proxy aliases before token acquisition or network I/O', async () => {
+    const raw = makeRaw();
+    await expect(createEngineTransport('coinbase', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw)
+      .request({ ...request('https://api.coinbase.com/api/v3/brokerage/orders'), headers: { Authorization: 'Bearer venue-jwt', 'Coinbase-Authorization': 'Bearer conflicting-jwt' } }))
+      .rejects.toThrow('header alias conflicts');
+    expect(mocks.token).not.toHaveBeenCalled();
+    expect(raw.request).not.toHaveBeenCalled();
+  });
+
+  it('rejects proxy authorization that replaces Coinbase venue credential bytes', async () => {
+    const raw = makeRaw();
+    const provider = {
+      ...directTransport,
+      rest: () => ({ proxied: true, authorize: async (config: InternalAxiosRequestConfig) => {
+        config.headers.set('Coinbase-Authorization', 'Bearer overwritten-venue-jwt');
+        config.headers.set('Authorization', 'Bearer proxy-jwt');
+      } }),
+    };
+    await expect(createEngineTransport('coinbase', options({ transport: provider, tealstreetTunnel: false }), raw)
+      .request({ ...request('https://api.coinbase.com/api/v3/brokerage/orders'), headers: { Authorization: 'Bearer venue-jwt' } }))
+      .rejects.toThrow('changed signed request bytes or headers');
+    expect(raw.request).not.toHaveBeenCalled();
+  });
   it('never sends a proxy write after disposal while its token was pending', async () => {
     let token!: (value: string) => void;
     mocks.token.mockImplementationOnce(
