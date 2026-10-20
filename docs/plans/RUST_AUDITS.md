@@ -48,9 +48,10 @@ Audit results and the standards: `docs/plans/RUST_QUALITY.md`.
 
 ## Cutover
 
-- Main-thread writes: web places orders on the main-thread exchange
+- ~~Main-thread writes: web places orders on the main-thread exchange
   (`apps/web/src/order/sendOrder.ts:24`); a main-thread `RustEngineExchange` has
-  no engine (`rust.exchange.ts:701`). Route commands to the worker engine.
+  no engine (`rust.exchange.ts:701`). Route commands to the worker engine.~~
+  Fixed: a bridged main-thread instance forwards its trading methods to the worker engine (B4).
 - No `socketHealth`, `reconnect` or `recoverAfterOffline` on Rust
   (`base.ts:1663,2053`); CLI stale-stream gate fails open
   (`cli-core/src/commands/BaseCommand.ts:172`).

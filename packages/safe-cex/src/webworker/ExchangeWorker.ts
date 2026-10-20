@@ -8,6 +8,7 @@ import type { TwapInstance } from './twap/TwapInstance';
 
 import throttle from 'lodash/throttle';
 
+import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
 import { isRustVenue, RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
@@ -970,12 +971,12 @@ export class ExchangeWorker {
         // Only these RPC methods dispatch venue writes. An executor's text and
         // caller IDs cannot be inferred here; actual native errors win first.
         const method = request.payload.op === 'callMethod' ? request.payload.data?.method : undefined;
+        const clientOrderIds = workerCallClientOrderIds(method, request.payload.data?.args);
         const details: SerializedCommandError = {
           ...fallback,
           ...(typeof method === 'string' && { command: method }),
-          ...(['setLeverage', 'changeMarginType', 'changePositionMode', 'scheduleCancel'].includes(method) && {
-            outcome: 'unknown' as const,
-          }),
+          ...(WORKER_WRITE_METHODS.has(method) && { outcome: 'unknown' as const }),
+          ...(clientOrderIds && { clientOrderIds }),
         };
         this._rejectUnavailablePayload(request.payload, fallback.message, details);
       }

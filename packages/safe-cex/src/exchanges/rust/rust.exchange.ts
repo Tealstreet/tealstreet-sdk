@@ -25,8 +25,8 @@ import type {
   ValidateAccountResult,
 } from '../../types';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
-import type { CallableMethodsInWorker } from '../base';
-import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
+import type { CallableMethodsInWorker, WorkerTradingMethod } from '../base';
+import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
 import type { EngineSnapshot } from '../base';
 
 import bs58 from 'bs58';
@@ -51,7 +51,13 @@ import {
   resolveAsterDEXApiVersion,
   resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
-import { BaseExchange, markBaseCapabilityFallback } from '../base';
+import {
+  BaseExchange,
+  markBaseCapabilityFallback,
+  WORKER_TRADING_METHODS,
+  WORKER_WRITE_METHODS,
+  workerCallClientOrderIds,
+} from '../base';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import {
   HYROTRADER_PROD_URL,
@@ -59,7 +65,12 @@ import {
   HYROTRADER_SIMULATOR_URL,
   HYROTRADER_SIMULATOR_WS_URL,
 } from '../bybit/bybit.types';
-import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
+import {
+  decodeWorkerOrderIds,
+  isRegularClientOrderShape,
+  patternClientOrderIdRule,
+  withReplacementClientOrderId,
+} from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
@@ -431,6 +442,7 @@ export class RustEngineExchange extends BaseExchange {
         });
       };
     }
+    this.forwardTradingToWorker();
   }
 
   get isPublicDataOnly(): boolean {
@@ -710,14 +722,40 @@ export class RustEngineExchange extends BaseExchange {
 
   protected override workerCommandTimeoutMs = () => this.commandTimeoutMs + 1000;
 
-  protected override workerCommandTimeoutError = (method: CallableMethodsInWorker): Error =>
-    Object.assign(new Error('Rust worker command timed out; reconcile interrupted writes before retrying'), {
+  protected override workerCommandTimeoutError = (method: CallableMethodsInWorker, args: unknown[]): Error => {
+    const clientOrderIds = workerCallClientOrderIds(method, args);
+    return Object.assign(new Error('Rust worker command timed out; reconcile interrupted writes before retrying'), {
       code: 'COMMAND_TIMEOUT',
       command: method,
-      ...(['setLeverage', 'scheduleCancel', 'changePositionMode', 'changeMarginType'].includes(method)
-        ? { outcome: 'unknown' as const }
-        : {}),
+      ...(WORKER_WRITE_METHODS.has(method) ? { outcome: 'unknown' as const } : {}),
+      ...(clientOrderIds ? { clientOrderIds } : {}),
     });
+  };
+
+  /**
+   * A main-thread instance is never started and has a worker bridge listening
+   * for `callMethod`; the worker's instance owns the engine. Its trading methods
+   * run there whole, so preflight, placement scopes and nuke retries see the
+   * authoritative state. Without a bridge, an unstarted instance rejects locally.
+   */
+  private get routesToWorker(): boolean {
+    return !this.startup && !this.host && this.emitter.hasListeners('callMethod');
+  }
+
+  private forwardTradingToWorker() {
+    for (const method of WORKER_TRADING_METHODS) {
+      const local = this[method] as (...args: unknown[]) => Promise<unknown>;
+      (this as Record<WorkerTradingMethod, unknown>)[method] = async (...args: unknown[]) => {
+        if (!this.routesToWorker) return local(...args);
+        const result = await (this.callMethodInWorker as (m: WorkerTradingMethod, ...a: unknown[]) => Promise<unknown>)(
+          method,
+          ...args,
+        );
+        // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
+        return method === 'updateOrder' ? decodeWorkerOrderIds(result as WorkerOrderIds) : result;
+      };
+    }
+  }
 
   private receiveCommandProgress = (progress: CommandProgress) => {
     if (this.isDisposed || this.engineFailure) return;

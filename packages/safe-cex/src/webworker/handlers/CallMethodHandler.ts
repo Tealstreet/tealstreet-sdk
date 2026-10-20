@@ -1,5 +1,6 @@
 import { serializeCommandError } from '../../commandOutcome';
-import { CallableMethodsInWorker } from '../../exchanges/base';
+import { CallableMethodsInWorker, WORKER_TRADING_METHODS, WorkerTradingMethod } from '../../exchanges/base';
+import { encodeWorkerOrderIds } from '../../exchanges/clientOrderId';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 import { ThrottleManager } from './ThrottleManager';
@@ -25,6 +26,13 @@ export class CallMethodHandler extends BaseHandler {
       console.log('Calling method', method);
     }
     try {
+      if ((WORKER_TRADING_METHODS as readonly string[]).includes(method)) {
+        const call = this._exchange[method as WorkerTradingMethod] as (...callArgs: unknown[]) => Promise<unknown>;
+        result = await call(...args);
+        if (method === 'updateOrder') result = encodeWorkerOrderIds(result as string[]);
+        this._ctx.postMessage({ op: 'callMethod:done', data: { requestId, result, success: true } });
+        return;
+      }
       switch (method) {
         case 'setLeverage':
           result = await this._exchange.setLeverage(...(args as Parameters<typeof this._exchange.setLeverage>));

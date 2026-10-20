@@ -108,6 +108,19 @@ credentials, supported venue products, or whether explicit public REST queries
 are allowed. `fetchBalance` reads current native reconciled state, as do the
 Rust adapter's other store-backed account reads.
 
+## Rust main-thread trading
+
+The web builds a second `RustEngineExchange` on the main thread that is never
+started; the worker's instance owns the engine. An unstarted instance with a
+`callMethod` listener (the host's worker bridge) forwards the
+`WORKER_TRADING_METHODS` in `exchanges/base.ts` whole through
+`callMethodInWorker`, so preflight, placement scopes and nuke retries run against
+the worker's state and report there once. A started instance, or one without a
+bridge, runs locally. `updateOrder` crosses as `{ orderIds, clientOrderId }`
+because array properties do not survive a JSON bridge. Interrupted forwarded
+writes carry `outcome: 'unknown'` and the caller's client order IDs
+(`WORKER_WRITE_METHODS`, `workerCallClientOrderIds`).
+
 ## Rust engine failure
 
 A native WASM trap makes that exchange instance terminal (`isEngineDead`),
