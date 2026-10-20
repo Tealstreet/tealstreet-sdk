@@ -312,7 +312,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | KuCoin, Phemex, Orderly family | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
-| Coinbase (INTX, CFM, spot; coinbasespot) | in progress on `feat/rust-coinbase`; native JWT plan in [RUST_COINBASE.md](RUST_COINBASE.md) |
+| Coinbase (CFM, spot, legacy INTX; coinbasespot) | implemented on `feat/rust-coinbase`; all local gates pass; native JWT and measurements in [RUST_COINBASE.md](RUST_COINBASE.md); PR review next |
 | Paradex, GRVT, AsterDEX, ApeX Omni, Kraken, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge

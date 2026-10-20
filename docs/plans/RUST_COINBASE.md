@@ -298,3 +298,27 @@ three native placement contracts become0.03base while retaining native extras.
 All six SDK/WASM cases, SDK typecheck/lint, 55 engine tests,86 venue tests and
 272 harness tests pass. The post-merge eight-private/public/control gates are
 running before PR publication.
+
+### Local acceptance gates passed
+
+- Bans, workspace formatting, strict workspace Clippy and strict WASM Clippy pass.
+- Native workspace:1458 tests across129 suites; Coinbase86, engine55 included.
+- Generic harness272; combined SDK/WASM81; browser/Workers/native JS host47.
+- Repository typecheck44 tasks, lint28 tasks, test27 tasks pass; each safe-cex
+  test task passes6977 cases. Six real Coinbase WASM cases include CFM units
+  through worker and main-thread decoding and independent JWT verification.
+- All eight product/algorithm private replays pass; the default private command
+  also passes on the combined build. Documented payloads, not live account keys.
+- Twenty-second public capture, eight-second fixture:925 markets,201 replayed
+  frames, two full-depth books. Three-run post-merge output is identical.
+  Median TS/Rust CPU827.6/316.4ms, steady459.1/74.3ms, retained32.3/14.2MB
+  (Rust includes11.8MB linear memory). Coinbase-only WASM959506bytes against
+  the1258291byte budget; combined build and both web/Node bindings pass.
+- Binance public control passes three runs:CPU179.3/79.2ms,
+  steady93.0/24.1ms, retained19.4/3.3MB. Its generated private control passes.
+
+Fourteen TS corrections are enumerated in the input-only oracle; all native
+request, signature, economic, caller-ID and command comparisons remain active.
+The PR targets only `feat/rust-rewrite`; posted correctness reviews and exact-head
+green CI are the remaining landing gates. No live private-authentication claim;
+the retired INTX routes and inactive Starbase migration are documented above.
