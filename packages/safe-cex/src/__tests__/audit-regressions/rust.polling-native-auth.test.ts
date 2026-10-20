@@ -34,14 +34,14 @@ function fixture(options: Partial<ExchangeOptions> = {}, initial: unknown[] = []
   let socket!: Parameters<Transport['connect']>[1];
   let failNextPolicy = false;
   let trapMessages = false;
-  const commands: Array<{ op: string; interval?: number | null }> = [];
+  const commands: Array<{ op: string; scale?: number | null; ceiling?: number }> = [];
   const idle = () => '[]';
   const native: WasmEngineLike = {
     start: () => JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://controlled.invalid/private' }, ...initial]),
     command(json) {
       const command = JSON.parse(json);
       commands.push(command);
-      if (command.op === 'setTickInterval' && failNextPolicy) {
+      if (command.op === 'setPollScale' && failNextPolicy) {
         failNextPolicy = false;
         throw new Error('Controlled policy failure');
       }
@@ -118,7 +118,8 @@ function fixture(options: Partial<ExchangeOptions> = {}, initial: unknown[] = []
     deactivated,
     request,
     commands,
-    controls: () => commands.filter((command) => command.op === 'setTickInterval').map((command) => command.interval),
+    // The resolved absolute tick travels as the scale's ceiling; null pauses.
+    controls: () => commands.filter((command) => command.op === 'setPollScale').map((command) => (command.scale === null ? null : command.ceiling)),
     start: async () => {
       const starting = exchange.start();
       await vi.advanceTimersByTimeAsync(250);
@@ -212,7 +213,7 @@ it('keeps failed policy delivery retryable without adding writes or terminal sta
   expect(r.exchange.authFailureStreak).toBe(1);
   await vi.advanceTimersByTimeAsync(250);
   expect(r.controls()).toEqual([1000, 2000, 2000]);
-  expect(r.commands.every(({ op }) => ['setTickInterval', 'setTickerSymbols'].includes(op))).toBe(true);
+  expect(r.commands.every(({ op }) => ['setPollScale', 'setTickerSymbols'].includes(op))).toBe(true);
   expect(r.exchange.isDisposed).toBe(false);
 });
 
