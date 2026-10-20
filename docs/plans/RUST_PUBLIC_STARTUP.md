@@ -196,9 +196,10 @@ repeat against the merged landing source before final proof.
 
 Merged landing `5f84b3e21d` (#1348, #1349) normally. Lighter's only textual
 conflict preserves native PnL/notional, unknown-owned metadata rejection and
-incoming leverage-bound validation. Bitget's semantic integration keeps the
-pre-row-isolation whole-snapshot protection: one unmappable owned peer cannot
-erase previous exposure or SL/TP. Incoming side leverage and config fences are
+incoming leverage-bound validation. Bitget's semantic integration first kept a
+whole-snapshot freeze; per-row retention has since replaced it: an unmappable
+owned row keeps its own stored position or order (and preset SL/TP children)
+while valid peers update. Incoming side leverage and config fences are
 retained. Independent integration and Binance/SDK source reviews passed; merged
 Binance/Bybit suites passed 323 cases / 24 targets, and all workspace targets
 compile. Root typecheck44/44 and lint28/28 passed.

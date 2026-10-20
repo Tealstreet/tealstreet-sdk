@@ -272,6 +272,22 @@ fn valid_hyro_position(row: &PositionRow<'_>) -> bool {
                     .all(|value| float_of(value).is_finite())))
 }
 
+/// The first account of a wallet-balance body, verbatim.
+fn raw_wallet_account(body: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Envelope<'a> {
+        #[serde(borrow)]
+        result: Option<Result<'a>>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Result<'a> {
+        #[serde(borrow)]
+        list: Vec<&'a serde_json::value::RawValue>,
+    }
+    let envelope: Envelope<'_> = serde_json::from_str(body).ok()?;
+    Some(envelope.result?.list.first()?.get().to_owned())
+}
+
 fn valid_hyro_wallet(row: &WalletAccount<'_>) -> bool {
     row.account_type.as_deref() == Some("UNIFIED")
         && (float_of(&row.total_equity).is_finite()
@@ -2262,6 +2278,7 @@ impl BybitLinear {
                     return;
                 }
                 self.account.hyro_transient |= outcome.is_err();
+                let outcome_body = outcome.as_ref().ok().copied();
                 let account = outcome.and_then(|body| {
                     serde_json::from_str::<WalletEnvelope>(body)
                         .ok()
@@ -2273,6 +2290,10 @@ impl BybitLinear {
                 });
                 match account {
                     Ok((wallet, coins)) => {
+                        // TS keeps the venue's first account verbatim as `balance.info`.
+                        self.balance_info = outcome_body
+                            .and_then(raw_wallet_account)
+                            .or(self.balance_info.take());
                         if self.variant.is_hyro() {
                             if let Some(snapshot) = &mut self.account.snapshot {
                                 snapshot.wallet = Some(wallet);
