@@ -219,3 +219,8 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 
 - All6/6renewedlocalreplaysPASS on8b835eed86: Phemex/Binance/KuCoinpublic+private. MedianpublicCPUms/steadyms/retainedMBTS/Rust: Phemex359.8/101.5,242.9/32.8,19.8/2.9; Binance268.7/147.6,159.6/76.4,18.5/2.4; KuCoin576.1/377.2,378.1/240.3,21.4/3.9. Bundles729,954/763,690/756,781bytesbelow1,258,291. Priord6abb7f782all14Bybit/Phemex/BinancecontrolsPASS; finalcurrentCIcoversall59replays+4Bitgetcontrols. No validscorediscardedorunchangedretry.
 - Allsource/boundarychecksabovePASS, andallconcretefindingshaveindependentlyreviewedfixes. Publishthischeckpoint/PRreviewfindings, requireallfinal-headRust/general/secretchecksgreen, thennormalmergePR1310into feat/rust-rewrite andcutfreshfollowupbranch. PreservefinalCIproofinPRcomments/mergecommit ratherthanrestartCIwithadoc-onlycommit.
+
+### CI fixture-isolation correction
+
+- Published2932a6b840CI passed all1,460workspace-native tests, source checks and completed venue replays, but BingXstoppedbeforeitsreplay in the sharedharness: actualWASMlinear-memorytest sawarrayBuffers delta−16,777,216instead0. Exactdropmatches the precedingtest's16MiBArrayBuffer, nowunusedexceptbyteLength afterKuCoinchangedthatfixturetosyntheticcounters. Itsbackingstorewascollectedduringthenexttest.
+- ReplacedonlytheunusedallocationwithconstframeBytes=16*1024*1024, preservingidenticalcounterarithmeticandassertion. TheactualWASM allocation/arrayBufferszero/exactonceassertions, memorysampler, scorevalidation andallreplayruntimecodeareunchanged. Independentplan+implementationreviewsCLEAN;268harnesscontrolsPASS. Commit/pushthisprecisetest-isolationfix, thenrequireallfinal-headCIgreenwithoutunchangedretryorpolicychange.
