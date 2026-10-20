@@ -184,3 +184,42 @@ Six wrapper cases demonstrably fail without the guard; all20 focused wrapper
 tests pass with it. Native suite98 and strict crate Clippy pass; peer reviews
 of the wrapper/native guards pass. Merged harness272/272 passes, including
 lazy-oracle isolation. Fresh artifact and full gates follow this checkpoint.
+
+
+### Final Aster-integrated checkpoint
+
+The now-used public `wire::PositionRisk` contract is restored for Aster's actual
+consumer. Aster99/99 and Binance98/98 native tests pass; both crate Clippy
+checks and default WASM-target Clippy pass. Final integrated source is
+`16f43063ca`. All twelve final replay gates pass: eight Binance gates, plus
+Hyro and baseline Bybit public/private. The following evidence supersedes the
+older intermediate replay measurements above.
+
+Final integrated Binance evidence (`16f43063ca`, including KuCoin/AsterDEX): all eight gates PASS. Public three-run medians, unchanged thresholds.
+
+| Profile | Frames | TS/Rust main ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| USD-M | 873 | 262.265/139.307 | 151.445/61.177 | 19.097/2.666 |
+| PM | 873 | 252.373/126.933 | 147.727/52.878 | 18.572/2.667 |
+| Spot | 7045 | 753.982/620.454 | 363.794/284.658 | 26.539/7.533 |
+| COIN-M | 202 | 211.416/90.890 | 141.328/54.074 | 15.682/1.515 |
+
+Private frames: USD-M14, PM6, Spot8, COIN-M6; all expected writes, HMAC signatures, subscription identities and account comparisons pass.
+
+Binance-only WASM **910175 bytes**, budget1258291. SHA-256 `e3b8fb107949471929b153c78df651dddddde320d57610d70d708dca1965f58e`.
+
+
+Hyro's fresh Bybit build passes public160 frames: TS/Rust main42.034/26.761ms,
+steady14.809/9.611ms, retained16.3/0.9MB. Private13 frames also passes with
+main54.758/34.345ms and steady25.477/16.119ms. No private informational or
+public gate metric misses. Base Bybit public8743/private18 frames also passes.
+The earlier unchanged-source and rebuilt-artifact results agree; no genuine
+Hyro production regression was established. All outcomes and diagnostic limits
+remain disclosed; no metric interval or threshold changed.
+
+Final default combined WASM rebuild passes all79 actual WASM cases across six
+files. Both root test scripts pass7011 safe-cex cases; all27 test tasks pass.
+Root typecheck44/lint28 tasks,51 host/wire tests,272 harness helpers, fmt,
+bans, strict crate/default WASM Clippy and the secret scan all pass. Phase
+review findings and fixes are ready for PR publication; green PR CI is required
+before merging.
