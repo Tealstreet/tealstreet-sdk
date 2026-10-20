@@ -238,3 +238,32 @@ for green CI, merge, and cut a fresh follow-up branch.
   public/private gates and combined adapter/host checks are running again.
 - Pre-integration broad safe-cex run finished green:475files/6982tests. Root
   integrated typecheck/lint and the new combined broad suite are running.
+
+### Integrated gates passing (25d60dd158)
+
+All local required gates pass after landing integration:
+
+| Gate | Result |
+| --- | --- |
+| Bans / workspace fmt / workspace all-target clippy / WASM clippy | pass |
+| Native workspace |1363tests,104suites,0failed/ignored |
+| Aster native |86tests (19lib,16account,16history,12public,23trading) |
+| Harness |233tests |
+| Root typecheck / lint |44/44tasks;28/28tasks |
+| Broad safe-cex |7000tests,476files |
+| Combined WASM adapter / host |74tests;49tests |
+| Transport |208tests including typed deadlines/route/disposal |
+| Selected Aster artifact |1015722bytes, budget1258291 |
+| Aster public |384frames,608markets,631tickers,2books;3runs PASS |
+| Aster V1 / V3 private |14frames each, exact4writes;PASS |
+| Native primary / secondary V3 |3integration tests;15commands each;PASS |
+| Binance public / private |873/14frames;3books/2markets;PASS |
+
+Performance under incoming pre-import memory rules (TS/Rust): Aster main
+241.8/119.6ms, steady91.6/55.5ms, process336.0/210.5ms, retained26.1/2.3MB,
+Rust linear1.4MB. Binance main274.9/113.6ms, steady157.0/46.5ms,
+process312.5/173.8ms, retained17.2/2.7MB, Rust linear1.6MB.
+
+All three independent phase/integration reviews are clear after fixes. Next:
+push branch, PR into feat/rust-rewrite, post independent code-correctness reviews,
+address/re-review, wait for green exact-head CI, merge, cut fresh branch.
