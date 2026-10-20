@@ -7,6 +7,8 @@ publish.workspace = true
 [features]
 # Prediction venues opt in; other standalone builds omit metadata storage and frames.
 prediction = []
+# Live polling controls are needed only by polling venues and native hosts.
+polling-control = []
 
 [dependencies]
 serde.workspace = true

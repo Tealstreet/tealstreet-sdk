@@ -13,6 +13,7 @@ text-ingress = []
 grvt = ["dep:safe-cex-venue-grvt", "text-ingress"]
 polymarket = ["dep:safe-cex-venue-polymarket", "text-ingress"]
 coinbase = ["dep:safe-cex-venue-coinbase", "text-ingress"]
+breakoutprop = ["dep:safe-cex-venue-breakoutprop", "text-ingress"]
 paradex = ["dep:safe-cex-venue-paradex"]
 apexomni = ["dep:safe-cex-venue-apexomni", "text-ingress"]
 kraken = ["dep:safe-cex-venue-kraken", "text-ingress"]
@@ -28,6 +29,7 @@ bingx = ["dep:safe-cex-venue-bingx", "text-ingress"]
 weex = ["dep:safe-cex-venue-weex", "text-ingress"]
 phemex = ["dep:safe-cex-venue-phemex", "text-ingress"]
 default = [
+    "breakoutprop",
     "grvt",
     "polymarket",
     "coinbase",
@@ -64,6 +66,7 @@ okx = ["dep:safe-cex-venue-okx", "text-ingress"]
 orderly = ["dep:safe-cex-venue-orderly", "text-ingress"]
 
 [dependencies]
+safe-cex-venue-breakoutprop = { path = "../../venues/breakoutprop", optional = true }
 safe-cex-venue-grvt = { workspace = true, optional = true }
 safe-cex-venue-polymarket = { path = "../../venues/polymarket", optional = true }
 safe-cex-venue-coinbase = { path = "../../venues/coinbase", optional = true }

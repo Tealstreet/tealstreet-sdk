@@ -12,6 +12,7 @@
     feature = "binance",
     feature = "apexomni",
     feature = "asterdex",
+    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -32,7 +33,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 #[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
@@ -59,6 +60,8 @@ use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
 use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
 #[cfg(feature = "blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
+#[cfg(feature = "breakoutprop")]
+use safe_cex_venue_breakoutprop::{BreakoutProp, Options as BreakoutOptions};
 #[cfg(feature = "bybit")]
 use safe_cex_venue_bybit::{
     BybitLinear, Endpoints as BybitEndpoints, Options as BybitOptions, Variant as BybitVariant,
@@ -156,6 +159,7 @@ struct KucoinExtra {
     feature = "binance",
     feature = "apexomni",
     feature = "asterdex",
+    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -229,6 +233,7 @@ struct EngineOptions {
         feature = "binance",
         feature = "apexomni",
         feature = "asterdex",
+        feature = "breakoutprop",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "blofin",
@@ -259,7 +264,7 @@ struct EngineOptions {
     #[cfg(feature = "paradex")]
     #[serde(default)]
     payload_signer: bool,
-    #[cfg(any(feature = "backpack", feature = "bitrue"))]
+    #[cfg(any(feature = "backpack", feature = "bitrue", feature = "breakoutprop"))]
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
@@ -316,9 +321,15 @@ struct EngineOptions {
     #[cfg(feature = "bybit")]
     #[serde(default)]
     endpoints: Option<EndpointOptions>,
-    #[cfg(feature = "orderly")]
+    #[cfg(any(feature = "orderly", feature = "breakoutprop"))]
     #[serde(default)]
     tick_interval: Option<f64>,
+    #[cfg(feature = "breakoutprop")]
+    #[serde(default)]
+    subaccount: Option<String>,
+    #[cfg(feature = "breakoutprop")]
+    #[serde(default)]
+    polling_enabled: Option<bool>,
 }
 #[cfg(feature = "asterdex")]
 #[derive(Deserialize, Default)]
@@ -891,6 +902,7 @@ impl WasmEngine {
         feature = "binance",
         feature = "apexomni",
         feature = "asterdex",
+        feature = "breakoutprop",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "polymarket",
@@ -932,6 +944,22 @@ impl WasmEngine {
                 .map_err(|error| JsError::new(&error))?;
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "breakoutprop")]
+            "breakoutprop" => Box::new(Engine::new(BreakoutProp::new(BreakoutOptions {
+                key: options.key.unwrap_or_default(),
+                secret: options.secret.unwrap_or_default(),
+                subaccount: options.subaccount,
+                public_data_only: options.public_data_only,
+                tick_interval: if options.polling_enabled == Some(false) {
+                    f64::INFINITY
+                } else {
+                    options.tick_interval.unwrap_or(2_000.0)
+                },
+                timeout_ms: options
+                    .recv_window
+                    .unwrap_or(20_000.0)
+                    .clamp(1.0, u32::MAX as f64) as u32,
+            }))),
             #[cfg(feature = "grvt")]
             "grvt" => Box::new(Engine::new(Grvt::new(GrvtOptions {
                 testnet: options.testnet,
@@ -1356,6 +1384,40 @@ impl WasmEngine {
     }
 
     pub fn command(&mut self, command_json: &str, now: f64) -> Result<String, JsError> {
+        #[cfg(feature = "breakoutprop")]
+        {
+            #[derive(Deserialize)]
+            struct Header<'a> {
+                #[serde(borrow)]
+                op: std::borrow::Cow<'a, str>,
+            }
+            let header: Header<'_> = serde_json::from_str(command_json)?;
+            if header.op == "setTickInterval" {
+                #[derive(Deserialize)]
+                #[serde(untagged)]
+                enum Interval {
+                    Millis(f64),
+                    Paused(()),
+                }
+                #[derive(Deserialize)]
+                struct Control {
+                    interval: Interval,
+                }
+                let control: Control = serde_json::from_str(command_json)?;
+                let interval_ms = match control.interval {
+                    Interval::Millis(ms) => ms,
+                    Interval::Paused(()) => f64::INFINITY,
+                };
+                if interval_ms.is_nan() || interval_ms <= 0.0 {
+                    return Err(JsError::new(
+                        "Polling interval must be positive or null to pause",
+                    ));
+                }
+                self.inner
+                    .handle(now, Event::TickIntervalChanged { interval_ms });
+                return Ok(self.flush());
+            }
+        }
         let command: CommandIn = serde_json::from_str(command_json)?;
         self.inner.handle(now, Event::Command(command.into()));
         Ok(self.flush())

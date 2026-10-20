@@ -297,3 +297,11 @@ drift measurement.
   exponent (`2.5e-7` has eight decimal places); do not reduce it to the
   exponent's absolute value.
 - `__testdata__/market-samples.json` — Real symbol samples from supported exchanges
+
+## Live polling slowdown
+
+`tickIntervalOverride.ts` publishes multiplier changes through
+`subscribeTickIntervalMultipliers`. Engine pollers subscribe once and remove the
+listener on disposal; they send resolved intervals rather than reconstructing
+wildcard/exact precedence. A paused interval stays paused across configuration
+updates. Other TS pollers continue reading the multiplier at their next tick.

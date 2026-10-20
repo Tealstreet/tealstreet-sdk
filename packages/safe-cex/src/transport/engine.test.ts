@@ -451,6 +451,31 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     });
   });
 
+  it.each([
+    ['direct', false, false],
+    ['proxy', true, false],
+    ['HOW', true, true],
+  ] as const)('preserves Breakout DXAPI session authorization through %s routing', async (_label, tealstreetProxy, tealstreetTunnel) => {
+    const raw = makeRaw();
+    const url = 'https://breakout.prosp.devexperts.com/dxsca-web/accounts/default%3A00002/portfolio';
+    const input = { method: 'GET', url, headers: { Authorization: 'DXAPI documented-session' } };
+    const opts = options({ tealstreetProxy, tealstreetTunnel });
+    const routed = createEngineTransport('breakoutprop', opts, raw);
+    try {
+      await routed.request(input);
+      const delivered = tealstreetTunnel ? mocks.adapter.mock.lastCall![0] : raw.request.mock.lastCall![0];
+      const headers = tealstreetTunnel ? delivered.headers.toJSON() : delivered.headers;
+      expect(headers.Authorization).toBe('DXAPI documented-session');
+      expect(headers['Tealstreet-Authorization']).toBe(tealstreetProxy && !tealstreetTunnel ? 'Bearer proxy-jwt' : undefined);
+      expect(headers['Coinbase-Authorization']).toBeUndefined();
+      const plan = resolveEngineRoutingPlan('breakoutprop', opts, 'https://breakout.prosp.devexperts.com');
+      expect(plan.http.authorizationHeader).toBe('Tealstreet-Authorization');
+      expect(plan.http.authorize).toBe(tealstreetProxy && !tealstreetTunnel);
+      expect(plan.http.mode).toBe(tealstreetTunnel ? 'how' : 'direct');
+      if (tealstreetTunnel) expect(raw.request).not.toHaveBeenCalled();
+    } finally { routed.dispose!(); }
+  });
+
   it('fails closed if a tunnel adapter returns parsed JSON', async () => {
     mocks.adapter.mockResolvedValueOnce({ status: 200, headers: {}, data: { id: 9007199254740992 } });
     await expect(

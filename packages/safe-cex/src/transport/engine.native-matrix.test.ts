@@ -41,6 +41,10 @@ const cases: Case[] = [
   { name: 'kucoinspot-private-default-how', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com', options: {}, how: true },
   { name: 'kucoinspot-private-explicit-false-how', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com', options: { tealstreetTunnel: false }, how: true },
   { name: 'kucoinspot-public-direct', exchange: 'kucoinspot', baseURL: 'https://api.kucoin.com', options: { publicDataOnly: true, tealstreetTunnel: true } },
+  { name: 'breakout-direct-provider', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: {}, direct: true },
+  { name: 'breakout-tealstreet-direct', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: {} },
+  { name: 'breakout-proxy', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: { tealstreetProxy: true, tealstreetTunnel: false } },
+  { name: 'breakout-how', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: { tealstreetTunnel: true }, how: true },
   { name: 'coinbase-direct-jwt', exchange: 'coinbase', baseURL: 'https://api.coinbase.com', options: {} },
   { name: 'coinbase-proxy-jwt', exchange: 'coinbase', baseURL: 'https://api.coinbase.com', options: { tealstreetProxy: true } },
   { name: 'coinbasespot-proxy-jwt', exchange: 'coinbasespot', baseURL: 'https://api.coinbase.com', options: { tealstreetProxy: true } },
@@ -267,6 +271,7 @@ const buildCase = async (input: Case) => {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(keyed ? { 'x-mbx-apikey': 'fixture-venue-key' } : {}),
+      ...(input.exchange === 'breakoutprop' ? { Authorization: 'DXAPI documented-session' } : {}),
       ...(['coinbase', 'coinbasespot'].includes(input.exchange) ? { Authorization: 'Bearer fixture-venue-jwt' } : {}),
     };
     const publicBinance = input.exchange.startsWith('binance') && !keyed;
