@@ -435,6 +435,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   market orders; spot cancel uses `C`; amend keeps TIF; PM conditional client id
   `newClientStrategyId`; PM TRIGGERED closes; PM cancel-all both endpoints;
   COIN-M rejects caller client ids; spot retired streams; depth snapshot retry.
+- Verify live (unconfirmed, no code change): a COIN-M triggered stop that keeps its
+  `orderId` after `EXPIRED` and then rests on the book might leave the row Canceled
+  and block later order snapshots; several `x=CALCULATED` liquidation partials with
+  `t=0` on one order would dedupe to the first fill (`account.rs` execution dedupe).
+  Both need a captured live packet before changing behaviour.
 
 ### Bybit family
 - ~~High: Brazil inverse/option sockets routed to the linear host (engine
