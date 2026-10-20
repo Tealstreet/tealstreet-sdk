@@ -155,3 +155,16 @@ with evidence, plus each gate's counts and CPU/memory/artifact measurements.
 - Full root test27/27 tasks PASS, including safe-cex7298/7298 in both configured
   runs. Native pre-precision checkpoint2149 tests+3doctests PASS, workspace
   native/wasm32 Clippy PASS. Rebuild/final native totals and replay suite next.
+
+### Frozen implementation verification
+
+- Final source `47f4bb19ff`: locked workspace2151 native/unit/integration tests
+  plus3doctests PASS,0failed/ignored. Workspace formatting, native/all-target
+  Clippy, locked workspace wasm32 Clippy and bans PASS. Runtime/test fingerprint
+  remained unchanged across the final native run.
+- Rebuilt combined WASM: real SDK102/102 across7files PASS, host64/64 PASS.
+  All four expanded private OKX profiles PASS with exact currency balances,
+  native units and full inverse/X-Perp lifecycle commands. Current SDK full
+  typecheck/lint PASS; earlier root44typecheck/28lint/27test tasks PASS.
+- Single-venue OKX size + three public gates now running; remaining touched
+  venues/Binance and Aster routing regression batch follows serially before PR.
