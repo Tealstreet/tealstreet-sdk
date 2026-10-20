@@ -42,7 +42,7 @@ import {
   resolveAsterDEXApiVersion,
   resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
-import { BaseExchange } from '../base';
+import { BaseExchange, markBaseCapabilityFallback } from '../base';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import {
   HYROTRADER_PROD_URL,
@@ -56,6 +56,7 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
+  apexomni: 'apexomni',
   asterdex: 'asterdex',
   binance: 'binance',
   backpack: 'backpack',
@@ -83,6 +84,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   cryptocom: 'cryptocom',
   kucoin: 'kucoin',
   hyperliquid: 'hyperliquid',
+  kraken: 'kraken',
   lighter: 'lighter',
   okx: 'okx',
   okxeu: 'okxeu',
@@ -107,6 +109,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   binancepm: patternClientOrderIdRule('Binance PM', /^[.A-Z:/a-z0-9_-]{1,32}$/, {
     mint: () => 'x-s3vFFRQp' + uuid(),
   }),
+  apexomni: patternClientOrderIdRule('ApeX Omni', /^\S+$/),
   'tealstreet-dex': orderlyClientOrderIdRule,
   kodiakfi: orderlyClientOrderIdRule,
   mode: orderlyClientOrderIdRule,
@@ -199,6 +202,7 @@ const STORE_FLUSH_MS = 250;
 export class RustEngineExchange extends BaseExchange {
   protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private host?: EngineHostType;
+  private hostInitialization?: Promise<void>;
   private startup?: Promise<void>;
   private startupFailure?: Error;
   private readonly startupWaiters = new Set<() => void>();
@@ -220,12 +224,28 @@ export class RustEngineExchange extends BaseExchange {
     this.isSpot = exchangeName === 'bybitspot';
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
+    if (exchangeName === 'apexomni') {
+      this.getAccount = async () => {
+        await this.ensureHost();
+        return this.command<ExchangeAccount>({ op: 'getAccount' });
+      };
+      this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
+      this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
+      this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
+    }
     if (exchangeName === 'hyperliquid') {
       this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
         this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
     }
-    this.applier = new FrameApplier(store, this.name === 'mexc' || this.name === 'blofin' || this.name === 'kucoin', this.name === 'bitgetinverse');
+    this.applier = new FrameApplier(
+      store,
+      this.name === 'mexc' || this.name === 'blofin' || this.name === 'kucoin',
+      this.name === 'bitgetinverse',
+    );
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
+    if (this.name === 'kraken') {
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
+    }
     if (this.name === 'woo') {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
@@ -272,7 +292,12 @@ export class RustEngineExchange extends BaseExchange {
     return (this.startup ??= this.startEngine());
   };
 
-  private startEngine = async () => {
+  private ensureHost = (): Promise<void> => {
+    if (this.isDisposed) return Promise.reject(new Error('Exchange disposed during startup'));
+    return (this.hostInitialization ??= this.createHost());
+  };
+
+  private createHost = async () => {
     assertEngineAccountRouting(this.options, this.name);
     if (this.name === 'asterdex' && !this.options.publicDataOnly) {
       const auth = resolveAsterDEXV3AuthContext(this.options);
@@ -326,8 +351,17 @@ export class RustEngineExchange extends BaseExchange {
       }
     });
     if (this.isDisposed) throw new Error('Exchange disposed during startup');
-    const { key, secret, passphrase, testnet, applicationId, vault, hyperliquidBuilder, enableSpotMarkets } =
-      this.options;
+    const {
+      key,
+      secret,
+      passphrase,
+      omniKeySeed,
+      testnet,
+      applicationId,
+      vault,
+      hyperliquidBuilder,
+      enableSpotMarkets,
+    } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
     const endpoints = this.name === 'hyrotrader' ? this.hyroEndpoints() : undefined;
     const transport = createEngineTransport(this.name, this.options, engineTransport());
@@ -337,6 +371,7 @@ export class RustEngineExchange extends BaseExchange {
         key,
         secret,
         passphrase,
+        ...(this.name === 'apexomni' ? { omniKeySeed } : {}),
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
         extra: this.name === 'kucoin' ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
@@ -387,6 +422,11 @@ export class RustEngineExchange extends BaseExchange {
         },
       },
     );
+  };
+
+  private startEngine = async () => {
+    await this.ensureHost();
+    if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
     this.host.start();
     this.updateTickerSymbols();
     // Books, candles and fills go out at the venue's book cadence, the rest
@@ -420,7 +460,7 @@ export class RustEngineExchange extends BaseExchange {
   snapshotFrame = () => this.host?.snapshot();
 
   updateSymbolMetadata = async (symbol: string) => {
-    if (!['mexc', 'woo'].includes(this.name) || this.isPublicDataOnly) return;
+    if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
     this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: rails } });
   };
@@ -501,7 +541,7 @@ export class RustEngineExchange extends BaseExchange {
       const unsubscribe = this.store.subscribe(loaded);
       const timeout = setTimeout(() => finish({ error: 'Timed out validating the account' }), 15_000);
       loaded();
-      if (!this.host) this.start().catch((error) => onError(String(error?.message ?? error)));
+      if (!this.host || !this.startup) this.start().catch((error) => onError(String(error?.message ?? error)));
     });
 
   private command = <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
@@ -684,7 +724,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['blofin', 'bitrue', 'hyperliquid', 'lighter', 'woo'].includes(this.name)
+      ...(['apexomni', 'blofin', 'bitrue', 'hyperliquid', 'lighter', 'kraken', 'woo'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });

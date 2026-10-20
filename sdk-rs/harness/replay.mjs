@@ -79,6 +79,7 @@ const PASSPHRASE = config.options?.passphrase ?? venue.replayCredentials?.passph
 venue.replayOptions = { ...venue.options, ...metadataOptions, ...(isPrivate
   ? { ...venue.replayCredentials, key: KEY, secret: SECRET, passphrase: PASSPHRASE }
   : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }), ...config.options };
+await venue.prepareReplay?.({ isPrivate, options: venue.replayOptions });
 await venue.initializeReplay?.(values.impl, venue.replayOptions);
 
 const callerIds = new Set();
@@ -133,7 +134,7 @@ const canonicalUrl = (url) => {
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
-const requestKey = (method, url, body) => (['blofin', 'mexc', 'bingx', 'bitrue', 'lighter', 'kucoin', 'asterdex'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'bybit')
+const requestKey = (method, url, body) => (['blofin', 'mexc', 'bingx', 'bitrue', 'lighter', 'kucoin', 'asterdex', 'kraken', 'apexomni'].includes(values.venue) || venue.family === 'orderly' || venue.family === 'bybit')
   ? keyOf(method, url, body, callerIds, venue)
   : `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
 
@@ -144,7 +145,7 @@ class Tape extends SharedTape {
   constructor(impl) {
     super(records, { ...venue, impl, books: bookSymbols, timeoutMs: 15000, isPrivate, canonicalize: values.venue === 'backpack' ? (url) => sharedUrl(url, callerIds, venue) : canonicalUrl,
       explicitOpens: values.venue === 'bitunix', legacyLatest: false,
-      responses: values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'lighter' || venue.family === 'orderly' || venue.family === 'bybit' || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue.startsWith('bitget') ? undefined : new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
+      responses: values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'lighter' || venue.family === 'orderly' || venue.family === 'bybit' || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue.startsWith('bitget') ? undefined : new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
         venue.matchRequestBody ? undefined : (method, url, body) => isWriteRequest(method, url) && !['', '{}'].includes(canonicalBody(body)) ? undefined : requestKey(method, url)),
       prepareFrame: (r) => {
         if (r.type !== 'ws') return r;
@@ -172,7 +173,7 @@ class Tape extends SharedTape {
 
   send(socket, text) {
     const { url, connection } = socket;
-    if (values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue.startsWith('bitget')) return super.send(socket, text);
+    if (values.venue === 'backpack' || values.venue === 'hyperliquid' || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni' || values.venue.startsWith('bitget')) return super.send(socket, text);
     venue.validateSocketMessage?.(socket, text);
     for (const key of subscriptionKeys(socket.rawUrl, text)) {
       if (this.startupSubscriptions.get(key) === false) {
@@ -424,7 +425,7 @@ async function runRust() {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const options = { ...venue.options, ...metadataOptions, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true, ...venue.publicOptions }), ...config.options };
+  const options = { ...venue.replayOptions };
   await settle();
   const heapBefore = await baseline();
   tape.sampleMemory = () => retainedMemory(heapBefore, process.memoryUsage(), wasmMemoryBytes());
@@ -524,7 +525,7 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex') ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return { frames, metrics, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni') ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
 }
 
 const commandArgs = ({ t, type, expected, ...args }) => args;
@@ -557,7 +558,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   return {
     hedged: status?.hedged ?? false,
     balance: { used: balance.used, free: balance.free, total: balance.total, upnl: balance.upnl,
-      ...(venue.inverseNativeAmounts ? { coins: balance.coins ?? {} } : {}),
+      ...((venue.inverseNativeAmounts || venue.compareBalanceCoins) ? { coins: balance.coins ?? {} } : {}),
       ...(venue.compareBalanceCurrencies ? { currencies: balance.currencies ?? {} } : {}) },
     orders: orderRows,
     positions: positionRows,
@@ -660,7 +661,7 @@ async function runTs() {
   const postStore = () => {
     if (!values['no-egress'] && state) mainStore.update(structuredClone(worker._prepareStorePayload(state)), true);
   };
-  const options = { ...venue.options, ...metadataOptions, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }), ...config.options };
+  const options = { ...venue.replayOptions };
   const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
   // Model worker dispatch through the exchange's real local methods.
   exchange.emitter.on('callMethod', ({ method, args, requestId }) => {
@@ -675,7 +676,7 @@ async function runTs() {
     });
   });
   venue.configureTs?.(exchange);
-  venue.prepareTs?.(exchange, TapeWebSocket);
+  await venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
@@ -684,7 +685,7 @@ async function runTs() {
   const started = exchange.start();
   const prepared = started.then(() => venue.prepareTsReady?.(exchange, { isPrivate }));
   const subscribed = (async () => {
-    while (!store.markets.length) await new Promise((r) => realTimeout(r, 1));
+    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange, store))) await new Promise((r) => realTimeout(r, 1));
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => {
       // KNOWN_TS_FIXES: BingX's feed supplies descending asks. Apply the
       // independent price-order contract before consumers and flush hashes.
@@ -738,7 +739,7 @@ async function runTs() {
     ? {
         hedged: Boolean(store.options.isHedged),
         balance: { used: store.balance.used, free: store.balance.free, total: store.balance.total, upnl: store.balance.upnl,
-          ...(venue.inverseNativeAmounts ? { coins: store.balance.coins ?? {} } : {}),
+          ...((venue.inverseNativeAmounts || venue.compareBalanceCoins) ? { coins: store.balance.coins ?? {} } : {}),
           ...(venue.compareBalanceCurrencies ? { currencies: store.balance.currencies ?? {} } : {}) },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.
@@ -750,7 +751,7 @@ async function runTs() {
   const protocolErrors = tape.audit?.errors() ?? [];
   exchange.dispose();
   clock?.restore();
-  return { frames, metrics, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex') ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return { frames, metrics, bookEvents, requests: [...tape.requests].sort(), writes: tape.writes, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors, invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : (tape.hyperliquid || values.venue === 'bitrue' || values.venue === 'woo' || values.venue === 'lighter' || venue.family === 'orderly' || venue.subscriptionGenerations || values.venue === 'kucoin' || values.venue === 'asterdex' || values.venue === 'kraken' || values.venue === 'apexomni') ? [...tape.fullSubscriptions].sort() : tape.bitget ? [...tape.protocolSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
 }
 
 async function runTsCommand(exchange, store, record, { candleListeners, candleUpdates }) {
@@ -779,6 +780,7 @@ async function runTsCommand(exchange, store, record, { candleListeners, candleUp
     case 'fetchLeverage': return exchange.fetchLeverageForSymbol(args.symbol);
     case 'fetchStpMode': return exchange.fetchStpMode();
     case 'setStpMode': await exchange.changeStpMode(args.mode); return [];
+    case 'getAccount':
     case 'fetchAccount': return exchange.getAccount();
     case 'fetchOrderBook': return exchange.fetchOrderBook(args.symbol, args.limit);
     case 'fetchFills': return exchange.fetchHistoricalFills(args);

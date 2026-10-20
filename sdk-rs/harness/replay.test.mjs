@@ -346,3 +346,149 @@ test('production Aster constructor binds configured V1/V3 credentials before mat
     }
   } finally { Date.now = now; }
 });
+
+const productionTapeFor = (name, records, venue = venueOf(name)) => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('const VOLATILE =');
+  const classStart = source.indexOf('class Tape extends SharedTape {');
+  const end = source.indexOf('\nconst settle =', classStart);
+  const ProductionTape = new Function('SharedTape', 'values', 'venue', 'records', 'bookSymbols', 'callerIds',
+    'keyOf', 'Responses', 'sharedUrl', 'parseRequestJson', 'isRead', 'isPrivate',
+    `${source.slice(start, classStart)}\nreturn (${source.slice(classStart, end)});`)(
+    Tape, { venue: name }, venue, records, [], new Set(), requestKey, Responses, undefined,
+    parseRequestJson, (method) => method === 'GET', true,
+  );
+  return new ProductionTape('ts');
+};
+
+test('production Kraken constructor validates raw form HMAC before typed generated create matching', async () => {
+  const venue = venueOf('kraken');
+  venue.initializeReplay('ts');
+  const url = 'https://futures.kraken.com/derivatives/api/v3/sendorder';
+  const records = [{ type:'http', method:'POST', url, requestBody:'cliOrdId=ts_recorded&size=1&symbol=PF_XBTUSD', status:200, body:'{}' }];
+  const tape = productionTapeFor('kraken', records);
+  assert(tape.responseStore);
+  const {krakenSignature}=await import('./kraken-protocol.mjs');
+  let nonce=BigInt(Date.now())*1000n;
+  const send=(size,id,auth=true)=>{
+    const body=new URLSearchParams({cliOrdId:id,size,symbol:'PF_XBTUSD'}).toString();
+    const n=String(++nonce);
+    return tape.respond('POST',url,body,{APIKey:'replay-key',Nonce:n,Authent:auth?krakenSignature(body+n+'/api/v3/sendorder'):'bad'});
+  };
+  assert.throws(()=>send('1','ts_bad',false),/signature/);
+  assert.equal(tape.missingWrites,1);
+  assert.equal(send('2','ts_changed').status,599);assert.equal(tape.missingWrites,1);
+  assert.throws(()=>send('1','ts_invalid\n'),/invalid/);assert.equal(tape.missingWrites,1);
+  assert.equal(send('1','ts_valid').status,200);assert.equal(tape.missingWrites,0);
+});
+
+test('production ApeX constructor authenticates exact form bytes and binds typed caller/economic fields', async () => {
+  const {prepareApexReplay,apexSignatureForTest,APEX_ACCOUNT}=await import('./apexomni-protocol.mjs');
+  await prepareApexReplay({isPrivate:true});
+  const url='https://omni.apex.exchange/api/v3/order',now=Date.now();
+  const id=`apexomni-${APEX_ACCOUNT}-${now}-123456`;
+  const fields={brokerId:'6587',clientId:id,clientOrderId:id,expiration:String((Math.ceil((now+30*86400000)/3600000)+168)*3600000),
+    limitFee:'0.030000',price:'60000',side:'BUY',size:'0.001',symbol:'BTC-USDT',timeInForce:'GOOD_TIL_CANCEL',type:'LIMIT',
+    signature:apexSignatureForTest(id,'0.001','60000',true)};
+  const expected={...fields,clientId:'recorded-parent',clientOrderId:'recorded-parent',expiration:'recorded-expiration',signature:'recorded-signature'};
+  const tape=productionTapeFor('apexomni',[{type:'http',method:'POST',url,requestBody:expected,status:200,body:'{}'}]);
+  assert(tape.responseStore);
+  const send=(values,auth=true)=>{
+    const body=new URLSearchParams(Object.entries(values).sort(([a],[b])=>a.localeCompare(b))).toString();
+    const signature=createHmac('sha256',Buffer.from('replay-secret').toString('base64')).update(`${now}POST/api/v3/order${body}`).digest('base64');
+    return tape.respond('POST',url,body,{'APEX-API-KEY':'replay-key','APEX-PASSPHRASE':'replay-passphrase','APEX-TIMESTAMP':String(now),
+      'APEX-SIGNATURE':auth?signature:'bad','Content-Type':'application/x-www-form-urlencoded'});
+  };
+  assert.throws(()=>send(fields,false),/HMAC/);assert.equal(tape.missingWrites,1);
+  assert.equal(send({...fields,unknownEconomicField:'extra'}).status,599);assert.equal(tape.missingWrites,1);
+  assert.throws(()=>send({...fields,clientId:id+'\n',clientOrderId:id+'\n'}),/client order ID/);assert.equal(tape.missingWrites,1);
+  assert.equal(send(fields).status,200);assert.equal(tape.missingWrites,0);
+});
+
+test('production ApeX socket audit keeps parallel and replacement auth, topics and pings isolated', () => {
+  const tape=productionTapeFor('apexomni',[]);
+  const url='wss://quote.omni.apex.exchange/realtime_private?v=2';
+  const connect=()=>tape.connect(url,()=>{},()=>{});
+  const login=(socket)=>{
+    const now=Date.now();
+    const signature=createHmac('sha256',Buffer.from('replay-secret').toString('base64')).update(`${now}GET/ws/accounts`).digest('base64');
+    tape.send(socket,JSON.stringify({op:'login',args:[JSON.stringify({type:'login',httpMethod:'GET',requestPath:'/ws/accounts',apiKey:'replay-key',passphrase:'replay-passphrase',timestamp:now,signature})]}));
+    tape.send(socket,'{"op":"subscribe","args":["ws_zk_accounts_v3","ws_user_v1","ws_notify_v1"]}');
+    tape.send(socket,'{"op":"ping"}');
+  };
+  const first=connect();login(first);
+  const sibling=connect();
+  sibling.onMessage('{"topic":"ws_user_v1","data":{}}');
+  assert(tape.audit.errors().some(error=>error.includes('without subscription')));
+  assert(tape.audit.errors().some(error=>error.includes('preceded login')));
+  login(sibling);
+  first.onMessage('{"op":"ping","args":["only-first"]}');
+  tape.send(sibling,'{"op":"pong","args":["only-first"]}');
+  assert(tape.audit.errors().some(error=>error.includes('unexpected server ping response')));
+  tape.send(first,'{"op":"pong","args":["only-first"]}');
+  tape.send(first,'{"op":"unsubscribe","args":["ws_user_v1"]}');
+  sibling.onMessage('{"topic":"ws_user_v1","data":{}}');
+  tape.close(first,1000,true);tape.close(sibling,1000,true);
+  const replacement=connect();
+  replacement.onMessage('{"topic":"ws_user_v1","data":{}}');
+  assert.equal(tape.audit.ready(),false,'closed authenticated sockets cannot make replacement ready');
+  tape.send(replacement,'{"op":"ping"}');
+  assert(tape.audit.errors().some(error=>error.includes('heartbeat preceded login')));
+  assert([...tape.fullSubscriptions].some(key=>key.includes('"op":"login"')),'actual wrapper delegates the shared send path');
+});
+
+test('both production exchange constructors receive the complete initialized replay options', () => {
+  const source=readFileSync(new URL('./replay.mjs',import.meta.url),'utf8');
+  const options={ key:'key', secret:'secret', passphrase:'pass', omniKeySeed:'documented-seed', applicationId:'owner', asterdex:{apiVersion:'v3'} };
+  for(const functionName of ['runRust','runTs']) {
+    const start=source.indexOf(`async function ${functionName}()`);
+    const declaration=source.slice(start).match(/  const options = [^\n]+;/)?.[0];
+    assert(declaration,`${functionName} production options declaration exists`);
+    const actual=new Function('venue',`${declaration}\nreturn options;`)({replayOptions:options});
+    assert.deepEqual(actual,options,`${functionName} must preserve per-venue credentials beyond the common three fields`);
+    assert.notEqual(actual,options);
+  }
+});
+
+test('production ApeX rejects authenticated JSON under a form header without consuming its form response', () => {
+  const url='https://omni.apex.exchange/api/v3/delete-order';
+  const tape=productionTapeFor('apexomni',[{type:'http',method:'POST',url,requestBody:{id:'order'},status:200,body:'{}'}]);
+  const send=(body,contentType='application/x-www-form-urlencoded')=>{
+    const timestamp=String(Date.now());
+    const signature=createHmac('sha256',Buffer.from('replay-secret').toString('base64')).update(`${timestamp}POST/api/v3/delete-order${body}`).digest('base64');
+    return tape.respond('POST',url,body,{'APEX-API-KEY':'replay-key','APEX-PASSPHRASE':'replay-passphrase','APEX-TIMESTAMP':timestamp,
+      'APEX-SIGNATURE':signature,'Content-Type':contentType});
+  };
+  for(const body of ['{"id":"order"}',' ["id=order"]','id','']) {
+    assert.throws(()=>send(body),/encoded form bytes/);
+    assert.equal(tape.missingWrites,1,'invalid actual encoding cannot consume a fixture acknowledgement');
+  }
+  for(const header of ['application/json','application/x-www-form-urlencoded-invalid'])
+    assert.throws(()=>send('id=order',header),/not form encoded/);
+  assert.equal(tape.missingWrites,1);
+  assert.equal(send('id=order').status,200);
+  assert.equal(tape.missingWrites,0);
+});
+
+test('production Kraken batch matching retains signed outer economic fields around JSON', async () => {
+  const venue=venueOf('kraken');venue.initializeReplay('ts');
+  const url='https://futures.kraken.com/derivatives/api/v3/batchorder';
+  const json=JSON.stringify({batchOrder:[{order:'cancel',order_id:'001'}]});
+  const body=new URLSearchParams({json}).toString();
+  const tape=productionTapeFor('kraken',[{type:'http',method:'POST',url,requestBody:body,status:200,body:'{}'}]);
+  const {krakenSignature}=await import('./kraken-protocol.mjs');
+  let nonce=BigInt(Date.now())*1000n;
+  const send=(actual)=>{
+    const n=String(++nonce);
+    return tape.respond('POST',url,actual,{APIKey:'replay-key',Nonce:n,Authent:krakenSignature(actual+n+'/api/v3/batchorder')});
+  };
+  for(const actual of [body+'&unknownEconomicField=extra',body+'&size=100',body+'&order_id=other']) {
+    assert.equal(send(actual).status,599);
+    assert.equal(tape.missingWrites,1,'authenticated outer fields cannot disappear while matching the batch');
+  }
+  assert.equal(send(body).status,200);assert.equal(tape.missingWrites,0);
+  const options={requestBody:(body,context)=>venue.requestBody(body,context)};
+  const large=(value)=>new URLSearchParams({json:`{"batchOrder":[{"order":"cancel","order_id":${value}}]}`}).toString();
+  assert.notEqual(requestKey('POST',url,large('9007199254740992'),new Set(),options),
+    requestKey('POST',url,large('9007199254740993'),new Set(),options),'JSON envelope decoding must retain distinct large numeric values');
+});

@@ -1,3 +1,4 @@
+import { requestKey } from './requests.mjs';
 // Expected conditional values come from the recorded venue, never the Rust output.
 const parse = (text) => JSON.parse(text, (_key, value, context) => {
   if (typeof value === 'number' && !Number.isSafeInteger(value) && Number.isInteger(value)) {
@@ -112,4 +113,81 @@ export function fixLighterCommands(results, records) {
     // TS inherits the base unsupported method instead of acknowledging it.
     if(command.op==='setPositionMode' && command.hedged===false && results[index]?.error==='Not implemented') results[index]={ok:null};
   }
+}
+
+// Kraken TS emits repeated execution IDs and omits native statistics/holdings.
+// Reconstruct only documented fields from input; production books and their
+// intermediate timestamp/hash comparisons remain untouched.
+export function fixKrakenOutput(ts,records){
+ const markets=new Map(ts.markets.map(m=>[m.symbol,m]));
+ const tickers=new Map((ts.tickers??[]).map(t=>[t.symbol,t]));
+ const fills=[],seen=new Set();let coins;
+ const extraReads=new Set();
+ const reads=records.filter(r=>r.type==='http'&&r.method==='GET'&&r.status===200);
+ const redundant=new Set();
+ // Require command-owned anchors; a short page in another query cannot excuse
+ // a missing Rust page. An ambiguous same-stage full page disables correction.
+ for(const source of reads){
+  if(source.afterCommand===undefined)continue;
+  const u=new URL(source.url),data=JSON.parse(source.body);
+  const sameStage=reads.filter(r=>r.afterCommand===source.afterCommand&&new URL(r.url).pathname===u.pathname);
+  if(u.pathname==='/derivatives/api/v3/fills'&&!u.search&&data.fills?.length>0&&data.fills.length<100&&!sameStage.some(r=>JSON.parse(r.body).fills?.length>=100)){
+   const oldest=Math.min(...data.fills.map(f=>Date.parse(f.fillTime)));
+   const cursor=new Date(Math.floor(oldest/1000)*1000+1).toISOString();
+   for(const page of sameStage){const p=new URL(page.url);if(p.searchParams.size===1&&p.searchParams.get('lastFillTime')===cursor&&JSON.parse(page.body).fills?.length===0)redundant.add(page);}
+  }
+  if(u.pathname==='/api/history/v3/account-log'&&data.logs?.length>0&&data.logs.length<500&&!sameStage.some(r=>JSON.parse(r.body).logs?.length>=500)){
+   const cash=data.logs.filter(r=>r.asset?.toLowerCase()!==r.contract?.toLowerCase());
+   if(!cash.length)continue;
+   const boundary=Math.max(...cash.map(r=>Date.parse(r.date)));
+   for(const page of sameStage){const p=new URL(page.url);if(p.searchParams.size===2&&p.searchParams.get('since')===String(boundary)&&p.searchParams.get('count')===u.searchParams.get('count')&&JSON.parse(page.body).logs?.length===0)redundant.add(page);}
+  }
+ }
+ for(const record of records){
+  if(record.type==='http'&&record.method==='GET'&&record.status===200){
+   const u=new URL(record.url),data=JSON.parse(record.body);
+   if(u.pathname==='/derivatives/api/v3/instruments'&&data.result==='success')for(const row of data.instruments??[]){
+    if(Number(row.contractValueTradePrecision)<0){const market=markets.get(row.symbol);if(market)market.precision.amount=10**(-Number(row.contractValueTradePrecision));}
+   }
+   // TS derives fill cursors after flooring to seconds, and its income pager
+   // requests an extra boundary page even when the native page was short.
+   if(redundant.has(record)&&!records.some(other=>other!==record&&other.type==='http'&&other.method==='GET'&&other.url===record.url&&!redundant.has(other))){
+    extraReads.add(requestKey('GET',record.url));
+   }
+   if(u.pathname==='/derivatives/api/v3/accounts'&&data.result==='success'&&data.accounts){
+    const holdings=new Map();
+    for(const [name,account]of Object.entries(data.accounts)){
+     if(['cash','cashAccount'].includes(name))for(const [coin,amount]of Object.entries(account.balances??{}))holdings.set(coin.toUpperCase(),[Number(amount),Number(amount)]);
+    }
+    const flex=data.accounts.flex??data.accounts.multiCollateralMarginAccount;
+    if(flex?.type==='multiCollateralMarginAccount')for(const [coin,v]of Object.entries(flex.currencies??{}))holdings.set(coin.toUpperCase(),[Number(v.quantity??0),Number(v.value??0)]);
+    for(const [name,a]of Object.entries(data.accounts))if(name.startsWith('fi_')&&a.auxiliary){const coin=(a.auxiliary.currency??'USD').toUpperCase(),v=Number(a.auxiliary.pv??0),prior=holdings.get(coin)??[0,0];holdings.set(coin,[prior[0]+v,prior[1]+v]);}
+    coins=Object.fromEntries([...holdings].map(([coin,[amount,notional]])=>[coin,{amount,notional}]));
+   }
+  }
+  if(record.type!=='ws')continue;
+  const m=JSON.parse(record.text);
+  if(m.feed==='ticker'&&!m.event){
+   const t=tickers.get(m.product_id);
+   if(t){
+    // Full native tickers omit a zero relative rate; TS keeps its stale rate.
+    t.fundingRate=Number(m.relative_funding_rate??0);
+    for(const [native,field]of [['volume','volume'],['volumeQuote','quoteVolume'],['openInterest','openInterest'],['change','percentage']])if(m[native]!=null)t[field]=Number(m[native]);
+    const open=Number(m.open_24h??m.open24h??m.open);
+    if(m.change==null&&m.last!=null&&open>0)t.percentage=(Number(m.last)-open)/open*100;
+   }
+  }
+  if(m.feed==='fills_snapshot'||m.feed==='fills')for(const f of m.fills??[]){
+   if(!f.fill_id||seen.has(f.fill_id))continue;seen.add(f.fill_id);
+   if(m.feed==='fills'&&markets.has(f.instrument))fills.push({id:String(f.order_id),symbol:f.instrument,side:f.buy?'buy':'sell',amount:Number(f.qty),price:Number(f.price)});
+  }
+ }
+ if(ts.account){
+  ts.account.fills=fills;if(coins!==undefined)ts.account.balance.coins=coins;
+  // Kraken publishes no position margin allocation; TS's base store invents 0.
+  for(const p of ts.account.positions)if(p.marginSize===0)p.marginSize=null;
+ }
+ ts.requests=ts.requests.filter(key=>!extraReads.has(key));
+ if(ts.outbound)ts.outbound=ts.outbound.filter(key=>!extraReads.has(key));
+ ts.subscriptions=ts.subscriptions.filter(key=>!key.includes('"feed":"account_balances"'));
 }

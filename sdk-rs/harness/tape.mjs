@@ -534,7 +534,7 @@ export class Tape {
   }
 
   respondMatched(method, url, body, headers) {
-    try { this.validateRequest?.({ method, url, body, headers }); }
+    try { this.validateRequest?.({ method, url, body, headers, callerIds: this.callerIds }); }
     catch (error) { this.invalidSignatures++; throw error; }
     if (this.isPrivate && this.venue.verifyRequest) {
       try { if (!this.venue.verifyRequest({ method, url, body, headers })) throw new Error(`invalid replay signature: ${method} ${url}`); }
@@ -617,7 +617,10 @@ export class Tape {
     url = this.canonicalize(url);
     const connection = this.connectionCounts.get(url) ?? 0;
     this.connectionCounts.set(url, connection + 1);
-    const socket = { url, rawUrl, channel: metadata.channel, context: metadata.context, connection, onOpen, onData: onMessage, onMessage: (text) => deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame), onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set(), subscriptionArgs: new Map(), subscriptions: new Set(), generation: connection + 1, ordinal: connection, loginVerified: false };
+    const socket = { url, rawUrl, channel: metadata.channel, context: metadata.context, connection, onOpen, onData: onMessage, onMessage: (text) => {
+      try { return deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame); }
+      catch (error) { this.invalidSignatures++; throw error; }
+    }, onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set(), subscriptionArgs: new Map(), subscriptions: new Set(), generation: connection + 1, ordinal: connection, loginVerified: false };
     if (this.venue.socketRequest || this.venue.socketResponse || this.venue.bootstrapPrivateFromTape) {
       Object.assign(socket, { requests: new Map(), requestIds: new Set(), requestCounts: new Map(), mappedRequests: new Map(), responseIds: new Set() });
       const deliver = socket.onMessage;
@@ -666,7 +669,8 @@ export class Tape {
       const message = JSON.parse(text);
       if (message.op && typeof message.req_id === 'string' && message.req_id) socket.requests.set(message.op, message.req_id);
     }
-    this.venue.validateSocketMessage?.(socket, text);
+    try { this.venue.validateSocketMessage?.(socket, text); }
+    catch (error) { this.invalidSignatures++; throw error; }
     let parsed;
     try { parsed = JSON.parse(text); } catch { /* Literal heartbeat. */ }
     if (parsed && this.isPrivate && this.venue.verifySubscribe) {

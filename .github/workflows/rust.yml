@@ -104,6 +104,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - venue: apexomni
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-apexomni
           - venue: asterdex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-asterdex
@@ -149,6 +152,9 @@ jobs:
           - venue: weex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape:weex
+          - venue: kraken
+            books: PF_XBTUSD,PF_ETHUSD
+            private_script: rust:private-tape-kraken
           - venue: lighter
             books: ETH,BTC
             private_script: rust:private-tape-lighter

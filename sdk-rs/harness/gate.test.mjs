@@ -109,6 +109,7 @@ const gate = (venue, isPrivate = false, defect) => {
         buffersBefore: 100, buffersAfter: 120, bufferRetainedBytes: 20,
         wasmBytes: 5, retainedBytes: 15,
       });
+      if (defect === 'book-events') output.bookEvents = [[100, 'BTCUSDT', rust ? 'wrong-intermediate-hash' : 'reference-hash']];
       if (rust && defect === 'peak') output.metrics.peakBytes = 26;
       // A later private run must reject invalid individual memory components
       // even though its aggregate and informational performance otherwise pass.
@@ -203,4 +204,12 @@ test('gate CLI retains the strict public sampled peak comparison', () => {
   const result = gate('bybitinverse', false, 'peak');
   assert.equal(result.status, 1, result.stderr + result.stdout);
   assert.match(result.stdout, /Rust sampled peak memory is not below TS/);
+});
+
+
+test('Kraken gate rejects wrong intermediate hashes while its final book matches', () => {
+  const result=gate('kraken',false,'book-events');
+  assert.equal(result.status,1,result.stderr);
+  assert.match(result.stdout,/bookEvents:/);
+  assert.doesNotMatch(result.stdout,/book BTCUSDT differs/);
 });

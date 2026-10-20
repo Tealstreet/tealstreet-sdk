@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 import { memoryMetricErrors } from './memory.mjs';
-import { fixWeexConditionals, fixLighterFills, fixLighterCommands } from './known-ts-fixes.mjs';
+import { fixWeexConditionals, fixLighterFills, fixLighterCommands, fixKrakenOutput } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
@@ -316,6 +316,40 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
 // and acknowledges retaining net-only mode; native output is never its input.
 KNOWN_TS_FIXES.lighter = { fills: fixLighterFills, commands: fixLighterCommands };
 KNOWN_TS_FIXES.woo = [];
+  // ApeX repairs are in the TS reference; output is compared without rewriting:
+  // continuous book sequences and atomic invalid depth updates; top-level ping
+  // detection avoids answering echoed ping acknowledgements; stable original
+  // payloads for legacy HMAC across form transforms; canonical hedged position
+  // IDs; failure-safe private snapshots and required row identifiers;
+  // documented realizedPnl aliases; raw-millisecond history bounds/order;
+  // one fill per genuine execution, isolated synthetic replay identity;
+  // distinct equal executions preserved in REST/WS history; exact tick splitting;
+  // both bracket siblings preserved during parent cancel/replace amendments.
+  // Price-only amendments keep the observed residual quantity; invalid/no-op
+  // amendments reject before cancellation and filled sources are not replaced.
+KNOWN_TS_FIXES.apexomni = [];
+KNOWN_TS_FIXES.kraken = {
+    output: fixKrakenOutput,
+    fixes: [
+      'TS production now retains full depth, rejects stale/gapped updates, and resubscribes for recovery; exact intermediate timestamp/hash checks stay unchanged.',
+      'Full native ticker statistics stay live; omitted relative funding resets zero instead of retaining a stale rate.',
+      'Negative instrument quantity precision is a positive power-of-ten step; TS clamps it to 0.1.',
+      'Deduplicate native execution IDs; suppress historical fills snapshots.',
+      'Use monotonic nonces beyond 1000 same-millisecond requests and clock regression.',
+      'Use documented index triggerSignal (TS sends stale spot enum).',
+      'Keep accepted settings and newer socket state across delayed reads/write ACKs.',
+      'Replace partially executed protective orders with remaining size and stop on raced fills.',
+      'Reject missing/contradictory semantic ACKs and failed/incomplete reads explicitly.',
+      'Keep exact native milliseconds for fill filters/cursors before seconds output.',
+      'Count raw ledger rows for pagination rather than mapped cash components.',
+      'One-way mode is an accepted no-op; TS inherits an unimplemented setter.',
+      'Use valid authenticated feeds and REST balance instead of invalid account_balances.',
+      'Preserve absent position margin allocation instead of TS base-store synthetic zero.',
+      'Map native post/ioc/fok orders as limits and reject unsupported opening conditional shapes before a write.',
+      'Keep initialized event-driven private feeds alive while bounding retained execution and terminal identities.',
+    ],
+  };
+
 KNOWN_TS_FIXES.asterdex = {
     // Native payload tests exercise these corrections; ordinary tapes compare
     // unchanged, including exact execution prices and economic request fields.
@@ -483,6 +517,7 @@ const fixCryptocomAccount = (account) => {
 for (let run = 0; run < runs; run++) {
   const result = { ts: results.ts[run], rust: results.rust[run] };
   const { ts, rust } = result;
+  if (values.venue === 'kraken') fixKrakenOutput(ts, tape);
   if (ts.frames !== rust.frames) differences.push(`run ${run} frames: ts=${ts.frames} rust=${rust.frames}`);
   if (values.venue === 'backpack') fixBackpack(ts);
   if (venue.family === 'orderly') fixOrderly(ts, tape);

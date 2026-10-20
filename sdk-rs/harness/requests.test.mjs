@@ -519,3 +519,25 @@ test('KuCoin topic batches and acknowledgement preferences retain exact token an
   assert.notDeepEqual(keys('/contractMarket/snapshot:A', false), keys('/contractMarket/snapshot:A', false, url, 'unsubscribe'));
   assert.deepEqual(subscriptionKeys(url, '{"type":"ping","id":1}', new Set(), venue), []);
 });
+
+test('wire body decoding preserves semantic form and multipart identity before normalization', () => {
+  const exchange='https://api.hyperliquid.xyz/exchange';
+  const options = { wireBody: (body) => typeof body === 'string' && body.includes('=')
+    ? Object.fromEntries(new URLSearchParams(body)) : body };
+  assert.equal(requestKey('POST', exchange, 'size=1&clientId=caller%2B1', new Set(), options),
+    requestKey('POST', exchange, { size: '1', clientId: 'caller+1' }, new Set(), options));
+  assert.notEqual(requestKey('POST', exchange, 'size=2&clientId=caller%2B1', new Set(), options),
+    requestKey('POST', exchange, { size: '1', clientId: 'caller+1' }, new Set(), options));
+});
+
+test('nested JSON login payloads retain credentials while clocks and validated signatures vary', () => {
+  const exchange='wss://quote.omni.apex.exchange/realtime_private?v=2';
+  const login = (timestamp, signature, apiKey = 'key') => JSON.stringify({ op: 'login', args: [JSON.stringify({
+    type: 'login', httpMethod: 'GET', requestPath: '/ws/accounts', apiKey, passphrase: 'pass', timestamp, signature,
+  })] });
+  assert.equal(subscriptionKey(exchange, login(100, 'a')), subscriptionKey(exchange, login(200, 'b')));
+  assert.notEqual(subscriptionKey(exchange, login(100, 'a')), subscriptionKey(exchange, login(100, 'a', 'other')));
+  assert.notEqual(subscriptionKey(exchange, login(100, 'a')), subscriptionKey(exchange, { op: 'login', args: [{
+    type: 'login', httpMethod: 'GET', requestPath: '/ws/accounts', apiKey: 'key', passphrase: 'pass', timestamp: 100, signature: 'a',
+  }] }));
+});

@@ -1,6 +1,9 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
+import { APEX_SEED, apexWireBody, createApexSocketAudit, prepareApexReplay, prepareApexTs, validateApexRequest, apexRequestOptions } from './apexomni-protocol.mjs';
+import { createKrakenRequestAudit, validateKrakenSocketMessage, validateKrakenSocketFrame, krakenRequestBody, krakenCommandResult } from './kraken-protocol.mjs';
+let krakenRequestAudit;
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { kucoin } from './kucoin.mjs';
 import { createRequire } from 'node:module';
@@ -516,6 +519,62 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  apexomni: {
+    rust: 'apexomni',
+    ts: { module: `${root}/apexomni/apexomni.exchange.ts`, className: 'ApexOmniExchange', name: 'apexomni' },
+    privateSocket: '/realtime_private',
+    replayCredentials: { omniKeySeed: APEX_SEED },
+    publicOptions: { passphrase: '' },
+    recordOptions: { publicDataOnly: true, key: '', secret: '' },
+    prepareReplay: prepareApexReplay,
+    prepareTs: prepareApexTs,
+    wireBody: apexWireBody,
+    requestKey: typedRequest,
+    requestOptions: apexRequestOptions,
+    matchRequestBody: true,
+    generatedId: () => false,
+    compareWriteOrder: true,
+    compareFillPrices: true,
+    compareClientIds: true,
+    subscriptionGenerations: true,
+    createSocketAudit: createApexSocketAudit,
+    validateRequest: validateApexRequest,
+    independentLeverage: true,
+    tsSettings: (_exchange, store) => store.markets.map((market) => ({
+      symbol: market.symbol,
+      marginType: 'cross',
+      buyLeverage: store.positions.find((position) => position.symbol === market.symbol && position.side === 'long')?.leverage ?? 0,
+      sellLeverage: store.positions.find((position) => position.symbol === market.symbol && position.side === 'short')?.leverage ?? 0,
+    })),
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderBook200.H.')).length >= count,
+    isWrite: (method) => method !== 'GET',
+  },
+  kraken: {
+    rust: 'kraken',
+    compareBalanceCoins:true,
+    productSubscriptions:true,
+    tsBooksReady:(exchange,store)=>Boolean(store.loaded.tickers&&exchange.publicWebsocket),
+    tsSettings:(exchange,store)=>store.markets.map(m=>{
+      const position=store.positions.find(p=>p.symbol===m.symbol&&p.contracts>0);
+      return {symbol:m.symbol,leverage:exchange.leverageSettings.get(m.symbol)??position?.leverage??m.limits.leverage.max,marginType:exchange.marginTypePreferences.get(m.symbol)??position?.marginType??'cross'};
+    }),
+    ts: {module: `${root}/kraken/kraken.exchange.ts`, className: 'KrakenExchange', name: 'kraken'},
+    replayCredentials: {key:'replay-key',secret:'cmVwbGF5LXNlY3JldA=='},
+    tsBooksSubscribed: (exchange,count) => Object.values(exchange.publicWebsocket.orderBookHandlers).filter(v=>v.length).length>=count,
+    isPrivateRecord: record=>record.type==='ws'&&/"(?:fills|open_orders|open_positions|challenge)"/.test(record.text??''),
+    initializeReplay(impl){krakenRequestAudit=createKrakenRequestAudit({strict:impl==='rust'});},
+    validateRequest: request=>krakenRequestAudit(request),
+    validateSocketMessage:validateKrakenSocketMessage,
+    validateSocketFrame:validateKrakenSocketFrame,
+    requestBody:krakenRequestBody,
+    requestKey:typedRequest,
+    commandResult:krakenCommandResult,
+    requestBodies:true,
+    compareFillPrices:true,
+    compareWriteOrder:true,
+    isWrite:method=>method!=='GET',
+  },
+
   asterdex: {
     initializeReplay: initializeAsterCrypto,
     rust: 'asterdex',

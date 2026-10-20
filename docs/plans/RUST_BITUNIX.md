@@ -1112,3 +1112,30 @@ PASS384frames/608markets/631tickers/2books: TS/Rust main145.9/76.9ms, steady
 1,258,291bytes. Rebuilt V1/V3private14frames/4commands each and3parity cases
 PASS. No reference/timing/threshold/sample changes. Checkpoint native-only
 correction before nextlanding merge.
+
+Kraken/ApeX integration source checkpoint: all1,762native tests across151groups,
+bans/fmt/strict native+WASM Clippy PASS. Host/SDK review passes216incoming
+regressions+63host checks; Kraken production full-depth and sequence recovery
+repair has5fail-before tests and12book/stats checks PASS. Full-depth snapshots
+are no longer truncated; duplicate/stale updates are ignored, gaps request a
+fresh snapshot, malformed frames preserve the last published book atomically.
+No final-book reconstruction oracle remains. ActualTSpublic replay has9,641
+frames/32book events and fullBTC1693/1502,ETH647/612levels.
+
+Harness389helpers PASS. ActualTSprivate Kraken49frames/13commands/11writes
+andApeX50frames/23commands PASS with zero transport/auth/protocol errors.
+Review fixed actualsocket readiness, route/type-valid generated IDs, Kraken
+nonce commit after validHMAC, signed-body validation before typed matching,
+and complete replayOptions forwarding (ApeX omniKeySeed) to real constructors.
+Root typecheck/lint and independent adversarial review are running; new
+per-venue artifact/public/private gates remain required before readiness.
+
+Final independent Kraken/ApeX review found two bounded P2 response aliases:
+ApeX JSON bytes labeled as form data could normalize into a recorded form
+request, and Kraken batch JSON unwrapping dropped extra outer form fields.
+Both now reject before response consumption; actual production-Tape probes
+verify malformed correctly signed writes leave the ACK available, then the
+valid write consumes once.391helpers and6independent production constructor/
+socket/credential regressions PASS; remaining review clear/diminishing returns.
+Root44typecheck/28lint tasks PASS. Kraken release module885,370bytes built;
+public/private artifact gates next, thenApeX.
