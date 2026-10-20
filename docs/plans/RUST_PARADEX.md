@@ -307,3 +307,42 @@ findings will be posted as PR comments and addressed before merging on green CI.
   caught the optional TS signing-module import inside the CPU timer; it now runs
   before CPU sampling, like WASM initialization, while remaining inside the early
   retained-memory baseline. Both binary ingress and all signature checks remain.
+
+### Explicit observation horizon and final merged checkpoint
+
+The Bybit landing merge exposed a private-tape timing dependency: terminal UI
+rows remain until the existing debounced REST reconciliation runs. Earlier GC
+sampling happened to provide that delay. A generic `wait` record now advances
+paced/virtual time to an explicit final observation horizon without making a
+request, locating a socket or executing a command. Paradex waits 1,500ms after
+its final recorded event. Inputs and financial outputs are unchanged; neither
+runtime's terminal behavior is filtered or rewritten. The marker counts as one
+frame in both replays. Independent review and three timer/bypass/validation
+regressions pass.
+
+Final single-venue artifact and wait-final replay gates pass against the merged
+source based on `a7330dc0b1`:
+
+| Gate | Result |
+| --- | --- |
+| Native Paradex tests | 105 PASS |
+| Replay harness | 247 PASS |
+| Workspace/ WASM Clippy; bans; format | PASS |
+| Repository typecheck / lint | 44 / 28 tasks PASS |
+| Single Paradex WASM, web and Node | 1,234,198 bytes; unchanged budget 1,258,291 |
+| Public replay, three runs | PASS: 12,261 frames, 66 markets/tickers, two full-depth books |
+| Public main-thread CPU, TS / Rust | 1,007.816ms / 779.891ms (1.29x) |
+| Public steady CPU, TS / Rust | 573.4ms / 373.8ms (1.53x) |
+| Public retained memory, TS / Rust | 21,785,193 / 2,056,788 bytes (10.59x) |
+| Private replay | PASS: 15 commands, 33 frames including the observation marker |
+
+The public book comparison retains BTC's 113 bids/71 asks and ETH's 107 bids/34
+asks. Private performance remains informational: main-thread CPU TS 600.751ms /
+Rust 359.710ms; retained memory 42,522,561 / 7,417,683 bytes. The landing's early
+retained-memory baseline now includes loaded runtime code; these measurements
+use that shared baseline and unchanged pass thresholds.
+
+All 21 Rust CI checks passed on `a7330dc0b1` before this observation-horizon fix.
+The new commit requires fresh green CI. The default combined WASM build, full
+host suite and Binance public/private regression gates are the remaining local
+follow-ups; their earlier checkpoint results do not replace those reruns.

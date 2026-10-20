@@ -219,7 +219,9 @@ export class Tape {
     this.publicTickers = this.venue.publicTickers?.(this.records) ?? [];
     this.audit = this.venue.createSocketAudit?.(impl, { isPrivate: this.isPrivate, books: this.bookSymbols, tickers: this.publicTickers });
     this.responses = new Responses(this.records, this.keyFor, this.venue.checkRequest, (method, url) => this.venue.isWrite?.(method, url) ?? isWriteRequest(method, url), true, impl);
-    this.frames = this.records.filter((r) => (r.type === 'ws' || r.type === 'command' || r.type === 'close' || r.type === 'open') && !this.venue.skipFrame?.(r));
+    this.frames = this.records.filter((r) => (r.type === 'ws' || r.type === 'command' || r.type === 'close' || r.type === 'open' || r.type === 'wait') && !this.venue.skipFrame?.(r));
+    if (this.frames.some((frame) => frame.type === 'wait' && (!Number.isFinite(frame.t) || frame.t < 0)))
+      throw new Error('Invalid replay wait timestamp');
     this.lifecycleStreams = new Map();
     this.lifecycleSockets = new Map();
     if (this.venue.subscriptionRouting) for (const frame of this.frames) {
@@ -698,7 +700,7 @@ export class Tape {
    * waits until its time after the account is ready.
    */
   async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
-    const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
+    const urls = [...new Set(this.frames.filter((f) => f.url && f.type !== 'wait').map((f) => f.url))];
     const startupDeadline = performance.now() + this.timeoutMs;
     await within(
       (async () => {
@@ -746,6 +748,8 @@ export class Tape {
             },
           ),
         );
+      } else if (frame.type === 'wait') {
+        // Observe timers at this explicit horizon without inventing socket traffic.
       } else if (this.bitget) {
         await this.deliverFrame(frame);
       } else {

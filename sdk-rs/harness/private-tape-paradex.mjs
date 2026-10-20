@@ -110,6 +110,8 @@ for (const name of ['order-v2', 'fill-v2', 'position-short', 'account-v2']) {
     records.at(-1).availableAfter = time;
   }
 }
+// Observe the final state after the venue's one-second order reconciliation.
+records.push({ type: 'wait', t: time + 1500 });
 records.sort((a, b) => a.t - b.t);
 mkdirSync(dirname(values.out), { recursive: true });
 writeFileSync(values.out, records.map(JSON.stringify).join('\n') + '\n');
