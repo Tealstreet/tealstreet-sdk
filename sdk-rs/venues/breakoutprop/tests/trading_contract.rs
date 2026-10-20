@@ -669,6 +669,7 @@ fn public_only_and_fixed_account_setting_writes_fail_without_requests() {
             command: 1,
             symbol: "ETHUSD".into(),
             leverage: 5.0,
+            side: None,
         },
         Command::SetMarginType {
             command: 2,
@@ -678,6 +679,7 @@ fn public_only_and_fixed_account_setting_writes_fail_without_requests() {
         Command::SetPositionMode {
             command: 3,
             hedged: false,
+            symbol: None,
         },
     ] {
         private.command(command);

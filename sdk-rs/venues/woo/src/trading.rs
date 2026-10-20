@@ -861,6 +861,7 @@ impl Woo {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => {
                 let planned = cx
                     .store
@@ -907,7 +908,11 @@ impl Woo {
                 };
                 (command, planned)
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 let revision = self.account_revision("$mode");
                 (
                     command,

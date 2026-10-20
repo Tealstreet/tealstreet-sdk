@@ -848,7 +848,7 @@ impl Orderly {
                         self.selected_mode(cx, &symbol),
                     )
                 };
-                let value = num::round_half_up(leverage.clamp(lo, hi));
+                let value = num::round_half_up(num::clamp_leverage(leverage, lo, hi)?);
                 #[derive(Serialize)]
                 struct Set<'a> {
                     leverage: f64,
@@ -1370,8 +1370,18 @@ impl Orderly {
                                 .entry((s.clone(), true))
                                 .or_insert(previous);
                             let m = cx.store.market(&s).unwrap();
-                            let effective =
-                                value.clamp(m.limits.leverage.min, m.limits.leverage.max);
+                            let effective = match num::clamp_leverage(
+                                *value,
+                                m.limits.leverage.min,
+                                m.limits.leverage.max,
+                            ) {
+                                Ok(effective) => effective,
+                                Err(_) => {
+                                    // The account write succeeded independently of market metadata.
+                                    cx.log(LogLevel::Warning, format!("Orderly invalid leverage limits for {s}; using confirmed account leverage"));
+                                    *value
+                                }
+                            };
                             self.account.leverage.insert((s.clone(), false), effective);
                             self.sync_setting(cx, &s);
                         }

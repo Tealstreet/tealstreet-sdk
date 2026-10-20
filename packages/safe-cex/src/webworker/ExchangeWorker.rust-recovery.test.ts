@@ -469,8 +469,12 @@ describe('Rust worker engine ownership', () => {
     const { worker, messages } = createWorker();
     await start(worker);
     worker.handlePayload({ op: 'exec', data: { reqId: 'accepted', command: 'fixture' } });
+    const original = worker.exchange as RustEngineExchange;
     sources[0].trap = true;
-    expect(() => (worker.exchange as RustEngineExchange).snapshotFrame()).toThrow();
+    // The pre-snapshot flush contains the trap and disposes the host before the read.
+    expect(original.snapshotFrame()).toBeUndefined();
+    expect(original.isEngineDead).toBe(true);
+    expect(original.isDisposed).toBe(true);
     await vi.advanceTimersByTimeAsync(1000);
     const replies = messages.filter((message) => message.op === 'exec-result' && message.data[0].reqId === 'accepted');
     expect(replies).toHaveLength(1);

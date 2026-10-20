@@ -1612,7 +1612,7 @@ pub(crate) fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountRe
     }
 }
 impl Woo {
-    fn account_auth(&self, pending: &Pending, response: &Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
+    pub(crate) fn account_auth(&self, pending: &Pending, response: &Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
         use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
         auth_scope(pending)?;
         let Pending::Account(r) = pending else { return None };

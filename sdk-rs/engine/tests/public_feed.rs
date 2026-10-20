@@ -67,6 +67,7 @@ impl Venue for Feeds {
                 bid: 456.,
                 ask: 458.,
                 last: 457.,
+                mid_price: Some(457.5),
                 ..Default::default()
             }]);
             cx.store.set_balance(Balance {
@@ -332,6 +333,81 @@ fn typed_ingest_uses_native_symbols_ids_metadata_settings_and_private_state() {
         .unwrap();
     assert_eq!(engine.store().ticker("A").unwrap().ask, 101.);
     assert_eq!(engine.store().ticker("A").unwrap().bid, 100.);
+}
+
+#[test]
+fn shared_midpoint_add_change_clear_and_omission_preserve_native_last() {
+    let mut engine = shared();
+    engine.take_frame(0.);
+    engine.apply_public_feed(1., update(
+        r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","last":100,"midPrice":101.25}]}"#,
+    )).unwrap();
+    assert_eq!(engine.store().ticker("A").unwrap().last, 100.);
+    assert_eq!(engine.store().ticker("A").unwrap().mid_price, Some(101.25));
+    engine.handle(
+        2.,
+        Event::WsMessage {
+            socket: SocketId(999),
+            text: "poll",
+        },
+    );
+    assert_eq!(engine.store().ticker("A").unwrap().mid_price, Some(101.25));
+    engine
+        .apply_public_feed(
+            3.,
+            update(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","bid":99}]}"#),
+        )
+        .unwrap();
+    assert_eq!(engine.store().ticker("A").unwrap().mid_price, Some(101.25));
+    engine
+        .apply_public_feed(
+            4.,
+            update(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","midPrice":102.5}]}"#),
+        )
+        .unwrap();
+    assert_eq!(engine.store().ticker("A").unwrap().last, 100.);
+    assert_eq!(engine.store().ticker("A").unwrap().mid_price, Some(102.5));
+    engine
+        .apply_public_feed(
+            5.,
+            update(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","midPrice":null}]}"#),
+        )
+        .unwrap();
+    assert_eq!(engine.store().ticker("A").unwrap().mid_price, None);
+    engine
+        .apply_public_feed(
+            6.,
+            update(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","ask":105}]}"#),
+        )
+        .unwrap();
+    assert_eq!(engine.store().ticker("A").unwrap().mid_price, None);
+    engine.handle(
+        7.,
+        Event::WsMessage {
+            socket: SocketId(999),
+            text: "poll",
+        },
+    );
+    assert_eq!(engine.store().ticker("A").unwrap().mid_price, None);
+    assert_eq!(engine.store().ticker("A").unwrap().last, 100.);
+}
+
+#[test]
+fn shared_midpoint_rejects_nonfinite_and_nonnumeric_json_values() {
+    for value in [
+        "1e400",
+        "-1e400",
+        "\"NaN\"",
+        "\"Infinity\"",
+        "true",
+        "{}",
+        "[]",
+    ] {
+        let json = format!(
+            r#"{{"op":"publicFeedUpdate","tickers":[{{"symbol":"A","midPrice":{value}}}]}}"#
+        );
+        assert!(decode_host_input(&json).is_err(), "{json}");
+    }
 }
 
 #[test]

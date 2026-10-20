@@ -48,3 +48,63 @@ test('Rust BOOK_DELTA reconstructs two full 1,000-level books through FrameAppli
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('Rust revised sections preserve native fields and identity through the SDK', async (t) => {
+  const result = spawnSync('cargo', ['run', '--quiet', '--locked', '--manifest-path',
+    'sdk-rs/Cargo.toml', '-p', 'safe-cex-engine', '--example', 'wire_contract_frames'],
+  { encoding: 'utf8', timeout: 120_000 });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+  const fixtures = JSON.parse(result.stdout);
+  const read = (name) => {
+    const bytes = Uint8Array.from(Buffer.from(fixtures[name], 'hex'));
+    return new Frame(bytes.buffer);
+  };
+  const store = new DefaultStore();
+  const applier = new FrameApplier(store);
+  const initial = read('initial');
+  applier.apply(initial);
+  await t.test('H2: display symbols retain native, empty and absent values', () => {
+    assert.equal(store.markets[0].prettySymbol, 'Native A / USD');
+    assert.equal(store.markets[1].prettySymbol, '');
+    assert.equal(store.markets[2].prettySymbol, undefined);
+  });
+  await t.test('H3: orphan orders, positions, executions and settings retain symbols', () => {
+    assert.deepEqual(store.orders.map((row) => row.symbol), ['A', 'ORPHAN']);
+    assert.deepEqual(store.positions.map((row) => row.symbol), ['A', 'ORPHAN']);
+    assert.deepEqual(applier.fills(initial).map((row) => [row.orderId, row.symbol, row.amount]),
+      [['tracked-order', 'A', 0.25], ['orphan-order', 'ORPHAN', 0.25]]);
+    assert.equal(store.fetchedLeverage.ORPHAN.buyLeverage, 11);
+    assert.equal(store.marketsBySymbol.ORPHAN, undefined);
+  });
+  await t.test('M3: native order extras and independent bracket triggers survive', () => {
+    assert.equal(store.orders[0].tpTriggerType, 'index_price');
+    assert.equal(store.orders[0].slTriggerType, 'last_price');
+    assert.equal(store.orders[0].extra.remainingNative, 7);
+    assert.equal(store.orders[0].extra.filledInPlacementUnits, 3);
+    assert.equal(store.orders[0].extra.remainingNotional, 42);
+    assert.equal(store.orders[0].extra.conditionalOrderPrice, 125);
+    assert.equal(store.orders[1].extra, undefined);
+  });
+  await t.test('M3: midpoint snapshots, deltas and clearing preserve absence', () => {
+    assert.equal(store.tickers[0].midPrice, 101.25);
+    assert.equal('midPrice' in store.tickers[1], false);
+    applier.apply(read('deltaMid'));
+    assert.equal(store.tickers[0].midPrice, 102.5);
+    applier.apply(read('clearMid'));
+    assert.equal('midPrice' in store.tickers[0], false);
+  });
+  await t.test('M1: market reorder preserves settings and queues market-flush rows', () => {
+    const reordered = read('reordered');
+    applier.apply(reordered);
+    assert.deepEqual(store.markets.map((row) => row.symbol), ['B', 'A']);
+    assert.deepEqual([store.fetchedLeverage.A.buyLeverage, store.fetchedLeverage.A.sellLeverage,
+      store.fetchedLeverage.B.buyLeverage, store.fetchedLeverage.ORPHAN.buyLeverage], [6, 7, 9, 11]);
+    assert.deepEqual(store.orders.map((row) => row.symbol), ['A', 'ORPHAN']);
+    assert.deepEqual(applier.fills(reordered).map((row) => row.symbol), ['A', 'ORPHAN']);
+    assert.equal(applier.candles(reordered)[0].symbol, 'A');
+    assert.equal(applier.books(reordered)[0].symbol, 'A');
+    const resumed = read('resumed');
+    applier.apply(resumed);
+    assert.deepEqual(applier.fills(resumed).map((row) => row.symbol), ['A', 'ORPHAN']);
+  });
+});

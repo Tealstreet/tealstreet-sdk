@@ -1413,7 +1413,7 @@ pub(crate) fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountRe
     Some(match r { Request::Config => Settings, Request::Balance { .. } => Balance, Request::Positions { .. } => Positions, Request::Orders { .. } => Orders })
 }
 impl Okx {
-    fn account_auth(&self, pending: &Pending, response: &Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
+    pub(crate) fn account_auth(&self, pending: &Pending, response: &Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
         use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
         let Pending::Account(r) = pending else { return None };
         if !self.account_request_current(r) { return None; }

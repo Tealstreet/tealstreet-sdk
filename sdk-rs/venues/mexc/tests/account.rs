@@ -287,6 +287,7 @@ fn metadata_read_cannot_be_overwritten_by_older_mutation_ack() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 30.0,
+            side: None,
         }),
     );
     let mutation = requests(&mut e).remove(0);
@@ -832,7 +833,19 @@ fn deal_financials_preserve_optional_zero_profit_precedence_and_execution_dedup(
         .unwrap()
         .1;
     assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 5);
-    assert_eq!(payload.len(), 224);
+    assert_eq!(payload.len(), 248);
+    let symbol_refs: Vec<_> = payload[144..164]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|value| u32::from_le_bytes(*value))
+        .collect();
+    assert_eq!(symbol_refs.len(), 5);
+    assert!(
+        symbol_refs
+            .iter()
+            .all(|value| *value != u32::MAX && *value == symbol_refs[0])
+    );
     let value = |at| f64::from_le_bytes(payload[at..at + 8].try_into().unwrap());
     for row in 0..5 {
         assert_eq!(
@@ -840,16 +853,16 @@ fn deal_financials_preserve_optional_zero_profit_precedence_and_execution_dedup(
             [65000., 0.001]
         );
     }
-    assert!(value(144).is_nan());
-    assert_eq!([value(152), value(160)], [0., -2.]);
+    assert!(value(168).is_nan());
+    assert_eq!([value(176), value(184)], [0., -2.]);
     assert!(
-        value(168).is_nan(),
+        value(192).is_nan(),
         "malformed metadata cannot discard a valid fill"
     );
-    assert_eq!(value(176), 5.);
-    assert!(value(184).is_nan());
-    assert_eq!([value(192), value(200)], [0.2, 0.]);
+    assert_eq!(value(200), 5.);
     assert!(value(208).is_nan());
-    assert!(value(216).is_nan());
+    assert_eq!([value(216), value(224)], [0.2, 0.]);
+    assert!(value(232).is_nan());
+    assert!(value(240).is_nan());
     assert!(e.take_market_frame(200.).is_none());
 }

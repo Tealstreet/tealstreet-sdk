@@ -17,6 +17,7 @@ pub enum Request {
     Probe,
     Positions {
         rows: Vec<Position>,
+        unmapped: bool,
         coins: std::collections::VecDeque<String>,
         started: f64,
         invalid: bool,
@@ -40,6 +41,7 @@ pub struct OrderSnapshot {
     pages: u32,
     page_count: usize,
     rows: Vec<Order>,
+    unmapped: bool,
     plans: Vec<(String, String)>,
     trailing: Vec<(String, (String, f64))>,
     started: f64,
@@ -378,6 +380,7 @@ impl BitgetFutures {
             Some(at),
             Request::Positions {
                 rows: vec![],
+                unmapped: false,
                 coins,
                 started: cx.now,
                 invalid: false,
@@ -434,6 +437,7 @@ impl BitgetFutures {
                 pages: 0,
                 page_count: 0,
                 rows: vec![],
+                unmapped: false,
                 plans: vec![],
                 trailing: vec![],
                 started: cx.now,
@@ -502,13 +506,28 @@ impl BitgetFutures {
         item: &str,
     ) {
         match request {
-            Request::Positions { rows, invalid, .. } => {
+            Request::Positions {
+                rows,
+                invalid,
+                unmapped,
+                ..
+            } => {
                 match serde_json::from_str::<PositionRow>(item)
                     .map_err(|e| e.to_string())
                     .and_then(|row| self.map_position(cx, &row))
                 {
                     Ok(p) => rows.push(p),
-                    Err(_) => *invalid = true,
+                    Err(error) => {
+                        if serde_json::from_str::<PositionRow>(item).is_err() {
+                            *invalid = true;
+                        } else {
+                            *unmapped = true;
+                        }
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("skipped Bitget position record: {error}"),
+                        );
+                    }
                 }
             }
             Request::Balance {
@@ -569,7 +588,17 @@ impl BitgetFutures {
                         Ok(orders)
                     }) {
                     Ok(orders) => snapshot.rows.extend(orders),
-                    Err(_) => snapshot.invalid = true,
+                    Err(error) => {
+                        if serde_json::from_str::<OrderRow>(item).is_err() {
+                            snapshot.invalid = true;
+                        } else {
+                            snapshot.unmapped = true;
+                        }
+                        cx.log(
+                            LogLevel::Warning,
+                            format!("skipped Bitget order record: {error}"),
+                        );
+                    }
                 }
             }
             _ => {}
@@ -646,6 +675,7 @@ impl BitgetFutures {
         match request {
             Request::Positions {
                 rows,
+                unmapped,
                 mut coins,
                 started,
                 invalid: false,
@@ -662,6 +692,7 @@ impl BitgetFutures {
                         Some(ArrayAt::Envelope(&[&["data"]])),
                         Request::Positions {
                             rows,
+                            unmapped,
                             coins,
                             started,
                             invalid: false,
@@ -670,6 +701,11 @@ impl BitgetFutures {
                     return;
                 }
                 self.account.positions_in_flight = false;
+                // A truly empty list clears positions. An entirely unmappable
+                // list cannot establish that the account is flat.
+                if rows.is_empty() && unmapped {
+                    return;
+                }
                 let rows = self.merge_positions(cx, rows, started);
                 for p in &rows {
                     self.position_setting(cx, p);
@@ -767,6 +803,11 @@ impl BitgetFutures {
                     self.order_page(cx, snapshot);
                 } else {
                     self.account.orders_in_flight = false;
+                    // Preserve known state when no row in a nonempty snapshot
+                    // could map; a successful empty list remains authoritative.
+                    if snapshot.rows.is_empty() && snapshot.unmapped {
+                        return;
+                    }
                     for (id, state) in snapshot.trailing {
                         let newer = self.order_revision(&id) > snapshot.stream_revision
                             || self
@@ -866,22 +907,33 @@ impl BitgetFutures {
             if !row.category.is_empty() && !row.category.eq_ignore_ascii_case(self.product()) {
                 continue;
             }
-            let leverage = first(&[
-                row.long_leverage,
-                row.leverage,
-                row.short_leverage,
-                row.crossed_margin_leverage,
-                row.isolated_long_lever,
-                row.isolated_short_lever,
-            ])
-            .unwrap_or(1.0);
             let margin = margin(&row.margin_mode);
             if !row.pos_mode.is_empty() {
                 cx.store.set_hedged(is_hedged(&row.pos_mode));
             }
+            let per_side = cx.store.hedged() && margin == MarginType::Isolated;
+            let long = first(&[row.long_leverage, row.isolated_long_lever]);
+            let short = first(&[row.short_leverage, row.isolated_short_lever]);
+            let common = first(&[row.leverage, row.crossed_margin_leverage]);
+            let leverage = if per_side {
+                long.or(common).or(short)
+            } else {
+                common.or(long).or(short)
+            }
+            .unwrap_or(1.0);
             cx.store.update_setting(&row.symbol, |s| {
                 s.leverage = leverage;
                 s.margin_type = Some(margin);
+                if per_side {
+                    // A scalar fallback says nothing about the opposite hedge
+                    // leg. Preserve a known leg if this row omits its value.
+                    s.buy_leverage = long.or(s.buy_leverage).or(common);
+                    s.sell_leverage = short.or(s.sell_leverage).or(common);
+                    s.leverage = s.buy_leverage.unwrap_or(leverage);
+                } else {
+                    s.buy_leverage = Some(leverage);
+                    s.sell_leverage = Some(leverage);
+                }
             });
         }
     }
@@ -890,8 +942,30 @@ impl BitgetFutures {
         cx.store
             .set_hedged(p.position_mode == Some(PositionMode::Hedged));
         cx.store.update_setting(&p.symbol, |s| {
-            s.leverage = p.leverage;
             s.margin_type = p.margin_type;
+            if p.position_mode == Some(PositionMode::Hedged)
+                && p.margin_type == Some(MarginType::Isolated)
+            {
+                match p.side {
+                    PositionSide::Long => {
+                        s.leverage = p.leverage;
+                        s.buy_leverage = Some(p.leverage);
+                    }
+                    PositionSide::Short => {
+                        s.sell_leverage = Some(p.leverage);
+                        // A short row must not rewrite a known long scalar.
+                        if let Some(long) = s.buy_leverage {
+                            s.leverage = long;
+                        } else if !s.leverage.is_finite() {
+                            s.leverage = p.leverage;
+                        }
+                    }
+                }
+            } else {
+                s.leverage = p.leverage;
+                s.buy_leverage = Some(p.leverage);
+                s.sell_leverage = Some(p.leverage);
+            }
         });
     }
 
@@ -905,47 +979,57 @@ impl BitgetFutures {
             .account
             .full_positions_at
             .is_some_and(|at| started - at <= 5_000.0);
-        let mut rows: Vec<_> =
-            rows.into_iter()
-                .filter_map(|mut p| {
-                    if self.account.config_at.is_some_and(|at| started <= at) {
-                        if let Some(settings) = cx.store.setting(&p.symbol) {
-                            if let Some(current) = cx.store.positions().iter().find(|current| {
-                                current.symbol == p.symbol && current.side == p.side
+        let mut rows: Vec<_> = rows
+            .into_iter()
+            .filter_map(|mut p| {
+                if self.account.config_at.is_some_and(|at| started <= at) {
+                    if let Some(settings) = cx.store.setting(&p.symbol) {
+                        if cx.store.hedged() && settings.margin_type == Some(MarginType::Isolated) {
+                            let leverage = match p.side {
+                                PositionSide::Long => settings.buy_leverage,
+                                PositionSide::Short => settings.sell_leverage,
+                            };
+                            if let Some(leverage) = leverage.or_else(|| {
+                                cx.store
+                                    .positions()
+                                    .iter()
+                                    .find(|current| {
+                                        current.symbol == p.symbol && current.side == p.side
+                                    })
+                                    .map(|current| current.leverage)
                             }) {
-                                p.leverage = current.leverage;
-                            } else if !cx.store.hedged()
-                                || settings.margin_type != Some(MarginType::Isolated)
-                            {
-                                p.leverage = settings.leverage;
+                                p.leverage = leverage;
                             }
-                            p.margin_type = settings.margin_type;
-                        }
-                        p.position_mode = Some(if cx.store.hedged() {
-                            PositionMode::Hedged
                         } else {
-                            PositionMode::Oneway
-                        });
-                    }
-                    if full_fresh && !self.account.full_position_ids.contains(&p.id) {
-                        return None;
-                    }
-                    if let Some(mark) = self.account.ws_positions.get(&p.id)
-                        && started - mark.at <= 5_000.0
-                    {
-                        let current = cx.store.position(&p.id);
-                        if mark.at >= started
-                            || p.last_update.is_none()
-                            || mark
-                                .update
-                                .is_some_and(|t| p.last_update.is_some_and(|r| t > r))
-                        {
-                            return current.cloned();
+                            p.leverage = settings.leverage;
                         }
+                        p.margin_type = settings.margin_type;
                     }
-                    Some(p)
-                })
-                .collect();
+                    p.position_mode = Some(if cx.store.hedged() {
+                        PositionMode::Hedged
+                    } else {
+                        PositionMode::Oneway
+                    });
+                }
+                if full_fresh && !self.account.full_position_ids.contains(&p.id) {
+                    return None;
+                }
+                if let Some(mark) = self.account.ws_positions.get(&p.id)
+                    && started - mark.at <= 5_000.0
+                {
+                    let current = cx.store.position(&p.id);
+                    if mark.at >= started
+                        || p.last_update.is_none()
+                        || mark
+                            .update
+                            .is_some_and(|t| p.last_update.is_some_and(|r| t > r))
+                    {
+                        return current.cloned();
+                    }
+                }
+                Some(p)
+            })
+            .collect();
         for current in cx.store.positions() {
             if !rows.iter().any(|p| p.id == current.id)
                 && self
@@ -1154,24 +1238,29 @@ impl BitgetFutures {
                 let Some(rows) = message.data else {
                     return;
                 };
-                let mapped: Result<Vec<_>, _> =
-                    rows.iter()
-                        .filter(|r| {
-                            !self.account.uta
-                                || ((r.margin_coin.is_empty() || r.margin_coin == self.coin())
-                                    && cx
-                                        .store
-                                        .market(&self.normalized_symbol(first_text(&[
-                                            &r.inst_id, &r.symbol,
-                                        ])))
-                                        .is_some())
-                        })
-                        .map(|r| self.map_position(cx, r))
-                        .collect();
-                let Ok(positions) = mapped else {
-                    cx.log(LogLevel::Warning, "invalid Bitget position stream record");
+                let mut positions = Vec::with_capacity(rows.len());
+                let mut unmapped = false;
+                for row in rows {
+                    if self.account.uta
+                        && !row.margin_coin.is_empty()
+                        && row.margin_coin != self.coin()
+                    {
+                        continue;
+                    }
+                    match self.map_position(cx, &row) {
+                        Ok(position) => positions.push(position),
+                        Err(error) => {
+                            unmapped = true;
+                            cx.log(
+                                LogLevel::Warning,
+                                format!("skipped Bitget position stream record: {error}"),
+                            );
+                        }
+                    }
+                }
+                if positions.is_empty() && unmapped {
                     return;
-                };
+                }
                 if message.action == "snapshot" {
                     self.account.full_positions_at = Some(cx.now);
                     self.account.full_position_ids = positions
@@ -1573,15 +1662,30 @@ impl BitgetFutures {
         }
         if self.account.positions_timer == Some(timer) {
             self.account.positions_timer = None;
-            self.refresh_positions(cx);
+            if self.account.positions_in_flight || cx.now < self.account.rest_paused_until {
+                let delay = (self.account.rest_paused_until - cx.now).max(100.0);
+                self.account.positions_timer = Some(cx.set_timer(delay));
+            } else {
+                self.refresh_positions(cx);
+            }
         }
         if self.account.balance_timer == Some(timer) {
             self.account.balance_timer = None;
-            self.refresh_balance(cx);
+            if self.account.balance_in_flight || cx.now < self.account.rest_paused_until {
+                let delay = (self.account.rest_paused_until - cx.now).max(100.0);
+                self.account.balance_timer = Some(cx.set_timer(delay));
+            } else {
+                self.refresh_balance(cx);
+            }
         }
         if self.account.orders_timer == Some(timer) {
             self.account.orders_timer = None;
-            self.refresh_orders(cx, false);
+            if self.account.orders_in_flight || cx.now < self.account.rest_paused_until {
+                let delay = (self.account.rest_paused_until - cx.now).max(100.0);
+                self.account.orders_timer = Some(cx.set_timer(delay));
+            } else {
+                self.refresh_orders(cx, false);
+            }
         }
     }
 

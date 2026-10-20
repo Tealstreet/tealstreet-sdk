@@ -555,6 +555,7 @@ fn a_successful_rest_setting_fences_older_state_mode_before_publishing_hedge_rai
             command: 992,
             symbol: "BTC-USDC".into(),
             leverage: 10.0,
+            side: None,
         }),
     );
     let actions = e.drain_actions().collect::<Vec<_>>();

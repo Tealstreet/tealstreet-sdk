@@ -241,6 +241,7 @@ impl AsterDex {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => {
                 let plan = cx
                     .store
@@ -283,7 +284,11 @@ impl AsterDex {
                     )),
                 )
             }
-            Command::SetPositionMode { command, hedged } => (
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => (
                 command,
                 Ok(single(
                     Method::Post,

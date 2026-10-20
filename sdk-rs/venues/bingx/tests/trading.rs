@@ -498,20 +498,100 @@ fn trigger_replacement_stops_when_cancel_fails() {
     assert!(h.done[0].is_err());
 }
 #[test]
-fn hedged_leverage_updates_both_sides_sequentially() {
+fn hedged_leverage_requires_side_without_sending_a_write() {
     let mut h = Harness::new(None);
     h.engine.store_mut().set_hedged(true);
     h.command(Command::SetLeverage {
         command: 1,
         symbol: "BTCUSDT".into(),
         leverage: 20.0,
+        side: None,
     });
-    assert!(h.body().contains("\"side\":\"LONG\""));
-    h.reply(r#"{"code":0,"data":{}}"#);
-    assert!(h.body().contains("\"side\":\"SHORT\""));
-    assert!(h.engine.store().setting("BTCUSDT").is_none());
-    h.reply(r#"{"code":0,"data":{}}"#);
-    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 20.0);
+    assert!(h.requests.is_empty());
+    assert!(h.done[0].as_ref().unwrap_err().contains("Side is required"));
+}
+
+#[test]
+fn side_leverage_updates_only_the_acknowledged_leg_and_oneway_uses_both() {
+    for (hedged, side, native) in [
+        (true, PositionSide::Long, "LONG"),
+        (true, PositionSide::Short, "SHORT"),
+        (false, PositionSide::Short, "BOTH"),
+    ] {
+        let mut h = Harness::new(None);
+        h.engine.store_mut().set_hedged(hedged);
+        h.engine.store_mut().update_setting("BTCUSDT", |s| {
+            s.leverage = 5.0;
+            s.buy_leverage = Some(5.0);
+            s.sell_leverage = Some(7.0);
+        });
+        let mut long = position();
+        long.leverage = 5.0;
+        long.side = PositionSide::Long;
+        let mut short = long.clone();
+        short.leverage = 7.0;
+        short.side = PositionSide::Short;
+        h.engine.store_mut().set_positions(vec![long, short]);
+        h.command(Command::SetLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            leverage: 20.0,
+            side: Some(side),
+        });
+        assert!(h.body().contains(&format!("\"side\":\"{native}\"")));
+        h.reply(r#"{"code":0,"data":{}}"#);
+        assert!(h.requests.is_empty());
+        let setting = h.engine.store().setting("BTCUSDT").unwrap();
+        assert_eq!(
+            setting.buy_leverage,
+            Some(if !hedged || side == PositionSide::Long {
+                20.0
+            } else {
+                5.0
+            })
+        );
+        assert_eq!(
+            setting.sell_leverage,
+            Some(if !hedged || side == PositionSide::Short {
+                20.0
+            } else {
+                7.0
+            })
+        );
+        for p in h.engine.store().positions() {
+            assert_eq!(
+                p.leverage,
+                if !hedged || p.side == side {
+                    20.0
+                } else if p.side == PositionSide::Long {
+                    5.0
+                } else {
+                    7.0
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn rejected_side_leverage_preserves_both_rails() {
+    let mut h = Harness::new(None);
+    h.engine.store_mut().set_hedged(true);
+    h.engine.store_mut().update_setting("BTCUSDT", |s| {
+        s.leverage = 5.0;
+        s.buy_leverage = Some(5.0);
+        s.sell_leverage = Some(7.0);
+    });
+    let before = h.engine.store().setting("BTCUSDT");
+    h.command(Command::SetLeverage {
+        command: 1,
+        symbol: "BTCUSDT".into(),
+        leverage: 20.0,
+        side: Some(PositionSide::Short),
+    });
+    h.failed();
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+    assert!(h.done[0].is_err());
 }
 
 #[test]

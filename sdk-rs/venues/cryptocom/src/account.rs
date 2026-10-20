@@ -721,7 +721,7 @@ impl Cryptocom {
 }
 
 impl Cryptocom {
-    fn account_auth(&self, pending: &Pending, response: &safe_cex_engine::Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
+    pub(crate) fn account_auth(&self, pending: &Pending, response: &safe_cex_engine::Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
         use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
         let Pending::Account(r) = pending else { return None };
         let e: crate::wire::RestEnvelope<'_> = serde_json::from_str(response.body).ok()?;

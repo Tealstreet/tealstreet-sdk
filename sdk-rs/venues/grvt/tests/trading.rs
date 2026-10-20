@@ -422,6 +422,7 @@ fn retired_product_identities_reject_every_symbol_write_without_touching_perpetu
                     command: 35,
                     symbol,
                     leverage: 5.,
+                    side: None,
                 },
             ] {
                 let actions = command(&mut e, request);
@@ -915,6 +916,7 @@ fn leverage_changes_only_on_explicit_success() {
                 command: 11,
                 symbol: "BTC_USDT_PERP".into(),
                 leverage: 20.,
+                side: None,
             },
         ),
         "set_initial_leverage",
@@ -932,6 +934,7 @@ fn leverage_changes_only_on_explicit_success() {
                 command: 12,
                 symbol: "BTC_USDT_PERP".into(),
                 leverage: 20.,
+                side: None,
             },
         ),
         "set_initial_leverage",
@@ -1139,6 +1142,7 @@ fn old_leverage_read_cannot_overwrite_a_successful_mutation() {
                 command: 21,
                 symbol: "BTC_USDT_PERP".into(),
                 leverage: 20.,
+                side: None,
             },
         ),
         "set_initial_leverage",

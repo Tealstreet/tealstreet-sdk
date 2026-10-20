@@ -1036,8 +1036,11 @@ impl Blofin {
                 } => {
                     positive(leverage, "leverage")?;
                     let market = cx.store.market(&symbol).ok_or("Unknown leverage market")?;
-                    let leverage =
-                        leverage.clamp(market.limits.leverage.min, market.limits.leverage.max);
+                    let leverage = num::clamp_leverage(
+                        leverage,
+                        market.limits.leverage.min,
+                        market.limits.leverage.max,
+                    )?;
                     let mode = self.account.margin.unwrap();
                     #[derive(Serialize)]
                     #[serde(rename_all = "camelCase")]

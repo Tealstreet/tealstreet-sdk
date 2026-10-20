@@ -4,7 +4,7 @@
 use crate::{Pending, Task, WeexFutures};
 use safe_cex_engine::model::{
     MarginType, Order, OrderExtra, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus,
-    OrderType, PlaceOrderOpts, StopTriggerType, TimeInForce,
+    OrderType, PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
 use serde::{Deserialize, Serialize};
@@ -65,6 +65,7 @@ enum Call {
     Leverage {
         symbol: String,
         leverage: f64,
+        side: Option<PositionSide>,
     },
     Margin {
         symbol: String,
@@ -866,6 +867,7 @@ impl WeexFutures {
                 command,
                 symbol,
                 leverage,
+                side,
             } => {
                 refresh = true;
                 let planned = (|| {
@@ -873,25 +875,56 @@ impl WeexFutures {
                     if !leverage.is_finite() || leverage <= 0.0 {
                         return Err("WEEX invalid leverage".into());
                     }
-                    let leverage = leverage.clamp(m.limits.leverage.min, m.limits.leverage.max);
+                    let leverage = num::clamp_leverage(
+                        leverage,
+                        m.limits.leverage.min,
+                        m.limits.leverage.max,
+                    )?;
                     let margin = cx
                         .store
                         .setting(&symbol)
                         .and_then(|s| s.margin_type)
                         .ok_or("WEEX symbol settings not loaded")?;
+                    let side = side.filter(|_| margin == MarginType::Isolated);
+                    let setting = cx.store.setting(&symbol);
+                    let config = self.account.configs.get(&symbol);
+                    let long = if side == Some(PositionSide::Short) {
+                        config
+                            .map(|c| c.isolated_long_leverage)
+                            .or_else(|| setting.and_then(|s| s.buy_leverage))
+                            .ok_or("WEEX current long leverage is unknown")?
+                    } else {
+                        leverage
+                    };
+                    let short = if side == Some(PositionSide::Long) {
+                        config
+                            .map(|c| c.isolated_short_leverage)
+                            .or_else(|| setting.and_then(|s| s.sell_leverage))
+                            .ok_or("WEEX current short leverage is unknown")?
+                    } else {
+                        leverage
+                    };
+                    if !long.is_finite() || long <= 0.0 || !short.is_finite() || short <= 0.0 {
+                        return Err("WEEX current side leverage is invalid".into());
+                    }
                     let value = num::format(leverage);
                     let payload = Leverage {
                         symbol: symbol.clone(),
                         margin_type: margin_text(margin),
                         cross_leverage: (margin == MarginType::Cross).then_some(value.clone()),
                         isolated_long_leverage: (margin == MarginType::Isolated)
-                            .then_some(value.clone()),
-                        isolated_short_leverage: (margin == MarginType::Isolated).then_some(value),
+                            .then(|| num::format(long)),
+                        isolated_short_leverage: (margin == MarginType::Isolated)
+                            .then(|| num::format(short)),
                     };
                     Ok(VecDeque::from([post(
                         "/capi/v3/account/leverage",
                         json(&payload),
-                        Call::Leverage { symbol, leverage },
+                        Call::Leverage {
+                            symbol,
+                            leverage,
+                            side,
+                        },
                     )]))
                 })();
                 (command, planned)
@@ -931,16 +964,19 @@ impl WeexFutures {
             Command::SetPositionMode {
                 command,
                 hedged: value,
+                symbol,
             } => {
                 refresh = true;
-                hedged = Some(value);
+                hedged = symbol.is_none().then_some(value);
                 let symbols: HashSet<_> = cx
                     .store
                     .positions()
                     .iter()
                     .map(|p| p.symbol.clone())
                     .collect();
-                let mut symbols: Vec<_> = if symbols.is_empty() {
+                let mut symbols: Vec<_> = if let Some(symbol) = symbol {
+                    vec![symbol]
+                } else if symbols.is_empty() {
                     cx.store
                         .markets()
                         .iter()
@@ -953,6 +989,9 @@ impl WeexFutures {
                 let planned = symbols
                     .into_iter()
                     .map(|symbol| {
+                        cx.store
+                            .market(&symbol)
+                            .ok_or("WEEX position mode market not found")?;
                         let margin = cx
                             .store
                             .setting(&symbol)
@@ -1220,16 +1259,43 @@ impl WeexFutures {
                     Ok(vec![before.id.clone()])
                 }
             }
-            Call::Leverage { symbol, leverage } => {
+            Call::Leverage {
+                symbol,
+                leverage,
+                side,
+            } => {
                 metadata(body, Some(symbol))?;
-                cx.store.update_setting(symbol, |s| s.leverage = *leverage);
+                cx.store.update_setting(symbol, |s| {
+                    if *side != Some(PositionSide::Short) {
+                        s.leverage = *leverage;
+                        s.buy_leverage = Some(*leverage);
+                    }
+                    if *side != Some(PositionSide::Long) {
+                        s.sell_leverage = Some(*leverage);
+                    }
+                });
                 if let Some(config) = self.account.configs.get_mut(symbol) {
-                    config.setting.leverage = *leverage;
+                    if *side != Some(PositionSide::Short) {
+                        config.setting.leverage = *leverage;
+                        config.setting.buy_leverage = Some(*leverage);
+                    }
+                    if *side != Some(PositionSide::Long) {
+                        config.setting.sell_leverage = Some(*leverage);
+                    }
                     if config.setting.margin_type == Some(MarginType::Isolated) {
-                        config.isolated_long_leverage = *leverage;
-                        config.isolated_short_leverage = *leverage;
+                        if *side != Some(PositionSide::Short) {
+                            config.isolated_long_leverage = *leverage;
+                        }
+                        if *side != Some(PositionSide::Long) {
+                            config.isolated_short_leverage = *leverage;
+                        }
                     }
                 }
+                cx.store.update_positions(|p| {
+                    if p.symbol == *symbol && side.is_none_or(|selected| selected == p.side) {
+                        p.leverage = *leverage;
+                    }
+                });
                 Ok(vec![])
             }
             Call::Margin { symbol, margin } => {
@@ -1243,9 +1309,32 @@ impl WeexFutures {
             }
             Call::Mode { symbol, hedged } => {
                 metadata(body, None)?;
-                if let Some(config) = self.account.configs.get_mut(symbol) {
-                    config.hedged = *hedged;
-                }
+                let setting = cx.store.setting(symbol).unwrap_or_default();
+                let config = self
+                    .account
+                    .configs
+                    .entry(symbol.clone())
+                    .or_insert_with(|| crate::account::Config {
+                        setting,
+                        hedged: *hedged,
+                        isolated_long_leverage: setting.buy_leverage.unwrap_or(f64::NAN),
+                        isolated_short_leverage: setting.sell_leverage.unwrap_or(f64::NAN),
+                    });
+                config.hedged = *hedged;
+                cx.store.update_positions(|p| {
+                    if p.symbol == *symbol {
+                        p.position_mode = Some(if *hedged {
+                            safe_cex_engine::model::PositionMode::Hedged
+                        } else {
+                            safe_cex_engine::model::PositionMode::Oneway
+                        });
+                    }
+                });
+                let any_hedged = self.account.configs.values().any(|config| config.hedged)
+                    || cx.store.positions().iter().any(|p| {
+                        p.position_mode == Some(safe_cex_engine::model::PositionMode::Hedged)
+                    });
+                cx.store.set_hedged(any_hedged);
                 Ok(vec![])
             }
         })();

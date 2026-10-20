@@ -978,3 +978,33 @@ JWT signer; proxy-only settings without read fields retain their old policy.
 342 wrapper controls (six new functions including 12 partial/empty variants),
 types and strict lint PASS; independent review PASS. Logs:
 /tmp/bridge-coinbase-read-options-*.log. Caller/saved options remain unchanged.
+
+## Landing integration c44f22bd8e checkpoint
+
+Merged 61 landing commits, including leverage-side and wire/cancel repairs.
+Fourteen content conflicts were resolved by preserving both contracts, followed
+by an independent correctness review of all resolutions. setAllLeverage keeps
+native position selection and the selected side. Frame application retains
+recoverable section handling, native STATUS readiness, shared-feed validation,
+post-forward subscription replay and account-read freshness markers. FILLS
+revision one keeps raw symbol references, optional aligned financial columns,
+and legacy decoder support; no-financial bytes retain the landing layout.
+
+909 unique tests across seven native venue crates/67 nonempty suites PASS;
+133 core cases PASS. The wire33, focused account/recovery73, worker26 (complete
+JSON receipt), and earlier merged FrameApplier36 controls PASS. SDK types and
+strict scoped lint PASS. Native strict Clippy and remaining final acceptance
+checks are separately recorded; no full-SDK or rebuilt-WASM pass is claimed here.
+Initial checks exposed three unhandled fixture notice matches, four WIP hook
+visibility mistakes, financial offsets after the new symbol tail, one pending
+catalog market-only fixture, native readiness fixture setup and the contained
+snapshot-trap return expectation. Bounded fixes preserve all business assertions
+and add explicit symbol/padding/readiness/terminal-state controls. An obsolete
+broad SDK run was stopped after its setup failures; targeted complete receipts
+replace it for this integration checkpoint, not final acceptance.
+
+Logs: /tmp/bridge-c44-native7-complete.log plus
+/tmp/bridge-landing-c44-weex-complete.log; /tmp/bridge-landing-c44-core-tests.log;
+/tmp/bridge-landing-wire-merge-final.log; /tmp/bridge-landing-c44-recovery-verified.log;
+/tmp/bridge-landing-worker-ack-results.json. Four initial auth hooks were preserved
+as explicit WIP before merge; the full classifier migration remains unproved.

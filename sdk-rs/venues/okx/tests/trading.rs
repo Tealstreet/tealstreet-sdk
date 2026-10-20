@@ -537,6 +537,7 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
             command: 2,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         }),
     );
     let out = actions(&mut e);
@@ -707,6 +708,34 @@ fn entry_and_algo_child_receipts_precede_each_write_and_use_sdk_symbol() {
         out = actions(&mut e);
     }
     assert_eq!(ids.len(), 3);
+}
+
+#[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let mut e = trading_engine();
+        e.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        e.handle(
+            5.0,
+            Event::Command(Command::SetLeverage {
+                command: 99,
+                symbol: "BTCUSDT".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+        let out = actions(&mut e);
+        assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+        assert!(out.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+    }
 }
 
 #[test]

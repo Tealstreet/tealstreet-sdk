@@ -183,7 +183,7 @@ struct Native<'a> {
     base_volume: Number,
     exec_qty: Number,
     cum_exec_qty: Number,
-    profit: Number,
+    profit: Option<Number>,
     exec_pnl: Number,
     amount: Number,
     fee: Option<Number>,
@@ -482,7 +482,7 @@ impl BitgetFutures {
                 {
                     return;
                 }
-                if !r.uta && n.profit.0.is_none() {
+                if !r.uta && n.profit.is_some_and(|profit| profit.0.is_none()) {
                     r.invalid = true;
                     return;
                 }
@@ -569,7 +569,7 @@ impl BitgetFutures {
                     realized_pnl: if r.uta {
                         n.exec_pnl.0
                     } else {
-                        Some(n.profit.get())
+                        Some(n.profit.map(Number::get).unwrap_or(0.0))
                     },
                     maker: match n.trade_scope {
                         "maker" => Some(true),
@@ -635,7 +635,7 @@ impl BitgetFutures {
                         n.base_volume.get()
                     },
                     reduce_only: n.reduce_only.eq_ignore_ascii_case("yes")
-                        || n.trade_side.starts_with("close"),
+                        || is_closing_trade(n.trade_side),
                     position_side,
                     created_time: time,
                     updated_time: if r.uta { n.updated_time.0 } else { n.u_time.0 },
@@ -955,12 +955,13 @@ fn uta_income_category(kind: &str) -> &'static str {
         _ => "other",
     }
 }
+fn is_closing_trade(trade: &str) -> bool {
+    trade.starts_with("close") || trade.ends_with("_close_long") || trade.ends_with("_close_short")
+}
 fn fill_direction(n: &Native<'_>, uta: bool) -> Option<(&'static str, &'static str)> {
     let raw = side(n.side)?;
     let trade = n.trade_side.to_ascii_lowercase();
-    if trade.ends_with("_single")
-        || (uta && (n.hold_mode == "one_way_mode" || n.pos_mode == "one_way_mode"))
-    {
+    if !uta && trade.ends_with("_single") {
         return Some(("both", raw));
     }
     let explicit = match if n.pos_side.is_empty() {
@@ -982,7 +983,7 @@ fn fill_direction(n: &Native<'_>, uta: bool) -> Option<(&'static str, &'static s
         }
     });
     let opening = trade.starts_with("open");
-    let closing = trade.starts_with("close");
+    let closing = is_closing_trade(&trade);
     if uta {
         let leg = explicit.or_else(|| {
             if opening {

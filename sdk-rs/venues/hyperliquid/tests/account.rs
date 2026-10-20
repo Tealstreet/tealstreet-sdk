@@ -661,19 +661,31 @@ fn live_close_fill_financials_are_net_and_do_not_invent_opening_values() {
         .unwrap()
         .1;
     assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 3);
-    assert_eq!(payload.len(), 136);
+    assert_eq!(payload.len(), 152);
+    let symbol_refs: Vec<_> = payload[88..100]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|value| u32::from_le_bytes(*value))
+        .collect();
+    assert_eq!(symbol_refs.len(), 3);
+    assert!(
+        symbol_refs
+            .iter()
+            .all(|value| *value != u32::MAX && *value == symbol_refs[0])
+    );
     let value = |at| f64::from_le_bytes(payload[at..at + 8].try_into().unwrap());
     assert_eq!([value(40), value(56), value(72)], [100., 101., 102.]);
     assert!(
-        value(88).is_nan(),
+        value(104).is_nan(),
         "opening executions do not carry close PnL"
     );
-    assert_eq!([value(96), value(104)], [3.75, 0.]);
+    assert_eq!([value(112), value(120)], [3.75, 0.]);
     assert!(
-        value(112).is_nan(),
+        value(128).is_nan(),
         "opening executions do not carry close fees"
     );
-    assert_eq!([value(120), value(128)], [0.25, 0.]);
+    assert_eq!([value(136), value(144)], [0.25, 0.]);
     assert!(e.take_market_frame(2100.).is_none());
 }
 
@@ -695,10 +707,15 @@ fn close_fill_missing_financial_fields_remain_absent_instead_of_becoming_zero() 
             .unwrap()
             .1;
         assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 1);
-        assert_eq!(payload.len(), if has_fee { 48 } else { 32 });
+        assert_eq!(payload.len(), if has_fee { 56 } else { 40 });
+        assert_ne!(
+            u32::from_le_bytes(payload[32..36].try_into().unwrap()),
+            u32::MAX
+        );
+        assert_eq!(&payload[36..40], &[0; 4]);
         if has_fee {
-            assert!(f64::from_le_bytes(payload[32..40].try_into().unwrap()).is_nan());
-            assert_eq!(f64::from_le_bytes(payload[40..48].try_into().unwrap()), 0.);
+            assert!(f64::from_le_bytes(payload[40..48].try_into().unwrap()).is_nan());
+            assert_eq!(f64::from_le_bytes(payload[48..56].try_into().unwrap()), 0.);
         }
     }
 }

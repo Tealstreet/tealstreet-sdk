@@ -251,7 +251,7 @@ impl Lighter {
                     symbol: old.symbol.clone(),
                     kind,
                     side: old.side,
-                    amount: amount.unwrap_or(old.amount),
+                    amount: amount.unwrap_or(old.remaining),
                     price: Some(price.unwrap_or(old.price)),
                     trigger_price: None,
                     stop_loss: None,
@@ -284,6 +284,7 @@ impl Lighter {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => (
                 command,
                 VecDeque::from([Step::Setting {
@@ -304,7 +305,11 @@ impl Lighter {
                     isolated: Some(isolated),
                 }]),
             ),
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 if hedged {
                     cx.done(
                         command,
@@ -587,9 +592,11 @@ impl Lighter {
                 if !leverage.is_finite() || leverage <= 0.0 {
                     return Err("Invalid Lighter leverage".into());
                 }
-                let leverage = snap_leverage(
-                    leverage.clamp(market.limits.leverage.min, market.limits.leverage.max),
-                );
+                let leverage = snap_leverage(num::clamp_leverage(
+                    leverage,
+                    market.limits.leverage.min,
+                    market.limits.leverage.max,
+                )?);
                 let isolated = isolated.unwrap_or_else(|| {
                     setting
                         .and_then(|s| s.margin_type)

@@ -396,6 +396,7 @@ fn leverage_updates_use_native_position_id_and_ignore_failed_envelopes() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 10.0,
+            side: None,
         }),
     );
     let first = requests(&mut e).remove(0);
@@ -461,6 +462,7 @@ fn queued_margin_change_retains_the_leverage_accepted_before_it() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 10.0,
+            side: None,
         }),
     );
     let first = requests(&mut e).remove(0);
@@ -494,6 +496,7 @@ fn mutation_ack_does_not_overwrite_newer_mode_or_position_stream_state() {
         Event::Command(Command::SetPositionMode {
             command: 1,
             hedged: false,
+            symbol: None,
         }),
     );
     let r = requests(&mut e).remove(0);
@@ -511,6 +514,7 @@ fn mutation_ack_does_not_overwrite_newer_mode_or_position_stream_state() {
             command: 2,
             symbol: "BTCUSDT".into(),
             leverage: 10.0,
+            side: None,
         }),
     );
     let r = requests(&mut e).remove(0);
@@ -735,6 +739,7 @@ fn open_position_writes_keep_native_ids_and_full_stops_have_their_own_route() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 5.0,
+            side: None,
         }),
     );
     let r = requests(&mut e).remove(0);
@@ -845,6 +850,7 @@ fn short_stream_update_does_not_suppress_the_long_leverage_acknowledgement() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 5.0,
+            side: None,
         }),
     );
     let r = requests(&mut e).remove(0);
@@ -1106,5 +1112,131 @@ fn native_bracket_clear_before_placement_ack_remains_authoritative() {
     assert_eq!(
         stored.extra.as_ref().unwrap().tp_trigger_type,
         Some(StopTriggerType::MarkPrice)
+    );
+}
+
+#[test]
+fn side_leverage_writes_only_the_selected_native_rail_and_keeps_other_setting() {
+    use safe_cex_engine::model::PositionSide;
+    for side in [PositionSide::Long, PositionSide::Short] {
+        let mut e = ready();
+        e.handle(
+            200.,
+            Event::Command(Command::SetLeverage {
+                command: 401,
+                symbol: "BTCUSDT".into(),
+                leverage: 37.,
+                side: Some(side),
+            }),
+        );
+        let first = requests(&mut e).remove(0);
+        let payload: serde_json::Value =
+            serde_json::from_str(first.body.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            payload["positionType"],
+            if side == PositionSide::Long { 1 } else { 2 }
+        );
+        assert_eq!(payload["leverage"], 37.);
+        reply(&mut e, &first, 300., r#"{"success":true,"code":0}"#);
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+        );
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 401,
+                result: Ok(_)
+            })
+        )));
+        let setting = e.store().setting("BTCUSDT").unwrap();
+        assert_eq!(
+            setting.buy_leverage,
+            Some(if side == PositionSide::Long { 37. } else { 20. })
+        );
+        assert_eq!(
+            setting.sell_leverage,
+            Some(if side == PositionSide::Short {
+                37.
+            } else {
+                20.
+            })
+        );
+    }
+}
+
+#[test]
+fn rejected_side_leverage_keeps_both_mexc_rails() {
+    let mut e = ready();
+    e.handle(
+        200.,
+        Event::Command(Command::SetLeverage {
+            command: 402,
+            symbol: "BTCUSDT".into(),
+            leverage: 37.,
+            side: Some(safe_cex_engine::model::PositionSide::Short),
+        }),
+    );
+    let first = requests(&mut e).remove(0);
+    reply(
+        &mut e,
+        &first,
+        300.,
+        r#"{"success":false,"code":600,"message":"rejected"}"#,
+    );
+    assert!(results(&mut e)[0].is_err());
+    let setting = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(20.));
+    assert_eq!(setting.sell_leverage, Some(20.));
+}
+
+#[test]
+fn targeted_open_mexc_leg_uses_its_native_position_id_and_preserves_other_position() {
+    use safe_cex_engine::model::PositionSide;
+    let (mut e, socket, reads, _) = private_started();
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    e.drain_actions().for_each(drop);
+    for (id, position_type, leverage) in [("native-long", 1, 10), ("native-short", 2, 20)] {
+        let text = format!(
+            r#"{{"channel":"push.personal.position","data":{{"positionId":"{id}","symbol":"BTC_USDT","positionType":{position_type},"positionMode":1,"holdVol":60,"holdAvgPrice":60000,"leverage":{leverage},"openType":1}}}}"#
+        );
+        ws(&mut e, socket, &text);
+    }
+    e.drain_actions().for_each(drop);
+    e.handle(
+        300.,
+        Event::Command(Command::SetLeverage {
+            command: 403,
+            symbol: "BTCUSDT".into(),
+            leverage: 37.,
+            side: Some(PositionSide::Short),
+        }),
+    );
+    let r = requests(&mut e).remove(0);
+    let payload: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["positionId"], "native-short");
+    assert_eq!(payload["leverage"], 37.);
+    assert!(payload.get("positionType").is_none());
+    assert!(payload.get("symbol").is_none());
+    reply(&mut e, &r, 400., r#"{"success":true,"code":0}"#);
+    assert!(results(&mut e)[0].is_ok());
+    for position in e.store().positions() {
+        assert_eq!(
+            position.leverage,
+            if position.side == PositionSide::Long {
+                10.
+            } else {
+                37.
+            }
+        );
+    }
+    let setting = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!(
+        (setting.buy_leverage, setting.sell_leverage),
+        (Some(10.), Some(37.))
     );
 }
