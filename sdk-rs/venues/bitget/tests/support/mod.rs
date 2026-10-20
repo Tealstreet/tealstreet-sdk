@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketId, TimerId,
+    Action, Command, Engine, Event, HttpRequest, Notice, RequestId, Response, SocketContext,
+    SocketId, TimerId,
 };
 use safe_cex_venue_bitget::{BitgetFutures, Options};
 
@@ -13,6 +14,7 @@ pub struct Harness {
     pub now: f64,
     pub requests: Vec<HttpRequest>,
     pub sockets: Vec<(SocketId, String)>,
+    pub socket_contexts: Vec<(SocketId, String, Option<SocketContext>)>,
     pub sent: Vec<(SocketId, String)>,
     pub closed: Vec<SocketId>,
     pub timers: Vec<(TimerId, f64)>,
@@ -26,6 +28,7 @@ impl Harness {
             now: 1_000_000.0,
             requests: vec![],
             sockets: vec![],
+            socket_contexts: vec![],
             sent: vec![],
             closed: vec![],
             timers: vec![],
@@ -55,8 +58,19 @@ impl Harness {
         for action in self.engine.drain_actions() {
             match action {
                 Action::Http(r) => self.requests.push(r),
-                Action::WsConnect { socket, url }
-                | Action::WsConnectWithHeaders { socket, url, .. } => {
+                Action::WsConnect {
+                    socket,
+                    url,
+                    context,
+                    ..
+                }
+                | Action::WsConnectWithHeaders {
+                    socket,
+                    url,
+                    context,
+                    ..
+                } => {
+                    self.socket_contexts.push((socket, url.clone(), context));
                     self.sockets.push((socket, url))
                 }
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),

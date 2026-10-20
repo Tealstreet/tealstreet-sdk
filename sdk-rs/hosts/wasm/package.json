@@ -13,7 +13,10 @@
       "types": "./js/wire.d.mts",
       "default": "./js/wire.mjs"
     },
-    "./workers": "./js/workers.mjs",
+    "./workers": {
+      "types": "./js/workers.d.mts",
+      "default": "./js/workers.mjs"
+    },
     "./web": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/web/safe_cex_wasm.js"

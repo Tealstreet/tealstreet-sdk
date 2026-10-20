@@ -72,6 +72,8 @@ struct Connection {
     socket: Option<SocketId>,
     open: bool,
     received: f64,
+    payload_at: f64,
+    recover: bool,
     ping_at: f64,
     watchdog: Option<TimerId>,
     reconnect: Option<TimerId>,
@@ -152,7 +154,13 @@ impl Orderly {
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.open = false;
         self.public.received = cx.now;
-        self.public.socket = Some(cx.connect(self.public_url()));
+        self.public.payload_at = cx.now;
+        self.public.socket = Some(cx.connect_feed(
+            self.public_url(),
+            safe_cex_engine::SocketChannel::Public,
+            "market",
+            self.public.recover,
+        ));
         self.public.watchdog = Some(cx.set_timer(10000.0));
     }
     fn public_topic_available(&self, cx: &mut Cx<'_, Pending>) -> bool {
@@ -421,7 +429,15 @@ impl Orderly {
         match env.topic.as_ref() {
             topic @ ("tickers" | "bbos" | "markprices" | "estfundingrate") => {
                 json::each::<LiveTicker<'_>>(data.get(), |r| {
-                    if let Some(symbol) = symbol(&r.symbol) {
+                    if let Some(symbol) = symbol(&r.symbol)
+                        && self
+                            .native
+                            .get(&symbol)
+                            .is_some_and(|native| native == r.symbol.as_ref())
+                    {
+                        self.public.payload_at = cx.now;
+                        self.public.recover = false;
+                        self.public.attempts = 0;
                         cx.store.update_ticker(&symbol, |t| match topic {
                             "tickers" => {
                                 t.last = r.close;
@@ -584,7 +600,6 @@ impl Venue for Orderly {
             return;
         }
         self.public.received = cx.now;
-        self.public.attempts = 0;
         if let Err(e) = self.public_message(cx, text) {
             cx.log(LogLevel::Error, e);
         }
@@ -848,7 +863,12 @@ impl Venue for Orderly {
         }
         if self.public.watchdog == Some(timer) {
             self.public.watchdog = None;
-            if !self.public.open || cx.now - self.public.received >= 20000.0 {
+            if !self.public.open
+                || cx.now - self.public.received >= 20000.0
+                || cx.now - self.public.payload_at >= 30000.0
+            {
+                self.public.recover =
+                    !self.public.open || cx.now - self.public.payload_at >= 30000.0;
                 let socket = self.public.socket.unwrap();
                 cx.close(socket);
                 self.on_close(cx, socket, 1006);

@@ -161,7 +161,14 @@ impl Hyperliquid {
             self.meta(cx, dex, offset);
         } else if self.connection.socket.is_none() {
             self.account_start(cx);
-            self.connection.socket = Some(cx.connect(self.ws()));
+            self.connection.socket = Some(cx.connect_channel(
+                self.ws(),
+                if self.options.public_data_only {
+                    safe_cex_engine::SocketChannel::Public
+                } else {
+                    safe_cex_engine::SocketChannel::Private
+                },
+            ));
         }
     }
     fn subscription(
@@ -722,7 +729,14 @@ impl Venue for Hyperliquid {
         }
         if self.connection.reconnect == Some(timer) {
             self.connection.reconnect = None;
-            self.connection.socket = Some(cx.connect(self.ws()));
+            self.connection.socket = Some(cx.connect_channel(
+                self.ws(),
+                if self.options.public_data_only {
+                    safe_cex_engine::SocketChannel::Public
+                } else {
+                    safe_cex_engine::SocketChannel::Private
+                },
+            ));
         }
         if self.connection.ping == Some(timer) {
             self.connection.ping = None;

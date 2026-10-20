@@ -30,11 +30,17 @@ impl Orderly {
         }
         let mut natives: Vec<_> = self.native.values().cloned().collect();
         natives.sort();
-        for chunk in natives.chunks(TOPICS_PER_SOCKET) {
+        for (index, chunk) in natives.chunks(TOPICS_PER_SOCKET).enumerate() {
             self.funding.shards.push(Shard {
                 connection: Connection {
-                    socket: Some(cx.connect(self.public_url())),
+                    socket: Some(cx.connect_feed(
+                        self.public_url(),
+                        safe_cex_engine::SocketChannel::Public,
+                        format!("funding-{index}"),
+                        false,
+                    )),
                     received: cx.now,
+                    payload_at: cx.now,
                     watchdog: Some(cx.set_timer(10000.0)),
                     ..Default::default()
                 },
@@ -129,12 +135,15 @@ impl Orderly {
                 let data = env.data.ok_or("Orderly funding update missing data")?;
                 self.apply_funding(cx, native, data.get())?;
                 self.funding.shards[index].connection.attempts = 0;
+                self.funding.shards[index].connection.payload_at = cx.now;
+                self.funding.shards[index].connection.recover = false;
             }
             Ok(())
         })();
         if let Err(error) = result {
             cx.log(LogLevel::Error, error);
             if rejected {
+                self.funding.shards[index].connection.recover = true;
                 cx.close(socket);
                 self.funding_close(cx, socket);
             }
@@ -172,11 +181,17 @@ impl Orderly {
             .iter()
             .position(|s| s.connection.reconnect == Some(timer))
         {
-            let socket = cx.connect(self.public_url());
+            let socket = cx.connect_feed(
+                self.public_url(),
+                safe_cex_engine::SocketChannel::Public,
+                format!("funding-{index}"),
+                self.funding.shards[index].connection.recover,
+            );
             let connection = &mut self.funding.shards[index].connection;
             connection.reconnect = None;
             connection.socket = Some(socket);
             connection.received = cx.now;
+            connection.payload_at = cx.now;
             connection.watchdog = Some(cx.set_timer(10000.0));
             return true;
         }
@@ -189,7 +204,12 @@ impl Orderly {
             let connection = &mut self.funding.shards[index].connection;
             connection.watchdog = None;
             if let Some(socket) = connection.socket {
-                if !connection.open || cx.now - connection.received >= 20000.0 {
+                if !connection.open
+                    || cx.now - connection.received >= 20000.0
+                    || cx.now - connection.payload_at >= 30000.0
+                {
+                    connection.recover =
+                        !connection.open || cx.now - connection.payload_at >= 30000.0;
                     cx.close(socket);
                     self.funding_close(cx, socket);
                 } else {

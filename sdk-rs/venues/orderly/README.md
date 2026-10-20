@@ -21,12 +21,15 @@ hyphen. IDs on split orders, brackets or conditional orders fail before any
 write, because the native API cannot preserve the caller's requested identity
 across those operations. Native order IDs remain exact decimal strings.
 
-The SDK transport preserves signed request bytes through direct requests,
-REST proxies and raw custom adapters. The existing built-in HTTP-over-WebSocket
-tunnel parses and reserializes bodies and is rejected for Orderly. Unsupported
-socket routing also fails during startup. Disposal aborts pending requests,
-including deferred authorization. Client-order lookup is unsupported; the
-four history/query methods use documented native reads.
+The shared SDK engine transport preserves signed request bytes through direct
+requests, REST proxies and the raw HTTP-over-WebSocket adapter. Intermediary
+authorization may add headers but cannot change signed bytes or venue headers.
+Hosts apply account socket routing to the venue's declared roles and feeds.
+Custom providers requiring upgrade headers fail before startup when the host
+cannot send those headers.
+Disposal aborts pending requests, including deferred authorization.
+Client-order lookup is unsupported; the four history/query methods use
+documented native reads.
 
 The independent legacy comparator is test-only under
 `packages/safe-cex/src/__tests__/reference/orderly`. Its declared corrections

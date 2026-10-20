@@ -308,7 +308,13 @@ fn private_connecting() -> (Driver, SocketId, TimerId) {
                     };
                     reply(&mut e, &r, 200, body);
                 }
-                Action::WsConnect { socket, url } if url.contains("private") => {
+                Action::WsConnect {
+                    socket,
+                    url,
+                    channel,
+                    ..
+                } if url.contains("private") => {
+                    assert_eq!(channel, Some(safe_cex_engine::SocketChannel::Private));
                     private = Some(socket);
                 }
                 Action::SetTimer { timer, at_ms } if private.is_some() => {
@@ -346,7 +352,7 @@ fn private_initial_and_reconnect_handshakes_time_out_without_open_callbacks() {
     let fresh = out
         .iter()
         .find_map(|a| match a {
-            Action::WsConnect { socket, url } if url.contains("private") => Some(*socket),
+            Action::WsConnect { socket, url, .. } if url.contains("private") => Some(*socket),
             _ => None,
         })
         .unwrap();

@@ -213,9 +213,9 @@ routes, rerun private gate with current query build/oracles, fit combined WASM
 within existing3MiB budget, run all gates/regressions/CI and adversarial reviews.
 Current public fixture is an intermediate recording and must be replaced.
 Unused hmac_sha512 helper removed; spec-required P5a signing primitives retained.
-Legacy built-in HOW tunnel cannot preserve signed bytes and currently fails
-explicitly; raw custom transport/proxy routes preserve bytes. Document/review
-this limitation before shipping.
+At this checkpoint the legacy HOW adapter could not preserve signed bytes;
+raw custom transport/proxy routes preserved them. The landing transport refresh
+below supersedes this temporary HOW limitation.
 
 ### Landing refresh (c5bc2c4adf)
 
@@ -258,7 +258,8 @@ Full SDK suite:6644tests/459files passed. SDK real Orderly WASM:15passed.
 Review fixes: shared startup promise prevents duplicate/orphaned hosts;
 disposal while loading rejects; unsupported Orderly history ID/status filters
 reject before reads.48focused SDK tests, typecheck/lint and87metadata/account
-construction tests pass. Built-in HOW capability is no longer advertised.
+construction tests pass. Built-in HOW capability was disabled at this
+checkpoint; the landing transport refresh below restores it using raw RPC.
 Test drivers for Binance/Bybit/Bitget explicitly fail on unexpected Deactivate
 notices, retaining exhaustive checks after the shared lifecycle addition.
 Remaining: combined host/SDK WASM tests, workspace checks, all broker variants,
@@ -269,3 +270,33 @@ WASM40tests pass. Follow-up independent review closed prompt disposal of a
 never-settling WASM loader (49focused SDK tests plus typecheck/lint pass).
 Landing advanced tofc18c55874 with shared transport routing and Bitrue;
 merge that structure before final workspace/Binance regression checks.
+
+### Shared transport integration (fc18c55874)
+
+The landing branch now owns engine REST/HOW/socket routing and native routing
+plans. Orderly uses that shared transport; its provisional adapter is removed.
+The shared HTTP path guards Orderly method, routed URL, body, venue headers and
+request signal before dispatch, while allowing intermediary authorization
+headers. Raw HOW preserves decimal lexemes and IDs in requests and responses,
+so all six brokers advertise tunnel support again. Deterministic wire tests
+cover all six aliases and testnet. Direct/custom/proxy, cancellation, mutation
+rejection and native policy regressions use the shared transport boundary.
+SDK startup retains memoization, default loading, prompt disposal and explicit
+deactivation alongside the landing branch's secondary-key routing preflight.
+
+Merged transport verification:316SDK/transport/metadata/account-construction
+tests pass, including actual SDK rejection before engine construction when a
+custom provider requires upgrade headers on an incapable host. Full repository
+typecheck44tasks and lint28tasks pass; follow-up safe-cex typecheck/lint after
+the header-capability guard also pass. No Orderly-specific transport remains.
+
+Merged socket protocol integration adds Public main/funding roles and Private
+account role. Main/funding sockets have stable market/funding-N identities;
+SocketContext owns its feed string so dynamic shards need no leaked strings or
+arbitrary shard cap. Native selectors retain the same string key semantics.
+Thirty seconds of heartbeat-only traffic requests recovery independently for
+the affected feed; malformed/empty/unknown aggregate payloads do not refresh
+usable-data liveness. Three independent shard/recovery regressions pass.
+Full native workspace:888tests passed; Orderly68passed. Post-merge harness181
+and host23tests pass; shared SDK/transport316targeted tests and whole-repo
+44typecheck/28lint tasks pass. Final WASM builds/replays follow this merge.

@@ -8,10 +8,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { orderlyTransport } from '../../exchanges/rust/transport';
+import { createEngineTransport, resolveEngineRoutingPlan } from '../../transport/engine';
 import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
 import { setDefaultTransport } from '../../transport/registry';
+import { tealstreetTransport } from '../../transport/tealstreet/tealstreetTransport';
 import { OrderStatus } from '../../types';
 
 const origin = 'https://api-evm.orderly.org';
@@ -244,339 +245,201 @@ describe('Orderly Rust transport boundary', () => {
     }
   });
 
-  it('keeps the direct transport and its streaming response unchanged', async () => {
-    setDefaultTransport(directTransport);
-    const { base, response } = createBase();
-    const transport = orderlyTransport('tealstreet-dex', options(), base);
-    expect(transport).toBe(base);
-    const request = signed();
-    expect(await transport.request(request)).toBe(response);
-    expect(base.request).toHaveBeenCalledExactlyOnceWith(request);
-  });
-
-  it('routes overrideProxyUrl while preserving the original escaped query, signed body and response stream', async () => {
-    const { base, response } = createBase();
-    const transport = orderlyTransport(
-      'woofi',
-      options(directTransport, { overrideProxyUrl: 'https://proxy.test' }),
-      base,
-    );
-    expect(await transport.request(signed())).toBe(response);
-    expect(base.request).toHaveBeenCalledExactlyOnceWith({
-      ...signed(),
-      url: `https://proxy.test/${origin}${query}`,
-    });
-  });
-
-  it('uses the registered default provider and authorizes every proxied request without touching signed bytes', async () => {
-    const { base, response } = createBase();
-    const authorize = vi.fn(async (config: InternalAxiosRequestConfig) => {
-      config.headers.set('Authorization', 'Bearer intermediary');
-    });
-    const rest = vi.fn(() => ({ baseURL: 'https://registered.test/orderly', proxied: true, authorize }));
-    const registered = provider({ rest });
-    setDefaultTransport(registered);
-    const opts = options(undefined, { tealstreetProxy: true, proxyRegion: 'JA' });
-    const transport = orderlyTransport('kodiakfi', opts, base);
-    expect(rest).toHaveBeenCalledExactlyOnceWith({ exchange: 'kodiakfi', options: opts, config: { baseURL: origin } });
-    expect(await transport.request(signed())).toBe(response);
-    expect(authorize).toHaveBeenCalledTimes(1);
-    expect(base.request).toHaveBeenCalledExactlyOnceWith({
-      ...signed(),
-      url: `https://registered.test/orderly${query}`,
-      headers: { ...signed().headers, Authorization: 'Bearer intermediary' },
-    });
-  });
-
-  it('honors a per-account provider over the registered default and passes testnet options intact', async () => {
+  it('keeps direct request bytes and streams through the generic host', async () => {
     const { base } = createBase();
-    const defaultRest = vi.fn();
-    setDefaultTransport(provider({ rest: defaultRest }));
-    const rest = vi.fn(({ config }: Parameters<TransportProvider['rest']>[0]) => ({
-      baseURL: config.baseURL,
-      proxied: false,
-    }));
-    const opts = options(provider({ rest }), { testnet: true });
-    const transport = orderlyTransport('salsadex', opts, base);
-    const request = signed();
-    await transport.request(request);
-    expect(base.request).toHaveBeenCalledExactlyOnceWith(request);
-    expect(defaultRest).not.toHaveBeenCalled();
-    expect(rest).toHaveBeenCalledExactlyOnceWith({
-      exchange: 'salsadex',
-      options: opts,
-      config: { baseURL: 'https://testnet-api-evm.orderly.org' },
-    });
-  });
-
-  it('calls a raw tunnel adapter once with the untouched body, query, headers and binary response contract', async () => {
-    const { base } = createBase();
-    const calls: InternalAxiosRequestConfig[] = [];
-    const bytes = new Uint8Array([0, 123, 125, 0]);
-    const adapter: AxiosAdapter = vi.fn(async (config) => {
-      calls.push(config);
-      return raw(config, bytes.subarray(1, 3), 429);
-    });
-    const restAdapter = vi.fn(() => adapter);
-    const opts = options(provider({ restAdapter }), { tealstreetTunnel: true, extra: { recvWindow: 12345 } });
-    const transport = orderlyTransport('mode', opts, base);
+    const transport = createEngineTransport('tealstreet-dex', options(), base);
     const result = await transport.request(signed());
-    expect(restAdapter).toHaveBeenCalledExactlyOnceWith({ exchange: 'mode', options: opts, variant: 'default' });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({
-      url: query,
-      baseURL: origin,
-      method: 'POST',
-      data: body,
-      timeout: 12345,
-      responseType: 'arraybuffer',
-    });
-    expect(calls[0].params).toBeUndefined();
-    expect(calls[0].headers.get('orderly-signature')).toBe('exact-signed-bytes');
-    expect(result.status).toBe(429);
-    expect(result.headers).toContain('retry-after: 1');
-    expect([...(result.body as Uint8Array)]).toEqual([123, 125]);
-    expect(base.request).not.toHaveBeenCalled();
+    expect(base.request).toHaveBeenCalledExactlyOnceWith({ ...signed(), signal: expect.any(AbortSignal) });
+    const chunks: number[] = [];
+    for await (const chunk of result.body) chunks.push(...(typeof chunk === 'number' ? [chunk] : chunk));
+    expect(chunks).toEqual([123, 125]);
+    transport.dispose?.();
   });
 
-  it('returns raw rejected HTTP responses and never retries an accepted or ambiguous write', async () => {
-    const { base } = createBase();
-    for (const mode of ['http', 'network'] as const) {
-      const adapter = vi.fn<AxiosAdapter>(async (config) => {
-        if (mode === 'http') throw { response: raw(config, '{"success":false,"code":-1}', 503) };
-        throw new Error('response lost after accepted write');
+  it.each<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])(
+    '%s uses shared direct/proxy routes and keeps escaped queries and signed body lexemes exact', async (name) => {
+      const { base } = createBase();
+      base.request.mockResolvedValue({ status: 200, headers: '', body: new Uint8Array() } as never);
+      const authorize = vi.fn(async (config: InternalAxiosRequestConfig) => {
+        config.headers.set('Authorization', 'Bearer intermediary');
       });
-      const transport = orderlyTransport(
-        'what',
-        options(provider({ restAdapter: () => adapter }), { tealstreetTunnel: true }),
-        base,
-      );
-      if (mode === 'http') {
-        const response = await transport.request(signed());
-        expect(response.status).toBe(503);
-        expect(new TextDecoder().decode(response.body as Uint8Array)).toBe('{"success":false,"code":-1}');
-      } else await expect(transport.request(signed())).rejects.toThrow('response lost');
-      expect(adapter).toHaveBeenCalledTimes(1);
+      const rest = vi.fn(({ config }: Parameters<TransportProvider['rest']>[0]) => ({
+        baseURL: `https://proxy.test/${config.baseURL}`, proxied: true, authorize,
+      }));
+      const transport = createEngineTransport(name, options(provider({ rest })), base);
+      await transport.request(signed());
+      expect(base.request).toHaveBeenCalledExactlyOnceWith({
+        ...signed(), url: `https://proxy.test/${origin}${query}`,
+        headers: { ...signed().headers, Authorization: 'Bearer intermediary' }, signal: expect.any(AbortSignal),
+      });
+      expect(authorize).toHaveBeenCalledOnce();
+      expect(rest.mock.calls[0][0].config.baseURL).toBe(origin);
+      transport.dispose?.();
+    },
+  );
+
+  it('honors per-account transport over the registered default and preserves testnet host', async () => {
+    const { base } = createBase();
+    base.request.mockResolvedValue({ status: 200, headers: '', body: new Uint8Array() } as never);
+    const unused = vi.fn();
+    setDefaultTransport(provider({ rest: unused }));
+    const rest = vi.fn(({ config }: Parameters<TransportProvider['rest']>[0]) => ({ baseURL: config.baseURL, proxied: false }));
+    const transport = createEngineTransport('mode', options(provider({ rest }), { testnet: true }), base);
+    const request = { ...signed(), url: signed().url.replace('https://api-', 'https://testnet-api-') };
+    await transport.request(request);
+    expect(base.request).toHaveBeenCalledExactlyOnceWith({ ...request, signal: expect.any(AbortSignal) });
+    expect(rest.mock.calls[0][0].config.baseURL).toBe('https://testnet-api-evm.orderly.org');
+    expect(unused).not.toHaveBeenCalled();
+    transport.dispose?.();
+  });
+
+  it('uses the raw adapter variant and preserves rejected HTTP status/body without resending', async () => {
+    const { base } = createBase();
+    const adapter = vi.fn<AxiosAdapter>(async (config) => raw(config, body, 429));
+    const restAdapter = vi.fn(() => adapter);
+    const transport = createEngineTransport('woofi', options(provider({ restAdapter }), { tealstreetTunnel: true }), base);
+    const result = await transport.request(signed());
+    expect(restAdapter).toHaveBeenCalledExactlyOnceWith({ exchange: 'woofi', options: expect.any(Object),
+      variant: { region: 'SG', raw: true, WebSocket: undefined } });
+    expect(adapter).toHaveBeenCalledOnce();
+    const config = adapter.mock.calls[0][0];
+    expect(config.url).toBe(`${origin}${query}`);
+    expect(config.data).toBe(body);
+    expect(config.headers.get('orderly-signature')).toBe('exact-signed-bytes');
+    expect(result.status).toBe(429);
+    expect(new TextDecoder().decode(result.body as Uint8Array)).toBe(body);
+    expect(base.request).not.toHaveBeenCalled();
+    transport.dispose?.();
+  });
+
+  it('rejects parsed tunnel bodies and never retries an ambiguous write', async () => {
+    const { base } = createBase();
+    for (const failure of ['parsed', 'lost'] as const) {
+      const adapter = vi.fn<AxiosAdapter>(async (config) => {
+        if (failure === 'lost') throw new Error('response lost after accepted write');
+        return raw(config, { order_id: 9007199254740992 });
+      });
+      const transport = createEngineTransport('what', options(provider({ restAdapter: () => adapter }), { tealstreetTunnel: true }), base);
+      await expect(transport.request(signed())).rejects.toThrow(failure === 'lost' ? 'response lost' : 'raw response body');
+      expect(adapter).toHaveBeenCalledOnce();
       expect(base.request).not.toHaveBeenCalled();
+      transport.dispose?.();
     }
   });
 
-  it('refuses parsed tunnel responses and detects authorization changing signed content before sending', async () => {
-    const { base } = createBase();
-    const adapter = vi.fn<AxiosAdapter>(async (config) => raw(config, { order_id: 9007199254740992 }));
-    const transport = orderlyTransport(
-      'woofi',
-      options(provider({ restAdapter: () => adapter }), { tealstreetTunnel: true }),
-      base,
-    );
-    await expect(transport.request(signed())).rejects.toThrow('unparsed response');
-    expect(adapter).toHaveBeenCalledTimes(1);
-    for (const mutate of [
-      (config: InternalAxiosRequestConfig) => {
-        config.data = '{}';
-      },
-      (config: InternalAxiosRequestConfig) => {
-        config.url = '/v1/other';
-      },
-      (config: InternalAxiosRequestConfig) => {
-        config.headers.set('orderly-signature', 'changed');
-      },
-    ]) {
-      const changed = orderlyTransport(
-        'woofi',
-        options(
-          provider({
-            rest: () => ({
-              baseURL: 'https://proxy.test',
-              proxied: true,
-              authorize: async (config) => {
-                mutate(config);
-              },
-            }),
-          }),
-        ),
-        base,
-      );
-      await expect(changed.request(signed())).rejects.toThrow('changed signed request');
+  it.each([false, true])('refuses signed packet mutations before any dispatch (HOW=%s)', async (tunnel) => {
+    const mutations = [
+      (config: InternalAxiosRequestConfig) => { config.data = '{}'; },
+      (config: InternalAxiosRequestConfig) => { config.url = '/v1/other'; },
+      (config: InternalAxiosRequestConfig) => { config.baseURL = 'https://other.test'; },
+      (config: InternalAxiosRequestConfig) => { config.method = 'DELETE'; },
+      (config: InternalAxiosRequestConfig) => { config.params = { added: 1 }; },
+      (config: InternalAxiosRequestConfig) => { config.headers.set('orderly-signature', 'changed'); },
+      (config: InternalAxiosRequestConfig) => { config.signal = new AbortController().signal; },
+    ];
+    for (const mutate of mutations) {
+      const { base } = createBase();
+      const adapter = vi.fn<AxiosAdapter>(async (config) => raw(config));
+      const transport = createEngineTransport('mode', options(provider({
+        restAdapter: () => adapter,
+        rest: () => ({ baseURL: 'https://proxy.test', proxied: true, authorize: async (config) => mutate(config) }),
+      }), { tealstreetTunnel: tunnel }), base);
+      await expect(transport.request(signed())).rejects.toThrow('changed signed request');
+      expect(base.request).not.toHaveBeenCalled();
+      expect(adapter).not.toHaveBeenCalled();
+      transport.dispose?.();
     }
+  });
+
+  it('protects venue headers from a provider mutating routing inputs', async () => {
+    const { base } = createBase();
+    const transport = createEngineTransport('mode', options(provider({ rest: ({ config }) => {
+      (config.headers as Record<string, string>)['orderly-signature'] = 'changed';
+      return { baseURL: config.baseURL, proxied: false };
+    } })), base);
+    await expect(transport.request(signed())).rejects.toThrow('changed signed request');
+    expect(base.request).not.toHaveBeenCalled();
+    transport.dispose?.();
+  });
+
+  it('disposes while intermediary authorization is pending and never dispatches the late write', async () => {
+    const { base } = createBase();
+    let authorized!: () => void;
+    const transport = createEngineTransport('mode', options(provider({ rest: () => ({
+      baseURL: 'https://proxy.test', proxied: true, authorize: () => new Promise((resolve) => { authorized = resolve; }),
+    }) })), base);
+    const result = transport.request(signed());
+    const rejected = expect(result).rejects.toThrow('disposed');
+    transport.dispose?.();
+    await rejected;
+    authorized();
+    await Promise.resolve();
     expect(base.request).not.toHaveBeenCalled();
   });
 
-  it('fails unsupported route and legacy tunnel options before opening a socket or sending HTTP', () => {
+  it.each([false, true])('routes declared public/funding/private sockets using exact venue URLs (testnet=%s)', (testnet) => {
     const { base } = createBase();
-    expect(() => orderlyTransport('mode', options(directTransport, { tealstreetProxy: true }), base)).toThrow(
-      'direct transport',
-    );
-    expect(() => orderlyTransport('mode', options(provider(), { tealstreetTunnel: true }), base)).toThrow(
-      'preserves signed',
-    );
-    expect(() =>
-      orderlyTransport(
-        'mode',
-        options(provider({ name: 'tealstreet', restAdapter: () => vi.fn() }), { tealstreetTunnel: true }),
-        base,
-      ),
-    ).toThrow('preserves signed');
-    expect(() => orderlyTransport('mode', options(provider(), { tealstreetWsRoute: true }), base)).toThrow(
-      'WebSocket routing',
-    );
-    const wsRouting = () => ({
-      ...directTransport.wsRouting('mode', {}),
-      wsPrivate: { tunnelled: true, host: 'wss://relay.test' },
-    });
-    expect(() => orderlyTransport('mode', options(provider({ wsRouting })), base)).toThrow('WebSocket routing');
-    expect(base.request).not.toHaveBeenCalled();
-    expect(base.connect).not.toHaveBeenCalled();
-  });
-
-  it('keeps direct sockets/timers bound to the supplied base and aborts delayed authorization before a write', async () => {
-    const { base } = createBase();
-    const controller = new AbortController();
-    const transport = orderlyTransport(
-      'mode',
-      options(
-        provider({
-          rest: () => ({
-            baseURL: 'https://proxy.test',
-            proxied: true,
-            authorize: async () => {
-              controller.abort();
-            },
-          }),
-        }),
-      ),
-      base,
-    );
-    const handlers = { onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() };
-    transport.connect('wss://ws-evm.orderly.org/ws/stream/public-id', handlers);
-    expect(base.connect).toHaveBeenCalledExactlyOnceWith('wss://ws-evm.orderly.org/ws/stream/public-id', handlers);
-    expect(transport.now()).toBe(42);
-    expect(transport.setTimeout(() => {}, 1)).toBe(123);
-    transport.clearTimeout(123);
-    expect(base.clearTimeout).toHaveBeenCalledExactlyOnceWith(123);
-    await expect(
-      transport.request({ ...signed(), signal: controller.signal } as Parameters<EngineHostTransport['request']>[0]),
-    ).rejects.toThrow();
-    expect(base.request).not.toHaveBeenCalled();
-  });
-
-  it('preflights provider upgrade headers and refuses a relay or an unsupported browser upgrade before connect', () => {
-    const { base } = createBase();
-    const url = 'wss://ws-evm.orderly.org/ws/stream/common';
-    const handlers = { onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() };
-    const headers = provider({
-      wsConnection: () => ({ kind: 'headers', headers: { Origin: 'https://provider.test' } }),
-    });
-    orderlyTransport('mode', options(headers), base).connect(url, handlers);
-    expect(base.connect).toHaveBeenCalledExactlyOnceWith(url, {
-      ...handlers,
-      headers: { Origin: 'https://provider.test' },
-    });
-    base.connect.mockClear();
-    expect(() => orderlyTransport('mode', options(headers), { ...base, webSocketHeaders: false })).toThrow(
-      'upgrade headers',
-    );
-    const relay = provider({ wsConnection: () => ({ kind: 'relay', headers: {} }) });
-    expect(() => orderlyTransport('mode', options(relay), base)).toThrow('relay');
-    expect(() =>
-      orderlyTransport('mode', options(headers), base).connect(url, {
-        ...handlers,
-        headers: { origin: 'https://original.test' },
-      }),
-    ).toThrow('changed an existing');
-    expect(base.connect).not.toHaveBeenCalled();
-  });
-
-  it.each([false, true])('preflights the actual public and private URLs and caches headers (testnet=%s)', (testnet) => {
-    const { base } = createBase();
-    const wsConnection = vi.fn(() => ({ kind: 'headers' as const, headers: { Origin: 'https://provider.test' } }));
-    const account = 'account-id';
+    const transport = createEngineTransport('mode', options(provider(), { testnet }), base);
     const prefix = testnet ? 'testnet-' : '';
-    const publicUrl = `wss://${prefix}ws-evm.orderly.org/ws/stream/${account}`;
-    const privateUrl = `wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/${account}`;
-    const transport = orderlyTransport(
-      'mode',
-      options(provider({ wsConnection }), { testnet, applicationId: account }),
-      base,
-    );
-    expect(wsConnection.mock.calls).toEqual([[publicUrl], [privateUrl]]);
-    expect(base.connect).not.toHaveBeenCalled();
-    // Reconnecting/funding sockets reuse a route that was already validated at startup.
-    wsConnection.mockImplementation(() => {
-      throw new Error('route changed after startup');
-    });
-    const handlers = { onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() };
-    transport.connect(publicUrl, handlers);
-    transport.connect(publicUrl, handlers);
-    transport.connect(privateUrl, handlers);
-    expect(wsConnection).toHaveBeenCalledTimes(2);
-    expect(base.connect).toHaveBeenLastCalledWith(privateUrl, {
-      ...handlers,
-      headers: { Origin: 'https://provider.test' },
-    });
+    const publicUrl = `wss://${prefix}ws-evm.orderly.org/ws/stream/account-id`;
+    const privateUrl = `wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/account-id`;
+    for (const [url, channel, feed] of [[publicUrl, 'public', 'market'], [publicUrl, 'public', 'funding'], [privateUrl, 'private', 'account']] as const) {
+      const handlers = { channel, context: { feed, recover: false }, onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() };
+      transport.connect(url, handlers);
+      expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers: {}, onMessage: expect.any(Function) });
+    }
+    transport.dispose?.();
   });
 
-  it.each([
-    { publicDataOnly: true, applicationId: undefined },
-    { publicDataOnly: true, applicationId: 'public-account' },
-    { key: '', secret: '', applicationId: undefined },
-  ])('only resolves the public socket when no private socket will be opened: %j', (overrides) => {
-    const { base } = createBase();
-    const wsConnection = vi.fn((url: string) => {
-      if (url.includes('ws-private-')) return { kind: 'relay' as const, headers: {} };
-      return undefined;
-    });
-    orderlyTransport('mode', options(provider({ wsConnection }), overrides), base);
-    expect(wsConnection).toHaveBeenCalledExactlyOnceWith(
-      `wss://ws-evm.orderly.org/ws/stream/${overrides.applicationId ?? 'OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY'}`,
-    );
-    expect(base.connect).not.toHaveBeenCalled();
-  });
-
-  it.each(
-    [
-      { testnet: false, privateRoute: false },
-      { testnet: true, privateRoute: false },
-      { testnet: false, privateRoute: true },
-      { testnet: true, privateRoute: true },
-    ].flatMap((scenario) => (['relay', 'headers'] as const).map((kind) => ({ ...scenario, kind }))),
-  )(
-    'rejects actual SDK startup before constructing an engine for an unsupported socket route: %j',
-    async ({ testnet, privateRoute, kind }) => {
+  it.each([false, true].flatMap((testnet) => [false, true].map((privateRoute) => ({ testnet, privateRoute }))))(
+    'preflights required custom upgrade headers before SDK construction: %j', async ({ testnet, privateRoute }) => {
       const { base } = createBase();
       const construct = vi.fn();
       setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
-      setRustEngineTransport(() => ({ ...base, webSocketHeaders: kind !== 'headers' }));
-      const wsConnection = vi.fn((url: string) => {
-        if (url.includes('ws-private-') === privateRoute) return { kind, headers: { Origin: 'https://provider.test' } };
-        return undefined;
-      });
-      const exchange = new RustEngineExchange(
-        'mode',
-        {
-          key: '11111111111111111111111111111111',
-          secret: '11111111111111111111111111111111',
-          testnet,
-          publicDataOnly: !privateRoute,
-          ...(privateRoute ? { applicationId: 'account-id' } : {}),
-          transport: provider({ wsConnection }),
-        },
-        new DefaultStore(),
-      );
+      setRustEngineTransport(() => ({ ...base, webSocketHeaders: false }));
+      const wsConnection = vi.fn((url: string) => url.includes('ws-private-') === privateRoute
+        ? { kind: 'headers' as const, headers: { Authorization: 'required-custom-auth' } } : undefined);
+      const exchange = new RustEngineExchange('mode', options(provider({ wsConnection }), {
+        key: '11111111111111111111111111111111', secret: '11111111111111111111111111111111',
+        publicDataOnly: !privateRoute, testnet, ...(privateRoute ? { applicationId: 'account-id' } : {}),
+      }), new DefaultStore());
       try {
-        await expect(exchange.start()).rejects.toThrow('unsupported relay');
+        await expect(exchange.start()).rejects.toThrow('upgrade header support');
         const prefix = testnet ? 'testnet-' : '';
-        expect(wsConnection).toHaveBeenLastCalledWith(
-          privateRoute
-            ? `wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/account-id`
-            : `wss://${prefix}ws-evm.orderly.org/ws/stream/OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY`,
-        );
+        expect(wsConnection).toHaveBeenLastCalledWith(privateRoute
+          ? `wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/account-id`
+          : `wss://${prefix}ws-evm.orderly.org/ws/stream/OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY`);
         expect(construct).not.toHaveBeenCalled();
         expect(base.connect).not.toHaveBeenCalled();
         expect(base.request).not.toHaveBeenCalled();
-      } finally {
-        exchange.dispose();
-      }
+      } finally { exchange.dispose(); }
+    },
+  );
+
+  it('preserves custom upgrade headers on capable hosts and rejects later route changes on incapable hosts', () => {
+    const { base } = createBase();
+    const url = 'wss://ws-evm.orderly.org/ws/stream/account-id';
+    const handlers = { channel: 'public' as const, onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() };
+    let headers: Record<string, string> = {};
+    const custom = provider({ wsConnection: () => ({ kind: 'headers', headers }) });
+    const incapable = createEngineTransport('mode', options(custom), { ...base, webSocketHeaders: false });
+    headers = { Authorization: 'required-custom-auth' };
+    expect(() => incapable.connect(url, handlers)).toThrow('upgrade header support');
+    expect(base.connect).not.toHaveBeenCalled();
+    const capable = createEngineTransport('mode', options(custom), base);
+    capable.connect(url, handlers);
+    expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers, onMessage: expect.any(Function) });
+    incapable.dispose?.();
+    capable.dispose?.();
+  });
+
+  it.each<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])(
+    '%s native routing plan uses the same serializable HOW policy', (name) => {
+      const plan = resolveEngineRoutingPlan(name, options(tealstreetTransport, { tealstreetTunnel: true }), origin);
+      expect(plan.http).toMatchObject({ mode: 'how', prefix: '', authorize: false,
+        tunnelUrl: 'wss://fsjnpy143pbz.asia.tealstreet.io/tunnel' });
+      expect(plan.ws).toEqual({ public: {}, private: {}, business: {} });
+      expect(JSON.stringify(plan)).not.toContain('unused-test-secret');
     },
   );
 });

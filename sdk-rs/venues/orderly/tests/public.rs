@@ -1,4 +1,7 @@
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Response, SocketId, Venue};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketContext, SocketId,
+    TimerId, Venue,
+};
 use safe_cex_venue_orderly::{Broker, Options, Orderly};
 
 type Driver = Engine<Orderly>;
@@ -60,7 +63,7 @@ fn ready_with(before_seed: impl FnOnce(&mut Driver)) -> (Driver, SocketId) {
     let socket = actions(&mut e)
         .into_iter()
         .find_map(|a| {
-            if let Action::WsConnect { socket, url } = a {
+            if let Action::WsConnect { socket, url, .. } = a {
                 assert_eq!(
                     url,
                     "wss://ws-evm.orderly.org/ws/stream/OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY"
@@ -934,4 +937,238 @@ fn main_socket_caps_unique_topics_and_releases_capacity_on_unsubscribe() {
         subscription_topics(&actions(&mut e), sockets[0]),
         ["PERP_ASSET099_USDC@kline_1m"]
     );
+}
+
+fn ready_feed_connections(count: usize) -> (Driver, Vec<(SocketId, SocketContext)>, Vec<Action>) {
+    let mut e = Engine::new(Orderly::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.start(1000.0);
+    let natives: Vec<_> = (0..count)
+        .map(|n| format!("PERP_ASSET{n:03}_USDC"))
+        .collect();
+    for body in [
+        rows_envelope(&natives.iter().map(|n| market_row(n)).collect::<Vec<_>>()),
+        rows_envelope(&natives.iter().map(|n| ticker_row(n)).collect::<Vec<_>>()),
+    ] {
+        let request = requests(&mut e).pop().unwrap();
+        reply(&mut e, &request, &body);
+    }
+    let connections: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel,
+                context,
+                ..
+            } => {
+                assert_eq!(channel, Some(SocketChannel::Public));
+                Some((socket, context.expect("public sockets identify their feed")))
+            }
+            _ => None,
+        })
+        .collect();
+    for (socket, _) in &connections {
+        e.handle(1000.0, Event::WsOpened { socket: *socket });
+    }
+    let opened = actions(&mut e);
+    (e, connections, opened)
+}
+
+fn only_timer(out: &[Action]) -> TimerId {
+    let timers: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, .. } => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(timers.len(), 1);
+    timers[0]
+}
+
+#[test]
+fn public_feed_identities_are_unique_and_stable_across_transport_reconnects() {
+    let (mut e, connections, opened) = ready_feed_connections(201);
+    assert_eq!(
+        connections
+            .iter()
+            .map(|(_, context)| context.feed.as_str())
+            .collect::<Vec<_>>(),
+        ["market", "funding-0", "funding-1", "funding-2"]
+    );
+    for (index, (old, original)) in connections.iter().enumerate() {
+        assert!(!original.recover);
+        let now = 2000.0 + index as f64 * 2000.0;
+        e.handle(
+            now,
+            Event::WsClosed {
+                socket: *old,
+                code: 1006,
+            },
+        );
+        let retry = only_timer(&actions(&mut e));
+        e.handle(now + 1000.0, Event::TimerFired { timer: retry });
+        let reconnect = actions(&mut e);
+        let fresh: Vec<_> = reconnect
+            .iter()
+            .filter_map(|action| match action {
+                Action::WsConnect {
+                    socket,
+                    channel,
+                    context,
+                    ..
+                } => {
+                    assert_eq!(*channel, Some(SocketChannel::Public));
+                    assert_eq!(context.as_ref(), Some(original));
+                    Some(*socket)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(fresh.len(), 1);
+        assert!(!connections.iter().any(|(socket, _)| *socket == fresh[0]));
+        e.handle(now + 1000.0, Event::WsOpened { socket: fresh[0] });
+        assert_eq!(
+            subscription_topics(&actions(&mut e), fresh[0]),
+            subscription_topics(&opened, *old)
+        );
+    }
+}
+
+fn assert_payload_silence_recovery(silent: usize) {
+    let (mut e, connections, opened) = ready_feed_connections(201);
+    let topics: Vec<_> = connections
+        .iter()
+        .map(|(socket, _)| subscription_topics(&opened, *socket))
+        .collect();
+    let mut timers: Vec<_> = opened
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, .. } => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(timers.len(), connections.len());
+    let mut retry = None;
+    for now in [11000.0, 21000.0, 31000.0] {
+        for (index, (socket, _)) in connections.iter().enumerate() {
+            // Every feed remains responsive to heartbeats. Only the selected
+            // feed withholds actual ticker/funding data.
+            e.handle(
+                now,
+                Event::WsMessage {
+                    socket: *socket,
+                    text: r#"{"event":"pong"}"#,
+                },
+            );
+            if index == silent && index == 0 {
+                for text in [
+                    r#"{"topic":"tickers","data":[]}"#,
+                    r#"{"topic":"tickers","data":[{"symbol":"PERP_UNKNOWN_USDC","close":3}]}"#,
+                    r#"{"topic":"tickers","data":[{"symbol":"PERP_ASSET000_USDC","close":"invalid"}]}"#,
+                ] {
+                    e.handle(
+                        now,
+                        Event::WsMessage {
+                            socket: *socket,
+                            text,
+                        },
+                    );
+                }
+            }
+            if index != silent {
+                let payload = if index == 0 {
+                    r#"{"topic":"markprices","data":[{"symbol":"PERP_ASSET000_USDC","price":2}]}"#
+                        .to_owned()
+                } else {
+                    let topic = &topics[index][0];
+                    let native = topic.strip_suffix("@estfundingrate").unwrap();
+                    format!(
+                        r#"{{"topic":"{topic}","data":{{"symbol":"{native}","fundingRate":0.001,"fundingTs":12345}}}}"#
+                    )
+                };
+                e.handle(
+                    now,
+                    Event::WsMessage {
+                        socket: *socket,
+                        text: &payload,
+                    },
+                );
+            }
+        }
+        actions(&mut e);
+        for (index, (socket, _)) in connections.iter().enumerate() {
+            e.handle(
+                now,
+                Event::TimerFired {
+                    timer: timers[index],
+                },
+            );
+            let out = actions(&mut e);
+            let closed: Vec<_> = out
+                .iter()
+                .filter_map(|action| match action {
+                    Action::WsClose { socket } => Some(*socket),
+                    _ => None,
+                })
+                .collect();
+            if now == 31000.0 && index == silent {
+                assert_eq!(closed, [*socket]);
+                retry = Some(only_timer(&out));
+            } else {
+                assert!(
+                    closed.is_empty(),
+                    "a responsive payload feed stays connected"
+                );
+                timers[index] = only_timer(&out);
+            }
+        }
+    }
+    e.handle(
+        32000.0,
+        Event::TimerFired {
+            timer: retry.unwrap(),
+        },
+    );
+    let out = actions(&mut e);
+    let fresh: Vec<_> = out
+        .iter()
+        .filter_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel,
+                context,
+                ..
+            } => {
+                assert_eq!(*channel, Some(SocketChannel::Public));
+                let context = context.as_ref().unwrap();
+                assert_eq!(context.feed, connections[silent].1.feed);
+                assert!(
+                    context.recover,
+                    "payload silence requests protocol recovery"
+                );
+                Some(*socket)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fresh.len(), 1);
+    e.handle(32000.0, Event::WsOpened { socket: fresh[0] });
+    assert_eq!(
+        subscription_topics(&actions(&mut e), fresh[0]),
+        topics[silent]
+    );
+}
+
+#[test]
+fn funding_payload_silence_requests_only_its_shard_recovery_despite_pongs() {
+    assert_payload_silence_recovery(1);
+}
+
+#[test]
+fn market_payload_silence_requests_only_main_recovery_despite_pongs() {
+    assert_payload_silence_recovery(0);
 }

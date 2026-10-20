@@ -82,7 +82,7 @@ pub fn ready_with(order: &str, algos: &str, positions: &str) -> (Driver, SocketI
                     };
                     reply(&mut e, &r, 200, &body);
                 }
-                Action::WsConnect { socket, url } if url.contains("private") => {
+                Action::WsConnect { socket, url, .. } if url.contains("private") => {
                     private = Some(socket)
                 }
                 _ => {}

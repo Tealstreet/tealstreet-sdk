@@ -64,7 +64,7 @@ impl Harness {
         self.actions
             .iter()
             .find_map(|a| match a {
-                Action::WsConnect { socket, url }
+                Action::WsConnect { socket, url, .. }
                     if url.ends_with(if private { "/user" } else { "/market" }) =>
                 {
                     Some(*socket)

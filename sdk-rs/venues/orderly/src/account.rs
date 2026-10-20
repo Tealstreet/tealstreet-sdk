@@ -851,7 +851,8 @@ impl Orderly {
         if let Some(timer) = self.account.socket.watchdog.take() {
             cx.clear_timer(timer);
         }
-        self.account.socket.socket = Some(cx.connect(self.private_url()));
+        self.account.socket.socket =
+            Some(cx.connect_channel(self.private_url(), safe_cex_engine::SocketChannel::Private));
         // Cover a transport that never produces either open or close.
         self.account.socket.watchdog = Some(cx.set_timer(10000.0));
     }

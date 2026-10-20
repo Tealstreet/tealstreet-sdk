@@ -121,6 +121,16 @@ const binanceFixes = (account, rustAccount) => {
 const KNOWN_TS_FIXES = {
   // Independent documented-tape oracle; native request/protocol counters remain exact.
   orderly: (ts) => fixOrderly(ts, tapeRecords),
+  // Paired TS fixes: contract-sized public volumes; private cumulative z/native
+  // units, execution L prices, monotonic terminal state and ping timestamp echo.
+  // Cancel native identities and protective defaults now match metadata. Rust
+  // also conserves split quantities, rejects unknown settings, and verifies
+  // final cancellation/protection provenance before placing replacements.
+  // Fill history no longer borrows counterparty IDs or invents an order ID;
+  // filtered full pages fail INCOMPLETE and rejected reads propagate errors.
+  // Conditional REST children retain exact IDs/parents and trigger references.
+  // Rust rejects malformed candle timestamps instead of returning partial history.
+  bitrue() {},
   bitget: {
     // Each correction is covered by documented-payload Rust tests. Normal
     // tapes still compare unchanged; these notes do not rewrite mismatches.

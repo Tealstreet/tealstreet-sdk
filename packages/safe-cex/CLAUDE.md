@@ -511,6 +511,22 @@ public-server proxies) use `proxyPrefix` / `privateProxy` / `withPublicCorsProxy
 `serverProxyUrl`. A method returning nothing means "go direct". Tealstreet's pools,
 tunnel and passthroughs are `transport/tealstreet/tealstreetTransport.ts`.
 
+**Engine hosts use the same provider.** `RustEngineExchange` wraps its raw host
+transport with `transport/engine.ts`; the venue still emits real URLs. Resolve
+the account's routing once and reuse provider REST authorization per operation.
+HOW uses the package's raw adapter so signed request strings, large native IDs,
+status/error bodies and response headers survive unchanged. Preserve the venue
+factory gates (BingX private defaults to HOW unless explicitly disabled; Binance
+public clients bypass ordinary proxies; WEEX/GRVT/BloFin do not install HOW).
+Account normalization already applies metadata; do not normalize explicit
+headless options again at this boundary. Engine socket effects carry optional
+public/private/business roles; new venues with shared URLs must supply the role.
+Reuse `WsDirectFallback` and the feature-gated package relay. Native launchers
+serialize `resolveEngineRoutingPlan(exchange, options, realRestBaseURL)` and pass
+it to `NetworkTransport::with_routing` with a fresh context token provider; never
+serialize a JWT. The engine rejects secondary signing keys before startup because
+its single signer cannot safely honor the TS secondary-read account contract.
+
 **The default is `directTransport` (`transport/direct.ts`).** Every Tealstreet entry
 point imports `transport/registerTealstreetTransport` as a side effect: the web main
 thread (through `apps/web/src/registerTealstreetRealm.ts`, which also registers the
@@ -925,9 +941,12 @@ the error.
 Tealstreet DEX, KodiakFi, WOOFi, Mode, SalsaDEX and What use one Rust venue
 with broker options. Production registries must not import the frozen replay
 reference in `src/__tests__/reference/orderly`. ED25519 signatures cover exact
-request bytes; the built-in HTTP-over-WebSocket adapter parses/reserializes
-those bytes and is unsupported (`supportsTunnel: false`). Direct requests,
-proxies and custom raw adapters retain byte identity; unsupported socket
-routes fail during startup. History `orderId`/`status` filters fail explicitly
-rather than returning unrelated rows. See `sdk-rs/venues/orderly/README.md`
+request bytes. The shared engine transport supports direct requests, proxies
+and the built-in raw HTTP-over-WebSocket adapter (`supportsTunnel: true`).
+Authorization may add intermediary headers but must not change the original
+URL suffix, body, method or venue headers. Socket roles and feed identities
+are declared by the venue; the shared host applies account routing policy.
+Custom provider upgrade headers require a capable host and are checked before
+engine construction. History `orderId`/`status` filters fail explicitly rather
+than returning unrelated rows. See `sdk-rs/venues/orderly/README.md`
 for native IDs, margin modes, caller IDs and socket capacity.
