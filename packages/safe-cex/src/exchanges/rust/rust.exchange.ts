@@ -1223,6 +1223,10 @@ export class RustEngineExchange extends BaseExchange {
           'coinbase',
           'coinbasespot',
           'polymarket',
+          'okx',
+          'okxeu',
+          'okxdemo',
+          'okxeudemo',
         ].includes(this.name) ||
         orderlyNames.has(this.name)
       )

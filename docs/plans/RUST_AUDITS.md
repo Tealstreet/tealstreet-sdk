@@ -369,12 +369,17 @@ per-venue canary holding the circular-evidence venues last.
 ## Port reviews (Opus, per venue vs TS)
 
 ### OKX
-- High: blank `bidPx`/`askPx`/volume or any failed instruments/tickers read at
+- ~~High: blank `bidPx`/`askPx`/volume or any failed instruments/tickers read at
   startup halts the venue with no retry (`okx/src/lib.rs:841,995`); TS treats
-  blanks as 0 and continues. Parse blanks as 0, retry with backoff.
-- Medium: one bad instrument row aborts the catalogue (`lib.rs:738`); leverage
+  blanks as 0 and continues. Parse blanks as 0, retry with backoff.~~ Fixed:
+  blank or malformed seed quotes start at 0 (row kept for live updates); a failed
+  or unusable catalog/ticker read retries the whole product chain with backoff.
+- ~~Medium: one bad instrument row aborts the catalogue (`lib.rs:738`); leverage
   for flat symbols missing (no `leverage-info`); account config (posMode, acctLv)
-  read once, so a mode change in the OKX app makes every order reject.
+  read once, so a mode change in the OKX app makes every order reject.~~ Fixed:
+  bad rows are skipped and counted in a warning; `fetchLeverage` reads
+  `leverage-info` (it previously never answered); config is re-read every 30 s
+  and a changed mode/level reconciles positions.
 - Low: `mmp`/`elp` order types get an empty id; conditional `price: 0`
   rejected; income limit truncates.
 - Confirm (TS bugs Rust fixed): OCO leg edit deleting its pair, triggered algos
