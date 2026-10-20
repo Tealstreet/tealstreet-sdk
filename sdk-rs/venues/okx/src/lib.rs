@@ -605,12 +605,8 @@ impl Okx {
                 if channel == "index-tickers" && !self.indexes.contains(id) {
                     self.indexes.insert(id.to_owned());
                 }
-                let Some(index) = index.or_else(|| {
-                    let symbol = cx.store.market_by_id(id)?.symbol.clone();
-                    let index = cx.store.ensure_ticker(&symbol)?;
-                    self.price_tickers.insert(id.to_owned(), Some(index));
-                    Some(index)
-                }) else {
+                // Like TS, live prices only update rows the REST ticker read listed.
+                let Some(index) = index else {
                     return;
                 };
                 cx.store.update_ticker_at(index, |t| match channel {
@@ -1594,7 +1590,7 @@ mod price_index_tests {
     }
 
     #[test]
-    fn live_prices_restore_known_catalogue_tickers_without_inserting_unknown_ids() {
+    fn live_prices_after_the_seed_never_create_tickers_the_rest_read_omitted() {
         let mut e = engine();
         e.start(0.0);
         let r = request(&mut e);
@@ -1618,12 +1614,38 @@ mod price_index_tests {
         assert_eq!(e.venue().indexes.len(), 1);
         assert!(e.venue().marks.contains("BTC-USDT-SWAP"));
         assert!(e.venue().indexes.contains("BTC-USDT-SWAP"));
-        assert_eq!(e.store().tickers().len(), 1);
-        assert_eq!(
-            (e.store().tickers()[0].mark, e.store().tickers()[0].index),
-            (2., 4.)
+        // TS updates only REST-seeded tickers (gate: CRMLUSDT, MPUSDT index-only rows).
+        assert!(e.store().tickers().is_empty());
+        assert_eq!(e.venue().price_tickers.get("BTC-USDT-SWAP"), Some(&None));
+    }
+
+    #[test]
+    fn index_fan_out_after_a_partial_seed_updates_only_rest_listed_tickers() {
+        let eth = MARKET.replace("BTC", "ETH");
+        let mut e = engine();
+        e.start(0.0);
+        let r = request(&mut e);
+        reply(&mut e, r, &format!("{MARKET},{eth}"));
+        let r = request(&mut e);
+        reply(
+            &mut e,
+            r,
+            r#"{"instId":"BTC-USDT-SWAP","bidPx":"1","askPx":"3","last":"2","open24h":"1","volCcy24h":"4","vol24h":"5"}"#,
         );
-        assert_eq!(e.venue().price_tickers.get("BTC-USDT-SWAP"), Some(&Some(0)));
+        let socket = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, url, .. } if url.ends_with("/public") => Some(socket),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(2.0, Event::WsOpened { socket });
+        e.handle(3.0, Event::WsMessage { socket, text: r#"{"arg":{"channel":"index-tickers"},"data":[{"instId":"BTC-USDT","idxPx":"4"},{"instId":"ETH-USDT","idxPx":"39.02"}]}"# });
+        e.handle(3.0, Event::WsMessage { socket, text: r#"{"arg":{"channel":"mark-price"},"data":[{"instId":"ETH-USDT-SWAP","markPx":"39"}]}"# });
+        assert_eq!(e.store().tickers().len(), 1);
+        assert_eq!(e.store().ticker("BTCUSDT").unwrap().index, 4.);
+        assert!(e.store().ticker("ETHUSDT").is_none());
+        assert_eq!(e.venue().price_tickers.get("ETH-USDT-SWAP"), Some(&None));
     }
 
     #[test]

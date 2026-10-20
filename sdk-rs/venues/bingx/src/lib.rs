@@ -189,6 +189,8 @@ pub struct Bingx {
     tickers_committed: bool,
     // Markets the live stream has priced; a late funding retry never overwrites them.
     live_priced: Vec<bool>,
+    // Rows created only to hold live fields before the REST seed commits.
+    staged_tickers: Vec<String>,
 }
 
 impl Bingx {
@@ -228,6 +230,7 @@ impl Bingx {
             retries: Default::default(),
             tickers_committed: false,
             live_priced: Vec::new(),
+            staged_tickers: Vec::new(),
         }
     }
 
@@ -322,7 +325,15 @@ impl Bingx {
             });
         }
         let mut rows = std::mem::take(&mut self.seed);
+        let seeded = rows.len();
         self.live_tickers.finish(cx.store, &mut rows);
+        // TS publishes only seeded tickers; a live-only staged row is dropped.
+        let staged = std::mem::take(&mut self.staged_tickers);
+        let mut index = 0;
+        rows.retain(|row| {
+            index += 1;
+            index <= seeded || !staged.contains(&row.symbol)
+        });
         self.seed_index.resize(cx.store.markets().len(), None);
         self.seed_index.fill(None);
         for (i, ticker) in rows.iter().enumerate() {
@@ -422,17 +433,21 @@ impl Bingx {
                     let Some(market) = cx.store.market_index_by_id(&row.symbol) else {
                         return;
                     };
+                    // Before the seed commits, a staged row keeps live fields for its overlay;
+                    // afterwards, like TS, markets the daily or funding read omitted stay absent.
                     let ticker = match self.seed_index.get(market as usize).copied().flatten() {
                         Some(ticker) => ticker,
-                        None => {
+                        None if !self.tickers_committed => {
                             let symbol = cx.store.markets()[market as usize].symbol.clone();
                             let Some(ticker) = cx.store.ensure_ticker(&symbol) else {
                                 return;
                             };
-                            self.seed_index.resize(cx.store.markets().len(), None);
-                            self.seed_index[market as usize] = Some(ticker as usize);
+                            if !self.staged_tickers.contains(&symbol) {
+                                self.staged_tickers.push(symbol);
+                            }
                             ticker as usize
                         }
+                        None => return,
                     };
                     let step = cx.store.markets()[market as usize].precision.price;
                     let mut mask = (1 << 3) | (1 << 4) | (1 << 7);

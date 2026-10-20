@@ -522,8 +522,9 @@ fn price_channels_follow_last_duplicate_symbol_in_reordered_ticker_seed() {
         ),
         (15.0, 16.0, 17.0, 0.002, 1800.0, 4.0, 5.0)
     );
-    assert_eq!(e.store().tickers().len(), 4);
-    assert_eq!(e.store().ticker("SOLUSDT").unwrap().mark, 99.0);
+    // Like TS, a catalogue market missing from the REST ticker seed stays absent.
+    assert_eq!(e.store().tickers().len(), 3);
+    assert!(e.store().ticker("SOLUSDT").is_none());
     assert!(e.store().ticker("UNKNOWN").is_none());
     assert_eq!(
         e.store().tickers()[1].mark,
