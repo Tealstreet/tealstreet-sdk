@@ -64,3 +64,45 @@ failed reads retain previous state, retry reads with bounded backoff.
 
 - Planning: repository and official signing/book docs inspected; authentication
   risks and phase boundaries recorded. Implementation pending.
+
+### Implementation checkpoint
+
+- Public data implemented with streamed seeds, role-tagged socket, engine ping,
+  sequenced full depth, polling charts and subscription generation fences.
+  Phase code-correctness review found stale book snapshots and candle error
+  envelopes; fixes covered by nine public tests. Live instruments additionally
+  prove negative quantity precision (PEPE -3 means 1,000-contract steps).
+- Private/signing implemented; independent official challenge and REST vectors,
+  monotonic nonce stress, streamed atomic reads and execution-ID dedup. Review
+  tightening confirmed settings versus defaults and authoritative omissions.
+- Trading implemented; review fixes include remaining-quantity protective replace,
+  queued margin settings resolved after prior ACK, and late ACK/WS ordering.
+  Thirty regression tests pass on author verification.
+- Queries implemented; fifteen tests cover exact native IDs/ISO time, first-page
+  PnL, cursor boundaries/refusals, raw-ledger paging and cash/position leg split,
+  documented v3 order events and public trade history. Independent review ongoing.
+- Harness integration underway; independent Node crypto validates sent form bytes,
+  paths and current per-socket challenges. Four oracle tests pass (179 harness
+  total). First per-venue Wasm build 837,439 bytes, below 1,258,291 budget.
+- Full gates/PR not yet complete. No credentials, stash, push or merge performed.
+
+### Phases 1–4 reviewed
+
+- Public review: stale snapshots and malformed/error/incomplete candle replies
+  fixed; 10 public regressions now include the live negative-precision case.
+- Private/signing review: default versus confirmed settings separated, complete
+  preference omissions reset cross mode, malformed snapshots retain last good
+  state, accepted settings survive initial/delayed socket snapshots, disconnects
+  fence REST, source clocks preserve richer live positions. Native remaining
+  execution quantity updates orders monotonically without duplicate fill events.
+- Trading review: partial protective replacement, execution race suppression,
+  late placed/edit ACK fences, and queued margin changes all accepted after fixes.
+- Queries review: saturated descending ledger can succeed only on a proven lower
+  boundary crossing; zero-quantity rejected order events supported; page budget
+  cannot be hidden by the requested output limit. 18 history regressions pass.
+- Independent reviewers accepted all four implementation phases. Native venue
+  tests and all-target Clippy pass; harness gate integration continues separately.
+- Deliberate TS corrections include monotonic nonces, full depth/sequence safety,
+  negative precision powers, execution-ID deduplication, remaining protective
+  size, accepted-write/source fences, documented index triggers and explicit
+  failed/incomplete reads. The harness lists these in KNOWN_TS_FIXES.
