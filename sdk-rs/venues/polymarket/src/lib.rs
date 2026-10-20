@@ -1015,6 +1015,14 @@ impl Venue for Polymarket {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            Command::FetchOptionChain { command, .. }
+            | Command::FetchOptionExpiries { command, .. }
+            | Command::FetchAccountGreeks { command } => {
+                cx.done(
+                    command,
+                    Err("Options are not enabled on this account".into()),
+                );
+            }
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
             Command::UnsubscribeOrderBook { symbol } => {

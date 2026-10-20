@@ -1050,6 +1050,14 @@ impl Venue for BreakoutProp {
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            Command::FetchOptionChain { command, .. }
+            | Command::FetchOptionExpiries { command, .. }
+            | Command::FetchAccountGreeks { command } => {
+                cx.done(
+                    command,
+                    Err("Options are not enabled on this account".into()),
+                );
+            }
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
                 let entry = self.books.entry(symbol).or_default();

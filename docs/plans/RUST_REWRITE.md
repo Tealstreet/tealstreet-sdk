@@ -102,7 +102,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 4 | `TICKER_DELTAS` | f64 `[ticker, mask, ...changed values]` repeated |
 | 5 | `BOOK` | `u32 market`, `u32 bids`, `u32 asks`, `u32 0`; f64 rows `[price, amount, total]` for bids then asks |
 | 6 | `CANDLES` | `u32 n`; `u32 market[n]`; `u32 interval[n]` (string); f64 rows `[time, open, high, low, close, volume]` |
-| 7 | `ORDERS` (replace) | `u32 n`; `u32 strings[n][3]` (id, clientOrderId, parentId); `u32 market[n]`; `u32 enums[n]`; f64 columns: price, amount, filled, remaining, lastUpdate, takeProfit, stopLoss; optional trailing f64 column remainingNative (NaN when absent per row) |
+| 7 | `ORDERS` (replace) | `u32 n`; `u32 strings[n][3]` (id, clientOrderId, parentId); `u32 market[n]`; `u32 enums[n]`; f64 columns: price, amount, filled, remaining, lastUpdate, takeProfit, stopLoss; optional trailing f64 columns remainingNative, then filledInPlacementUnits (NaN when absent per row) |
 | 8 | `POSITIONS` (replace) | `u32 n`; `u32 market[n]`; `u32 enums[n]`; f64 columns: entryPrice, notional, leverage, unrealizedPnl, realizedPnl, contracts, liquidationPrice, marginSize, lastUpdate; optional appended u32 position-ID string references |
 | 9 | `BALANCE` | f64 `[used, free, total, upnl]` |
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
@@ -111,6 +111,9 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 13 | `PREDICTION_MARKETS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][6]` (conditionId, outcome, question, description, endDate, slug); `u32 flags[n]` (bit 0 negRisk); aligned f64 tickSize[n] |
 | 14 | `PREDICTION_HOLDINGS` (optional replace with POSITIONS) | `u32 n`; `u32 market[n]`; `u32 flags[n]` (bit 0 redeemable, bit 1 mergeable) |
 | 15 | `BOOK_DELTA` | `u32 market`, `u32 bid changes`, `u32 ask changes`, `u32 0`; f64 rows `[price, amount]` for bids then asks; zero amount deletes the price |
+| 16 | `INSTRUMENT_CLASSIFICATIONS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 strings[n][3]` (native symbolType, marketRegion, underlyingTicker); absent and explicitly empty strings differ |
+| 17 | `DERIVATIVE_PRODUCTS` (optional replace with MARKETS) | `u32 n`; `u32 market[n]`; `u32 kind[n]` (1 Future, 2 Call, 3 Put); `u32 strings[n][5]` (underlying, settleAsset, premiumAsset, style, settlement); aligned f64 expiry[n], strike[n]; unknown terms are absent |
+| 18 | `POSITION_GREEKS` (optional replace with POSITIONS) | `u32 n`; `u32 strings[n][2]` (position ID, units); aligned f64 delta[n], gamma[n], vega[n], theta[n] |
 
 Prediction venues map each outcome token to one ordinary market, with shares
 as base size and collateral as quote. Optional typed metadata sections preserve

@@ -408,7 +408,7 @@ fn unknown_option_terms_remain_absent_and_new_foreign_pricing_rejects_before_wri
         done(&a)
             .as_ref()
             .unwrap_err()
-            .contains("Implied-volatility")
+            .contains("Options are not enabled")
     );
     assert!(
         !a.iter()

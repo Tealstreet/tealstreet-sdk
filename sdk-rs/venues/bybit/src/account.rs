@@ -5,8 +5,9 @@ use crate::sign::Query;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Channel, Pending, Rest, Then, venue_error};
 use safe_cex_engine::model::{
-    Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
-    PositionMode, PositionSide, RejectReason, StopTriggerType, TimeInForce, OptionGreeks, PositionGreeks,
+    Balance, MarginType, OptionGreeks, Order, OrderExtra, OrderSide, OrderStatus, OrderType,
+    Position, PositionGreeks, PositionMode, PositionSide, RejectReason, StopTriggerType,
+    TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, LogLevel, Response, SocketId, Store, TimerId, num};
@@ -61,7 +62,8 @@ struct FillCursor {
 
 pub struct MappedPosition {
     pub position: Position,
-    greeks: Option<OptionGreeks>,    /// Placeholder rows repeat a symbol; the most informative one wins.
+    greeks: Option<OptionGreeks>,
+    /// Placeholder rows repeat a symbol; the most informative one wins.
     score: u32,
     updated: f64,
 }
@@ -141,6 +143,12 @@ pub struct AccountState {
     /// Bybit permits different position modes on different symbols.
     pub position_modes: HashMap<String, bool>,
     pub position_bound: HashSet<String>,
+}
+
+impl AccountState {
+    pub(crate) fn has_hedged(&self) -> bool {
+        self.position_modes.values().any(|hedged| *hedged)
+    }
 }
 
 fn finite(value: f64) -> Option<f64> {
@@ -235,7 +243,7 @@ fn valid_hyro_wallet(row: &WalletAccount<'_>) -> bool {
         })
 }
 
-fn valid_hyro_list(body: &str, cursor: &str) -> bool {
+pub(crate) fn valid_snapshot_list(body: &str, cursor: &str) -> bool {
     #[derive(serde::Deserialize)]
     struct Envelope {
         result: List,
@@ -551,10 +559,20 @@ pub fn map_position(
     let native = or_zero(&p.size);
     let inverse = is_inverse_symbol(&p.symbol);
     let option = Category::for_symbol(&p.symbol) == Category::Option;
-    let reference = store
-        .ticker(&p.symbol)
-        .map(|t| if t.mark > 0.0 { t.mark } else { t.last })
-        .filter(|v| *v > 0.0)
+    let ticker = store.ticker(&p.symbol);
+    let reference = ticker
+        .map(|ticker| ticker.mark)
+        .filter(|mark| mark.is_finite() && *mark > 0.0)
+        .or_else(|| {
+            present(&p.mark_price)
+                .map(float)
+                .filter(|mark| mark.is_finite() && *mark > 0.0)
+        })
+        .or_else(|| {
+            ticker
+                .map(|ticker| ticker.last)
+                .filter(|last| last.is_finite() && *last > 0.0)
+        })
         .unwrap_or(entry_price);
     let contracts = if inverse && reference > 0.0 {
         num::round_half_up(native / reference * 1e8) / 1e8
@@ -576,7 +594,8 @@ pub fn map_position(
     });
     let mut unrealized = or_zero(&p.unrealised_pnl);
     // USDC contracts report PnL settled differently; TS values them at mark.
-    if !option && !p.symbol.ends_with("USDT")
+    if !option
+        && !p.symbol.ends_with("USDT")
         && store.market(&p.symbol).is_some_and(|m| m.quote == "USDC")
         && let Some(ticker) = store.ticker(&p.symbol)
     {
@@ -606,7 +625,9 @@ pub fn map_position(
         score += 5;
     }
     MappedPosition {
-        greeks: option.then(|| crate::options::greeks(&p.delta, &p.gamma, &p.vega, &p.theta)).flatten(),
+        greeks: option
+            .then(|| crate::options::greeks(&p.delta, &p.gamma, &p.vega, &p.theta))
+            .flatten(),
         position: Position {
             id: position_id(&p.symbol, side, mode),
             symbol: p.symbol.to_string(),
@@ -837,8 +858,12 @@ impl BybitLinear {
             return category == self.paths.category
                 && (!self.variant.is_hyro() || symbol.ends_with("USDT"));
         }
-        if self.variant.is_spot() { return false; }
-        if self.category == Category::Option { return Category::for_symbol(symbol) == Category::Option; }
+        if self.variant.is_spot() {
+            return false;
+        }
+        if self.category == Category::Option {
+            return Category::for_symbol(symbol) == Category::Option;
+        }
         if self.category == Category::Inverse {
             return is_inverse_symbol(symbol);
         }
@@ -862,6 +887,16 @@ impl BybitLinear {
     pub(crate) fn on_private_closed(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.authed = false;
         if !self.variant.is_hyro() {
+            self.account.session_version += 1;
+            self.account.orders_generation += 1;
+            self.account.positions_generation += 1;
+            self.account.orders = None;
+            self.account.positions = None;
+            self.account.orders_follow_up = false;
+            self.account.positions_follow_up = false;
+            self.account.orders_stale = true;
+            self.account.wallet_in_flight = false;
+            self.account.wallet_follow_up = false;
             return;
         }
         self.account.session_version += 1;
@@ -1051,7 +1086,9 @@ impl BybitLinear {
         {
             return;
         }
-        if self.category == self.primary_category { self.connect(cx, Channel::Private); }
+        if self.category == self.primary_category {
+            self.connect(cx, Channel::Private);
+        }
         if self.variant.is_hyro() {
             return;
         }
@@ -1165,7 +1202,9 @@ impl BybitLinear {
     }
 
     fn fetch_wallet(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.category != self.primary_category { return; }
+        if self.category != self.primary_category {
+            return;
+        }
         if std::mem::replace(&mut self.account.wallet_in_flight, true) {
             return;
         }
@@ -1347,6 +1386,21 @@ impl BybitLinear {
                 self.fetch_orders(cx);
                 self.fetch_positions(cx);
                 self.fetch_wallet(cx);
+                let category = self.category;
+                for other in self
+                    .categories()
+                    .into_iter()
+                    .filter(|other| *other != category)
+                    .collect::<Vec<_>>()
+                {
+                    self.select_category(other);
+                    self.account.authed = true;
+                    self.account.orders_follow_up = self.account.orders.is_some();
+                    self.account.positions_follow_up = self.account.positions.is_some();
+                    self.fetch_orders(cx);
+                    self.fetch_positions(cx);
+                }
+                self.select_category(category);
             }
             (_, Some(false)) => {
                 let message = frame.ret_msg.as_deref().unwrap_or_default();
@@ -1432,8 +1486,14 @@ impl BybitLinear {
             let position = mapped.position;
             let mut greek_rows = cx.store.position_greeks().unwrap_or_default().to_vec();
             greek_rows.retain(|row| row.position_id != position.id);
-            if position.contracts != 0.0 && let Some(greeks) = mapped.greeks { greek_rows.push(PositionGreeks { position_id: position.id.clone(), greeks }); }
-            if self.category == Category::Option { cx.store.set_position_greeks(greek_rows); }
+            if position.contracts != 0.0
+                && let Some(greeks) = mapped.greeks
+            {
+                greek_rows.push(PositionGreeks {
+                    position_id: position.id.clone(),
+                    greeks,
+                });
+            }
             if let Some(mode) = position.position_mode {
                 self.account
                     .position_modes
@@ -1447,13 +1507,15 @@ impl BybitLinear {
                 });
             }
             cx.store.upsert_position(position);
+            if self.category == Category::Option {
+                cx.store.set_position_greeks(greek_rows);
+            }
             changed = true;
         }
         if !changed {
             return;
         }
-        cx.store
-            .set_hedged(self.account.position_modes.values().any(|hedged| *hedged));
+        cx.store.set_hedged(self.any_hedged());
         self.account.position_version += 1;
         // Only the PnL follows the stream; the total waits for the wallet.
         if cx.store.loaded().balance {
@@ -1466,7 +1528,9 @@ impl BybitLinear {
     }
 
     fn commit_balance(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.category == self.primary_category { self.wallet = self.account.wallet; }
+        if self.category == self.primary_category {
+            self.wallet = self.account.wallet;
+        }
         if let Some(wallet) = self.wallet {
             cx.store.set_balance(wallet.balance(open_upnl(cx.store)));
         }
@@ -1480,16 +1544,37 @@ impl BybitLinear {
     ) {
         match request {
             Request::Orders { rows, invalid, .. } => {
-                let row = serde_json::from_str::<OrderRow>(item).ok();
-                let mapped = row
-                    .as_ref()
-                    .filter(|row| self.trades_row(&row.category, &row.symbol))
-                    .and_then(|row| map_order(row, cx.store, cx.now));
-                if self.variant.is_hyro()
-                    && (row.as_ref().is_none_or(|row| !valid_hyro_order(row))
-                        || mapped.as_ref().is_none_or(|mapped| {
-                            mapped.orders.iter().any(|order| !valid_order(order))
-                        }))
+                let Ok(row) = serde_json::from_str::<OrderRow>(item) else {
+                    *invalid = true;
+                    return;
+                };
+                if row.symbol.is_empty() || row.order_id.is_empty() {
+                    *invalid = true;
+                    return;
+                }
+                if !self.trades_row(&row.category, &row.symbol) {
+                    return;
+                }
+                let mapped = map_order(&row, cx.store, cx.now);
+                if (self.variant.is_hyro() && !valid_hyro_order(&row))
+                    || !float_of(&row.qty).is_finite()
+                    || float_of(&row.qty) < 0.0
+                    || order_status(&row.order_status).is_none()
+                    || [
+                        &row.price,
+                        &row.cum_exec_qty,
+                        &row.cum_exec_value,
+                        &row.leaves_qty,
+                        &row.avg_price,
+                        &row.trigger_price,
+                        &row.stop_loss,
+                        &row.take_profit,
+                    ]
+                    .into_iter()
+                    .any(|value| !optional_numeric(value))
+                    || mapped
+                        .as_ref()
+                        .is_none_or(|mapped| mapped.orders.iter().any(|order| !valid_order(order)))
                 {
                     *invalid = true;
                 } else if let Some(mapped) = mapped {
@@ -1497,15 +1582,43 @@ impl BybitLinear {
                 }
             }
             Request::Positions { rows, invalid, .. } => {
-                if let Ok(row) = serde_json::from_str::<PositionRow>(item) {
-                    if !self.trades_row(&row.category, &row.symbol) { return; }
-                    if self.variant.is_hyro() && !valid_hyro_position(&row) {
-                        *invalid = true;
-                    } else {
-                        rows.push(self.map_account_position(&row, cx.store, cx.now));
-                    }
-                } else if self.variant.is_hyro() {
+                let Ok(row) = serde_json::from_str::<PositionRow>(item) else {
                     *invalid = true;
+                    return;
+                };
+                if row.symbol.is_empty() {
+                    *invalid = true;
+                    return;
+                }
+                if !self.trades_row(&row.category, &row.symbol) {
+                    return;
+                }
+                let size = float_of(&row.size);
+                if (self.variant.is_hyro() && !valid_hyro_position(&row))
+                    || !size.is_finite()
+                    || size < 0.0
+                    || (size > 0.0 && order_side(row.side.as_deref()).is_none())
+                    || [
+                        &row.avg_price,
+                        &row.entry_price,
+                        &row.mark_price,
+                        &row.leverage,
+                        &row.unrealised_pnl,
+                        &row.position_value,
+                        &row.position_im,
+                        &row.cur_realised_pnl,
+                        &row.liq_price,
+                        &row.delta,
+                        &row.gamma,
+                        &row.vega,
+                        &row.theta,
+                    ]
+                    .into_iter()
+                    .any(|value| !optional_numeric(value))
+                {
+                    *invalid = true;
+                } else {
+                    rows.push(self.map_account_position(&row, cx.store, cx.now));
                 }
             }
             _ => {}
@@ -1556,7 +1669,10 @@ impl BybitLinear {
                     state.startup.account_info = true;
                 }
                 let category = self.category;
-                for other in self.categories() { self.select_category(other); self.try_start_account(cx); }
+                for other in self.categories() {
+                    self.select_category(other);
+                    self.try_start_account(cx);
+                }
                 self.select_category(category);
             }
             Request::Orders {
@@ -1566,19 +1682,19 @@ impl BybitLinear {
                 rows,
                 invalid,
             } => {
-                let outcome = if self.variant.is_hyro()
-                    && (invalid
-                        || outcome
-                            .as_ref()
-                            .is_ok_and(|body| !valid_hyro_list(body, &cursor)))
+                let outcome = if invalid
+                    || outcome
+                        .as_ref()
+                        .is_ok_and(|body| !valid_snapshot_list(body, &cursor))
                 {
-                    Err("Malformed HyroTrader private snapshot".to_owned())
+                    Err("Malformed Bybit private snapshot".to_owned())
                 } else {
                     outcome
                 };
-                let next = outcome.as_ref().ok().and_then(|body| {
-                    next_cursor(body, &cursor, !self.variant.is_hyro() && rows.is_empty())
-                });
+                let next = outcome
+                    .as_ref()
+                    .ok()
+                    .and_then(|body| next_cursor(body, &cursor, false));
                 let Some(join) = self
                     .account
                     .orders
@@ -1591,9 +1707,7 @@ impl BybitLinear {
                     Ok(_) => {
                         join.rows.extend(rows);
                         if let Some(next) = next {
-                            if self.variant.is_hyro()
-                                && (!join.cursors.insert(next.clone()) || join.cursors.len() > 100)
-                            {
+                            if !join.cursors.insert(next.clone()) || join.cursors.len() > 100 {
                                 join.failed = true;
                             } else {
                                 self.request_orders_page(cx, generation, coin, next);
@@ -1616,13 +1730,12 @@ impl BybitLinear {
                 rows,
                 invalid,
             } => {
-                let outcome = if self.variant.is_hyro()
-                    && (invalid
-                        || outcome
-                            .as_ref()
-                            .is_ok_and(|body| !valid_hyro_list(body, &cursor)))
+                let outcome = if invalid
+                    || outcome
+                        .as_ref()
+                        .is_ok_and(|body| !valid_snapshot_list(body, &cursor))
                 {
-                    Err("Malformed HyroTrader private snapshot".to_owned())
+                    Err("Malformed Bybit private snapshot".to_owned())
                 } else {
                     outcome
                 };
@@ -1642,9 +1755,7 @@ impl BybitLinear {
                     Ok(_) => {
                         join.rows.extend(rows);
                         if let Some(next) = next {
-                            if self.variant.is_hyro()
-                                && (!join.cursors.insert(next.clone()) || join.cursors.len() > 100)
-                            {
+                            if !join.cursors.insert(next.clone()) || join.cursors.len() > 100 {
                                 join.failed = true;
                             } else {
                                 self.request_positions_page(cx, generation, coin, next);
@@ -1760,12 +1871,22 @@ impl BybitLinear {
                 merged.push((*order).clone());
             }
         }
-        let old: Vec<String> = cx.store.orders().iter().filter(|order| self.owns_symbol(&order.symbol)).map(|order| order.id.clone()).collect();
+        let old: Vec<String> = cx
+            .store
+            .orders()
+            .iter()
+            .filter(|order| self.owns_symbol(&order.symbol))
+            .map(|order| order.id.clone())
+            .collect();
         let old_refs: Vec<&str> = old.iter().map(String::as_str).collect();
         cx.store.remove_orders(&old_refs);
-        for order in merged.drain(..) { cx.store.upsert_order(order); }
+        for order in merged.drain(..) {
+            cx.store.upsert_order(order);
+        }
         self.orders_loaded.insert(self.category);
-        if self.orders_loaded.len() == self.products.len() + 1 { cx.store.set_orders(cx.store.orders().to_vec()); }
+        if self.orders_loaded.len() == self.products.len() + 1 {
+            cx.store.set_orders(cx.store.orders().to_vec());
+        }
     }
 
     pub(crate) fn refresh_after_mode_change(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1821,35 +1942,55 @@ impl BybitLinear {
                         .insert(row.position.symbol.clone(), mode == PositionMode::Hedged);
                 }
             }
-            cx.store
-                .set_hedged(self.account.position_modes.values().any(|hedged| *hedged));
+            cx.store.set_hedged(self.any_hedged());
         }
-        let settings: Vec<(u32, MarketSetting)> = best
+        for row in &best {
+            if row.position.leverage > 0.0 {
+                cx.store.update_setting(&row.position.symbol, |setting| {
+                    setting.leverage = row.position.leverage;
+                    setting.margin_type = row.position.margin_type;
+                });
+            }
+        }
+        let mut greek_rows = cx
+            .store
+            .position_greeks()
+            .unwrap_or_default()
             .iter()
-            .filter(|r| r.position.leverage > 0.0)
-            .filter_map(|r| {
-                Some((
-                    cx.store.market_index(&r.position.symbol)?,
-                    MarketSetting {
-                        leverage: r.position.leverage,
-                        margin_type: r.position.margin_type,
-                        ..MarketSetting::default()
-                    },
-                ))
+            .filter(|row| {
+                cx.store
+                    .position(&row.position_id)
+                    .is_some_and(|position| !self.owns_symbol(&position.symbol))
             })
-            .collect();
-        cx.store.set_settings(settings);
-        let mut greek_rows = cx.store.position_greeks().unwrap_or_default().iter().filter(|row| cx.store.position(&row.position_id).is_some_and(|position| !self.owns_symbol(&position.symbol))).cloned().collect::<Vec<_>>();
-        for row in &best { if row.position.contracts != 0.0 && let Some(greeks) = &row.greeks { greek_rows.push(PositionGreeks { position_id: row.position.id.clone(), greeks: greeks.clone() }); } }
+            .cloned()
+            .collect::<Vec<_>>();
+        for row in &best {
+            if row.position.contracts != 0.0
+                && let Some(greeks) = &row.greeks
+            {
+                greek_rows.push(PositionGreeks {
+                    position_id: row.position.id.clone(),
+                    greeks: greeks.clone(),
+                });
+            }
+        }
         let category = self.category;
         let spot = self.variant.is_spot();
         cx.store.update_positions(|position| {
-            if spot || Category::for_symbol(&position.symbol) == category { position.contracts = 0.0; }
+            if spot || Category::for_symbol(&position.symbol) == category {
+                position.contracts = 0.0;
+            }
         });
-        for row in best { cx.store.upsert_position(row.position); }
-        if self.category_enabled(Category::Option) { cx.store.set_position_greeks(greek_rows); }
+        for row in best {
+            cx.store.upsert_position(row.position);
+        }
+        if self.category_enabled(Category::Option) {
+            cx.store.set_position_greeks(greek_rows);
+        }
         self.positions_loaded.insert(self.category);
-        if self.positions_loaded.len() == self.products.len() + 1 { cx.store.set_positions(cx.store.positions().to_vec()); }
+        if self.positions_loaded.len() == self.products.len() + 1 {
+            cx.store.set_positions(cx.store.positions().to_vec());
+        }
         self.commit_balance(cx);
     }
 }

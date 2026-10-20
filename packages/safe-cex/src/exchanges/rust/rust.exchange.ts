@@ -488,7 +488,7 @@ export class RustEngineExchange extends BaseExchange {
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
         ...(['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name) ? {
-          enableInverseMarkets: Boolean(this.options.enableInverseMarkets),
+          enableInverseMarkets: Boolean(this.options.enableInverseMarkets && !this.options.externalPublicData),
           enableOptionMarkets: Boolean(this.options.enableOptionMarkets),
         } : {}),
         ...(this.name === 'grvt' ? {
@@ -668,6 +668,15 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[]) => {
+    for (const order of orders) {
+      if (order.impliedVolatility === undefined) continue;
+      if (this.name !== 'bybit' || !this.options.enableOptionMarkets) {
+        this.rejectPreflight('Options are not enabled on this account');
+      }
+      if (typeof order.impliedVolatility !== 'number' || !Number.isFinite(order.impliedVolatility) || order.impliedVolatility <= 0) {
+        this.rejectPreflight('impliedVolatility must be finite and positive');
+      }
+    }
     if (this.name !== 'asterdex' && orders.some((order) => order.stpMode !== undefined)) {
       this.rejectPreflight(`${this.name} does not support AsterDEX stpMode`);
     }
@@ -810,6 +819,12 @@ export class RustEngineExchange extends BaseExchange {
 
   fetchOptionChain = (query: OptionChainQuery): Promise<OptionChainRow[]> => {
     this.assertOptionQueries();
+    for (const field of ['expiry', 'strikeMin', 'strikeMax'] as const) {
+      const value = query[field];
+      if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
+        this.rejectPreflight(`Option query ${field} must be finite`);
+      }
+    }
     return this.command({ op: 'fetchOptionChain', query });
   };
 

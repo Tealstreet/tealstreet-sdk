@@ -45,3 +45,33 @@ Rust opt-in. Follow `VENUE_PORT_BRIEF.md`; full-auto execution is authorized.
 ## Evidence
 
 Implementation, phase audits and gate results are appended at stable commits.
+
+### Implementation checkpoint
+
+- WIP checkpoint `a3f9cee4a5` preserved the implementation before merging
+  landing `0063068241` in `a7ce59126b`; no stash or rebase was used.
+- Shared engine tests: 74 PASS. Existing Binance native control: 99 PASS.
+  Bybit: 137 PASS (123 existing plus 14 product regressions), strict Clippy
+  PASS. GRVT: 93 PASS, strict Clippy PASS. OKX: 77 PASS before the live
+  optional-cap regression described below. The combined native matrix passes.
+- Root typecheck: 44 tasks PASS; lint: 28 tasks PASS; full repository tests:
+  27 tasks PASS, including 505 safe-cex files / 7,329 tests. Focused current
+  wrapper/inverse consumer regressions: 20 PASS; actual CLI policy tests: 22 PASS.
+- Independent phase reviewers found and closed: wrong inverse native-PnL
+  labeling in the shared consumer; incomplete EU history joins; Bybit global
+  history limits hiding later categories, sibling settings replacement,
+  reconnect healing only one category, malformed category snapshots erasing
+  state, IV bypass on non-option protective branches and cold inverse mark
+  fallback. These are implementation-review findings, not all TS bugs.
+- The classification integration fails against the previous artifact because
+  the native semantic section is absent. With the new artifact it passes real
+  Bybit discovery, worker frame application, actual buffer transfer, main frame
+  application and `prepareCliOrder`: stock/ETF/commodity/FX refuse, empty and
+  innovation crypto pass, absent and future labels remain unknown.
+- First fresh 20-second public captures: Bybit 17,591 frames / 912 markets,
+  GRVT 4,412 frames. OKX/EEA captures expose empty optional order-type caps on
+  inactive preopen rows; native parsing and the independent TS reference are
+  being corrected before the public gate is accepted.
+- Final native/combined WASM, public/private replay, artifact-size, adversarial
+  PR review and exact-head CI evidence are still required. Live private
+  credentials, Hyro origins and combined options connectivity are not claimed.
