@@ -480,3 +480,38 @@ Mostly matches TS.
 - Per-coin balances missing on Bybit, Crypto.com, Bitrue; check every venue.
 - Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
   check every venue that fences REST snapshots by stream revision.
+
+### ApeX Omni
+Signing and payloads match; no confirmed highs.
+- Medium: cancelled ids hidden for good (terminal map, `apexomni/src/account.rs:150`;
+  cancel-all marks untriggered stops terminal, `trading.rs:928`); one bad
+  open-order row leaves the account side dead incl. signing state
+  (`account.rs:975`); null fields drop whole private frames incl. fills
+  (`private_wire.rs:205`); one odd `/v3/symbols` row blocks private start; a bad
+  omni key seed kills read-only monitoring (`account.rs:504`).
+- Low: caller client id rejected on stops/brackets/splits; float remaining size;
+  zero-price candle rejects batch; leverage always sent. Unchecked: private
+  socket via Tealstreet proxy.
+
+### Paradex
+StarkNet typed data, JWT, payloads and SBE decoding match.
+- High: one blank ticker field halts the venue incl. private side
+  (`paradex/src/public.rs:714`, `lib.rs:127`); a failed TP/SL child logs at
+  Warning so no toast — user believes they are protected (`trading.rs:855`);
+  REST positions may never commit if `leverage`/`liquidation_price` are blank
+  (`account.rs:1824`; verify live).
+- Medium: multi-order placement stops at first failure and loses placed ids
+  (`trading.rs:458,699,867`); venue rejection reasons dropped (`lib.rs:231`);
+  leverage serialized `20.0` (`trading.rs:542`; verify live); one malformed SBE
+  frame recycles the public socket (`public.rs:388`).
+- Low: one unmappable order row discards refresh; leverage-0 config row; TP/SL
+  of 0 rejects order; history fails on one row; stale uPnL after WS close;
+  README says remote signing rejected.
+
+### Cross-venue: silent partial failures
+- Child-leg failures (TP/SL after an entry) must surface as errors on every
+  venue (Paradex logs at Warning).
+- Batches that fail midway must return placed ids with the error (Paradex,
+  Binance COIN-M, Bitrue cancels).
+- Integers serialized as floats (`20.0`): Paradex leverage, KuCoin leverage;
+  check every venue's integer fields.
