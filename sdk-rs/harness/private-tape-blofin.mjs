@@ -143,6 +143,14 @@ ws(PUBLIC, {
   ],
 });
 const orderEvent = (row) => ws(PRIVATE, { arg: { channel: 'orders' }, data: [row] });
+// The documented live/unfilled push proves order200 has no historical fills.
+// Keep every existing event time: the first execution remains at t300.
+records.push({
+  t: 250,
+  type: 'ws',
+  url: PRIVATE,
+  text: JSON.stringify({ arg: { channel: 'orders' }, data: [normal('200')] }),
+});
 orderEvent(normal('200', { filledSize: '0.1', averagePrice: '100', state: 'partially_filled' }));
 orderEvent(normal('200', { filledSize: '0.3', averagePrice: '120', state: 'partially_filled' }));
 orderEvent(normal('200', { filledSize: '0.3', averagePrice: '120', state: 'partially_filled' }));
