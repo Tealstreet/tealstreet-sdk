@@ -890,3 +890,7 @@ leverage uses the existing cached setting or 10x fallback; liquidation defaults
 to zero. Nonempty malformed values and booleans remain invalid; position size/PnL
 still reject null and empty strings. Account margin and depth
 numbers retain strict validation. Binary position decoding is unchanged.
+
+## Rust socket supervision
+
+Both Rust sockets use `engine::socket::Supervisor`: a 10-second connection deadline and capped exponential reconnect delay with jitter that survives short open/close flaps. Validated idle limits remain 60 seconds public and 90 seconds private; private authentication and subscription replies have 15-second deadlines. Native SBE heartbeat template40 and host RFC6455 control frames prove liveness. Rust sends no application JSON ping. Public per-book resynchronization and subscription retry timers remain independent.

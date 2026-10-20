@@ -2,6 +2,7 @@ use crate::{Coinbase, Pending, ProductKind, wire::*};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
 };
@@ -58,9 +59,7 @@ pub(crate) struct Public {
     socket: Option<SocketId>,
     open: bool,
     recover: bool,
-    received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
     sequence: Option<u64>,
     poll: Option<TimerId>,
     // Instruments are `None`; concurrent CFM and Spot product reads each own a key.
@@ -77,6 +76,17 @@ pub(crate) struct Public {
     seed_markets: Vec<Market>,
     seed_tickers: Vec<Ticker>,
     deferred: Vec<Command>,
+}
+impl Public {
+    pub(crate) fn new() -> Self {
+        Self {
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 20_000.,
+                ..Config::default()
+            }),
+            ..Self::default()
+        }
+    }
 }
 #[allow(clippy::too_many_arguments)]
 fn market(
@@ -334,10 +344,12 @@ impl Coinbase {
         }
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
+            return;
+        }
         self.public.socket =
             Some(cx.connect_feed(WS, SocketChannel::Public, "market", self.public.recover));
-        self.public.received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(5000.));
+        self.public.supervisor.connecting(cx);
     }
     fn subscription(
         &self,
@@ -370,7 +382,7 @@ impl Coinbase {
             return false;
         }
         self.public.open = true;
-        self.public.received = cx.now;
+        self.public.supervisor.opened(cx);
         self.public.sequence = None;
         for state in self.public.books.values_mut() {
             state.waiting_since = cx.now;
@@ -444,12 +456,7 @@ impl Coinbase {
                 cx.clear_timer(timer);
             }
         }
-        if let Some(timer) = self.public.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        if self.public.reconnect.is_none() {
-            self.public.reconnect = Some(cx.set_timer(1000.));
-        }
+        self.public.supervisor.retry(cx);
         true
     }
     fn reconnect_public(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1116,24 +1123,21 @@ impl Coinbase {
             self.daily_seed(cx, &symbol, day);
             return true;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect_public(cx);
-            return true;
-        }
-        if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if cx.now - self.public.received >= 20000.
-                || self.public.open
-                    && self
-                        .public
-                        .books
-                        .values()
-                        .any(|b| !b.live && cx.now - b.waiting_since >= 10000.)
-            {
-                self.reconnect_public(cx);
-            } else {
-                self.public.watchdog = Some(cx.set_timer(5000.));
+        if self.public.supervisor.owns_timer(timer) {
+            match self.public.supervisor.on_timer(cx, timer) {
+                SocketTick::Reconnect => self.connect_public(cx),
+                SocketTick::TimedOut(_) => self.reconnect_public(cx),
+                SocketTick::Handled
+                    if self.public.open
+                        && self
+                            .public
+                            .books
+                            .values()
+                            .any(|b| !b.live && cx.now - b.waiting_since >= 10_000.) =>
+                {
+                    self.reconnect_public(cx)
+                }
+                _ => {}
             }
             return true;
         }
@@ -1229,7 +1233,7 @@ impl Coinbase {
                     self.reconnect_public(cx);
                     return true;
                 }
-                self.public.received = cx.now;
+                self.public.supervisor.received(cx.now);
                 for event in events {
                     for (symbol, state) in &mut self.public.books {
                         if ws_symbol(symbol) != event.product_id {
@@ -1264,7 +1268,7 @@ impl Coinbase {
                 let Ok(events) = serde_json::from_str::<Vec<CandleEvent>>(events.get()) else {
                     return true;
                 };
-                self.public.received = cx.now;
+                self.public.supervisor.received(cx.now);
                 for event in events {
                     if event.kind != "update" {
                         continue;
@@ -1307,7 +1311,7 @@ impl Coinbase {
                 let Ok(events) = serde_json::from_str::<Vec<TradeEvent>>(events.get()) else {
                     return true;
                 };
-                self.public.received = cx.now;
+                self.public.supervisor.received(cx.now);
                 for event in events {
                     if event.kind != "update" {
                         continue;
@@ -1383,7 +1387,7 @@ impl Coinbase {
                         !events.is_empty() && events.iter().all(|e| !e.heartbeat_counter.is_empty())
                     })
                 {
-                    self.public.received = cx.now;
+                    self.public.supervisor.received(cx.now);
                 }
             }
             _ => {}

@@ -189,3 +189,7 @@ preserves the prior snapshot. A documented `slug` outside an explicit
 requires an observed positive last price or an actual last-trade observation;
 a BBO-only row's default zero is not a price. Explicit native `curPrice: 0`
 remains valid. Full rejected-row isolation is tracked separately.
+
+## Rust socket supervision
+
+Both Rust market and user sockets use `engine::socket::Supervisor` for a 10-second connection deadline and capped exponential reconnect delay with jitter. Native raw `PING` remains every10 seconds, and only exact raw `PONG` satisfies its deadline; ordinary market/user data cannot keep an unanswered ping alive. Short open/close flaps retain the failure count. Public subscriptions remain lazy and reconnect requires a fresh book snapshot.

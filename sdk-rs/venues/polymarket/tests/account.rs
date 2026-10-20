@@ -628,3 +628,13 @@ fn bbo_only_peer_never_uses_placeholder_zero_to_value_funded_holdings() {
         );
     }
 }
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn user_supervisor_bounds_handshake_and_backs_off_without_changing_subscriptions() {
+    let mut h = H::new();
+    let socket = h.private.unwrap();
+    h.event(Event::WsOpened { socket });
+    socket_checks::flaps(h.e, socket, h.now);
+}

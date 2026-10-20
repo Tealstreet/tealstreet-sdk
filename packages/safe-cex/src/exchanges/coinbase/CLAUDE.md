@@ -297,3 +297,7 @@ neighbours remain usable. Private account initialization starts once the usable
 catalogue is available, without waiting for REST ticker seeds. Account snapshots,
 mutation acknowledgements and signing validation retain their stricter rules.
 See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.
+
+## Rust socket supervision
+
+The Rust public socket uses `engine::socket::Supervisor` with a 10-second connection deadline, 20-second validated-traffic watchdog and capped exponential reconnect delay with jitter. Native `heartbeats` subscriptions provide idle traffic; there is no invented client ping. The separate 10-second initial-book snapshot deadline, connection-wide sequences, recovery routing and daily candle backfill remain enforced. Short open/close flaps retain the failure count.

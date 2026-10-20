@@ -375,7 +375,7 @@ fn fills_are_deduplicated_by_execution_identity_across_reconnects() {
     assert_eq!(fills(&mut h), 1);
     h.e.handle(h.now, Event::WsClosed { socket, code: 1006 });
     h.collect();
-    h.timer(h.now + 1_000.);
+    h.reconnect();
     let newer = h
         .actions
         .iter()
@@ -1140,4 +1140,13 @@ fn exposure_on_a_deliberately_excluded_perpetual_does_not_block_startup_or_strea
     )));
     assert_eq!(h.e.store().positions().len(), 1);
     assert_eq!(h.e.store().orders().len(), 1);
+}
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn private_supervisor_bounds_handshake_and_preserves_backoff_after_open() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    socket_checks::flaps(h.e, socket, h.now);
 }

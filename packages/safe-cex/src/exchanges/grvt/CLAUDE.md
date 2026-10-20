@@ -852,6 +852,10 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Sends `metadata.client_order_id`. GRVT types it uint64 with the top half reserved for its own UI, so the rule accepts canonical decimal strings `1..2^63-1`. The caller's ID then becomes the canonical safe-cex order ID: it replaces the nonce everywhere the nonce was used (`recordNonce`, builder-fee events, the return value).
 
+## Rust socket supervision
+
+All Rust public, per-timeframe candle and private sockets use `engine::socket::Supervisor` for connection deadlines and capped exponential reconnect delay with jitter. Public/candle idle deadlines remain 20 seconds; the private idle deadline is 90 seconds and proxy authentication has a separate 15-second deadline. Native lowercase ping/pong remains venue-owned, including the replaceable, socket/generation-fenced private ping five seconds after a pong. Terminal authentication rejection still suppresses retries; dropping the last candle interest cancels its supervision and pending reconnect.
+
 ## Rust shared public feed
 
 Shared provider quotes enter the native ticker store and run GRVT's existing

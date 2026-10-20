@@ -196,7 +196,7 @@ impl Woo {
     }
     pub fn new(options: Options) -> Self {
         Self {
-            account: account::Account::default(),
+            account: account::Account::new(),
             trading: trading::Trading::default(),
             history: history::History::default(),
             rest: if options.testnet {

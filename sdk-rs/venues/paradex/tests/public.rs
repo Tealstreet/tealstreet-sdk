@@ -119,7 +119,7 @@ fn independent_book_subscribers_and_reconnect_restore_interest() {
         },
     );
     h.collect();
-    h.timer(h.now + 1000.);
+    h.reconnect();
     h.public = h
         .actions
         .iter()
@@ -1076,4 +1076,12 @@ fn late_rest_summary_keeps_early_live_bbo_without_suppressing_last_and_statistic
         (110., 112., 100., 100.5, 200.)
     );
     assert!(h.e.store().loaded().tickers);
+}
+
+#[path = "support/socket.rs"]
+mod socket_checks;
+#[test]
+fn public_supervisor_bounds_handshake_and_backs_off_flapping_connections() {
+    let h = Harness::new();
+    socket_checks::flaps(h.e, h.public, h.now);
 }

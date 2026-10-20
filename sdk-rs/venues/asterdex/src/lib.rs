@@ -9,6 +9,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Response, SocketChannel, SocketId, TimerId, Venue, json, num,
 };
@@ -17,8 +18,6 @@ use sign::{Credentials, Version};
 use std::collections::{HashMap, VecDeque};
 use wire::*;
 
-const WATCHDOG_MS: f64 = 5_000.0;
-const SILENCE_MS: f64 = 20_000.0;
 const INTEREST_MS: f64 = 15_000.0;
 
 #[derive(Clone, Debug, Default)]
@@ -98,15 +97,26 @@ pub enum Pending {
     },
 }
 
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
     next_request_id: u64,
+}
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(5_000.0),
+                backoff_base_ms: 500.0,
+                ..Config::default()
+            }),
+            next_request_id: 0,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -277,25 +287,15 @@ impl AsterDex {
         if self.public.socket.is_some() {
             return;
         }
+        self.public.supervisor.connecting(cx);
         self.public.socket = Some(cx.connect_channel(self.urls.public_ws, SocketChannel::Public));
         self.public.open = false;
-    }
-
-    fn watch_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.watchdog = Some(cx.set_timer(WATCHDOG_MS));
     }
 
     fn close_public(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.socket = None;
         self.public.open = false;
-        self.public.attempts = self.public.attempts.saturating_add(1);
-        if let Some(timer) = self.public.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        if self.public.reconnect.is_none() {
-            let delay = (500.0 * 2f64.powi(self.public.attempts.min(6) as i32 - 1)).min(30_000.0);
-            self.public.reconnect = Some(cx.set_timer(delay));
-        }
+        self.public.supervisor.retry(cx);
     }
 
     fn subscribe(&mut self, cx: &mut Cx<'_, Pending>, method: &str, topics: &[String]) {
@@ -662,9 +662,7 @@ impl Venue for AsterDex {
             return;
         }
         self.public.open = true;
-        self.public.attempts = 0;
-        self.public.last_received = cx.now;
-        self.watch_public(cx);
+        self.public.supervisor.opened(cx);
         cx.send(socket, "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}");
         let mut topics = vec!["!ticker@arr".to_owned(), "!markPrice@arr@1s".to_owned()];
         for (symbol, state) in &mut self.books {
@@ -682,7 +680,7 @@ impl Venue for AsterDex {
             return;
         }
         if self.public.socket == Some(socket) {
-            self.public.last_received = cx.now;
+            self.public.supervisor.received(cx.now);
             self.on_public_frame(cx, text);
         }
     }
@@ -968,21 +966,20 @@ impl Venue for AsterDex {
         {
             return;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect_public(cx);
-        }
-        if self.public.watchdog == Some(timer) {
-            self.public.watchdog = None;
-            if let Some(socket) = self.public.socket {
-                if cx.now - self.public.last_received > SILENCE_MS {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Reconnect => self.connect_public(cx),
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.public.socket {
                     cx.close(socket);
-                    self.close_public(cx);
-                } else {
-                    cx.send(socket, "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}");
-                    self.watch_public(cx);
+                }
+                self.close_public(cx);
+            }
+            Tick::Ping => {
+                if let Some(socket) = self.public.socket {
+                    cx.send(socket, r#"{"id":-1,"method":"LIST_SUBSCRIPTIONS"}"#);
                 }
             }
+            Tick::Handled | Tick::Unhandled => {}
         }
         if self.interest_timer == Some(timer) {
             self.interest_timer = None;
