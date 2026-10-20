@@ -66,6 +66,7 @@ fn opts(id: &str) -> PlaceOrderOpts {
         amount: 0.01,
         price: Some(69000.0),
         trigger_price: None,
+        max_slippage_pct: None,
         stop_loss: None,
         take_profit: None,
         reduce_only: None,
@@ -75,7 +76,6 @@ fn opts(id: &str) -> PlaceOrderOpts {
         sl_trigger_type: None,
         client_order_id: (!id.is_empty()).then(|| id.to_owned()),
         close: None,
-        max_slippage_pct: None,
     }
 }
 fn order(id: &str, kind: OrderType) -> Order {

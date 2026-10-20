@@ -652,6 +652,7 @@ impl MexcFutures {
                         }),
                         price: price.or(Some(o.price)),
                         trigger_price: None,
+                        max_slippage_pct: None,
                         reduce_only: Some(o.reduce_only),
                         time_in_force: o.time_in_force,
                         trigger_type: o.trigger_type,
@@ -661,7 +662,6 @@ impl MexcFutures {
                         take_profit: o.take_profit,
                         client_order_id: None,
                         close: o.close,
-                        max_slippage_pct: None,
                     };
                     let mut replacement = self.placement(cx, opts)?;
                     if let Call::Place { amend, .. } = &mut replacement.call {

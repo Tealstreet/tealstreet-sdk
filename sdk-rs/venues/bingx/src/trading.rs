@@ -887,6 +887,7 @@ impl Trading {
                 amount: o.amount,
                 price: Some(next),
                 trigger_price: None,
+                max_slippage_pct: None,
                 stop_loss: None,
                 take_profit: None,
                 reduce_only: Some(o.reduce_only),
@@ -896,7 +897,6 @@ impl Trading {
                 trigger_type: o.trigger_type,
                 tp_trigger_type: o.trigger_type,
                 sl_trigger_type: o.trigger_type,
-                max_slippage_pct: None,
             };
             let mut replacement = self.format(cx, &opts)?;
             for step in &mut replacement {

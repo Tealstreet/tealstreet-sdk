@@ -879,6 +879,7 @@ fn plan_stop_amend_keeps_latest_native_source_after_ws() {
         amount: 60.0,
         price: Some(55000.0),
         trigger_price: None,
+        max_slippage_pct: None,
         stop_loss: None,
         take_profit: None,
         reduce_only: Some(true),
@@ -888,7 +889,6 @@ fn plan_stop_amend_keeps_latest_native_source_after_ws() {
         sl_trigger_type: Some(StopTriggerType::MarkPrice),
         client_order_id: None,
         close: None,
-        max_slippage_pct: None,
     };
     e.handle(
         200.0,

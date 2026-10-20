@@ -902,6 +902,7 @@ impl BybitLinear {
                 amount: order.amount,
                 price: Some(target),
                 trigger_price: None,
+                max_slippage_pct: None,
                 stop_loss: None,
                 take_profit: None,
                 reduce_only: None,
@@ -911,7 +912,6 @@ impl BybitLinear {
                 sl_trigger_type: None,
                 client_order_id: None,
                 close: None,
-                max_slippage_pct: None,
             };
             return Ok(trading_stop_job(self.trailing_stop(cx, &opts)?));
         }

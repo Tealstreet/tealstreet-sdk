@@ -1,6 +1,7 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
+import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { subscriptionKeys } from './requests.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
@@ -172,6 +173,20 @@ export const VENUES = {
     compareFillPrices: true,
     compareWriteOrder: true,
   },
+  woo: {
+    rust: 'woo',
+    wooProtocol: true,
+    subscriptionGenerations: true,
+    ts: { module: `${root}/woo/woo.exchange.ts`, className: 'WOOXExchange', name: 'woo' },
+    privateSocket: '/v2/ws/private/',
+    matchRequestBody: true,
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('@orderbookupdate')).length >= count,
+    respondToPing: true,
+    createSocketAudit: createWooSocketAudit,
+    validateRequest: validateWooRequest,
+    compareFillPrices: true,
+  },
   bitrue: {
     rust: 'bitrue',
     bitrueProtocol: true,
@@ -262,6 +277,15 @@ export const VENUES = {
   bitgetusdc: {
     rust: 'bitgetusdc',
     ts: { module: `${root}/bitget/bitgetusdc.exchange.ts`, className: 'BitgetUSDCExchange', name: 'bitgetusdc' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('orderBook_') && handlers.length).length >= count,
+    privateSocket: '/ws/private',
+    options: { passphrase: 'replay-passphrase' },
+  },
+  bitgetinverse: {
+    inverseNativeAmounts: true,
+    rust: 'bitgetinverse',
+    ts: { module: `${root}/bitget/bitgetinverse.exchange.ts`, className: 'BitgetInverseExchange', name: 'bitgetinverse' },
     tsBooksSubscribed: (exchange, count) =>
       Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('orderBook_') && handlers.length).length >= count,
     privateSocket: '/ws/private',

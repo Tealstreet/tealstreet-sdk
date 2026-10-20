@@ -89,6 +89,7 @@ fn limit(symbol: &str, side: OrderSide, amount: f64, price: f64) -> PlaceOrderOp
         amount,
         price: Some(price),
         trigger_price: None,
+        max_slippage_pct: None,
         stop_loss: None,
         take_profit: None,
         reduce_only: None,
@@ -98,7 +99,6 @@ fn limit(symbol: &str, side: OrderSide, amount: f64, price: f64) -> PlaceOrderOp
         sl_trigger_type: None,
         client_order_id: None,
         close: None,
-        max_slippage_pct: None,
     }
 }
 

@@ -216,3 +216,14 @@ retained 3.0/1.8 MB (1.67x). Wasm 963,789 bytes against 1,258,291.
 Lighter private: PASS, 14 events/eight commands/11 tx across ten writes;
 CPU and memory informational. Both Binance gates already pass; reviewed
 changes affect only the Lighter crate. Final PR CI must be green before merge.
+
+### Second landing integration
+
+All Rust CI jobs passed, but landing advanced to `6945ee83b4` (WOO and Bitget
+parity), making the PR conflict. Merged it with standing authorization. Kept
+incoming workspace, coin-balance and option layout; unioned both venues in
+wrapper, host features/options/constructor, harness build/entry/known-fix lists.
+Removed duplicate slippage fields/literal entries from the automatic merge,
+keeping the incoming shared field. Independent registration/balance and
+harness cross-reviews accepted the merge; 175/175 harness tests pass. Re-running
+native/Wasm, JS and Lighter/Binance gates; final CI must cover the merged head.

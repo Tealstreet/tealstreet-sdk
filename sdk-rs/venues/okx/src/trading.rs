@@ -690,6 +690,7 @@ impl Okx {
                     amount: amount.unwrap_or(o.amount),
                     price: Some(price.unwrap_or(o.price)),
                     trigger_price: None,
+                    max_slippage_pct: None,
                     stop_loss: None,
                     take_profit: None,
                     reduce_only: Some(o.reduce_only),
@@ -699,7 +700,6 @@ impl Okx {
                     tp_trigger_type: o.trigger_type,
                     client_order_id: None,
                     close: o.close,
-                    max_slippage_pct: None,
                 }],
             )?;
             result.steps.extend(replacement.steps);
