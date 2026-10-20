@@ -1053,12 +1053,15 @@ impl Kraken {
         } else {
             PositionSide::Long
         };
+        let setting = self.account_setting(&row.symbol);
         let (leverage, margin) = if let Some(leverage) = row.max_fixed_leverage {
             (leverage, MarginType::Isolated)
+        } else if live && let Some(setting) = setting {
+            // Stream rows can omit maxFixedLeverage; keep the REST-proven mode as TS does.
+            setting
         } else {
             (
-                self.account_setting(&row.symbol)
-                    .map_or(market.limits.leverage.max, |s| s.0),
+                setting.map_or(market.limits.leverage.max, |s| s.0),
                 MarginType::Cross,
             )
         };
