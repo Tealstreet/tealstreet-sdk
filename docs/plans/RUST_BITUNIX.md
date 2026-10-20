@@ -1707,3 +1707,11 @@ safe diagnostics and a host-level post-readiness rejection regression. Run
 focused recorder/helpers, independent audit. Neither changed path participates
 in current Coinbase replays; finish these fixes before the batch reaches its
 future Bitunix build. Record each finding/resolution on PR1309 after pushing.
+
+Same adversarial review also found P1 split conservation: amount250/max100/
+step0.001 emits66.667×3+50=250.001 (step1 emits67×3+50=251). TS has same
+ceil-lot divisor error, so this is a documented Rust correction. Plan native
+integer-tick max-sized lots plus exact remainder, each≤market max and aligned
+to step; bound total resulting lots≤10,000, preserve full batch preflight and
+caller-ID split rejection. Prove nonmultiple/awkward-step conservation and
+boundaries with fail-before cases; independent venue audit after scopedchecks.
