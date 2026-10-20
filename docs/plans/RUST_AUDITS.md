@@ -384,12 +384,17 @@ per-venue canary holding the circular-evidence venues last.
 
 ### Hyperliquid
 Signing hash, order payload and price/size rounding match TS; no new highs.
-- Medium: HIP-3 leverage change sends cross where TS sends isolated
+- ~~Medium: HIP-3 leverage change sends cross where TS sends isolated
   (`hyperliquid/src/trading.rs:758`); read `onlyIsolated`/`marginMode`. HIP-3
   margin-type change with no position fails (default leverage 20 > market max,
   `trading.rs:759`). Spot open orders never reconciled and can go stale
   (`account.rs:426,1604`). Edit aborts when the source order already filled
-  (TS places a second order) — confirm fail-closed is intended.
+  (TS places a second order) — confirm fail-closed is intended.~~ Fixed:
+  `onlyIsolated`/`marginMode` seed isolated settings with leverage capped at the
+  market maximum, and cross on an isolated-only asset is refused before signing;
+  standalone spot reads `frontendOpenOrders` at startup, on every refresh and
+  every 10 s. Edit fail-closed is kept: placing a replacement for a filled source
+  doubles exposure, which is worse than a visible edit error.
 - Low/confirm: spot testnet signing and spot size rounding (TS bugs Rust fixed);
   spot vault signs as vault (TS as master) — confirm; more terminal statuses;
   `stopLoss: 0` rejects whole order; signed fees; unified balance spot slices
