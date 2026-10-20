@@ -1598,3 +1598,51 @@ fn windowed_fill_request_sequence_is_pinned() {
         ]
     );
 }
+
+#[test]
+fn write_failures_never_claim_a_refusal_the_answer_does_not_prove() {
+    use safe_cex_engine::Outcome;
+    let unknown = Some(Outcome::Unknown);
+    for (body, outcome) in [
+        // A 2xx without a Bybit envelope proves nothing.
+        ("<html>gateway</html>", unknown),
+        // A per-item internal error may follow acceptance.
+        (
+            r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":""}]},"retExtInfo":{"list":[{"code":10016,"msg":"Internal System Error"}]}}"#,
+            unknown,
+        ),
+        // An explicit per-item refusal with nothing accepted.
+        (
+            r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":""}]},"retExtInfo":{"list":[{"code":110007,"msg":"insufficient balance"}]}}"#,
+            Some(Outcome::Rejected),
+        ),
+    ] {
+        let mut h = ready();
+        place(
+            &mut h,
+            71,
+            vec![limit("BTCUSDT", OrderSide::Buy, 0.001, 90_000.0)],
+        );
+        let request = h.take("/v5/order/create-batch");
+        h.reply(request.id, 200, body);
+        assert_eq!(h.outcomes, [(71, outcome)], "{body}");
+    }
+    // One leg cancelled, the other refused: something took effect.
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    let other = "5cf98598-39a7-459e-97bf-76ca765ee020";
+    h.command(Command::CancelOrders {
+        command: 14,
+        ids: vec![ORDER_ID.into(), other.into()],
+    });
+    let cancel = h.take("/v5/order/cancel-batch");
+    h.reply(
+        cancel.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":"x"},{"orderId":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110020,"msg":"not allowed"}]}}"#,
+    );
+    assert_eq!(h.outcomes, [(14, None)]);
+}

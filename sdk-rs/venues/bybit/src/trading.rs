@@ -207,7 +207,7 @@ const CANCEL_ALL_NOT_SUCCESSFUL: &str = "Bybit cancel-all was not successful";
 /// No definitive answer: transport failure (0), HTTP 408/5xx without a Bybit
 /// envelope, or retCode 10000 (server timeout) / 10016 (internal error).
 fn outcome_unknown(code: i64) -> bool {
-    matches!(code, 0 | 408 | 500..=599 | 10000 | 10016)
+    matches!(code, 0 | 408 | 500..=599 | 10000 | 10016 | 170001 | 170007)
 }
 
 /// Bybit's message, with the Trading Terms refusal made actionable.
@@ -483,6 +483,16 @@ impl BybitLinear {
                 Ok(()) => cx.done(id, Ok("[]".to_owned())),
                 Err(error) => cx.fail(id, not_sent(error).kind(ErrorKind::Unsupported)),
             }
+            return;
+        }
+        // `send` drops signed writes without a key; every plan below writes.
+        if self.credentials.is_none()
+            && let Some(id) = trade_command_id(&command)
+        {
+            cx.fail(
+                id,
+                not_sent("Bybit trading needs an API key").kind(ErrorKind::AuthInvalid),
+            );
             return;
         }
         // A settle-coin snapshot omits flat symbols. Resolve their mode before
@@ -928,10 +938,23 @@ impl BybitLinear {
         let mut unknown = false;
         let network = response.is_err();
         // An explicit venue retCode that proves this write was refused.
+        // Without a parsed retCode the code is the HTTP status, which proves nothing.
+        let ret_code_parsed = response.as_ref().is_ok_and(|r| {
+            serde_json::from_str::<Status>(r.body)
+                .ok()
+                .and_then(|s| s.ret_code)
+                .is_some()
+        });
         let refused = match &outcome {
-            Err((code, _)) if !outcome_unknown(*code) && !http_unknown => Some(Some(*code)),
+            Err((code, _)) if ret_code_parsed && !outcome_unknown(*code) && !http_unknown => {
+                Some(Some(*code))
+            }
             _ => None,
         };
+        let no_envelope = succeeded_without_envelope(&response, &outcome);
+        // Set when a 2xx answer carries per-item refusals with explicit codes.
+        let mut item_refusals = false;
+        let mut took_effect = false;
         let succeeded = outcome.is_ok();
         let mut fallback_steps = Vec::new();
         match (call, outcome) {
@@ -980,6 +1003,11 @@ impl BybitLinear {
                     .unwrap_or_default();
                 for (index, status) in statuses.iter().enumerate() {
                     if status.code != 0 {
+                        if outcome_unknown(status.code) {
+                            unknown = true;
+                        } else {
+                            item_refusals = true;
+                        }
                         let message = status.msg.as_deref().unwrap_or("batch order rejected");
                         errors.push(format!(
                             "Order {}: {}",
@@ -1007,7 +1035,11 @@ impl BybitLinear {
                         self.note_partial_stop_canceled(&id);
                         mark_canceled(cx, &[id], self.local_order_lifecycle());
                     }
-                    Err(message) => errors.push(message),
+                    Err(message) => {
+                        // A retCode-0 ack that does not confirm the cancel proves nothing.
+                        unknown = true;
+                        errors.push(message);
+                    }
                 }
             }
             (Call::CancelPartialStop { id, .. }, Err((_, message))) if already_gone(&message) => {
@@ -1027,6 +1059,11 @@ impl BybitLinear {
                             if status.code != 0
                                 && !already_gone(status.msg.as_deref().unwrap_or_default()) =>
                         {
+                            if outcome_unknown(status.code) {
+                                unknown = true;
+                            } else {
+                                item_refusals = true;
+                            }
                             errors.push(
                                 status
                                     .msg
@@ -1039,6 +1076,7 @@ impl BybitLinear {
                     }
                 }
                 if !canceled.is_empty() {
+                    took_effect = true;
                     self.note_order_terminal(&canceled);
                 }
                 mark_canceled(cx, &canceled, self.local_order_lifecycle());
@@ -1137,6 +1175,7 @@ impl BybitLinear {
                         self.fetch_positions(cx);
                     }
                     (outcome, _) if !reasons.is_empty() || outcome.is_ok() => {
+                        item_refusals = true;
                         errors.push(reasons.join(", "));
                     }
                     (Err(error), _) => {
@@ -1162,6 +1201,8 @@ impl BybitLinear {
             (_, Ok(_)) => {}
         }
         unknown |= http_unknown && !errors.is_empty();
+        // A 2xx without a retCode does not prove the write was refused.
+        unknown |= no_envelope && !errors.is_empty();
         for message in &errors {
             cx.command_error(command, message.clone());
         }
@@ -1171,12 +1212,13 @@ impl BybitLinear {
         if let Some(first) = errors.into_iter().next() {
             if job.error.is_none() {
                 // Per-order refusals in a 2xx answer carry no single retCode.
-                job.refused = refused.or(succeeded.then_some(None));
+                job.refused = refused.or(item_refusals.then_some(None));
             }
             job.error.get_or_insert(first);
         } else if succeeded {
             job.effective = true;
         }
+        job.effective |= took_effect;
         if !ids.is_empty() {
             job.effective = true;
         }
@@ -2426,4 +2468,19 @@ fn trade_command_id(command: &Command) -> Option<CommandId> {
         | Command::SetPositionMode { command, .. } => Some(*command),
         _ => None,
     }
+}
+
+/// A 2xx answer whose body has no Bybit envelope.
+fn succeeded_without_envelope(
+    response: &Result<Response<'_>, &str>,
+    outcome: &Result<&str, (i64, String)>,
+) -> bool {
+    outcome.is_err()
+        && response.as_ref().is_ok_and(|r| {
+            (200..300).contains(&r.status)
+                && serde_json::from_str::<Status>(r.body)
+                    .ok()
+                    .and_then(|s| s.ret_code)
+                    .is_none()
+        })
 }
