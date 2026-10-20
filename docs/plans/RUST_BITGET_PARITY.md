@@ -201,3 +201,35 @@ green final-head CI. No stash, rebase, force push or master changes.
   Binance private PASS. Private CPU/memory measurements remain informational.
 - Next: push, PR into feat/rust-rewrite, post adversarial independent reviews,
   fix findings, require all final-head CI green, merge and create follow-up branch.
+
+## PR adversarial review, round 1
+
+- PR1317 targets feat/rust-rewrite. Three independent adversarial reviewers
+  reproduced five defects against the real engine; findings posted on the PR.
+- Private fixes: decode documented single-mode WS equity without duplicate-field
+  aliases; pin position reconciliation guards for the entire serial collateral
+  walk, including delays beyond ten seconds and zero-size closure updates.
+- Trading fixes: distinct replacement identity uses requested amend price/size
+  despite a newer cancellation of the old identity; preserve an actual newer
+  replacement row. External opening trailing remains visible/cancelable and must
+  reject unsupported editing before cancellation changes exposure.
+- Query fix: explicit historical fee coin bypasses current-market fallback.
+  Delisted-row handling must not fail unrelated fills. TS drops unknown markets;
+  this is not a claim of TS retaining delisted history.
+- Focused regressions, independent second-round reviews, final artifact gates
+  and final-head green CI remain required. Earlier local numbers are provisional
+  until these changes pass their affected gates.
+
+## PR adversarial review, round 2
+
+- Independent reviewers cleared equity, delayed position reconciliation and lazy
+  fee-asset changes, with46 focused tests passing.
+- A further confirmed amendment race left the source ID open when the replacement
+  became terminal before the ACK. Retire the source before checking replacement
+  terminal state; never reopen the replacement. Direct/resolved ACKs, fill/cancel,
+  and previously-visible/unknown replacement identities receive regression cases.
+- Defensive one-way trailing rows lacking an unambiguous protected side must
+  reject editing unless explicit native reduce-only intent is present. Preserve
+  visibility/cancellation. Side-only placement is documented; omission of posSide
+  in native GET responses is not established, so this is a defensive schema case,
+  not claimed live exchange evidence.

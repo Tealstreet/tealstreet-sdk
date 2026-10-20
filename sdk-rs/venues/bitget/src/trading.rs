@@ -1787,6 +1787,9 @@ impl BitgetFutures {
         let (price, amount, fallback, stream_revision) = values;
         let original = cx.store.order(old).cloned().or(fallback);
         let newer_stream = self.order_revision(old) > stream_revision;
+        if old != next {
+            self.mark_canceled(cx, old);
+        }
         if self.order_terminal(next)
             || (old == next
                 && original.as_ref().is_some_and(|o| {
@@ -1795,14 +1798,12 @@ impl BitgetFutures {
         {
             return;
         }
-        if old != next {
-            self.mark_canceled(cx, old);
-        }
         if let Some(mut order) = original {
             if old != next && cx.store.order(next).is_some() {
                 return;
             }
-            if !newer_stream {
+            // Old-ID events describe the canceled order, not its replacement.
+            if old != next || !newer_stream {
                 order.price = price;
                 order.amount = amount;
                 amend_remaining(&mut order, self.inverse());

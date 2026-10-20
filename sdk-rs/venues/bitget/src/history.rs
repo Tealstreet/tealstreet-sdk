@@ -539,7 +539,14 @@ impl BitgetFutures {
                         }
                     })
                     .sum::<f64>();
-                let fallback_asset = if self.inverse() {
+                let commission_asset = if let Some(asset) = n
+                    .fee_detail
+                    .first()
+                    .map(|f| f.fee_coin)
+                    .filter(|s| !s.is_empty())
+                {
+                    asset
+                } else if self.inverse() {
                     let Some(market) = cx.store.market(&symbol) else {
                         r.invalid = true;
                         return;
@@ -557,13 +564,7 @@ impl BitgetFutures {
                     qty,
                     side,
                     commission: if r.uta { fee } else { -fee },
-                    commission_asset: n
-                        .fee_detail
-                        .first()
-                        .map(|f| f.fee_coin)
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or(fallback_asset)
-                        .into(),
+                    commission_asset: commission_asset.into(),
                     position_side,
                     realized_pnl: if r.uta {
                         n.exec_pnl.0

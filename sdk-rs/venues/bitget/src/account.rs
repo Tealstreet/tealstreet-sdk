@@ -1515,6 +1515,12 @@ impl BitgetFutures {
         }
         if self.account.poll == Some(timer) {
             self.account.poll = None;
+            // Keep stream updates and closures until every collateral read completes.
+            if !self.account.positions_in_flight {
+                self.account
+                    .ws_positions
+                    .retain(|_, m| cx.now - m.at < 10_000.0);
+            }
             if self.account.degraded {
                 self.refresh_balance(cx);
                 self.refresh_orders(cx, false);
@@ -1540,9 +1546,6 @@ impl BitgetFutures {
             self.account
                 .plans
                 .retain(|id, _| cx.store.order(id).is_some());
-            self.account
-                .ws_positions
-                .retain(|_, m| cx.now - m.at < 10_000.0);
             self.account.terminal.retain(|_, until| *until > cx.now);
             self.account.opened.retain(|_, until| *until > cx.now);
         }
@@ -1765,7 +1768,7 @@ impl BitgetFutures {
             },
             reduce_only: raw.reduce_only.0
                 || !raw.plan_type.is_empty()
-                || raw.strategy_type == "trailing_stop"
+                || (raw.strategy_type == "trailing_stop" && !unsupported_trailing_exposure(raw))
                 || [&raw.trade_side, &raw.t_s, &raw.side].iter().any(|value| {
                     matches!(
                         value.as_ref(),
@@ -1953,7 +1956,7 @@ pub(crate) fn order_side(value: &str) -> Option<OrderSide> {
 }
 fn classic_amounts(row: &AccountRow<'_>) -> Option<Amounts> {
     Some(Amounts {
-        equity: first(&[row.union_total_margin, row.account_equity])?,
+        equity: first(&[row.union_total_margin, row.account_equity, row.equity])?,
         free: first(&[row.union_available, row.available])?,
         upnl: row
             .unrealized_pl
@@ -1980,10 +1983,23 @@ fn round8(value: f64) -> f64 {
     (value * 100_000_000.0).round() / 100_000_000.0
 }
 
+fn unsupported_trailing_exposure(raw: &OrderRow<'_>) -> bool {
+    if raw.strategy_type != "trailing_stop" {
+        return false;
+    }
+    match (raw.side.as_ref(), raw.pos_side.as_ref()) {
+        ("buy", "long" | "buy") | ("sell", "short" | "sell") => true,
+        ("sell", "long" | "buy") | ("buy", "short" | "sell") => false,
+        // Replacing side-only or net orders is safe only with explicit reduce-only intent.
+        _ => !raw.reduce_only.0,
+    }
+}
+
 fn trailing_state(raw: &OrderRow<'_>) -> Option<(String, f64)> {
     if let Some(params) = &raw.trailing_stop_params {
         let value = params.trail_variance.0.filter(|v| *v > 0.0)?;
-        if (!params.pre_order_type.is_empty() && params.pre_order_type != "market")
+        if unsupported_trailing_exposure(raw)
+            || (!params.pre_order_type.is_empty() && params.pre_order_type != "market")
             || (!params.activation_type.is_empty()
                 && !matches!(params.activation_type.as_str(), "mark" | "market"))
         {

@@ -379,6 +379,8 @@ pub struct AccountRow<'a> {
     pub union_total_margin: Number,
     #[serde(default, rename = "accountEquity")]
     pub account_equity: Number,
+    #[serde(default)]
+    pub equity: Number,
     #[serde(default, rename = "unionAvailable")]
     pub union_available: Number,
     #[serde(default, rename = "available")]

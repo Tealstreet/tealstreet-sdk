@@ -28,8 +28,9 @@ UTA bills use v3 `financial-records`, retaining raw signed amount and fee metada
 without assuming trade rows are gross PnL. Classic trailing modifies through
 `modify-plan-order`; UTA trailing uses `type=trailing_stop` and native distance
 parameters. Size-only edits preserve original callback parameters and activation
-basis. Unsupported external limit/index trailing configurations remain visible
-and cancelable; edits fail before canceling protection.
+basis. Unsupported external opening, ambiguous exposure, limit-execution or
+index-triggered trailing configurations remain visible and cancelable; edits
+fail before canceling them.
 
 Documented native regressions and private tapes cover these engine paths; the TS
 implementation below remains the replay reference for its supported overlap.
