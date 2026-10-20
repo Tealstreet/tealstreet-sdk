@@ -1125,7 +1125,19 @@ impl BybitLinear {
         }
         let snapshot = self.account.snapshot.take().expect("checked above");
         if snapshot.revision != self.account.revision {
-            if self.account.snapshot_attempts >= 3 {
+            if self.account.ready {
+                // Hyro streams no wallet, so order/position frames cannot make it stale.
+                self.account.wallet = snapshot.wallet;
+                self.account.coins = Some(snapshot.coins);
+                self.commit_balance(cx);
+                // A live stream already owns orders and positions; steady frames
+                // must not turn reconciliation into a reconnect loop.
+                if self.account.snapshot_attempts < 3 {
+                    self.start_hyro_snapshot(cx);
+                } else {
+                    self.account.snapshot_attempts = 0;
+                }
+            } else if self.account.snapshot_attempts >= 3 {
                 self.fail_hyro(cx, "private state did not stabilize during reconciliation");
             } else {
                 self.start_hyro_snapshot(cx);

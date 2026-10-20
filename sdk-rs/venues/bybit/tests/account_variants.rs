@@ -707,3 +707,28 @@ fn hyro_streamed_venue_refusal_is_transient_but_repeated_failures_reconnect() {
         "persistent failures must recover the session"
     );
 }
+
+#[test]
+fn hyro_steady_stream_frames_never_turn_reconciliation_into_a_reconnect_loop() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    let richer = WALLET.replace("\"totalEquity\":\"1100\"", "\"totalEquity\":\"1600\"");
+    // Every periodic read is overtaken by a live position frame.
+    for _ in 0..6 {
+        h.advance(5000.0);
+        while h.has_request("/v5/order/realtime") {
+            h.message("/v5/private", r#"{"topic":"position","data":[]}"#);
+            h.respond("/v5/order/realtime", 200, EMPTY);
+            h.respond("/v5/position/list", 200, POSITIONS);
+            h.respond("/v5/account/wallet-balance", 200, &richer);
+        }
+    }
+    assert!(h.closed.is_empty(), "steady frames forced a reconnect");
+    assert_eq!(h.socket("/v5/private"), Some(socket));
+    assert!(
+        h.engine.store().balance().total > 1000.0,
+        "the unfenced wallet still refreshed"
+    );
+}

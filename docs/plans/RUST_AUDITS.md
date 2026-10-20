@@ -791,9 +791,13 @@ Mostly matches TS.
   malformed snapshot never sets loaded.
 
 ### Cross-venue: per-coin balances and snapshot starvation
-- Per-coin balances missing on Bybit, Crypto.com, ~~Bitrue~~; check every venue.
+- Per-coin balances missing on ~~Bybit~~ (#1379), Crypto.com, ~~Bitrue~~; check every venue.
 - Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
   check every venue that fences REST snapshots by stream revision.
+  - ~~Bybit Hyro: a ready session's periodic snapshot is discarded on every order/position
+    frame and three discards reconnect, so steady frames loop forever.~~ Fixed: a ready
+    session commits the unfenced wallet (Hyro streams none), re-reads, and stops after
+    three tries without tearing down the live stream that already owns orders/positions.
 
 ### ApeX Omni
 Signing and payloads match; no confirmed highs.
