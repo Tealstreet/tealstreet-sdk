@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 afterEach(() => vi.unstubAllEnvs());
@@ -20,6 +21,7 @@ it.each([
   const noop = () => '[]';
   const nativeLoaded = { markets: true, tickers: true, balance: true, orders: true, positions: true };
   const engine: WasmEngineLike = {
+    capabilities: () => engineCapabilities('blofin'),
     start: noop, command: noop, takeFrame: () => new Uint8Array(consumerFrame({ loaded: nativeLoaded })),
     snapshotFrame: () => new Uint8Array(), wsOpen: noop, wsMessage: noop,
     wsClose: noop, httpStart: noop, httpChunk: noop, httpEnd: noop,

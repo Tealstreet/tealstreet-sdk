@@ -638,6 +638,12 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            account_tier: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }
