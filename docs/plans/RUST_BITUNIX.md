@@ -2207,3 +2207,13 @@ two books: TS/Rust main CPU 56.6/53.2 ms, steady 21.3/15.9 ms, retained
 /tmp/bitunix-df2-final-*. No fixture, threshold or measurement policy changes.
 Remaining selected integration/control gates continue sequentially from Kraken.
 Final compiled consumers, push/reviews, exact-head CI and merge remain pending.
+
+
+Fresh merged-source Bitunix gates PASS. Selected release module is 806,839 bytes
+against 1,258,291. Live public fixture remains 28,694 frames, 697 markets and
+tickers, two books: TS/Rust main CPU 344.3/276.0 ms, steady 189.5/143.7 ms,
+retained 3.7/2.5 MB and sampled peak 12.1/5.0 MB. Private documented tape:
+42 frames, two markets/tickers, correctness PASS. Net realizedPNL remains
+verbatim. Kraken futures/spot public and private plus five compiled spot
+controls also PASS; selected Kraken module 1,057,043 bytes. The remaining
+Binance four-mode and integration controls continue; final CI is still pending.
