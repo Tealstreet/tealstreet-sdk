@@ -4,7 +4,7 @@ import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
 
 import { LOADED_FLAG, MARKET_FLAG, TICKER_FIELDS, orderEnums, positionEnums } from '@tealstreet/safe-cex-wasm/wire';
 import { MarginType, OrderSide, PositionMode } from '../types';
-import { subtract } from '../utils/safe-math';
+import { divide, subtract } from '../utils/safe-math';
 
 export type FrameBook = { symbol: string; orderbook: OrderBook };
 export type FrameCandle = { symbol: string; interval: string; candle: Candle };
@@ -67,7 +67,8 @@ export class FrameApplier {
       const rows: Ticker[] = [];
       for (let i = 0; i < tickers.count; i++) {
         const market = update.markets?.[tickers.market[i]] ?? this.store.marketsBySymbol[this.symbol(tickers.market[i])];
-        const ticker: Record<string, number | string> = { id: market?.id ?? '', symbol: market?.symbol ?? '' };
+        const identity = tickers.identity?.(i);
+        const ticker: Record<string, number | string> = { id: market?.id ?? identity?.id ?? '', symbol: market?.symbol ?? identity?.symbol ?? '' };
         for (const field of TICKER_FIELDS) ticker[field] = tickers[field][i];
         rows.push(ticker as unknown as Ticker);
       }
@@ -109,8 +110,8 @@ export class FrameApplier {
               ...(this.nativePlacementAmounts && {
                 remainingNative: native !== undefined && Number.isFinite(native)
                   ? native
-                  : orders.remaining[i] / this.contractSizes[orders.market[i]],
-                filledInPlacementUnits: orders.filled[i] / this.contractSizes[orders.market[i]],
+                  : divide(orders.remaining[i], this.contractSizes[orders.market[i]]),
+                filledInPlacementUnits: divide(orders.filled[i], this.contractSizes[orders.market[i]]),
               }),
             }
           : undefined;
@@ -157,9 +158,12 @@ export class FrameApplier {
           leverage: positions.leverage[i],
           unrealizedPnl: positions.unrealizedPnl[i],
           contracts: positions.contracts[i],
-          ...((market?.isInverse || this.inverseNativeAmounts) && {
-            extra: { contractsNative: positions.notional[i], unrealizedPnlNative: positions.unrealizedPnl[i] },
-          }),
+          ...((this.nativePlacementAmounts || market?.isInverse || this.inverseNativeAmounts) && { extra: {
+            ...(this.nativePlacementAmounts && {
+              contractsNative: divide(positions.contracts[i], this.contractSizes[positions.market[i]]),
+            }),
+            ...((market?.isInverse || this.inverseNativeAmounts) && { contractsNative: positions.notional[i], unrealizedPnlNative: positions.unrealizedPnl[i] }),
+          } }),
           liquidationPrice: positions.liquidationPrice[i],
           ...(mode !== undefined && { positionMode: mode }),
           ...(enums.marginType !== undefined && { marginType: enums.marginType as MarginType }),

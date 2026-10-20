@@ -11,7 +11,7 @@ export async function prepareTsReplaySockets(tape, prepare, until) {
   await until(() => [...tape.open.values()].flatMap((sockets) => sockets instanceof Set ? [...sockets] : sockets)
     .some((socket) => !socket.closed), 'TS initial socket');
   await prepare?.();
-  await until(() => !tape.audit || tape.audit.ready(), 'TS socket authentication/subscriptions');
+  await until(() => !tape.audit?.ready || tape.audit.ready(), 'TS socket authentication/subscriptions');
 }
 export class ReplayTimeout extends Error {}
 export const withTimeout = async (promise, label, ms = 30000) => {
@@ -196,6 +196,7 @@ export class Tape {
     this.commandTimeoutMs = timeoutMs;
     this.cadence = 'recorded';
     this.options = options ?? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', ...venue.replayCredentials };
+    this.validateRequest = venue.createRequestValidator?.(this.options) ?? venue.validateRequest;
     this.callerIds = callerIdsOf(records);
     // Recorded delivery URLs are fixed. Canonicalize them before the replay's
     // memory/CPU baseline and retain the bounded cache across both samples.
@@ -203,7 +204,7 @@ export class Tape {
     const socketUrls = new Set();
     for (const record of records) if (['ws', 'open', 'close'].includes(record.type) && typeof record.url === 'string') socketUrls.add(record.url);
     for (const url of socketUrls) {
-      try { this.recordedSocketKeys.set(url, strictUrl(url, this.callerIds)); }
+      try { this.recordedSocketKeys.set(url, canonicalUrl(url, this.callerIds, this.venue)); }
       catch { /* Invalid URLs must still fail at their original delivery call. */ }
     }
     this.bookSymbols = books;
@@ -231,10 +232,11 @@ export class Tape {
       )
       .map((record) => this.keyFor(record.method, record.url, record.requestBody));
     this.publicTickers = this.venue.publicTickers?.(this.records) ?? [];
-    this.audit = this.venue.createSocketAudit?.(impl, { isPrivate: this.isPrivate, books: this.bookSymbols, tickers: this.publicTickers });
+    this.audit = this.venue.createSocketAudit?.(impl, { isPrivate: this.isPrivate, books: this.bookSymbols, tickers: this.publicTickers, records: this.records });
     this.responses = new Responses(this.records, this.keyFor, this.venue.checkRequest, (method, url) => this.venue.isWrite?.(method, url) ?? isWriteRequest(method, url), true, impl);
     this.frames = this.records.filter((r) => r.type === 'ws' || r.type === 'command' || r.type === 'close'
-      || (r.type === 'open' && (!venue.rust || this.bitget || venue.orderlyProtocol || ['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader', 'mexc', 'backpack', 'hyperliquid', 'bitrue', 'woo', 'lighter'].includes(venue.rust))));
+      || (r.type === 'open' && (!venue.rust || this.bitget || venue.orderlyProtocol || ['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader', 'mexc', 'backpack', 'hyperliquid', 'bitrue', 'woo', 'lighter', 'kucoin', 'asterdex'].includes(venue.rust))));
+    this.startupDelivered = new Set();
     this.open = new Map();
     this.waiters = [];
     this.commandIndex = 0;
@@ -355,8 +357,8 @@ export class Tape {
   }
 
   respond(method, url, body, headers) {
-    if (this.venue.validateRequest) this.verifySignature(
-      (request) => this.venue.validateRequest(request) !== false, { method, url, body, headers }, 'invalid replay request validation');
+    if (this.validateRequest) this.verifySignature(
+      (request) => this.validateRequest(request) !== false, { method, url, body, headers }, 'invalid replay request validation');
     if (this.isPrivate && this.venue.verifyRequest) {
       this.verifySignature(
         this.venue.verifyRequest,
@@ -375,18 +377,11 @@ export class Tape {
     }
     const elapsed = this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time;
     const response = this.bitget || this.venue.validateMatchedRequest
-      ? this.responses.respond(
-          method,
-          url,
-          body,
-          this.commandIndex,
-          (record) => {
-            this.validateBitgetMatch(record, method, url, body);
-            this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
-          },
-          elapsed,
-        )
-      : this.responses.respond(method, url, body, this.commandIndex, elapsed);
+      ? this.responses.respond(method, url, body, this.commandIndex, (record) => {
+        this.validateBitgetMatch(record, method, url, body);
+        this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
+      }, elapsed, headers)
+      : this.responses.respond(method, url, body, this.commandIndex, elapsed, headers);
     if (this.responses.isWrite(method, url) && response.status !== 599) this.expectedWrites.shift();
     return response;
   }
@@ -397,7 +392,7 @@ export class Tape {
   }
 
   connect(url, onOpen, onMessage, onClose) {
-    const key = canonicalUrl(url, this.callerIds);
+    const key = canonicalUrl(url, this.callerIds, this.venue);
     const generation = (this.generations.get(key) ?? 0) + 1;
     this.generations.set(key, generation);
     const socket = {
@@ -420,6 +415,17 @@ export class Tape {
       if (!this.open.has(key)) this.open.set(key, new Set());
       this.open.get(key).add(socket);
       onOpen();
+      // Bootstrap only the first recorded frame for this exact connection. A
+      // business frame or close before welcome must keep startup fail-closed.
+      if (!socket.closed && !this.playing && this.venue.startupMessage) {
+        const frame = this.frames.find((record) => record.type !== 'open' && record.type !== 'command'
+          && !this.startupDelivered.has(record) && canonicalUrl(record.url, this.callerIds, this.venue) === key
+          && (record.socket === undefined || record.socket === socket.ordinal));
+        if (frame?.type === 'ws' && this.venue.startupMessage(frame)) {
+          this.startupDelivered.add(frame);
+          this.deliver(socket, frame.text);
+        }
+      }
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
     return socket;
@@ -493,7 +499,13 @@ export class Tape {
     }
     if (this.venue.respondToPing && text === 'ping') {
       setImmediate(() => {
-        if (!socket.closed) socket.onMessage('pong');
+        if (!socket.closed) this.deliver(socket, 'pong');
+      });
+      return;
+    }
+    if (this.venue.respondToJsonPing && message?.type === 'ping') {
+      setImmediate(() => {
+        if (!socket.closed) this.deliver(socket, JSON.stringify({ type: 'pong', id: message.id }));
       });
       return;
     }
@@ -626,7 +638,7 @@ export class Tape {
 
   async socketFor(url, text, ordinal) {
     if (typeof text === 'number') { ordinal = text; text = undefined; }
-    const key = this.recordedSocketKeys.get(url) ?? strictUrl(url, this.callerIds);
+    const key = this.recordedSocketKeys.get(url) ?? canonicalUrl(url, this.callerIds, this.venue);
     const stream = text && this.venue.streamOf?.(text);
     const matches = (socket) => !socket.closed && (ordinal === undefined || socket.ordinal === ordinal)
       && (!stream || [...socket.subscriptions].some((topic) => stream === topic || stream.startsWith(`${topic}.`)));
@@ -683,14 +695,9 @@ export class Tape {
 
   async deliverFrame(frame) {
     const latest = await this.socketFor(frame.url, frame.text, frame.socket);
-    const sockets =
-      this.bitget && frame.socket === undefined
-        ? [...(this.open.get(canonicalUrl(frame.url, this.callerIds)) ?? [])].filter((socket) => !socket.closed)
-        : [latest];
-    if (frame.type === 'close') {
-      for (const socket of sockets) this.close(socket, frame.code ?? 1006);
-      return;
-    }
+    const sockets = this.bitget && frame.socket === undefined
+      ? [...(this.open.get(canonicalUrl(frame.url, this.callerIds, this.venue)) ?? [])].filter((socket) => !socket.closed) : [latest];
+    if (frame.type === 'close') { for (const socket of sockets) this.close(socket, frame.code ?? 1006); return; }
     if (frame.type === 'open') return;
     let arg;
     if (this.bitget) {
@@ -710,17 +717,22 @@ export class Tape {
   async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
     const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
     const startupDeadline = performance.now() + this.timeoutMs;
-    await within((async () => {
-      if (urls.length) await this.socketFor(urls[0]);
-      await ready(!this.venue.bootstrapPrivateFromTape);
-      // Native and TS outboxes batch sends independently of handler registration.
-      // Begin the tape only after every seed-derived startup topic reached send.
-      while ((this.audit && !this.audit.ready()) || this.pendingStartupSubscriptions) {
-        if (performance.now() >= startupDeadline) throw new ReplayTimeout('replay timeout: startup subscriptions');
-        await new Promise((resolve) => setTimeout(resolve, 1));
-      }
-    })(), this.timeoutMs, 'Replay startup');
+    await within(
+      (async () => {
+        if (urls.length) await this.socketFor(urls[0]);
+        await ready(!this.venue.bootstrapPrivateFromTape);
+        // Native and TS outboxes batch sends independently of handler registration.
+        // Begin the tape only after every seed-derived startup topic reached send.
+        while (this.pendingStartupSubscriptions || (this.audit?.ready && !this.audit.ready())) {
+          if (performance.now() >= startupDeadline) throw new ReplayTimeout('replay timeout: startup subscriptions');
+          await new Promise((resolve) => setTimeout(resolve, 1));
+        }
+      })(),
+      this.timeoutMs,
+      'Replay startup',
+    );
     begin();
+    this.playing = true;
     clock?.start();
     this.replayClock = clock;
     const start = performance.now();
@@ -744,6 +756,8 @@ export class Tape {
           if (error instanceof ReplayTimeout || String(error?.message).startsWith('replay timeout:')) throw error;
           return { error: String(error?.message ?? error) };
         }));
+      } else if (this.startupDelivered.has(frame)) {
+        // Still advance tape time, frame count and tick callbacks below.
       } else if (this.bitget) {
         await this.deliverFrame(frame);
       } else {

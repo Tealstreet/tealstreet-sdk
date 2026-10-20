@@ -7,6 +7,10 @@ import { venueFamily } from '@tealstreet/safe-cex-wasm/venues';
 // Literal imports keep each venue in its own browser chunk.
 const importEngine = (family: VenueFamily) => {
   switch (family) {
+    case 'asterdex':
+      return import('@tealstreet/safe-cex-wasm/web/asterdex');
+    case 'kucoin':
+      return import('@tealstreet/safe-cex-wasm/web/kucoin');
     case 'orderly':
       return import('@tealstreet/safe-cex-wasm/web/orderly');
     case 'woo':

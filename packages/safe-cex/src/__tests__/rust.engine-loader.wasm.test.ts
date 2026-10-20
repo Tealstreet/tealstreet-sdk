@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const init = vi.hoisted(() => ({
+  asterdex: vi.fn(async () => undefined),
+  kucoin: vi.fn(async () => undefined),
   orderly: vi.fn(async () => undefined),
   woo: vi.fn(async () => undefined),
   lighter: vi.fn(async () => undefined),
@@ -18,6 +20,8 @@ const init = vi.hoisted(() => ({
   weex: vi.fn(async () => undefined),
 }));
 
+vi.mock('@tealstreet/safe-cex-wasm/web/asterdex', () => ({ default: init.asterdex, WasmEngine: class {} }));
+vi.mock('@tealstreet/safe-cex-wasm/web/kucoin', () => ({ default: init.kucoin, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/orderly', () => ({ default: init.orderly, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/bitrue', () => ({ default: init.bitrue, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/lighter', () => ({ default: init.lighter, WasmEngine: class {} }));
@@ -59,11 +63,15 @@ describe.runIf(process.env.SAFE_CEX_WASM_TESTS)('browser Rust engine selection',
     expect(init.lighter).not.toHaveBeenCalled();
     expect(init.woo).not.toHaveBeenCalled();
     expect(init.orderly).not.toHaveBeenCalled();
+    expect(init.asterdex).not.toHaveBeenCalled();
+    expect(init.kucoin).not.toHaveBeenCalled();
   });
 
   it('initializes each requested family separately', async () => {
     const { loadWebEngine } = await import('../exchanges/rust/loadWebEngine');
     const families = {
+      asterdex: ['asterdex'],
+      kucoin: ['kucoin'],
       backpack: ['backpack'],
       binance: ['binance', 'binancepm'],
       bingx: ['bingx'],
@@ -85,7 +93,7 @@ describe.runIf(process.env.SAFE_CEX_WASM_TESTS)('browser Rust engine selection',
       expect(engines.every((engine) => engine === engines[0])).toBe(true);
       return engines[0];
     }));
-    expect(new Set(modules).size).toBe(15);
+    expect(new Set(modules).size).toBe(17);
     for (const initialize of Object.values(init)) expect(initialize).toHaveBeenCalledTimes(1);
   });
 

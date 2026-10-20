@@ -14,6 +14,7 @@ import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterComma
 import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
+import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
 
 const { values } = parseArgs({
@@ -154,6 +155,18 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  asterdex: {
+    // Native payload tests exercise these corrections; ordinary tapes compare
+    // unchanged, including exact execution prices and economic request fields.
+    notes: [
+      'A zero-size hedge WS update closes only its reported leg; TS removes every position for the symbol.',
+      'Nonce uniqueness is scoped to the agent address as documented; TS scopes it to owner plus agent and can collide across owners.',
+      'Failed or malformed history reads propagate errors instead of silently returning an authoritative empty result.',
+      'Historical candle timestamps use engine seconds consistently; TS returns raw milliseconds on this REST path.',
+      'Do not submit an amendment replacement after the old order fills during cancellation, including fills reported by the cancel response; an unknown-order rejection cannot authorize replacement.',
+      'Configured leverage reads use the actual native setting rather than the inherited TS market-maximum fallback that overwrites it.',
+    ],
+  },
   hyperliquid() {
     // Native command regressions pin these deliberate TS fixes:
     // - Validate every cancel acknowledgement before cancel+replace continues.
@@ -258,6 +271,26 @@ const KNOWN_TS_FIXES = {
     // Native bracket clears and corrected sources win over delayed placement acks.
     // Repeated private execution IDs emit one fill within the replay window.
   },
+  kucoin: [
+    'futures inherits empty fills/orders/income and unsupported public trades; query results use explicit documented tape oracles',
+    'stops classify with side and direction, retain trigger basis and closeOrder',
+    'match executions deduplicate trade IDs and require their execution price',
+    'failed and delayed REST snapshots preserve newer account state and terminal orders',
+    'conditional orders and mixed bracket trigger references fail before writes instead of dropping fields',
+    'explicit protected-market slippage is rejected before batch I/O rather than silently dropped',
+    'Bybit-only BBO and tick-slippage controls are rejected on KuCoin before batch I/O',
+    'cancelSymbolOrders cancels the stop book too (reference signed transport fills this omission)',
+    'open orders walk every numbered page; TS reads only its default first page',
+    'socket readiness and subscriptions wait for welcome; TS sends on TCP open',
+    'cancel-replace proves terminal cancellation and subtracts fills during cancellation',
+    'stop-to-normal migration remains visible across independent REST books',
+    'settings streams update flat symbols and fence delayed metadata reads',
+    'position mode uses its authoritative read rather than inferring it from positions',
+    'independent tape contracts require native query/cancel-proof/mode reads and single-page active-book aliases',
+    'partial order stream rows retain REST-known safety flags',
+    'immediate bracket replacement retains submitted protections before reconciliation',
+    'cached book snapshot gaps retain the entire contiguous buffered suffix (TS reference fixed with a regression)',
+  ],
   binancepm: (ts, rust) => KNOWN_TS_FIXES.binance(ts, rust),
   bingx: (ts) => {
     const account = ts.account;
@@ -677,9 +710,23 @@ for (let run = 0; run < runs; run++) {
       if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
     }
   }
+  // KNOWN_TS_FIXES: KuCoin TS has no futures history implementations. The
+  // synthetic tape declares independent documented query expectations; never
+  // derive this reference from the Rust result.
+  if (values.venue === 'kucoin') tapeRecords.filter((r) => r.type === 'command').forEach((record, index) => {
+    if (record.expected !== undefined) {
+      if (!['fetchFills', 'fetchOrderHistory', 'fetchIncome', 'fetchPublicTrades'].includes(record.op)) throw new Error('KuCoin expected oracle is restricted to missing TS query methods');
+      ts.commands[index] = { ok: record.expected };
+    }
+  });
   if (!sameCommandResults(ts.commands, rust.commands))
     differences.push(`command results: ts=${JSON.stringify(ts.commands)} rust=${JSON.stringify(rust.commands)}`);
   normalizeBingxPublic(ts);
+  if (values.venue === 'kucoin') {
+    const requests = applyKucoinRequestContracts(tapeRecords, ts.requests, rust.requests);
+    ts.requests = requests.tsRequests;
+    rust.requests = requests.rustRequests;
+  }
   // KNOWN_TS_FIXES: unavailable Crypto.com quotes produce NaN in TS.
   if (values.venue === 'cryptocom')
     for (const ticker of ts.tickers) {

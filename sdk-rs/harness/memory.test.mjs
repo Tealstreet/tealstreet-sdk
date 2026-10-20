@@ -6,12 +6,12 @@ import { memoryMetricErrors, retainedMemory, settledMemory } from './memory.mjs'
 const liveBuffers = [];
 
 test('retained frame backing buffers are included', () => {
-  const before = process.memoryUsage();
   const frame = new ArrayBuffer(16 * 1024 * 1024);
   liveBuffers.push(frame);
-  const after = process.memoryUsage();
-  assert(after.arrayBuffers >= frame.byteLength);
-  assert.equal(retainedMemory(before, after) - (after.heapUsed - before.heapUsed), after.arrayBuffers - before.arrayBuffers);
+  // GC may free heap while a transferred frame remains retained.
+  const before = { heapUsed: 100_000, arrayBuffers: 400_000 };
+  const after = { heapUsed: 90_000, arrayBuffers: 400_000 + frame.byteLength };
+  assert.equal(retainedMemory(before, after), frame.byteLength - 10_000);
 });
 test('linear wasm memory is counted exactly once', () => {
   const before = process.memoryUsage();

@@ -7,6 +7,8 @@
 #[cfg(not(any(
     feature = "venue-bitrue",
     feature = "venue-binance",
+    feature = "venue-asterdex",
+    feature = "venue-kucoin",
     feature = "venue-blofin",
     feature = "venue-bybit",
     feature = "venue-woo",
@@ -22,13 +24,15 @@
     feature = "venue-okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, woo or weex"
 );
 
-use safe_cex_engine::model::PlaceOrderOpts;
+use safe_cex_engine::model::{CancelOrderRef, PlaceOrderOpts, StpMode};
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
+#[cfg(feature = "venue-asterdex")]
+use safe_cex_venue_asterdex::{AsterDex, Options as AsterOptions};
 #[cfg(feature = "venue-backpack")]
 use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 #[cfg(feature = "venue-binance")]
@@ -49,6 +53,8 @@ use safe_cex_venue_bybit::{
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "venue-hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
+#[cfg(feature = "venue-kucoin")]
+use safe_cex_venue_kucoin::{Kucoin, Options as KucoinOptions};
 #[cfg(feature = "venue-lighter")]
 use safe_cex_venue_lighter::{Lighter, Options as LighterOptions};
 #[cfg(feature = "venue-mexc")]
@@ -104,8 +110,18 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
 }
 
+#[cfg(feature = "venue-kucoin")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KucoinExtra {
+    #[serde(default)]
+    kucoin_broker: Option<safe_cex_venue_kucoin::sign::BrokerOptions>,
+}
+
 #[cfg(any(
     feature = "venue-binance",
+    feature = "venue-asterdex",
+    feature = "venue-kucoin",
     feature = "venue-blofin",
     feature = "venue-bybit",
     feature = "venue-woo",
@@ -136,6 +152,8 @@ struct EngineOptions {
     lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
         feature = "venue-binance",
+        feature = "venue-asterdex",
+        feature = "venue-kucoin",
         feature = "venue-blofin",
         feature = "venue-bybit",
         feature = "venue-woo",
@@ -158,6 +176,7 @@ struct EngineOptions {
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
+        feature = "venue-kucoin",
         feature = "venue-okx",
         feature = "venue-weex",
         feature = "venue-blofin",
@@ -167,6 +186,7 @@ struct EngineOptions {
     passphrase: Option<String>,
     #[cfg(any(
         feature = "venue-hyperliquid",
+        feature = "venue-asterdex",
         feature = "venue-orderly",
         feature = "venue-lighter",
         feature = "venue-woo"
@@ -182,6 +202,13 @@ struct EngineOptions {
     #[cfg(feature = "venue-hyperliquid")]
     #[serde(default)]
     enable_spot_markets: bool,
+    #[cfg(feature = "venue-asterdex")]
+    #[serde(default)]
+    asterdex: AsterConfig,
+
+    #[cfg(feature = "venue-kucoin")]
+    #[serde(default)]
+    extra: Option<KucoinExtra>,
     #[cfg(feature = "venue-weex")]
     #[serde(default)]
     private_ws_headers: bool,
@@ -191,6 +218,20 @@ struct EngineOptions {
     #[cfg(feature = "venue-orderly")]
     #[serde(default)]
     tick_interval: Option<f64>,
+}
+#[cfg(feature = "venue-asterdex")]
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AsterConfig {
+    api_version: Option<safe_cex_venue_asterdex::sign::Version>,
+    user_address: Option<String>,
+    signer_address: Option<String>,
+    private_key: Option<String>,
+    builder_address: Option<String>,
+    builder_fee_rate_maker: Option<String>,
+    builder_fee_rate_taker: Option<String>,
+    read_key: Option<String>,
+    read_secret: Option<String>,
 }
 
 #[cfg(feature = "venue-bybit")]
@@ -249,6 +290,10 @@ enum ActionOut<'a> {
     Http {
         request: u32,
         method: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        route: Option<&'static str>,
+        #[serde(rename = "timeoutMs", skip_serializing_if = "Option::is_none")]
+        timeout_ms: Option<u32>,
         url: &'a str,
         headers: Vec<(&'static str, &'a str)>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -381,6 +426,8 @@ fn encode(actions: &[Action]) -> String {
             Action::Http(request) => ActionOut::Http {
                 request: request.id.0,
                 method: request.method.as_str(),
+                route: request.route.map(safe_cex_engine::RequestRoute::as_str),
+                timeout_ms: request.timeout_ms,
                 url: &request.url,
                 headers: request
                     .headers
@@ -447,6 +494,10 @@ enum CommandIn {
         command: u32,
         ids: Vec<String>,
     },
+    CancelOrdersWithSymbols {
+        command: u32,
+        orders: Vec<CancelOrderRef>,
+    },
     AmendOrder {
         command: u32,
         id: String,
@@ -473,6 +524,22 @@ enum CommandIn {
     SetPositionMode {
         command: u32,
         hedged: bool,
+    },
+    FetchStpMode {
+        command: u32,
+    },
+    FetchAccount {
+        command: u32,
+    },
+    FetchOrderBook {
+        command: u32,
+        symbol: String,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    SetStpMode {
+        command: u32,
+        mode: StpMode,
     },
     FetchLeverage {
         command: u32,
@@ -568,6 +635,9 @@ impl From<CommandIn> for Command {
             }
             CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
             CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
+            CommandIn::CancelOrdersWithSymbols { command, orders } => {
+                Self::CancelOrdersWithSymbols { command, orders }
+            }
             CommandIn::AmendOrder {
                 command,
                 id,
@@ -591,6 +661,18 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
+            CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
+            CommandIn::FetchAccount { command } => Self::FetchAccount { command },
+            CommandIn::FetchOrderBook {
+                command,
+                symbol,
+                limit,
+            } => Self::FetchOrderBook {
+                command,
+                symbol,
+                limit,
+            },
+            CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
                 command,
@@ -702,6 +784,8 @@ pub struct WasmEngine {
 impl WasmEngine {
     #[cfg(any(
         feature = "venue-binance",
+        feature = "venue-asterdex",
+        feature = "venue-kucoin",
         feature = "venue-blofin",
         feature = "venue-bybit",
         feature = "venue-woo",
@@ -728,6 +812,23 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "venue-asterdex")]
+            "asterdex" => Box::new(Engine::new(AsterDex::new(AsterOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+                auth_user_address: options.asterdex.user_address,
+                auth_signer_address: options.asterdex.signer_address,
+                auth_private_key: options.asterdex.private_key,
+                api_version: options.asterdex.api_version,
+                builder_address: options.asterdex.builder_address,
+                builder_fee_rate_maker: options.asterdex.builder_fee_rate_maker,
+                builder_fee_rate_taker: options.asterdex.builder_fee_rate_taker,
+                read_key: options.asterdex.read_key,
+                read_secret: options.asterdex.read_secret,
+            }))),
             #[cfg(feature = "venue-orderly")]
             "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
                 Box::new(Engine::new(Orderly::new(OrderlyOptions {
@@ -793,6 +894,15 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            #[cfg(feature = "venue-kucoin")]
+            "kucoin" => Box::new(Engine::new(Kucoin::new(KucoinOptions {
+                broker: options.extra.and_then(|e| e.kucoin_broker),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
             }))),
             #[cfg(feature = "venue-bingx")]
             "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {
@@ -1054,6 +1164,83 @@ mod action_tests {
         assert_eq!(decoded[0].text, text);
         assert!(encoded.capacity() <= encoded.len() + 128);
     }
+    #[test]
+    fn http_route_metadata_is_optional_and_has_stable_host_names() {
+        let actions = [
+            None,
+            Some(safe_cex_engine::RequestRoute::Direct),
+            Some(safe_cex_engine::RequestRoute::PublicCors),
+        ]
+        .into_iter()
+        .map(|route| {
+            Action::Http(safe_cex_engine::HttpRequest {
+                id: safe_cex_engine::RequestId(1),
+                method: safe_cex_engine::Method::Get,
+                route,
+                timeout_ms: route.map(|_| 5_000),
+                url: "https://venue.test/time".into(),
+                headers: vec![],
+                body: None,
+            })
+        })
+        .collect::<Vec<_>>();
+        let encoded = encode(&actions);
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&encoded).unwrap();
+        assert!(rows[0].get("route").is_none());
+        assert_eq!(rows[1]["route"], "direct");
+        assert_eq!(rows[2]["route"], "publicCors");
+        assert!(rows[0].get("timeoutMs").is_none());
+        assert_eq!(rows[1]["timeoutMs"], 5_000);
+        assert_eq!(rows[2]["timeoutMs"], 5_000);
+        assert!(
+            rows.iter()
+                .all(|row| row["headers"] == serde_json::json!([]))
+        );
+    }
+
+    #[test]
+    fn http_capacity_hint_bounds_maximum_metadata_and_escaped_fields() {
+        let escaped = "\"\\\n\u{0000}東京".repeat(500);
+        for headers in [
+            vec![],
+            vec![("x-route", escaped.as_str()), ("x-other", "\"\\")],
+        ] {
+            let out = ActionOut::Http {
+                request: u32::MAX,
+                method: safe_cex_engine::Method::Delete.as_str(),
+                route: Some(safe_cex_engine::RequestRoute::PublicCors.as_str()),
+                timeout_ms: Some(u32::MAX),
+                url: &escaped,
+                headers,
+                body: Some(&escaped),
+            };
+            let hint = out.capacity_hint();
+            let encoded = serde_json::to_vec(&out).unwrap();
+            assert!(encoded.len() <= hint);
+            let mut reserved = Vec::with_capacity(hint);
+            let capacity = reserved.capacity();
+            serde_json::to_writer(&mut reserved, &out).unwrap();
+            assert_eq!(reserved.capacity(), capacity);
+            assert_eq!(reserved, encoded);
+            let decoded: serde_json::Value = serde_json::from_slice(&reserved).unwrap();
+            assert_eq!(decoded["url"], escaped);
+            assert_eq!(decoded["body"], escaped);
+            assert_eq!(decoded["route"], "publicCors");
+            assert_eq!(decoded["timeoutMs"], u32::MAX);
+        }
+    }
+
+    #[test]
+    fn cancellation_with_symbols_preserves_caller_identity() {
+        let wire: CommandIn = serde_json::from_str(
+            r#"{"op":"cancelOrdersWithSymbols","command":19,"orders":[{"id":"22542179","symbol":"BTCUSDT"}]}"#,
+        ).unwrap();
+        assert!(
+            matches!(Command::from(wire), Command::CancelOrdersWithSymbols { command: 19, orders }
+            if orders == vec![CancelOrderRef { id: "22542179".into(), symbol: "BTCUSDT".into() }])
+        );
+    }
+
     #[test]
     fn forwards_leverage_metadata_command() {
         let wire: CommandIn =

@@ -6,12 +6,12 @@ import { ReplayClock } from './tape.mjs';
 import { venueOf } from './venues.mjs';
 
 const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
-const clockSource = source.slice(source.indexOf('let clockStart = '), source.indexOf('const config = '));
+const clockSource = source.slice(source.indexOf('const clockStart = '), source.indexOf('const config = '));
 const resets = [...source.matchAll(/if \(isPrivate\) clockStart = performance\.now\(\);/g)];
 
 // Run the actual clock setup without loading engines, fixtures, or exchange workers.
-test('recorded epochs cover freshness checks outside MEXC and reset after private startup', () => {
-  assert.equal(resets.length, 2, 'Rust and TS both reset the private replay epoch');
+test('recorded epochs keep signer and freshness clocks continuous through private startup', () => {
+  assert.equal(resets.length, 0, 'neither runtime may rebase Date.now at readiness');
   const realNow = Date.now;
   for (const venue of ['lighter', 'woo', 'mexc', 'okx']) {
     for (const epoch of [0, 1_700_000_000_000]) {
@@ -24,12 +24,9 @@ test('recorded epochs cover freshness checks outside MEXC and reset after privat
       assert.equal(context.Date.now(), epoch + 4_999);
       assert.ok(context.Date.now() - epoch < 5_000, 'a taped recent fill stays fresh');
       elapsed += 10_000;
-      for (const reset of resets) {
-        vm.runInContext(reset[0], context);
-        assert.equal(context.Date.now(), epoch, 'startup time is excluded from taped freshness');
-        elapsed += 123.9;
-        assert.equal(context.Date.now(), epoch + 123);
-      }
+      assert.equal(context.Date.now(), epoch + 14_999, 'readiness cannot rewind the signing/freshness epoch');
+      elapsed += 123.9;
+      assert.equal(context.Date.now(), epoch + 15_123);
     }
   }
   assert.equal(Date.now, realNow, 'the test never replaces the process clock');

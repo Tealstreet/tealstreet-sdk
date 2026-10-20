@@ -150,6 +150,22 @@
     "./node/orderly": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/orderly/safe_cex_wasm.js"
+    },
+    "./web/asterdex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/asterdex/safe_cex_wasm.js"
+    },
+    "./node/asterdex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/asterdex/safe_cex_wasm.js"
+    },
+    "./web/kucoin": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/kucoin/safe_cex_wasm.js"
+    },
+    "./node/kucoin": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/kucoin/safe_cex_wasm.js"
     }
   },
   "scripts": {

@@ -4,16 +4,24 @@ The Tealstreet exchange store. One `DefaultStore` per exchange
 account; mirrored across worker → main thread via the worker's
 throttled postMessage.
 
-Rust frames keep quantities in published base units. For MEXC and BloFin,
+Rust frames keep quantities in published base units. For MEXC, BloFin and KuCoin futures,
 `FrameApplier` also retains native placement-unit order extras in both worker
 and main stores. Prefer the exact native remaining column when present; legacy
 frames reconstruct placement quantities from `contractSize` so chaser arithmetic
-retains its native-volume contract. `SETTINGS` optionally carries
+retains its native-volume contract. Use decimal-safe division here: a base fill
+of 0.3 at multiplier 0.1 must reconstruct exactly 3 lots. Position frames also
+restore `extra.contractsNative` for native-volume venues, which copier closes
+consume as their placement quantity. `SETTINGS` optionally carries
 separate buy/sell leverage columns; do not collapse these hedge rails to the
 single representative leverage value when applying frames. `POSITIONS` may append
 string references for venue-defined position IDs; preserve these when present
 so simultaneous Cross and Isolated rows for a symbol remain distinct. Older
 frames still derive identity from symbol and position mode.
+
+Aggregate venue ticker streams may still contain delisted symbols absent from
+the current market table. `TICKERS` then carries optional symbol/ID references;
+`FrameApplier` uses those identities for orphan rows and preserves packed delta
+indexes. Keep those ticker rows without synthesizing markets or filtering them.
 
 `serialize()` carries every derived display bridge field, including
 `displayedPositions` and `displayedMargin`. Hosted or force-full-store paths

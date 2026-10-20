@@ -1,5 +1,7 @@
 /** Aliases share one engine binary; unsupported names fail before loading wasm. */
 const families = Object.freeze({
+  asterdex: 'asterdex',
+  kucoin: 'kucoin',
   backpack: 'backpack',
   binance: 'binance',
   binancepm: 'binance',

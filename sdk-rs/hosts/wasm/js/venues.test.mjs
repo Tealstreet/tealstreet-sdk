@@ -6,6 +6,8 @@ import { loadEngine } from './engine.node.mjs';
 
 const require = createRequire(import.meta.url);
 const aliases = {
+  asterdex: ['asterdex'],
+  kucoin: ['kucoin'],
   backpack: ['backpack'],
   binance: ['binance', 'binancepm'],
   bingx: ['bingx'],

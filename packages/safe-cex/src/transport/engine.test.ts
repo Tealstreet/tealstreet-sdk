@@ -17,7 +17,12 @@ import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
 import { setDefaultTransport } from './registry';
 import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
-import { PRIVATE_PROXY_ASIA, PRIVATE_PROXY_GRVT_TINY, PRIVATE_PROXY_JP } from './tealstreet/transportResolution';
+import {
+  AWS_PUBLIC_CORS_PROXY,
+  PRIVATE_PROXY_ASIA,
+  PRIVATE_PROXY_GRVT_TINY,
+  PRIVATE_PROXY_JP,
+} from './tealstreet/transportResolution';
 import { setWsRelayEnabled } from './tealstreet/wsRelay';
 
 const mocks = vi.hoisted(() => ({
@@ -945,5 +950,293 @@ describe('Hyperliquid uses the factories original publicDataOnly option', () => 
     expect(mocks.adapter).toHaveBeenCalledTimes(1);
     expect(raw.request).not.toHaveBeenCalled();
     expect(resolveEngineRoutingPlan('hyperliquid', opts, 'https://api.hyperliquid.xyz').http.mode).toBe('how');
+  });
+});
+
+describe('Aster secondary signer HTTP routing', () => {
+  const baseURL = 'https://fapi.asterdex.com';
+  const privateRequest = (method: string): Request => ({
+    method,
+    url: `${baseURL}/fapi/v3/order?quantity=0.0010&signature=exact%2Bbytes`,
+    headers: { 'x-mbx-apikey': 'read-wallet' },
+  });
+
+  it.each(['GET', 'get'])(
+    'routes signed %s to the secondary CORS egress and every write to primary',
+    async (method) => {
+      const opts = options({
+        tealstreetProxy: true,
+        tealstreetTunnel: false,
+        secondary_key: 'read-wallet',
+        secondary_secret: 'read-private-key',
+      });
+      const raw = makeRaw();
+      const routed = createEngineTransport('asterdex', opts, raw);
+      await routed.request(privateRequest(method));
+      expect(raw.request.mock.lastCall![0].url).toBe(`${AWS_PUBLIC_CORS_PROXY}/${privateRequest(method).url}`);
+      expect(raw.request.mock.lastCall![0].headers['x-mbx-apikey']).toBe('read-wallet');
+      for (const write of ['POST', 'PUT', 'DELETE']) {
+        await routed.request(privateRequest(write));
+        expect(raw.request.mock.lastCall![0].url).toBe(`${PRIVATE_PROXY_ASIA}/${privateRequest(write).url}`);
+      }
+      await routed.request({ ...privateRequest('GET'), headers: {} });
+      expect(raw.request.mock.lastCall![0].url).toBe(`${PRIVATE_PROXY_ASIA}/${privateRequest('GET').url}`);
+      routed.dispose!();
+    },
+  );
+
+  it('retains the primary HOW path and puts secondary CORS inside only its read RPC', async () => {
+    const opts = options({
+      tealstreetTunnel: true,
+      secondary_key: 'read-wallet',
+      secondary_secret: 'read-private-key',
+    });
+    const raw = makeRaw();
+    const routed = createEngineTransport('asterdex', opts, raw);
+    await routed.request(privateRequest('GET'));
+    expect(mocks.adapter.mock.lastCall![0].url).toBe(`${AWS_PUBLIC_CORS_PROXY}/${privateRequest('GET').url}`);
+    await routed.request(privateRequest('POST'));
+    expect(mocks.adapter.mock.lastCall![0].url).toBe(privateRequest('POST').url);
+    expect(raw.request).not.toHaveBeenCalled();
+    const plan = resolveEngineRoutingPlan('asterdex', opts, baseURL);
+    expect(plan.http).toMatchObject({ mode: 'how', prefix: '', authorize: false });
+    expect(plan.readHttp).toMatchObject({ mode: 'how', prefix: AWS_PUBLIC_CORS_PROXY, authorize: false });
+    expect(plan.readHttp?.tunnelUrl).toBe(plan.http.tunnelUrl);
+    expect(JSON.stringify(plan)).not.toMatch(/read-wallet|read-private-key|venue-key|venue-secret|proxy-jwt/);
+    routed.dispose!();
+  });
+
+  it('honors a secondary proxy override while preserving primary-only defaults', async () => {
+    const raw = makeRaw();
+    const opts = options({
+      tealstreetProxy: true,
+      tealstreetTunnel: false,
+      secondary_key: 'read-wallet',
+      secondary_secret: 'read-private-key',
+      secondaryProxyUrl: 'https://secondary.example/proxy',
+    });
+    const routed = createEngineTransport('asterdex', opts, raw);
+    await routed.request(privateRequest('GET'));
+    expect(raw.request.mock.lastCall![0].url).toBe(`https://secondary.example/proxy/${privateRequest('GET').url}`);
+    const plan = resolveEngineRoutingPlan('asterdex', opts, baseURL);
+    expect(plan.readHttp?.prefix).toBe('https://secondary.example/proxy');
+    expect(plan.http.prefix).toBe(PRIVATE_PROXY_ASIA);
+    const primaryOptions = options({ tealstreetProxy: true, tealstreetTunnel: false });
+    const primaryPlan = resolveEngineRoutingPlan('asterdex', primaryOptions, baseURL);
+    expect(primaryPlan).not.toHaveProperty('readHttp');
+    expect(primaryPlan).not.toHaveProperty('publicHeader');
+    const primary = createEngineTransport('asterdex', primaryOptions, raw);
+    await primary.request(privateRequest('GET'));
+    expect(raw.request.mock.lastCall![0].url).toBe(`${PRIVATE_PROXY_ASIA}/${privateRequest('GET').url}`);
+    routed.dispose!();
+    primary.dispose!();
+  });
+
+  it.each([{ secondary_key: 'read-wallet' }, { secondary_secret: 'read-private-key' }])(
+    'rejects partial secondary credentials %o',
+    (partial) => {
+      const opts = options(partial);
+      expect(() => createEngineTransport('asterdex', opts, makeRaw())).toThrow('secondary signing keys');
+      expect(() => resolveEngineRoutingPlan('asterdex', opts, baseURL)).toThrow('secondary signing keys');
+    },
+  );
+
+  it('keeps direct transport direct when no secondary egress is configured', async () => {
+    const raw = makeRaw();
+    const opts = options({
+      transport: directTransport,
+      secondary_key: 'read-wallet',
+      secondary_secret: 'read-private-key',
+    });
+    const routed = createEngineTransport('asterdex', opts, raw);
+    await routed.request(privateRequest('GET'));
+    expect(raw.request.mock.lastCall![0].url).toBe(privateRequest('GET').url);
+    expect(mocks.token).not.toHaveBeenCalled();
+    expect(resolveEngineRoutingPlan('asterdex', opts, baseURL).readHttp).toEqual(
+      resolveEngineRoutingPlan('asterdex', opts, baseURL).http,
+    );
+    routed.dispose!();
+  });
+});
+
+describe('typed public HTTP route hints', () => {
+  it('keeps clock direct and CORS attempts out of account HOW routing and auth', async () => {
+    const raw = makeRaw();
+    const opts = options({
+      tealstreetProxy: true,
+      tealstreetTunnel: true,
+      overrideProxyUrl: 'https://account.example/proxy',
+      secondary_key: 'read-key',
+      secondary_secret: 'read-secret',
+    });
+    const routed = createEngineTransport('asterdex', opts, raw);
+    const url = 'https://fapi.asterdex.com/fapi/v3/time?exact=one%2Btwo';
+    for (const [route, expected] of [
+      ['direct', url],
+      ['publicCors', `${AWS_PUBLIC_CORS_PROXY}/${url}`],
+    ] as const) {
+      await routed.request({ method: 'GET', route, url, headers: {} });
+      const sent = raw.request.mock.lastCall![0];
+      expect(sent.url).toBe(expected);
+      expect(sent.headers).toEqual({});
+      expect(sent).not.toHaveProperty('route');
+    }
+    expect(mocks.adapter).not.toHaveBeenCalled();
+    expect(mocks.token).not.toHaveBeenCalled();
+    await routed.request({ method: 'GET', url, headers: {} });
+    expect(mocks.adapter).toHaveBeenCalledOnce();
+    const plan = resolveEngineRoutingPlan('asterdex', opts, 'https://fapi.asterdex.com');
+    expect(plan.publicCorsHttp).toEqual({
+      mode: 'direct',
+      prefix: AWS_PUBLIC_CORS_PROXY,
+      authorize: false,
+      authorizationHeader: 'Authorization',
+      headers: {},
+    });
+    expect(JSON.stringify(plan)).not.toMatch(/read-key|read-secret|venue-key|venue-secret|proxy-jwt/);
+    routed.dispose!();
+  });
+
+  it.each(['binance', 'hyperliquid'] as const)(
+    'explicit public CORS is direct even for %s special account policies',
+    async (exchange) => {
+      const raw = makeRaw();
+      const routed = createEngineTransport(exchange, options({ tealstreetTunnel: true }), raw);
+      const url = 'https://venue.test/time';
+      await routed.request({ method: 'GET', route: 'publicCors', url, headers: {} });
+      expect(raw.request.mock.lastCall![0].url).toBe(`${AWS_PUBLIC_CORS_PROXY}/${url}`);
+      expect(mocks.adapter).not.toHaveBeenCalled();
+      expect(mocks.token).not.toHaveBeenCalled();
+      routed.dispose!();
+    },
+  );
+
+  it('fails unconfigured CORS before network and preserves ordinary direct requests', async () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('asterdex', options({ transport: directTransport }), raw);
+    const input = { method: 'GET', url: 'https://fapi.asterdex.com/fapi/v1/time', headers: {} };
+    await expect(routed.request({ ...input, route: 'publicCors' })).rejects.toThrow('not configured');
+    expect(raw.request).not.toHaveBeenCalled();
+    await routed.request(input);
+    expect(raw.request.mock.lastCall![0].url).toBe(input.url);
+    expect(
+      resolveEngineRoutingPlan('asterdex', options({ transport: directTransport }), 'https://fapi.asterdex.com'),
+    ).not.toHaveProperty('publicCorsHttp');
+    routed.dispose!();
+  });
+
+  it('disposal aborts direct and CORS route streams using the shared deadline', async () => {
+    vi.useFakeTimers();
+    const raw = makeRaw();
+    raw.request.mockResolvedValue({
+      status: 200,
+      body: (async function* () {
+        yield new Uint8Array([1]);
+      })(),
+    });
+    const routed = createEngineTransport('asterdex', options({ tealstreetTunnel: true }), raw);
+    for (const route of ['direct', 'publicCors'] as const)
+      await routed.request({ method: 'GET', route, url: 'https://venue.test/time', headers: {} });
+    expect(vi.getTimerCount()).toBe(2);
+    routed.dispose!();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(raw.request.mock.calls.every(([request]) => request.signal?.aborted)).toBe(true);
+  });
+});
+
+describe('typed HTTP operation deadlines', () => {
+  it.each([
+    [undefined, 20_000],
+    [5_000, 5_000],
+  ] as const)('bounds the whole request at %s with default 20 seconds', async (timeoutMs, deadline) => {
+    vi.useFakeTimers();
+    const schedule = vi.spyOn(globalThis, 'setTimeout');
+    const cancel = vi.spyOn(globalThis, 'clearTimeout');
+    const raw = makeRaw();
+    raw.request.mockImplementation(() => new Promise(() => {}));
+    const routed = createEngineTransport('asterdex', options({ transport: directTransport }), raw);
+    const pending = routed.request({
+      method: 'GET',
+      route: 'direct',
+      timeoutMs,
+      url: 'https://venue.test/time',
+      headers: {},
+    });
+    const deadlineTimers = schedule.mock.calls.flatMap(([, delay], index) =>
+      delay === deadline ? [schedule.mock.results[index].value] : [],
+    );
+    expect(deadlineTimers).toHaveLength(1);
+    const rejected = expect(pending).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(deadline - 1);
+    expect(raw.request.mock.lastCall![0].signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    expect(raw.request.mock.lastCall![0]).not.toHaveProperty('timeoutMs');
+    expect(raw.request.mock.lastCall![0]).not.toHaveProperty('route');
+    routed.dispose!();
+    // Other environment tasks may schedule timers during the asynchronous clock
+    // advance. Verify cleanup of this request's deadline by its own handle.
+    expect(cancel).toHaveBeenCalledWith(deadlineTimers[0]);
+  });
+
+  it('disposal clears its pending deadline while preserving an unrelated caller timer', async () => {
+    vi.useFakeTimers();
+    const caller = vi.fn();
+    const callerTimer = setTimeout(caller, 60_000);
+    const schedule = vi.spyOn(globalThis, 'setTimeout');
+    const cancel = vi.spyOn(globalThis, 'clearTimeout');
+    const raw = makeRaw();
+    raw.request.mockImplementation(() => new Promise(() => {}));
+    const routed = createEngineTransport('asterdex', options({ transport: directTransport }), raw);
+    const pending = routed.request({ method: 'GET', route: 'direct', url: 'https://venue.test/time', headers: {} });
+    const deadlineTimers = schedule.mock.calls.flatMap(([, delay], index) =>
+      delay === 20_000 ? [schedule.mock.results[index].value] : [],
+    );
+    expect(deadlineTimers).toHaveLength(1);
+    const rejected = expect(pending).rejects.toThrow('disposed');
+    routed.dispose!();
+    await rejected;
+    expect(raw.request.mock.lastCall![0].signal?.aborted).toBe(true);
+    expect(cancel).toHaveBeenCalledWith(deadlineTimers[0]);
+    expect(cancel).not.toHaveBeenCalledWith(callerTimer);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(caller).toHaveBeenCalledTimes(1);
+    clearTimeout(callerTimer);
+  });
+
+  it('keeps the 5-second clock budget active through a stalled CORS response body', async () => {
+    vi.useFakeTimers();
+    const raw = makeRaw();
+    raw.request.mockResolvedValue({
+      status: 200,
+      body: { [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }) },
+    });
+    const routed = createEngineTransport('asterdex', options({ tealstreetTunnel: true }), raw);
+    const response = await routed.request({
+      method: 'GET',
+      route: 'publicCors',
+      timeoutMs: 5_000,
+      url: 'https://venue.test/time',
+      headers: {},
+    });
+    const body = response.body as AsyncIterable<Uint8Array>;
+    const rejected = expect(body[Symbol.asyncIterator]().next()).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(raw.request.mock.lastCall![0].signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    expect(raw.request.mock.lastCall![0].signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    routed.dispose!();
+  });
+
+  it('passes only the remaining budget to HOW without serializing timeout metadata', async () => {
+    const routed = createEngineTransport('asterdex', options({ tealstreetTunnel: true }), makeRaw());
+    await routed.request({ method: 'GET', timeoutMs: 5_000, url: 'https://venue.test/time', headers: {} });
+    const config = mocks.adapter.mock.lastCall![0];
+    expect(config.timeout).toBeGreaterThan(0);
+    expect(config.timeout).toBeLessThanOrEqual(5_000);
+    expect(config).not.toHaveProperty('timeoutMs');
+    routed.dispose!();
   });
 });

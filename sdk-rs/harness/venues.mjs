@@ -1,9 +1,12 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
-import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
+import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
+import { kucoin } from './kucoin.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
+import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
+import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
 
 let lighterVerifier;
@@ -507,6 +510,29 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  asterdex: {
+    initializeReplay: initializeAsterCrypto,
+    rust: 'asterdex',
+    ts: { module: `${root}/asterdex/asterdex.exchange.ts`, className: 'AsterDEXExchange', name: 'asterdex' },
+    privateSocket: '/ws/',
+    compareFillPrices: true,
+    compareBalanceCurrencies: true,
+    compareWriteOrder: true,
+    requestUrl: asterRequestUrl,
+    createRequestValidator: createAsterRequestValidator,
+    createSocketAudit: asterSocketAudit,
+    isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.topics).filter((topic) => topic.endsWith('@depth20@100ms')).length >= count,
+    startupSubscriptions: (records, books) => {
+      const url = records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/stream')?.url ?? 'wss://fstream.asterdex.com/stream';
+      return subscriptionKeys(url, { method: 'SUBSCRIBE', params: ['!ticker@arr', '!markPrice@arr@1s', ...books.map((symbol) => `${symbol.toLowerCase()}@depth20@100ms`)] });
+    },
+    prepareTsTransport: async (_exchange, adapter) => {
+      const { default: axios } = await import('axios');
+      axios.defaults.adapter = adapter;
+      createRequire(import.meta.url)('axios').defaults.adapter = adapter;
+    },
+  },
   ...Object.fromEntries([...Object.keys(ORDERLY_BROKERS), 'orderly'].map((name) => [name, orderly(name)])),
   lighter: {
     rust: 'lighter',
@@ -1028,6 +1054,10 @@ export const VENUES = {
     privateSocket: '/private/ws',
     volatileBodyFields: true,
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
+  },
+  kucoin: {
+    ...kucoin,
+    requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),
   },
   bybit: bybit('bybit', 'BybitExchange'),
   bybitinverse: bybit('bybitinverse', 'BybitInverseExchange'),

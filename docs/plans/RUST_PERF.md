@@ -8,17 +8,27 @@ green CI, merge and fresh follow-up branch. No stash/rebase/force push.
 
 ## Current verification checkpoint
 
-Production source is `ecca589fb3`, integrated through landing `922b5fdc89`.
-There are 15 isolated WASM families and 19 public fixture profiles. Release,
-all size budgets, 1,295 Rust tests, native/wasm and isolated-feature Clippy,
-273 harness tests, 100 host tests, 78 SDK WASM tests and repository checks pass.
-All 36 private gates pass. The final public comparison and diagnostic
-profiles have not started; performance widening remains unproven. Earlier
-negative eleven-family results remain in `RUST_PERF_INITIAL11.json`.
+The last measured production source is `ecca589fb3`, integrated through landing
+`922b5fdc89` (15 WASM families, 19 public profiles). Its workspace, repository,
+size and all 36 private checks pass. The first public attempt passed 11 venues,
+then stopped at Bitrue before comparison pairs. The shared replay clock fix
+restores Bitrue correctness; its corrected CPU gate fails at 0.97x. The fixed
+OKX/Bybit diagnostic profiles also retain an OKX batch regression. These are
+recorded in `RUST_PERF_FIRST19.json.gz`; wider performance remains unproven.
+Earlier negative eleven-family results remain in `RUST_PERF_INITIAL11.json`.
 
-The final predeclared protocol is `RUST_PERF_CROSSOVER19.md`. Earlier 14- and
-15-family build/control checkpoints were never sampled because venue merges
-arrived before measurement. They do not supply performance results.
+Current phase: merge landing `d9aa597fd3` (KuCoin and AsterDEX), preserving typed
+routing/deadlines, frame identity and all audit requirements. Extend isolated
+builds and static loaders to 17 families, reconcile frame-size hints for new
+optional tails, then review and verify before collecting new timings. The
+19-profile comparison was aborted, not silently resumed against changed source.
+The two bounded V8 diagnostics locate substantial audit/runtime work and do not
+establish packing or duplicate UTF8 validation as the dominant cause. Retain
+raw diagnostic provenance and negative evidence before any source experiment.
+
+The prior predeclared protocol is `RUST_PERF_CROSSOVER19.md`. A fresh expanded
+protocol and exact landing control are required after this merge. Earlier 14-
+and 15-family build/control checkpoints were never sampled.
 
 ## Historical nine-family checkpoint
 
@@ -889,3 +899,27 @@ productionoptimization (including measuredBitrueopt3 tradeoff ifWASMdominates),
 review/verify/commit, refreshcontrol/helper/artifactproofs andpredeclarefresh
 publicgates+fixedcomparison. Keepallvalidnegativeobservations andneverchange
 publicthresholdsoracceptunsubscribeddata. NoPR/push/merge untilactualgatespass.
+
+
+Landing integration phase plan (d9aa597fd3): resolve conflicts by combining
+existing batching/feature isolation with incoming KuCoin/AsterDEX and typed
+HTTP routing/deadline contracts. Independent agents own harness, host/native,
+and build/loader scopes; root owns Store frame hints. New ticker identity tails
+and currency balances must reserve their complete payload/string bounds,
+without wire changes. Verify focused harness/host/SDK/engine tests, all feature
+constructors and build selection, then independent phase review and merge
+commit. No performance jobs run during source integration. New-family caps
+come from real release builds; existing fitting caps remain fixed. Bitrue O3
+is a separate bounded experiment after this checkpoint, not an unrecorded
+change to the failed result.
+
+Merge17 phase checkpoint: independent harness, host/native, WASM loader/build,
+and Store reservation reviews pass. All306 harness tests,73 engine tests,
+41 native tests,85 focused JS host/socket/wire checks and224 focused SDK checks
+pass. Full44-task typecheck and28-task lint pass. Full checks caught three new
+native tests still using mpsc channels and one Aster mock lacking wsMessages;
+adapt fixtures to the production interfaces without dropping assertions.
+Native strict Clippy, fmt and bans pass. Broader workspace tests/Clippy and
+17-family release/size/private/public checks remain pending; no new timing
+comparison has run. Preserve the two19c diagnostic raw profiles, output,
+provenance and limitations in RUST_PERF_HOST_DIAGNOSE19C.json.gz.
