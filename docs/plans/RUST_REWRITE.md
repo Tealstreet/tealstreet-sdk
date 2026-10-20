@@ -304,11 +304,12 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | BloFin | done (#1300) |
 | Hyperliquid perps | done (#1306) |
 | Backpack | done (#1299) |
-| Bitget (USDT-M, USDC) | done (#1308); inverse sizing and UTA ledger/trailing parity next |
+| Bitget (USDT-M, USDC, inverse) | done (#1308); inverse sizing and UTA ledger/trailing parity done (#1317) |
 | Bitrue futures | done (#1314) |
 | Bitunix | wave 1, PR in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | done ([#1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313)) |
-| KuCoin, Phemex, WOO, Orderly family, Bitget parity | wave 2 lanes running |
+| WOO | done ([#1316](https://github.com/Tealstreet/tealstreet-sdk/pull/1316)) |
+| KuCoin, Phemex, Orderly family | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | Lighter, Paradex, GRVT, AsterDEX, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 

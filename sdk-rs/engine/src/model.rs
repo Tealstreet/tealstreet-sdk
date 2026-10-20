@@ -305,6 +305,9 @@ pub struct PlaceOrderOpts {
     pub price: Option<f64>,
     #[serde(default)]
     pub trigger_price: Option<f64>,
+    /// A venue's protected market-order slippage, in percentage points.
+    #[serde(default)]
+    pub max_slippage_pct: Option<f64>,
     #[serde(default)]
     pub stop_loss: Option<f64>,
     #[serde(default)]
@@ -327,8 +330,6 @@ pub struct PlaceOrderOpts {
     pub client_order_id: Option<String>,
     #[serde(default)]
     pub close: Option<bool>,
-    #[serde(default)]
-    pub max_slippage_pct: Option<f64>,
     #[serde(default)]
     pub bybit_bbo: Option<BybitBbo>,
     #[serde(default)]

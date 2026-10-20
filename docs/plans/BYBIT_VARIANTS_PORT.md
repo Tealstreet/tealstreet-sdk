@@ -662,3 +662,21 @@ mandatory. Final PR CI will run the complete 13-job venue matrix on isolated
 runners, alongside local required profile gates when the shared host is quiet;
 use those complete CI results as the authoritative full regression evidence.
 Do not claim interrupted or baseline-timeout local matrices as passing.
+
+### Thirteen-venue coherent source
+
+Resolve WOO as a strict union. The generic percentage slippage option has one
+serde-defaulted field; remove sixteen duplicate initializer lines introduced by
+its different field position, with no existing-venue behavior change. WOO's
+batch preflight now rejects Bybit-only BBO/TickSize controls before reads/writes;
+both mixed-batch regressions were proved red/green. WOO112 + Bybit121 native
+cases and strict Clippy/fmt pass; independent native review passes and the P1
+stop guard is unchanged. WOO's original explicit socket roles remain intact.
+
+All 178 harness helpers and all-module symbol checks pass without weakening
+prior exact transport/body/signature/mutation/metric controls. Independent
+schema/feature and TS wrapper reviews pass. Thirteen features match thirteen
+CI jobs, with the same 1,258,291-byte per-venue budget; Bybit aliases and endpoints
+remain feature-gated. The twelve-venue previous full native run passed 987 cases;
+that historical result is not a current thirteen-venue full test claim. Current
+combined build and targeted boundary checks precede pushing for complete CI.

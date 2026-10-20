@@ -346,7 +346,8 @@ async function tsCommand(exchange, store, record) {
       await exchange.cancelOrders(store.orders.filter((order) => args.ids.includes(order.id)));
       return [];
     case 'cancelSymbolOrders':
-      await exchange.cancelSymbolOrders(args.symbol);
+      if (args.symbol === '') await exchange.cancelAllOrders();
+      else await exchange.cancelSymbolOrders(args.symbol);
       return [];
     case 'amendOrder': {
       const order = store.orders.find((o) => o.id === args.id);

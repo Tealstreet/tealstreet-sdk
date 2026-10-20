@@ -366,6 +366,29 @@ describe('RustEngineExchange', () => {
     await expect(exchange.updateSymbolMetadata('BTCUSDT')).resolves.toBeUndefined();
   });
 
+  it('skips private WOO metadata for implicit public-only credentials', async () => {
+    exchange = new RustEngineExchange('woo', { key: '', secret: '' }, new DefaultStore());
+    await expect(exchange.updateSymbolMetadata('BTCUSDT')).resolves.toBeUndefined();
+  });
+
+  it('keeps WOO journal PnL on the order axis when fills have no PnL', async () => {
+    exchange = new RustEngineExchange('woo', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    const orders = vi.spyOn(exchange, 'fetchHistoricalOrders').mockResolvedValue([
+      { id: 'open', symbol: 'ETHUSDT', side: OrderSide.Buy, type: OrderType.Limit, status: OrderStatus.Closed,
+        price: 99, averagePrice: 100, amount: 1, filled: 1, reduceOnly: false,
+        createdTime: 1_000_000, updatedTime: 1_000_000, realizedPnl: 0, fees: 0.1, feeAsset: 'USDT' },
+      { id: 'close', symbol: 'ETHUSDT', side: OrderSide.Sell, type: OrderType.Limit, status: OrderStatus.Closed,
+        price: 111, averagePrice: 110, amount: 1, filled: 1, reduceOnly: true,
+        createdTime: 2_000_000, updatedTime: 2_000_000, realizedPnl: 10, fees: 0.1, feeAsset: 'USDT' },
+    ]);
+    const fills = vi.spyOn(exchange, 'fetchHistoricalFills').mockRejectedValue(new Error('fills lack PnL'));
+    const records = await exchange.fetchHistoricalPositions({ account: 'woo-account', from: 500_000, to: 3_000_000 });
+    expect(orders).toHaveBeenCalledWith({ from: 500_000, to: 3_000_000 });
+    expect(fills).not.toHaveBeenCalled();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ account: 'woo-account', symbol: 'ETHUSDT', state: 'closed', realizedPnl: 10, sourceAxis: 'orders' });
+  });
+
   it('routes real engine HTTP and private sockets through the account provider', async () => {
     const tape = recordedOkxTransport();
     const outgoing: Array<Parameters<Transport['request']>[0]> = [];

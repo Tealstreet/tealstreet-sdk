@@ -605,3 +605,15 @@ test('caller IDs are collected from every command shape without collecting tape 
     new Set(['place', 'amend']),
   );
 });
+
+
+test('WOO native topics and auth identity remain exact while fresh clocks vary', () => {
+  const url = 'wss://wss.woox.io/v2/ws/private/stream/app';
+  const options = { wooProtocol: true };
+  const keys = (value) => subscriptionKeys(url, JSON.stringify(value), new Set(), options);
+  assert.notDeepEqual(keys({ event: 'subscribe', topic: 'executionreport' }), keys({ event: 'subscribe', topic: 'algoexecutionreportv2' }));
+  for (const event of ['ping', 'pong']) assert.deepEqual(keys({ event }), []);
+  const auth = (apikey, timestamp, sign) => keys({ event: 'auth', params: { apikey, timestamp, sign } });
+  assert.deepEqual(auth('key', 1, 'a'), auth('key', 2, 'b'));
+  assert.notDeepEqual(auth('key', 1, 'a'), auth('other', 1, 'a'));
+});

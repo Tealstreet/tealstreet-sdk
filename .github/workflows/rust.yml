@@ -104,6 +104,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - venue: woo
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-woo
           - venue: binance
             books: BTCUSDT,ETHUSDT,SOLUSDT
             private_script: rust:private-tape

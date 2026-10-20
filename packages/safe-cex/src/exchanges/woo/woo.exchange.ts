@@ -1,18 +1,16 @@
 import type { Axios } from 'axios';
-import type { PositionRecord } from '../../journal/position.types';
 import type { Store } from '../../store/store.interface';
+import type { ClientOrderIdRule } from '../clientOrderId';
 
 import rateLimit from 'axios-rate-limit';
 import flatten from 'lodash/flatten';
 import sumBy from 'lodash/sumBy';
-import times from 'lodash/times';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { createApiWithSecondaryKey } from '../../createApiWithSecondaryKey';
-import { mapFoldedInterval } from '../../journal/fold.position-adapter';
-import { reconstructPositionIntervals } from '../../journal/position-intervals';
-import { wooOrdersToExecutions } from '../../journal/woo.position-adapter';
+import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
+import { getTransport } from '../../transport/registry';
 import {
   Balance,
   Candle,
@@ -23,12 +21,15 @@ import {
   HistoricalOrder,
   HistoricalTrade,
   HistoricalTradeOptions,
+  IncomeHistoryOptions,
+  IncomeRecord,
   LogSeverity,
   MarginType,
   Market,
   OHLCVOptions,
   Order,
   OrderBook,
+  OrderFillEvent,
   OrderHistoryOptions,
   OrderSide,
   OrderStatus,
@@ -53,10 +54,11 @@ import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange, CallableMethodsInWorker } from '../base';
-import type { ClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './woo.api';
+import { buildWooIncomeParams, mapWooIncomeRecord, wooIncomeIdentity } from './woo.income';
 import { buildWooLegacyFillsParams } from './woo.legacy-fills';
 import { mapWooHistoricalOrder } from './woo.order-history';
+import { assertWooAlgoSnapshotRow, splitWooQuantity } from './woo.order-state';
 import {
   ACCOUNT_RESPONSE,
   ENDPOINTS,
@@ -71,7 +73,6 @@ import {
   PLACE_ALGO_ORDER_RESPONSE,
   PLACE_ORDER_RESPONSE,
 } from './woo.types';
-import { getTransport } from '../../transport/registry';
 import { mapWooHedgeTransactionSide, normalizeSymbol, reverseSymbol } from './woo.utils';
 import { WooPrivateWebscoket } from './woo.ws-private';
 import { WooPublicWebsocket } from './woo.ws-public';
@@ -212,19 +213,11 @@ export class WOOXExchange extends BaseExchange {
     const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
 
     const orders = await this.fetchHistoricalOrders({ from, to });
-    const executions = wooOrdersToExecutions(orders);
-    const records: PositionRecord[] = [];
-
-    for (const interval of reconstructPositionIntervals(executions)) {
-      if (interval.closedAt === undefined || interval.closedAt < from) continue;
-      const record = mapFoldedInterval(interval, {
-        account: opts.account,
-        resolveSettleCurrency: (symbol: string) => this.store?.marketsBySymbol?.[symbol]?.quote || 'USDT',
-      });
-      if (record) records.push(record);
-    }
-
-    return records;
+    return wooOrdersToPositionRecords(orders, {
+      account: opts.account,
+      from,
+      resolveSettleCurrency: (symbol) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
+    });
   };
 
   private static readonly MAX_FILL_POSITION_REFRESH_ATTEMPTS = 4;
@@ -255,6 +248,42 @@ export class WOOXExchange extends BaseExchange {
   private _positionMetadataCache = new Map<string, CachedWooPositionMetadata>();
   private _positionMetadataInFlight = new Map<string, Promise<WooPositionMetadata[]>>();
   private _positionMetadataRateLimitedUntil = new Map<string, number>();
+  private _incomeNextAt = 0;
+  private _orderRevision = 0;
+  private _orderVersions = new Map<string, number>();
+  private _terminalOrders = new Map<string, { status: OrderStatus; at: number }>();
+
+  reconcileOrder = (next: Order): Order => {
+    const old = this.store.orders.find((row) => row.id === next.id);
+    const terminal = this._terminalOrders.get(next.id)?.status;
+    const filled = Math.max(next.filled || 0, old?.filled || 0);
+    const status =
+      old?.status === OrderStatus.Closed || terminal === OrderStatus.Closed
+        ? OrderStatus.Closed
+        : next.status === OrderStatus.Closed
+          ? OrderStatus.Closed
+          : old?.status === OrderStatus.Canceled || terminal === OrderStatus.Canceled
+            ? OrderStatus.Canceled
+            : next.status;
+    return { ...next, filled, remaining: Math.max(0, subtract(next.amount, filled)), status };
+  };
+
+  acceptOrder = (next: Order) => {
+    const row = this.reconcileOrder(next);
+    this._orderVersions.set(row.id, ++this._orderRevision);
+    if (row.status === OrderStatus.Closed || row.status === OrderStatus.Canceled) {
+      this._terminalOrders.set(row.id, { status: row.status, at: virtualClock.getCurrentTimeMs() });
+    }
+    const cutoff = virtualClock.getCurrentTimeMs() - 300_000;
+    for (const [id, value] of this._terminalOrders) {
+      if (value.at < cutoff) {
+        this._terminalOrders.delete(id);
+        this._orderVersions.delete(id);
+      }
+    }
+    this.store.addOrUpdateOrder(row);
+    return row;
+  };
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
     super(exchangeName, opts, store);
@@ -281,12 +310,9 @@ export class WOOXExchange extends BaseExchange {
 
     this.publicWebsocket = new WooPublicWebsocket(this);
     this.privateWebsocket = new WooPrivateWebscoket(this);
-
-    this.on('fill', this.handleFillForPositionSync);
   }
 
   dispose = () => {
-    this.off('fill', this.handleFillForPositionSync);
     this._fillPositionRefreshTimers.forEach((timer) => clearTimeout(timer));
     this._fillPositionRefreshTimers.clear();
     this._fillPositionRefreshInFlight.clear();
@@ -402,6 +428,7 @@ export class WOOXExchange extends BaseExchange {
       const data = await this.fetchAccountInfo();
       this._accountPositionMode = data.positionMode === 'ONE_WAY' ? PositionMode.OneWay : PositionMode.Hedged;
     }
+    this.store.setSetting('isHedged', this._accountPositionMode === PositionMode.Hedged);
     return this._accountPositionMode;
   }
 
@@ -836,12 +863,21 @@ export class WOOXExchange extends BaseExchange {
       unrealizedPnl: nextContracts === 0 ? 0 : currentOpenPosition?.unrealizedPnl || 0,
       contracts: nextContracts,
       liquidationPrice: nextContracts === 0 ? 0 : currentOpenPosition?.liquidationPrice || 0,
+      marginSize: undefined,
       positionMode,
       marginType,
     };
 
     this.store.addOrUpdatePosition(optimisticPosition);
     return true;
+  };
+
+  emitOrderExecution = (fill: OrderFillEvent, positionAmount: number) => {
+    // An unseen execution still belongs in the fill stream when REST already
+    // includes it. Only the unaccounted cumulative delta may move positions.
+    if (positionAmount > 0) this.handleFillForPositionSync({ ...fill, amount: positionAmount });
+    else this.scheduleFillPositionRefresh(fill.symbol, 0);
+    this.emitter.emit('fill', fill);
   };
 
   private handleFillForPositionSync = (orderFill: {
@@ -994,6 +1030,7 @@ export class WOOXExchange extends BaseExchange {
 
       // same with positionMode
       this._accountPositionMode = data.positionMode === 'ONE_WAY' ? PositionMode.OneWay : PositionMode.Hedged;
+      this.store.setSetting('isHedged', this._accountPositionMode === PositionMode.Hedged);
 
       const free = Math.round(data.freeCollateral * 100) / 100;
       const total = Math.round(data.totalAccountValue * 100) / 100;
@@ -1382,6 +1419,8 @@ export class WOOXExchange extends BaseExchange {
           unrealizedPnl: upnl,
           contracts,
           liquidationPrice: v(p, 'estLiqPrice'),
+          // Clear the synthetic flat position's zero when this holding reopens.
+          marginSize: undefined,
           positionMode: positionMode,
           marginType: p.marginMode === 'CROSS' ? MarginType.Cross : MarginType.Isolated,
           info: p,
@@ -1401,9 +1440,14 @@ export class WOOXExchange extends BaseExchange {
   };
 
   fetchOrders = async () => {
+    const revision = this._orderRevision;
     const limitOrders = await this.fetchLimitOrders();
     const algoOrders = await this.fetchAlgoOrders();
-    return [...limitOrders, ...algoOrders];
+    const orders = new Map([...limitOrders, ...algoOrders].map((o) => [o.id, this.reconcileOrder(o)]));
+    for (const row of this.store.orders) {
+      if ((this._orderVersions.get(row.id) || 0) > revision) orders.set(row.id, row);
+    }
+    return [...orders.values()];
   };
 
   fetchHistoricalFills = async (opts: ExecutionsOptions = {}): Promise<Execution[]> => {
@@ -1634,6 +1678,25 @@ export class WOOXExchange extends BaseExchange {
   };
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
+    const market = this.store.marketsBySymbol[order.symbol];
+    if (!market) return this.rejectPreflight(`Market ${order.symbol} not found`);
+    if (
+      'price' in update &&
+      (!(update.price > 0) || !Number.isFinite(update.price) || !(adjust(update.price, market.precision.price) > 0))
+    ) {
+      return this.rejectPreflight('Invalid WOO amendment price');
+    }
+    if ('amount' in update) {
+      const quantity = adjust(update.amount, market.precision.amount);
+      if (
+        !Number.isFinite(quantity) ||
+        quantity < market.limits.amount.min ||
+        quantity > market.limits.amount.max ||
+        quantity < order.filled
+      ) {
+        return this.rejectPreflight('Invalid WOO amendment quantity');
+      }
+    }
     if (order.type === OrderType.TrailingStopLoss) {
       await this.cancelOrders([order]);
 
@@ -1643,6 +1706,7 @@ export class WOOXExchange extends BaseExchange {
         type: OrderType.TrailingStopLoss,
         price: 'price' in update ? update.price : order.price,
         amount: 'amount' in update ? update.amount : order.amount,
+        slTriggerType: order.slTriggerType,
       });
     }
 
@@ -1653,8 +1717,8 @@ export class WOOXExchange extends BaseExchange {
     // WOO requires quantity (or amount) on every edit — a price-only body is
     // accepted as EDIT_SENT and then fails asynchronously, cancelling the order.
     const payload: Record<string, any> = { orderId: order.id };
-    if ('price' in update) payload.price = `${update.price}`;
-    payload.quantity = `${'amount' in update ? update.amount : order.amount}`;
+    if ('price' in update) payload.price = `${adjust(update.price, market.precision.price)}`;
+    payload.quantity = `${adjust('amount' in update ? update.amount : order.amount, market.precision.amount)}`;
 
     try {
       await this.xhr.put(`${ENDPOINTS.UPDATE_ORDER}/${order.id}`, payload);
@@ -1666,18 +1730,30 @@ export class WOOXExchange extends BaseExchange {
   };
 
   updateAlgoOrder = async ({ order, update }: UpdateOrderOpts) => {
-    const payload: Record<string, any> = {};
-
+    const market = this.store.marketsBySymbol[order.symbol];
+    if (!market) return this.rejectPreflight(`Market ${order.symbol} not found`);
+    const leaf: Record<string, any> = {};
     if ('price' in update) {
-      if (order.amount) {
-        payload.triggerPrice = `${update.price}`;
-      } else {
-        payload.childOrders = [{ algoOrderId: order.id, triggerPrice: `${update.price}` }];
-      }
+      const price = adjust(update.price, market.precision.price);
+      if (!(price > 0) || !Number.isFinite(price)) return this.rejectPreflight('Invalid WOO amendment price');
+      leaf.triggerPrice = String(price);
     }
-
+    if ('amount' in update) {
+      const amount = adjust(update.amount, market.precision.amount);
+      if (
+        !Number.isFinite(amount) ||
+        amount < market.limits.amount.min ||
+        amount > market.limits.amount.max ||
+        amount < order.filled
+      ) {
+        return this.rejectPreflight('Invalid WOO amendment quantity');
+      }
+      leaf.quantity = String(amount);
+    }
+    const positional = order.info?.algoType === 'POSITIONAL_TP_SL' || !order.amount;
+    const payload = positional ? { childOrders: [{ algoOrderId: order.id, ...leaf }] } : leaf;
     try {
-      await this.xhr.put(`${ENDPOINTS.ALGO_ORDER}/${order.parentId}`, payload);
+      await this.xhr.put(`${ENDPOINTS.ALGO_ORDER}/${order.parentId || order.id}`, payload);
       return [order.id];
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
@@ -1788,7 +1864,79 @@ export class WOOXExchange extends BaseExchange {
     }
   };
 
-  fetchOrdersRecursively = async (endpoint: string, page: number = 1): Promise<FETCH_ORDER_RESPONSE['rows']> => {
+  fetchIncomeHistory = async (opts: IncomeHistoryOptions = {}): Promise<IncomeRecord[]> => {
+    if (this.isPublicDataOnly) return [];
+    const complete = opts.limit === undefined && opts.startTime !== undefined && opts.endTime !== undefined;
+    const limit = opts.limit ?? (complete ? 100000 : 500);
+    try {
+      if (
+        !Number.isSafeInteger(limit) ||
+        limit < 1 ||
+        limit > 100000 ||
+        [opts.startTime, opts.endTime].some((time) => time !== undefined && (!Number.isFinite(time) || time < 0)) ||
+        (opts.startTime !== undefined && opts.endTime !== undefined && opts.startTime > opts.endTime)
+      ) {
+        throw new Error('Invalid WOO income range or limit');
+      }
+      const rows: IncomeRecord[] = [];
+      const seen = new Set<string>();
+      for (let page = 1; page <= 1000; page += 1) {
+        const now = virtualClock.getCurrentTimeMs();
+        const at = Math.max(now, this._incomeNextAt);
+        this._incomeNextAt = at + 6000;
+        if (at > now) await sleep(at - now);
+        if (this.isDisposed) throw new Error('WOO exchange disposed');
+        const params = buildWooIncomeParams({ ...opts, limit }, page);
+        const { data } = await this.xhr.get('/v1/client/transaction_history', { params });
+        if (data?.success !== true || !Array.isArray(data.data?.rows)) {
+          throw new Error(data?.message || 'Invalid WOO income response');
+        }
+        let fresh = 0;
+        for (const raw of data.data.rows) {
+          const row = mapWooIncomeRecord(raw);
+          if (!row) throw new Error('Invalid WOO income row');
+          const key = wooIncomeIdentity(row);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          fresh += 1;
+          if (opts.symbol && row.symbol !== opts.symbol) continue;
+          if (opts.incomeType && row.incomeType !== opts.incomeType) continue;
+          if (opts.startTime !== undefined && row.timestamp < opts.startTime) continue;
+          if (opts.endTime !== undefined && row.timestamp > opts.endTime) continue;
+          rows.push(row);
+        }
+        const meta = data.data.meta;
+        if (
+          meta !== undefined &&
+          (!Number.isSafeInteger(meta.total) ||
+            meta.total < 0 ||
+            !Number.isSafeInteger(meta.records_per_page) ||
+            meta.records_per_page <= 0 ||
+            meta.current_page !== page)
+        ) {
+          throw new Error('Invalid WOO income page metadata');
+        }
+        if (complete && rows.length > limit) throw new Error('WOO income range exceeded the complete-history budget');
+        if (
+          (!complete && rows.length >= limit) ||
+          data.data.rows.length === 0 ||
+          (meta !== undefined && meta.total <= page * meta.records_per_page)
+        ) {
+          return rows.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
+        }
+        if (!fresh) throw new Error('WOO income pagination did not advance');
+      }
+      throw new Error('WOO income pagination limit exceeded');
+    } catch (error: any) {
+      this.emitAndLogError(error?.response?.data?.message || error?.message);
+      throw error;
+    }
+  };
+
+  fetchIncomeHistoryRange = (startTime: number, endTime: number, incomeType?: string) =>
+    this.fetchIncomeHistory({ startTime, endTime, incomeType });
+
+  fetchOrdersRecursively = async (endpoint: string, page: number = 1): Promise<Array<Record<string, any>>> => {
     let { data } = await this.xhr.get<FETCH_ORDER_RESPONSE>(endpoint, {
       params: { status: 'INCOMPLETE', page },
     });
@@ -1796,13 +1944,23 @@ export class WOOXExchange extends BaseExchange {
     if (this.isDisposed) return [];
 
     if (!data.success) {
-      this.emitAndLogError((data as any).message || (data as any).meta?.message || `Failed to fetch orders`);
-      return [];
+      throw new Error((data as any).message || (data as any).meta?.message || `Failed to fetch orders`);
     }
 
     // algo orders nest data...
     data = (data as any).data || data;
-
+    if (
+      !Array.isArray(data.rows) ||
+      !data.meta ||
+      data.meta.current_page !== page ||
+      !Number.isSafeInteger(data.meta.total) ||
+      data.meta.total < 0 ||
+      !Number.isSafeInteger(data.meta.records_per_page) ||
+      data.meta.records_per_page <= 0 ||
+      page > 1000
+    ) {
+      throw new Error('Invalid WOO order page');
+    }
     if (data.rows.length === 0) return [];
 
     if (data.meta.total > data.meta.records_per_page * page) {
@@ -1821,45 +1979,61 @@ export class WOOXExchange extends BaseExchange {
       for (let i = 0; i < rows.length; i++) {
         const order = this.mapLimitOrder(rows[i]);
         if (order !== null) orders.push(order);
+        else if (this.store.marketsBySymbol[normalizeSymbol(rows[i].symbol || '')])
+          throw new Error('Invalid WOO regular order');
       }
       return orders;
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return [];
+      throw err;
     }
   };
 
   mapLimitOrder = (o: Record<string, any>) => {
-    const orderId = v(o, 'order_id') || v(o, 'orderId') || v(o, 'id');
-    const rawSymbol = v(o, 'symbol');
-    if (!orderId || !rawSymbol) return null;
-
-    const symbol = normalizeSymbol(rawSymbol);
-    const market = this.store.marketsBySymbol[symbol];
-    if (!market) return null;
-    const quantity = o.quantity || o.order_quantity;
-    const executed = o.executed || 0;
-
-    const timeInForce = o.type === 'POST_ONLY' ? OrderTimeInForce.PostOnly : OrderTimeInForce.GoodTillCancel;
-
-    const status = o.status === 'CANCELLED' ? OrderStatus.Canceled : OrderStatus.Open;
-    const order: Order = {
-      id: `${orderId}`,
+    const orderId = o.order_id ?? o.orderId ?? o.id;
+    if (orderId === undefined || orderId === null) return null;
+    const old = this.store.orders.find((row) => row.id === String(orderId));
+    const symbol = o.symbol ? normalizeSymbol(o.symbol) : old?.symbol;
+    if (!symbol || !this.store.marketsBySymbol[symbol]) return null;
+    const quantity = Number(o.quantity ?? o.orderQuantity ?? o.order_quantity ?? old?.amount);
+    const executed = Number(o.totalExecutedQuantity ?? o.executed ?? old?.filled ?? 0);
+    const rawType = o.type ?? o.orderType ?? o.order_type;
+    const type = ['IOC', 'FOK', 'POST_ONLY'].includes(rawType) ? OrderType.Limit : (ORDER_TYPE[rawType] ?? old?.type);
+    const rawStatus = o.status;
+    const status =
+      rawStatus === 'FILLED'
+        ? OrderStatus.Closed
+        : ['CANCELLED', 'CANCELED', 'REJECTED'].includes(rawStatus)
+          ? OrderStatus.Canceled
+          : OrderStatus.Open;
+    const side = ORDER_SIDE[o.side] ?? old?.side;
+    const price = Number(o.price ?? o.orderPrice ?? o.order_price ?? old?.price ?? 0);
+    if (
+      !type ||
+      !side ||
+      !Number.isFinite(quantity) ||
+      quantity < 0 ||
+      !Number.isFinite(executed) ||
+      executed < 0 ||
+      !Number.isFinite(price)
+    )
+      return null;
+    return this.reconcileOrder({
+      id: String(orderId),
       status,
       symbol,
-      type: ORDER_TYPE[o.type || o.order_type],
-      side: ORDER_SIDE[o.side],
-      price: o.price || o.order_price,
+      type,
+      side,
+      price,
       amount: quantity,
-      reduceOnly: v(o, 'reduce_only'),
-      timeInForce,
+      reduceOnly: o.reduce_only ?? o.reduceOnly ?? old?.reduceOnly ?? false,
+      timeInForce:
+        rawType === 'POST_ONLY' ? OrderTimeInForce.PostOnly : (old?.timeInForce ?? OrderTimeInForce.GoodTillCancel),
       filled: executed,
-      remaining: subtract(quantity, executed),
+      remaining: Math.max(0, subtract(quantity, executed)),
       lastUpdate: virtualClock.getCurrentTimeMs(),
       info: o,
-    };
-
-    return order;
+    });
   };
 
   fetchAlgoOrders = async () => {
@@ -1869,55 +2043,97 @@ export class WOOXExchange extends BaseExchange {
 
       const orders: Order[] = [];
       for (let i = 0; i < rows.length; i++) {
-        const childOrders = this.mapAlgoOrder(rows[i]);
-        for (let j = 0; j < childOrders.length; j++) {
-          orders.push(childOrders[j]);
+        assertWooAlgoSnapshotRow(rows[i], (symbol) => !!this.store.marketsBySymbol[normalizeSymbol(symbol)]);
+        const leaves = Array.isArray(rows[i].childOrders) ? rows[i].childOrders : [rows[i]];
+        for (const leaf of leaves) {
+          const childOrders = this.mapAlgoOrder(
+            Array.isArray(rows[i].childOrders) ? { ...rows[i], childOrders: [leaf] } : leaf,
+          );
+          if (
+            !childOrders.length &&
+            this.store.marketsBySymbol[normalizeSymbol(leaf.symbol || rows[i].symbol || '')] &&
+            ['STOP', 'STOP_LOSS', 'TAKE_PROFIT', 'TRAILING_STOP'].includes(leaf.algoType)
+          )
+            throw new Error('Invalid WOO algo order');
+          orders.push(...childOrders);
         }
       }
       return orders;
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return [];
+      throw err;
     }
   };
 
-  mapAlgoOrder = (o: Record<string, any>) => {
-    const symbol = normalizeSymbol(o.symbol);
-    const market = this.store.marketsBySymbol[symbol];
-
-    if (!market) return [];
-
-    const arr = o.childOrders ? o.childOrders : [o];
-    return arr
-      .filter((co: Record<string, any>) => v(co, 'triggerPrice') || v(co, 'algoType') === 'TRAILING_STOP')
-      .map((co: Record<string, any>) => {
-        const filled = v(co, 'totalExecutedQuantity');
-        const price = v(co, 'triggerPrice') || subtract(v(co, 'extremePrice'), v(co, 'callbackValue'));
-        const orderType = ORDER_TYPE[v(co, 'algoType')];
-
-        return {
-          id: `${v(co, 'algoOrderId')}`,
-          parentId: `${v(o, 'rootAlgoOrderId') || v(co, 'rootAlgoOrderId')}`,
-          status: OrderStatus.Open,
+  mapAlgoOrder = (o: Record<string, any>): Order[] => {
+    const rows = Array.isArray(o.childOrders) ? o.childOrders : [o];
+    const result: Order[] = [];
+    for (const co of rows) {
+      const id = String(co.algoOrderId ?? co.orderId ?? co.id ?? '');
+      const old = this.store.orders.find((row) => row.id === id);
+      const symbol = normalizeSymbol(co.symbol || o.symbol || old?.symbol || '');
+      const ticker = this.store.tickersBySymbol[symbol];
+      const side = ORDER_SIDE[co.side ?? o.side] ?? old?.side;
+      if (!id || !this.store.marketsBySymbol[symbol] || !side) continue;
+      const algoType = co.algoType;
+      const source = ORDER_TRIGGER_TYPE[co.triggerPriceType] ?? old?.slTriggerType ?? old?.tpTriggerType;
+      const callback = Number(co.callbackValue);
+      const extreme = Number(co.extremePrice);
+      const triggerPrice = Number(co.triggerPrice);
+      const price =
+        triggerPrice > 0
+          ? triggerPrice
+          : Number(
+              Number.isFinite(extreme) && Number.isFinite(callback)
+                ? extreme + (side === OrderSide.Buy ? callback : -callback)
+                : old?.price,
+            );
+      if (!Number.isFinite(price) || !(price > 0)) continue;
+      let type = ORDER_TYPE[algoType] ?? old?.type;
+      if (algoType === 'STOP') {
+        const reference = source === OrderStopTriggerType.LastPrice ? ticker?.last : ticker?.mark;
+        type =
+          old?.type ??
+          (reference && (side === OrderSide.Sell ? price > reference : price < reference)
+            ? OrderType.TakeProfit
+            : OrderType.StopLoss);
+      }
+      if (!type) continue;
+      const amount = Number(co.quantity ?? old?.amount ?? 0);
+      const filled = Number(co.totalExecutedQuantity ?? co.executed ?? old?.filled ?? 0);
+      if (!Number.isFinite(amount) || amount < 0 || !Number.isFinite(filled) || filled < 0) continue;
+      const status =
+        co.algoStatus === 'FILLED'
+          ? OrderStatus.Closed
+          : ['CANCELLED', 'CANCELED', 'REJECTED'].includes(co.algoStatus)
+            ? OrderStatus.Canceled
+            : OrderStatus.Open;
+      result.push(
+        this.reconcileOrder({
+          id,
+          parentId: String(
+            o.rootAlgoOrderId ||
+              co.rootAlgoOrderId ||
+              (Array.isArray(o.childOrders) ? o.algoOrderId || o.orderId || o.id : undefined) ||
+              old?.parentId ||
+              id,
+          ),
+          status,
           symbol,
-          type: orderType,
-          ...(() => {
-            const rawTriggerPriceType = v(co, 'triggerPriceType');
-            const mappedTriggerType = ORDER_TRIGGER_TYPE[rawTriggerPriceType];
-            return orderType === OrderType.TrailingStopLoss || orderType === OrderType.StopLoss
-              ? { slTriggerType: mappedTriggerType }
-              : { tpTriggerType: mappedTriggerType };
-          })(),
-          side: ORDER_SIDE[co.side],
+          type,
+          side,
           price,
-          amount: co.quantity,
-          reduceOnly: v(co, 'reduceOnly'),
+          amount,
           filled,
-          remaining: subtract(co.quantity, filled),
+          remaining: Math.max(0, subtract(amount, filled)),
+          reduceOnly: co.reduceOnly ?? o.reduceOnly ?? true,
+          ...(type === OrderType.TakeProfit ? { tpTriggerType: source } : { slTriggerType: source }),
           lastUpdate: virtualClock.getCurrentTimeMs(),
           info: o,
-        };
-      });
+        }),
+      );
+    }
+    return result;
   };
 
   cancelOrders = async (orders: Order[]) => {
@@ -1934,11 +2150,11 @@ export class WOOXExchange extends BaseExchange {
         const isAlgo = this.isAlgoOrder(order.type);
 
         if (isAlgo) {
-          await this.xhr.delete(`${ENDPOINTS.ALGO_ORDER}/${order.parentId}`);
+          await this.xhr.delete(`${ENDPOINTS.ALGO_ORDER}/${order.parentId || order.id}`);
         } else {
           await this.xhr.delete(ENDPOINTS.CANCEL_ORDER, {
             data: omitUndefined({
-              order_id: parseInt(order.id, 10),
+              order_id: order.id,
               symbol: reverseSymbol(order.symbol),
             }),
           });
@@ -2000,8 +2216,18 @@ export class WOOXExchange extends BaseExchange {
     return positionSide;
   };
 
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    this.assertCallerClientOrderIds(orders);
+    if (orders.some((order) => order.type === OrderType.Conditional)) {
+      return this.rejectPreflight('WOO opening conditional orders are not implemented by the TS venue');
+    }
+    return (await mapSeries(orders, (order) => this.placeOrder(order))).flat();
+  };
+
   placeOrder = async (opts: PlaceOrderOpts) => {
     const callerClientOrderId = this.resolveCallerClientOrderId(opts);
+    if (opts.type === OrderType.Conditional)
+      return this.rejectPreflight('WOO opening conditional orders are not implemented by the TS venue');
     if (this.isAlgoOrder(opts.type)) {
       return this.placeAlgoOrder(opts);
     }
@@ -2012,7 +2238,6 @@ export class WOOXExchange extends BaseExchange {
       throw new Error(`Market not found: ${opts.symbol}`);
     }
 
-    const maxSize = market.limits.amount.max;
     const pPrice = market.precision.price;
     const pAmount = market.precision.amount;
 
@@ -2075,15 +2300,7 @@ export class WOOXExchange extends BaseExchange {
       client_order_id: callerClientOrderId === undefined ? undefined : Number(callerClientOrderId),
     });
 
-    const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
-    const rest = amount > maxSize ? adjust(amount % maxSize, pAmount) : 0;
-
-    const lotSize = adjust((amount - rest) / lots, pAmount);
-    const payloads = times(lots, () => ({ ...req, order_quantity: lotSize }));
-
-    if (rest) {
-      payloads.push({ ...req, order_quantity: rest });
-    }
+    const payloads = splitWooQuantity(amount, market).map((quantity) => ({ ...req, order_quantity: quantity }));
     this.assertSingleNativeClientOrderId(callerClientOrderId, payloads.length);
 
     try {
@@ -2146,8 +2363,14 @@ export class WOOXExchange extends BaseExchange {
     }
 
     if (sibling) {
-      if (sibling.type === OrderType.StopLoss) params.stopLoss = sibling.price;
-      if (sibling.type === OrderType.TakeProfit) params.takeProfit = sibling.price;
+      if (sibling.type === OrderType.StopLoss) {
+        params.stopLoss = sibling.price;
+        params.slTriggerType = sibling.slTriggerType;
+      }
+      if (sibling.type === OrderType.TakeProfit) {
+        params.takeProfit = sibling.price;
+        params.tpTriggerType = sibling.tpTriggerType;
+      }
       await this.cancelAlgoOrder(sibling, false);
     }
 
@@ -2161,7 +2384,6 @@ export class WOOXExchange extends BaseExchange {
     if (!market) throw new Error(`Market ${opts.symbol} not found`);
     if (!ticker) throw new Error(`Ticker ${opts.symbol} not found`);
 
-    const maxSize = market.limits.amount.max;
     const pPrice = market.precision.price;
     const pAmount = market.precision.amount;
 
@@ -2172,7 +2394,9 @@ export class WOOXExchange extends BaseExchange {
     const rawTriggerType =
       (opts.type === OrderType.StopLoss || opts.type === OrderType.TrailingStopLoss
         ? opts.slTriggerType
-        : opts.tpTriggerType) || OrderStopTriggerType.MarkPrice;
+        : opts.tpTriggerType) ||
+      opts.triggerType ||
+      OrderStopTriggerType.MarkPrice;
 
     const triggerType = inverseObj(ORDER_TRIGGER_TYPE)[rawTriggerType];
 
@@ -2181,7 +2405,7 @@ export class WOOXExchange extends BaseExchange {
       type: 'MARKET',
       algoType: 'STOP',
       side: inverseObj(ORDER_SIDE)[opts.side],
-      triggerPrice: price,
+      triggerPrice: String(price),
       triggerPriceType: triggerType,
       reduceOnly: true,
       positionSide: await this.getPositionSideForOrder({
@@ -2190,15 +2414,7 @@ export class WOOXExchange extends BaseExchange {
       }),
     });
 
-    const lots = amount > maxSize ? Math.ceil(amount / maxSize) : 1;
-    const rest = amount > maxSize ? adjust(amount % maxSize, pAmount) : 0;
-
-    const lotSize = adjust((amount - rest) / lots, pAmount);
-    const payloads = times(lots, () => {
-      return { ...req, quantity: lotSize };
-    });
-
-    if (rest) payloads.push({ ...req, quantity: rest });
+    const payloads = splitWooQuantity(amount, market).map((quantity) => ({ ...req, quantity: String(quantity) }));
 
     try {
       const orderIds = await mapSeries(payloads, async (payload) => {
@@ -2235,7 +2451,11 @@ export class WOOXExchange extends BaseExchange {
       market.precision.price,
     );
 
-    const rawTriggerType = opts.tpTriggerType || OrderStopTriggerType.MarkPrice;
+    if (!(priceDistance > 0) || !Number.isFinite(priceDistance) || !(position.contracts > 0)) {
+      return this.rejectPreflight('WOO trailing callback distance and quantity must be positive');
+    }
+    const rawTriggerType =
+      opts.slTriggerType || opts.tpTriggerType || opts.triggerType || OrderStopTriggerType.MarkPrice;
     const triggerType = inverseObj(ORDER_TRIGGER_TYPE)[rawTriggerType];
 
     const payload = omitUndefined({
@@ -2268,7 +2488,10 @@ export class WOOXExchange extends BaseExchange {
   };
 
   placePositionalAlgoOrder = async (
-    opts: Pick<PlaceOrderOpts, 'side' | 'stopLoss' | 'symbol' | 'takeProfit' | 'tpTriggerType' | 'slTriggerType'>,
+    opts: Pick<
+      PlaceOrderOpts,
+      'side' | 'stopLoss' | 'symbol' | 'takeProfit' | 'tpTriggerType' | 'slTriggerType' | 'triggerType'
+    >,
   ) => {
     const market = this.store.marketsBySymbol[opts.symbol];
     if (!market) {
@@ -2305,7 +2528,7 @@ export class WOOXExchange extends BaseExchange {
     }
 
     if (opts.takeProfit) {
-      const rawTriggerType = opts.tpTriggerType || OrderStopTriggerType.MarkPrice;
+      const rawTriggerType = opts.tpTriggerType || opts.triggerType || OrderStopTriggerType.MarkPrice;
       const triggerType = inverseObj(ORDER_TRIGGER_TYPE)[rawTriggerType];
 
       req.childOrders.push({
@@ -2333,21 +2556,26 @@ export class WOOXExchange extends BaseExchange {
   };
 
   cancelAllOrders = async () => {
-    try {
-      await this.xhr.delete(ENDPOINTS.CANCEL_ORDERS);
-    } catch (err: any) {
-      this.emitAndLogError(err?.response?.data?.message || err?.message);
+    const errors: unknown[] = [];
+    for (const endpoint of [ENDPOINTS.CANCEL_ORDERS, ENDPOINTS.CANCEL_ALGO_ORDERS]) {
+      try {
+        await this.xhr.delete(endpoint);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length) {
+      this.emitAndLogError(String(errors[0]));
+      throw errors[0];
     }
   };
 
   cancelSymbolOrders = async (symbol: string) => {
     try {
-      const wooSymbol = reverseSymbol(symbol);
-      await this.xhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, {
-        params: { symbol: wooSymbol },
-      });
+      await this.xhr.delete(`/v3/merge/orders/pending/${reverseSymbol(symbol)}`);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
+      throw err;
     }
   };
 

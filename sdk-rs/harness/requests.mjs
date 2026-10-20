@@ -187,6 +187,9 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
         ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}),
       }));
     }
+    if (options.wooProtocol && method === 'auth' && message.params) {
+      message.params = { ...message.params, timestamp: '<timestamp>', sign: '<signature>' };
+    }
     // Bybit signs a fresh expiration per connection. Keep the API identity.
     if (method === 'auth' && Array.isArray(message.args) && message.args.length === 3) {
       message.args = [message.args[0], '<expires>', '<signature>'];
