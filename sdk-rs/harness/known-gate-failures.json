@@ -68,6 +68,12 @@
       "ciHead": "24802ce5a593f9a65dca19b0ba028afca2769af6",
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39439275804",
       "note": "Eight independently reviewed literal paths in unchanged base-coinbase INTX EdDSA and Spot ES256 cases. Native closed-order retention shifts stop 50 to row5; INTX TS still contains that stop at row3, Spot compares its missing TS client ID. Command results, writes and boundaries match prior evidence; private Spot metadata polls vary. No comparison/threshold/integrity relaxation; all previous observations retained."
+    },
+    "coinbaseLateCheckpointRefresh": {
+      "ciRun": 39443426730,
+      "ciHead": "c645b24b370fccad2cb23e4cb3923e4ec5df9d9b",
+      "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39443426730",
+      "note": "Fourteen independently reviewed literal CFM ES256 paths. Tape, every boundary, command results and writes unchanged; native receipt unchanged, TS periodic GET counts vary. Account implementation/reference/generator unchanged by socket integration. Collection incomplete because Weex checkout has no replay output; no full-matrix claim. All historical entries retained, no comparator/threshold/integrity relaxation."
     }
   },
   "failures": [
@@ -10073,6 +10079,25 @@
             "checkpoint 7 account.orders[1].status",
             "checkpoint 8 account.orders[1].status",
             "checkpoint 9 account.orders[1].status"
+          ]
+        },
+        {
+          "divergence": "At checkpoints 15\u201316, TS retains stale rows 12/30 while native contains 11/13/50. Sorted rows expose different IDs and associated parent/type/price/TIF fields; stop 50 remains present by ID in both stores. This is the existing CFM ES256 snapshot/terminal-retention family at later boundaries, not independent same-order economic changes.",
+          "keys": [
+            "checkpoint 15 account.orders[1].id",
+            "checkpoint 15 account.orders[1].parentId",
+            "checkpoint 15 account.orders[4]",
+            "checkpoint 16 account.orders.length",
+            "checkpoint 16 account.orders[1].id",
+            "checkpoint 16 account.orders[1].parentId",
+            "checkpoint 16 account.orders[2].id",
+            "checkpoint 16 account.orders[2].parentId",
+            "checkpoint 16 account.orders[2].price",
+            "checkpoint 16 account.orders[2].side",
+            "checkpoint 16 account.orders[2].timeInForce",
+            "checkpoint 16 account.orders[2].type",
+            "checkpoint 16 account.orders[3]",
+            "checkpoint 16 account.orders[4]"
           ]
         }
       ]

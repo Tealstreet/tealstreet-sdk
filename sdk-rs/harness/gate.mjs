@@ -162,8 +162,8 @@ const rawAudited = { ts: structuredClone(ts), rust: structuredClone(rust) };
 //  - Bybit: TS may drop the initial ticker snapshot before a slow REST seed;
 //    Rust installs the seed before connecting. These cases have native regression
 //    coverage; the committed replay tapes require no normalization for them.
-//  - Bybit: with no mark price, TS can add a second Partial stop on amend;
-//    Rust amends the existing native order ID.
+//  - Bybit Partial TP/SL now follows the owner-selected TS replacement and
+//    missing-mark fallbacks; the former amend-in-place divergence is retired.
 //  - Bybit inverse: TS clamps USD contracts before splitting, silently shrinking
 //    large requests; Rust preserves the requested total in max lots + remainder.
 //  - Bybit inverse: TS sums coin PnL into the USD wallet; Rust converts using

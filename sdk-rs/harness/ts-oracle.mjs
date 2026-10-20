@@ -390,6 +390,8 @@ const KNOWN_TS_FIXES = {
   //   instead targets c, which can be the cancellation request's client ID.
   // - Spot/COIN-M duplicate cumulative executions can emit fills again and
   //   stale NEW events reopen terminal orders; Rust fences by native order ID.
+  //   Spot also deduplicates the latest 16,384 native (symbol, order, trade) IDs,
+  //   independently of ACK totals and terminal lifecycle (native/SDK proofs).
   // - COIN-M malformed openOrders responses become authoritative empty in TS;
   //   Rust preserves the previous order state and retries reconciliation.
   // - COIN-M TS values an unpriced collateral coin at USD1; Rust keeps its

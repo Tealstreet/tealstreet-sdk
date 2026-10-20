@@ -497,3 +497,32 @@ never retry an unchanged failed performance measurement to obtain a pass.
   verifies candidate-only price/fee mutations still reach financial comparison.
   Gate remains byte-identical; no midpoint exemption is executed. Full updated
   harness is running. Publish reviewed integration for independent full CI.
+- Socket integration `c645b24b37` passes the full local harness (877/877).
+  CI `39443426730` completes 30 suites / 105 reports; Weex stalls in checkout
+  and supplies no evidence, so this collection is explicitly incomplete.
+  Coinbase exposes fourteen exact CFM ES256 paths at checkpoints 15–16: TS
+  retains stale 12/30 rows and native contains 11/13/50. Stop 50 exists in both;
+  whole-row absence is positional. Independent raw/source review PASS: same
+  tape, boundaries, 61 events, fifteen unchanged command results, five matching
+  writes and zero protocol/completion errors. Native receipt is unchanged;
+  TS periodic census/poll counts vary. Add only these paths, keep all history.
+  Shipping web/Node both 12,306,304 / 12,582,912 bytes, SHA256
+  `1363f5ae01f9d12f9547519822e6fddbeff456056949488676245f33e073f5bb`.
+- Landing advances again to `3686c4ffa1` (Binance/Bybit follow-up PR #1354).
+  Authorized conflict resolution changes only the exact incoming Bybit comment
+  and moves two Binance dedup comments to the isolated oracle. Runtime gate,
+  six strict midpoint control groups, and all policy protections unchanged;
+  independent staged-resolution review PASS. Incoming native/host/wrapper
+  changes require rebuilt CI and the frozen Binance six-command lifecycle.
+  Latest load rule: focused local checks only, CARGO_BUILD_JOBS=4, no local
+  WASM/replay/size/timing sweeps. No such heavy local process is running.
+  A fresh complete 107-case CI remains mandatory; stalled checkout is not a
+  known venue divergence and cannot replace missing replay coverage.
+- Focused integration verification PASS: Binance wrapper 4/4, fixer AST lint
+  1/1, policy/verifier 9/9. Independent fourteen-key policy review PASS with
+  seven neighboring/hash/protected-integrity probes; all prior observations
+  preserved and incomplete Weex coverage explicitly stated. Scoped native/SDK
+  integration review PASS: no ABI/frame/capture change, branded unsupported
+  Spot/COIN-M history stays distinct from empty success, and the frozen USD-M
+  fixture's six mandatory-success commands/bytes remain intact. Publish the
+  reviewed integration and require fresh complete CI; no local heavy checks.
