@@ -335,13 +335,14 @@ pub enum OffsetStep {
 }
 
 /// Offset or page-number paging. The offset advances by the rows a page
-/// actually returned, so a venue that serves short pages skips nothing; a
-/// page that brings no rows or no new rows while the venue reports more
-/// cannot progress and stalls.
+/// actually returned, so a venue that serves short pages skips nothing; an
+/// empty page (or, opted in, a page of no new rows) while the venue reports
+/// more cannot progress and stalls.
 pub struct OffsetWalk {
     max_pages: u32,
     max_offset: u64,
     fixed_step: Option<u64>,
+    stall_on_no_new_rows: bool,
     pages: u32,
     offset: u64,
 }
@@ -352,6 +353,7 @@ impl OffsetWalk {
             max_pages,
             max_offset: u64::MAX,
             fixed_step: None,
+            stall_on_no_new_rows: false,
             pages: 0,
             offset: 0,
         }
@@ -367,6 +369,12 @@ impl OffsetWalk {
     /// whose contract serves full pages while they report more.
     pub fn fixed_step(mut self, step: u64) -> Self {
         self.fixed_step = Some(step);
+        self
+    }
+
+    /// Stall when a nonempty page holds only rows seen before.
+    pub fn stall_on_no_new_rows(mut self) -> Self {
+        self.stall_on_no_new_rows = true;
         self
     }
 
@@ -396,7 +404,7 @@ impl OffsetWalk {
         if rows == 0 {
             return OffsetStep::Stalled(Stall::EmptyPage);
         }
-        if fresh == 0 {
+        if self.stall_on_no_new_rows && fresh == 0 {
             return OffsetStep::Stalled(Stall::NoNewRows);
         }
         if self.pages >= self.max_pages {
@@ -613,6 +621,8 @@ mod tests {
             OffsetStep::Stalled(Stall::EmptyPage)
         );
         let mut walk = OffsetWalk::new(10);
+        assert_eq!(walk.advance(5, 0, true), OffsetStep::More(5));
+        let mut walk = OffsetWalk::new(10).stall_on_no_new_rows();
         assert_eq!(
             walk.advance(5, 0, true),
             OffsetStep::Stalled(Stall::NoNewRows)

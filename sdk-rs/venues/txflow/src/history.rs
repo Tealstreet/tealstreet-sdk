@@ -20,6 +20,7 @@ fn offset_walk() -> OffsetWalk {
     OffsetWalk::new(u32::MAX)
         .fixed_step(2000)
         .max_offset(200_001)
+        .stall_on_no_new_rows()
 }
 
 pub struct Request {
