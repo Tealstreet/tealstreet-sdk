@@ -1691,7 +1691,7 @@ async fn routed_signed_network_notices(
         .send(Command::FetchCandles {
             command: 411,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: None,
             from_ms: None,
             to_ms: None,
