@@ -76,6 +76,10 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
         'cutover-session',
       );
       const startup = worker.start();
+      if (name === 'hyperliquid') {
+        // Paced catalog discovery finishes before this venue creates its socket.
+        expect(await startup).toBe(true);
+      }
       if (name === 'polymarket' || name === 'paradex') {
         // Subscribe the books represented by the captured input. Polymarket
         // opens its socket lazily; Paradex must match the taped book ACKs.
