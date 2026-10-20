@@ -73,6 +73,54 @@ pub(crate) struct Account {
     order_created: HashMap<String, u64>,
     sequences: HashMap<(String, String), u64>,
     first_sequence: HashMap<(String, String), u64>,
+    placement_created: HashMap<String, u64>,
+    pending_placements: HashSet<String>,
+}
+impl Account {
+    pub(crate) fn order_created(&self, client: &str) -> Option<u64> {
+        self.order_created
+            .get(client)
+            .copied()
+            .filter(|time| *time > 0)
+    }
+    pub(crate) fn record_identity(&mut self, client: &str, native: Option<&str>, created_at: f64) {
+        let created = nanos("", created_at);
+        if native.is_some()
+            && self
+                .placement_created
+                .get(client)
+                .is_some_and(|previous| *previous != created)
+        {
+            return;
+        }
+        if native.is_none() {
+            self.terminal.remove(client);
+            self.terminal_queue.retain(|id| id != client);
+            self.native_ids.remove(client);
+            self.order_times.remove(client);
+            self.order_created.remove(client);
+            self.identity_queue.retain(|id| id != client);
+            self.placement_created.insert(client.to_owned(), created);
+            self.pending_placements.insert(client.to_owned());
+        }
+        if !self.order_times.contains_key(client) {
+            self.identity_queue.push_back(client.to_owned());
+        }
+        self.order_created.entry(client.to_owned()).or_insert(0);
+        self.order_times.entry(client.to_owned()).or_insert(0);
+        if let Some(native) = native {
+            self.native_ids.insert(client.to_owned(), native.to_owned());
+        }
+        while self.identity_queue.len() > RECENT_LIMIT {
+            if let Some(id) = self.identity_queue.pop_front() {
+                self.native_ids.remove(&id);
+                self.order_times.remove(&id);
+                self.order_created.remove(&id);
+                self.placement_created.remove(&id);
+                self.pending_placements.remove(&id);
+            }
+        }
+    }
 }
 pub(crate) enum Request {
     Login,
@@ -91,6 +139,7 @@ pub(crate) enum Request {
     },
     Leverage {
         revision: u64,
+        command: Option<(u32, String)>,
         rows: Vec<Leverage>,
         failed: bool,
     },
@@ -794,6 +843,43 @@ impl Grvt {
             body,
             Job::Account(Request::Leverage {
                 revision: self.account.settings_revision,
+                command: None,
+                rows: vec![],
+                failed: false,
+            }),
+        );
+    }
+    pub(crate) fn fetch_leverage_command(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: u32,
+        symbol: String,
+    ) {
+        if cx.store.market(&symbol).is_none() {
+            cx.done(command, Err("Unknown GRVT leverage market".into()));
+            return;
+        }
+        let Some(account) = self
+            .account
+            .trading_account_id
+            .as_deref()
+            .filter(|_| self.account.session.is_some())
+        else {
+            cx.done(
+                command,
+                Err("GRVT private account is not authenticated".into()),
+            );
+            return;
+        };
+        let body =
+            serde_json::to_string(&SubaccountRequest { sa: account }).expect("serialize account");
+        self.request(
+            cx,
+            LEVERAGE,
+            body,
+            Job::Account(Request::Leverage {
+                revision: self.account.settings_revision,
+                command: Some((command, symbol)),
                 rows: vec![],
                 failed: false,
             }),
@@ -862,6 +948,7 @@ impl Grvt {
         }
     }
     fn remember_identity(&mut self, decoded: &DecodedOrder) {
+        self.account.pending_placements.remove(&decoded.order.id);
         if !self.account.order_times.contains_key(&decoded.order.id) {
             self.account
                 .identity_queue
@@ -885,6 +972,8 @@ impl Grvt {
                 self.account.native_ids.remove(&id);
                 self.account.order_times.remove(&id);
                 self.account.order_created.remove(&id);
+                self.account.placement_created.remove(&id);
+                self.account.pending_placements.remove(&id);
             }
         }
     }
@@ -936,6 +1025,22 @@ impl Grvt {
             }
         }
         true
+    }
+    fn preserve_local_order_fields(&self, store: &Store, decoded: &mut DecodedOrder) {
+        if let Some(previous) = store.order(&decoded.order.id)
+            && (self.account.pending_placements.contains(&decoded.order.id)
+                || self
+                    .account
+                    .order_created
+                    .get(&decoded.order.id)
+                    .is_some_and(|created| *created == decoded.created_ns)
+                || decoded.native_id.as_ref().is_some_and(|native| {
+                    self.account.native_ids.get(&decoded.order.id) == Some(native)
+                }))
+            && decoded.order.parent_id.is_none()
+        {
+            decoded.order.parent_id = previous.parent_id.clone();
+        }
     }
     fn remember_terminal(&mut self, id: String, time: u64, native: Option<String>) {
         if !self.account.terminal.contains_key(&id) {
@@ -1094,7 +1199,8 @@ impl Grvt {
                 self.account.orders_pending = false;
                 if !failed && revision == self.account.orders_revision {
                     let mut orders = Vec::with_capacity(rows.len());
-                    for decoded in rows {
+                    for mut decoded in rows {
+                        self.preserve_local_order_fields(cx.store, &mut decoded);
                         if !self.accept_order(cx.store, &decoded) {
                             if let Some(previous) = cx.store.order(&decoded.order.id) {
                                 orders.push(previous.clone());
@@ -1131,10 +1237,17 @@ impl Grvt {
             }
             Request::Leverage {
                 revision,
+                command,
                 rows,
                 failed,
             } => {
-                self.account.leverage_pending = false;
+                if command.is_none() {
+                    self.account.leverage_pending = false;
+                }
+                let answer = command
+                    .as_ref()
+                    .and_then(|(_, symbol)| rows.iter().find(|row| &row.symbol == symbol))
+                    .map(|row| row.value);
                 if !failed && revision == self.account.settings_revision {
                     for row in rows {
                         cx.store.update_setting(&row.symbol, |s| {
@@ -1167,6 +1280,32 @@ impl Grvt {
                         LogLevel::Error,
                         "Malformed GRVT leverage settings; retaining previous settings",
                     );
+                }
+                if let Some((command, _)) = command {
+                    #[derive(Serialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct Fetched {
+                        buy_leverage: f64,
+                        sell_leverage: f64,
+                    }
+                    let result = if failed {
+                        Err("Malformed GRVT leverage response".into())
+                    } else if revision != self.account.settings_revision {
+                        Err("GRVT leverage settings changed during read; retry query".into())
+                    } else {
+                        answer
+                            .ok_or_else(|| {
+                                "GRVT response omitted requested instrument leverage".into()
+                            })
+                            .map(|value| {
+                                serde_json::to_string(&Fetched {
+                                    buy_leverage: value,
+                                    sell_leverage: value,
+                                })
+                                .expect("serialize leverage")
+                            })
+                    };
+                    cx.done(command, result);
                 }
             }
             Request::Builders { cap, failed } => {
@@ -1296,7 +1435,13 @@ impl Grvt {
                 self.account.orders_pending = false;
                 cx.store.set_orders(cx.store.orders().to_vec());
             }
-            Request::Leverage { .. } => self.account.leverage_pending = false,
+            Request::Leverage { command, .. } => {
+                if let Some((command, _)) = command {
+                    cx.done(command, Err("GRVT leverage request failed".into()));
+                } else {
+                    self.account.leverage_pending = false;
+                }
+            }
             Request::Builders { .. } => self.account.builder = BuilderState::Unknown,
         }
         cx.log(
@@ -1395,9 +1540,10 @@ impl Grvt {
         match &*message.stream {
             "v1.order" | "v1.state" | "v1.cancel" => {
                 match decode_order(feed.get(), cx.store, cx.now) {
-                    Ok(decoded) => {
+                    Ok(mut decoded) => {
                         self.account.healthy_since.get_or_insert(cx.now);
                         self.account.orders_revision += 1;
+                        self.preserve_local_order_fields(cx.store, &mut decoded);
                         if !self.accept_order(cx.store, &decoded) {
                             return true;
                         }

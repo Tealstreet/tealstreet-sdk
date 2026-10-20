@@ -140,12 +140,25 @@ export class RustEngineExchange extends BaseExchange {
    * listeners here stay silent: main decodes those from the frame itself.
    */
   onFrame?: (frame: ArrayBuffer) => void;
+  fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
-    if (exchangeName === 'hyperliquid') {
+    if (exchangeName === 'hyperliquid' || exchangeName === 'grvt') {
       this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
         this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
+    }
+    if (exchangeName === 'grvt') {
+      this.fetchFillsForOrderIds = async (ids) => {
+        const quantities = new Map<string, number>();
+        for (const id of new Set(ids)) {
+          const fills = await this.command<Execution[]>({ op: 'fetchFills', orderId: id, from: 0, limit: 1000 });
+          for (const fill of fills) {
+            if (fill.orderId === id) quantities.set(id, (quantities.get(id) ?? 0) + fill.qty);
+          }
+        }
+        return quantities;
+      };
     }
     this.applier = new FrameApplier(store, this.name === 'mexc');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);

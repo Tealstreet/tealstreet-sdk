@@ -423,9 +423,15 @@ Trigger metadata format:
 
 ### Order Update (`grvt.exchange.ts:1459-1496`)
 
+Regular entry TP/SL options create an ordinary entry followed by distinct
+opposite-side reduce-only trigger orders. Both protective legs are retained;
+a failure reports the IDs already created. A standalone SL/TP uses market
+execution and explicit non-split trigger metadata. Symbol cancel-all uses the
+native kind/base/quote filters, which survive the client conversion.
+
 GRVT does not support native order modification. `updateOrder()` builds and
 validates the full replacement *before* cancelling the live order, then
-cancels and places it. REST `mapOrder()` and private-WS `parseOrder()` must
+cancels and places the desired total minus already-filled quantity. REST `mapOrder()` and private-WS `parseOrder()` must
 both preserve GRVT's `time_in_force`/`ti`, `post_only`/`po`, `reduce_only`/`ro`,
 and TP/SL metadata. `post_only: true` is represented as safe-cex
 `OrderTimeInForce.PostOnly`; GTT, IOC, and FOK map to their respective

@@ -4,6 +4,13 @@ import { DefaultStore } from '../../store/store.base';
 import { MarginType } from '../../types';
 
 describe('GRVT private native values', () => {
+  it('answers the private server ping', () => {
+    const e = new GrvtExchange('grvt', {} as any, new DefaultStore());
+    e.privateWebsocket.trackLastReceived = vi.fn();
+    e.privateWebsocket.send = vi.fn();
+    e.privateWebsocket.onMessage({ data: 'ping' } as MessageEvent);
+    expect(e.privateWebsocket.send).toHaveBeenCalledWith('pong');
+  });
   it.each(['0', 0])('preserves explicitly zero available collateral (%s)', async (zero) => {
     const exchange = new GrvtExchange('grvt', {} as any, new DefaultStore());
     vi.spyOn(exchange.tradingXhr, 'post').mockResolvedValue({ data: { r: { te: '100', ts2: zero, tu: '0' } } } as any);

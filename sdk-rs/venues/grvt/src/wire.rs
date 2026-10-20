@@ -98,9 +98,9 @@ pub struct Instrument<'a> {
     #[serde(rename = "ia", alias = "is_active", default)]
     pub active: Option<bool>,
     #[serde(rename = "bd", alias = "base_decimals", default)]
-    pub base_decimals: Option<u32>,
+    pub base_decimals: Option<i32>,
     #[serde(rename = "qd", alias = "quote_decimals", default)]
-    pub quote_decimals: Option<u32>,
+    pub quote_decimals: Option<i32>,
 }
 #[derive(Deserialize)]
 pub struct Level {

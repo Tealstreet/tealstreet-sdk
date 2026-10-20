@@ -307,6 +307,7 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         return;
       }
       if (data === 'ping') {
+        this.send('pong');
         return;
       }
 

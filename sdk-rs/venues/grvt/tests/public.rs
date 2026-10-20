@@ -363,3 +363,134 @@ fn unsupported_unicode_candle_interval_fails_without_trapping() {
         })
     )));
 }
+
+#[test]
+fn catalog_refresh_remaps_ticker_state_sequences_and_subscriptions_by_native_id() {
+    let mut e = Engine::new(Grvt::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(1000.);
+    let request = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(request) => Some(request.id),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(
+        1001.,
+        Event::HttpResponse {
+            request,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: CATALOG,
+            },
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let socket = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let refresh = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 301001.,
+            } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1002., Event::WsOpened { socket });
+    e.drain_actions();
+    ws(
+        &mut e,
+        socket,
+        r#"{"r":{"s":"v1.ticker.d","s1":["BTC_USDT_Perp@500","ETH_USDT_Perp@500"],"fs":["10","20"]}}"#,
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"s":"v1.ticker.d","s1":"BTC_USDT_Perp","sn":"10","f":{"i":"BTC_USDT_Perp","lp":"100","op":"80","bv":"2","sv":"3"}}"#,
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"s":"v1.ticker.d","s1":"ETH_USDT_Perp","sn":"0","f":{"i":"ETH_USDT_Perp","lp":"200","op":"100","bv":"10","sv":"4"}}"#,
+    );
+    e.handle(301001., Event::TimerFired { timer: refresh });
+    let request = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(request) => Some(request.id),
+            _ => None,
+        })
+        .unwrap();
+    let catalog = r#"{"r":[{"i":"ETH_USDT_Perp","ih":"0x030502","b":"ETH","q":"USDT","k":"PERPETUAL","ts":"0.01","ms":"0.01"},{"i":"SOL_USDT_Perp","ih":"0x030503","b":"SOL","q":"USDT","k":"PERPETUAL","ts":"0.01","ms":"0.01"},{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001"}]}"#;
+    e.handle(
+        301002.,
+        Event::HttpResponse {
+            request,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: catalog,
+            },
+        },
+    );
+    let subscriptions: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } if text.contains("v1.ticker.d") => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(subscriptions.len(), 1);
+    assert!(subscriptions[0].contains("SOL_USDT_Perp@500"));
+    ws(
+        &mut e,
+        socket,
+        r#"{"s":"v1.ticker.d","s1":"BTC_USDT_Perp","sn":"11","f":{"i":"BTC_USDT_Perp","lp":"120"}}"#,
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"s":"v1.ticker.d","s1":"ETH_USDT_Perp","sn":"20","f":{"i":"ETH_USDT_Perp","lp":"220"}}"#,
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"s":"v1.ticker.d","s1":"SOL_USDT_Perp","sn":"1","f":{"i":"SOL_USDT_Perp","lp":"1","bv":"4"}}"#,
+    );
+    for (symbol, last, volume, percentage) in [
+        ("BTC_USDT_PERP", 120., 5., 50.),
+        ("ETH_USDT_PERP", 220., 14., 120.),
+        ("SOL_USDT_PERP", 1., 4., 0.),
+    ] {
+        let ticker = e.store().ticker(symbol).unwrap();
+        assert_eq!(
+            (ticker.last, ticker.volume, ticker.percentage),
+            (last, volume, percentage)
+        );
+    }
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::WsClose { .. }))
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"s":"v1.ticker.d","s1":"BTC_USDT_Perp","sn":"13","f":{"i":"BTC_USDT_Perp","lp":"999"}}"#,
+    );
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::WsClose { .. }))
+    );
+    assert_eq!(e.store().ticker("BTC_USDT_PERP").unwrap().last, 120.);
+}

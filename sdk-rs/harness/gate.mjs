@@ -127,6 +127,9 @@ const KNOWN_TS_FIXES = {
   // Successful revision-matching empty snapshots remove ghosts and retain
   // tombstones against delayed stream events. Session code 1000 refreshes once
   // even when delivered in an HTTP-200 error envelope.
+  // Orders use exact EIP-712 integers, distinct reducing bracket children,
+  // native symbol-cancel filters and remaining quantity on partial-fill amend.
+  // The private server ping receives pong rather than being ignored.
   grvt() {},
   // Paired TS fixes: contract-sized public volumes; private cumulative z/native
   // units, execution L prices, monotonic terminal state and ping timestamp echo.

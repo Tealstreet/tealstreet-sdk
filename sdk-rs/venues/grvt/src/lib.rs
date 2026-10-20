@@ -1,5 +1,7 @@
 //! GRVT perpetuals: deterministic market, account and order state machines.
 mod account;
+mod sign;
+mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
@@ -36,8 +38,8 @@ impl Default for Options {
 #[derive(Clone)]
 pub struct InstrumentInfo {
     pub hash: String,
-    pub base_decimals: Option<u32>,
-    pub quote_decimals: Option<u32>,
+    pub base_decimals: Option<i32>,
+    pub quote_decimals: Option<i32>,
 }
 pub struct Pending {
     pub(crate) path: &'static str,
@@ -48,6 +50,7 @@ pub struct Pending {
 }
 pub(crate) enum Job {
     Account(account::Request),
+    Trade(trading::Request),
     Markets {
         rows: Vec<Market>,
         metadata: HashMap<String, InstrumentInfo>,
@@ -74,24 +77,27 @@ struct Depth {
     sequence: Option<u64>,
     ready: bool,
 }
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 struct TickerState {
     buy: f64,
     sell: f64,
     open: f64,
+    sequence: Option<u64>,
+    first_sequence: Option<u64>,
+    subscriptions: u8,
 }
 pub struct Grvt {
     options: Options,
     account: account::Account,
+    trading: trading::Trading,
     metadata: HashMap<String, InstrumentInfo>,
     public: Connection,
     books: HashMap<String, Depth>,
     candle_sockets: HashMap<String, Connection>,
     candles: HashMap<(String, String), u32>,
-    subscriptions: HashMap<(String, String), u32>,
-    sequence: HashMap<(String, String), u64>,
-    first_sequence: HashMap<(String, String), u64>,
-    ticker_state: HashMap<String, TickerState>,
+    // Catalog-indexed state shares the Store identities instead of allocating
+    // the same stream/selector strings in four separate maps.
+    ticker_state: Vec<TickerState>,
     request_id: u32,
     ticker_batch: Option<TimerId>,
     ticker_offset: usize,
@@ -129,15 +135,13 @@ impl Grvt {
         Self {
             options,
             account: account::Account::default(),
+            trading: trading::Trading::default(),
             metadata: HashMap::new(),
             public: Connection::default(),
             books: HashMap::new(),
             candle_sockets: HashMap::new(),
             candles: HashMap::new(),
-            subscriptions: HashMap::new(),
-            sequence: HashMap::new(),
-            first_sequence: HashMap::new(),
-            ticker_state: HashMap::new(),
+            ticker_state: Vec::new(),
             request_id: 0,
             ticker_batch: None,
             ticker_offset: 0,
@@ -191,6 +195,15 @@ impl Grvt {
                 ],
                 None,
             ),
+            Job::Trade(_) => (
+                if self.options.testnet {
+                    "https://trades.testnet.grvt.io"
+                } else {
+                    "https://trades.grvt.io"
+                },
+                self.account_headers(),
+                None,
+            ),
             Job::Account(request) => (
                 if self.options.testnet {
                     "https://trades.testnet.grvt.io"
@@ -212,6 +225,7 @@ impl Grvt {
     fn fail_pending(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending.job {
             Job::Account(request) => self.account_failed(cx, request, error),
+            Job::Trade(request) => self.trade_failed(cx, request, error),
             Job::Markets { .. } => {
                 cx.log(LogLevel::Warning, "GRVT instrument read failed");
                 if self.startup_retry.is_none() {
@@ -242,16 +256,29 @@ impl Grvt {
         self.public.watchdog = Some(cx.set_timer(5_000.));
     }
     fn subscribe(&mut self, cx: &mut Cx<'_, Pending>, stream: &str, selector: &str, remove: bool) {
-        let key = (stream.to_owned(), selector.to_owned());
         if !self.public.open {
             return;
         }
-        if remove {
-            if self.subscriptions.remove(&key).is_none() {
-                return;
-            }
-        } else if self.subscriptions.contains_key(&key) {
+        let bit = match stream {
+            "v1.ticker.d" => 1,
+            "v1.book.s" => 2,
+            _ => return,
+        };
+        let primary = selector.split('@').next().unwrap_or(selector);
+        let Some(index) = cx.store.market_index_by_id(primary) else {
             return;
+        };
+        let Some(state) = self.ticker_state.get_mut(index as usize) else {
+            return;
+        };
+        let subscribed = state.subscriptions & bit != 0;
+        if subscribed == !remove {
+            return;
+        }
+        if remove {
+            state.subscriptions &= !bit;
+        } else {
+            state.subscriptions |= bit;
         }
         self.request_id = self.request_id.wrapping_add(1).max(1);
         let message = Subscription {
@@ -268,9 +295,6 @@ impl Grvt {
                 socket,
                 serde_json::to_string(&message).expect("subscription"),
             );
-        }
-        if !remove {
-            self.subscriptions.insert(key, self.request_id);
         }
     }
     fn ticker_batch(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -303,9 +327,11 @@ impl Grvt {
         if let Some(timer) = self.ticker_batch.take() {
             cx.clear_timer(timer);
         }
-        self.subscriptions.clear();
-        self.sequence.clear();
-        self.first_sequence.clear();
+        for state in &mut self.ticker_state {
+            state.subscriptions = 0;
+            state.sequence = None;
+            state.first_sequence = None;
+        }
         for depth in self.books.values_mut() {
             depth.ready = false;
             depth.sequence = None;
@@ -390,11 +416,15 @@ impl Grvt {
             return;
         };
         if let Some(ack) = message.result {
-            for (selector, first) in ack.subs.iter().zip(ack.first) {
-                if let Ok(first) = first.parse::<u64>() {
+            if ack.stream == "v1.ticker.d" {
+                for (selector, first) in ack.subs.iter().zip(ack.first) {
                     let primary = selector.split('@').next().unwrap_or(selector);
-                    self.first_sequence
-                        .insert((ack.stream.to_string(), primary.to_owned()), first);
+                    if let (Some(index), Ok(first)) =
+                        (cx.store.market_index_by_id(primary), first.parse::<u64>())
+                        && let Some(state) = self.ticker_state.get_mut(index as usize)
+                    {
+                        state.first_sequence = Some(first);
+                    }
                 }
             }
             return;
@@ -402,11 +432,10 @@ impl Grvt {
         let Some(feed) = message.feed else {
             return;
         };
-        let Some(market) = cx
+        let Some(index) = cx
             .store
-            .market(&feed.instrument)
-            .or_else(|| cx.store.markets().iter().find(|m| m.id == feed.instrument))
-            .cloned()
+            .market_index_by_id(&feed.instrument)
+            .or_else(|| cx.store.market_index(&feed.instrument))
         else {
             return;
         };
@@ -421,37 +450,41 @@ impl Grvt {
             .selector
             .split('@')
             .next()
+            .filter(|s| !s.is_empty())
             .unwrap_or(&feed.instrument);
-        let key = (stream.to_owned(), primary.to_owned());
         if let Ok(sequence) = message.sequence.parse::<u64>()
             && stream == "v1.ticker.d"
         {
+            let Some(sequence_index) = cx
+                .store
+                .market_index_by_id(primary)
+                .or_else(|| cx.store.market_index(primary))
+            else {
+                return;
+            };
+            let state = &mut self.ticker_state[sequence_index as usize];
             if sequence == 0 {
                 // Initial snapshot has no live sequence; the ACK anchors the first delta.
-                self.sequence.remove(&key);
+                state.sequence = None;
             } else {
-                if let Some(last) = self.sequence.get(&key) {
-                    if sequence == *last {
+                if let Some(last) = state.sequence {
+                    if sequence == last {
                         return;
                     }
                     if sequence != last.saturating_add(1) {
                         self.disconnect(cx, true);
                         return;
                     }
-                } else if self
-                    .first_sequence
-                    .get(&key)
-                    .is_some_and(|first| sequence != *first)
-                {
+                } else if state.first_sequence.is_some_and(|first| sequence != first) {
                     self.disconnect(cx, true);
                     return;
                 }
-                self.sequence.insert(key, sequence);
+                state.sequence = Some(sequence);
             }
         }
         match stream {
             "v1.ticker.d" | "v1.ticker.s" => {
-                let state = self.ticker_state.entry(market.symbol.clone()).or_default();
+                let state = &mut self.ticker_state[index as usize];
                 if let Some(v) = feed.buy_volume {
                     state.buy = v.0;
                 }
@@ -461,7 +494,8 @@ impl Grvt {
                 if let Some(v) = feed.open_price {
                     state.open = v.0;
                 }
-                cx.store.update_ticker(&market.symbol, |t| {
+                // This venue constructs tickers in catalog order at every replacement.
+                cx.store.update_ticker_at(index, |t| {
                     if let Some(v) = feed.last {
                         t.last = v.0;
                     }
@@ -498,11 +532,8 @@ impl Grvt {
                 self.sync_balance_upnl(cx);
             }
             "v1.book.s" => {
-                let Some(depth) = self
-                    .books
-                    .get_mut(&market.symbol)
-                    .filter(|d| d.subscribers > 0)
-                else {
+                let symbol = cx.store.markets()[index as usize].symbol.clone();
+                let Some(depth) = self.books.get_mut(&symbol).filter(|d| d.subscribers > 0) else {
                     return;
                 };
                 let (Some(bids), Some(asks)) = (feed.bids, feed.asks) else {
@@ -534,9 +565,10 @@ impl Grvt {
                     .book
                     .load_sorted(BookSide::Asks, asks.iter().map(|l| (l.price.0, l.size.0)));
                 depth.ready = true;
-                cx.book_changed(&market.symbol);
+                cx.book_changed(&symbol);
             }
             "v1.candle" => {
+                let market_symbol = cx.store.markets()[index as usize].symbol.clone();
                 let Some((_, suffix)) = message.selector.split_once('@') else {
                     return;
                 };
@@ -545,7 +577,7 @@ impl Grvt {
                 };
                 for ((symbol, interval_name), subscribers) in &self.candles {
                     if *subscribers > 0
-                        && *symbol == market.symbol
+                        && *symbol == market_symbol
                         && interval(interval_name).as_deref() == Some(grvt_interval)
                         && let Some(candle) = feed.candle()
                     {
@@ -655,6 +687,7 @@ impl Venue for Grvt {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match &mut pending.job {
             Job::Account(request) => self.account_item(cx, request, item),
+            Job::Trade(_) => {}
             Job::Markets {
                 rows,
                 metadata,
@@ -736,6 +769,7 @@ impl Venue for Grvt {
         }
         match pending.job {
             Job::Account(request) => self.account_response(cx, request, response),
+            Job::Trade(request) => self.trade_response(cx, request, response),
             Job::Markets {
                 rows,
                 metadata,
@@ -762,6 +796,19 @@ impl Venue for Grvt {
                     })
                     .collect();
                 let first = !cx.store.loaded().markets;
+                // Catalog refreshes can reorder or insert rows. Remap by native
+                // instrument identity before replacing the Store's indexes.
+                let previous = std::mem::take(&mut self.ticker_state);
+                self.ticker_state = rows
+                    .iter()
+                    .map(|market| {
+                        cx.store
+                            .market_index_by_id(&market.id)
+                            .and_then(|index| previous.get(index as usize))
+                            .copied()
+                            .unwrap_or_default()
+                    })
+                    .collect();
                 self.metadata = metadata;
                 cx.store.set_markets(rows);
                 cx.store.set_tickers(tickers);
@@ -801,10 +848,18 @@ impl Venue for Grvt {
         pending: Pending,
         response: Response<'_>,
     ) {
-        if wire::check(&response).is_err(){self.on_response(cx,pending,response);}else{self.fail_pending(cx,pending,"Missing GRVT response array");}
+        if wire::check(&response).is_err() {
+            self.on_response(cx, pending, response);
+        } else {
+            self.fail_pending(cx, pending, "Missing GRVT response array");
+        }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
-        let read = !matches!(pending.job, Job::Account(account::Request::Login));
+        let read = match &pending.job {
+            Job::Trade(request) => request.is_read(),
+            Job::Account(account::Request::Login) => false,
+            _ => true,
+        };
         if read && pending.attempts < 5 {
             pending.attempts += 1;
             match &mut pending.job {
@@ -822,6 +877,7 @@ impl Venue for Grvt {
                     *failed = false;
                 }
                 Job::Account(request) => request.reset(),
+                Job::Trade(_) => {}
             }
             self.send_request(cx, pending);
             return;
@@ -895,6 +951,24 @@ impl Venue for Grvt {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchLeverage { command, symbol } = command {
+            self.fetch_leverage_command(cx, command, symbol);
+            return;
+        }
+        if matches!(
+            &command,
+            Command::PlaceOrders { .. }
+                | Command::CancelOrders { .. }
+                | Command::AmendOrder { .. }
+                | Command::CancelSymbolOrders { .. }
+                | Command::SetLeverage { .. }
+                | Command::SetMarginType { .. }
+                | Command::SetPositionMode { .. }
+                | Command::FetchLeverage { .. }
+        ) {
+            self.trade_command(cx, command);
+            return;
+        }
         match command {
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
