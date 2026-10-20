@@ -668,13 +668,15 @@ No confirmed highs; valid data matches TS.
 
 ### AsterDEX
 No confirmed highs.
-- Medium: failed position-mode read silently leaves one-way, never retried, and
+- Medium: ~~failed position-mode read silently leaves one-way, never retried, and
   orders can go before it lands (`asterdex/src/account.rs:566`); order events
   with unmapped types (e.g. `LIQUIDATION`) dropped with their fills
   (`account.rs:817`); one malformed row halts startup (`lib.rs:849,781`); one bad
   row discards open-orders/positions snapshots (`account.rs:402,415`); hedge
   amend of a closing order may open the opposite side (shared with TS; reuse the
-  row's `positionSide`).
+  row's `positionSide`).~~ Mode read retries and holds placement until known;
+  unmapped order types keep their fills; bad rows are skipped keeping stored
+  copies; hedge amend reuses the recorded `positionSide` (TS bug fixed).
 - Low: no credential check at start; ACCOUNT_UPDATE strict on `ep`/`cr`; fills
   history fails on one row and refuses >7 day windows; listen-key keepalive
   omits `listenKey` and tears down on failure; partial balance rows skipped.
