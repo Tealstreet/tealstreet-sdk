@@ -220,9 +220,40 @@ publish an empty snapshot or dispose the previous good engine.
   correctness ran in pairs. Landing remained `02e9db0e8b` at final fetch.
   All local phase gates/reviews pass; PR correctness review and green CI follow.
 
+- Opened [PR #1342](https://github.com/Tealstreet/tealstreet-sdk/pull/1342)
+  into `feat/rust-rewrite`; phase findings and fresh review findings are posted.
+  Native policy/hosts/valuation review PASS (22 focused native + 2 WASM ingress
+  cases). SDK review found equal-seed readiness not waking and provider-owned
+  book/candle callbacks being suppressed on frame-forwarding sources; both
+  regressions prove-fail before `6392a068d1` and pass after it. A separate
+  reviewer confirms callback isolation/refcounts, Aster clones and buffer use
+  before transfer. Full SDK WASM now 414/14 files; types/lint PASS.
+- Consumer review found MCP's TS Infinity override disabled BreakoutProp's
+  native REST polling. `f29b10eb7e` applies the TS policy only after actual
+  instance selection, preserving native defaults/opt-in and caller options.
+  The final real-MCP/actual-WASM changed-quote regression fails with the old
+  policy and passes with the fix. All five MCP WASM + 29 unit tests,
+  typecheck/lint/build/isolated smoke PASS; two CLI + two mobile proofs make
+  nine consumer WASM tests. Independent consumer re-review PASS.
+- CI exposed Paradex solo bundle growth to 1,290,381 bytes over its unchanged
+  1,258,291-byte limit. A Paradex-only host size profile produces 1,221,468
+  bytes with engine hot loops still O3; default/all other 33 selection argument
+  arrays remain unchanged. Independent build-script review PASS. Official
+  solo public/private replay gates PASS; combined web/node artifacts restore
+  exactly to `eb2f1751…b3359`.
+  No size-budget increase or native semantic change is used.
+
+- Local follow-up gates PASS: BreakoutProp and Paradex public/private controls,
+  bringing final coverage to 15 public CPU/memory and 24 private correctness
+  controls. The final MCP polling test also proves failure with the old Infinity
+  override using its corrected time-gated HTTP fixture, then restores committed
+  production code. Final source root typecheck 44/lint 28 and SDK 414 WASM pass.
+  No native venue logic or combined WASM bytes changed in this PR review round.
+
 ## Final public replay metrics
 
-Three-run medians on the integrated `eb2f1751…b3359` combined binary. Values are
+Three-run medians on the integrated `eb2f1751…b3359` combined binary, except
+Paradex on its scoped 1,221,468-byte solo binary (`044c75bc…6826`). Values are
 TypeScript → Rust. Public gates enforce main-thread CPU, steady CPU and
 retained memory; process CPU is an additional diagnostic. Private replay
 controls enforce correctness only. The updated landing GRVT/Lighter fixtures
@@ -243,8 +274,10 @@ are used; this consumer change adds no live venue capture or TS protocol fix.
 | lighter | 400.6 → 243.0 | 270.3 → 156.4 | 497.1 → 382.1 | 17.7 → 4.0 |
 | lighter-robinhood | 267.5 → 96.8 | 187.4 → 43.0 | 334.7 → 209.0 | 20.5 → 6.2 |
 | apexomni | 78.6 → 39.2 | 47.0 → 6.8 | 110.3 → 83.7 | 21.8 → 3.4 |
+| breakoutprop | 22.2 → 18.8 | 6.3 → 5.0 | 44.2 → 25.6 | 12.3 → 2.0 |
+| paradex | 947.1 → 705.3 | 526.9 → 338.4 | 1061.2 → 847.1 | 19.6 → 2.3 |
 
-All 13 public controls PASS. GRVT process CPU is higher in this run;
+All 15 public controls PASS. GRVT process CPU is higher in this run;
 its gated main/steady CPU and retained memory remain below TS. Public
 main-thread speedups range from 1.15× to 6.32×; retained memory reductions
 range from 1.78× to 9.45×. No benchmark builds/tests ran concurrently with

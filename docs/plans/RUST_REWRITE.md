@@ -557,7 +557,8 @@ cutover or deletion:
 
 The consumer-blockers phase also proves saved CFM account CLI reads through the
 real factory, MCP catalog/balance/positions/orders over its actual protocol,
-plus store-only ticker freshness through native Binance public frames,
+plus store-only ticker freshness through native Binance public frames and
+BreakoutProp REST polling,
 isolated compiled Bun CLI loading, and isolated packaged Node MCP loading with
 Rust artifacts and dependency notices. `EXCHANGE_ENGINE=rust` explicitly selects
 the MCP engine. Mobile has an explicit cached host-loader registration tested
