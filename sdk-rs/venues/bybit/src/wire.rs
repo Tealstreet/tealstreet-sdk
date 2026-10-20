@@ -421,6 +421,17 @@ impl BookLevels {
 
 struct BookSeed<'a>(&'a mut BookLevels);
 
+#[derive(Deserialize)]
+#[serde(field_identifier)]
+enum BookField {
+    #[serde(rename = "type")]
+    Kind,
+    #[serde(rename = "data")]
+    Data,
+    #[serde(other)]
+    Other,
+}
+
 impl<'de> serde::de::DeserializeSeed<'de> for BookSeed<'_> {
     type Value = BookMessage<'de>;
     fn deserialize<D: serde::Deserializer<'de>>(
@@ -439,21 +450,21 @@ impl<'de> serde::de::Visitor<'de> for BookSeed<'_> {
     fn visit_map<M: serde::de::MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
         use serde::de::Error;
         let (mut kind, mut data) = (None, None);
-        while let Some(BorrowedStr(key)) = map.next_key()? {
-            match key.as_ref() {
-                "type" => {
+        while let Some(key) = map.next_key::<BookField>()? {
+            match key {
+                BookField::Kind => {
                     if kind.is_some() {
                         return Err(M::Error::duplicate_field("type"));
                     }
                     kind = Some(map.next_value::<BorrowedStr<'de>>()?.0);
                 }
-                "data" => {
+                BookField::Data => {
                     if data.is_some() {
                         return Err(M::Error::duplicate_field("data"));
                     }
                     data = Some(map.next_value_seed(BookDataSeed(self.0))?);
                 }
-                _ => {
+                BookField::Other => {
                     map.next_value::<serde::de::IgnoredAny>()?;
                 }
             }
@@ -468,6 +479,21 @@ impl<'de> serde::de::Visitor<'de> for BookSeed<'_> {
 }
 
 struct BookDataSeed<'a>(&'a mut BookLevels);
+
+#[derive(Deserialize)]
+#[serde(field_identifier)]
+enum BookDataField {
+    #[serde(rename = "s")]
+    Symbol,
+    #[serde(rename = "u")]
+    Update,
+    #[serde(rename = "b")]
+    Bids,
+    #[serde(rename = "a")]
+    Asks,
+    #[serde(other)]
+    Other,
+}
 
 impl<'de> serde::de::DeserializeSeed<'de> for BookDataSeed<'_> {
     type Value = (Cow<'de, str>, u64);
@@ -488,35 +514,35 @@ impl<'de> serde::de::Visitor<'de> for BookDataSeed<'_> {
         use serde::de::Error;
         let (mut symbol, mut update) = (None, None);
         let (mut bids, mut asks) = (false, false);
-        while let Some(BorrowedStr(key)) = map.next_key()? {
-            match key.as_ref() {
-                "s" => {
+        while let Some(key) = map.next_key::<BookDataField>()? {
+            match key {
+                BookDataField::Symbol => {
                     if symbol.is_some() {
                         return Err(M::Error::duplicate_field("s"));
                     }
                     symbol = Some(map.next_value::<BorrowedStr<'de>>()?.0);
                 }
-                "u" => {
+                BookDataField::Update => {
                     if update.is_some() {
                         return Err(M::Error::duplicate_field("u"));
                     }
                     update = Some(map.next_value()?);
                 }
-                "b" => {
+                BookDataField::Bids => {
                     if bids {
                         return Err(M::Error::duplicate_field("b"));
                     }
                     bids = true;
                     map.next_value_seed(LevelsSeed(&mut self.0.bids))?;
                 }
-                "a" => {
+                BookDataField::Asks => {
                     if asks {
                         return Err(M::Error::duplicate_field("a"));
                     }
                     asks = true;
                     map.next_value_seed(LevelsSeed(&mut self.0.asks))?;
                 }
-                _ => {
+                BookDataField::Other => {
                     map.next_value::<serde::de::IgnoredAny>()?;
                 }
             }
@@ -1126,6 +1152,117 @@ mod tests {
             levels.bids.is_empty() && levels.asks.is_empty(),
             "old scratch data leaked into omitted sides"
         );
+    }
+
+    #[test]
+    fn book_field_identifiers_decode_all_escaped_keys_and_skip_nested_unknowns() {
+        let mut levels = BookLevels::default();
+        let message = levels.decode(
+            r#"{"unknown":{"type":null,"data":[{"s":false}]},"\u0064\u0061\u0074\u0061":{"\u0061":[["2","3"]],"unknown":[null,{"b":false,"u":"bad"}],"\u0075":0,"\u0073":"BTCUSDT","\u0062":[["1","2"]],"unknown":true},"\u0074\u0079\u0070\u0065":"delta","\u0075nknown":[{"data":{}}]}"#,
+        ).unwrap();
+        assert_eq!(message.kind, "delta");
+        assert_eq!(message.symbol, "BTCUSDT");
+        assert_eq!(message.update, 0);
+        assert!(matches!(message.kind, Cow::Borrowed(_)));
+        assert!(matches!(message.symbol, Cow::Borrowed(_)));
+        assert_eq!(levels.bids, [(1.0, 2.0)]);
+        assert_eq!(levels.asks, [(2.0, 3.0)]);
+
+        // A failed frame may refill scratch space, but never produces a message;
+        // the next frame must start with empty sides even when they are omitted.
+        for invalid in [
+            r#"{"type":"delta","data":{"s":"BTCUSDT","b":[["3","4"]]},"unknown":{"bad":[1,]}}"#,
+            r#"{"type":"delta","data":{"s":"BTCUSDT","b":[["3","4"]]}} trailing"#,
+        ] {
+            assert!(levels.decode(invalid).is_err(), "{invalid}");
+            let message = levels
+                .decode(r#"{"type":"snapshot","data":{"s":"ETHUSDT"}}"#)
+                .unwrap();
+            assert_eq!(message.symbol, "ETHUSDT");
+            assert_eq!(message.update, 0);
+            assert!(levels.bids.is_empty() && levels.asks.is_empty());
+        }
+    }
+
+    #[test]
+    fn book_field_identifiers_reject_escaped_equivalent_duplicates_in_either_order() {
+        let mut levels = BookLevels::default();
+        for (key, escaped, value, top_level) in [
+            ("type", r"\u0074ype", r#""delta""#, true),
+            ("data", r"d\u0061ta", r#"{"s":"BTCUSDT"}"#, true),
+            ("s", r"\u0073", r#""BTCUSDT""#, false),
+            ("u", r"\u0075", "0", false),
+            ("b", r"\u0062", "[]", false),
+            ("a", r"\u0061", "[]", false),
+        ] {
+            // Also retain rejection for two escaped spellings of the same key.
+            for (first, second) in [(key, escaped), (escaped, key), (escaped, escaped)] {
+                let pair = format!(r#""{first}":{value},"{second}":{value}"#);
+                let text = if top_level {
+                    let other = if key == "type" {
+                        r#""data":{"s":"BTCUSDT"}"#
+                    } else {
+                        r#""type":"delta""#
+                    };
+                    format!("{{{pair},{other}}}")
+                } else {
+                    let symbol = if key == "s" { "" } else { r#""s":"BTCUSDT","# };
+                    format!(r#"{{"type":"delta","data":{{{symbol}{pair}}}}}"#)
+                };
+                assert!(levels.decode(&text).is_err(), "accepted duplicate: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn book_field_identifiers_preserve_known_value_type_rejection() {
+        let mut levels = BookLevels::default();
+        for (key, top_level, invalid_values) in [
+            (r"\u0074ype", true, &["null", "false", "1", "[]", "{}"][..]),
+            (
+                r"d\u0061ta",
+                true,
+                &["null", "false", "1", "[]", r#""1""#][..],
+            ),
+            (r"\u0073", false, &["null", "false", "1", "[]", "{}"][..]),
+            (
+                r"\u0075",
+                false,
+                &["null", "false", r#""1""#, "[]", "{}", "1.5", "-1"][..],
+            ),
+            (
+                r"\u0062",
+                false,
+                &["null", "false", r#""1""#, "1", "{}"][..],
+            ),
+            (
+                r"\u0061",
+                false,
+                &["null", "false", r#""1""#, "1", "{}"][..],
+            ),
+        ] {
+            for value in invalid_values {
+                let text = if top_level {
+                    let other = if key == r"\u0074ype" {
+                        r#""data":{"s":"BTCUSDT"}"#
+                    } else {
+                        r#""type":"delta""#
+                    };
+                    format!(r#"{{"{key}":{value},{other}}}"#)
+                } else {
+                    let symbol = if key == r"\u0073" {
+                        ""
+                    } else {
+                        r#""s":"BTCUSDT","#
+                    };
+                    format!(r#"{{"type":"delta","data":{{{symbol}"{key}":{value}}}}}"#)
+                };
+                assert!(
+                    levels.decode(&text).is_err(),
+                    "accepted invalid type: {text}"
+                );
+            }
+        }
     }
 
     #[test]

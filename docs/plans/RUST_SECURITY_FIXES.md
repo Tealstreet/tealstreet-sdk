@@ -501,3 +501,25 @@ live trading, weakened parity oracle, or performance threshold changes.
   Kraken passes, as do all 76 native tests and all 138 Kraken tests.
 - Push the fixes and require fresh green CI at the corrected head; earlier
   public/variant successes at49f2a35681 do not substitute for that final CI.
+
+### Final CI performance repair
+
+- Corrected-head CI `39435940351` finishes with 39/40 checks passing. All 30
+  primary public gates and completed private suites pass; Bybit's later Hyro
+  variant fails only steady CPU (TS 5.4 ms, Rust 5.6 ms), with identical output,
+  total CPU 38.9/31.5 ms and retained memory 13.5/0.9 MB. Preserve this failure.
+- Plan a bounded Bybit book-parser repair: deserialize field names into typed
+  identifiers instead of constructing a Cow string for every map key. Preserve
+  escaped-key equivalence, duplicate/type/level validation, unknown fields,
+  defaults, scratch-buffer reuse and complete-frame validation. Add semantic
+  regressions, run Bybit tests/strict Clippy/bans/formatting, and require an
+  independent correctness review before the next commit. No ticker API,
+  benchmark fixture, sampler or gate threshold changes. CI supplies the next
+  performance measurement; no local CPU-admission wait or public timing.
+- Wind-down instruction: finish this PR through green CI and merge, write the
+  handoff and stop. Do not start queued follow-up work.
+- Implemented only the typed key dispatch and three parity tests. Pinned Rust
+  1.99 passes all 171 Bybit tests, strict all-target Clippy, formatting and bans.
+  Independent final code-correctness review accepts every preserved schema and
+  mutation boundary; it makes no speedup claim. Commit this bounded repair and
+  require fresh CI measurements before landing.
