@@ -321,7 +321,7 @@ fn inverse_and_xperp_writes_keep_native_lots_and_exact_instrument_identity() {
     assert!(body.contains(r#""clOrdId":"CallerX""#));
 }
 #[test]
-fn failed_xperp_catalog_never_publishes_only_the_swap_half() {
+fn malformed_xperp_row_is_skipped_without_withholding_the_catalog() {
     let mut e = Engine::new(Okx::new(Options {
         eea: true,
         ..Options::default()
@@ -333,19 +333,67 @@ fn failed_xperp_catalog_never_publishes_only_the_swap_half() {
     reply(
         &mut e,
         &a,
-        &envelope(
-            r#"{"instType":"FUTURES","ruleType":"xperp","ctType":"inverse","instId":"BTC-USD-261225"}"#,
-        ),
+        &envelope(&format!(
+            r#"{{"instType":"FUTURES","ruleType":"xperp","ctType":"inverse","instId":"BTC-USD-261225"}},{}"#,
+            future()
+        )),
+        2.0,
+    );
+    assert!(e.store().loaded().markets);
+    let symbols: Vec<_> = e
+        .store()
+        .markets()
+        .iter()
+        .map(|m| m.symbol.clone())
+        .collect();
+    assert_eq!(symbols.len(), 2, "{symbols:?}");
+    assert!(
+        actions(&mut e)
+            .iter()
+            .any(|a| is_get(a, "/api/v5/market/tickers?instType=SWAP"))
+    );
+}
+
+#[test]
+fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
+    let mut e = Engine::new(Okx::new(Options {
+        eea: true,
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(MARKET), 1.0);
+    let a = actions(&mut e).remove(0);
+    reply(
+        &mut e,
+        &a,
+        r#"{"code":"50001","msg":"Service temporarily unavailable","data":[]}"#,
         2.0,
     );
     assert!(!e.store().loaded().markets);
     assert!(e.store().markets().is_empty());
+    let out = actions(&mut e);
     assert!(
-        !actions(&mut e)
-            .iter()
+        !out.iter()
             .any(|a| matches!(a, Action::WsConnect { .. } | Action::Http(_)))
     );
+    let timer = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1002.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("startup retry timer");
+    e.handle(1002.0, Event::TimerFired { timer });
+    let a = actions(&mut e).remove(0);
+    assert!(is_get(&a, "/api/v5/public/instruments?instType=SWAP"));
+    reply(&mut e, &a, &envelope(MARKET), 1003.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(&future()), 1004.0);
+    assert!(e.store().loaded().markets);
+    assert_eq!(e.store().markets().len(), 2);
 }
+
 #[test]
 fn failed_later_product_position_refresh_keeps_both_previous_products() {
     let (mut e, _, out) = private_catalog();
@@ -514,12 +562,12 @@ fn blank_untraded_xperp_ticker_fields_do_not_abort_other_seeded_markets() {
     );
 }
 #[test]
-fn malformed_xperp_seed_remains_atomic_despite_permitted_blank_values() {
-    for bad in [
-        r#""last":"NaN""#,
-        r#""last":"Infinity""#,
-        r#""last":"bad""#,
-        r#""last":null"#,
+fn malformed_xperp_seed_values_start_at_zero_without_withholding_other_tickers() {
+    for (good, bad) in [
+        (r#""last":"40000""#, r#""last":"NaN""#),
+        (r#""last":"40000""#, r#""last":"Infinity""#),
+        (r#""last":"40000""#, r#""last":"bad""#),
+        (r#""bidPx":"39999.9""#, r#""bidPx":"bad""#),
     ] {
         let mut e = Engine::new(Okx::new(Options {
             eea: true,
@@ -533,18 +581,15 @@ fn malformed_xperp_seed_remains_atomic_despite_permitted_blank_values() {
         let a = actions(&mut e).remove(0);
         reply(&mut e, &a, &envelope(TICKER), 3.0);
         let a = actions(&mut e).remove(0);
-        reply(
-            &mut e,
-            &a,
-            &envelope(&ticker("BTC-USD-261225").replace(r#""last":"40000""#, bad)),
-            4.0,
-        );
-        assert!(!e.store().loaded().tickers, "{bad}");
-        assert!(e.store().tickers().is_empty(), "partial SWAP seed leaked");
+        let row = ticker("BTC-USD-261225").replace(good, bad);
+        reply(&mut e, &a, &envelope(&row), 4.0);
+        assert!(e.store().loaded().tickers, "{bad}");
+        assert_eq!(e.store().tickers().len(), 2, "{bad}");
+        assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 40000.0);
         assert!(
-            !actions(&mut e)
+            actions(&mut e)
                 .iter()
-                .any(|a| matches!(a, Action::WsConnect { .. } | Action::Http(_)))
+                .any(|a| matches!(a, Action::WsConnect { .. }))
         );
     }
 }
@@ -1439,7 +1484,7 @@ mod product_semantics {
     }
 
     #[test]
-    fn supplied_invalid_or_wholly_absent_caps_never_publish_a_partial_catalog() {
+    fn invalid_caps_skip_only_that_row_and_a_wholly_unusable_catalog_retries() {
         let native: serde_json::Value =
             serde_json::from_str(include_str!("fixtures/crml-preopen.json")).unwrap();
         for value in ["malformed", "-1", "NaN", "inf", "0"] {
@@ -1454,8 +1499,9 @@ mod product_semantics {
                 &envelope(&format!("{INVERSE},{row}")),
                 1.0,
             );
-            assert!(!e.store().loaded().markets, "{value}");
-            assert!(e.store().markets().is_empty());
+            assert!(e.store().loaded().markets, "{value}");
+            assert_eq!(e.store().markets().len(), 1, "{value}");
+            assert!(e.store().market("CRMLUSDT").is_none(), "{value}");
         }
         let mut row = native;
         for key in [
@@ -1473,6 +1519,11 @@ mod product_semantics {
         let request = actions(&mut e).remove(0);
         reply(&mut e, &request, &envelope(&row.to_string()), 1.0);
         assert!(!e.store().loaded().markets);
+        assert!(
+            actions(&mut e)
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 1001.0))
+        );
     }
 
     #[test]
@@ -1534,7 +1585,7 @@ mod product_semantics {
     }
 
     #[test]
-    fn nonempty_malformed_native_last_still_rejects_the_entire_ticker_snapshot() {
+    fn nonempty_malformed_native_last_seeds_zero_and_keeps_the_ticker_row() {
         for last in ["garbage", "NaN", "inf"] {
             let mut e = Engine::new(Okx::new(Options::default()));
             e.start(0.0);
@@ -1547,8 +1598,10 @@ mod product_semantics {
                 &envelope(&TICKER.replace("\"last\":\"40000\"", &format!("\"last\":\"{last}\""))),
                 2.0,
             );
-            assert!(!e.store().loaded().tickers);
-            assert!(e.store().tickers().is_empty());
+            assert!(e.store().loaded().tickers);
+            let t = e.store().ticker("BTCUSDT").unwrap();
+            assert_eq!((t.last, t.percentage), (0.0, 0.0), "{last}");
+            assert_eq!(t.bid, 39999.9);
         }
     }
 
@@ -2183,4 +2236,62 @@ mod product_semantics {
             "retired FUTURES completion must not advance old order kinds"
         );
     }
+}
+
+#[test]
+fn open_position_on_a_skipped_instrument_is_reported_not_silently_hidden() {
+    let mut e = Engine::new(Okx::new(Options {
+        key: Some("k".into()),
+        secret: Some("s".into()),
+        passphrase: Some("p".into()),
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let a = actions(&mut e).remove(0);
+    let broken = r#"{"instType":"SWAP","instId":"ETH-USDT-SWAP","ctType":"linear","ctVal":"bad"}"#;
+    reply(&mut e, &a, &envelope(&format!("{MARKET},{broken}")), 1.0);
+    let a = actions(&mut e)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
+    reply(&mut e, &a, &envelope(TICKER), 2.0);
+    let a = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut e,
+        &a,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.0,
+    );
+    let mut pending: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    let mut logs = Vec::new();
+    while let Some(a) = pending.pop() {
+        let body = if matches!(&a, Action::Http(r) if r.url.contains("/account/positions")) {
+            envelope(
+                r#"{"instType":"SWAP","instId":"ETH-USDT-SWAP","pos":"3","posSide":"net","avgPx":"2000","lever":"5","mgnMode":"cross"}"#,
+            )
+        } else if matches!(&a, Action::Http(r) if r.url.contains("account-position-risk")) {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else {
+            envelope("")
+        };
+        reply(&mut e, &a, &body, 4.0);
+        for out in actions(&mut e) {
+            match out {
+                Action::Http(_) => pending.push(out),
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        logs.iter()
+            .any(|m| m.contains("ETH-USDT-SWAP") && m.contains("not shown")),
+        "{logs:?}"
+    );
 }
