@@ -184,7 +184,7 @@ export interface EngineCapabilities {
   orderHistory: boolean;
   incomeHistory: boolean;
   fillsByOrderId: boolean;
-  cancelAll: boolean;
+  cancelAll: 'eachOpenSymbol' | 'eachPlacedSymbol' | 'native';
   leverageQuery: 'settings' | 'onRead' | 'onMetadata';
   maxLeverage: 'market' | 'query' | 'rails' | 'unsupported';
   accountLeverage: boolean;

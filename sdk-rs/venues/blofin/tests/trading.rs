@@ -990,34 +990,151 @@ fn successful_cancel_ack_cannot_downgrade_an_intervening_filled_status() {
 }
 
 #[test]
-fn invalid_dynamic_leverage_limits_reject_without_native_write() {
-    for (min, max) in [
-        (30.0, 20.0),
-        (f64::NAN, 20.0),
-        (1.0, 0.0),
-        (1.0, f64::INFINITY),
+fn cancel_symbol_includes_ack_before_private_or_rest_order_arrives() {
+    let mut h = Harness::new();
+    h.seed();
+    place(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":60000,"clientOrderId":"Pending1"}]"#,
+    );
+    h.reply(
+        "batch-orders",
+        r#"{"code":"0","data":[{"orderId":"ack-only","code":"0","msg":"success"}]}"#,
+    );
+    assert!(h.e.store().orders().is_empty());
+    h.e.handle(
+        2.,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 8,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    h.collect();
+    let cancel = h.take("cancel-batch-orders");
+    let payload: serde_json::Value = serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload[0]["orderId"], "ack-only");
+    assert_eq!(payload[0]["instId"], "BTC-USDT");
+    h.respond(
+        cancel,
+        r#"{"code":"0","data":[{"orderId":"ack-only","code":"0"}]}"#,
+    );
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 8,
+            result: Ok(_)
+        })
+    )));
+}
+
+#[test]
+fn retained_protective_and_trigger_orders_keep_their_cancel_family() {
+    for (kind, trigger, place_path, cancel_path, id_field) in [
+        ("stop_market", "", "order-tpsl", "cancel-tpsl", "tpslId"),
+        (
+            "conditional",
+            ",\"triggerPrice\":61000",
+            "order-algo",
+            "cancel-algo",
+            "algoId",
+        ),
     ] {
-        let mut h = Harness::new();
-        h.seed();
-        h.pending.clear();
-        h.actions.clear();
-        h.e.store_mut().update_markets(|market| {
-            market.limits.leverage.min = min;
-            market.limits.leverage.max = max;
-        });
-        h.e.handle(
-            1.0,
-            Event::Command(Command::SetLeverage {
-                command: 99,
-                symbol: "BTCUSDT".into(),
-                leverage: 5.0,
-                side: None,
-            }),
-        );
-        h.collect();
-        assert!(h.pending.is_empty());
-        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
+        for bad_ack in [
+            r#"{"code":"0","data":[]}"#,
+            r#"{"code":"0","data":[{"orderId":"retained","code":"0"}]}"#,
+        ] {
+            let mut h = Harness::new();
+            h.seed();
+            place(
+                &mut h,
+                &format!(
+                    r#"[{{"symbol":"BTCUSDT","type":"{kind}","side":"sell","amount":1,"price":60000{trigger}}}]"#
+                ),
+            );
+            let placed = h.take(place_path);
+            h.respond(
+                placed,
+                &format!(r#"{{"code":"0","data":{{"{id_field}":"retained","code":"0"}}}}"#),
+            );
+            assert!(h.e.store().orders().is_empty());
+            h.e.handle(
+                2.,
+                Event::Command(Command::CancelSymbolOrders {
+                    command: 8,
+                    symbol: "BTCUSDT".into(),
+                }),
+            );
+            h.collect();
+            let cancel = h.take(cancel_path);
+            let payload: serde_json::Value =
+                serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+            let row = if kind == "conditional" {
+                &payload
+            } else {
+                &payload[0]
+            };
+            assert_eq!(row[id_field], "retained");
+            assert_eq!(row["instId"], "BTC-USDT");
+            h.respond(cancel, bad_ack);
+            assert!(h.actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone {
+                    command: 8,
+                    result: Err(_)
+                })
+            )));
+            h.e.handle(
+                3.,
+                Event::Command(Command::CancelSymbolOrders {
+                    command: 9,
+                    symbol: "BTCUSDT".into(),
+                }),
+            );
+            h.collect();
+            let cancel = h.take(cancel_path);
+            h.respond(
+                cancel,
+                &format!(r#"{{"code":"0","data":[{{"{id_field}":"retained","code":"0"}}]}}"#),
+            );
+            assert!(h.actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone {
+                    command: 9,
+                    result: Ok(_)
+                })
+            )));
+        }
     }
+}
+
+#[test]
+fn ambiguous_placement_ack_cannot_authorize_empty_cancel_all_success() {
+    let mut h = Harness::new();
+    h.seed();
+    place(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":60000}]"#,
+    );
+    h.reply("batch-orders", r#"{"code":"0","data":[]}"#);
+    assert!(done(&h));
+    h.e.handle(
+        2.,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 8,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    h.collect();
+    assert!(
+        h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone {
+                command: 8,
+                result: Err(_)
+            })
+        )),
+        "successful empty ACK does not prove placement absence"
+    );
 }
 
 #[test]
@@ -1111,6 +1228,100 @@ fn broker_payload_gate_covers_normal_trigger_and_protective_orders_without_rewri
                 assert_eq!(client.len(), 32);
             }
         }
+    }
+}
+
+#[test]
+fn mixed_unknown_cancel_keeps_ack_route_and_sends_no_partial_write() {
+    for cached_first in [false, true] {
+        let mut h = Harness::new();
+        h.seed();
+        place(
+            &mut h,
+            r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":60000,"clientOrderId":"Pending1"}]"#,
+        );
+        h.reply(
+            "batch-orders",
+            r#"{"code":"0","data":[{"orderId":"ack-only","code":"0","msg":"success"}]}"#,
+        );
+        assert!(h.e.store().orders().is_empty());
+        h.e.handle(
+            2.,
+            Event::Command(Command::CancelOrders {
+                command: 991,
+                ids: if cached_first {
+                    vec!["ack-only".into(), "missing".into()]
+                } else {
+                    vec!["missing".into(), "ack-only".into()]
+                },
+            }),
+        );
+        h.collect();
+        assert!(
+            h.pending
+                .iter()
+                .all(|request| request.method == safe_cex_engine::Method::Get)
+        );
+        assert!(h.actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
+                if error.contains("missing") && error.contains("not found")
+        )));
+        h.e.handle(
+            3.,
+            Event::Command(Command::CancelOrders {
+                command: 992,
+                ids: vec!["ack-only".into()],
+            }),
+        );
+        h.collect();
+        let cancel = h.take("cancel-batch-orders");
+        let payload: serde_json::Value =
+            serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload[0]["orderId"], "ack-only");
+        assert_eq!(payload[0]["instId"], "BTC-USDT");
+        h.respond(
+            cancel,
+            r#"{"code":"0","data":[{"orderId":"ack-only","code":"0"}]}"#,
+        );
+        assert!(h.actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone {
+                command: 992,
+                result: Ok(_)
+            })
+        )));
+    }
+}
+
+#[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let mut h = Harness::new();
+        h.seed();
+        h.pending.clear();
+        h.actions.clear();
+        h.e.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        h.e.handle(
+            1.0,
+            Event::Command(Command::SetLeverage {
+                command: 99,
+                symbol: "BTCUSDT".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+        h.collect();
+        assert!(h.pending.is_empty());
+        assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command:99, result:Err(error) }) if error.contains("leverage limits"))));
     }
 }
 

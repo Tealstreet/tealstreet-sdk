@@ -698,6 +698,7 @@ impl BreakoutProp {
         body: &str,
     ) {
         let command = request.command;
+        let was_place = matches!(request.step, Step::Place { .. });
         let outcome = match request.step {
             Step::Place { code, order } => serde_json::from_str::<PlaceAck>(body)
                 .map_err(|_| "Invalid DXtrade placement acknowledgement".to_owned())
@@ -792,6 +793,9 @@ impl BreakoutProp {
                 &expected,
             ),
         };
+        if was_place && outcome.is_err() {
+            self.order_revision = self.order_revision.wrapping_add(1);
+        }
         if let Some(job) = self.trading.jobs.get_mut(&command) {
             job.in_flight = job.in_flight.saturating_sub(1);
             if let Err(error) = outcome {
@@ -807,6 +811,9 @@ impl BreakoutProp {
         request: Request,
         error: String,
     ) {
+        if matches!(request.step, Step::Place { .. }) {
+            self.order_revision = self.order_revision.wrapping_add(1);
+        }
         self.on_trade_failed_step(cx, request.command, error);
     }
     fn on_trade_failed_step(

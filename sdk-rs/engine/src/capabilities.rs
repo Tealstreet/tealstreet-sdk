@@ -14,8 +14,7 @@ pub struct Capabilities {
     pub income_history: bool,
     /// `FetchFills` filters by `orderId`.
     pub fills_by_order_id: bool,
-    /// `CancelSymbolOrders` with an empty symbol cancels every open order.
-    pub cancel_all: bool,
+    pub cancel_all: CancelAll,
     pub leverage_query: LeverageQuery,
     pub max_leverage: MaxLeverage,
     /// `SetLeverage` with an empty symbol sets the whole account.
@@ -30,6 +29,18 @@ pub struct Capabilities {
     pub order_book_query: bool,
     /// Option chains, greeks and IV-priced orders.
     pub options: bool,
+}
+
+/// How the host cancels every open order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CancelAll {
+    /// `CancelSymbolOrders` for each symbol with an open order.
+    EachOpenSymbol,
+    /// Also each symbol a placement was attempted on, since frames can lag the ACK.
+    EachPlacedSymbol,
+    /// `CancelSymbolOrders` with an empty symbol cancels every open order.
+    Native,
 }
 
 /// How `FetchAccount` answers.
@@ -72,7 +83,7 @@ impl Capabilities {
         order_history: true,
         income_history: true,
         fills_by_order_id: false,
-        cancel_all: false,
+        cancel_all: CancelAll::EachOpenSymbol,
         leverage_query: LeverageQuery::Settings,
         max_leverage: MaxLeverage::Market,
         account_leverage: false,

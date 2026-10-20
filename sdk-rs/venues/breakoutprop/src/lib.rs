@@ -737,10 +737,17 @@ impl BreakoutProp {
 }
 
 impl Venue for BreakoutProp {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
-            cancel_all: true,
+            cancel_all: safe_cex_engine::CancelAll::Native,
             max_leverage: safe_cex_engine::MaxLeverage::Unsupported,
             ..safe_cex_engine::Capabilities::NO_HISTORY
         }

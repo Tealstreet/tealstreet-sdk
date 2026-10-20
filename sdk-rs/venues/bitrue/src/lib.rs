@@ -551,9 +551,17 @@ impl Bitrue {
     }
 }
 impl Venue for Bitrue {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             client_order_lookup: true,
             order_history: false,
             income_history: false,
@@ -1071,12 +1079,7 @@ impl Venue for Bitrue {
             .map(|s| &s.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, s)| s.received)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
 

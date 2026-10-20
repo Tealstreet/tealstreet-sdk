@@ -566,6 +566,10 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
@@ -1023,7 +1027,6 @@ impl Venue for TxFlow {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, l)| l.time.is_some())
                 .map(|(symbol, ladder)| (symbol.as_str(), &ladder.book)),
         )
     }

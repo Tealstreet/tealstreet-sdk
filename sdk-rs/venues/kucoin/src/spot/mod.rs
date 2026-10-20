@@ -682,7 +682,7 @@ impl Venue for KucoinSpot {
             client_order_lookup: true,
             order_history: false,
             income_history: false,
-            cancel_all: true,
+            cancel_all: safe_cex_engine::CancelAll::Native,
             account_margin_type: true,
             cancel_with_symbols: true,
             amend_with_symbol: true,

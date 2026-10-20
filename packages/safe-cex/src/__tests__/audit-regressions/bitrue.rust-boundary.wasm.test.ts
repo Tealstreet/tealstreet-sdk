@@ -214,17 +214,19 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
       }),
     ).rejects.toThrow();
     expect(placements).toBe(2);
-    const update = (nativeFilled: number, executionPrice: number) => {
+    // l is this event's native fill quantity and cannot exceed cumulative z.
+    // The replay and late event overlap execution ranges already delivered.
+    const update = (nativeFilled: number, lastNativeFilled: number, executionPrice: number) => {
       cumulative = Math.max(cumulative, nativeFilled * 10);
       privateSocket!.onMessage(
-        `{"e":"ORDER_TRADE_UPDATE","E":${++now},"o":{"s":"E_BTCUSDT","i":${orderId},"S":"BUY","o":"LIMIT","x":"TRADE","X":"PARTIALLY_FILLED","q":"100","z":"${nativeFilled}","l":"999","p":"100","ap":"102","L":"${executionPrice}"}}`,
+        `{"e":"ORDER_TRADE_UPDATE","E":${++now},"o":{"s":"E_BTCUSDT","i":${orderId},"S":"BUY","o":"LIMIT","x":"TRADE","X":"PARTIALLY_FILLED","q":"100","z":"${nativeFilled}","l":"${lastNativeFilled}","p":"100","ap":"102","L":"${executionPrice}"}}`,
       );
     };
     expect(privateSocket).toBeDefined();
-    update(1, 101);
-    update(3, 103);
-    update(3, 103);
-    update(2, 102);
+    update(1, 1, 101);
+    update(3, 2, 103);
+    update(3, 2, 103);
+    update(2, 1, 102);
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(fills.map(({ id, amount, price }) => ({ id, amount, price }))).toEqual([
       { id: orderId, amount: 10, price: 101 },

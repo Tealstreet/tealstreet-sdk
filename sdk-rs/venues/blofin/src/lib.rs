@@ -391,9 +391,17 @@ impl Blofin {
     }
 }
 impl Venue for Blofin {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             account_margin_type: true,
             ..safe_cex_engine::Capabilities::BASE

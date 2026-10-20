@@ -567,6 +567,10 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(error) = self.config_error {
@@ -1080,12 +1084,7 @@ impl Venue for Bingx {
         self.books.get(symbol).filter(|b| b.ready).map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, b)| b.ready)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
 

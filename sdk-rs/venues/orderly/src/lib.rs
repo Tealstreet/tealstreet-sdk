@@ -569,6 +569,7 @@ impl Venue for Orderly {
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
+            cancel_all: safe_cex_engine::CancelAll::Native,
             account: safe_cex_engine::AccountLookup::AfterLoad,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             account_leverage: true,
@@ -867,7 +868,7 @@ impl Venue for Orderly {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, error),
-            Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::Trade(request) => self.trade_lost(cx, request, error),
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets { .. } => self.retry_seed(cx, Seed::Markets, error),
             Pending::Tickers { .. } => self.retry_seed(cx, Seed::Tickers, error),
@@ -1085,7 +1086,6 @@ impl Venue for Orderly {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, s)| s.last.is_some())
                 .map(|(s, state)| (s.as_str(), &state.book)),
         )
     }

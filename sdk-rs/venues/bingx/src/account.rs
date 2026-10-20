@@ -82,6 +82,7 @@ pub struct Account {
     poll_count: u8,
     last_positions: f64,
     cumulative_fills: HashMap<String, f64>,
+    orders_seeded: bool,
     terminal_orders: HashMap<String, f64>,
     seen_executions: HashSet<String>,
     // REST/z can cover executions never observed individually by this account.
@@ -812,12 +813,18 @@ impl Account {
                     return;
                 }
                 log_snapshot_skips(cx, "open order", &skipped, &mut self.unidentified_orders);
-                for order in &rows {
-                    if order.filled > self.cumulative_fills.get(&order.id).copied().unwrap_or(0.0) {
-                        self.covered_history.insert(order.id.clone());
+                // Startup history is a baseline; later REST reads cannot consume live executions.
+                if !self.orders_seeded {
+                    for order in &rows {
+                        if order.filled
+                            > self.cumulative_fills.get(&order.id).copied().unwrap_or(0.0)
+                        {
+                            self.covered_history.insert(order.id.clone());
+                        }
+                        self.record_cumulative(&order.id, order.filled);
                     }
-                    self.record_cumulative(&order.id, order.filled);
                 }
+                self.orders_seeded = true;
                 self.observations.extend(metas);
                 // A malformed row never removes the known open order it names.
                 let unidentified = skipped.iter().any(String::is_empty);

@@ -600,7 +600,7 @@ impl Venue for Polymarket {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
-            cancel_all: true,
+            cancel_all: safe_cex_engine::CancelAll::Native,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             max_leverage: safe_cex_engine::MaxLeverage::Rails,
             order_book_query: true,
@@ -1143,11 +1143,6 @@ impl Venue for Polymarket {
         self.books.get(symbol).filter(|s| s.synced).map(|s| &s.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, s)| s.synced)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }

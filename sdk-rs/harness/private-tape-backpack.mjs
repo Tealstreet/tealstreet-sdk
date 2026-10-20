@@ -181,14 +181,15 @@ command({
 http('POST', '/api/v1/order', placed('400', limit), limit);
 ws('account.orderUpdate', order('400', { c: 1234, p: '140.12', q: '1.23' }));
 command({ op: 'amendOrder', id: '400', price: 142, amount: 1 });
-http('DELETE', '/api/v1/order', {}, { symbol: SYMBOL, orderId: '400' });
+// Cancel 200 returns the complete terminal order: https://docs.backpack.exchange/#tag/Order
+http('DELETE', '/api/v1/order', placed('400', { ...limit, status: 'Cancelled' }), { symbol: SYMBOL, orderId: '400' });
 const replacement = { ...limit, price: '142.00', quantity: '1.00' };
 delete replacement.clientId;
 http('POST', '/api/v1/order', placed('401', replacement), replacement);
 ws('account.orderUpdate', order('400', { c: 1234, X: 'Cancelled', p: '140.12', q: '1.23' }));
 ws('account.orderUpdate', order('401', { p: '142', q: '1' }));
 command({ op: 'cancelOrders', ids: ['401'] });
-http('DELETE', '/api/v1/order', {}, { symbol: SYMBOL, orderId: '401' });
+http('DELETE', '/api/v1/order', placed('401', { ...replacement, status: 'Cancelled' }), { symbol: SYMBOL, orderId: '401' });
 ws('account.orderUpdate', order('401', { e: 'orderCancelled', X: 'Cancelled', p: '142', q: '1' }));
 command({
   op: 'placeOrders',

@@ -878,3 +878,24 @@ fn local_price_ack_preserves_the_last_native_execution_clock() {
         (110.0, 0.5, 1.5)
     );
 }
+#[test]
+fn stream_row_without_max_fixed_leverage_keeps_proven_isolation() {
+    let (mut e, s) = ready();
+    message(&mut e, s, NOW, POSITION);
+    assert_eq!(
+        e.store().positions()[0].margin_type,
+        Some(safe_cex_engine::model::MarginType::Isolated)
+    );
+    message(
+        &mut e,
+        s,
+        NOW + 1.0,
+        r#"{"feed":"open_positions","positions":[{"instrument":"PF_XBTUSD","balance":2,"entry_price":100,"mark_price":121,"pnl":42,"liquidation_threshold":50}]}"#,
+    );
+    let p = &e.store().positions()[0];
+    assert_eq!(
+        p.margin_type,
+        Some(safe_cex_engine::model::MarginType::Isolated)
+    );
+    assert_eq!(p.leverage, 10.0);
+}

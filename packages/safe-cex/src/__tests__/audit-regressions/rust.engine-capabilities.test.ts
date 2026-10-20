@@ -82,7 +82,7 @@ describe('Rust bridge routes from the engine capability record', () => {
     expect(exchange.engineCapabilities).toBeUndefined();
     expect(exchange.capabilities.orderHistory).toBe(true);
     await exchange.start();
-    expect(exchange.engineCapabilities?.cancelAll).toBe(true);
+    expect(exchange.engineCapabilities?.cancelAll).toBe('native');
     expect(exchange.capabilities).toMatchObject({
       fillHistory: false,
       orderHistory: false,
@@ -104,14 +104,14 @@ describe('Rust bridge routes from the engine capability record', () => {
   });
 
   it('cancels everything in one native command only where the engine supports it', async () => {
-    const native = fixture({ cancelAll: true });
+    const native = fixture({ cancelAll: 'native' });
     await native.exchange.start();
     await native.exchange.cancelAllOrders();
     expect(native.commands.filter((c) => c.op === 'cancelSymbolOrders')).toEqual([
       expect.objectContaining({ symbol: '' }),
     ]);
 
-    const perSymbol = fixture({ cancelAll: false });
+    const perSymbol = fixture({ cancelAll: 'eachOpenSymbol' });
     await perSymbol.exchange.start();
     perSymbol.exchange.store.update({ orders: [order('a', 'BTC'), order('b', 'ETH'), order('c', 'BTC')] });
     await perSymbol.exchange.cancelAllOrders();

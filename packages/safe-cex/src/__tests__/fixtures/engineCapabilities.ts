@@ -10,7 +10,7 @@ const OKX = ['okx', 'okxeu', 'okxdemo', 'okxeudemo'];
  */
 export const engineCapabilities = (venue: string, overrides: Partial<EngineCapabilities> = {}): string => {
   const is = (...names: string[]) => names.includes(venue);
-  const noHistory = is('breakoutprop', 'hyperliquidspot', 'krakenspot');
+  const noHistory = is('breakoutprop', 'hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse');
   const noOrdersOrIncome = noHistory || is('apexomni', 'bitrue', 'kucoinspot');
   const record: EngineCapabilities = {
     account: is('apexomni', 'kucoinspot', 'asterdex', 'polymarket')
@@ -23,7 +23,11 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     orderHistory: !noOrdersOrIncome,
     incomeHistory: !noOrdersOrIncome,
     fillsByOrderId: is('grvt'),
-    cancelAll: is('polymarket', 'breakoutprop', 'woo', 'grvt', 'kucoin', 'kucoinspot'),
+    cancelAll: is('polymarket', 'breakoutprop', 'woo', 'grvt', 'kucoin', 'kucoinspot', ...ORDERLY)
+      ? 'native'
+      : is('phemex', 'asterdex', 'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue', ...OKX)
+        ? 'eachPlacedSymbol'
+        : 'eachOpenSymbol',
     leverageQuery: is('asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', ...OKX, ...ORDERLY)
       ? 'onRead'
       : is('mexc', 'woo', 'kraken')

@@ -233,6 +233,10 @@ impl ApexOmni {
 }
 
 impl Venue for ApexOmni {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {

@@ -620,9 +620,24 @@ impl PhemexPerpetuals {
                 return true;
             }
         };
+        let skipped = orders.iter().flatten().filter(|row| {
+            cx.store.market(&row.symbol.to_ascii_uppercase()).is_some() && row.unrecognized()
+        });
+        let skipped = skipped
+            .map(|row| {
+                format!(
+                    "Phemex skipped order {} with unsupported status {} or type {}",
+                    row.order_id, row.status, row.kind
+                )
+            })
+            .collect::<Vec<_>>();
+        for message in skipped {
+            cx.log(LogLevel::Warning, message);
+        }
         if orders.as_ref().is_some_and(|rows| {
             rows.iter().any(|row| {
                 cx.store.market(&row.symbol.to_ascii_uppercase()).is_some()
+                    && !row.unrecognized()
                     && row.orders(cx.now).is_none()
             })
         }) {
@@ -747,6 +762,20 @@ impl PhemexPerpetuals {
             let mut staged = Vec::new();
             for row in &rows {
                 if cx.store.market(&row.symbol.to_ascii_uppercase()).is_none() {
+                    continue;
+                }
+                if row.unrecognized() {
+                    // Executions stand alone; the store keeps its copy of the order.
+                    if !snapshot {
+                        let version = if row.version() > 0 {
+                            row.version()
+                        } else {
+                            message.timestamp
+                        };
+                        self.account_fill(cx, row, version);
+                    } else if safe_snapshot && let Some(order) = cx.store.order(&row.order_id) {
+                        staged.push(order.clone());
+                    }
                     continue;
                 }
                 let mapped = row.orders(cx.now).expect("validated order row");

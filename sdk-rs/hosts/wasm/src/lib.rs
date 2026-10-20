@@ -311,7 +311,12 @@ struct EngineOptions {
     #[cfg(feature = "paradex")]
     #[serde(default)]
     payload_signer: bool,
-    #[cfg(any(feature = "backpack", feature = "bitrue", feature = "breakoutprop"))]
+    #[cfg(any(
+        feature = "backpack",
+        feature = "bitrue",
+        feature = "breakoutprop",
+        feature = "binance"
+    ))]
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
@@ -723,6 +728,7 @@ impl WasmEngine {
                     public_data_only: options.public_data_only,
                     spot_only: venue == "coinbasespot" || options.spot_only,
                     testnet: options.testnet,
+                    read_credentials: options.read_credentials.clone(),
                 })
                 .map_err(|error| JsError::new(&error))?,
             )),
@@ -877,6 +883,7 @@ impl WasmEngine {
             #[cfg(feature = "binance")]
             "binance" | "binancepm" | "binancespot" | "binanceinverse" => {
                 Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
+                    recv_window: options.recv_window,
                     read_credentials: options.read_credentials.clone(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
@@ -1313,7 +1320,7 @@ mod tests {
     ))]
     #[test]
     fn capabilities_match_the_former_bridge_name_lists() {
-        use safe_cex_engine::{AccountLookup, Capabilities, LeverageQuery, MaxLeverage};
+        use safe_cex_engine::{AccountLookup, CancelAll, Capabilities, LeverageQuery, MaxLeverage};
         const ORDERLY: [&str; 6] = [
             "tealstreet-dex",
             "kodiakfi",
@@ -1378,7 +1385,16 @@ mod tests {
             format!(r#"{{"publicDataOnly":true{endpoints}{extra}}}"#)
         };
         for venue in venues {
-            let no_history = any(&["breakoutprop", "hyperliquidspot", "krakenspot"], venue);
+            let no_history = any(
+                &[
+                    "breakoutprop",
+                    "hyperliquidspot",
+                    "krakenspot",
+                    "binancespot",
+                    "binanceinverse",
+                ],
+                venue,
+            );
             let no_orders_or_income =
                 no_history || any(&["apexomni", "bitrue", "kucoinspot"], venue);
             let expected = Capabilities {
@@ -1406,7 +1422,7 @@ mod tests {
                 order_history: !no_orders_or_income,
                 income_history: !no_orders_or_income,
                 fills_by_order_id: venue == "grvt",
-                cancel_all: any(
+                cancel_all: if any(
                     &[
                         "polymarket",
                         "breakoutprop",
@@ -1416,7 +1432,26 @@ mod tests {
                         "kucoinspot",
                     ],
                     venue,
-                ),
+                ) || any(&ORDERLY, venue)
+                {
+                    CancelAll::Native
+                } else if any(
+                    &[
+                        "phemex",
+                        "asterdex",
+                        "bitget",
+                        "bitgetinverse",
+                        "bitgetusdc",
+                        "blofin",
+                        "bitrue",
+                    ],
+                    venue,
+                ) || any(&OKX, venue)
+                {
+                    CancelAll::EachPlacedSymbol
+                } else {
+                    CancelAll::EachOpenSymbol
+                },
                 leverage_query: if any(
                     &[
                         "asterdex",

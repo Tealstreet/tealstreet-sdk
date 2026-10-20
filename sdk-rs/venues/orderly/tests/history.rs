@@ -9,10 +9,10 @@ const HIST_ORDER: &str = r#"{"order_id":9007199254740993,"symbol":"PERP_BTC_USDC
 const TRADE: &str = r#"{"symbol":"PERP_BTC_USDC","side":"SELL","executed_price":51000,"executed_quantity":0.25,"executed_timestamp":2000}"#;
 
 fn ask(e: &mut Driver, query: Query) {
-    e.handle(
-        2000.0,
-        Event::Command(Command::Query { command: 77, query }),
-    );
+    ask_with_id(e, 77, query);
+}
+fn ask_with_id(e: &mut Driver, command: u32, query: Query) {
+    e.handle(2000.0, Event::Command(Command::Query { command, query }));
 }
 fn result(e: &mut Driver) -> Result<String, String> {
     e.drain_actions()
@@ -577,7 +577,7 @@ fn funding_commands_and_page_continuations_share_account_rate_slots() {
     };
     ask(&mut e, income());
     let first = request(&mut e);
-    ask(&mut e, income());
+    ask_with_id(&mut e, 78, income());
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     let (second_timer, second_at) = out
@@ -644,8 +644,8 @@ fn funding_timers_delayed_by_host_throttling_cannot_dispatch_together() {
     ask(&mut e, income());
     request(&mut e);
     let mut timers = vec![];
-    for _ in 0..2 {
-        ask(&mut e, income());
+    for command in 78..80 {
+        ask_with_id(&mut e, command, income());
         timers.extend(actions(&mut e).into_iter().filter_map(|a| match a {
             Action::SetTimer { timer, .. } => Some(timer),
             _ => None,

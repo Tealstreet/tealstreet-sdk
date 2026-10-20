@@ -232,7 +232,10 @@ impl Kraken {
             steps.push_back(Step::Place(Box::new(self.prepare_order(cx, opts)?)));
             if opts.stop_loss.is_some() || opts.take_profit.is_some() {
                 if opts.kind != OrderType::Limit {
-                    return Err("Kraken brackets require a limit entry".into());
+                    return Err(
+                        "Kraken does not support take-profit/stop-loss legs on a market entry; use a limit entry or place TP/SL separately"
+                            .into(),
+                    );
                 }
                 for (kind, price) in [
                     (OrderType::StopLoss, opts.stop_loss),

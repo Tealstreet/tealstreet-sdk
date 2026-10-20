@@ -637,7 +637,7 @@ impl Venue for Grvt {
         safe_cex_engine::Capabilities {
             client_order_lookup: true,
             fills_by_order_id: true,
-            cancel_all: true,
+            cancel_all: safe_cex_engine::CancelAll::Native,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             ..safe_cex_engine::Capabilities::BASE
         }
@@ -1229,7 +1229,7 @@ impl Venue for Grvt {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, d)| d.ready && d.subscribers > 0)
+                .filter(|(_, d)| d.subscribers > 0)
                 .map(|(s, d)| (s.as_str(), &d.book)),
         )
     }

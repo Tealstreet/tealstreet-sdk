@@ -935,7 +935,7 @@ fn conditional_amount_replacement_preserves_trigger_and_execution() {
 }
 
 #[test]
-fn old_failed_command_cannot_rollback_newer_optimistic_owner() {
+fn overlapping_cancel_rejects_and_late_failure_cannot_rollback_the_retry() {
     let mut e = engine();
     e.store_mut().upsert_order(order("1", OrderType::Limit));
     let actions = command(
@@ -953,7 +953,11 @@ fn old_failed_command_cannot_rollback_newer_optimistic_owner() {
             ids: vec!["1".into()],
         },
     );
-    let second = writes(&actions).pop().unwrap();
+    assert!(writes(&actions).is_empty());
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandDone { command: 2, result: Err(error) })
+        if error == "Order amendment or cancellation is already in flight")));
+    assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Canceling);
     e.handle(
         1002.0,
         Event::HttpFailed {
@@ -961,7 +965,33 @@ fn old_failed_command_cannot_rollback_newer_optimistic_owner() {
             error: "first timeout",
         },
     );
-    e.drain_actions().for_each(drop);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(writes(&actions).is_empty());
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
+        if error == "first timeout")));
+    assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Open);
+    let actions = command(
+        &mut e,
+        Command::CancelOrders {
+            command: 3,
+            ids: vec!["1".into()],
+        },
+    );
+    let second = writes(&actions).pop().unwrap();
+    assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Canceling);
+    e.handle(
+        1003.0,
+        Event::HttpFailed {
+            request: first.id,
+            error: "late duplicate first timeout",
+        },
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|action| matches!(
+        action,
+        Action::Http(_) | Action::Notice(Notice::CommandDone { .. })
+    )));
     assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Canceling);
     let actions = response(&mut e, &second, json!([{"orderId":"1","success":true}]));
     assert_eq!(done(&actions).unwrap(), "[]");

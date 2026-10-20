@@ -35,6 +35,9 @@ struct Info {
     position_side: String,
 }
 fn ready(pm: bool) -> Harness {
+    ready_with_window(pm, None)
+}
+fn ready_with_window(pm: bool, recv_window: Option<f64>) -> Harness {
     let mut h = Harness::started(Options {
         key: Some("lookup-key".into()),
         read_credentials: Some(safe_cex_engine::ReadCredentials {
@@ -44,6 +47,7 @@ fn ready(pm: bool) -> Harness {
         }),
         secret: Some("lookup-secret".into()),
         portfolio_margin: pm,
+        recv_window,
         ..Options::default()
     });
     h.load_public();
@@ -388,4 +392,46 @@ fn native_json_escaped_client_identity_is_valid_and_matches_the_caller() {
         result(&mut h).unwrap().order.unwrap().client_order_id,
         "caller:/1"
     );
+}
+
+#[test]
+fn primary_lookup_signs_the_configured_recv_window_without_using_read_keys() {
+    for pm in [false, true] {
+        for (window, expected) in [(None, "20000"), (Some(4321.0), "4321"), (Some(0.0), "0")] {
+            let mut h = ready_with_window(pm, window);
+            h.engine
+                .store_mut()
+                .set_orders(vec![cached_order("secondary-order", "caller:/1")]);
+            query(&mut h, "BTCUSDT", "caller:/1");
+            let request = h.requests.pop().unwrap();
+            assert_eq!(request.route, Some(safe_cex_engine::RequestRoute::Primary));
+            assert!(
+                request
+                    .headers
+                    .iter()
+                    .any(|(name, value)| *name == "X-MBX-APIKEY" && value == "lookup-key")
+            );
+            let (payload, signature) = request
+                .url
+                .split_once('?')
+                .unwrap()
+                .1
+                .rsplit_once("&signature=")
+                .unwrap();
+            let expected_payload = format!(
+                "symbol=BTCUSDT&origClientOrderId=caller%3A%2F1&timestamp=1000&recvWindow={expected}"
+            );
+            assert_eq!(payload, expected_payload);
+            assert_eq!(
+                signature,
+                safe_cex_crypto::hmac_sha256(
+                    b"lookup-secret",
+                    expected_payload.as_bytes(),
+                    safe_cex_crypto::Encoding::Hex
+                )
+            );
+            h.reply(request.id, 200, "", ROW);
+            assert!(result(&mut h).unwrap().found);
+        }
+    }
 }
