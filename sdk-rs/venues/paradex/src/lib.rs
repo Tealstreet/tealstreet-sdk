@@ -1,6 +1,7 @@
 //! Paradex perpetuals on the sans-I/O engine.
 mod account;
 mod history;
+mod identity;
 mod public;
 mod sbe;
 pub mod sign;
@@ -39,6 +40,7 @@ pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
+    Identity(safe_cex_engine::CommandId),
 }
 
 pub struct Paradex {
@@ -117,11 +119,12 @@ impl Venue for Paradex {
             Pending::Public(request) => self.public_item(cx, request, item),
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::History(request) => self.history.on_item(cx, request, item),
-            Pending::Trade(_) => {}
+            Pending::Trade(_) | Pending::Identity(_) => {}
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         match pending {
+            Pending::Identity(command) => self.identity_response(cx, command, response),
             Pending::Public(request) => {
                 self.public_response(cx, request, response);
                 if cx.store.loaded().tickers {
@@ -174,6 +177,11 @@ impl Venue for Paradex {
         self.failures(cx);
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::FetchAccount { command } = command {
+            self.fetch_identity(cx, command);
+            self.failures(cx);
+            return;
+        }
         if let Some(command) = self.public_command(cx, command) {
             match command {
                 Command::Query { command, query } => self.history.query(
@@ -202,6 +210,7 @@ impl Venue for Paradex {
 impl Paradex {
     fn dispatch_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::Public(request) => self.public_failed(cx, request, error),
             Pending::Account(request) => self.account.on_failed(cx, request, error),
             Pending::Trade(request) => {

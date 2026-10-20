@@ -826,7 +826,6 @@ fn unsupported_stp_controls_reject_the_whole_batch_before_quotes_or_writes() {
 fn unsupported_aster_commands_complete_with_an_error_instead_of_waiting_forever() {
     use safe_cex_engine::model::StpMode;
     for command in [
-        Command::FetchAccount { command: 191 },
         Command::FetchStpMode { command: 191 },
         Command::SetStpMode {
             command: 191,

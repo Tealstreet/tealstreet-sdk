@@ -551,7 +551,6 @@ fn foreign_commands_fail_without_bypassing_known_order_cancellation_identity() {
             command: 33,
             mode: StpMode::ExpireBoth,
         },
-        Command::FetchAccount { command: 33 },
         Command::FetchOrderBook {
             command: 33,
             symbol: "BTC_USDT_PERP".into(),

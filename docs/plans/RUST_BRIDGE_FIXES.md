@@ -898,3 +898,18 @@ checks PASS. Default-core command parser and standalone Backpack host alias
 controls PASS. Logs: /tmp/bridge-identity-batch2-*.log and
 /tmp/bridge-identity-parser-*.log. SDK routing and rebuilt-WASM identity proof
 remain pending; these receipts cover native implementation and feature graphs.
+
+## Phase 4d session-backed identity checkpoint
+
+Crypto.com, GRVT and Paradex identity queries reuse their native sign/session
+state machines and dedicated read continuations. Crypto.com retains its one
+signature resend and safe-read network retries. GRVT fences old generations,
+allows legitimate current-session header rotation, and uses the selected/default
+trading subaccount before private startup. Paradex retains JWT acquisition,
+expiry refresh and delegated/direct signer routing. Login failures settle
+identity waiters once; no identity reducer changes financial state.
+
+309 native tests PASS in 22 nonempty suites (25 including empty doctests),
+including 26 new controls. Strict Clippy, fmt, bans and whitespace checks PASS.
+Independent implementation review PASS. Logs: /tmp/bridge-identity3-*.log.
+SDK dispatch and final combined-WASM acceptance remain separate gates.

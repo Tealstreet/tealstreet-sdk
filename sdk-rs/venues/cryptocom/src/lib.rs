@@ -1,6 +1,7 @@
 //! Crypto.com Exchange v1 perpetual derivatives on the sans-I/O engine.
 mod account;
 mod history;
+mod identity;
 pub mod sign;
 mod trading;
 mod wire;
@@ -27,6 +28,7 @@ pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
+    Identity(identity::Request),
     Markets {
         rows: Vec<Market>,
         indexes: HashMap<String, String>,
@@ -434,7 +436,7 @@ impl Venue for Cryptocom {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::History(request) => self.history_item(cx, request, item),
-            Pending::Trade(_) => {}
+            Pending::Trade(_) | Pending::Identity(_) => {}
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets {
                 rows,
@@ -476,6 +478,10 @@ impl Venue for Cryptocom {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Identity(request) = pending {
+            self.identity_response(cx, request, response);
+            return;
+        }
         if let Pending::Trade(request) = pending {
             self.trade_response(
                 cx,
@@ -508,7 +514,7 @@ impl Venue for Cryptocom {
             return;
         }
         match pending {
-            Pending::Trade(_) => unreachable!(),
+            Pending::Trade(_) | Pending::Identity(_) => unreachable!(),
             Pending::History(request) => self.history_response(cx, request),
             Pending::Account(request) => self.account_response(cx, request),
             Pending::Markets {
@@ -563,6 +569,7 @@ impl Venue for Cryptocom {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::History(request) => self.history_failed(cx, request, error, true),
             Pending::Account(request) => self.account_failed(cx, request, error, true),
@@ -688,6 +695,7 @@ impl Venue for Cryptocom {
                 }
                 Err(error) => cx.done(command, Err(error)),
             },
+            Command::FetchAccount { command } => self.fetch_identity(cx, command),
             Command::Query { command, query } => self.query(cx, command, query),
             command => self.trade_command(cx, command),
         }
