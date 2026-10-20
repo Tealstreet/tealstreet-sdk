@@ -95,6 +95,10 @@ pub struct Account {
     pub suppressed: HashMap<String, f64>,
     seen_fills: HashSet<u64>,
     fill_queue: VecDeque<u64>,
+    spot_filled: HashMap<String, (String, f64)>,
+    spot_fill_orders: VecDeque<String>,
+    spot_fill_tids: HashSet<u64>,
+    spot_fill_queue: VecDeque<u64>,
     notify_fills: HashSet<u64>,
     notify_queue: VecDeque<u64>,
     realized: HashMap<(String, PositionSide), f64>,
@@ -116,6 +120,42 @@ pub struct Placement {
     pub at: f64,
 }
 impl Hyperliquid {
+    pub(crate) fn apply_spot_ack_fills(&self, order: &mut Order) {
+        if let Some((symbol, filled)) = self.account.spot_filled.get(&order.id)
+            && *symbol == order.symbol
+        {
+            order.filled = order.amount.min(*filled);
+            order.remaining = (order.amount - order.filled).max(0.0);
+        }
+    }
+    fn record_spot_fill(&mut self, fill: &FillRow<'_>, symbol: &str) {
+        if !self.account.spot_fill_tids.insert(fill.tid) {
+            return;
+        }
+        self.account.spot_fill_queue.push_back(fill.tid);
+        if self.account.spot_fill_queue.len() > 20_000
+            && let Some(tid) = self.account.spot_fill_queue.pop_front()
+        {
+            self.account.spot_fill_tids.remove(&tid);
+        }
+        let id = fill.oid.to_string();
+        if !self.account.spot_filled.contains_key(&id) {
+            self.account.spot_fill_orders.push_back(id.clone());
+        }
+        let entry = self
+            .account
+            .spot_filled
+            .entry(id)
+            .or_insert_with(|| (symbol.to_owned(), 0.0));
+        if entry.0 == symbol {
+            entry.1 += fill.sz;
+        }
+        if self.account.spot_fill_orders.len() > 1024
+            && let Some(id) = self.account.spot_fill_orders.pop_front()
+        {
+            self.account.spot_filled.remove(&id);
+        }
+    }
     pub(crate) fn user(&self) -> Option<&str> {
         self.options
             .vault
@@ -271,28 +311,6 @@ impl Hyperliquid {
             .collect::<Vec<_>>();
         cx.store.set_settings(settings);
         if self.spot {
-            let positions = cx
-                .store
-                .markets()
-                .iter()
-                .map(|m| Position {
-                    id: m.symbol.clone(),
-                    symbol: m.symbol.clone(),
-                    side: PositionSide::Short,
-                    entry_price: 0.0,
-                    notional: 0.0,
-                    leverage: 1.0,
-                    margin_type: Some(MarginType::Cross),
-                    position_mode: Some(PositionMode::Oneway),
-                    unrealized_pnl: 0.0,
-                    realized_pnl: None,
-                    contracts: 0.0,
-                    liquidation_price: 0.0,
-                    margin_size: None,
-                    last_update: None,
-                })
-                .collect();
-            cx.store.set_positions(positions);
             self.account.mode_resolved = true;
             self.account.builder_approved = Some(false);
             if !self.options.public_data_only && self.user().is_some() {
@@ -1154,30 +1172,62 @@ impl Hyperliquid {
         };
         cx.store.set_balance(balance);
     }
+    fn spot_price(&self, cx: &Cx<'_, Pending>, coin: &str, path: &mut Vec<String>) -> f64 {
+        if ["USDC", "USDT", "USD", "USDH"]
+            .iter()
+            .any(|c| coin.eq_ignore_ascii_case(c))
+        {
+            return 1.0;
+        }
+        if path.len() >= 3
+            || path
+                .iter()
+                .any(|visited| visited.eq_ignore_ascii_case(coin))
+        {
+            return 0.0;
+        }
+        path.push(coin.to_owned());
+        let price =
+            (|| {
+                for usdc in [true, false] {
+                    for market in cx.store.markets().iter().filter(|m| {
+                        m.base.eq_ignore_ascii_case(coin) && (m.quote == "USDC") == usdc
+                    }) {
+                        let Some(ticker) = cx.store.ticker(&market.symbol) else {
+                            continue;
+                        };
+                        let mark = if ticker.mark > 0.0 {
+                            ticker.mark
+                        } else {
+                            ticker.last
+                        };
+                        if mark.is_finite() && mark > 0.0 {
+                            let quote = self.spot_price(cx, &market.quote, path);
+                            let notional = mark * quote;
+                            if notional.is_finite() && notional > 0.0 {
+                                return notional;
+                            }
+                        }
+                    }
+                }
+                0.0
+            })();
+        path.pop();
+        price
+    }
     fn apply_spot(&mut self, cx: &mut Cx<'_, Pending>, state: &SpotState<'_>, ws: bool) {
         if self.spot {
             let mut balance = Balance::default();
             let mut currencies = Vec::new();
             let mut coins = Vec::new();
+            let mut valuation_path = Vec::with_capacity(3);
             for b in &state.balances {
-                let price = if ["USDC", "USDT", "USD", "USDH"]
-                    .iter()
-                    .any(|c| b.coin.eq_ignore_ascii_case(c))
-                {
-                    1.0
-                } else {
-                    cx.store
-                        .markets()
-                        .iter()
-                        .find(|m| {
-                            m.base.eq_ignore_ascii_case(&b.coin)
-                                || b.token
-                                    .and_then(|token| self.spot_tokens.get(&token))
-                                    .is_some_and(|symbol| *symbol == m.symbol)
-                        })
-                        .and_then(|m| cx.store.ticker(&m.symbol))
-                        .map_or(0.0, |t| if t.mark > 0.0 { t.mark } else { t.last })
-                };
+                let coin = b
+                    .token
+                    .and_then(|token| self.spot_tokens.get(&token))
+                    .and_then(|symbol| cx.store.market(symbol))
+                    .map_or(b.coin.as_ref(), |m| m.base.as_str());
+                let price = self.spot_price(cx, coin, &mut valuation_path);
                 let free = (b.total - b.hold).max(0.0);
                 balance.total += b.total * price;
                 balance.used += b.hold * price;
@@ -1534,7 +1584,7 @@ impl Hyperliquid {
                     }
                 }
             }
-            if fills.is_snapshot {
+            if fills.is_snapshot || (self.spot && self.account.spot_fill_tids.contains(&fill.tid)) {
                 continue;
             }
             if self.account.notify_fills.insert(fill.tid) {
@@ -1552,6 +1602,7 @@ impl Hyperliquid {
                     amount: fill.sz,
                 });
                 if self.spot {
+                    self.record_spot_fill(&fill, &symbol);
                     let id = fill.oid.to_string();
                     self.amend_source_filled(&id);
                     if let Some(order) = cx.store.order(&id) {

@@ -80,9 +80,16 @@ documented positive relative distance; ambiguous edits fail before writes.
 - Kraken frozen full crate: 120 tests (93 existing futures, 27 spot) pass;
   strict crate Clippy, formatting and diff checks pass. Public/private/trading/
   query review findings are resolved, with focused independent regressions.
-- Hyperliquid frozen full crate: 83 tests (25 spot) pass; strict crate Clippy,
+- Hyperliquid frozen full crate: 84 tests (26 spot) pass; strict crate Clippy,
   formatting and diff checks pass. New quote identity and valuation changes
-  receive another independent review before gates.
+  received another independent review, including the cyclic conversion fix.
+- Harness phase review passes: independently checked 9 protocol tests and
+  4 compiled Kraken tests. Three compiled Hyperliquid tests also pass after
+  fixing the deterministic rig's timer pumping. No account economics are
+  rewritten in the replay gate.
+- First Kraken live capture includes 5,043 WS frames and two books, but exposed
+  rejected XDG subscriptions. Pair TS/Rust XDG/XXDG-to-DOGE normalization,
+  test inbound/outbound identity and balance valuation, then rebuild/recapture.
 - Work-in-progress checkpoint `3972cc5f54` committed before merging the landing
   branch cleanly at `16e4fa340e`. No PR exists yet. Selected Kraken WASM build,
   private/public/parent-venue/Binance gates, final repository checks, independent

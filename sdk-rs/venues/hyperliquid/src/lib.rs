@@ -149,6 +149,8 @@ impl Hyperliquid {
     fn ws(&self) -> &'static str {
         if self.options.testnet {
             "wss://api.hyperliquid-testnet.xyz/ws"
+        } else if self.spot {
+            "wss://api.hyperliquid.xyz/ws"
         } else {
             "wss://api-ui.hyperliquid.xyz/ws"
         }
@@ -272,7 +274,7 @@ impl Hyperliquid {
         if self.connection.open
             && let Some(socket) = self.connection.socket
         {
-            for n in 0..=6 {
+            for n in [None, Some(2), Some(3), Some(4), Some(5)] {
                 cx.send(
                     socket,
                     serde_json::to_string(&Send {
@@ -280,7 +282,7 @@ impl Hyperliquid {
                         subscription: Sub {
                             r#type: "l2Book",
                             coin,
-                            n_sig_figs: (n > 0).then_some(n),
+                            n_sig_figs: n,
                         },
                     })
                     .unwrap(),
@@ -594,11 +596,13 @@ fn spot_rows(
     let Ok(contexts) = serde_json::from_str::<Vec<SpotCtx>>(raw) else {
         return false;
     };
+    let positional =
+        contexts.len() == meta.universe.len() && contexts.iter().all(|c| c.coin.is_empty());
     for (position, native) in meta.universe.iter().enumerate() {
         let Some(ctx) = contexts
             .iter()
             .find(|c| c.coin == native.name)
-            .or_else(|| contexts.get(position).filter(|c| c.coin.is_empty()))
+            .or_else(|| positional.then(|| contexts.get(position)).flatten())
         else {
             continue;
         };
@@ -609,11 +613,18 @@ fn spot_rows(
         else {
             continue;
         };
+        let Some(quote) = meta
+            .tokens
+            .iter()
+            .find(|t| Some(&t.index) == native.tokens.get(1))
+        else {
+            continue;
+        };
         let Some(price) = ctx.context.mid_px.filter(|p| *p > 0.0) else {
             continue;
         };
         let id = native.name.clone();
-        let symbol = format!("{}/USDC", token.name);
+        let symbol = format!("{}/{}", token.name, quote.name);
         let step = 10f64.powi(-token.sz_decimals);
         let mark = if ctx.context.mark_px > 0.0 {
             ctx.context.mark_px
@@ -625,7 +636,7 @@ fn spot_rows(
             symbol: symbol.clone(),
             pretty_symbol: None,
             base: token.name.clone(),
-            quote: "USDC".into(),
+            quote: quote.name.clone(),
             active: true,
             precision: Precision {
                 amount: step,
@@ -793,7 +804,16 @@ impl Venue for Hyperliquid {
                         if let Some(m) = markets.iter().find(|m| m.id == native.name) {
                             self.assets.insert(m.symbol.clone(), 10_000 + native.index);
                             if let Some(token) = native.tokens.first() {
-                                self.spot_tokens.insert(*token, m.symbol.clone());
+                                let replace = self
+                                    .spot_tokens
+                                    .get(token)
+                                    .and_then(|s| markets.iter().find(|m| &m.symbol == s))
+                                    .is_none_or(|existing| {
+                                        existing.quote != "USDC" && m.quote == "USDC"
+                                    });
+                                if replace {
+                                    self.spot_tokens.insert(*token, m.symbol.clone());
+                                }
                             }
                             self.coins
                                 .insert(m.id.to_ascii_lowercase(), m.symbol.clone());

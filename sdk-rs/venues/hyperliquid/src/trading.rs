@@ -909,6 +909,9 @@ impl Hyperliquid {
                     self.trading.active.as_mut().unwrap().ids.push(id.clone());
                     if let Some(mut record) = records.get(index).cloned() {
                         record.order.id = id.clone();
+                        if self.spot {
+                            self.apply_spot_ack_fills(&mut record.order);
+                        }
                         if resting {
                             self.acknowledge_order_write(cx, &record.order.symbol);
                             if !record.order.symbol.contains('|') {
@@ -916,6 +919,7 @@ impl Hyperliquid {
                             }
                         }
                         if resting
+                            && (!self.spot || record.order.remaining > 0.0)
                             && cx.store.order(&id).is_none()
                             && !self.account.suppressed.contains_key(&id)
                         {
