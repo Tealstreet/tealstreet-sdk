@@ -245,3 +245,7 @@ leverage; neither runtime's output is rewritten for Paradex.
 Landing integration preserves both Lighter and Paradex registrations, normalization
 hooks and host roles. Five focused wrapper/routing files pass55 tests after that
 merge. PR adversarial reviews and green CI are the remaining landing steps.
+
+PR: https://github.com/Tealstreet/tealstreet-sdk/pull/1320, targeting
+`feat/rust-rewrite`. Two adversarial reviewers are examining the actual PR diff;
+findings will be posted as PR comments and addressed before merging on green CI.
