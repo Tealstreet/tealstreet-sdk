@@ -925,7 +925,8 @@ fn queries_return_history_in_the_shared_shapes() {
         },
     });
     let request = h.take("/v5/market/recent-trade");
-    assert!(request.headers.is_empty(), "public reads are not signed");
+    // Public reads retain the TS factory broker header without credentials.
+    assert_eq!(request.headers, vec![("X-Referer", "Tealstreet".into())]);
     h.reply(
         request.id,
         200,
@@ -1113,4 +1114,60 @@ fn a_mode_switch_fences_old_position_snapshots_and_queues_a_refresh() {
     h.reply(mode.id, 200, r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":1,"size":"0"},{"symbol":"BTCUSDT","positionIdx":2,"size":"0"}]}}"#);
     let batch = h.take("/v5/order/create-batch");
     assert!(body(&batch).contains(r#""positionIdx":1}"#));
+}
+
+#[test]
+fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
+    use safe_cex_engine::{Action, Notice};
+    for mixed in [false, true] {
+        let mut h = ready();
+        h.engine.store_mut().set_orders(vec![Order {
+            id: "123".into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTCUSDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 90.0,
+            amount: 1.0,
+            filled: 0.0,
+            remaining: 1.0,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }]);
+        h.engine.drain_actions().for_each(drop);
+        h.engine.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 991,
+                ids: if mixed {
+                    vec!["123".into(), "456".into()]
+                } else {
+                    vec!["456".into()]
+                },
+            }),
+        );
+        let actions = h.engine.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
+                    if error.contains("456") && error.contains("not found")
+            )),
+            "missing cancellation error: {actions:?}"
+        );
+        assert_eq!(
+            h.engine.store().order("123").unwrap().status,
+            OrderStatus::Open
+        );
+    }
 }

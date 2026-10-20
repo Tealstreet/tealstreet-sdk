@@ -453,11 +453,15 @@ impl BybitLinear {
         let (id, plan) = match command {
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
             Command::CancelOrders { command, ids } => {
-                let orders: Vec<Order> = ids
+                let orders = ids
                     .iter()
-                    .filter_map(|id| cx.store.order(id).cloned())
-                    .collect();
-                (command, Ok(self.plan_cancel(&orders)))
+                    .map(|id| {
+                        cx.store.order(id).cloned().ok_or_else(|| {
+                            format!("Order {id} not found; cancellation requires its symbol")
+                        })
+                    })
+                    .collect::<Result<Vec<Order>, String>>();
+                (command, orders.map(|orders| self.plan_cancel(&orders)))
             }
             Command::AmendOrder {
                 command,

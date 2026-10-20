@@ -508,10 +508,16 @@ impl BitgetFutures {
         match &job.intent {
             Command::PlaceOrders { orders, .. } => job.calls = self.place_calls(cx, orders)?.into(),
             Command::CancelOrders { ids, .. } => {
-                let native: HashSet<_> = ids
+                let native = ids
                     .iter()
-                    .filter_map(|id| cx.store.order(id).map(native_id))
-                    .collect();
+                    .map(|id| {
+                        cx.store.order(id).map(native_id).ok_or_else(|| {
+                            format!(
+                                "Order {id} not found; cancellation requires a reconciled order"
+                            )
+                        })
+                    })
+                    .collect::<Result<HashSet<_>, String>>()?;
                 let orders: Vec<_> = cx
                     .store
                     .orders()
