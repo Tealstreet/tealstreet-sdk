@@ -185,6 +185,12 @@ No new error architecture or unrelated engine helper migration belongs here.
   source-reviewed; compiled proof and full native/Clippy remain pending after
   the incoming wire merge. No claim of unbounded or mixed-idless exactly-once
   delivery, historical backfill or funded private verification is made.
+- Landing PR #1345 merged cleanly at 678177c203. Independent integration review
+  confirmed receive-window options and history brands survived the SDK merge.
+  Its fill bridge now exposes both id/orderId, so the new Spot worker/main
+  fixture explicitly expects both native identity fields. Full checks and all
+  replay gates must now certify this integrated source, replacing earlier
+  pre-integration performance evidence.
 
 ## Authorized next task after this PR merges
 

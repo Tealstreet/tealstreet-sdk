@@ -177,7 +177,7 @@ it.each([false, true])(
         expect(workerFills).toHaveLength(1);
         expect(mainFills).toHaveLength(1);
       });
-      const expected = [{ id: 'maker', symbol: 'BTCUSDT', side: OrderSide.Buy, price: 9100, amount: 1 }];
+    const expected = [{ id: 'maker', orderId: 'maker', symbol: 'BTCUSDT', side: OrderSide.Buy, price: 9100, amount: 1 }];
       expect(workerFills).toEqual(expected);
       expect(mainFills).toEqual(expected);
       if (reused) {
