@@ -1179,3 +1179,59 @@ fn a_refusal_after_an_accepted_placement_is_never_rejected() {
     );
     assert_eq!(error.outcome, None);
 }
+
+#[test]
+fn edit_and_cancel_statuses_never_claim_a_refusal_after_an_effect() {
+    use safe_cex_engine::Outcome;
+    for (status, outcome) in [
+        ("invalidSize", Some(Outcome::Rejected)),
+        // These cancel the resting order, possibly after fills.
+        ("postWouldExecute", None),
+        ("iocWouldNotExecute", None),
+    ] {
+        let (mut e, _) = ready();
+        inject(&mut e, "old", OrderType::Limit, None);
+        command(
+            &mut e,
+            Command::AmendOrder {
+                command: 8,
+                id: "old".into(),
+                price: Some(101.0),
+                amount: Some(0.2),
+            },
+        );
+        let r = http(&mut e, "editorder");
+        reply(
+            &mut e,
+            &r,
+            200,
+            &json!({"result":"success","editStatus":{"orderId":"old","status":status}}).to_string(),
+        );
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(error.outcome, outcome, "{status}");
+    }
+    // An unproven batch entry keeps the command Unknown after a later refusal.
+    let (mut e, _) = ready();
+    inject(&mut e, "a", OrderType::Limit, None);
+    inject(&mut e, "b", OrderType::Limit, None);
+    command(
+        &mut e,
+        Command::CancelOrders {
+            command: 8,
+            ids: vec!["a".into(), "b".into()],
+        },
+    );
+    let r = http(&mut e, "batchorder");
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"result":"success","batchStatus":[{"status":"cancelled"},{"status":"notFound","order_id":"b"}]}"#,
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        error.legacy_text(),
+        "Kraken cancellation rejected or identity mismatch: notFound"
+    );
+}

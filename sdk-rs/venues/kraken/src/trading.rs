@@ -712,6 +712,7 @@ impl Kraken {
         response: Response<'_>,
     ) {
         let ok = (200..300).contains(&response.status);
+        let leverage_read = matches!(request.step, Step::Leverage { .. });
         let reply = serde_json::from_str::<Reply>(response.body).map_err(|_| {
             let message = "Invalid Kraken trading response";
             if ok {
@@ -749,7 +750,13 @@ impl Kraken {
                     job.effective = true;
                 }
             }
-            Err(error) => self.trading_finish(cx, Err(error)),
+            Err(mut error) => {
+                // A leverage read has no write outcome.
+                if leverage_read {
+                    error.outcome = None;
+                }
+                self.trading_finish(cx, Err(error))
+            }
         }
         self.trading_pump(cx);
     }
@@ -771,6 +778,7 @@ impl Kraken {
                     return Err(status_failure(
                         format!("Kraken placement rejected or incomplete: {}", status.status),
                         &status.status,
+                        false,
                     ));
                 }
                 if self
@@ -818,7 +826,7 @@ impl Kraken {
                     ));
                 }
                 let mut seen = HashSet::new();
-                let mut error = None;
+                let mut error: Option<VenueError> = None;
                 let mut cancelled = false;
                 for status in statuses {
                     if status.status == "cancelled"
@@ -832,11 +840,21 @@ impl Kraken {
                             "Kraken cancellation rejected or identity mismatch: {}",
                             status.status
                         );
-                        error = Some(if ids.contains(&status.order_id) {
-                            status_failure(message, &status.status)
+                        let failure = if ids.contains(&status.order_id) {
+                            status_failure(message, &status.status, false)
                         } else {
                             unproven(message)
-                        });
+                        };
+                        // The last failure's text, but an Unknown entry is never overwritten.
+                        error = match error {
+                            Some(first) if first.outcome == Some(Outcome::Unknown) => {
+                                Some(VenueError {
+                                    message: failure.message,
+                                    ..first
+                                })
+                            }
+                            _ => Some(failure),
+                        };
                     }
                 }
                 if let Some(mut error) = error {
@@ -868,7 +886,7 @@ impl Kraken {
                         status.status
                     );
                     return Err(if status.order_id == original.id {
-                        status_failure(message, &status.status)
+                        status_failure(message, &status.status, true)
                     } else {
                         unproven(message)
                     });
@@ -1009,6 +1027,9 @@ fn refusal(message: String, status: Option<&str>, code: Option<String>) -> Venue
     let error = VenueError::new(message);
     let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
     let error = match (status, code.as_deref()) {
+        (_, Some("Server Error" | "Unavailable" | "unknownError")) => {
+            error.outcome(Outcome::Unknown)
+        }
         (Some("unauthorized"), _) | (_, Some("authenticationError")) => {
             rejected(error, ErrorKind::AuthInvalid)
         }
@@ -1030,9 +1051,6 @@ fn refusal(message: String, status: Option<&str>, code: Option<String>) -> Venue
             ),
         )
         | (Some("BAD_REQUEST"), _) => rejected(error, ErrorKind::Rejected),
-        (_, Some("Server Error" | "Unavailable" | "unknownError")) => {
-            error.outcome(Outcome::Unknown)
-        }
         _ => error,
     };
     match code {
@@ -1043,8 +1061,16 @@ fn refusal(message: String, status: Option<&str>, code: Option<String>) -> Venue
 
 /// A send/edit/cancel status that is not success. Only Kraken's documented
 /// refusal statuses prove nothing happened.
-fn status_failure(message: String, status: &str) -> VenueError {
+fn status_failure(message: String, status: &str, edit: bool) -> VenueError {
     let error = VenueError::new(message);
+    // A success status with a missing or mismatched id does not prove what happened.
+    if status.is_empty() || matches!(status, "placed" | "filled" | "cancelled" | "edited") {
+        return error.outcome(Outcome::Unknown);
+    }
+    // On an edit these cancel the resting order, possibly after fills.
+    if edit && matches!(status, "postWouldExecute" | "iocWouldNotExecute") {
+        return error.venue_code(status);
+    }
     let refused = matches!(
         status,
         "marketSuspended"
@@ -1078,8 +1104,6 @@ fn status_failure(message: String, status: &str) -> VenueError {
             .kind(ErrorKind::Rejected)
             .outcome(Outcome::Rejected)
             .venue_code(status)
-    } else if status.is_empty() {
-        error.outcome(Outcome::Unknown)
     } else {
         error.venue_code(status)
     }
