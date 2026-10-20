@@ -28,7 +28,9 @@ compile_error!(
     "safe-cex-wasm requires at least one venue feature: paradex, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, woo or weex"
 );
 
-use safe_cex_engine::model::{CancelOrderRef, PlaceOrderOpts, StpMode};
+use safe_cex_engine::model::PlaceOrderOpts;
+#[cfg(feature = "asterdex")]
+use safe_cex_engine::model::{CancelOrderRef, StpMode};
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
@@ -459,6 +461,7 @@ enum CommandIn {
         command: u32,
         ids: Vec<String>,
     },
+    #[cfg(feature = "asterdex")]
     CancelOrdersWithSymbols {
         command: u32,
         orders: Vec<CancelOrderRef>,
@@ -490,18 +493,22 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
+    #[cfg(feature = "asterdex")]
     FetchStpMode {
         command: u32,
     },
+    #[cfg(feature = "asterdex")]
     FetchAccount {
         command: u32,
     },
+    #[cfg(feature = "asterdex")]
     FetchOrderBook {
         command: u32,
         symbol: String,
         #[serde(default)]
         limit: Option<u32>,
     },
+    #[cfg(feature = "asterdex")]
     SetStpMode {
         command: u32,
         mode: StpMode,
@@ -600,6 +607,7 @@ impl From<CommandIn> for Command {
             }
             CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
             CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
+            #[cfg(feature = "asterdex")]
             CommandIn::CancelOrdersWithSymbols { command, orders } => {
                 Self::CancelOrdersWithSymbols { command, orders }
             }
@@ -626,8 +634,11 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
+            #[cfg(feature = "asterdex")]
             CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
+            #[cfg(feature = "asterdex")]
             CommandIn::FetchAccount { command } => Self::FetchAccount { command },
+            #[cfg(feature = "asterdex")]
             CommandIn::FetchOrderBook {
                 command,
                 symbol,
@@ -637,6 +648,7 @@ impl From<CommandIn> for Command {
                 symbol,
                 limit,
             },
+            #[cfg(feature = "asterdex")]
             CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
@@ -1152,6 +1164,7 @@ mod tests {
 
     use super::*;
 
+    #[cfg(feature = "asterdex")]
     #[test]
     fn cancellation_with_symbols_preserves_caller_identity() {
         let wire: CommandIn = serde_json::from_str(
@@ -1161,6 +1174,66 @@ mod tests {
             matches!(Command::from(wire), Command::CancelOrdersWithSymbols { command: 19, orders }
             if orders == vec![CancelOrderRef { id: "22542179".into(), symbol: "BTCUSDT".into() }])
         );
+    }
+
+    // These methods are exposed by the SDK only for Aster. Keep their wire
+    // parsers out of other single-venue builds while retaining the shared
+    // engine command types for native hosts.
+    #[test]
+    fn aster_commands_follow_the_compiled_venue_feature() {
+        let commands = [
+            r#"{"op":"cancelOrdersWithSymbols","command":19,"orders":[{"id":"7","symbol":"BTCUSDT"}]}"#,
+            r#"{"op":"fetchStpMode","command":19}"#,
+            r#"{"op":"fetchAccount","command":19}"#,
+            r#"{"op":"fetchOrderBook","command":19,"symbol":"BTCUSDT","limit":50}"#,
+            r#"{"op":"setStpMode","command":19,"mode":"EXPIRE_MAKER"}"#,
+        ];
+        for (index, json) in commands.into_iter().enumerate() {
+            let parsed = serde_json::from_str::<CommandIn>(json);
+            #[cfg(feature = "asterdex")]
+            match (index, Command::from(parsed.unwrap())) {
+                (
+                    0,
+                    Command::CancelOrdersWithSymbols {
+                        command: 19,
+                        orders,
+                    },
+                ) => {
+                    assert_eq!(
+                        orders,
+                        vec![CancelOrderRef {
+                            id: "7".into(),
+                            symbol: "BTCUSDT".into()
+                        }]
+                    );
+                }
+                (1, Command::FetchStpMode { command: 19 })
+                | (2, Command::FetchAccount { command: 19 })
+                | (
+                    4,
+                    Command::SetStpMode {
+                        command: 19,
+                        mode: StpMode::ExpireMaker,
+                    },
+                ) => {}
+                (
+                    3,
+                    Command::FetchOrderBook {
+                        command: 19,
+                        symbol,
+                        limit: Some(50),
+                    },
+                ) => {
+                    assert_eq!(symbol, "BTCUSDT");
+                }
+                _ => panic!("Aster command {index} changed its wire mapping"),
+            }
+            #[cfg(not(feature = "asterdex"))]
+            assert!(
+                parsed.is_err(),
+                "unsupported Aster command {index} must reject"
+            );
+        }
     }
 
     #[test]

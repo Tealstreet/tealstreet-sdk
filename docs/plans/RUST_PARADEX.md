@@ -423,3 +423,19 @@ dropping it. Five newly introduced Aster-specific engine commands return explici
 unsupported errors on Paradex instead of leaving callers waiting. Regression tests
 cover these boundaries. Fresh standard artifact/replay gates and exact-head CI are
 required after this integration; the latest results are posted on PR #1320.
+
+### Restore the single-venue size contract
+
+The Aster merge grew the single-Paradex artifact to 1,264,821 bytes, exceeding
+the unchanged 1,258,291-byte budget by 6,530 bytes. Review traced the avoidable
+retention to five Aster-only command wire parsers. Their enum variants, conversion
+arms and imports are now selected by the Aster feature, matching the SDK's existing
+Aster-only dispatch. Default combined builds retain the full API. Shared native
+commands, STP parsing and Paradex's explicit rejection guards stay intact.
+
+Independent review passes. Single-Paradex wire tests reject all five unavailable
+operations, and Aster-feature tests verify exact forwarding. The rebuilt web and
+Node artifact measures 1,239,936 bytes: 24,885 bytes smaller than the failing
+control, with 18,355 bytes of budget headroom. No threshold or economic behavior
+changed. Final standard replays and exact-head CI validate this candidate; results
+and command/artifact provenance are posted on PR #1320.
