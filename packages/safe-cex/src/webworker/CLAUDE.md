@@ -315,3 +315,49 @@ Driven from the page by `apps/web/src/utils/dev/perfFixture.ts`
 (`?perfFixture=record`, then `__tsPerfFixture.save()` / `.replay()` / `.off()`).
 Opt-in: with no URL param and no stored mode the worker stays in `off` and the
 cost is one boolean per outbound message.
+
+## Rust engine traps and worker ownership
+
+`engine-dead` is terminal for one native account. The worker owns recovery only
+once startup has completed: it invalidates the old callback generation, detaches
+its store listener, clears the trailing throttle/handlers, stops its own chasers
+and exact TWAP instances, and makes one fresh account/store after a 500 ms delay.
+A second panic or failed replacement stops recovery and warns the consumer.
+Every fatal event invalidates loaded flags and derived active-algorithm lists,
+including terminal shared-feed failures, while preserving last known main-thread
+venue values until a real replacement snapshot arrives. The disposed native
+adapter's local store may reset through its inherited dispose implementation.
+Initial startup failures still return `false` to `store.webworker.ts` for cleanup;
+explicit dispose/deactivate cancels both queued and in-flight replacement.
+For a native trap, the adapter already emits the fatal error once; the worker
+adds startup context as a warning log instead of reporting a duplicate error.
+
+Every generation fences frame callbacks, store notifications, event forwarding
+and handler state messages. A request already in flight may receive its one
+correlated result from the old generation, preserving known write IDs or typed
+unknown outcomes. A task fallback fails any interrupted executor that does not
+report, and later duplicate replies stay fenced. Fresh state resets the object/delta baselines
+and advances order/position freshness IDs; the adapter sends its native empty
+full snapshot before starting the replacement, clearing the main decoder's
+catalog/book baselines. Do not reuse a poisoned host or reset the shared WASM
+module loader: other accounts in the same realm remain live.
+
+Only current book/candle desired subscriptions survive reconstruction, keyed by
+stream kind/subId and removed by subId-only unsubscribe even during recovery.
+The latest UI state and active ticker symbols are also restored as safe demand. Trading,
+CLI commands, method calls and algorithm state are never replayed. Requests
+arriving during recovery receive a visible failure (with their existing request
+ID where the protocol supports one). Interrupted writes may already have reached
+the venue: recovery does not prove cancellation or authorize a retry.
+
+A transferred shared-public-feed port belongs to the failed account and is
+closed during disposal. That policy fails closed: recovery requires a fresh
+provider attachment and explicit account init, rather than silently opening
+direct public feeds or reusing the closed port. Shared-worker attachments during
+an existing recovery retain that owner and receive a failed startup acknowledgement
+and warning on the attaching port, without interrupting existing clients.
+
+TWAP instances are tracked by actual handler-created instance identity, never
+account name, so terminating one worker cannot stop another same-name account.
+`TwapInstance.start()` checks termination again after its awaited placement;
+otherwise a reply arriving after terminate could schedule another old slice.

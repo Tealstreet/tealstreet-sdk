@@ -83,6 +83,23 @@ credentials, supported venue products, or whether explicit public REST queries
 are allowed. `fetchBalance` reads current native reconciled state, as do the
 Rust adapter's other store-backed account reads.
 
+## Rust engine failure
+
+A native WASM trap makes that exchange instance terminal (`isEngineDead`),
+settles its pending commands and emits `engine-dead` after one visible error.
+The host stops its I/O and ignores late callbacks. Ordinary venue validation,
+transport and consumer-callback errors do not mark the engine dead. Interrupted
+writes report an unknown outcome with supplied client order IDs; never replay
+them automatically or interpret failure as proof that no order exists.
+
+A running ExchangeWorker makes at most one delayed reconstruction attempt with
+a fresh exchange and native state, retaining only public subscription demand.
+The new stream starts with a full native empty snapshot to discard old book and
+catalog baselines. Chasers/TWAPs stop and commands arriving during recovery fail.
+Shared-feed accounts require a fresh provider attachment and account init;
+their closed transferred port cannot be reused. Module-wide WASM initialization
+and sibling accounts remain independent of one account's terminal state.
+
 ## Client order ID contract
 
 `PlaceOrderOpts.clientOrderId` is a caller-supplied ID for the venue-native

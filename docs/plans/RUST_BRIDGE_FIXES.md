@@ -89,4 +89,53 @@ verification and a stable commit. Keep failures and evidence boundaries visible.
 - Plan recorded after PR #1342 merged with 40/40 green checks: 40 public,
   64 private and 30 size gates; 2,794 native tests, 7,748 SDK unit and 443 SDK
   WASM tests. Detailed receipt and original failed trials remain on that PR.
-- Phase 1 plan independently reviewed; implementation pending.
+- Phase 1 implemented and independently reviewed PASS. Host traps latch terminal
+  state, clean up I/O and preserve unknown-write identity; the wrapper wakes
+  startup and reports failure once. Running workers reconstruct at most once,
+  retain safe demand, stop algos and never replay writes. Shared ports require
+  fresh attachment. Native initial empty snapshots discard main book baselines;
+  terminal lifecycle updates mark unavailable while retaining last-known venue
+  data. Capture freshness IDs before inherited disposal resets the local store.
+- Review findings fixed: subId-only unsubscribe replay, synchronous first-slice
+  TWAP failure escaping ownership cleanup, replyless control rejections, shared
+  client startup acknowledgement during recovery, pending RPC settlement and
+  preservation of already acknowledged order IDs, and false recovered status
+  if subscription replay traps the replacement. A terminated TWAP's pending
+  placement continuation can no longer schedule another slice.
+- Phase 1 verification: 98 host tests; 447 SDK WASM cases in 17 files; 107
+  relevant worker/handler/TWAP cases across scoped runs (including final 18-case
+  recovery suite); whole SDK typecheck and scoped strict lint PASS. Source
+  review PASS after fixes. New real minimal-WASM unreachable controls plus two
+  actual-native account/stream integration tests establish containment and
+  sibling/baseline behavior; they do not claim a live venue panic was observed.
+  Native source is unchanged. Local combined artifact is 12,172,135 bytes,
+  SHA256 `51e335bd0acd407f75b51b26bf780d083ea49bd720b9533c2fc2cc9906c2d3c3`.
+  Broad final gates and PR review remain phase 7 work.
+
+## Phase 2 plan and audit
+
+- Retain current listener demand, not a chronological command queue. Use native
+  STATUS/MARKETS readiness rather than cache-seeded JS flags. Apply and validate
+  native metadata before replay, and forward the catalog before a synchronous
+  demand-generated data frame can reach the main consumer.
+- Register callbacks before sending the first subscription. Capture both book
+  and candle listener-container snapshots before replay; recheck map identity
+  and nonempty demand immediately before each send. This avoids replaying a
+  removed/replaced topic or duplicating one added reentrantly. Preserve callback
+  refcounts, Aster independent listener semantics, canonical intervals and
+  symbols containing colons. Shared demand waits for compatible native catalog.
+- Public reads on an unstarted object must not return cache seed or empty data
+  as native truth. Start the existing single-use engine and await only the
+  relevant native market/ticker readiness, with terminal/startup failure and
+  bounded waiting; public reads do not wait on unrelated private balances.
+  Running reads remain snapshots, not a claimed forced metadata refresh.
+- The actual factory cache-poisoning caller is already fixed by #1342. No
+  in-repo caller proves successful validateAccount must auto-dispose; retain
+  caller ownership and document that lifecycle-only skip. Do not break reuse
+  merely to mirror a TS startup/cleanup shape.
+- Tests: delayed module and native metadata with seeded JS flags, prestart
+  subscribe/unsubscribe, duplicate/refcount behavior, reentrant add/remove and
+  immediate callbacks, shared mismatch with zero provider demand, forwarding
+  catalog-before-book ordering, and public metadata available while private
+  balance is still pending. Run scoped checks, independent review, fixes and
+  commit before phase 3.

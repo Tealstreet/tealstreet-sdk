@@ -115,6 +115,13 @@ export class CallMethodHandler extends BaseHandler {
               stack: e.stack,
               // Preserve custom properties like 'code' from exchange errors
               ...('code' in e && { code: (e as Error & { code: unknown }).code }),
+              ...('code' in e && e.code === 'ENGINE_DEAD' && {
+                ...('outcome' in e && e.outcome === 'unknown' && { outcome: 'unknown' }),
+                ...('clientOrderId' in e && typeof e.clientOrderId === 'string' && { clientOrderId: e.clientOrderId }),
+                ...('clientOrderIds' in e && Array.isArray(e.clientOrderIds) && {
+                  clientOrderIds: e.clientOrderIds.filter((id: unknown) => typeof id === 'string'),
+                }),
+              }),
             }
           : {
               message: String(e),

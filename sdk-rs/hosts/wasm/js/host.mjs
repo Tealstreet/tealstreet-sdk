@@ -13,6 +13,26 @@
 // }
 
 const CHUNK_BYTES = 16 * 1024;
+const WRITE_COMMANDS = new Set(['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
+  'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode', 'setStpMode']);
+
+/** A trapped engine cannot be reused. An interrupted write may already exist at the venue. */
+export class EngineDeadError extends Error {
+  constructor(cause, command) {
+    super('Exchange engine stopped unexpectedly', { cause });
+    this.name = 'EngineDeadError';
+    this.code = 'ENGINE_DEAD';
+    if (command) {
+      this.command = command.op;
+      if (WRITE_COMMANDS.has(command.op)) {
+        this.outcome = 'unknown';
+        this.message = 'Exchange engine stopped; command outcome is unknown. Reconcile before retrying';
+      }
+      if (command.clientOrderId !== undefined) this.clientOrderId = command.clientOrderId;
+      if (command.clientOrderIds?.length) this.clientOrderIds = command.clientOrderIds;
+    }
+  }
+}
 
 export class EngineHost {
   constructor(engine, transport, handlers = {}) {
@@ -26,6 +46,7 @@ export class EngineHost {
     this.signings = new Map();
     this.nextCommand = 1;
     this.disposed = false;
+    this.deadError = undefined;
     this.wsEncoder = undefined;
     this.wsScratch = undefined;
     this.wsScratchBusy = false;
@@ -33,21 +54,48 @@ export class EngineHost {
 
   start() {
     if (this.disposed) return;
-    this.run(this.engine.start(this.transport.now()));
+    this.run(this.invoke(this.engine.start, this.transport.now()));
+  }
+
+  get dead() { return this.deadError !== undefined; }
+
+  // Preserve native argument counts without per-message closures or rest arrays.
+  invoke(fn, a, b, c, d) {
+    if (this.disposed) return;
+    try {
+      switch (arguments.length) {
+        case 1: return fn.call(this.engine);
+        case 2: return fn.call(this.engine, a);
+        case 3: return fn.call(this.engine, a, b);
+        case 4: return fn.call(this.engine, a, b, c);
+        default: return fn.call(this.engine, a, b, c, d);
+      }
+    } catch (error) {
+      if (typeof WebAssembly === 'undefined' || !(error instanceof WebAssembly.RuntimeError)) throw error;
+      this.deadError = new EngineDeadError(error);
+      this.disposed = true;
+      try { this.cleanup(this.deadError, true); }
+      finally { this.handlers.onDead?.(this.deadError); }
+    }
   }
 
   /** Send a command; resolves with its result for commands that report one. */
   command(command) {
-    if (this.disposed) return Promise.reject(new Error('engine disposed'));
+    if (this.disposed) return Promise.reject(this.deadError ?? new Error('engine disposed'));
     const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setTickInterval' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
+    const clientOrderIds = reply !== undefined && Array.isArray(command.orders)
+      ? command.orders.map((order) => order?.clientOrderId).filter((id) => typeof id === 'string') : undefined;
+    const identity = reply === undefined ? undefined : { op: command.op,
+      clientOrderId: command.clientOrderId ?? (clientOrderIds?.length === 1 ? clientOrderIds[0] : undefined), clientOrderIds };
     const promise = reply === undefined
       ? Promise.resolve()
-      : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject }));
+      : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity }));
     try {
-      this.run(this.engine.command(JSON.stringify(reply === undefined ? command : { ...command, command: reply }), this.transport.now()));
+      this.run(this.invoke(this.engine.command, JSON.stringify(reply === undefined ? command : { ...command, command: reply }), this.transport.now()));
+      if (reply === undefined && this.deadError) return Promise.reject(this.deadError);
     } catch (error) {
       if (reply === undefined) return Promise.reject(error);
       const pending = this.commands.get(reply);
@@ -65,69 +113,83 @@ export class EngineHost {
    */
   flush(marketOnly = false) {
     if (this.disposed) return;
-    const frame = this.engine.takeFrame(this.transport.now(), marketOnly);
+    const frame = this.invoke(this.engine.takeFrame, this.transport.now(), marketOnly);
     if (frame) this.handlers.onFrame?.(frame.buffer);
   }
 
   /** The whole current state as one frame (an ArrayBuffer), for a consumer
    * that starts late or skipped frames; later flushes apply on top of it. */
   snapshot() {
-    if (this.disposed) throw new Error('engine disposed');
-    return this.engine.snapshotFrame(this.transport.now()).buffer;
+    if (this.disposed) throw this.deadError ?? new Error('engine disposed');
+    const frame = this.invoke(this.engine.snapshotFrame, this.transport.now());
+    if (this.deadError) throw this.deadError;
+    return frame.buffer;
   }
 
   accountId() {
-    if (this.disposed) throw new Error('engine disposed');
-    return this.engine.accountId?.();
+    if (this.disposed) throw this.deadError ?? new Error('engine disposed');
+    const id = this.engine.accountId ? this.invoke(this.engine.accountId) : undefined;
+    if (this.deadError) throw this.deadError;
+    return id;
   }
 
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
-    for (const controller of this.requests.values()) controller.abort();
+    this.cleanup(new Error('engine disposed'));
+  }
+
+  cleanup(error, tolerateErrors = false) {
+    const attempt = (fn) => {
+      if (!tolerateErrors) { fn(); return; }
+      try { fn(); } catch { /* A broken transport must not strand the remaining resources. */ }
+    };
+    for (const controller of this.requests.values()) attempt(() => controller.abort());
     this.requests.clear();
     for (const pending of this.signings.values()) {
-      pending.controller.abort();
-      this.transport.clearTimeout(pending.timer);
+      attempt(() => pending.controller.abort());
+      attempt(() => this.transport.clearTimeout(pending.timer));
     }
     this.signings.clear();
-    for (const pending of this.commands.values()) pending.reject(new Error('engine disposed'));
+    for (const pending of this.commands.values()) pending.reject(this.deadError
+      ? new EngineDeadError(this.deadError.cause, pending.identity) : error);
     this.commands.clear();
-    for (const socket of this.sockets.values()) socket.close();
-    for (const handle of this.timers.values()) this.transport.clearTimeout(handle);
+    for (const socket of this.sockets.values()) attempt(() => socket.close());
+    for (const handle of this.timers.values()) attempt(() => this.transport.clearTimeout(handle));
     this.sockets.clear();
     this.wsScratch = undefined;
     this.timers.clear();
-    this.transport.dispose?.();
+    attempt(() => this.transport.dispose?.());
   }
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
   async receive(id, { status, headers = '', body }) {
     if (this.disposed) return;
     const { engine, transport } = this;
-    this.run(engine.httpStart(id, status, headers, transport.now()));
+    this.run(this.invoke(engine.httpStart, id, status, headers, transport.now()));
+    if (this.disposed) return;
     try {
       if (body instanceof Uint8Array) {
         for (let at = 0; at < body.length; at += CHUNK_BYTES) {
           if (this.disposed) return;
-          this.run(engine.httpChunk(id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
+          this.run(this.invoke(engine.httpChunk, id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
         }
       } else {
         for await (const chunk of body) {
           if (this.disposed) return;
           for (let at = 0; at < chunk.length; at += CHUNK_BYTES) {
             if (this.disposed) return;
-            this.run(engine.httpChunk(id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
+            this.run(this.invoke(engine.httpChunk, id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
           }
         }
       }
     } catch (error) {
       if (this.disposed) return;
-      this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
+      this.run(this.invoke(engine.httpFailed, id, String(error?.message ?? error), transport.now()));
       return;
     }
     if (this.disposed) return;
-    this.run(engine.httpEnd(id, transport.now()));
+    this.run(this.invoke(engine.httpEnd, id, transport.now()));
   }
 
   async request(action) {
@@ -146,7 +208,7 @@ export class EngineHost {
       });
       if (!this.disposed) await this.receive(id, response);
     } catch (error) {
-      if (!this.disposed) this.run(this.engine.httpFailed(id, String(error?.message ?? error), this.transport.now()));
+      if (!this.disposed) this.run(this.invoke(this.engine.httpFailed, id, String(error?.message ?? error), this.transport.now()));
     } finally {
       this.requests.delete(id);
     }
@@ -162,9 +224,9 @@ export class EngineHost {
       this.transport.clearTimeout(pending.timer);
       if (error) {
         controller.abort();
-        this.run(this.engine.payloadSignFailed(id, String(error?.message ?? error), this.transport.now()));
+        this.run(this.invoke(this.engine.payloadSignFailed, id, String(error?.message ?? error), this.transport.now()));
       } else {
-        this.run(this.engine.payloadSigned(id, result.signature, result.headers, this.transport.now()));
+        this.run(this.invoke(this.engine.payloadSigned, id, result.signature, result.headers, this.transport.now()));
       }
     };
     const timer = this.transport.setTimeout(() => finish(new Error('Payload signing timed out')), action.timeoutMs);
@@ -211,7 +273,7 @@ export class EngineHost {
         if (action.headers?.length && !transport.webSocketHeaders) {
           this.handlers.onLog?.('warning', 'WebSocket upgrade headers unavailable; continuing REST reconciliation');
           transport.setTimeout(() => {
-            if (!this.disposed) this.run(engine.wsClose(id, 1006, transport.now()));
+            if (!this.disposed) this.run(this.invoke(engine.wsClose, id, 1006, transport.now()));
           }, 0);
           break;
         }
@@ -220,11 +282,11 @@ export class EngineHost {
           channel: action.channel,
           context: action.context,
           headers: action.headers && Object.fromEntries(action.headers),
-          onOpen: () => { if (!this.disposed) this.run(engine.wsOpen(id, transport.now())); },
+          onOpen: () => { if (!this.disposed) this.run(this.invoke(engine.wsOpen, id, transport.now())); },
           onMessage: (text) => {
             if (this.disposed) return;
             if (!wsMessageBytes) {
-              this.run(wsMessage.call(engine, id, text, transport.now()));
+              this.run(this.invoke(wsMessage, id, text, transport.now()));
               return;
             }
             // UTF-8 needs at most three bytes per UTF-16 unit, including lone
@@ -242,7 +304,7 @@ export class EngineHost {
               } else {
                 bytes = encoder.encode(text);
               }
-              actions = wsMessageBytes.call(engine, id, bytes, transport.now());
+              actions = this.invoke(wsMessageBytes, id, bytes, transport.now());
             } finally {
               if (scratch) this.wsScratchBusy = false;
             }
@@ -250,21 +312,25 @@ export class EngineHost {
           },
           onBinary: (data) => {
             if (this.disposed || !this.sockets.has(id)) return;
-            if (engine.wsBinary) this.run(engine.wsBinary(id, data, transport.now()));
+            if (engine.wsBinary) this.run(this.invoke(engine.wsBinary, id, data, transport.now()));
             else {
               const active = this.sockets.get(id);
               this.sockets.delete(id);
               active.close();
-              this.run(engine.wsClose(id, 1003, transport.now()));
+              this.run(this.invoke(engine.wsClose, id, 1003, transport.now()));
             }
           },
           onClose: (code) => {
             if (this.disposed || !this.sockets.has(id)) return;
             this.sockets.delete(id);
-            this.run(engine.wsClose(id, code ?? 1006, transport.now()));
+            this.run(this.invoke(engine.wsClose, id, code ?? 1006, transport.now()));
           },
         });
-        this.sockets.set(id, socket);
+        // A synchronous transport may call onOpen before returning its socket.
+        if (this.disposed) {
+          if (this.dead) { try { socket.close(); } catch { /* Fatal cleanup is best effort. */ } }
+          else socket.close();
+        } else this.sockets.set(id, socket);
         break;
       }
       case 'wsSend':
@@ -283,9 +349,10 @@ export class EngineHost {
         const handle = transport.setTimeout(() => {
           if (this.disposed) return;
           this.timers.delete(id);
-          this.run(engine.timer(id, transport.now()));
+          this.run(this.invoke(engine.timer, id, transport.now()));
         }, Math.max(0, action.at - transport.now()));
-        this.timers.set(id, handle);
+        if (this.disposed) transport.clearTimeout(handle);
+        else this.timers.set(id, handle);
         break;
       }
       case 'clearTimer':

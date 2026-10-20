@@ -48,10 +48,22 @@ export interface Transport {
 }
 
 export interface EngineHandlers {
+  /** Called once after a WASM trap makes this host terminal and releases its I/O. */
+  onDead?(error: EngineDeadError): void;
   onDeactivate?(): void;
   /** One frame per flush; transfer it, don't copy it. */
   onFrame?(buffer: ArrayBuffer): void;
   onLog?(level: 'info' | 'warning' | 'error', message: string): void;
+}
+
+export class EngineDeadError extends Error {
+  constructor(cause: unknown, command?: { op: string; clientOrderId?: string; clientOrderIds?: string[] });
+  readonly code: 'ENGINE_DEAD';
+  readonly command?: string;
+  /** An interrupted write may already have been accepted; reconcile before retrying. */
+  readonly outcome?: 'unknown';
+  readonly clientOrderId?: string;
+  readonly clientOrderIds?: string[];
 }
 
 /** The subset of the wasm-bindgen engine the host drives. */
@@ -80,6 +92,8 @@ export interface WasmEngineLike {
 }
 
 export class EngineHost {
+  readonly dead: boolean;
+  readonly deadError?: EngineDeadError;
   accountId(): string | undefined;
   constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers);
   start(): void;

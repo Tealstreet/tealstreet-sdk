@@ -2,8 +2,8 @@ import { ExchangeName } from '../types';
 import { setTickIntervalMultipliers } from '../utils/tickIntervalOverride';
 import { virtualClock } from '../utils/virtualClock';
 import { setWsDiagnosticsEnabled } from '../utils/wsDiagnostics';
-import { setMainAcceptsFrames } from './frameForwarding';
 import { ExchangeWorker } from './ExchangeWorker';
+import { setMainAcceptsFrames } from './frameForwarding';
 import {
   configurePerfFixture,
   isReplayingPerfFixture,
@@ -234,7 +234,15 @@ const start = (ctx: Worker, shared = false) => {
       const existingWorker = getMyExchangeWorker();
       if (existingWorker) {
         // Check if the exchange is still alive (not disposed)
-        if (existingWorker.exchange?.isDisposed) {
+        if (existingWorker.isRecovering) {
+          ctx.postMessage({ op: 'start-status', data: false });
+          ctx.postMessage({
+            op: 'warning',
+            data: ['Rust engine recovery is in progress; account commands are temporarily unavailable.'],
+          });
+          return;
+        } else if (existingWorker.exchange?.isDisposed) {
+          existingWorker.dispose();
           deleteMyExchangeWorker();
         } else {
           ctx.postMessage({ op: 'start-status', data: true });

@@ -240,7 +240,13 @@ const STORE_FLUSH_MS = 250;
 export class RustEngineExchange extends BaseExchange {
   protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private host?: EngineHostType;
+  private engineFailure?: Error;
   private publicFeedDisabled = false;
+
+  /** A native trap is terminal for this instance, including after disposal. */
+  get isEngineDead(): boolean {
+    return this.engineFailure !== undefined;
+  }
 
   get publicFeedMode(): 'direct' | 'disabled' | 'shared' {
     if (this.options.publicFeed?.mode === 'shared') return 'shared';
@@ -335,8 +341,7 @@ export class RustEngineExchange extends BaseExchange {
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     if (this.name === 'breakoutprop') {
       this.stopPollingConfig = subscribeTickIntervalMultipliers(() => {
-        if (this.host && !this.isDisposed)
-          void this.host.command({ op: 'setTickInterval', interval: this.getTickInterval() });
+        this.subscriptionCommand({ op: 'setTickInterval', interval: this.getTickInterval() });
       });
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
@@ -409,7 +414,7 @@ export class RustEngineExchange extends BaseExchange {
   }
   private updateTickerSymbols = () => {
     this.sharedPublicFeed?.send({ op: 'tickerSymbols', symbols: this.getActiveTickerSymbols() });
-    if (this.host) void this.host.command({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
+    this.subscriptionCommand({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
   };
 
   /** Startup is single-use; metadata factories can replace an already-started instance. */
@@ -632,6 +637,7 @@ export class RustEngineExchange extends BaseExchange {
       {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,
+        onDead: this.receiveEngineFailure,
         onDeactivate: () => {
           this.startupFailure = new Error(`${this.name} credentials were rejected`);
           for (const wake of this.startupWaiters) wake();
@@ -639,6 +645,22 @@ export class RustEngineExchange extends BaseExchange {
         },
       },
     );
+  };
+
+  private receiveEngineFailure = (error: Error) => {
+    if (this.engineFailure) return;
+    this.engineFailure = error;
+    this.startupFailure = error;
+    for (const wake of this.startupWaiters) wake();
+    try {
+      this.emitAndLogError(error);
+    } finally {
+      try {
+        this.emitter.emit('engine-dead', error);
+      } finally {
+        this.dispose();
+      }
+    }
   };
 
   private startEngine = async () => {
@@ -675,8 +697,14 @@ export class RustEngineExchange extends BaseExchange {
       }
       if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
     }
-    this.host.start();
+    // A fresh engine's full native snapshot clears the previous worker stream's
+    // catalog/book baselines before any new deltas reach the main consumer.
+    if (this.onFrame) this.receiveFrame(this.host.snapshot());
+    this.host?.start();
+    if (this.engineFailure) throw this.engineFailure;
+    if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
     this.updateTickerSymbols();
+    if (this.engineFailure) throw this.engineFailure;
     // Books, candles and fills go out at the venue's book cadence, the rest
     // at the store's, matching what the TS worker posts today.
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
@@ -854,6 +882,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private command = <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
+    if (this.engineFailure) return Promise.reject(this.engineFailure);
     if (this.isDisposed) return Promise.reject(new Error(`${this.name} engine disposed`));
     if (!this.host) return Promise.reject(new Error(`${this.name} engine is not started`));
     if (['coinbase', 'coinbasespot'].includes(this.name)) {
@@ -864,6 +893,14 @@ export class RustEngineExchange extends BaseExchange {
       if (invalid(command)) return Promise.reject(new Error('Coinbase command numbers must be finite'));
     }
     return this.host.command(command) as Promise<T>;
+  };
+
+  private subscriptionCommand = (command: { op: string; [field: string]: unknown }): void => {
+    if (!this.host || this.isDisposed || this.engineFailure) return;
+    void this.command(command).catch((error: unknown) => {
+      if (!this.isDisposed && !this.engineFailure)
+        this.emitAndLogError(error instanceof Error ? error : String(error));
+    });
   };
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[]) => {
@@ -1201,7 +1238,7 @@ export class RustEngineExchange extends BaseExchange {
       listeners = new Map();
       this.bookListeners.set(symbol, listeners);
       if (this.sharedPublicFeed) this.sharedPublicFeed.send({ op: 'book', symbol, subscribe: true });
-      void this.command({ op: 'subscribeOrderBook', symbol });
+      this.subscriptionCommand({ op: 'subscribeOrderBook', symbol });
     }
     const listenerId =
       (this.name !== 'asterdex' ? [...listeners].find(([, listener]) => listener === callback)?.[0] : undefined) ??
@@ -1212,7 +1249,7 @@ export class RustEngineExchange extends BaseExchange {
       if (listeners!.size === 0 && this.bookListeners.get(symbol) === listeners) {
         this.bookListeners.delete(symbol);
         if (this.sharedPublicFeed) this.sharedPublicFeed.send({ op: 'book', symbol, subscribe: false });
-        void this.command({ op: 'unsubscribeOrderBook', symbol });
+        this.subscriptionCommand({ op: 'unsubscribeOrderBook', symbol });
       }
     };
   };
@@ -1237,7 +1274,7 @@ export class RustEngineExchange extends BaseExchange {
       this.candleListeners.set(key, listeners);
       if (this.sharedPublicFeed)
         this.sharedPublicFeed.send({ op: 'candle', symbol: opts.symbol, interval, subscribe: true });
-      void this.command({ op: 'subscribeCandles', symbol: opts.symbol, interval });
+      this.subscriptionCommand({ op: 'subscribeCandles', symbol: opts.symbol, interval });
     }
     listeners.add(callback);
     return () => {
@@ -1246,7 +1283,7 @@ export class RustEngineExchange extends BaseExchange {
         this.candleListeners.delete(key);
         if (this.sharedPublicFeed)
           this.sharedPublicFeed.send({ op: 'candle', symbol: opts.symbol, interval, subscribe: false });
-        void this.command({ op: 'unsubscribeCandles', symbol: opts.symbol, interval });
+        this.subscriptionCommand({ op: 'unsubscribeCandles', symbol: opts.symbol, interval });
       }
     };
   };
