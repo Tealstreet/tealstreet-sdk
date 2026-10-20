@@ -722,24 +722,32 @@ Signing and payloads match; no confirmed highs.
 ### Paradex
 StarkNet typed data, JWT, payloads and SBE decoding match.
 - High: one blank ticker field halts the venue incl. private side
-  (`paradex/src/public.rs:714`, `lib.rs:127`); a failed TP/SL child logs at
-  Warning so no toast — user believes they are protected (`trading.rs:855`);
+  (`paradex/src/public.rs:714`, `lib.rs:127`); ~~a failed TP/SL child logs at
+  Warning so no toast — user believes they are protected (`trading.rs:855`)~~
+  — child failures now produce Error notices while retaining accepted entry IDs;
   REST positions may never commit if `leverage`/`liquidation_price` are blank
   (`account.rs:1824`; verify live).
-- Medium: multi-order placement stops at first failure and loses placed ids
-  (`trading.rs:458,699,867`); venue rejection reasons dropped (`lib.rs:231`);
-  leverage serialized `20.0` (`trading.rs:542`; verify live); one malformed SBE
-  frame recycles the public socket (`public.rs:388`).
+- Medium: ~~multi-order placement stops at first failure and loses placed ids
+  (`trading.rs:458,699,867`)~~ — independent operations continue, verified partial
+  native IDs are returned in caller order and failures identify rejected clients;
+  ~~venue rejection reasons dropped (`lib.rs:231`)~~ — structured error/message
+  details retained with bounded text and no response dump;
+  ~~leverage serialized `20.0` (`trading.rs:542`; verify live)~~ — JSON integer,
+  per the documented request schema, matching confirmed state;
+  ~~one malformed SBE frame recycles the public socket (`public.rs:388`)~~ — malformed frames
+  now drop without clearing books/socket or refreshing liveness; subsequent valid
+  sequence gaps still recover only the affected book (native regressions).
 - Low: one unmappable order row discards refresh; leverage-0 config row; TP/SL
   of 0 rejects order; history fails on one row; stale uPnL after WS close;
-  README says remote signing rejected.
+  ~~README says remote signing rejected~~ — corrected to the landed payload
+  signing contract exercised by the delegated-signing regressions.
 
 ### Cross-venue: silent partial failures
 - Child-leg failures (TP/SL after an entry) must surface as errors on every
-  venue (Paradex logs at Warning).
-- Batches that fail midway must return placed ids with the error (Paradex,
+  venue (~~Paradex logs at Warning~~; now Error with a native regression).
+- Batches that fail midway must return placed ids with the error (~~Paradex~~ repaired,
   Binance COIN-M, Bitrue cancels).
-- Integers serialized as floats (`20.0`): Paradex leverage, KuCoin leverage;
+- Integers serialized as floats (`20.0`): ~~Paradex leverage~~ repaired, KuCoin leverage;
   check every venue's integer fields.
 
 ### GRVT
