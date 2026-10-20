@@ -17,6 +17,11 @@ pub struct Envelope<'a> {
     pub result: Option<&'a RawValue>,
 }
 
+#[derive(Deserialize)]
+pub struct AuthenticationReply {
+    pub code: i64,
+}
+
 // The common public path decodes its nested payload once.
 #[derive(Deserialize)]
 pub struct TickerPush<'a> {
