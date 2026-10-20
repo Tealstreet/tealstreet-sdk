@@ -53,3 +53,4 @@ c58afe1514d38ddbd90e45261f078721a9db03c6:sdk-rs/harness/kucoinspot.test.mjs:gene
 070fd851dd0377bb63c4c4235c3bb58db0fd0307:packages/safe-cex/src/__tests__/audit-regressions/coinbase.secondary-read-key.test.ts:generic-api-key:10
 070fd851dd0377bb63c4c4235c3bb58db0fd0307:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:1693
 b7b8856406fbe53c71fdd298c3aa40f6e80b2c69:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:1757
+27a5979867c0f2d0ae002abe803eeca5b4c9977a:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:1919
