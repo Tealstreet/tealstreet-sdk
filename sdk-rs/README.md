@@ -40,7 +40,7 @@ into the native host. Secondary signing keys remain unsupported and fail before
 engine startup, so the host cannot silently bypass their distinct read egress.
 
 From the repository root, `corepack yarn rust:build-wasm` builds the combined
-host. Use `corepack yarn rust:build-wasm --venue hyperliquid` (or `backpack` / `blofin` / `mexc` / `bingx` / `binance` / `bybit` / `cryptocom` / `okx` / `weex`) to
+host. Use `corepack yarn rust:build-wasm --venue hyperliquid` (or `bitget` / `backpack` / `blofin` / `mexc` / `bingx` / `binance` / `bybit` / `cryptocom` / `okx` / `weex`) to
 build a single-venue browser/Workers bundle. Each build replaces the bindings
 under `hosts/wasm/pkg/`; its constructor accepts only the compiled venues.
 The default Cargo features retain all registered venues. CI replays each single-venue

@@ -55,11 +55,17 @@ fn uta() -> Harness {
         200,
         r#"{"code":"00000","data":{"list":[]}}"#,
     );
-    h.respond(
-        "/unfilled-strategy-orders",
-        200,
-        r#"{"code":"00000","data":[]}"#,
-    );
+    while h
+        .requests
+        .iter()
+        .any(|r| r.url.contains("/unfilled-strategy-orders"))
+    {
+        h.respond(
+            "/unfilled-strategy-orders",
+            200,
+            r#"{"code":"00000","data":[]}"#,
+        );
+    }
     h.login();
     h.engine.store_mut().set_hedged(true);
     h
