@@ -893,3 +893,38 @@ security-fix head will run all CI again; no unchanged manual retry is requested
 and no Bybit performance improvement is attributed to this credential fix.
 If the strict timing failure recurs, investigate and measure a real performance
 change before continuing. Exact new-head green CI and final review remain required.
+
+## Public-only correction: bounded final verification
+
+Runtime source `6c7cc518fa` fixes both KuCoin futures authentication selectors.
+Native workspace **2,767**, scoped KuCoin **151** (Spot **46**), workspace and
+wasm32 Clippy, fmt and bans pass. The rebuilt combined artifact is **11,948,833
+bytes**, SHA-256 `b440a9e996bc45e3f8b4428742e4ffa70e8da8a991d9f2b9b663ae40bdacc039`;
+its SDK **431/14 files**, host **74**, products **16**, scripted lifecycle **9**,
+frame **1** and server adapter **1** checks pass.
+
+Fresh KuCoin futures public3/private1 gates pass on their first attempts:
+**782,323 bytes**, main CPU TS/Rust **385.528/197.154 ms**, steady CPU
+**231.398/106.412 ms**, retained memory **21,417,945/4,043,340 bytes**;
+private **32 frames/17 commands**, with all protocol/signature audits clean.
+Canonical web and Node builds of Paradex, Bitrue, Spot, Binance, Polymarket and
+Bybit exactly match their saved F920 artifacts. The TS, harness, tapes and build
+inputs are unchanged. Their **20** passing gates remain attributed to F920;
+the fresh futures pair supplies the other **2**, without relabeling measurements.
+Actual Spot SDK **2** tests pass again. See
+[bounded follow-up evidence](venue-ports/PARITY_PUBLIC_ONLY_FIX_GATES.json).
+
+Latest landing merge `c2874607b2` adds only `RUST_AUDITS.md`; runtime trees match
+6c7. An additional first-attempt Hyro public3/private1 comparison at that merge
+passes with the identical Bybit binary: main **20.981/19.208 ms**, steady
+**4.022/3.543 ms**, retained **13,438,833/845,932 bytes**. This is fresh local
+measurement, not a claimed performance fix for the preserved 722 CI failure.
+The published correction requires new exact-head CI and correctness review;
+old green checkpoints do not authorize landing. Credentialed private production
+captures and the Spot live sizing profile remain unavailable; synthetic replay
+and scripted lifecycle results do not establish live parity.
+
+Gate PASS above means the existing replay oracle passed. The landing audit notes
+partial final-state comparisons and Binance/Bybit margin-size normalization;
+this PR does not turn those checks into full financial or live-account evidence.
+Those unchanged limitations remain in [RUST_AUDITS.md](RUST_AUDITS.md#gate-honesty).
