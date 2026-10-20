@@ -449,6 +449,38 @@ publish an empty snapshot or dispose the previous good engine.
   upload steps before final landing. The current merged source still requires
   its own exact-head CI, separate from this diagnostic tree.
 
+- Exact-head `8b50f9dea3` CI reproduced the short Hyro steady miss:
+  TS 6.6 / Rust 7.4 ms, with main CPU 34.6 / 31.7 ms and retained
+  memory 13.3 / 0.8 MB passing. No unchanged job rerun. All 32 current
+  combined-artifact private controls pass. Both reviewers identify a bounded
+  harness improvement from the earlier profile: avoid repeated default URL
+  parsing during websocket routing. A per-Tape exact-string cache reuses only
+  successful default canonical strings, identically for TS and Rust. Caller IDs,
+  custom URL/query hooks and mutable URL objects bypass it; guards are checked
+  every time. Socket selection, subscriptions, lifecycle/generations, HTTP and
+  signature oracles, fixtures, thresholds and measurement windows stay intact.
+  The implementation and fairness audits pass. All 582 harness tests pass;
+  against the previous implementation only the parsing-reuse assertion fails
+  (seven parses versus one), while the other 581 pass. Regression cases cover
+  mutable rules/callers, distinct token/path identities, invalid URLs and live
+  replacement-socket delivery for both engines.
+- The local combined-binary Hyro control before caching passed main
+  TS 42.8 / Rust 35.6 ms, steady 16.2 / 13.2 ms. After caching, steady passes
+  3.4 / 2.5 ms and memory passes 13.5 / 1.7 MB, but main CPU narrowly misses
+  18.9 / 19.0 ms. The much faster TS control also shows runtime variation;
+  neither pair establishes a quantified engine speedup. Preserve that miss,
+  check the canonical single-venue build and require fresh unchanged-rule CI.
+  This change removes measured replay housekeeping, not native protocol work.
+
+- Canonical Bybit solo build after the parity merge is 1,152,801 bytes,
+  SHA `fc405faea038d0b8e89f3af6011893d84fdd21bd28831e7c355f49a8acd1a00c`,
+  below the unchanged 1,258,291-byte budget. Its Hyro gate passes with the
+  URL cache: main CPU TS 21.1 → Rust 18.7 ms, steady 3.9 → 3.1 ms,
+  retained memory 13.5 → 0.8 MB. Both independent implementation reviews pass
+  the cache/tests/docs with no introduced correctness or fairness findings.
+  Fresh exact-head CI remains required; retain the combined-build timing miss
+  as a diagnostic limit, separate from this accepted canonical artifact.
+
 ## Final public replay metrics
 
 CI runtime: Node 22.23.3, three-run medians. Fifteen profiles, including OKX EU,
