@@ -9,6 +9,7 @@ pub const ORDER: &str = r#"{"order_id":"9007199254740993","client_oid":"caller",
 pub struct Harness {
     pub engine: Engine<Cryptocom>,
     pub actions: Vec<Action>,
+    pub failures: Vec<safe_cex_engine::VenueError>,
     pub now: f64,
 }
 impl Harness {
@@ -20,6 +21,7 @@ impl Harness {
                 ..Default::default()
             })),
             actions: vec![],
+            failures: vec![],
             now: 1_610_000_000_000.0,
         };
         h.engine.start(h.now);
@@ -29,7 +31,18 @@ impl Harness {
         h
     }
     pub fn collect(&mut self) {
-        self.actions.extend(self.engine.drain_actions());
+        for action in self.engine.drain_actions() {
+            // Failures as the plain text the host renders.
+            let action = match action {
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error }) => {
+                    let result = Err(error.legacy_text());
+                    self.failures.push(error);
+                    Action::Notice(safe_cex_engine::Notice::CommandDone { command, result })
+                }
+                action => action,
+            };
+            self.actions.push(action);
+        }
     }
     pub fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);

@@ -4,7 +4,9 @@ use crate::sign::Params;
 use crate::wire::RestEnvelope;
 use crate::{Cryptocom, Pending};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, TimerId, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, LogLevel, Outcome, TimerId, VenueError, num,
+};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -32,7 +34,9 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     best_effort: bool,
-    first_error: Option<String>,
+    first_error: Option<VenueError>,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -201,6 +205,7 @@ impl Cryptocom {
             ids: vec![],
             best_effort: true,
             first_error: None,
+            effective: false,
         })
     }
 
@@ -209,9 +214,9 @@ impl Cryptocom {
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, orders)),
             Command::CancelOrders { command, ids } => {
                 if let Some(id) = ids.iter().find(|id| cx.store.order(id).is_none()) {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err(format!(
+                        not_sent(format!(
                             "Order {id} not found; cancellation requires a reconciled order"
                         )),
                     );
@@ -241,6 +246,7 @@ impl Cryptocom {
                         ids: vec![],
                         best_effort: true,
                         first_error: None,
+                        effective: false,
                     }),
                 )
             }
@@ -251,15 +257,15 @@ impl Cryptocom {
                 amount,
             } => {
                 let Some(order) = cx.store.order(&id) else {
-                    cx.done(command, Err(format!("Order not found: {id}")));
+                    cx.fail(command, not_sent(format!("Order not found: {id}")));
                     return;
                 };
                 let price = price.unwrap_or(order.price);
                 let amount = amount.unwrap_or(order.amount);
                 if !price.is_finite() || price <= 0.0 || !amount.is_finite() || amount <= 0.0 {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("A positive price and quantity are required".into()),
+                        not_sent("A positive price and quantity are required"),
                     );
                     return;
                 }
@@ -306,9 +312,9 @@ impl Cryptocom {
                     || !(1.0..=100.0).contains(&leverage)
                     || leverage.fract() != 0.0
                 {
-                    cx.done(
+                    cx.fail(
                         command,
-                        Err("Crypto.com account leverage must be an integer from 1 to 100".into()),
+                        not_sent("Crypto.com account leverage must be an integer from 1 to 100"),
                     );
                     return;
                 }
@@ -326,7 +332,7 @@ impl Cryptocom {
                 symbol,
                 isolated,
             } => {
-                cx.done(command, Err(format!("Crypto.com does not support switching {symbol} to {} margin through Exchange v1", if isolated { "isolated" } else { "cross" })));
+                cx.fail(command, not_sent(format!("Crypto.com does not support switching {symbol} to {} margin through Exchange v1", if isolated { "isolated" } else { "cross" })).kind(ErrorKind::Unsupported));
                 return;
             }
             Command::SetPositionMode { command, .. } => {
@@ -340,7 +346,10 @@ impl Cryptocom {
             _ => return,
         };
         if self.credentials.is_none() {
-            cx.done(command, Err("Crypto.com credentials are required".into()));
+            cx.fail(
+                command,
+                not_sent("Crypto.com credentials are required").kind(ErrorKind::AuthInvalid),
+            );
             return;
         }
         match plan {
@@ -351,7 +360,7 @@ impl Cryptocom {
             }
             Err(error) => {
                 cx.command_error(command, &error);
-                cx.done(command, Err(error));
+                cx.fail(command, not_sent(error));
             }
         }
     }
@@ -382,13 +391,17 @@ impl Cryptocom {
                 return;
             }
             let job = self.trading.jobs.remove(&command).unwrap();
-            cx.done(
-                command,
-                match (job.best_effort, job.first_error) {
-                    (false, Some(error)) => Err(error),
-                    _ => Ok(serde_json::to_string(&job.ids).unwrap()),
-                },
-            );
+            match (job.best_effort, job.first_error) {
+                (false, Some(mut error)) => {
+                    if (job.effective || !job.ids.is_empty())
+                        && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                    {
+                        error.outcome = None;
+                    }
+                    cx.fail(command, error);
+                }
+                _ => cx.done(command, Ok(serde_json::to_string(&job.ids).unwrap())),
+            }
         }
     }
     pub(crate) fn trade_response(
@@ -396,6 +409,7 @@ impl Cryptocom {
         cx: &mut Cx<'_, Pending>,
         mut request: Request,
         response: Result<&str, &str>,
+        status: Option<u16>,
     ) {
         let result = response.and_then(|body| {
             serde_json::from_str::<RestEnvelope>(body).map_err(|_| "invalid Crypto.com response")
@@ -418,8 +432,11 @@ impl Cryptocom {
             );
             return;
         }
+        // Set when the failure comes from the envelope's own error code.
+        let mut code = None;
         let result = result.map_err(str::to_owned).and_then(|envelope| {
             if envelope.code != 0 {
+                code = Some(envelope.code);
                 return Err(format!(
                     "Crypto.com API Error {}: {}",
                     envelope.code, envelope.message
@@ -486,12 +503,21 @@ impl Cryptocom {
                 _ => Ok(None),
             }
         });
+        // The balance read that precedes a leverage change sends nothing.
+        let read = matches!(request.step.call, Call::LeverageAccount { .. });
         let job = self.trading.jobs.get_mut(&request.command).unwrap();
         match result {
-            Ok(Some(id)) => job.ids.push(id),
-            Ok(None) => {}
+            Ok(Some(id)) => {
+                job.effective = true;
+                job.ids.push(id);
+            }
+            Ok(None) => job.effective |= !read,
             Err(error) => {
                 cx.command_error(request.command, &error);
+                let mut error = classify(error, status, code);
+                if read {
+                    error.outcome = Some(Outcome::NotSent);
+                }
                 job.first_error.get_or_insert(error);
                 if !job.best_effort {
                     job.steps.clear();
@@ -510,5 +536,39 @@ fn single(step: Step) -> Job {
         ids: vec![],
         best_effort: false,
         first_error: None,
+        effective: false,
+    }
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+/// A failed write. Transport loss (no status), 408/5xx and malformed answers
+/// do not prove a refusal; documented Crypto.com codes are classified.
+fn classify(message: String, status: Option<u16>, code: Option<i64>) -> VenueError {
+    let error = VenueError::new(message);
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    let Some(code) = code else {
+        return match status {
+            None => error.kind(ErrorKind::Network).outcome(Outcome::Unknown),
+            Some(401) => rejected(error, ErrorKind::AuthInvalid),
+            Some(403) => rejected(error, ErrorKind::AuthPermission),
+            Some(429) => rejected(error, ErrorKind::RateLimited),
+            Some(400..=407 | 409..=499) => rejected(error, ErrorKind::Rejected),
+            _ => error.outcome(Outcome::Unknown),
+        };
+    };
+    let error = error.venue_code(code.to_string());
+    match code {
+        10002 | 10007 | 40101 | 40102 => rejected(error, ErrorKind::AuthInvalid),
+        10003 | 40103 | 40104 => rejected(error, ErrorKind::AuthPermission),
+        10006 | 42901 => rejected(error, ErrorKind::RateLimited),
+        10001 | 40801 | 50001 => error.outcome(Outcome::Unknown),
+        10004 | 20002 | 30003..=30025 | 306 | 308 | 309 | 40401 => {
+            rejected(error, ErrorKind::Rejected)
+        }
+        _ => error,
     }
 }
