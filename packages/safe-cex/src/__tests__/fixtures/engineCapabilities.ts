@@ -40,6 +40,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     amendWithSymbol: is('kucoinspot'),
     orderBookQuery: is('asterdex', 'polymarket'),
     options: false,
+    accountTier: is('lighter', 'lighter-robinhood'),
     ...overrides,
   };
   return JSON.stringify(record);

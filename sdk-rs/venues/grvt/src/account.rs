@@ -1,17 +1,17 @@
 //! Session authentication, private streams and atomic REST reconciliation.
 use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
-use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::{
-    Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
-    PositionSide, StopTriggerType, TimeInForce,
+    Balance, CurrencyBalance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position,
+    PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::store::Store;
 use safe_cex_engine::{Cx, Fill, LogLevel, Response, SocketChannel, SocketId, TimerId};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 const AUTH: &str = "/auth/api_key/login";
 const SUMMARY: &str = "/lite/v1/aggregated_account_summary";
@@ -292,6 +292,54 @@ struct Summary<'a> {
     upnl: Option<Number>,
     #[serde(borrow, rename = "sas", alias = "sub_account_summaries", default)]
     subaccounts: Vec<Subaccount<'a>>,
+    #[serde(borrow, rename = "sb", alias = "spot_balances", default)]
+    spot_balances: Option<&'a RawValue>,
+}
+#[derive(Deserialize)]
+struct SpotBalance<'a> {
+    #[serde(borrow, rename = "c", alias = "currency")]
+    currency: Text<'a>,
+    #[serde(rename = "b", alias = "balance")]
+    balance: Number,
+}
+impl Summary<'_> {
+    /// Spot rows are summed per currency and parsed apart from the summary, so a bad row is
+    /// dropped without costing the aggregate; `None` (unreadable list) keeps the previous coins.
+    fn currencies(&self, cx: &mut Cx<'_, Pending>) -> Option<Vec<CurrencyBalance>> {
+        let mut totals = BTreeMap::<String, f64>::new();
+        let mut skipped = 0usize;
+        if let Some(raw) = self.spot_balances.filter(|raw| raw.get() != "null") {
+            json::each::<&RawValue>(raw.get(), |item| {
+                match serde_json::from_str::<SpotBalance>(item.get()) {
+                    Ok(row) if !row.currency.is_empty() => {
+                        *totals.entry(row.currency.to_string()).or_default() += row.balance.0;
+                    }
+                    _ => skipped += 1,
+                }
+            })
+            .ok()?;
+        }
+        if skipped > 0 {
+            cx.log(
+                LogLevel::Warning,
+                format!("Skipped {skipped} malformed GRVT spot balance row(s)"),
+            );
+        }
+        Some(
+            totals
+                .into_iter()
+                .map(|(currency, total)| CurrencyBalance {
+                    currency,
+                    balance: Balance {
+                        total,
+                        free: total,
+                        used: 0.,
+                        upnl: 0.,
+                    },
+                })
+                .collect(),
+        )
+    }
 }
 #[derive(Deserialize)]
 struct Subaccount<'a> {
@@ -1347,6 +1395,9 @@ impl Grvt {
                             used: summary.equity.0 - free,
                             upnl,
                         });
+                        if let Some(currencies) = summary.currencies(cx) {
+                            cx.store.set_currency_balances(currencies);
+                        }
                     }
                     Err(_) => {
                         cx.log(

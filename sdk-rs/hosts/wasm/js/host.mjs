@@ -21,7 +21,8 @@ const commandTimeout = (value) => {
   return value;
 };
 const WRITE_COMMANDS = new Set(['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
-  'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode', 'setStpMode']);
+  'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode', 'setStpMode',
+  'setAccountTier']);
 class UnknownEngineActionError extends Error {}
 class CommandDiagnosticCallbackError extends Error {
   constructor(cause) { super('Command diagnostic callback failed', { cause }); }
@@ -544,6 +545,9 @@ export class EngineHost {
         break;
       case 'deactivate':
         this.handlers.onDeactivate?.();
+        break;
+      case 'startupFailed':
+        this.handlers.onStartupFailed?.(action.detail);
         break;
       case 'log':
         this.handlers.onLog?.(action.level, action.message);

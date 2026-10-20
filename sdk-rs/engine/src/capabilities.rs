@@ -29,6 +29,8 @@ pub struct Capabilities {
     pub order_book_query: bool,
     /// Option chains, greeks and IV-priced orders.
     pub options: bool,
+    /// `FetchAccountTier` / `SetAccountTier` venue actions (Lighter).
+    pub account_tier: bool,
 }
 
 /// How the host cancels every open order.
@@ -92,6 +94,7 @@ impl Capabilities {
         amend_with_symbol: false,
         order_book_query: false,
         options: false,
+        account_tier: false,
     };
 
     /// No history axis: fills, orders and income are all unavailable.

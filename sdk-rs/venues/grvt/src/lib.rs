@@ -1077,6 +1077,9 @@ impl Venue for Grvt {
                 );
             }
             Command::SetTickerSymbols { .. } => {}
+            Command::Venue { command, .. } => {
+                safe_cex_engine::unsupported_venue_action(cx, command)
+            }
             Command::SubscribeOrderBook { symbol } => {
                 let key = cx
                     .store

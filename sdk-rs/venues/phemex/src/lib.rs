@@ -36,6 +36,7 @@ pub enum Pending {
         invalid: bool,
     },
     Account(account::Request),
+    Orders(account::OrdersRead),
     Trade(trading::Request),
     History(history::Request),
     Income(income::Request),
@@ -158,7 +159,8 @@ impl PhemexPerpetuals {
         stream: Option<ArrayAt>,
     ) {
         // A definitive lookup must query the account that placed the order.
-        let primary = matches!(&pending, Pending::History(request) if request.is_lookup());
+        let primary = matches!(&pending, Pending::History(request) if request.is_lookup())
+            || matches!(&pending, Pending::Orders(_));
         let credentials = if matches!(method, Method::Get) && !primary {
             self.read_credentials.as_ref().or(self.credentials.as_ref())
         } else {
@@ -246,7 +248,7 @@ impl PhemexPerpetuals {
             "/md/v2/fullbook",
             &format!(
                 "symbol={}&limit=1000",
-                url_encode(self.native_symbol(symbol))
+                safe_cex_engine::url::encode(self.native_symbol(symbol))
             ),
             None,
             Pending::Depth {
@@ -301,7 +303,8 @@ impl PhemexPerpetuals {
     fn fail(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Account(r) => self.account_failed(cx, r, error),
-            Pending::Trade(r) => self.trade_failed(cx, r, error),
+            Pending::Orders(r) => self.orders_read_failed(cx, r, error),
+            Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Late),
             Pending::History(r) => self.history_failed(cx, r, error),
             Pending::Income(r) => self.income_failed(cx, r, error),
             Pending::Depth { symbol, generation } => {
@@ -572,6 +575,7 @@ impl Venue for PhemexPerpetuals {
         {
             match p {
                 Pending::Trade(p) if e.error.is_none() => self.trade_response(cx, p, r),
+                Pending::Orders(read) => self.orders_read_response(cx, read, r.body),
                 p => self.fail(cx, p, &format!("Phemex {} {}", e.code.unwrap_or(-1), e.msg)),
             }
             return;
@@ -636,6 +640,7 @@ impl Venue for PhemexPerpetuals {
                 cx.done(command, Ok(serde_json::to_string(&rows).unwrap()));
             }
             Pending::Account(p) => self.account_response(cx, p, r),
+            Pending::Orders(read) => self.orders_read_response(cx, read, r.body),
             Pending::Trade(p) => self.trade_response(cx, p, r),
             Pending::History(p) => self.history_response(cx, p, r),
             Pending::Income(p) => self.income_response(cx, p, r),
@@ -804,7 +809,7 @@ impl Venue for PhemexPerpetuals {
                     "/exchange/public/md/v2/kline/list",
                     &format!(
                         "symbol={}&resolution={n}&from={:.0}&to={:.0}",
-                        url_encode(self.native_symbol(&symbol)),
+                        safe_cex_engine::url::encode(self.native_symbol(&symbol)),
                         (from / 1000.).floor(),
                         (to / 1000.).ceil()
                     ),

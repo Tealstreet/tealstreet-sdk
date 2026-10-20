@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 
 use safe_cex_crypto::{Encoding, eip712, ethereum, hmac_sha256};
+use safe_cex_engine::url;
 use safe_cex_engine::{Method, num};
 use serde::Deserialize;
 
@@ -288,39 +289,18 @@ fn join(params: &[(String, String)], encoded: bool) -> String {
             result.push('&');
         }
         if encoded {
-            axios_encode(&mut result, key);
+            url::encode_http_client_into(&mut result, key);
         } else {
             result.push_str(key);
         }
         result.push('=');
         if encoded {
-            axios_encode(&mut result, value);
+            url::encode_http_client_into(&mut result, value);
         } else {
             result.push_str(value);
         }
     }
     result
-}
-
-// The TS HTTP client's default URL spelling, after URI component escaping.
-fn axios_encode(output: &mut String, input: &str) {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    for byte in input.bytes() {
-        if byte.is_ascii_alphanumeric()
-            || matches!(
-                byte,
-                b'-' | b'_' | b'.' | b'~' | b'!' | b'\'' | b'(' | b')' | b'*' | b':' | b'$' | b','
-            )
-        {
-            output.push(char::from(byte));
-        } else if byte == b' ' {
-            output.push('+');
-        } else {
-            output.push('%');
-            output.push(char::from(HEX[(byte >> 4) as usize]));
-            output.push(char::from(HEX[(byte & 15) as usize]));
-        }
-    }
 }
 
 #[cfg(test)]

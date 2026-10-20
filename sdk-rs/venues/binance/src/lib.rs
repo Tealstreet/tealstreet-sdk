@@ -13,7 +13,7 @@ use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
-use sign::{Credentials, Query};
+use sign::{Credentials, Query, Signed};
 use std::collections::{HashMap, VecDeque};
 use wire::*;
 
@@ -1463,7 +1463,7 @@ impl Venue for BinanceFutures {
                         return;
                     }
                 };
-                let path = format!("{}?{}", self.paths.klines, query.unsigned());
+                let path = format!("{}?{}", self.paths.klines, query.into_string());
                 let candles = Vec::new();
                 self.get_streamed(
                     cx,

@@ -1,30 +1,9 @@
 //! PerpetualV2 public wire records use real prices and quantities.
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
-pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Bare(n) => n,
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
-    if f64::is_finite(n) {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
-pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    Ok(Option::<N>::deserialize(d)?.map(|n| n.0))
-}
-#[derive(Deserialize)]
-pub struct N(#[serde(deserialize_with = "number")] pub f64);
+pub use safe_cex_engine::de::{Number as N, number, optional_number};
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Product<'a> {
@@ -269,20 +248,6 @@ pub fn resolution(i: &str) -> Option<u32> {
         "1Y" => 31104000,
         _ => return None,
     })
-}
-
-/// Encode venue-native symbols without letting a command add query parameters.
-pub fn url_encode(text: &str) -> String {
-    let mut out = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
-            out.push(b as char)
-        } else {
-            use std::fmt::Write;
-            let _ = write!(out, "%{b:02X}");
-        }
-    }
-    out
 }
 
 pub fn snapshot_sides(text: &str) -> bool {
