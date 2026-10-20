@@ -404,3 +404,50 @@ fn a_delegated_amendment_binds_the_stable_venue_id_and_rolls_back_unsent_failure
             .contains(r#""signature":"opaque signer answer \"quoted\"""#)
     );
 }
+
+#[test]
+fn identities_survive_the_jwt_queue_and_precede_delegated_order_signing() {
+    let mut h = seed();
+    // Auth has not completed. The order may be planned but its receipt does
+    // not claim a write while it remains in the JWT prerequisite queue.
+    h.command(Command::PlaceOrders {
+        command: 77,
+        orders: vec![order(OrderType::Limit)],
+    });
+    assert!(
+        !h.receipt_trace
+            .iter()
+            .any(|a| matches!(a, ReceiptTrace::Progress(77, _)))
+    );
+    let (auth, _) = signing(&mut h);
+    signed(&mut h, auth);
+    h.reply("/auth/", r#"{"jwt_token":"jwt"}"#);
+    let (request, _) = signing(&mut h);
+    let sign_index = h
+        .receipt_trace
+        .iter()
+        .position(|a| matches!(a, ReceiptTrace::Sign(id) if *id == request))
+        .unwrap();
+    let (owner, receipts) = match &h.receipt_trace[sign_index - 1] {
+        ReceiptTrace::Progress(command, receipts) => (*command, receipts.clone()),
+        _ => panic!("receipt must precede delegated signing"),
+    };
+    assert_eq!(owner, 77);
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(
+        receipts[0].kind,
+        safe_cex_engine::OrderIdentityKind::ClientOrderId
+    );
+    signed(&mut h, request);
+    let write = h.take("/orders/batch");
+    let payload: serde_json::Value = serde_json::from_str(write.body.as_deref().unwrap()).unwrap();
+    assert_eq!(receipts[0].symbol, payload[0]["market"]);
+    assert_eq!(receipts[0].identity, payload[0]["client_id"]);
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|a| matches!(a, ReceiptTrace::Progress(77, _)))
+            .count(),
+        1
+    );
+}

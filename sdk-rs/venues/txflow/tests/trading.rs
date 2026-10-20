@@ -158,6 +158,63 @@ fn every_order_without_a_caller_id_gets_a_distinct_native_cloid() {
 }
 
 #[test]
+fn batch_receipts_match_all_caller_and_generated_ids_before_signed_http() {
+    let mut e = engine();
+    let mut generated = limit("unused");
+    generated.client_order_id = None;
+    place(&mut e, 91, vec![limit("caller-receipt"), generated]);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let (write_at, request) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            Action::Http(request) if request.url.ends_with("/exchange") => Some((i, request)),
+            _ => None,
+        })
+        .expect("signed placement");
+    let (progress_at, receipts) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            Action::Notice(Notice::CommandProgress {
+                command: 91,
+                receipts,
+            }) => Some((i, receipts)),
+            _ => None,
+        })
+        .expect("batch identities");
+    assert!(progress_at < write_at);
+    #[derive(serde::Deserialize)]
+    struct Envelope {
+        action: OrderAction,
+    }
+    #[derive(serde::Deserialize)]
+    struct OrderAction {
+        orders: Vec<NativeOrder>,
+    }
+    #[derive(serde::Deserialize)]
+    struct NativeOrder {
+        c: String,
+    }
+    let body: Envelope = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body.action.orders[0].c, "caller-receipt");
+    assert!(body.action.orders[1].c.starts_with("ts_"));
+    assert_eq!(
+        receipts,
+        &body
+            .action
+            .orders
+            .into_iter()
+            .map(|order| OrderIdentityReceipt {
+                symbol: "BTC-USDC".into(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: order.c,
+            })
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn complete_batch_preflight_rejects_invalid_last_shape_without_writes() {
     let mut e = engine();
     place(

@@ -840,9 +840,10 @@ for (const failure of ['connect', 'send']) {
     const pending = assert.rejects(host.command({ op: 'placeOrders', orders: [] }),
       (error) => error.message === 'Socket closed before venue acknowledgement');
     assert.deepEqual(closed, []);
-    assert.equal(timers.length, 1);
-    assert.equal(timers[0].ms, 1_000);
-    timers[0].fn();
+    // The command deadline shares the transport timer; only the reconnect delay is under test.
+    const failureTimers = timers.filter((timer) => timer.ms === 1_000);
+    assert.equal(failureTimers.length, 1);
+    failureTimers[0].fn();
     await pending;
     assert.deepEqual(closed, [[19, 1006]]);
     assert.deepEqual(logs, [`WebSocket transport ${failure === 'connect' ? 'connection' : 'send'} failed`]);

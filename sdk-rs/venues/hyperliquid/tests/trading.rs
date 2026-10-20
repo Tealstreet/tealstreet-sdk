@@ -6,6 +6,45 @@ use safe_cex_venue_hyperliquid::Hyperliquid;
 use serde_json::Value;
 use support::*;
 const CLOID: &str = "0x00000000000000000000000000000001";
+#[test]
+fn all_actual_bracket_cloids_are_receipted_before_the_signed_write() {
+    let (mut e, _) = ready("disabled");
+    e.handle(2000., Event::Command(Command::PlaceOrders { command: 91, orders: vec![opts(&format!(r#"{{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":2,"stopLoss":80,"takeProfit":120,"clientOrderId":"{CLOID}"}}"#))] }));
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let (at, receipts) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            Action::Notice(Notice::CommandProgress {
+                command: 91,
+                receipts,
+            }) => Some((i, receipts)),
+            _ => None,
+        })
+        .unwrap();
+    let (write_at, request) = actions
+        .iter()
+        .enumerate()
+        .find_map(|(i, action)| match action {
+            Action::Http(request) if request.url.ends_with("/exchange") => Some((i, request)),
+            _ => None,
+        })
+        .unwrap();
+    assert!(at < write_at);
+    let payload = body(request);
+    let wires = payload["action"]["orders"].as_array().unwrap();
+    assert_eq!(receipts.len(), 3);
+    for (receipt, wire) in receipts.iter().zip(wires) {
+        assert_eq!(receipt.symbol, "BTC-PERP");
+        assert_eq!(
+            receipt.kind,
+            safe_cex_engine::OrderIdentityKind::ClientOrderId
+        );
+        assert_eq!(receipt.identity, wire["c"].as_str().unwrap());
+    }
+    assert_eq!(receipts[0].identity, CLOID);
+    assert_ne!(receipts[1].identity, receipts[2].identity);
+}
 fn opts(text: &str) -> PlaceOrderOpts {
     serde_json::from_str(text).unwrap()
 }
