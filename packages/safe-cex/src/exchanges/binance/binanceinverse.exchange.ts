@@ -549,6 +549,7 @@ export class BinanceInverseExchange extends BaseExchange {
       let free = 0;
       let upnl = 0;
       let used = 0;
+      const currencies: Record<string, Balance> = {};
       const coins: Record<string, CoinBalance> = {};
 
       for (const asset of assets) {
@@ -563,6 +564,7 @@ export class BinanceInverseExchange extends BaseExchange {
         free += available * usdMultiplier;
         used += initial * usdMultiplier;
         upnl += unrealized * usdMultiplier;
+        currencies[asset.asset] = { total: wallet, free: available, used: initial, upnl: unrealized };
         coins[asset.asset] = { base: asset.asset, amount: wallet, notional: wallet * usdMultiplier };
       }
 
@@ -576,7 +578,7 @@ export class BinanceInverseExchange extends BaseExchange {
         );
       }
 
-      const balance = { total, free, used, upnl, coins, info: { ...data, assets: undefined } };
+      const balance = { total, free, used, upnl, currencies, coins, info: { ...data, assets: undefined, coinMargined: true } };
       return { balance, positions: this.store.positions };
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);

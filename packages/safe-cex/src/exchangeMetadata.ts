@@ -512,13 +512,15 @@ const BinanceInverseMetadata: ExchangeMetadata = {
   exchangeName: 'binanceinverse' as ExchangeName,
   prettyName: 'Binance Inverse',
   defaultQuote: 'USD',
-  // Keep COIN-M hidden until credentialed livenet/testnet validation covers
-  // private state, order placement, and inverse sizing end-to-end.
   enabled: false,
   enabledInDev: true,
-  enableInPreview: false,
+  enableInPreview: true,
   supportedOnMobile: false,
   latencyDomain: 'dapi.binance.com',
+  requiresCors: true,
+  privateProxyRegions: {
+    JA: privateProxyIpsTokyo,
+  },
   supportsTestnet: false,
   requiresTickersForMarketsLoaded: true,
 };
@@ -698,6 +700,7 @@ const MexcMetadata: ExchangeMetadata = {
   marginTypeIsGlobal: false,
   leverageIsGlobal: false,
   supportsFeeRates: true,
+  fetchLeverageOnMarginSymbolChange: true,
   alwaysCalculateUnrealizedPnlFromLastPrice: true,
   doesNotSupportOpenInterest: false,
   latencyDomain: 'api.mexc.com',

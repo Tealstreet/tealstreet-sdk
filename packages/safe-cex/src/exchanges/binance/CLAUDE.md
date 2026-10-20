@@ -202,6 +202,12 @@ errors to users.
 family. Keep it as a separate variant because symbols, collateral, native order
 quantity, and position sizing are inverse-contract specific.
 
+Direct browser REST writes to `/dapi` are not CORS-safe: live testing saw
+`POST /dapi/v1/order` fail at the preflight with `OPTIONS 404` and no
+`Access-Control-Allow-Origin`. Keep `requiresCors: true` and the Tealstreet
+private proxy path forced unless Binance changes the `/dapi` CORS contract and
+order placement has been revalidated in a browser.
+
 | Endpoint                     | Method      | Description                                                        |
 | ---------------------------- | ----------- | ------------------------------------------------------------------ |
 | `/dapi/v1/exchangeInfo`      | GET         | Fetch COIN-M markets and contract metadata, including contract size |
@@ -761,6 +767,8 @@ is authoritative only for balances and preserves the current position array.
 - **Non-stablecoins**: Converted to USD using market tickers (direct pair lookup, or BTC routing).
 - Logs balance aggregation details once on first fetch (`hasLoggedBalanceAggregation` flag).
 - Falls back to top-level `totalWalletBalance`/`availableBalance` if aggregation throws.
+
+**COIN-M inverse**: Aggregates `/dapi/v1/account` assets into USD top-level totals for portfolio display, but also preserves each asset under `balance.currencies[asset]` with native `total`/`free`/`used`/`upnl` and marks `balance.info.coinMargined = true`. The order form and margin module depend on those per-coin slices so `NEARUSD_PERP` validates against NEAR collateral rather than aggregate BTC/XRP/USD value; when a coin is absent, `getBalanceSlice` uses the marker to return a zero slice. Keep `balance.coins[asset]` for holdings display.
 
 **PM**: Fetches from `/papi/v1/balance`, aggregates only USDT, USDC, and FDUSD assets. Uses `totalWalletBalance`, `crossMarginFree`, and `umUnrealizedPNL`.
 

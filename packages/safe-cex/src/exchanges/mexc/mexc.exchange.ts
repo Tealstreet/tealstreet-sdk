@@ -635,6 +635,7 @@ export class MexcExchange extends BaseExchange {
       return [await this.placePlanOrder(opts)];
     }
 
+    await this.ensureSymbolConfig(opts.symbol);
     const payload = this.formatRegularOrderPayload(opts);
 
     try {
@@ -767,8 +768,8 @@ export class MexcExchange extends BaseExchange {
       throw new Error(message);
     }
 
+    const config = await this.ensureSymbolConfig(opts.symbol);
     const leverage = Math.min(Math.max(this.getLeverageForOrder(opts), market.limits.leverage.min), market.limits.leverage.max);
-    const config = this.symbolSettings.get(opts.symbol) || this.deriveSymbolConfig(opts.symbol);
     const payload = omitUndefined({
       symbol: market.id,
       vol,
@@ -1075,6 +1076,8 @@ export class MexcExchange extends BaseExchange {
     order.type !== OrderType.StopLoss && order.type !== OrderType.TakeProfit && order.type !== OrderType.TrailingStopLoss;
 
   private placeRegularOrdersBatch = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
+    await Promise.all([...new Set(orders.map((order) => order.symbol))].map((symbol) => this.ensureSymbolConfig(symbol)));
+
     const payload = orders.map((order) => ({
       ...this.formatRegularOrderPayload(order),
       stpMode: 0,
@@ -1564,6 +1567,19 @@ export class MexcExchange extends BaseExchange {
           : (oneWayPositionLeverage ?? existingConfig?.sellLeverage ?? existingConfig?.buyLeverage ?? 20),
       positionMode,
     };
+  };
+
+  private ensureSymbolConfig = async (symbol: string): Promise<MexcSymbolConfig> => {
+    const existingConfig = this.symbolSettings.get(symbol);
+    if (existingConfig) return existingConfig;
+
+    if (!this.isPublicDataOnly) {
+      await this.fetchLeverageForSymbol(symbol);
+      const fetchedConfig = this.symbolSettings.get(symbol);
+      if (fetchedConfig) return fetchedConfig;
+    }
+
+    return this.deriveSymbolConfig(symbol);
   };
 
   private getLeverageForOrder = (opts: PlaceOrderOpts): number => {

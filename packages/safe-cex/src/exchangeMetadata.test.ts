@@ -424,7 +424,12 @@ describe('exchangeMetadata', () => {
       });
     });
 
-    it('keeps Binance inverse hidden until COIN-M private and history surfaces are certified', () => {
+    it('keeps Binance inverse preview-only while COIN-M beta testing settles', () => {
+      expect(exchangeMetadata.binanceinverse.enabled).toBe(false);
+      expect(exchangeMetadata.binanceinverse.enabledInDev).toBe(true);
+      expect(exchangeMetadata.binanceinverse.enableInPreview).toBe(true);
+      expect(exchangeMetadata.binanceinverse.requiresCors).toBe(true);
+      expect(exchangeMetadata.binanceinverse.privateProxyRegions).toHaveProperty('JA');
       expect(exchangeMetadata.binanceinverse.supportsTestnet).toBe(false);
       expect(exchangeMetadata.binanceinverse.requiresTickersForMarketsLoaded).toBe(true);
       expect(exchangeMetadata.binanceinverse.latencyDomain).toBe('dapi.binance.com');
