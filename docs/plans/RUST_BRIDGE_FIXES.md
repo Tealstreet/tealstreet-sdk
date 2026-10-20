@@ -504,3 +504,22 @@ Next: merge latest landing (`702a62050c` at the last fetch), retaining its
 broker/cancel repairs, then refine account-query and polling/resync dependencies.
 Phases 4–7 and the queued RUST_QUALITY follow-ups remain outstanding. No PR,
 all-harness acceptance, or cutover claim is made at this checkpoint.
+
+Landing integration: merged `702a62050c` after phase 3c. Four conflicts were
+resolved by retaining both appended test groups (Bitget/Bitrue/OKX) and landing's
+Kucoin account-wide stop cancellation guard plus this lane's typed receipt/error
+metadata. Independent four-file review passes; 512 native cases across the four
+conflicted crates, strict all-target/all-feature Clippy and scoped fmt pass.
+Twenty-nine relevant SDK cases pass. Four incoming broker-fixture cases first
+timed out because they supplied only seeded JS readiness; they now emit native
+STATUS with the same intended flags, preserving all assertions and the 5 s
+deadline. Independent fixture review and strict lint pass. Incoming broker,
+unknown-cancel and Kucoin scope fixes are retained. Final artifacts/gates must
+be regenerated after further native work.
+
+Planning order adjustment: implement phase 6a's shared periodic-poll scheduler
+before phase 4's explicit resync hooks. Timer kicking alone cannot refresh
+Hyperliquid/GRVT/OKX's full account, so resync remains a separate completion-aware
+venue operation. Phase 6b must add classified native credential evidence;
+reflecting manual Base auth-streak mutations alone would not establish actual
+credential backoff. No body/log regex or signed-header inference is planned.

@@ -19,6 +19,24 @@ pub struct Credentials {
     pub broker: Option<BrokerOptions>,
 }
 
+pub(crate) fn public_headers() -> Vec<(&'static str, String)> {
+    vec![
+        ("X-CHANNEL-API-CODE", "3zexp".into()),
+        ("Content-Type", "application/json".into()),
+    ]
+}
+
+pub(crate) fn public_request_headers(
+    credentials: Option<&Credentials>,
+    method: Method,
+    path: &str,
+    now: f64,
+) -> Vec<(&'static str, String)> {
+    credentials.map_or_else(public_headers, |credentials| {
+        headers(credentials, method, path, "", now)
+    })
+}
+
 pub fn headers(
     credentials: &Credentials,
     method: Method,

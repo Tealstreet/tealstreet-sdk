@@ -11,7 +11,11 @@ pub struct Harness {
 }
 impl Harness {
     pub fn new() -> Self {
+        Self::with_broker_attribution(false)
+    }
+    pub fn with_broker_attribution(broker_attribution: bool) -> Self {
         let mut e = Engine::new(Blofin::new(Options {
+            broker_attribution,
             key: Some("key".into()),
             secret: Some("secret".into()),
             passphrase: Some("pass".into()),

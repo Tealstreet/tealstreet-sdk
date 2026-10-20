@@ -9,7 +9,7 @@ import { buildAsterTape } from './private-tape-asterdex.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
-test('private replay keeps venue signing clocks valid after delayed readiness', { timeout: 30000 }, () => {
+test('private replay keeps venue signing clocks valid after slow module setup and delayed readiness', { timeout: 30000 }, () => {
   const directory = mkdtempSync(join(tmpdir(), 'asterdex-replay-clock-'));
   try {
     const tape = join(directory, 'clock.jsonl');
@@ -17,6 +17,7 @@ test('private replay keeps venue signing clocks valid after delayed readiness', 
     const preload = join(directory, 'delay-ready.mjs');
     // Exercise the real TS virtual clock and request signer. A slow account
     // startup after its time sync must not move signatures into the future.
+    // Simulate expensive imports before start without sleeping for recvWindow.
     const clockModule = new URL(
       '../../packages/safe-cex/src/exchanges/asterdex/asterdex.virtualClock.ts',
       import.meta.url,
@@ -24,9 +25,24 @@ test('private replay keeps venue signing clocks valid after delayed readiness', 
     writeFileSync(
       preload,
       `
+      import { registerHooks } from 'node:module';
       import { asterDEXVirtualClock } from ${JSON.stringify(clockModule.href)};
+      const realNow = performance.now.bind(performance);
+      let setupElapsed = 0;
+      Object.defineProperty(performance, 'now', {
+        configurable: true,
+        value: () => realNow() + setupElapsed,
+      });
+      registerHooks({
+        load(url, context, nextLoad) {
+          const result = nextLoad(url, context);
+          if (url.endsWith('/asterdex/asterdex.exchange.ts')) setupElapsed = 21000;
+          return result;
+        },
+      });
       const start = asterDEXVirtualClock.start;
       asterDEXVirtualClock.start = async (...args) => {
+        if (setupElapsed !== 21000) throw new Error('Synthetic module setup delay was not applied');
         await start(...args);
         await new Promise(resolve => setTimeout(resolve, 1500));
       };

@@ -208,12 +208,18 @@ impl Cryptocom {
         let (command, plan) = match command {
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, orders)),
             Command::CancelOrders { command, ids } => {
+                if let Some(id) = ids.iter().find(|id| cx.store.order(id).is_none()) {
+                    cx.done(
+                        command,
+                        Err(format!(
+                            "Order {id} not found; cancellation requires a reconciled order"
+                        )),
+                    );
+                    return;
+                }
                 let mut steps = VecDeque::new();
                 for id in ids {
-                    let Some(order) = cx.store.order(&id) else {
-                        cx.log(LogLevel::Warning, format!("Order not found: {id}"));
-                        continue;
-                    };
+                    let order = cx.store.order(&id).expect("cancel preflight");
                     let mut params = Params::default().text("order_id", &id);
                     if !advanced(order.kind) {
                         params = params.text("instrument_name", &order.symbol);
