@@ -84,7 +84,13 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { paradexSigningTransport } from './paradex.signing';
-import { RustPublicFeedClient, rustPublicFeedIdentity } from './publicFeed';
+import {
+  IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
+  inProcessPortPair,
+  RustPublicFeedClient,
+  rustPublicFeedIdentity,
+  serveInProcessPublicData,
+} from './publicFeed';
 
 /** Exchange names the Rust engine runs; the engine takes the same name. */
 export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
@@ -275,8 +281,14 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   get publicFeedMode(): 'direct' | 'disabled' | 'shared' {
-    if (this.options.publicFeed?.mode === 'shared') return 'shared';
+    if (this.options.publicFeed?.mode === 'shared' || this.usesInProcessPublicData) return 'shared';
+    // exchange-server keys its shared source by venue only, so testnet runs its own feed.
+    if (this.options.externalPublicData?.type === 'in-process' && this.options.testnet) return 'direct';
     return this.publicFeedDisabled || this.isPrivateOnly ? 'disabled' : (this.options.publicFeed?.mode ?? 'direct');
+  }
+
+  private get usesInProcessPublicData() {
+    return this.options.externalPublicData?.type === 'in-process' && !this.options.testnet;
   }
 
   override disablePublicWebsockets(): void {
@@ -284,6 +296,7 @@ export class RustEngineExchange extends BaseExchange {
     this.publicFeedDisabled = true;
   }
   private sharedPublicFeed?: RustPublicFeedClient;
+  private stopInProcessFeed?: () => void;
   private requestSharedSnapshot = false;
   private sharedNativeSymbols = new Set<string>();
   private sharedValidatedMarkets?: Store['markets'];
@@ -344,8 +357,10 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   // History axes the engine lacks take the branded base fallbacks, which
-  // `exchange.capabilities` reports absent.
-  private adoptCapabilities(capabilities: EngineCapabilities) {
+  // `exchange.capabilities` reports absent. A main-thread mirror adopts the
+  // record from the worker's snapshot frame; the record never changes.
+  protected override adoptEngineCapabilities(capabilities: EngineCapabilities) {
+    if (this.capabilityRecord) return;
     this.capabilityRecord = capabilities;
     if (!capabilities.fillHistory)
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
@@ -391,13 +406,7 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
-    this.applier = new FrameApplier(
-      store,
-      ['mexc', 'blofin', 'kucoin', 'coinbase', 'coinbasespot'].includes(this.name),
-      this.name === 'bitgetinverse',
-      ['okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(this.name),
-      this.name === 'binanceinverse',
-    );
+    this.applier = new FrameApplier(store);
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
     if (this.name === 'breakoutprop') {
       this.stopPollingConfig = subscribeTickIntervalMultipliers(() => {
@@ -481,10 +490,13 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private createHost = async () => {
-    if (this.options.externalPublicData) {
+    if (this.options.externalPublicData?.type === 'websocket') {
       throw new Error(
-        'Rust externalPublicData is unsupported; use publicFeed: { mode: "shared", port } with RustPublicFeedProvider',
+        'Rust externalPublicData websocket gateways are unsupported; use publicFeed: { mode: "shared", port } or an in-process source',
       );
+    }
+    if (this.options.externalPublicData && this.options.publicFeed) {
+      throw new Error('externalPublicData conflicts with publicFeed policy');
     }
     if (this.options.privateOnly && this.options.publicFeed?.mode === 'direct') {
       throw new Error('privateOnly conflicts with direct publicFeed policy');
@@ -700,7 +712,7 @@ export class RustEngineExchange extends BaseExchange {
       { commandTimeoutMs: this.commandTimeoutMs },
     );
     try {
-      this.adoptCapabilities(host.capabilities());
+      this.adoptEngineCapabilities(host.capabilities());
     } catch (error) {
       host.dispose();
       throw error;
@@ -779,12 +791,25 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
+  /** exchange-server's in-process source speaks the shared-feed protocol over an in-memory port. */
+  private openSharedFeedPort = ():
+    | { port: MessagePort; policy?: { handshakeTimeoutMs: number; inProcess: true } }
+    | undefined => {
+    if (this.options.publicFeed?.mode === 'shared') return { port: this.options.publicFeed.port };
+    const external = this.options.externalPublicData;
+    if (external?.type !== 'in-process' || !this.usesInProcessPublicData) return undefined;
+    const [port, sourcePort] = inProcessPortPair();
+    this.stopInProcessFeed = serveInProcessPublicData(external.source, sourcePort);
+    return { port, policy: { handshakeTimeoutMs: IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS, inProcess: true } };
+  };
+
   private startEngine = async () => {
     await this.ensureHost();
     if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
-    if (this.options.publicFeed?.mode === 'shared') {
+    const sharedFeed = this.openSharedFeedPort();
+    if (sharedFeed) {
       this.sharedPublicFeed = new RustPublicFeedClient(
-        this.options.publicFeed.port,
+        sharedFeed.port,
         rustPublicFeedIdentity(this.name, this.options),
         async (update) => {
           await this.host?.command(update);
@@ -804,6 +829,7 @@ export class RustEngineExchange extends BaseExchange {
           this.emitAndLogError(error);
           this.dispose();
         },
+        sharedFeed.policy,
       );
       try {
         await this.sharedPublicFeed.connect();
@@ -812,6 +838,8 @@ export class RustEngineExchange extends BaseExchange {
         throw error;
       }
       if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
+      if (!this.sharedPublicFeed.isReady)
+        this.log('In-process public data has not loaded; continuing private startup', LogSeverity.Warning);
     }
     // A fresh engine's full native snapshot clears the previous worker stream's
     // catalog/book baselines before any new deltas reach the main consumer.
@@ -1460,17 +1488,11 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit });
   };
 
-  private candleInterval = (interval: OHLCVOptions['interval']): OHLCVOptions['interval'] =>
-    this.name === 'asterdex' &&
-    !['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w'].includes(interval)
-      ? '1h'
-      : interval;
-
   fetchOHLCV = (opts: OHLCVOptions) =>
     this.command<Candle[]>({
       op: 'fetchCandles',
       symbol: opts.symbol,
-      interval: this.candleInterval(opts.interval),
+      interval: opts.interval,
       limit: opts.limit,
       from: opts.from,
       to: opts.to,
@@ -1611,7 +1633,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
-    const interval = this.candleInterval(opts.interval);
+    const { interval } = opts;
     const key = `${opts.symbol}:${interval}`;
     let listeners = this.candleListeners.get(key);
     const first = !listeners;
@@ -1636,8 +1658,6 @@ export class RustEngineExchange extends BaseExchange {
     this.subscriptionCommand({ op: subscribe ? 'subscribeCandles' : 'unsubscribeCandles', symbol, interval });
   };
 
-  candleIntervalForFeed = (interval: OHLCVOptions['interval']) => this.candleInterval(interval);
-
   listenOHLCVForFeed = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
     const listener = (candle: Candle) => callback(candle);
     this.feedCandleListeners.add(listener);
@@ -1651,6 +1671,8 @@ export class RustEngineExchange extends BaseExchange {
   dispose() {
     this.sharedPublicFeed?.dispose();
     this.sharedPublicFeed = undefined;
+    this.stopInProcessFeed?.();
+    this.stopInProcessFeed = undefined;
     for (const observer of this.publicFeedObservers) this.dispatchFrameEvent(() => observer.closed());
     this.publicFeedObservers.clear();
     this.feedBookListeners.clear();
