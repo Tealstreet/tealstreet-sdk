@@ -25,7 +25,7 @@ fn missed_gap_clear_is_recoverable_from_snapshot_then_fresh_depth() {
     assert_eq!(wire::book_top(&snapshot_books(&mut h)[0]).unwrap().1, 99.5);
     h.engine.take_frame(h.now); // The consumer has seen the live book.
     h.diff(120, 125, 119, "99.6");
-    h.engine.take_frame(h.now); // Simulate losing the clear frame.
+    h.engine.take_frame(h.now); // Discard any pending incremental frame.
     assert!(h.engine.book("BTCUSDT").is_none());
     let books = snapshot_books(&mut h);
     assert_eq!(books.len(), 1, "resync identity must survive snapshots");

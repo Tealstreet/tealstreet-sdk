@@ -664,6 +664,143 @@ fn accepted_partial_cancel_filters_replica_stale_identity_but_refresh_discovers_
 }
 
 #[test]
+fn linear_partial_refresh_cannot_reopen_the_canceled_native_identity() {
+    partial_refresh_cannot_reopen_the_canceled_native_identity(PROFILES[0]);
+}
+
+#[test]
+fn combined_inverse_partial_refresh_cannot_reopen_the_canceled_native_identity() {
+    partial_refresh_cannot_reopen_the_canceled_native_identity(PROFILES[4]);
+}
+
+fn partial_refresh_cannot_reopen_the_canceled_native_identity(profile: Profile) {
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
+    amend(&mut h, Some(110.0), None);
+    accept_cancel(&mut h, profile);
+    h.respond("/v5/position/trading-stop", 200, OK);
+    assert_eq!(
+        h.engine.store().order("partial").unwrap().status,
+        OrderStatus::Canceled
+    );
+    h.advance(250.0);
+    let old = format!(
+        r#"{{"category":"{}","symbol":"{}","orderId":"partial","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Partial","qty":"7","price":"90","triggerPrice":"90","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}}"#,
+        profile.category(),
+        profile.symbol()
+    );
+    let new = old
+        .replace("partial", "replacement")
+        .replace("StopLoss", "TakeProfit")
+        .replace("90", "110");
+    // The venue has the replacement, but its read replica still includes the old stop.
+    // No private terminal event arrives to repair a healthy-but-degraded socket.
+    h.respond(
+        "/v5/order/realtime",
+        200,
+        &format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"list":[{old},{new}],"nextPageCursor":""}}}}"#
+        ),
+    );
+    if !profile.inverse() {
+        h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+    }
+    let open: Vec<_> = h
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .filter(|order| order.symbol == profile.symbol() && order.status == OrderStatus::Open)
+        .map(|order| order.id.as_str())
+        .collect();
+    assert_eq!(
+        open,
+        vec!["replacement"],
+        "{profile:?}: the refresh must show only the genuine replacement, never the canceled chart row"
+    );
+}
+
+#[test]
+fn canceled_partial_stop_ignores_delayed_private_open_rows_but_accepts_late_terminal_updates() {
+    for profile in PROFILES {
+        let mut h = ready(profile);
+        seed(
+            &mut h,
+            profile,
+            "Sell",
+            "StopLoss",
+            "MarkPrice",
+            false,
+            true,
+        );
+        amend(&mut h, Some(110.0), None);
+        accept_cancel(&mut h, profile);
+        h.respond("/v5/position/trading-stop", 200, OK);
+        let old = format!(
+            r#"{{"category":"{}","symbol":"{}","orderId":"partial","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Partial","qty":"7","cumExecQty":"2","cumExecValue":"180","avgPrice":"90","price":"90","leavesQty":"5","triggerPrice":"90","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}}"#,
+            profile.category(),
+            profile.symbol()
+        );
+        let new = old
+            .replace("partial", "replacement")
+            .replace("StopLoss", "TakeProfit")
+            .replace("\"price\":\"90\"", "\"price\":\"110\"")
+            .replace("\"triggerPrice\":\"90\"", "\"triggerPrice\":\"110\"")
+            .replace("\"cumExecQty\":\"2\"", "\"cumExecQty\":\"0\"")
+            .replace("\"cumExecValue\":\"180\"", "\"cumExecValue\":\"0\"")
+            .replace("\"leavesQty\":\"5\"", "\"leavesQty\":\"7\"");
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{new}]}}"#),
+        );
+        // The older open event was in flight independently of the REST cancel ACK.
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{old}]}}"#),
+        );
+        let open: Vec<_> = h
+            .engine
+            .store()
+            .orders()
+            .iter()
+            .filter(|order| order.symbol == profile.symbol() && order.status == OrderStatus::Open)
+            .map(|order| order.id.as_str())
+            .collect();
+        assert_eq!(
+            open,
+            vec!["replacement"],
+            "{profile:?}: delayed private state must not reopen the canceled chart row"
+        );
+        // A cancellation can race an execution; its final economics must still arrive.
+        let filled = old
+            .replace("Untriggered", "Filled")
+            .replace("\"cumExecQty\":\"2\"", "\"cumExecQty\":\"7\"")
+            .replace("\"cumExecValue\":\"180\"", "\"cumExecValue\":\"630\"")
+            .replace("\"leavesQty\":\"5\"", "\"leavesQty\":\"0\"");
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{filled}]}}"#),
+        );
+        let terminal = h.engine.store().order("partial").unwrap();
+        assert_eq!(terminal.status, OrderStatus::Closed, "{profile:?}");
+        assert_eq!(terminal.filled, 7.0, "{profile:?}");
+        assert_eq!(
+            h.engine.store().order("replacement").unwrap().status,
+            OrderStatus::Open,
+            "{profile:?}"
+        );
+    }
+}
+
+#[test]
 fn hyro_partial_refresh_reuses_managed_snapshot_recovery_instead_of_starting_an_unjoined_read() {
     let profile = PROFILES[2];
     let mut h = ready(profile);

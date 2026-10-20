@@ -922,14 +922,14 @@ impl BybitLinear {
             (Call::CancelPartialStop { id, batch }, Ok(body)) => {
                 match partial_stop_cancel_accepted(body, &id, batch) {
                     Ok(()) => {
-                        self.note_order_terminal(std::slice::from_ref(&id));
+                        self.note_partial_stop_canceled(&id);
                         mark_canceled(cx, &[id], self.local_order_lifecycle());
                     }
                     Err(message) => errors.push(message),
                 }
             }
             (Call::CancelPartialStop { id, .. }, Err((_, message))) if already_gone(&message) => {
-                self.note_order_terminal(std::slice::from_ref(&id));
+                self.note_partial_stop_canceled(&id);
                 mark_canceled(cx, &[id], self.local_order_lifecycle());
             }
             (Call::Cancel { ids: requested }, Ok(body)) => {

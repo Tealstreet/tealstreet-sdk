@@ -28,7 +28,7 @@ fn missed_gap_clear_is_recoverable_from_snapshot_then_fresh_depth() {
     );
     h.engine.take_frame(h.now);
     h.message("/v5/public/linear", r#"{"topic":"orderbook.1000.BTCUSDT","type":"delta","data":{"s":"BTCUSDT","b":[],"a":[],"u":177400509}}"#);
-    h.engine.take_frame(h.now); // Discard the gap notification as a consumer may.
+    h.engine.take_frame(h.now); // Discard any pending incremental frame.
     assert!(h.engine.book("BTCUSDT").is_none());
     let books = snapshot_books(&mut h);
     assert_eq!(books.len(), 1, "resync identity must survive snapshots");

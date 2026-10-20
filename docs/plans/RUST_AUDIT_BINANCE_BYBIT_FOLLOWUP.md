@@ -237,9 +237,9 @@ Selected WASM bytes (fixed budget 1,258,291): Binance 1,014,611; AsterDEX
 - AsterDEX: `4fdb57a1390afaf71c2ea907fc525c56cb09cfcc567f11390ff7654ce0bf957b`.
 - Bybit: `977a812d30670e180d0bc9358215d9ffd5e0212a91e1dfe2eaf15546abe5155c`.
 
-This evidence certifies the integrated runtime; later changes at this checkpoint
-are documentation/test expectations only. Earlier pre-integration failures above
-remain recorded and do not substitute for these final-source passes.
+This evidence certifies the initial integrated runtime at 23a106668a. The PR
+review closure below changes Bybit and requires fresh affected-runtime evidence.
+Earlier pre-integration failures above remain recorded.
 
 Independent gate review passed at e6390fdb06: all 94 replay output files have
 the expected run counts and zero unserved requests, missing/unused writes,
@@ -259,3 +259,37 @@ per-coin balances, funding/settlement rows in fills, hedge funding dedupe, then
 the medium findings excluding the settled Partial TP/SL item. Reverify current
 source and judge production impact; do not fold that new scope into this PR.
 Coordination: thread-dmam5utc39vm, owner reply received 2026-10-20.
+
+## PR correctness review closure
+
+Three independent reviews covered Binance, Bybit and SDK/WASM/public/query
+boundaries and were posted on PR #1354. Binance review reran 78 native tests;
+boundary review reran 26. No introduced P1/P2 found in those scopes.
+
+Bybit review found a P2 in the new forced Partial replacement refresh: ordinary
+Linear and combined inverse could reopen the canceled native ID when a replica
+returned its old Untriggered row alongside the actual replacement. Two tests
+reproduced both failures before the fix. A third regression independently
+proved the analogous delayed private Untriggered publication failure.
+
+Accepted/already-gone Partial cancels now retain the old native ID in the
+existing bounded terminal cache on all applicable profiles. Ordinary cancel
+cache policy is unchanged. Snapshot reconciliation and private open publication
+reject those identities; private terminal updates still apply. Hyro cumulative
+fill processing runs before the publication fence; other execution topics are
+independent. The new stream test covers all five profiles and proves late
+Closed/filled state updates, without claiming emitted-FILL proof from that
+assertion. Two independent source reviews passed the snapshot and stream fix.
+Affected native, selected Bybit replay and combined WASM checks are rerunning.
+
+Boundary review caveat: the resync tests prove explicit full-snapshot empty
+BOOK delivery and subsequent recovery. They do not prove an ordinary gap clear
+was emitted: Binance on_depth and Bybit on_book clear their state and return
+before book_changed on the gap path, also in the base. Comments now accurately
+say pending incremental frames are discarded. This preexisting ordinary clear
+gap remains in the handoff; no claim that it was fixed by this PR.
+
+Initial PR CI at 23a106668a also missed two performance gates: Hyro steady CPU
+TS 5.6 / Rust 5.7 ms and untouched Paradex main CPU TS 297.8 / Rust 311.5 ms.
+No correctness mismatch or threshold change. These failed attempts are not
+passing evidence; the final head must pass CI before merge.

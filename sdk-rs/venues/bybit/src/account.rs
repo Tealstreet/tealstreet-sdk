@@ -887,9 +887,20 @@ impl BybitLinear {
     }
 
     fn remember_terminal_order(&mut self, id: &str) {
-        if !(self.variant == crate::Variant::Demo || self.variant.is_hyro())
-            || !self.account.terminal_orders.insert(id.to_owned())
-        {
+        if !(self.variant == crate::Variant::Demo || self.variant.is_hyro()) {
+            return;
+        }
+        self.cache_terminal_order(id);
+    }
+
+    pub(crate) fn note_partial_stop_canceled(&mut self, id: &str) {
+        self.account.revision = self.account.revision.wrapping_add(1);
+        // The replacement refresh can read a replica still serving the canceled leg.
+        self.cache_terminal_order(id);
+    }
+
+    fn cache_terminal_order(&mut self, id: &str) {
+        if !self.account.terminal_orders.insert(id.to_owned()) {
             return;
         }
         self.account.recent_terminal_orders.push_back(id.to_owned());
@@ -1516,6 +1527,9 @@ impl BybitLinear {
         let Some(mut mapped) = map_order(row, cx.store, cx.now) else {
             return;
         };
+        if self.stale_terminal_snapshot(&mapped) {
+            return;
+        }
         self.note_position_bound(&mapped);
         if mapped.terminal {
             let ids = mapped
