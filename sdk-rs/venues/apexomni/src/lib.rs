@@ -141,7 +141,7 @@ impl ApexOmni {
                     self.failed(
                         cx,
                         *pending,
-                        "ApeX Omni response contains malformed error metadata",
+                        trading::unknown("ApeX Omni response contains malformed error metadata"),
                     );
                     return;
                 }
@@ -170,7 +170,8 @@ impl ApexOmni {
                             .map(|e| e.msg.as_ref())
                             .unwrap_or("invalid response")
                     );
-                    self.failed(cx, *pending, &error);
+                    let error = trading::failure(code, response.status, error);
+                    self.failed(cx, *pending, error);
                 } else {
                     self.response(cx, *pending, response);
                 }
@@ -217,17 +218,25 @@ impl ApexOmni {
                     cx.log(LogLevel::Error, error);
                 }
             }
-            pending => self.failed(cx, pending, error),
+            pending => {
+                let error = trading::unknown(error).kind(safe_cex_engine::ErrorKind::Network);
+                self.failed(cx, pending, error)
+            }
         }
     }
 
-    fn failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+    fn failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
         match pending {
             Pending::SignedAuth { pending, .. } => self.failed(cx, *pending, error),
-            Pending::Public(pending) => self.public_failed(cx, pending, error),
-            Pending::Account(pending) => self.account_failed(cx, pending, error),
+            Pending::Public(pending) => self.public_failed(cx, pending, &error.message),
+            Pending::Account(pending) => self.account_failed(cx, pending, &error.message),
             Pending::Trade(pending) => self.trading_failed(cx, pending, error),
-            Pending::History(pending) => self.history_failed(cx, pending, error),
+            Pending::History(pending) => self.history_failed(cx, pending, &error.message),
         }
     }
 }
@@ -282,7 +291,7 @@ impl Venue for ApexOmni {
             self.failed(
                 cx,
                 pending,
-                "ApeX Omni response did not contain the expected list",
+                trading::unknown("ApeX Omni response did not contain the expected list"),
             );
         }
     }
