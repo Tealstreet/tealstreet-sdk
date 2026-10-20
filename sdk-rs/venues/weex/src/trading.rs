@@ -3,8 +3,8 @@
 //! never retried, including when the transport cannot determine their outcome.
 use crate::{Pending, Task, WeexFutures};
 use safe_cex_engine::model::{
-    MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide,
-    StopTriggerType, TimeInForce,
+    MarginType, Order, OrderExtra, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus,
+    OrderType, PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
 use serde::{Deserialize, Serialize};
@@ -339,7 +339,7 @@ fn price(value: Option<f64>, step: f64) -> Result<Option<String>, String> {
     value.map(|v| rounded(v, step).map(num::format)).transpose()
 }
 fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: String) {
-    cx.log(LogLevel::Error, &error);
+    cx.command_error(command, &error);
     cx.done(command, Err(error));
 }
 fn post(path: &'static str, body: String, call: Call) -> Step {
@@ -1116,6 +1116,24 @@ impl WeexFutures {
                     cx.store.set_order_status(&before.id, OrderStatus::Updating);
                 }
                 _ => {}
+            }
+            if let Call::Place { orders, .. } = &step.call {
+                cx.command_progress(
+                    command,
+                    orders
+                        .iter()
+                        .filter_map(|order| {
+                            order
+                                .client_order_id
+                                .as_ref()
+                                .map(|identity| OrderIdentityReceipt {
+                                    symbol: order.symbol.clone(),
+                                    kind: OrderIdentityKind::ClientOrderId,
+                                    identity: identity.clone(),
+                                })
+                        })
+                        .collect(),
+                );
             }
             self.signed_request(
                 cx,

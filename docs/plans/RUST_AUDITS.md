@@ -437,9 +437,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   COIN-M rejects caller client ids; spot retired streams; depth snapshot retry.
 
 ### Bybit family
-- High: Brazil inverse/option sockets routed to the linear host (engine
+- ~~High: Brazil inverse/option sockets routed to the linear host (engine
   transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
-  `bybit/src/lib.rs:407`).
+  `bybit/src/lib.rs:407`).~~ Fixed: browser and native hosts pick a product route
+  by native URL (`publicWsRoutes`): inverse/spot use the `bybitinverse`/`bybitspot`
+  hosts as TS does; options stay direct (no option proxy is deployed).
 - ~~High: per-coin balances never set (`account.rs:662`).~~ Fixed: `Balance.coins`
   (equity, else wallet balance; USD value, else amount) from every accepted wallet
   read, merged from stream pushes with explicit zeros; failed reads keep holdings.
@@ -464,7 +466,11 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 - ~~Medium: no UNIFIED retry on the wallet call.~~ Fixed: a CONTRACT read refused
   with `accountType only support UNIFIED` switches the account to UTA and retries
   once; other errors never change the account type.
-- Medium: demo reduce-only fill check missing.
+- ~~Medium: demo reduce-only fill check missing.~~ Fixed: a locally published Demo
+  reduce-only limit is checked against its executions at 1 s, 3 s and 8.25 s; a
+  complete cursor walk (20 pages, as TS) proving a full fill retires it (terminal
+  fence); otherwise, or on failure, orders are re-read after the grace. Partial,
+  failed or capped walks never prove a fill.
 - ~~Medium: Hyro tears down on one bad poll (`account.rs:1838`).~~ Fixed: a periodic
   read failing in transport or at the venue keeps the ready stream and last-good
   state and retries next tick; malformed content and initial snapshots still
@@ -762,8 +768,9 @@ No confirmed highs.
 
 ### Crypto.com
 Mostly matches TS.
-- Medium: per-coin balances (`position_balances`) dropped
-  (`cryptocom/src/account.rs:232`) — resilience lane. ~~Caller client id refused
+- Medium: ~~per-coin balances (`position_balances`) dropped
+  (`cryptocom/src/account.rs:232`)~~ — published with the aggregate (REST and
+  `user.balance`). ~~Caller client id refused
   on stop/TP orders (`trading.rs:76`).~~ Matches TS and the client-order-id
   contract (`rust.exchange.ts` rejects it before the engine); a change is a
   contract decision, not a port bug.
@@ -791,7 +798,9 @@ Mostly matches TS.
   malformed snapshot never sets loaded.
 
 ### Cross-venue: per-coin balances and snapshot starvation
-- Per-coin balances missing on ~~Bybit~~ (#1379), Crypto.com, ~~Bitrue~~; check every venue.
+- Per-coin balances missing on ~~Bybit~~ (#1379), ~~Crypto.com~~, ~~Bitrue~~;
+  ~~check every venue~~: GRVT, MEXC and Phemex also dropped the per-currency
+  balances TS publishes and now set them; ApeX and Backpack publish none in TS.
 - Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
   check every venue that fences REST snapshots by stream revision.
   - ~~Bybit Hyro: a ready session's periodic snapshot is discarded on every order/position
