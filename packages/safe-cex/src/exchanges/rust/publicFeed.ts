@@ -6,7 +6,12 @@ export type RustPublicFeedPolicy = { mode: 'direct' | 'disabled' } | { mode: 'sh
 
 type FeedUpdate = {
   op: 'publicFeedUpdate';
-  tickers?: Array<Partial<Record<Exclude<keyof Ticker, 'id' | 'symbol' | 'info'>, number>> & { symbol: string }>;
+  tickers?: Array<
+    Partial<Record<Exclude<keyof Ticker, 'id' | 'symbol' | 'info' | 'midPrice'>, number>> & {
+      symbol: string;
+      midPrice?: number | null;
+    }
+  >;
   books?: Array<{ symbol: string; bids: number[][]; asks: number[][] }>;
   candles?: Array<Candle & { symbol: string; interval: string }>;
 };
@@ -76,7 +81,9 @@ const tickerFields = [
 ] as const;
 
 export const hasSharedTickerValues = (ticker: NonNullable<FeedUpdate['tickers']>[number]): boolean =>
-  tickerFields.some((field) => Number.isFinite(ticker[field]));
+  tickerFields.some((field) => Number.isFinite(ticker[field])) ||
+  ticker.midPrice === null ||
+  Number.isFinite(ticker.midPrice);
 
 /** Excludes credentials/account settings; includes all public-product selectors. */
 export const rustPublicFeedIdentity = (name: ExchangeName, options: ExchangeOptions) =>
@@ -141,7 +148,10 @@ export class RustPublicFeedProvider {
     const seed = () => {
       if (!ready || !this.source.store.loaded.tickers) return;
       const tickers = this.source.store.tickers.map((ticker) => {
-        const row: NonNullable<FeedUpdate['tickers']>[number] = { symbol: ticker.symbol };
+        const row: NonNullable<FeedUpdate['tickers']>[number] = {
+          symbol: ticker.symbol,
+          midPrice: Number.isFinite(ticker.midPrice) ? ticker.midPrice! : null,
+        };
         for (const field of tickerFields) if (Number.isFinite(ticker[field])) row[field] = ticker[field];
         return row;
       });

@@ -119,17 +119,183 @@ no freshness fence, so every venue reinvents dedupe and terminal fencing.
 
 ## Wire contract
 
-- FILLS lose `orderId`, so chaser fill tracking never fires on Rust
-  (`frameApplier.ts:469`, `ChaserOrderManager.ts:783`).
-- `Market.pretty_symbol` never encoded (`store.rs:827`).
-- Rows on markets missing from the table get symbol `''` (`store.rs:704`,
-  `frameApplier.ts:337`).
-- Settings keyed by market index survive a market-table change (`store.rs:144`).
-- One throw in `FrameApplier.apply` drops the frame with no resync (`frameApplier.ts:41`).
-- Never encoded: `conditional_order_price`, bracket trigger types,
-  `remaining_notional`, `Ticker.mid_price`.
-- Low: two `fetchedLeverage` writers; `FORMAT` never bumped and reserved u16 unused;
-  fills precede orders by up to 250 ms; `TickerState` views detach on transfer.
+Repair lane: `feat/rust-wire-fixes`, based on `bd94abb524`. Reverified against
+the current code: all requested findings below still hold; ticker orphan
+identities already work and must remain intact. Full-auto phases:
+
+1. Preserve wire information: explicit per-section revisions, display symbols,
+   orphan identities, order extras, midpoint snapshots/deltas, and owned ticker
+   state. Keep Rust, JS declarations, decoder and FrameApplier synchronized.
+2. Preserve market identity: symbol-keyed settings and no market-only flush
+   while MARKETS is pending; regression tests cover reorder/removal and queued
+   books/candles/fills. Route SETTINGS and rare-query leverage writes through
+   the sole FrameApplier owner.
+3. Recover apply failures: retain independent account sections, stage identity
+   changes, request local/worker snapshots, and test actual frame-to-chaser fills.
+4. Run scoped native/JS/SDK checks, combined WASM and Binance plus affected-field
+   venue replay gates; create the PR into `feat/rust-rewrite`, post adversarial
+   reviews, fix findings, merge only on green CI, and cut a follow-up branch.
+
+Each phase requires an independent sub-agent review and a stable commit. Every
+fixed finding gets a reproducing regression. No TS venue deletion or replay
+threshold relaxation. Strike findings with the fix PR and its evidence.
+
+- ~~FILLS lose `orderId`, so chaser fill tracking never fires on Rust
+  (`frameApplier.ts:469`, `ChaserOrderManager.ts:783`).~~
+- ~~`Market.pretty_symbol` never encoded (`store.rs:827`).~~
+- ~~Rows on markets missing from the table get symbol `''` (`store.rs:704`,
+  `frameApplier.ts:337`).~~
+- ~~Settings keyed by market index survive a market-table change (`store.rs:144`).~~
+- ~~One throw in `FrameApplier.apply` drops the frame with no resync (`frameApplier.ts:41`).~~
+- ~~Never encoded: `conditional_order_price`, bracket trigger types,
+  `remaining_notional`, `Ticker.mid_price`.~~
+- Low: ~~two `fetchedLeverage` writers~~; ~~`FORMAT` never bumped and reserved u16 unused~~;
+  fills precede orders by up to 250 ms; ~~`TickerState` views detach on transfer~~.
+
+Repair evidence: actual Rust-writer → JS decoder → FrameApplier regression,
+actual FILLS frame → GRVT chaser partial/completion regression, native layout
+and market-reorder/queue tests, decoder legacy/revision/bounds/transfer tests,
+worker midpoint bridge tests, and local/worker recovery RPC regressions.
+FORMAT remains 1 because the envelope is unchanged; section revisions identify
+new fixed tails. Both readers check FORMAT; unknown enum values stay absent.
+Independent phase reviews found missing STRINGS acceptance, observer exceptions
+masking recovery, worker midpoint loss and orphan native-quantity NaNs; all fixed
+with regressions. Execution-vs-order flush cadence remains a separate finding.
+
+Phase progress: phases 1–3 and independent reviews complete, committed in
+`fb5537d662`. Integrated landing PR #1338 (`1b8592dbd2`) in `a35660f9f3`,
+retaining both test additions and adapting renamed helpers/revised Greek tails;
+the landed KuCoin Spot leverage path also uses the sole applier owner.
+Integrated checks pass: 95 all-feature/89 default engine tests, 25 decoder tests,
+187 scoped SDK/worker tests, typecheck/lint, native/WASM Clippy and 586 harness
+tests. Combined release WASM built successfully. All 12 public/private gates pass
+for Binance, Hyperliquid, OKX, GRVT, KuCoin futures and KuCoin spot.
+Public main/steady CPU in ms (TS → Rust): Binance 296.1/166.6 → 158.1/82.4;
+Hyperliquid 387.2/44.9 → 81.5/33.8; OKX 1589.2/1188.4 → 1290.8/936.8;
+GRVT 171.3/97.4 → 153.7/84.1; KuCoin 408.9/247.4 → 202.6/108.5;
+KuCoin spot 525.5/333.2 → 464.3/301.3. All retained-memory comparisons pass.
+The first OKX attempt matched output but missed steady CPU by 0.4%; a
+same-machine decoder control profile matched output/main CPU, followed by one
+full three-run retry with unchanged fixture and thresholds (passing above).
+The PR records both attempts and distinguishes profiling from gate evidence.
+
+Phase-4 review additionally found query-only leverage filtered from main, stale
+late snapshots, market maxima masquerading as account leverage, and
+identity/book baselines surviving rejected frames. Repairs preserve query rails
+in coherent snapshot bundles, return only confirmed account rails or null, and
+require fresh baselines after errors; each has reproducing SDK regressions.
+These are production data-loss/staleness/attribution fixes, not lifecycle parity.
+Final phase review passes. Follow-up checks: 54 recovery/worker/contract tests,
+12 book tests (two fail with the baseline invalidation removed), 83 JS host/reader
+tests, 7 actual-writer cross-language tests, typecheck, production lint and bans.
+PR #1345 adversarial round 1 found two additional P2 defects: required identity
+references accepted NONE, and local recovery erased query-only leverage. Both
+are repaired and independently re-reviewed: 27 decoder tests and 37 recovery
+tests pass, with three failing-before controls for each defect, plus typecheck
+and production lint. Required references reject NONE while optional values and
+empty strings retain their contracts. Local/RPC snapshots share coherent capture.
+CI exposed stale tests for the repaired contracts: BreakoutProp synthetic
+candles expected a market-only startup flush, and two WASM consumer fixtures
+omitted FILLS.orderId. Corrected tests preserve their original data assertions;
+36 BreakoutProp public tests and 262 WASM consumer tests pass. The initial CI
+also hit Paradex size and two small CPU comparisons; fixed-budget integration
+and final green-CI verification remain in progress.
+Integrated landing PR #1342 (`fc809a9d85`), retaining its public-feed ownership,
+provider callbacks before transfers, lazy text codecs and fixed-budget Paradex
+profile alongside all wire repairs. The integration revealed shared public feeds
+omitting midpoint; explicit numeric/null/omitted updates now preserve/change/
+clear midpoint through the native cached feed and emitted frames. A JSON control
+against the incoming DTO failed at runtime; the repaired native target passes
+9 tests. Two binary wrapper regressions cover observer/provider exceptions and
+catalog validation failures without losing original fills or frame forwarding.
+The measured settings-helper size experiment grew WASM by 34 bytes and was
+removed; no speculative engine optimization or budget increase is retained.
+Integrated checks pass: 95 all-feature engine unit tests plus 9 shared-feed
+integration tests, native format/Clippy/bans, 62 SDK tests and SDK typecheck/lint.
+Real rebuilt-WASM midpoint/provider regression and all 12 shared-feed tests pass.
+CI identified three more fill-layout fixture assumptions (OKX/Phemex/WEEX).
+Their repairs preserve execution prices/amounts, ordering and deduplication, and
+consume pending MARKETS before expecting a market-only flush. Independent
+failing-before controls and all 84 affected native tests pass; review passes.
+Repeated Hyperliquid Spot CI startup misses prompted a bounded fixture profile.
+Owned TickerState snapshots now copy numeric storage once and keep validated
+owned identity bytes for lazy decoding. Three alternating paired replays match
+all output; eager/owned median main CPU is 42.634/40.213 ms and steady CPU
+13.063/10.739 ms. This does not explain all startup variance. Transfer, required
+reference and lazy-decode regressions pass (29 reader cases); independent review
+passes. The canonical three-run Hyperliquid Spot gate passes: TS/Rust main
+46.3/41.6 ms, steady 17.1/11.8 ms, retained 18.9/6.9 MB. No budget, fixture or
+shared engine hot path changed. Host JS tests pass 89/89 and actual-writer
+cross-language tests 7/7. All 12 rebuilt affected-venue gates pass at `560b969297`. Final public main/
+steady CPU ms (TS → Rust): Binance 189.7/100.8 → 89.2/35.1; Hyperliquid
+442.3/32.2 → 60.0/19.9; OKX 2155.2/1668.3 → 1905.5/1461.2; GRVT
+302.8/195.5 → 110.1/56.1; KuCoin 424.9/263.6 → 220.3/121.7; KuCoin spot
+571.4/350.8 → 501.4/322.6. Every retained-memory comparison and all six private
+correctness gates pass. Fresh Bitrue CI passes after the prior registry HTTP 502.
+CI still requires confirmation: Hyperliquid Spot startup missed by 0.7 ms and
+Paradex by 15.6 ms (both steady/memory/output pass); the prior identical native
+Paradex integration passed 317.5/303.7 ms TS/Rust. A bounded unchanged-production-code
+retry accompanies the fixture checkpoint. Native CI additionally identified two
+Paradex candle tests assuming an early market-only startup frame; repaired
+fixtures consume full MARKETS and retain candle quantity/rewind assertions.
+Both original failures reproduce with a passing control; all 32 public tests and
+formatting pass, and independent review passes. Full workspace native tests run
+with no-fail-fast to discover any remaining stale fixtures in one pass. Refreshed
+SDK recovery/contract/worker tests also pass 62/62.
+Full workspace verification at `164baa955c` passes 2,802 tests across 218 test
+results, with zero failures; both general CI runs are green. Native CI and
+Paradex pass. The bounded CPU retry still misses Hyperliquid Spot startup by
+0.4 ms and Hyro by 0.1 ms, with identical output and passing steady/memory.
+Profiling identifies repeated market-index hashing inside the symbol-settings
+sort introduced by this repair. Each row now captures its current index once,
+then sorts and encodes that same value; indices are never cached across flushes.
+Independent review confirms identical known/orphan/empty-symbol order and rails.
+A first paired timing was inconclusive. A balanced three-variant fixture
+comparison then measures original/cached-index main medians 43.387/38.418 ms,
+startup 31.526/27.951 ms, steady 10.736/10.950 ms and identical complete output.
+WASM shrinks 1,128,738 → 1,103,477 bytes. Canonical standalone Hyperliquid Spot
+passes main TS/Rust 39.3/38.7 ms, steady 12.3/11.2 ms, retained 18.9/6.1 MB.
+The constant ticker-loop experiment showed no benefit (+80 bytes), and a
+separate serializer boundary added no clear benefit; both were removed. Only
+the cached per-flush SETTINGS index is retained. Engine tests pass 95 unit +
+9 feed integration, cross-language writer tests 7/7, formatting and Clippy pass.
+The final combined rebuild, replays and exact-head CI follow.
+
+
+Wire lane final allocation follow-up (`feat/rust-wire-fixes`): all twelve final
+combined-WASM gates pass at `ebe329766f`; both general CI runs and 34 of 35 Rust
+jobs pass. The declared unchanged-head retry passes Paradex but Hyperliquid Spot
+misses startup by 0.4 ms (TS 64.6/Rust 65.0; steady 17.9/15.4 passes). Standalone
+Paradex host opt2 exceeded the fixed size budget; host s fit but measured worse
+CPU. Both experiments were removed, so build profiles remain unchanged.
+Review found the ticker reserve still assumed 92 bytes/row after revision 1 grew
+to 108. A full-startup allocation regression reproduces capacity 62,348 for 32,152
+encoded bytes; the corrected estimate uses 33,222 for identical bytes. It checks
+all 128 market refs, midpoints and exact identity tails after string packing.
+Independent review passes. Engine lib tests pass 90 default/96 all-features;
+Clippy, formatting and seven cross-language writer regressions pass. Alternating
+three-pair standalone replays match all output: main median 43.848 → 40.483 ms,
+steady 14.503 → 12.333 ms; retained memory is effectively unchanged. Canonical
+Hyperliquid Spot gate passes: TS/Rust main 56.1/49.8 ms, steady 20.9/16.4 ms,
+retained 18.9/6.1 MB. Exact-head CI and final combined verification follow.
+
+Wire integration checkpoint: the rebuilt `2ebdda7c1c` source passes all twelve
+affected-venue local gates and 2,820 native CI test executions. Both general CI
+runs and 34/35 Rust jobs pass; the bounded Bybit retry still misses Hyro steady
+CPU (TS/Rust 3.4/3.9 ms, main 26.2/22.8 ms passes). Its canonical standalone
+control passes main 22.560/19.865 and steady 4.177/3.142 ms, whereas combined
+main 33.5/34.3 and steady 10.5/11.6 ms fail. Same-combined-WASM reader controls
+match every nonmetric output: current reader beats the landed reader in all
+three pairs, with variable steady medians 4.286/6.846 ms. Steady-window profiling
+does not support another wire change; no speculative hot-path edit is retained.
+Merged landing `5f84b3e21d` in `6c8823dbcf`, including its Bybit numeric ticker
+decoder, broker/cancellation and side-aware leverage repairs. Independent engine
+integration review passes. Wrapper review caught overlapping leverage flushes;
+the existing regression fails before removing the redundant branch flush and
+passes afterwards (58 recovery/contract/leverage tests). Incoming broker/scope
+tests pass 19/19; integrated engine lib tests pass 99/99, SDK typecheck and scoped
+lint pass. Sole leverage ownership and coherent snapshots remain intact.
+Fresh combined gates and exact-head CI are required before merging PR #1345.
 
 ## Security
 
@@ -328,8 +494,8 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   `fetchMarkets`/`fetchTickers` on an unstarted instance return `[]` and
   `PublicExchangeFactory` caches it (`rust.exchange.ts:856`); book/candle
   subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`).
-- Medium: `fetchLeverageForSymbol` returns market max for mexc, bingx, weex
-  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`; command
+- Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
+  (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~; command
   rejections don't emit the error toast (one-error rule); `privateOnly`/
   `externalPublicData` ignored; `getAccount` missing for ~18 venues; dispose
   mid-command reports a placed order as failed (`host.mjs:83`); base

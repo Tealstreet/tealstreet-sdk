@@ -37,6 +37,15 @@ pub struct PublicTicker {
     pub funding_time: Option<f64>,
     pub volume: Option<f64>,
     pub quote_volume: Option<f64>,
+    /// Omitted preserves, null clears, a number replaces.
+    #[serde(default, deserialize_with = "midpoint_update")]
+    pub mid_price: Option<Option<f64>>,
+}
+
+fn midpoint_update<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<f64>>, D::Error> {
+    Option::deserialize(deserializer).map(Some)
 }
 
 impl PublicFeedUpdate {
@@ -88,6 +97,7 @@ impl PublicTicker {
         ]
         .iter()
         .any(Option::is_some)
+            || self.mid_price.is_some()
     }
     fn valid(&self) -> bool {
         [
@@ -106,6 +116,7 @@ impl PublicTicker {
         .iter()
         .flatten()
         .all(|value| value.is_finite())
+            && self.mid_price.flatten().is_none_or(f64::is_finite)
     }
     pub(crate) fn merge(&mut self, update: Self) {
         macro_rules! fields {
@@ -124,6 +135,9 @@ impl PublicTicker {
             volume,
             quote_volume
         );
+        if update.mid_price.is_some() {
+            self.mid_price = update.mid_price;
+        }
     }
     pub(crate) fn apply(&self, target: &mut Ticker) {
         macro_rules! fields {
@@ -142,6 +156,9 @@ impl PublicTicker {
             volume,
             quote_volume
         );
+        if let Some(mid_price) = self.mid_price {
+            target.mid_price = mid_price;
+        }
     }
 }
 

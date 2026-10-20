@@ -553,10 +553,18 @@ fn synthetic_candle_interval(interval: &str, seconds: f64) {
         interval: interval.into(),
     });
     rig.boot();
+    assert!(
+        rig.engine.take_market_frame(rig.now).is_none(),
+        "indexed candles wait for the pending market table"
+    );
     let frame = rig
         .engine
-        .take_market_frame(rig.now)
-        .expect("live candle frame");
+        .take_frame(rig.now)
+        .expect("startup market table and queued candle frame");
+    assert!(
+        safe_cex_engine::wire::sections(frame)
+            .any(|(kind, _)| kind == safe_cex_engine::wire::section::MARKETS)
+    );
     let mut at = 16;
     let mut candle = None;
     while at < frame.len() {
@@ -583,6 +591,20 @@ fn synthetic_candle_interval(interval: &str, seconds: f64) {
     assert_eq!(candle[0], (rig.now / 1_000.0 / seconds).floor() * seconds);
     assert_eq!(&candle[1..5], &[3656.01; 4]);
     assert_eq!(candle[5], 0.0);
+    let request = rig.next_request();
+    rig.reply(&request, 200, QUOTES);
+    let live = rig
+        .engine
+        .take_market_frame(rig.now)
+        .expect("live candle frame after the market table was consumed");
+    assert!(
+        safe_cex_engine::wire::sections(live)
+            .any(|(kind, _)| kind == safe_cex_engine::wire::section::CANDLES)
+    );
+    assert!(
+        safe_cex_engine::wire::sections(live)
+            .all(|(kind, _)| kind != safe_cex_engine::wire::section::MARKETS)
+    );
     rig.command(Command::UnsubscribeCandles {
         symbol: "ETHUSD".into(),
         interval: interval.into(),
