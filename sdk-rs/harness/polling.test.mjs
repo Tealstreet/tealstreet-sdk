@@ -171,9 +171,11 @@ test('HTTP-only polling timeline advances timers and changes snapshots without s
   try {
     assert.equal(tape.respond('GET', url).body, 'initial');
     const ticks = [];
-    await tape.play((t) => ticks.push(t), async () => {}, async () => {}, clock, () => {
-      timer = setInterval(() => seen.push(tape.respond('GET', url).body), 10);
-    });
+    await tape.play((t) => {
+      ticks.push(t);
+      // Arm after the virtual clock starts, so wall-clock startup cannot poll.
+      if (ticks.length === 1) timer = setInterval(() => seen.push(tape.respond('GET', url).body), 10);
+    }, async () => {}, async () => {}, clock);
     assert.deepEqual(seen, ['second', 'third']);
     assert.deepEqual(ticks, [0, 10, 20]);
     assert.equal(tape.open.size, 0);

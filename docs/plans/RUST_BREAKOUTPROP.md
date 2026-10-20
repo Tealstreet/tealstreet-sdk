@@ -265,3 +265,23 @@ provably unused crypto helpers were found by the independent caller audit.
 - Current fix verification: 103 Breakout native tests, 30 targeted TS tests,
   391 harness tests, workspace strict all-target clippy and format pass.
   Independent fix re-reviews and refreshed final artifacts/gates are running.
+- Independent auth/account and trading re-reviews cleared the P1 fix; the
+  trading reviewer reran the exact canonical/legacy-zero STOP amendment
+  regression successfully. Auth independently cleared the recorder fix and
+  reran all 22 polling tests. Findings and resolutions are posted as
+  code-correctness comments on PR #1328.
+- Linux CI exposed a test-only startup timer race: a polling interval armed
+  before virtual-clock startup could observe an extra real-time seed response.
+  Arm it at the first virtual tick instead. Exact response and tick-time
+  assertions remain unchanged; independent re-review is clear, and the full
+  391-test harness passes. No runtime or performance threshold changed.
+- Refreshed selected Breakout artifact: 642,528 bytes, SHA-256
+  `e7fc05738c15196f77e8f88a571a91f61527c98ab822f97d2351d6ad4bc6fdc4`.
+  Private replay PASS with documented and legacy STOPs. One local public run
+  missed the steady CPU threshold by 0.8 ms; an unchanged three-run retry
+  passed strictly: main CPU TS/Rust 38.0/27.4 ms, steady 19.6/12.8 ms,
+  retained 14.1/0.8 MB. The Linux Breakout replay CI job also passed.
+- Refreshed native workspace: 2,096 tests pass, including 103 Breakout tests.
+  Root typecheck 44 tasks and lint 28 tasks pass. The final acceptance evidence
+  for PR #1328 is recorded in its exact-head checks, body and comments;
+  live connectivity still requires Sam's legacy DXtrade credentials.
