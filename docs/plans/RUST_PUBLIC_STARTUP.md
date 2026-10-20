@@ -35,7 +35,10 @@ their old strict semantics until the third phase. Supported blank-number
 coercions remain public-only. Private reads start after catalogue availability,
 independently of ticker read success. Store::ensure_ticker recovers a known
 catalogue row only when real validated live data arrives, preserving the REST
-loaded flag. Optimized ticker index caches recover through the same path.
+loaded flag. After the seed loads, live data creates no row the seed omitted
+(TS parity) unless a venue registered that base as a funded asset awaiting
+valuation (`Store::want_ticker_for_base`). Optimized ticker index caches recover
+through the same path.
 
 ## Checkpoint before first-PR gates
 

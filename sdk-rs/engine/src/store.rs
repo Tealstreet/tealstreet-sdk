@@ -10,7 +10,7 @@ use crate::model::{DerivativeProduct, InstrumentClassification, PositionGreeks, 
 #[cfg(feature = "prediction")]
 use crate::model::{PredictionHolding, PredictionMarket};
 use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
 pub struct Store {
@@ -47,6 +47,8 @@ pub struct Store {
     ticker_masks: Vec<u16>,
     dirty_tickers: Vec<u32>,
     ticker_deltas_spare: Vec<(u32, u16)>,
+    /// Funded base assets awaiting valuation; live data may add their rows after the seed.
+    wanted_ticker_bases: HashSet<String>,
 }
 
 /// Packed ticker delta field order; matches `PACKED_TICKER_FIELDS` in
@@ -349,9 +351,29 @@ impl Store {
         Some(index)
     }
 
+    /// Let live data add tickers for markets on this base after the seed, so a
+    /// funded asset the seed omitted can still be valued.
+    pub fn want_ticker_for_base(&mut self, base: &str) {
+        if !self.wanted_ticker_bases.contains(base) {
+            self.wanted_ticker_bases.insert(base.to_owned());
+        }
+    }
+
     /// Mutate ticker values, keeping its symbol identity; changed fields go out as deltas.
     pub fn update_ticker(&mut self, symbol: &str, update: impl FnOnce(&mut Ticker)) {
-        let Some(index) = self.ensure_ticker(symbol) else {
+        // Before the seed, live data may recover a catalogue row; afterwards the
+        // seed decides which markets have tickers (as TS does), except for a
+        // funded asset a venue still needs to value.
+        let recover = !self.loaded.tickers
+            || self
+                .market(symbol)
+                .is_some_and(|market| self.wanted_ticker_bases.contains(&market.base));
+        let index = if recover {
+            self.ensure_ticker(symbol)
+        } else {
+            self.ticker_index(symbol)
+        };
+        let Some(index) = index else {
             return;
         };
         self.update_ticker_at(index, update);
@@ -1274,6 +1296,21 @@ mod tests {
             symbol: symbol.into(),
             ..Ticker::default()
         }
+    }
+
+    #[test]
+    fn live_ticker_after_the_seed_never_creates_a_row_the_seed_omitted() {
+        let mut store = Store::default();
+        store.set_markets(vec![market("AAA"), market("DELISTED")]);
+        store.set_tickers(vec![ticker("AAA")]);
+        store.update_ticker("DELISTED", |ticker| ticker.mark = 0.15);
+        assert!(store.ticker("DELISTED").is_none());
+        store.update_ticker("AAA", |ticker| ticker.mark = 2.0);
+        assert_eq!(store.ticker("AAA").unwrap().mark, 2.0);
+        // Test markets share the base "LIVE".
+        store.want_ticker_for_base("LIVE");
+        store.update_ticker("DELISTED", |ticker| ticker.mark = 0.15);
+        assert_eq!(store.ticker("DELISTED").unwrap().mark, 0.15);
     }
 
     #[test]

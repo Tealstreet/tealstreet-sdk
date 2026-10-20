@@ -384,6 +384,7 @@ impl KrakenSpot {
         let mut total = 0.0;
         let mut missing = false;
         let mut unsupported = false;
+        let mut wanted = Vec::new();
         for holding in currencies {
             let rate = if matches!(holding.currency.as_str(), "USD" | "USDT" | "USDC") {
                 Some(1.0)
@@ -411,6 +412,7 @@ impl KrakenSpot {
                         // A rejected catalogue peer may be this funded asset's
                         // missing conversion route; absence is not dust proof.
                         missing = true;
+                        wanted.push(holding.currency.clone());
                     } else {
                         unsupported = true;
                     }
@@ -420,6 +422,9 @@ impl KrakenSpot {
             if let Some(rate) = rate {
                 total += holding.balance.total * rate;
             }
+        }
+        for base in &wanted {
+            cx.store.want_ticker_for_base(base);
         }
         // Each warning repeats only after its condition has cleared.
         if !unsupported {

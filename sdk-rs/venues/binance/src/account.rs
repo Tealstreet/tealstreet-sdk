@@ -1358,6 +1358,7 @@ impl BinanceFutures {
                 balance.upnl += unrealized * price;
             } else if self.asset_has_valuation_market(cx.store, &asset.asset) {
                 missing_price = true;
+                cx.store.want_ticker_for_base(&asset.asset);
             } else if !self.account.valuation_warned {
                 cx.log(LogLevel::Warning, "Binance wallet asset has no supported valuation market; native amount retained");
                 self.account.valuation_warned = true;
@@ -2377,9 +2378,13 @@ impl BinanceFutures {
         for (asset, &(free, used)) in &self.account.spot_balances {
             let price = self.asset_usd_price(cx.store, asset);
             let total = free + used;
-            missing_price |= (free != 0.0 || used != 0.0)
+            let unpriced = (free != 0.0 || used != 0.0)
                 && !(price.is_finite() && price > 0.0)
                 && self.asset_has_valuation_market(cx.store, asset);
+            if unpriced {
+                cx.store.want_ticker_for_base(asset);
+            }
+            missing_price |= unpriced;
             balance.free += free * price;
             balance.used += used * price;
             balance.total += total * price;
