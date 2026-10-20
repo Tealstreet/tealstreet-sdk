@@ -512,10 +512,10 @@ const BinanceInverseMetadata: ExchangeMetadata = {
   exchangeName: 'binanceinverse' as ExchangeName,
   prettyName: 'Binance Inverse',
   defaultQuote: 'USD',
-  enabled: false,
+  enabled: true,
   enabledInDev: true,
   enableInPreview: true,
-  supportedOnMobile: false,
+  supportedOnMobile: true,
   latencyDomain: 'dapi.binance.com',
   requiresCors: true,
   privateProxyRegions: {
