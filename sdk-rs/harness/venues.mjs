@@ -3,6 +3,8 @@
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { kucoin } from './kucoin.mjs';
+import { createRequire } from 'node:module';
+import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { subscriptionKeys, requestKey } from './requests.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
@@ -514,6 +516,33 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  asterdex: {
+    initializeReplay: initializeAsterCrypto,
+    rust: 'asterdex',
+    ts: { module: `${root}/asterdex/asterdex.exchange.ts`, className: 'AsterDEXExchange', name: 'asterdex' },
+    privateSocket: '/ws/',
+    compareFillPrices: true,
+    compareBalanceCurrencies: true,
+    compareWriteOrder: true,
+    requestUrl: asterRequestUrl,
+    // Aster does not mint client IDs: injected IDs remain part of exact identity.
+    generatedId: () => false,
+    requestKey: typedRequest,
+    createRequestValidator: createAsterRequestValidator,
+    createSocketAudit: asterSocketAudit,
+    isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.topics).filter((topic) => topic.endsWith('@depth20@100ms')).length >= count,
+    startupSubscriptions: (records, books) => {
+      const url = records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/stream')?.url ?? 'wss://fstream.asterdex.com/stream';
+      return subscriptionKeys(url, { method: 'SUBSCRIBE', params: ['!ticker@arr', '!markPrice@arr@1s', ...books.map((symbol) => `${symbol.toLowerCase()}@depth20@100ms`)] });
+    },
+    prepareTsTransport: async (_exchange, adapter) => {
+      const { default: axios } = await import('axios');
+      axios.defaults.adapter = adapter;
+      createRequire(import.meta.url)('axios').defaults.adapter = adapter;
+    },
+  },
+
   kucoin: {
     ...kucoin,
     requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),

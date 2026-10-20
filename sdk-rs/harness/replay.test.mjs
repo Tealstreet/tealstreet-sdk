@@ -298,3 +298,51 @@ test('production KuCoin startup requires every requested REST book and accepts i
   await pending;
   assert.equal(done, true);
 });
+
+test('production Aster constructor binds configured V1/V3 credentials before matching and consuming writes', () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const keyStart = source.indexOf('const VOLATILE =');
+  const classStart = source.indexOf('class Tape extends SharedTape {');
+  const classEnd = source.indexOf('\nconst settle =', classStart);
+  const vectors = JSON.parse(readFileSync(new URL('../venues/asterdex/tests/fixtures/signing.json', import.meta.url))).cases;
+  const vector = vectors.find((row) => row.name === 'documented-order-mainnet');
+  const now = Date.now;
+  Date.now = () => vector.nowMs;
+  try {
+    for (const v3 of [false, true]) {
+      const venue = { ...venueOf('asterdex'), replayOptions: v3
+        ? { key: vector.signer, secret: '0x4fd0a42218f3eae43a6ce26d22544e986139a01e5b34a62db53757ffca81bae1', applicationId: vector.user }
+        : { key: 'configured-key', secret: 'configured-secret' } };
+      const base = 'https://fapi.asterdex.com/fapi/' + (v3 ? 'v3' : 'v1') + '/order';
+      const fields = 'symbol=BTCUSDT&quantity=0.003&recvWindow=20000&timestamp=' + vector.nowMs;
+      const url = v3 ? base + '?' + vector.codeQuery + '&signature=' + vector.codeSignature
+        : base + '?' + fields + '&signature=' + createHmac('sha256', 'configured-secret').update(fields).digest('hex');
+      const records = [{ type: 'http', method: 'POST', url, status: 200, body: '{}' }];
+      const ProductionTape = new Function('SharedTape', 'values', 'venue', 'records', 'bookSymbols', 'callerIds',
+        'keyOf', 'Responses', 'sharedUrl', 'parseRequestJson', 'isRead', 'isPrivate',
+        `${source.slice(keyStart, classStart)}\nreturn (${source.slice(classStart, classEnd)});`)(
+        Tape, { venue: 'asterdex' }, venue, records, [], new Set(), requestKey,
+        Responses, undefined, parseRequestJson, () => false, true,
+      );
+      const tape = new ProductionTape('ts');
+      assert(tape.responseStore, 'production Aster uses the shared typed store');
+      assert.throws(() => tape.respond('POST', url, undefined, { 'X-MBX-APIKEY': 'wrong-key' }), /wrong API wallet/);
+      assert.equal(tape.missingWrites, 1, 'invalid auth must not consume a response');
+      if (!v3) for (const [field, value] of [['newClientOrderId', ''], ['newClientOrderId', 'bad\n'],
+        ['clientAlgoId', 'x'.repeat(99)], ['quantity', '0.004'], ['unknown', 'economic']]) {
+        const changed = new URL(url);
+        changed.searchParams.delete('signature');
+        changed.searchParams.set(field, value);
+        const payload = [...changed.searchParams].map(([key, value]) => `${key}=${value}`).join('&');
+        changed.searchParams.set('signature', createHmac('sha256', 'configured-secret').update(payload).digest('hex'));
+        assert.equal(tape.respond('POST', changed.href, undefined, { 'X-MBX-APIKEY': 'configured-key' }).status, 599);
+        assert.equal(tape.missingWrites, 1, `${field} must not alias the expected order`);
+      }
+
+      assert.equal(tape.respond('POST', url, undefined, { 'X-MBX-APIKEY': venue.replayOptions.key }).status, 200);
+      assert.equal(tape.missingWrites, 0);
+      if (v3) assert.throws(() => tape.respond('POST', url, undefined, { 'X-MBX-APIKEY': venue.replayOptions.key }), /nonce was reused/);
+      else assert.equal(tape.respond('POST', url, undefined, { 'X-MBX-APIKEY': venue.replayOptions.key }).status, 599);
+    }
+  } finally { Date.now = now; }
+});

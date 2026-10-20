@@ -18,6 +18,33 @@ fn done(e: &mut TestEngine, command: u32) -> Result<String, String> {
         .expect("command completion")
 }
 #[test]
+fn unsupported_stp_on_final_batch_member_prevents_all_io() {
+    for mode in ["EXPIRE_TAKER", "EXPIRE_MAKER", "EXPIRE_BOTH"] {
+        let (mut e, _) = startup();
+        e.handle(
+            1.0,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![order(""), order(&format!(r#", "stpMode":"{mode}""#))],
+            }),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
+                if error.contains("self-trade prevention")
+        )));
+        assert!(
+            !e.store()
+                .orders()
+                .iter()
+                .any(|o| o.status == OrderStatus::Creating)
+        );
+    }
+}
+
+#[test]
 fn unsupported_bybit_controls_on_final_batch_member_prevent_all_io() {
     for control in [
         r#", "bybitBbo":{"sideType":"Queue","level":1}"#,

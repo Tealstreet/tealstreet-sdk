@@ -344,7 +344,7 @@ const bitgetContract = (callerIds, venue) => {
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 export class Tape {
-  constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = venue.timeoutMs ?? 30000, impl = venue.impl, books = venue.books ?? []) {
+  constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = venue.timeoutMs ?? 30000, impl = venue.impl, books = venue.books ?? [], options = venue.replayOptions) {
     records = implementationRecords(records, impl);
     this.records = records;
     this.impl = impl;
@@ -355,6 +355,9 @@ export class Tape {
     this.isPrivate = isPrivate;
     this.timeoutMs = timeoutMs;
     this.books = books;
+    this.options = options ?? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase',
+      ...venue.options, ...venue.replayCredentials };
+    this.validateRequest = venue.createRequestValidator?.(this.options) ?? venue.validateRequest;
     this.commandIndex = 0;
     this.time = 0;
     this.generations = new Map();
@@ -531,7 +534,7 @@ export class Tape {
   }
 
   respondMatched(method, url, body, headers) {
-    try { this.venue.validateRequest?.({ method, url, body, headers }); }
+    try { this.validateRequest?.({ method, url, body, headers }); }
     catch (error) { this.invalidSignatures++; throw error; }
     if (this.isPrivate && this.venue.verifyRequest) {
       try { if (!this.venue.verifyRequest({ method, url, body, headers })) throw new Error(`invalid replay signature: ${method} ${url}`); }
@@ -1042,12 +1045,12 @@ export class Tape {
 
 // Factory compatibility uses the production transport, with venue defaults.
 export const createTape = (records, venue = {}, isPrivate = venue.isPrivate ?? false, {
-  impl, books = [], socketTimeoutMs = 30_000, commandTimeoutMs = 15_000, credentials = venue.replayCredentials,
+  impl, books = [], socketTimeoutMs = 30_000, commandTimeoutMs = 15_000, credentials = venue.replayCredentials, options,
 } = {}) => {
   const defaults = venue.rust === 'mexc' ? { canonicalIntegerStrings: true, ignoredBodyFields: ['externalOid', 'requestId'], rollingListWindows: true, matchRequestBody: true }
     : venue.rust === 'cryptocom' ? { requestBodyParams: true }
     : ['bingx', 'blofin'].includes(venue.rust) ? { requestBodies: true } : {};
-  const tape = new Tape(records, { ...defaults, ...venue, replayCredentials: credentials, commandTimeoutMs }, isPrivate, socketTimeoutMs, impl, books);
+  const tape = new Tape(records, { ...defaults, ...venue, replayCredentials: credentials, replayOptions: options ?? venue.replayOptions, commandTimeoutMs }, isPrivate, socketTimeoutMs, impl, books);
   tape.subscriptions = tape.protocolSubscriptions;
   tape.normalizedSubscriptions = tape.nativeSubscriptions;
   return tape;

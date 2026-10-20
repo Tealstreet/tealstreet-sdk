@@ -800,6 +800,7 @@ impl WeexFutures {
                             sl_trigger_type: brackets.sl,
                             client_order_id: None,
                             close: o.close,
+                            stp_mode: None,
                             max_slippage_pct: None,
                             bybit_bbo: None,
                             bybit_slippage_tolerance_ticks: None,

@@ -462,6 +462,102 @@ mod tests {
     }
 
     #[test]
+    fn currency_snapshot_reservation_includes_empty_collateral_and_all_columns() {
+        for count in [0, 63, 64] {
+            for collateral in [false, true] {
+                let mut store = Store::default();
+                if collateral {
+                    store.set_coin_balances(
+                        (0..count)
+                            .map(|index| crate::model::CoinBalance {
+                                base: format!("COIN{index}"),
+                                amount: 1.0,
+                                notional: 100.0,
+                            })
+                            .collect(),
+                    );
+                }
+                store.set_currency_balances(
+                    (0..count)
+                        .map(|index| crate::model::CurrencyBalance {
+                            currency: format!("CURRENCY{index}"),
+                            balance: crate::model::Balance {
+                                used: 1.0,
+                                free: 2.0,
+                                total: 3.0,
+                                upnl: 4.0,
+                            },
+                        })
+                        .collect(),
+                );
+                let pending = store.everything();
+                let mut writer = FrameWriter::new(Vec::new(), 1.0);
+                store.write(&pending, &mut writer);
+                let capacity = writer.buf.capacity();
+                assert_eq!(
+                    writer.strings.capacity(),
+                    count * if collateral { 2 } else { 1 }
+                );
+                let pointer = writer.buf.as_ptr();
+                let frame = writer.finish();
+                assert_eq!(frame.as_ptr(), pointer, "currency strings must fit");
+                assert!(
+                    capacity < frame.len() + 16,
+                    "reserve the full currency tail"
+                );
+                let payload = sections(&frame)
+                    .find(|(kind, _)| *kind == section::BALANCE)
+                    .unwrap()
+                    .1;
+                let coins = if collateral { count } else { 0 };
+                assert_eq!(
+                    payload.len(),
+                    32 + (4 + coins * 4).next_multiple_of(8)
+                        + coins * 16
+                        + (4 + count * 4).next_multiple_of(8)
+                        + count * 32
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn orphan_ticker_reservation_includes_identity_columns_and_strings() {
+        for count in [63, 64] {
+            let mut store = Store::default();
+            store.set_tickers(
+                (0..count)
+                    .map(|index| Ticker {
+                        id: format!("native-retired-{index}"),
+                        symbol: format!("RETIRED{index}USDT"),
+                        ..Ticker::default()
+                    })
+                    .collect(),
+            );
+            let pending = store.everything();
+            let mut writer = FrameWriter::new(Vec::new(), 1.0);
+            store.write(&pending, &mut writer);
+            let capacity = writer.buf.capacity();
+            assert_eq!(writer.strings.capacity(), count * 2);
+            let pointer = writer.buf.as_ptr();
+            let frame = writer.finish();
+            assert_eq!(frame.as_ptr(), pointer, "ticker identity strings must fit");
+            assert!(
+                capacity < frame.len() + 16,
+                "reserve both ticker identity columns"
+            );
+            let payload = sections(&frame)
+                .find(|(kind, _)| *kind == section::TICKERS)
+                .unwrap()
+                .1;
+            assert_eq!(
+                payload.len(),
+                (4 + count * 4).next_multiple_of(8) + count * (TICKER_COLUMNS * 8 + 8)
+            );
+        }
+    }
+
+    #[test]
     fn position_identity_reservation_includes_optional_tail_and_strings() {
         for retained in [false, true] {
             for count in [63, 64] {

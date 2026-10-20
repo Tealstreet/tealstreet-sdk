@@ -1052,3 +1052,38 @@ Owner102native/fmt/strictClippy/bans PASS and independent final queue/helper
 review has no findings. Whole-batch zero-HTTP guards remain, cached fixture
 mode equality is explicit. Checkpoint the causal3RPS correction before
 fetching/merging AsterDEX; no hashes, timings, thresholds or samples waived.
+
+Aster host/SDK conflicts resolved preserving18factories:324SDK/routing/frame
+and63host/worker checks PASS, package typecheck/runtime lint and root44/28
+typecheck/lint PASS. Engine76/Bitunix60 PASS; new63/64currency+orphan ticker
+reservation tests fail before/passes after, preserving every prior allocation
+regression and scratch buffer guard. Bitunix rejects all3STPmodes across the
+whole batch before HTTP, and initializes replacement STP to None.
+
+Harness integration preserves requests/responses/memory backbone verbatim.
+Correct production validator options carry actual metadata/config credentials;
+Aster protocol state uses actual socket instances, and signing time remains
+continuous. Independent signed probes find unsupported extra newClientOrderId
+query fields could disappear into generic aliases; keep them exact for Aster.
+Initial352helpers PASS and actual TS V1/V3 private probes are running. Fresh
+Aster artifact builds successfully; complete native checks, final independent
+review, unchanged public/private+3parity gates and fresh28-check CI follow.
+
+Reviewed Aster integration checkpoint: independent352helpers and signed
+production constructor/socket probes PASS, all1,564native workspace tests
+and bans/fmt/Clippy/WASM Clippy PASS. Full V1/V3 private gates14frames/4commands
+each and3Aster parity cases PASS; module1,025,202/1,258,291bytes. Root44typecheck/
+28lint,324SDK/63host checks PASS.
+
+First public three-run gate passes books/CPU/memory but fails75OIcomparisons
+(25fields x3runs). Independent raw TS store proves25nonzero vsnative50;
+worker packing is correct. TS failed bulk is retried by fallback helper,
+consuming recordedthirdbulk at16.753s; first25complete18.753s and nextpoll
+33.753s beyond20s. Native skips that retry and reaches another25early.
+Preserve TS request semantics: add repeatedbulk before fallback plus shared
+public-client10/1000ms FIFO (clock/private transports unaffected). Stage
+fallback values and commit only when the batch finishes as TS does. Add
+quota/FIFO/stream/retry, secondbulk-success and partialbatch publication
+regressions. Independent phase review, rebuilt artifact and unchanged full
+gates follow. No OI erasure, reference normalization or weakened threshold.
+Checkpoint merged source before this bounded native correction.

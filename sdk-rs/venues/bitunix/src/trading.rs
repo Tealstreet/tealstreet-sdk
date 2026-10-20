@@ -178,6 +178,9 @@ impl BitunixFutures {
     fn preflight(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<(), String> {
         let mut ids = HashSet::new();
         for o in orders {
+            if o.stp_mode.is_some() {
+                return Err("Bitunix does not support self-trade prevention controls".into());
+            }
             if o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some() {
                 return Err("Bybit BBO and TickSize controls are not supported by Bitunix".into());
             }
@@ -875,6 +878,7 @@ impl BitunixFutures {
             price: Some(parent.price),
             trigger_price: None,
             max_slippage_pct: None,
+            stp_mode: None,
             bybit_bbo: None,
             bybit_slippage_tolerance_ticks: None,
             stop_loss: n.sl,

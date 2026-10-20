@@ -585,3 +585,17 @@ test('socket feed identity and protocol recovery reach the account transport', (
   assert.deepEqual(received, { url: 'wss://venue.test/shared', channel: 'public', context });
   host.dispose();
 });
+
+test('public HTTP routing metadata survives actions without changing ordinary requests', async () => {
+  const captured=[];
+  const host=new EngineHost({httpFailed:()=>''},{now:()=>0,request:(request)=>{captured.push(request);return Promise.reject(new Error('fixture stop'));}});
+  for(const route of [undefined,'direct','publicCors']) host.execute({op:'http',request:1,method:'GET',url:'https://venue.test/time',headers:[],...(route?{route,timeoutMs:5000}:{})});
+  assert.equal(Object.hasOwn(captured[0],'route'),false);assert.equal(Object.hasOwn(captured[0],'timeoutMs'),false);assert.deepEqual(captured.slice(1).map((request)=>request.timeoutMs),[5000,5000]);
+  assert.deepEqual(captured.slice(1).map((request)=>request.route),['direct','publicCors']);
+  assert.ok(captured.every((request)=>Object.keys(request.headers).length===0));
+  await Promise.resolve();
+});
+
+test('the raw host rejects unconfigured CORS routing before touching the network', async () => {
+  await assert.rejects(nativeTransport().request({method:'GET',route:'publicCors',url:'https://venue.test/time',headers:{}}),/not configured/);
+});

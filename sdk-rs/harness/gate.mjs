@@ -316,6 +316,18 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
 // and acknowledges retaining net-only mode; native output is never its input.
 KNOWN_TS_FIXES.lighter = { fills: fixLighterFills, commands: fixLighterCommands };
 KNOWN_TS_FIXES.woo = [];
+KNOWN_TS_FIXES.asterdex = {
+    // Native payload tests exercise these corrections; ordinary tapes compare
+    // unchanged, including exact execution prices and economic request fields.
+    notes: [
+      'A zero-size hedge WS update closes only its reported leg; TS removes every position for the symbol.',
+      'Nonce uniqueness is scoped to the agent address as documented; TS scopes it to owner plus agent and can collide across owners.',
+      'Failed or malformed history reads propagate errors instead of silently returning an authoritative empty result.',
+      'Historical candle timestamps use engine seconds consistently; TS returns raw milliseconds on this REST path.',
+      'Do not submit an amendment replacement after the old order fills during cancellation, including fills reported by the cancel response; an unknown-order rejection cannot authorize replacement.',
+      'Configured leverage reads use the actual native setting rather than the inherited TS market-maximum fallback that overwrites it.',
+    ],
+  };
 KNOWN_TS_FIXES.kucoin = [
     'futures inherits empty fills/orders/income and unsupported public trades; query results use explicit documented tape oracles',
     'stops classify with side and direction, retain trigger basis and closeOrder',
