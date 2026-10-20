@@ -5,12 +5,12 @@ set -euo pipefail
 build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown)
 if [[ $# -gt 0 ]]; then
   if [[ $# -ne 2 || $1 != --venue ]]; then
-    echo "Usage: $0 [--venue binance|bybit|hyperliquid|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo]" >&2
+    echo "Usage: $0 [--venue binance|bybit|hyperliquid|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter]" >&2
     exit 2
   fi
   case "$2" in
-    binance|bybit|hyperliquid|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo) build_args+=(--no-default-features --features "$2") ;;
-    *) echo "Unsupported venue: $2 (expected binance, bybit, hyperliquid, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, phemex or woo)" >&2; exit 2 ;;
+    binance|bybit|hyperliquid|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter) build_args+=(--no-default-features --features "$2") ;;
+    *) echo "Unsupported venue: $2 (expected binance, bybit, hyperliquid, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, phemex, woo or lighter)" >&2; exit 2 ;;
   esac
 fi
 cd "$(dirname "$0")/.."

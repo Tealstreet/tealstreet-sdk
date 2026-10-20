@@ -604,3 +604,6 @@ Exchange-specific unit coverage exists for private WS reconciliation:
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `clOrdID`, rule 1-40 characters. Replaces the generated `BROKER_ID_…` ID; no prefix is composed.
+- The Rust wrapper uses the same rule and `Tealstreet_…` mint format. Both paths
+  share `BROKER_ID` from `phemex.types.ts`; `phemex.api.ts` re-exports it for
+  existing callers.
