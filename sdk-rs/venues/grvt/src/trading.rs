@@ -68,6 +68,8 @@ struct Target {
     filled: f64,
     amount: f64,
     created_ns: Option<u64>,
+    execution_revision: u64,
+    inspected_updated_ns: u64,
 }
 struct Amend {
     target: Target,
@@ -283,7 +285,57 @@ impl Grvt {
             filled: order.filled,
             amount: order.amount,
             created_ns: self.account.order_created(&order.id),
+            execution_revision: self.account.execution_revision,
+            inspected_updated_ns: 0,
         })
+    }
+    fn guard_amend(&self, cx: &Cx<'_, Pending>, target: &Target) -> Result<(), String> {
+        if self.account.execution_revision != target.execution_revision {
+            return Err(
+                "GRVT replacement aborted after an account execution; reconcile before retrying"
+                    .into(),
+            );
+        }
+        if cx.store.order(&target.id).is_some_and(|order| {
+            order.filled > target.filled || order.status == OrderStatus::Closed
+        }) || self
+            .account
+            .order_progress(&target.id)
+            .is_some_and(|progress| {
+                progress.filled > target.filled
+                    || progress.amount != target.amount
+                    || progress.status == OrderStatus::Closed
+                    || target.native.as_deref().is_some_and(|expected| {
+                        progress
+                            .native_id
+                            .as_deref()
+                            .is_some_and(|native| native != expected)
+                    })
+                    || target.created_ns.is_some_and(|expected| {
+                        progress.created_ns > 0 && progress.created_ns != expected
+                    })
+            })
+        {
+            return Err(
+                "GRVT replacement aborted after order execution or lifecycle progress".into(),
+            );
+        }
+        Ok(())
+    }
+    pub(crate) fn trade_pending_guard(
+        &self,
+        cx: &Cx<'_, Pending>,
+        request: &Request,
+    ) -> Result<(), String> {
+        match &request.step.effect {
+            Effect::Inspect(amend) => self.guard_amend(cx, &amend.target),
+            Effect::Place(_) | Effect::Verify(_) => request
+                .plan
+                .guard
+                .as_ref()
+                .map_or(Ok(()), |target| self.guard_amend(cx, target)),
+            _ => Ok(()),
+        }
     }
     fn identity(&self, target: &Target) -> Result<String, String> {
         serde_json::to_string(&Identity {
@@ -706,6 +758,7 @@ impl Grvt {
                         "Cannot safely amend GRVT order before its native identity is known".into(),
                     );
                 }
+                self.guard_amend(cx, &target)?;
                 plan.steps.push_back(Step {
                     path: GET,
                     body: self.identity(&target)?,
@@ -807,17 +860,10 @@ impl Grvt {
             return;
         };
         if matches!(step.effect, Effect::Place(_) | Effect::Verify(_))
-            && plan.guard.as_ref().is_some_and(|target| {
-                cx.store
-                    .order(&target.id)
-                    .is_some_and(|o| o.filled > target.filled || o.status == OrderStatus::Closed)
-            })
+            && let Some(target) = plan.guard.as_ref()
+            && let Err(error) = self.guard_amend(cx, target)
         {
-            self.trade_finish(
-                cx,
-                plan,
-                Some("GRVT replacement aborted after execution progress".into()),
-            );
+            self.trade_finish(cx, plan, Some(error));
             return;
         }
         match &step.effect {
@@ -951,10 +997,20 @@ impl Grvt {
                         .update_setting(symbol, |setting| setting.leverage = *leverage);
                 }
                 Effect::Inspect(amend) => {
+                    self.guard_amend(cx, &amend.target)?;
                     let raw: Reply<'_> = serde_json::from_str(response.body)
                         .map_err(|_| "Malformed GRVT order lookup")?;
                     let decoded = decode_order(raw.result.get(), cx.store, cx.now)?;
                     let source = &decoded.order;
+                    if self
+                        .account
+                        .order_progress(&amend.target.id)
+                        .is_some_and(|progress| decoded.updated_ns < progress.updated_ns)
+                    {
+                        return Err(
+                            "GRVT amendment inspection predates a known order update".into()
+                        );
+                    }
                     ensure_identity(
                         &amend.target,
                         source,
@@ -1031,6 +1087,7 @@ impl Grvt {
                         &mut HashSet::new(),
                     )?;
                     let mut target = amend.target.clone();
+                    target.inspected_updated_ns = decoded.updated_ns;
                     if decoded.native_id.is_some() {
                         target.native = decoded.native_id;
                     }
@@ -1049,6 +1106,7 @@ impl Grvt {
                     request.plan.steps.push_back(replacement);
                 }
                 Effect::Verify(target) => {
+                    self.guard_amend(cx, target)?;
                     let raw: Reply<'_> = serde_json::from_str(response.body)
                         .map_err(|_| "Malformed GRVT cancellation confirmation")?;
                     let decoded = decode_order(raw.result.get(), cx.store, cx.now)?;
@@ -1058,6 +1116,14 @@ impl Grvt {
                         decoded.native_id.as_deref(),
                         decoded.created_ns,
                     )?;
+                    if decoded.updated_ns < target.inspected_updated_ns
+                        || self
+                            .account
+                            .order_progress(&target.id)
+                            .is_some_and(|progress| decoded.updated_ns < progress.updated_ns)
+                    {
+                        return Err("GRVT cancellation proof predates a known order update".into());
+                    }
                     let state: CancelState<'_> = serde_json::from_str(raw.result.get())
                         .map_err(|_| "Missing GRVT cancellation state")?;
                     if state.state.status != "CANCELLED"

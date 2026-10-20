@@ -34,15 +34,26 @@ pub(crate) struct Session {
     pub cookie: String,
     pub account_id: String,
 }
+pub(crate) struct OrderProgress {
+    pub native_id: Option<String>,
+    pub created_ns: u64,
+    pub updated_ns: u64,
+    pub filled: f64,
+    pub amount: f64,
+    pub status: OrderStatus,
+}
 #[derive(Default)]
 pub(crate) struct Account {
     pub session: Option<Session>,
+    pub generation: u64,
     pub trading_account_id: Option<String>,
     pub builder: BuilderState,
     pub native_ids: HashMap<String, String>,
     pub orders_revision: u64,
     pub positions_revision: u64,
     pub settings_revision: u64,
+    pub execution_revision: u64,
+    progress: HashMap<String, OrderProgress>,
     pub socket: Option<SocketId>,
     started: bool,
     login_pending: bool,
@@ -61,6 +72,7 @@ pub(crate) struct Account {
     health: Option<TimerId>,
     reconnect: Option<TimerId>,
     tick: Option<TimerId>,
+    login_retry: Option<TimerId>,
     orders_timer: Option<TimerId>,
     positions_timer: Option<TimerId>,
     fills: HashSet<String>,
@@ -78,6 +90,9 @@ pub(crate) struct Account {
     prior_lifecycle: HashMap<String, (u64, Option<String>)>,
 }
 impl Account {
+    pub(crate) fn order_progress(&self, client: &str) -> Option<&OrderProgress> {
+        self.progress.get(client)
+    }
     pub(crate) fn order_created(&self, client: &str) -> Option<u64> {
         self.order_created
             .get(client)
@@ -108,6 +123,7 @@ impl Account {
             self.terminal.remove(client);
             self.terminal_queue.retain(|id| id != client);
             self.native_ids.remove(client);
+            self.progress.remove(client);
             self.order_times.remove(client);
             self.order_created.remove(client);
             self.identity_queue.retain(|id| id != client);
@@ -125,6 +141,7 @@ impl Account {
         while self.identity_queue.len() > RECENT_LIMIT {
             if let Some(id) = self.identity_queue.pop_front() {
                 self.native_ids.remove(&id);
+                self.progress.remove(&id);
                 self.order_times.remove(&id);
                 self.order_created.remove(&id);
                 self.placement_created.remove(&id);
@@ -595,7 +612,10 @@ impl Grvt {
         }
     }
     fn login(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.login_pending || self.account.authentication_failed {
+        if self.account.login_pending
+            || self.account.authentication_failed
+            || self.account.login_retry.is_some()
+        {
             return;
         }
         let Some(key) = self.options.key.as_deref() else {
@@ -619,6 +639,10 @@ impl Grvt {
         if let Job::Account(request) = &mut pending.job {
             request.reset();
         }
+        if pending.auth_generation != self.account.generation && self.account.session.is_some() {
+            self.send_request(cx, pending);
+            return;
+        }
         self.account.waiting.push(pending);
         self.account.session = None;
         self.account.authenticated = false;
@@ -629,6 +653,25 @@ impl Grvt {
             cx.clear_timer(timer);
         }
         self.login(cx);
+    }
+    pub(crate) fn account_defer(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
+        if self.account.authentication_failed {
+            self.fail_pending(cx, pending, "GRVT authentication failed closed");
+            return;
+        }
+        self.account.waiting.push(pending);
+        self.login(cx);
+    }
+    pub(crate) fn account_login_unavailable(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.login_pending = false;
+        if self.account.login_retry.is_none() {
+            self.account.login_retry = Some(cx.set_timer(5_000.));
+        }
+        cx.log(
+            LogLevel::Warning,
+            "GRVT login temporarily unavailable after network retries; retrying shortly",
+        );
+        self.fail_waiting(cx);
     }
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.authentication_failed
@@ -741,6 +784,9 @@ impl Grvt {
         if let Some(timer) = self.account.reconnect.take() {
             cx.clear_timer(timer);
         }
+        if let Some(timer) = self.account.login_retry.take() {
+            cx.clear_timer(timer);
+        }
         cx.log(LogLevel::Error,"GRVT private WebSocket authentication failed closed. Check the API key and account authorization, then reconnect.");
     }
     fn refresh_stream_session(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -840,7 +886,7 @@ impl Grvt {
         );
     }
     pub(crate) fn refresh_leverage(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.leverage_pending || self.account.session.is_none() {
+        if self.account.leverage_pending {
             return;
         }
         let Some(subaccount) = self.account.trading_account_id.as_deref() else {
@@ -871,12 +917,7 @@ impl Grvt {
             cx.done(command, Err("Unknown GRVT leverage market".into()));
             return;
         }
-        let Some(account) = self
-            .account
-            .trading_account_id
-            .as_deref()
-            .filter(|_| self.account.session.is_some())
-        else {
+        let Some(account) = self.account.trading_account_id.as_deref() else {
             cx.done(
                 command,
                 Err("GRVT private account is not authenticated".into()),
@@ -960,6 +1001,35 @@ impl Grvt {
         }
     }
     fn remember_identity(&mut self, decoded: &DecodedOrder) {
+        let previous = self.account.progress.get(&decoded.order.id);
+        let same_lifecycle = previous.is_some_and(|old| {
+            old.native_id == decoded.native_id
+                && (old.created_ns == 0
+                    || decoded.created_ns == 0
+                    || old.created_ns == decoded.created_ns)
+        });
+        let prior_filled = previous
+            .filter(|_| same_lifecycle)
+            .map_or(0., |old| old.filled);
+        let prior_closed = previous
+            .filter(|_| same_lifecycle)
+            .is_some_and(|old| old.status == OrderStatus::Closed);
+        if decoded.order.filled > prior_filled
+            || (decoded.order.status == OrderStatus::Closed && !prior_closed)
+        {
+            self.account.execution_revision += 1;
+        }
+        self.account.progress.insert(
+            decoded.order.id.clone(),
+            OrderProgress {
+                native_id: decoded.native_id.clone(),
+                created_ns: decoded.created_ns,
+                updated_ns: decoded.updated_ns,
+                filled: decoded.order.filled,
+                amount: decoded.order.amount,
+                status: decoded.order.status,
+            },
+        );
         self.account.pending_placements.remove(&decoded.order.id);
         self.account.prior_lifecycle.remove(&decoded.order.id);
         if !self.account.order_times.contains_key(&decoded.order.id) {
@@ -983,6 +1053,7 @@ impl Grvt {
         while self.account.identity_queue.len() > RECENT_LIMIT {
             if let Some(id) = self.account.identity_queue.pop_front() {
                 self.account.native_ids.remove(&id);
+                self.account.progress.remove(&id);
                 self.account.order_times.remove(&id);
                 self.account.order_created.remove(&id);
                 self.account.placement_created.remove(&id);
@@ -1089,15 +1160,17 @@ impl Grvt {
             self.account_failed(cx, request, "GRVT private read rejected");
             return;
         }
-        self.refresh_session_headers(&response);
         match request {
             Request::Login => {
                 self.account.login_pending = false;
-                if self.account.session.is_none() {
+                let (cookie, account_id) = session_headers(&response);
+                let (Some(cookie), Some(account_id)) = (cookie, account_id) else {
                     self.fail_authentication(cx);
                     self.fail_waiting(cx);
                     return;
-                }
+                };
+                self.account.session = Some(Session { cookie, account_id });
+                self.account.generation += 1;
                 if self.account.trading_account_id.is_none()
                     && let Ok(login) = serde_json::from_str::<LoginBody<'_>>(response.body)
                     && valid_account(&login.sub_account_id)
@@ -1179,6 +1252,20 @@ impl Grvt {
                             self.account
                                 .position_times
                                 .insert(position.id.clone(), time);
+                            if cx.store.position(&position.id).map_or_else(
+                                || {
+                                    cx.store.setting(&position.symbol).is_some_and(|s| {
+                                        s.margin_type != position.margin_type
+                                            || s.leverage != position.leverage
+                                    })
+                                },
+                                |old| {
+                                    old.margin_type != position.margin_type
+                                        || old.leverage != position.leverage
+                                },
+                            ) {
+                                self.account.settings_revision += 1;
+                            }
                             if let Some(margin) = position.margin_type {
                                 cx.store.update_setting(&position.symbol, |s| {
                                     s.margin_type = Some(margin)
@@ -1333,6 +1420,9 @@ impl Grvt {
                     };
                     cx.done(command, result);
                 }
+                if !failed && revision != self.account.settings_revision {
+                    self.refresh_leverage(cx);
+                }
             }
             Request::Builders { cap, failed } => {
                 self.account.builder = if failed {
@@ -1347,42 +1437,46 @@ impl Grvt {
             }
         }
     }
-    fn refresh_session_headers(&mut self, response: &Response<'_>) {
-        let cookie = response
-            .header("x-ts-grvt-session")
-            .map(str::to_owned)
-            .or_else(|| {
-                response
-                    .headers
-                    .lines()
-                    .filter_map(|line| line.split_once(':'))
-                    .filter(|(name, _)| name.trim().eq_ignore_ascii_case("set-cookie"))
-                    .find_map(|(_, value)| {
-                        value
-                            .trim()
-                            .strip_prefix("gravity=")
-                            .and_then(|v| v.split(';').next())
-                            .filter(|v| !v.is_empty())
-                            .map(str::to_owned)
-                    })
-            });
-        let account = response
-            .header("x-grvt-account-id")
-            .filter(|v| !v.is_empty())
-            .map(str::to_owned);
-        match (&mut self.account.session, cookie, account) {
-            (Some(session), cookie, account) => {
-                if let Some(cookie) = cookie {
-                    session.cookie = cookie;
+    pub(crate) fn account_response_headers(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        generation: u64,
+        response: &Response<'_>,
+    ) {
+        if generation != self.account.generation {
+            return;
+        }
+        let (cookie, account_id) = session_headers(response);
+        if let Some(session) = &mut self.account.session {
+            let mut changed = false;
+            if let Some(cookie) = cookie
+                && cookie != session.cookie
+            {
+                session.cookie = cookie;
+                changed = true;
+            }
+            if let Some(account_id) = account_id
+                && account_id != session.account_id
+            {
+                session.account_id = account_id;
+                changed = true;
+            }
+            if changed {
+                self.account.generation += 1;
+                self.account.authenticated = false;
+                if let Some(socket) = self.account.socket.take() {
+                    cx.close(socket);
                 }
-                if let Some(account) = account {
-                    session.account_id = account;
+                if let Some(timer) = self.account.health.take() {
+                    cx.clear_timer(timer);
+                }
+                if let Some(timer) = self.account.reconnect.take() {
+                    cx.clear_timer(timer);
+                }
+                if self.account.started {
+                    self.connect_private(cx);
                 }
             }
-            (session @ None, Some(cookie), Some(account_id)) => {
-                *session = Some(Session { cookie, account_id })
-            }
-            _ => {}
         }
     }
     fn fail_waiting(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1611,6 +1705,20 @@ impl Grvt {
                             self.account
                                 .position_times
                                 .insert(position.id.clone(), time);
+                            if cx.store.position(&position.id).map_or_else(
+                                || {
+                                    cx.store.setting(&position.symbol).is_some_and(|s| {
+                                        s.margin_type != position.margin_type
+                                            || s.leverage != position.leverage
+                                    })
+                                },
+                                |old| {
+                                    old.margin_type != position.margin_type
+                                        || old.leverage != position.leverage
+                                },
+                            ) {
+                                self.account.settings_revision += 1;
+                            }
                             if let Some(margin) = position.margin_type {
                                 cx.store.update_setting(&position.symbol, |s| {
                                     s.margin_type = Some(margin)
@@ -1639,6 +1747,7 @@ impl Grvt {
                     self.account.healthy_since.get_or_insert(cx.now);
                     let key = format!("{}:{}", market.id, fill.trade_id);
                     if self.account.fills.insert(key.clone()) {
+                        self.account.execution_revision += 1;
                         self.account.fill_queue.push_back(key);
                         while self.account.fill_queue.len() > RECENT_LIMIT {
                             if let Some(old) = self.account.fill_queue.pop_front() {
@@ -1673,7 +1782,10 @@ impl Grvt {
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.account.health == Some(timer) {
+        if self.account.login_retry == Some(timer) {
+            self.account.login_retry = None;
+            self.login(cx);
+        } else if self.account.health == Some(timer) {
             self.account.health = None;
             if let Some(socket) = self.account.socket {
                 let idle = cx.now - self.account.last_received;
@@ -1787,4 +1899,30 @@ struct SubaccountRequest<'a> {
 }
 fn valid_account(text: &str) -> bool {
     !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()) && text.parse::<u64>().is_ok()
+}
+fn session_headers(response: &Response<'_>) -> (Option<String>, Option<String>) {
+    let cookie = response
+        .header("x-ts-grvt-session")
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            response
+                .headers
+                .lines()
+                .filter_map(|line| line.split_once(':'))
+                .filter(|(name, _)| name.trim().eq_ignore_ascii_case("set-cookie"))
+                .find_map(|(_, value)| {
+                    value
+                        .trim()
+                        .strip_prefix("gravity=")
+                        .and_then(|v| v.split(';').next())
+                        .filter(|v| !v.is_empty())
+                        .map(str::to_owned)
+                })
+        });
+    let account = response
+        .header("x-grvt-account-id")
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned);
+    (cookie, account)
 }

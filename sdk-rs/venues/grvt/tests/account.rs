@@ -503,3 +503,258 @@ fn expired_private_session_refreshes_once_then_fails_closed() {
             .any(|a| matches!(a,Action::WsClose {socket:s} if *s==socket))
     );
 }
+
+#[test]
+fn adversarial_old_request_rejection_reuses_fresh_session() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    let old_orders = h.take("open_orders");
+    let old_positions = h.take("positions");
+    h.respond(old_orders, r#"{"c":1000,"m":"expired"}"#, "");
+    h.reply(
+        "login",
+        r#"{"status":"success"}"#,
+        "x-ts-grvt-session: session-new\nx-grvt-account-id: 0xaccount",
+    );
+    h.actions.clear();
+    h.respond(old_positions, r#"{"c":1000,"m":"expired old session"}"#, "");
+    assert!(
+        !h.requests.iter().any(|r| r.url.ends_with("login")),
+        "late old-session rejection starts a second login and tears down fresh session"
+    );
+}
+#[test]
+fn adversarial_stale_leverage_read_cannot_revert_stream_margin() {
+    let mut h = Harness::new(true);
+    h.reply(
+        "login",
+        r#"{"status":"success"}"#,
+        "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xaccount",
+    );
+    h.reply("aggregated_account_summary", SUMMARY, "");
+    h.socket = h.actions.iter().find_map(|a| match a {
+        Action::WsConnect {
+            socket,
+            channel: Some(SocketChannel::Private),
+            ..
+        } => Some(*socket),
+        _ => None,
+    });
+    h.open();
+    h.ws(r#"{"s":"v1.position","f":{"i":"BTC_USDT_Perp","s":"1","ep":"100","n":"100","l":"20","el":"50","up":"0","mt":"CROSS","et":"1700000000000000000"}}"#);
+    assert_eq!(
+        h.engine
+            .store()
+            .setting("BTC_USDT_PERP")
+            .unwrap()
+            .margin_type,
+        Some(safe_cex_engine::model::MarginType::Cross)
+    );
+    h.reply(
+        "get_all_initial_leverage",
+        r#"{"r":[{"i":"BTC_USDT_Perp","l":"10","mt":"ISOLATED"}]}"#,
+        "",
+    );
+    assert!(
+        h.requests
+            .iter()
+            .any(|r| r.url.ends_with("get_all_initial_leverage")),
+        "stale configuration read must refresh account rails"
+    );
+    assert_eq!(
+        h.engine
+            .store()
+            .setting("BTC_USDT_PERP")
+            .unwrap()
+            .margin_type,
+        Some(safe_cex_engine::model::MarginType::Cross)
+    );
+}
+#[test]
+fn adversarial_login_network_failure_gets_bounded_read_retry() {
+    let mut h = Harness::new(true);
+    let login = h.take("login");
+    h.engine.handle(
+        h.now,
+        Event::HttpFailed {
+            request: login.id,
+            error: "fixture connection reset",
+        },
+    );
+    h.collect();
+    assert!(
+        h.requests.iter().any(|r| r.url.ends_with("login")),
+        "login classified non-read and permanently fails authentication on transient network loss"
+    );
+}
+
+fn fetch_leverage(h: &mut Harness, command: u32) {
+    h.engine.handle(
+        h.now,
+        Event::Command(safe_cex_engine::Command::FetchLeverage {
+            command,
+            symbol: "BTC_USDT_PERP".into(),
+        }),
+    );
+    h.collect();
+}
+fn assert_session(request: &HttpRequest, expected: &str) {
+    assert!(
+        request
+            .headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("X-Ts-Grvt-Session") && v == expected),
+        "unexpected headers: {:?}",
+        request.headers
+    );
+}
+#[test]
+fn delayed_session_rejections_resend_once_and_new_queries_wait_for_login() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    let orders = h.take("open_orders");
+    let positions = h.take("positions");
+    h.respond(orders, r#"{"c":1000,"m":"expired"}"#, "");
+    fetch_leverage(&mut h, 700);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.ends_with("get_all_initial_leverage"))
+    );
+    h.reply(
+        "login",
+        r#"{"status":"success"}"#,
+        "x-ts-grvt-session: session-new\nx-grvt-account-id: 0xaccount",
+    );
+    let leverage = h.take("get_all_initial_leverage");
+    assert_session(&leverage, "session-new");
+    h.respond(positions, r#"{"c":1000,"m":"old session"}"#, "");
+    let resent = h.take("positions");
+    assert_session(&resent, "session-new");
+    h.respond(resent, r#"{"c":1000,"m":"still rejected"}"#, "");
+    assert!(
+        !h.requests.iter().any(|r| r.url.ends_with("login")),
+        "second rejection must not reset resend budget"
+    );
+}
+#[test]
+fn old_successful_headers_cannot_replace_new_login_and_current_rotation_reconnects() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    let orders = h.take("open_orders");
+    let positions = h.take("positions");
+    h.respond(orders, r#"{"c":1000,"m":"expired"}"#, "");
+    h.reply(
+        "login",
+        r#"{"status":"success"}"#,
+        "x-ts-grvt-session: session-new\nx-grvt-account-id: 0xaccount",
+    );
+    h.actions.clear();
+    h.respond(
+        positions,
+        r#"{"r":[]}"#,
+        "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xold",
+    );
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { .. }))
+    );
+    fetch_leverage(&mut h, 701);
+    let read = h.take("get_all_initial_leverage");
+    assert_session(&read, "session-new");
+    h.respond(
+        read,
+        r#"{"r":[{"i":"BTC_USDT_Perp","l":"20"}]}"#,
+        "x-ts-grvt-session: session-rotated\nx-grvt-account-id: 0xaccount",
+    );
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { .. }))
+    );
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::WsConnect {
+            channel: Some(SocketChannel::Private),
+            ..
+        }
+    )));
+    fetch_leverage(&mut h, 702);
+    assert_session(&h.take("get_all_initial_leverage"), "session-rotated");
+}
+#[test]
+fn stale_headers_cannot_resurrect_session_while_refresh_login_is_incomplete() {
+    let mut h = Harness::new(true);
+    h.authenticate();
+    h.open();
+    let orders = h.take("open_orders");
+    let positions = h.take("positions");
+    h.respond(orders, r#"{"c":1000,"m":"expired"}"#, "");
+    h.respond(
+        positions,
+        r#"{"r":[]}"#,
+        "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xold",
+    );
+    h.reply(
+        "login",
+        r#"{"status":"success"}"#,
+        "x-ts-grvt-session: missing-account",
+    );
+    assert!(!h.requests.iter().any(|r| r.url.ends_with("open_orders")));
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::Log {
+            level: safe_cex_engine::LogLevel::Error,
+            ..
+        })
+    )));
+}
+#[test]
+fn login_network_retry_exhaustion_backs_off_and_recovers_without_terminal_auth_error() {
+    let mut h = Harness::new(true);
+    for _ in 0..6 {
+        let login = h.take("login");
+        h.engine.handle(
+            h.now,
+            Event::HttpFailed {
+                request: login.id,
+                error: "fixture reset",
+            },
+        );
+        h.collect();
+    }
+    assert!(!h.requests.iter().any(|r| r.url.ends_with("login")));
+    assert!(!h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::Log {
+            level: safe_cex_engine::LogLevel::Error,
+            ..
+        })
+    )));
+    let retry = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 5000. => Some(*timer),
+            _ => None,
+        })
+        .expect("bounded retry timer");
+    fetch_leverage(&mut h, 703);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.ends_with("login") || r.url.ends_with("get_all_initial_leverage"))
+    );
+    h.timer(retry, h.now + 5000.);
+    h.reply(
+        "login",
+        r#"{"status":"success","sub_account_id":"777"}"#,
+        "x-ts-grvt-session: recovered\nx-grvt-account-id: 0xaccount",
+    );
+    assert_session(&h.take("aggregated_account_summary"), "recovered");
+}

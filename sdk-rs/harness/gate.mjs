@@ -133,6 +133,8 @@ const KNOWN_TS_FIXES = {
   // its trigger; mapped orders keep explicit client IDs. Refreshed cookies
   // agree with proxy-session headers and reconnect the private socket.
   // The private server ping receives pong rather than being ignored.
+  // Rust also refuses replacement after observed execution/lifecycle progress
+  // or stale cancellation proof, rechecking deferred/resigned dispatches.
   grvt() {},
   // WOO repairs live in the TS reference itself; no result normalization:
   // exact integer IDs; order-axis journal provenance; camel-case aliases;

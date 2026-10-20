@@ -1,11 +1,17 @@
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Response};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketChannel, SocketId,
+};
 use safe_cex_venue_grvt::{Grvt, Options};
 use serde::Deserialize;
 use std::collections::VecDeque;
 const NOW: f64 = 1_700_000_000_000.;
 const CATALOG: &str = r#"{"r":[{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6}]}"#;
 fn boot() -> Engine<Grvt> {
+    boot_with_socket().0
+}
+fn boot_with_socket() -> (Engine<Grvt>, SocketId) {
+    let mut private_socket = None;
     let mut e = Engine::new(Grvt::new(Options {
         key: Some("grvt-test-key".into()),
         secret: Some(format!("0x{}", "01".repeat(32))),
@@ -62,16 +68,69 @@ fn boot() -> Engine<Grvt> {
                 },
             },
         );
-        pending.extend(e.drain_actions().filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
+        for action in e.drain_actions() {
+            match action {
+                Action::Http(request) => pending.push_back(request),
+                Action::WsConnect {
+                    socket,
+                    channel: Some(SocketChannel::Private),
+                    ..
+                } => private_socket = Some(socket),
+                _ => {}
+            }
+        }
+    }
+    assert!(pending.is_empty());
+    (e, private_socket.expect("GRVT private socket"))
+}
+fn authenticated() -> (Engine<Grvt>, SocketId) {
+    let (mut engine, socket) = boot_with_socket();
+    engine.handle(NOW + 1., Event::WsOpened { socket });
+    engine.handle(
+        NOW + 1.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"type":"auth_success"}"#,
+        },
+    );
+    let mut pending: VecDeque<_> = engine
+        .drain_actions()
+        .filter_map(|action| {
+            if let Action::Http(request) = action {
+                Some(request)
+            } else {
+                None
+            }
+        })
+        .collect();
+    while let Some(request) = pending.pop_front() {
+        let body = if request.url.ends_with("open_orders") {
+            OPEN_ORDERS
+        } else if request.url.ends_with("aggregated_account_summary") {
+            r#"{"r":{"te":"1000","ts2":"1000","tu":"0","sas":[{"si":"9007199254740993"}]}}"#
+        } else {
+            r#"{"r":[]}"#
+        };
+        engine.handle(
+            NOW + 1.,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        pending.extend(engine.drain_actions().filter_map(|action| {
+            if let Action::Http(request) = action {
+                Some(request)
             } else {
                 None
             }
         }));
     }
-    assert!(pending.is_empty());
-    e
+    (engine, socket)
 }
 fn opts() -> PlaceOrderOpts {
     PlaceOrderOpts {
@@ -743,4 +802,320 @@ fn old_leverage_read_cannot_overwrite_a_successful_mutation() {
     );
     assert!(done(&actions, 20).unwrap().is_err());
     assert_eq!(e.store().setting("BTC_USDT_PERP").unwrap().leverage, 20.);
+}
+
+fn order_frame(status: &str, filled: &str, updated_ns: &str) -> String {
+    OPEN.replace("{\"r\":", "{\"s\":\"v1.order\",\"f\":")
+        .replace("\"OPEN\"", &format!("\"{status}\""))
+        .replace("[\"0.2\"]", &format!("[\"{filled}\"]"))
+        .replace("1700000000000000000", updated_ns)
+}
+fn execution_frame() -> &'static str {
+    r#"{"s":"v1.fill","f":{"i":"BTC_USDT_Perp","ti":"9223372036854775806","co":"42","oi":"0x1234","ib":true,"s":"0.1","p":"110"}}"#
+}
+#[test]
+fn terminal_execution_survives_store_removal_through_every_amendment_boundary() {
+    for stage in 0..3 {
+        let (mut e, socket) = authenticated();
+        seed(&mut e);
+        let get = http(
+            command(
+                &mut e,
+                Command::AmendOrder {
+                    command: 90,
+                    id: "42".into(),
+                    price: Some(110.),
+                    amount: None,
+                },
+            ),
+            "/order",
+        );
+        let pending = if stage == 0 {
+            get
+        } else {
+            let cancel = http(reply(&mut e, &get, 200, OPEN), "cancel_order");
+            if stage == 1 {
+                cancel
+            } else {
+                http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order")
+            }
+        };
+        let filled = order_frame("FILLED", "1", "1700000000010000000");
+        e.handle(
+            NOW + 4.,
+            Event::WsMessage {
+                socket,
+                text: &filled,
+            },
+        );
+        assert!(
+            e.store().order("42").is_none(),
+            "terminal original is removed from Store"
+        );
+        e.drain_actions();
+        let response = match stage {
+            0 => OPEN,
+            1 => r#"{"r":{"a":true}}"#,
+            _ => CANCELED,
+        };
+        let actions = reply(&mut e, &pending, 200, response);
+        assert!(done(&actions, 90).unwrap().is_err(), "stage {stage}");
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("create_order"))),
+            "stage {stage}"
+        );
+        if stage == 0 {
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("cancel_order")))
+            );
+        }
+    }
+}
+#[test]
+fn fill_topic_only_execution_aborts_pending_inspection_and_final_proof() {
+    for after_cancel in [false, true] {
+        let (mut e, socket) = authenticated();
+        seed(&mut e);
+        let get = http(
+            command(
+                &mut e,
+                Command::AmendOrder {
+                    command: 91,
+                    id: "42".into(),
+                    price: Some(110.),
+                    amount: None,
+                },
+            ),
+            "/order",
+        );
+        let pending = if after_cancel {
+            let cancel = http(reply(&mut e, &get, 200, OPEN), "cancel_order");
+            http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order")
+        } else {
+            get
+        };
+        e.handle(
+            NOW + 4.,
+            Event::WsMessage {
+                socket,
+                text: execution_frame(),
+            },
+        );
+        assert_eq!(
+            e.store().order("42").unwrap().filled,
+            0.2,
+            "fill feed does not update the order snapshot"
+        );
+        e.drain_actions();
+        let actions = reply(
+            &mut e,
+            &pending,
+            200,
+            if after_cancel { CANCELED } else { OPEN },
+        );
+        assert!(
+            done(&actions, 91)
+                .unwrap()
+                .as_ref()
+                .unwrap_err()
+                .contains("account execution")
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("create_order")))
+        );
+    }
+}
+#[test]
+fn authoritative_unchanged_fill_cancellation_still_allows_replacement() {
+    let (mut e, socket) = authenticated();
+    seed(&mut e);
+    let get = http(
+        command(
+            &mut e,
+            Command::AmendOrder {
+                command: 92,
+                id: "42".into(),
+                price: Some(110.),
+                amount: None,
+            },
+        ),
+        "/order",
+    );
+    let cancel = http(reply(&mut e, &get, 200, OPEN), "cancel_order");
+    let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+    let canceled = order_frame("CANCELLED", "0.2", "1700000000001000000");
+    e.handle(
+        NOW + 4.,
+        Event::WsMessage {
+            socket,
+            text: &canceled,
+        },
+    );
+    assert!(e.store().order("42").is_none());
+    e.drain_actions();
+    let replacement = http(reply(&mut e, &verify, 200, CANCELED), "create_order");
+    assert_eq!(body(&replacement).o.l[0].s, "0.8");
+}
+#[test]
+fn unchanged_fill_but_older_inspection_or_cancellation_proof_is_rejected() {
+    for final_proof in [false, true] {
+        let (mut e, socket) = authenticated();
+        seed(&mut e);
+        let get = http(
+            command(
+                &mut e,
+                Command::AmendOrder {
+                    command: 93,
+                    id: "42".into(),
+                    price: Some(110.),
+                    amount: None,
+                },
+            ),
+            "/order",
+        );
+        let pending = if final_proof {
+            let cancel = http(reply(&mut e, &get, 200, OPEN), "cancel_order");
+            http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order")
+        } else {
+            get
+        };
+        let newer = order_frame(
+            if final_proof { "CANCELLED" } else { "OPEN" },
+            "0.2",
+            "1700000000010000000",
+        );
+        e.handle(
+            NOW + 4.,
+            Event::WsMessage {
+                socket,
+                text: &newer,
+            },
+        );
+        e.drain_actions();
+        let actions = reply(
+            &mut e,
+            &pending,
+            200,
+            if final_proof { CANCELED } else { OPEN },
+        );
+        assert!(
+            done(&actions, 93)
+                .unwrap()
+                .as_ref()
+                .unwrap_err()
+                .contains("predates")
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("create_order")))
+        );
+    }
+}
+
+#[test]
+fn cancellation_proof_cannot_predate_the_authoritative_inspection() {
+    let mut e = boot();
+    seed(&mut e);
+    let get = http(
+        command(
+            &mut e,
+            Command::AmendOrder {
+                command: 94,
+                id: "42".into(),
+                price: Some(110.),
+                amount: None,
+            },
+        ),
+        "/order",
+    );
+    let inspected = OPEN.replace("1700000000000000000", "1700000000005000000");
+    let cancel = http(reply(&mut e, &get, 200, &inspected), "cancel_order");
+    let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+    let actions = reply(&mut e, &verify, 200, CANCELED);
+    assert!(
+        done(&actions, 94)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .contains("predates")
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("create_order")))
+    );
+}
+#[test]
+fn authentication_resend_rechecks_execution_progress_for_pending_verify_and_place() {
+    for pending_place in [false, true] {
+        let (mut e, socket) = authenticated();
+        seed(&mut e);
+        let get = http(
+            command(
+                &mut e,
+                Command::AmendOrder {
+                    command: 95,
+                    id: "42".into(),
+                    price: Some(110.),
+                    amount: None,
+                },
+            ),
+            "/order",
+        );
+        let cancel = http(reply(&mut e, &get, 200, OPEN), "cancel_order");
+        let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+        let pending = if pending_place {
+            http(reply(&mut e, &verify, 200, CANCELED), "create_order")
+        } else {
+            verify
+        };
+        // Start an independent account read while the amendment HTTP is in flight.
+        let unrelated = order_frame("OPEN", "0", "1700000000002000000")
+            .replace("\"co\":\"42\"", "\"co\":\"88\"")
+            .replace("0x1234", "0x8888");
+        e.handle(
+            NOW + 4.,
+            Event::WsMessage {
+                socket,
+                text: &unrelated,
+            },
+        );
+        let timer = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if at_ms == NOW + 1004. => Some(timer),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(NOW + 1004., Event::TimerFired { timer });
+        let snapshot = http(e.drain_actions().collect(), "open_orders");
+        let login = http(
+            reply(&mut e, &pending, 401, r#"{"c":1000,"m":"expired"}"#),
+            "auth/api_key/login",
+        );
+        let filled = OPEN
+            .replace("[\"0.2\"]", "[\"0.3\"]")
+            .replace("1700000000000000000", "1700000000010000000");
+        let snapshot_body = filled
+            .replace("\"r\":{", "\"r\":[{")
+            .replacen("}}}", "}}]}", 1);
+        reply(&mut e, &snapshot, 200, &snapshot_body);
+        e.handle(NOW+1005.,Event::HttpResponse{request:login.id,response:Response{status:200,headers:"Set-Cookie: gravity=renewed-session; Path=/\nX-Grvt-Account-Id: renewed-account",body:r#"{"sub_account_id":"9007199254740993"}"#}});
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(
+            done(&actions, 95)
+                .unwrap()
+                .as_ref()
+                .unwrap_err()
+                .contains("execution")
+        );
+        assert!(!actions.iter().any(|a|matches!(a,Action::Http(r) if r.url.ends_with("create_order")||r.url.ends_with("/order"))));
+    }
 }

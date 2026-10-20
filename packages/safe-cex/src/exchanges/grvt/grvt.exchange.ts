@@ -1860,6 +1860,25 @@ export class GrvtExchange extends BaseExchange {
         };
       }
 
+      const market = this.store.marketsBySymbol[newOrderOpts.symbol];
+      if (!market) throw new Error('Unknown GRVT replacement market');
+      const { bd: baseDecimals } = this.getInstrumentSigningMetadata(market);
+      const replacementSize = adjust(newOrderOpts.amount, market.precision.amount);
+      if (!Number.isFinite(replacementSize) || replacementSize <= 0 || replacementSize < market.limits.amount.min || (market.limits.amount.max > 0 && replacementSize > market.limits.amount.max)) {
+        throw new Error('GRVT replacement amount is outside market precision or limits');
+      }
+      grvtScaledUint64(replacementSize.toString(), baseDecimals);
+      const replacementIsMarket = replacementExecution?.isMarket ?? (newOrderOpts.type === OrderType.Market || newOrderOpts.type === OrderType.StopLoss || newOrderOpts.type === OrderType.TakeProfit);
+      if (!replacementIsMarket) {
+        const replacementPrice = adjust(replacementExecution?.limitPrice ?? newOrderOpts.price ?? 0, market.precision.price);
+        if (!Number.isFinite(replacementPrice) || replacementPrice <= 0) throw new Error('Invalid GRVT replacement limit price');
+        grvtScaledUint64(replacementPrice.toString(), 9);
+      }
+      if (newOrderOpts.triggerPrice !== undefined) {
+        if (!Number.isFinite(newOrderOpts.triggerPrice) || newOrderOpts.triggerPrice <= 0) throw new Error('Invalid GRVT replacement trigger price');
+        grvtScaledUint64(newOrderOpts.triggerPrice.toString(), 9);
+      }
+
       // Step 1: Cancel the existing order only after the replacement is safe.
       await this.cancelOrder(order);
       this.log(`Order ${order.id} cancelled for update`, LogSeverity.Debug);

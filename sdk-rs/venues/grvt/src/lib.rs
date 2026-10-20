@@ -48,6 +48,7 @@ pub struct Pending {
     pub(crate) job: Job,
     pub(crate) attempts: u8,
     pub(crate) auth_resent: bool,
+    pub(crate) auth_generation: u64,
 }
 pub(crate) enum Job {
     Account(account::Request),
@@ -63,6 +64,17 @@ pub(crate) enum Job {
         rows: Vec<Candle>,
         failed: bool,
     },
+}
+impl Job {
+    fn is_private(&self) -> bool {
+        match self {
+            Self::Markets { .. }
+            | Self::Candles { .. }
+            | Self::Account(account::Request::Login) => false,
+            Self::History(request) => !request.is_public(),
+            _ => true,
+        }
+    }
 }
 #[derive(Default)]
 struct Connection {
@@ -174,10 +186,22 @@ impl Grvt {
                 job,
                 attempts: 0,
                 auth_resent: false,
+                auth_generation: self.account.generation,
             },
         );
     }
-    fn send_request(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
+    fn send_request(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending) {
+        if let Job::Trade(request) = &pending.job
+            && let Err(error) = self.trade_pending_guard(cx, request)
+        {
+            self.fail_pending(cx, pending, &error);
+            return;
+        }
+        if pending.job.is_private() && self.account.session.is_none() {
+            self.account_defer(cx, pending);
+            return;
+        }
+        pending.auth_generation = self.account.generation;
         let (base, headers, at) = match &pending.job {
             Job::Markets { .. } | Job::Candles { .. } => (
                 self.mdg(),
@@ -795,6 +819,9 @@ impl Venue for Grvt {
             }
             return;
         }
+        if pending.job.is_private() {
+            self.account_response_headers(cx, pending.auth_generation, &response);
+        }
         match pending.job {
             Job::Account(request) => self.account_response(cx, request, response),
             Job::Trade(request) => self.trade_response(cx, request, response),
@@ -810,6 +837,18 @@ impl Venue for Grvt {
                         self.startup_retry = Some(cx.set_timer(5_000.));
                     }
                     return;
+                }
+                // The public instrument catalog has no authenticated leverage
+                // rails. Retain those already fetched from the trading API;
+                // replacing signing metadata must not restore the 1..100 defaults.
+                let mut rows = rows;
+                let has_new_markets = rows
+                    .iter()
+                    .any(|market| cx.store.market_by_id(&market.id).is_none());
+                for market in &mut rows {
+                    if let Some(previous) = cx.store.market_by_id(&market.id) {
+                        market.limits.leverage = previous.limits.leverage;
+                    }
                 }
                 let tickers = rows
                     .iter()
@@ -844,6 +883,10 @@ impl Venue for Grvt {
                 self.connect(cx);
                 if first {
                     self.private_start(cx);
+                } else if has_new_markets {
+                    // Hydrate account-specific rails for newly listed markets.
+                    // The helper waits for a private session and avoids duplicate reads.
+                    self.refresh_leverage(cx);
                 }
                 if self.public.open {
                     self.ticker_offset = 0;
@@ -886,7 +929,6 @@ impl Venue for Grvt {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
         let read = match &pending.job {
             Job::Trade(request) => request.is_read(),
-            Job::Account(account::Request::Login) => false,
             _ => true,
         };
         if read && pending.attempts < 5 {
@@ -912,7 +954,11 @@ impl Venue for Grvt {
             self.send_request(cx, pending);
             return;
         }
-        self.fail_pending(cx, pending, error);
+        if matches!(pending.job, Job::Account(account::Request::Login)) {
+            self.account_login_unavailable(cx);
+        } else {
+            self.fail_pending(cx, pending, error);
+        }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if self.account_timer(cx, timer) {
