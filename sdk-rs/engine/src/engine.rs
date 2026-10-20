@@ -2171,7 +2171,7 @@ mod streaming_tests {
     }
 
     #[test]
-    fn fill_financials_leave_legacy_bytes_identical_when_absent() {
+    fn fill_financials_leave_revision_one_bytes_identical_when_absent() {
         for financials in [
             None,
             Some(FillFinancials::default()),
@@ -2205,9 +2205,11 @@ mod streaming_tests {
             for value in [99f64, 1.] {
                 expected.extend(value.to_le_bytes());
             }
+            expected.extend(1u32.to_le_bytes()); // Stable raw symbol reference.
+            expected.extend(0u32.to_le_bytes()); // Section padding.
             assert_eq!(
                 fills, expected,
-                "absent financials must preserve the old payload"
+                "absent financials must preserve the symbol-bearing revision-one payload"
             );
             assert!(engine.take_frame(1.).is_none(), "fill must flush once");
         }
@@ -2250,19 +2252,27 @@ mod streaming_tests {
             .unwrap()
             .1;
         assert_eq!(u32::from_le_bytes(fills[..4].try_into().unwrap()), 3);
-        assert_eq!(fills.len(), 136);
-        let floats: Vec<_> = fills[40..]
+        assert_eq!(fills.len(), 152);
+        let rows: Vec<_> = fills[40..88]
             .as_chunks::<8>()
             .0
             .iter()
             .map(|value| f64::from_le_bytes(*value))
             .collect();
-        assert_eq!(&floats[..6], &[99., 1., 99., 1., 99., 1.]);
-        assert!(floats[6].is_nan());
-        assert_eq!(&floats[7..9], &[0., -3.5]);
-        assert!(floats[9].is_nan());
-        assert_eq!(floats[10], 0.);
-        assert!(floats[11].is_nan());
+        assert_eq!(rows, [99., 1., 99., 1., 99., 1.]);
+        assert_eq!(&fills[88..100], &[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
+        assert_eq!(&fills[100..104], &[0; 4]);
+        let floats: Vec<_> = fills[104..]
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|value| f64::from_le_bytes(*value))
+            .collect();
+        assert!(floats[0].is_nan());
+        assert_eq!(&floats[1..3], &[0., -3.5]);
+        assert!(floats[3].is_nan());
+        assert_eq!(floats[4], 0.);
+        assert!(floats[5].is_nan());
         assert!(engine.take_market_frame(1.).is_none());
         assert!(engine.take_frame(1.).is_none());
     }
