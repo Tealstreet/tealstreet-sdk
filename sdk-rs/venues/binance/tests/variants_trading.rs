@@ -358,6 +358,69 @@ fn inverse_short_or_rejected_batch_cannot_advance_the_remaining_brackets() {
 }
 
 #[test]
+fn inverse_partial_rejection_retains_all_proven_ids_on_the_error() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Partial {
+        message: String,
+        partial_order_ids: Vec<String>,
+    }
+    for (body, expected) in [
+        (
+            r#"[{"orderId":1},{"orderId":2},{"code":-2010,"msg":"insufficient margin"},{"orderId":4},{"orderId":5}]"#,
+            vec!["1", "2", "4", "5"],
+        ),
+        (r#"[{"orderId":1},{"orderId":2}]"#, vec!["1", "2"]),
+    ] {
+        let mut h = ready(Variant::CoinM);
+        let mut o = order(Variant::CoinM, r#""stopLoss":90,"takeProfit":110"#);
+        o.amount = 11.0;
+        place(&mut h, vec![o]);
+        let request = h.take("/dapi/v1/batchOrders");
+        h.reply(request.id, 200, "", body);
+        let error = h.result(77).unwrap().as_ref().unwrap_err();
+        let details: Partial = serde_json::from_str(error).expect("host-readable partial error");
+        assert_eq!(details.partial_order_ids, expected);
+        assert!(!details.message.is_empty());
+        assert!(h.requests.is_empty(), "remaining bracket steps must stop");
+    }
+}
+
+#[test]
+fn inverse_later_step_failure_preserves_previously_placed_ids() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Partial {
+        message: String,
+        partial_order_ids: Vec<String>,
+    }
+    let mut h = ready(Variant::CoinM);
+    let orders = (0..6)
+        .map(|_| order(Variant::CoinM, r#""reduceOnly":false"#))
+        .collect();
+    place(&mut h, orders);
+    let first = h.take("/dapi/v1/batchOrders");
+    h.reply(
+        first.id,
+        200,
+        "",
+        r#"[{"orderId":1},{"orderId":2},{"orderId":3},{"orderId":4},{"orderId":5}]"#,
+    );
+    let second = h.take("/dapi/v1/order");
+    h.reply(
+        second.id,
+        400,
+        "",
+        r#"{"code":-2010,"msg":"insufficient margin"}"#,
+    );
+    let details: Partial = serde_json::from_str(h.result(77).unwrap().as_ref().unwrap_err())
+        .expect("retain earlier successful steps");
+    assert_eq!(details.partial_order_ids, ["1", "2", "3", "4", "5"]);
+    assert_eq!(details.message, "insufficient margin");
+    assert!(h.requests.is_empty());
+}
+
+#[test]
 fn whitespace_negative_success_response_cannot_advance_brackets_or_retry() {
     for variant in [Variant::Spot, Variant::CoinM] {
         let mut h = ready(variant);

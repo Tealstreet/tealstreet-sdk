@@ -232,6 +232,11 @@ export const setRustEngineTransport = (factory: () => Transport) => {
   engineTransport = factory;
 };
 
+const placementScopedCancelAllNames = new Set<ExchangeName>([
+  'phemex', 'okx', 'okxeu', 'okxdemo', 'okxeudemo', 'asterdex',
+  'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue',
+]);
+
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
 
@@ -279,6 +284,7 @@ export class RustEngineExchange extends BaseExchange {
   private hostInitialization?: Promise<void>;
   private startup?: Promise<void>;
   private startupFailure?: Error;
+  private readonly attemptedPlacementSymbols = new Set<string>();
   private readonly startupWaiters = new Set<() => void>();
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
@@ -309,6 +315,24 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
+    if (placementScopedCancelAllNames.has(exchangeName)) {
+      this.cancelAllOrders = async () => {
+        // Frames can lag placement ACKs. Keep attempted scopes for this account's
+        // lifetime, including uncertain/rejected outcomes and races with later places.
+        const symbols = new Set([...this.store.orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols]);
+        const failures: string[] = [];
+        for (const symbol of symbols) {
+          if (this.isDisposed) continue;
+          try {
+            await this.cancelSymbolOrders(symbol);
+          } catch (error) {
+            // A rejected scope must not prevent cancellation of later live orders.
+            failures.push(`${symbol}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+        if (failures.length) throw new Error(`${this.name} cancel-all failed: ${failures.join('; ')}`);
+      };
+    }
     if (exchangeName === 'polymarket') {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
@@ -369,13 +393,13 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
     }
-    if (this.name === 'hyperliquidspot' || this.name === 'krakenspot') {
+    if (['hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse'].includes(this.name)) {
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
-    if (['woo', 'grvt', 'kucoin', 'kucoinspot'].includes(this.name)) {
+    if (['woo', 'grvt', 'kucoin', 'kucoinspot'].includes(this.name) || orderlyNames.has(this.name)) {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       };
@@ -614,7 +638,7 @@ export class RustEngineExchange extends BaseExchange {
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
         extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
-        ...(['backpack', 'bitrue', 'breakoutprop'].includes(this.name)
+        ...(['backpack', 'bitrue', 'breakoutprop', 'binance', 'binancepm', 'binancespot', 'binanceinverse'].includes(this.name)
           ? { recvWindow: this.options.extra?.recvWindow }
           : {}),
         applicationId,
@@ -1163,6 +1187,9 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     if (this.name === 'asterdex') for (const order of orders) this.validateAsterStp(order.stpMode);
+    if (this.host && placementScopedCancelAllNames.has(this.name)) {
+      for (const order of orders) this.attemptedPlacementSymbols.add(order.symbol);
+    }
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 

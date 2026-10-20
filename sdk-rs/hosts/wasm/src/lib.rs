@@ -317,7 +317,12 @@ struct EngineOptions {
     #[cfg(feature = "paradex")]
     #[serde(default)]
     payload_signer: bool,
-    #[cfg(any(feature = "backpack", feature = "bitrue", feature = "breakoutprop"))]
+    #[cfg(any(
+        feature = "backpack",
+        feature = "bitrue",
+        feature = "breakoutprop",
+        feature = "binance"
+    ))]
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
@@ -729,6 +734,7 @@ impl WasmEngine {
                     public_data_only: options.public_data_only,
                     spot_only: venue == "coinbasespot" || options.spot_only,
                     testnet: options.testnet,
+                    read_credentials: options.read_credentials.clone(),
                 })
                 .map_err(|error| JsError::new(&error))?,
             )),
@@ -883,6 +889,7 @@ impl WasmEngine {
             #[cfg(feature = "binance")]
             "binance" | "binancepm" | "binancespot" | "binanceinverse" => {
                 Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
+                    recv_window: options.recv_window,
                     read_credentials: options.read_credentials.clone(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,

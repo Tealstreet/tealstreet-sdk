@@ -657,3 +657,27 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     );
     assert_eq!(resumed[0].1, due + 2. + 10_000_f64.max(0.0));
 }
+
+#[test]
+fn delayed_live_execution_is_not_lost_after_five_seconds() {
+    let (mut e, s) = ready();
+    e.take_frame(NOW);
+    let event = format!(
+        r#"{{"type":"update/account_all","channel":"account_all:718895","trades":{{"1":[{{"trade_id":"late-99","order_id":"42","side":"buy","price":"90","size":"0.25","timestamp":{}}}]}}}}"#,
+        (NOW + 1.0) as u64
+    );
+    message(&mut e, s, NOW + 10_000.0, &event);
+    message(&mut e, s, NOW + 10_001.0, &event);
+    assert_eq!(fill_count(e.take_frame(NOW + 10_001.0).unwrap()), 1);
+    let history = event
+        .replace("update/account_all", "subscribed/account_all")
+        .replace("late-99", "history-100");
+    message(&mut e, s, NOW + 10_002.0, &history);
+    message(
+        &mut e,
+        s,
+        NOW + 10_003.0,
+        &history.replace("subscribed/account_all", "update/account_all"),
+    );
+    assert_eq!(e.take_frame(NOW + 10_003.0).map_or(0, fill_count), 0);
+}
