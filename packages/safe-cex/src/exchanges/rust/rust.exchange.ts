@@ -718,6 +718,10 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   updateSymbolMetadata = async (symbol: string) => {
+    if (this.name === 'bitrue') {
+      if (!this.isPublicDataOnly) await this.fetchSymbolMaxLeverage(symbol);
+      return;
+    }
     if (!['mexc', 'woo', 'kraken'].includes(this.name) || this.isPublicDataOnly) return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
     this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: rails } });
@@ -1065,6 +1069,12 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'breakoutprop') throw new Error('Not implemented');
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market not found for symbol: ${symbol}`);
+    if (this.name === 'bitrue' && !this.isPublicDataOnly) {
+      const leverage = await this.command<number>({ op: 'fetchMaxLeverage', symbol });
+      if (!Number.isFinite(leverage) || leverage < 1) throw new Error('Invalid Bitrue maximum leverage');
+      this.host?.flush();
+      return leverage;
+    }
     return market.limits.leverage.max;
   };
 

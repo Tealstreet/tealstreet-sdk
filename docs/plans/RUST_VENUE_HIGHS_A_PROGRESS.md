@@ -76,3 +76,31 @@ TS divergences are explicit: the gate adds only the exact documented expected
 TS mini subscription, never prices or Rust output. The private tape separately
 requires TS's rejected singleton market-maker batch attempt and the shared
 accepted submit. Request/signature/write-consumption checks remain active.
+
+### Bitrue phase — implemented and independently reviewed
+
+Fresh/flat symbols can establish leverage with a successful explicit write;
+unknown margin defaults Cross without guessing market-max leverage. Empty or
+zero-leverage flat account rows retain that confirmed setting and valid balance
+data. Cancels continue after per-ID preflight, transport, venue and identity
+errors, report confirmed IDs and each failure, and preserve failed live orders.
+Children remain fallback cancel steps until their parent actually succeeds.
+
+Initial order readiness follows a complete first sweep of attempted symbols;
+failed symbols remain visible errors with retained state and scheduled retries.
+USDT/USDC currency balances cross frames alongside the primary wallet.
+Authenticated, identity-checked leverage brackets update only the ceiling;
+leverage writes preserve exact requested integers and reject known limits
+visibly rather than silently clamping. `FetchMaxLeverage` is separate from
+current account leverage; the SDK uses it for Bitrue max/metadata reads, flushes
+native market changes and keeps public-only reads unauthenticated.
+
+Validation: 83 Bitrue native tests, strict all-target clippy and seven new SDK
+boundary tests pass. Engine JSON conversion and actual SDK/WASM bracket/frame
+assertions are included for integration gates. Private replay now exercises a
+flat symbol's 125x bracket and both collateral currencies; comparisons include
+all currency balances. Independent review found premature parent/child cancel
+deduplication; missing/unmappable/failed parent and successful dedup regressions
+resolve it, re-reviewed PASS. Other account/trading/bracket and shared boundary
+review PASS. Intentional TS corrections (flat leverage preservation and complete
+cancel continuation) are listed in the gate without result normalization.

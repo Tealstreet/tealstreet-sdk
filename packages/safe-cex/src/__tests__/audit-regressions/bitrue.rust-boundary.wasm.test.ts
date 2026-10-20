@@ -53,6 +53,7 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
           ]),
         );
       if (path.endsWith('/listenKey')) return ok({ listenKey: 'futures-key' });
+      if (path.endsWith('/leverageBracket')) return ok({ contractName: symbol, brackets: [{ initialLeverage: 125 }] });
       if (path.endsWith('/account'))
         return ok({
           account: [
@@ -135,6 +136,13 @@ it('preserves Bitrue private IDs, fill units, leverage and exact signed writes a
     expect(store.markets[0]).toMatchObject({ symbol, precision: { amount: 10 } });
     expect(store.orders[0]).toMatchObject({ id: orderId, amount: 100, filled: 0, remaining: 100 });
     expect(main.store.orders[0].id).toBe(orderId);
+    expect(await bounded(exchange.fetchSymbolMaxLeverage(symbol), 'native bracket')).toBe(125);
+    expect(store.marketsBySymbol[symbol].limits.leverage.max).toBe(125);
+    expect(main.store.marketsBySymbol[symbol].limits.leverage.max).toBe(125);
+    expect(store.fetchedLeverage[symbol]?.buyLeverage).toBe(25);
+    const bracketRequest = requests.find((request) => new URL(request.url).pathname.endsWith('/leverageBracket'))!;
+    expect(bracketRequest.method).toBe('GET');
+    expect(bracketRequest.url).toBe(`https://fapi.bitrue.com/fapi/v2/leverageBracket?contractName=${symbol}`);
     // Prove this goes through the engine cache, not BaseExchange's JS store.
     const cachedOrders = store.orders;
     store.update({ orders: [] });
