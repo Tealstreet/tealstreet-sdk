@@ -2252,3 +2252,19 @@ latent omission escaped because both outbound arrays were empty; the stricter
 current arrays expose the three-versus-four write difference. This is a genuine
 paired TS bug fix, documented in the gate. Fresh PM controls and remaining
 integration gates resume on this reviewed source.
+
+
+PM paired-correction replay now matches both required writes, but exposes a
+second latent native defect: cancel-all turns a fully filled event-order from
+Closed into Canceled. The TS correction correctly preserves Closed. Failure
+retained in /tmp/bitunix-df2-pmfix-binancepm-private.log. Keep status/economic
+comparison exact; no unchanged retry.
+
+Independent plan review approves reusing the existing native Binance
+mark_canceled_preserving_closed helper in both proof-less cancellation success
+and UNKNOWN_ORDER paths, then deleting the unused unconditional helper. Spot
+and COIN-M already use this guard. Add command/ACK regressions covering PM and
+USD-M preclosed and racing full fills, success and unknown-order responses,
+while still canceling open targets. Run scoped native tests/strict checks and
+independent final review. Rebuild and rerun all four Binance public/private
+modes before resuming the remaining batch; no fixture or gate changes.
