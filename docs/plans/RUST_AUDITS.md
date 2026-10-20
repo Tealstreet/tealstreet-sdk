@@ -528,7 +528,7 @@ Futures matches TS on nearly every input; no high regression.
   spot `EGeneral:Permission denied` on an order deactivates the account
   (`spot/account.rs:513`).~~ Fixed: a stream row without the field keeps the
   REST-proven margin mode and leverage (as TS's cached preference does); a capped
-  candle page returns its rows; permission denied on a spot write fails only that
+  candle page (Kraken serves 2000 bars from `from`) pages forward to `to`, bounded; permission denied on a spot write fails only that
   command, while on a read it still deactivates.
 - ~~Decided: market entry with attached TP/SL is rejected (Rust behaviour);
   the error must say the TP/SL legs are unsupported on market entry.~~ Done: the

@@ -211,6 +211,7 @@ fn old_or_malformed_snapshot_cannot_replace_synced_depth() {
 fn failed_or_incomplete_candles_are_explicit_errors() {
     for body in [
         r#"{"candles":[],"error":"unavailable"}"#,
+        r#"{"candles":[],"more_candles":true}"#,
         r#"{"status":"error"}"#,
         r#"{"candles":null}"#,
         r#"{"candles":{}}"#,
@@ -311,7 +312,7 @@ fn full_ticker_refreshes_native_statistics_after_rest_seed() {
     );
 }
 #[test]
-fn capped_candle_page_returns_served_rows_instead_of_an_empty_chart() {
+fn capped_candle_page_continues_to_the_newest_bars() {
     let (mut e, _) = public();
     e.handle(
         NOW,
@@ -329,7 +330,19 @@ fn capped_candle_page_returns_served_rows_instead_of_an_empty_chart() {
         &mut e,
         &r,
         200,
-        r#"{"candles":[{"time":1700000000000,"open":"1","high":"2","low":"0.5","close":"1.5","volume":"3"}],"more_candles":true}"#,
+        r#"{"candles":[{"time":1699999880000,"open":"1","high":"2","low":"0.5","close":"1.5","volume":"3"}],"more_candles":true}"#,
     );
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 8, result: Ok(s) }) if s.contains("1700000000.0"))));
+    let next = requests(&mut e).pop().expect("next page");
+    assert!(
+        next.url.contains("from=1699999940&to=1700000000"),
+        "{}",
+        next.url
+    );
+    reply(
+        &mut e,
+        &next,
+        200,
+        r#"{"candles":[{"time":1699999940000,"open":"2","high":"3","low":"1","close":"2.5","volume":"4"}],"more_candles":false}"#,
+    );
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 8, result: Ok(s) }) if s.contains("1699999880.0") && s.contains("1699999940.0"))));
 }

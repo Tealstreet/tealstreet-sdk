@@ -42,8 +42,18 @@ pub enum Pending {
         generation: Option<u64>,
         rows: Vec<Candle>,
         failed: bool,
+        page: CandlePage,
     },
 }
+/// Kraken serves at most 2000 bars from `from`; later pages resume after the last bar.
+#[derive(Clone, Copy)]
+pub struct CandlePage {
+    from: f64,
+    to: f64,
+    step: f64,
+    pages: u8,
+}
+const MAX_CANDLE_PAGES: u8 = 10;
 #[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
@@ -312,7 +322,7 @@ impl Kraken {
             }
             return;
         }
-        let (resolution, step) = interval_spec(&interval);
+        let (_, step) = interval_spec(&interval);
         let to = to_ms.unwrap_or(cx.now);
         let from = from_ms.unwrap_or(to - step * f64::from(limit.unwrap_or(500).clamp(1, 5000)));
         if !from.is_finite() || !to.is_finite() || from < 0.0 || from > to {
@@ -333,16 +343,14 @@ impl Kraken {
         } else {
             None
         };
-        cx.request_streamed(
-            Method::Get,
-            format!(
-                "{}/api/charts/v1/trade/{symbol}/{resolution}?from={:.0}&to={:.0}",
-                self.host(),
-                (from / 1000.0).floor(),
-                (to / 1000.0).floor()
-            ),
-            vec![],
-            ArrayAt::Field("candles"),
+        let page = CandlePage {
+            from,
+            to,
+            step,
+            pages: 0,
+        };
+        self.candles_page(
+            cx,
             Pending::Candles {
                 command,
                 symbol,
@@ -350,7 +358,32 @@ impl Kraken {
                 generation,
                 rows: vec![],
                 failed: false,
+                page,
             },
+        );
+    }
+    fn candles_page(&self, cx: &mut Cx<'_, Pending>, pending: Pending) {
+        let Pending::Candles {
+            symbol,
+            interval,
+            page,
+            ..
+        } = &pending
+        else {
+            return;
+        };
+        let (resolution, _) = interval_spec(interval);
+        cx.request_streamed(
+            Method::Get,
+            format!(
+                "{}/api/charts/v1/trade/{symbol}/{resolution}?from={:.0}&to={:.0}",
+                self.host(),
+                (page.from / 1000.0).floor(),
+                (page.to / 1000.0).floor()
+            ),
+            vec![],
+            ArrayAt::Field("candles"),
+            pending,
         );
     }
     fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -723,11 +756,12 @@ impl Venue for Kraken {
                 generation,
                 mut rows,
                 failed,
+                page,
             } => {
                 let envelope = serde_json::from_str::<CandleEnvelope<'_>>(response.body);
+                let more = envelope.as_ref().is_ok_and(|e| e.more_candles);
                 if !envelope.as_ref().is_ok_and(|e| {
                     let _ = &e.candles;
-                    // more_candles marks a capped page, not a failure; keep what was served.
                     e.error.is_empty() && !matches!(e.status.as_ref(), "error" | "unauthorized")
                 }) {
                     self.public_failed(
@@ -739,6 +773,7 @@ impl Venue for Kraken {
                             generation,
                             rows,
                             failed,
+                            page,
                         },
                         "Kraken candle read failed or incomplete",
                     );
@@ -762,8 +797,48 @@ impl Venue for Kraken {
                             generation,
                             rows,
                             failed,
+                            page,
                         },
                         "Invalid Kraken candles",
+                    );
+                    return;
+                }
+                if more {
+                    // A capped page holds the oldest bars; never return a window missing its newest end.
+                    let next = rows.last().map(|c| c.timestamp * 1000.0 + page.step);
+                    let Some(next) = next.filter(|next| {
+                        *next > page.from && *next <= page.to && page.pages + 1 < MAX_CANDLE_PAGES
+                    }) else {
+                        self.public_failed(
+                            cx,
+                            Pending::Candles {
+                                command,
+                                symbol,
+                                interval,
+                                generation,
+                                rows,
+                                failed,
+                                page,
+                            },
+                            "Kraken candle range exceeds the paging bound",
+                        );
+                        return;
+                    };
+                    self.candles_page(
+                        cx,
+                        Pending::Candles {
+                            command,
+                            symbol,
+                            interval,
+                            generation,
+                            rows,
+                            failed,
+                            page: CandlePage {
+                                from: next,
+                                pages: page.pages + 1,
+                                ..page
+                            },
+                        },
                     );
                     return;
                 }
