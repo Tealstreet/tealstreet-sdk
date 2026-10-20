@@ -90,6 +90,7 @@ pub struct CandleRead {
 pub struct Okx {
     options: Options,
     instruments: HashMap<String, Instrument>,
+    index_targets: HashMap<String, Vec<(String, String)>>,
     credentials: Option<Credentials>,
     account: account::AccountState,
     trading: trading::TradingState,
@@ -121,6 +122,7 @@ impl Okx {
         Self {
             options,
             instruments: HashMap::new(),
+            index_targets: HashMap::new(),
             credentials,
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
@@ -400,21 +402,13 @@ impl Okx {
         }
         let _ = json::each::<wire::Prices<'_>>(data.get(), |p| {
             if channel == "index-tickers" {
-                let symbols: Vec<_> = cx
-                    .store
-                    .markets()
-                    .iter()
-                    .filter(|m| {
-                        self.instruments
-                            .get(&m.id)
-                            .is_some_and(|i| i.index_id == p.inst_id)
-                    })
-                    .map(|m| (m.id.clone(), m.symbol.clone()))
-                    .collect();
-                for (id, symbol) in symbols {
-                    self.indexes.insert(id);
-                    cx.store
-                        .update_ticker(&symbol, |t| t.index = num::parse(p.idx_px));
+                let Some(targets) = self.index_targets.get(p.inst_id) else {
+                    return;
+                };
+                let index = num::parse(p.idx_px);
+                for (id, symbol) in targets {
+                    self.indexes.insert(id.clone());
+                    cx.store.update_ticker(symbol, |t| t.index = index);
                 }
                 return;
             }
@@ -805,6 +799,18 @@ impl Venue for Okx {
                     );
                     return;
                 }
+                // Commit routing with the complete catalog: one native index
+                // can feed an inverse swap and one or more linear X-Perps.
+                let mut index_targets: HashMap<String, Vec<(String, String)>> = HashMap::new();
+                for market in &rows {
+                    if let Some(instrument) = self.instruments.get(&market.id) {
+                        index_targets
+                            .entry(instrument.index_id.clone())
+                            .or_default()
+                            .push((market.id.clone(), market.symbol.clone()));
+                    }
+                }
+                self.index_targets = index_targets;
                 cx.store.set_markets(rows);
                 self.list(
                     cx,

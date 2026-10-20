@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { venueOf } from './venues.mjs';
 import { requestKey } from './requests.mjs';
+import { Tape } from './tape.mjs';
 test('product request matching preserves native kind/instrument fields and refuses category aliases', () => {
   for (const name of ['okx', 'okxdemo', 'okxeu', 'okxeudemo']) {
     const venue = venueOf(name), base = `https://${name.startsWith('okxeu') ? 'eea.okx.com' : name.endsWith('demo') ? 'openapi.okx.com' : 'www.okx.com'}/api/v5/trade/orders-history`;
@@ -61,6 +62,40 @@ test('private tape generators retain OKX inverse/EEA native startup surface', ()
         assert(rows.some((r) => r.instId === 'BTC-USD-UM' && r.instType === 'FUTURES' && r.ruleType === 'xperp'));
         assert(records.some((r) => r.url?.endsWith('/account/positions')));
         assert(records.some((r) => r.type === 'command' && r.op === 'fetchOrderHistory' && r.symbol === 'BTCUSDUM'));
+        const startup = records.filter((record) => record.type === 'http' && /^\/api\/v5\/(account\/(account-position-risk|positions)|trade\/(orders-pending|orders-algo-pending))$/.test(new URL(record.url).pathname));
+        for (const all of startup.filter((record) => !new URL(record.url).searchParams.has('instType'))) {
+          const url = new URL(all.url), allRows = JSON.parse(all.body).data;
+          for (const instType of ['SWAP', 'FUTURES']) {
+            url.searchParams.set('instType', instType);
+            const key = requestKey('GET', url.href, undefined, new Set(), venueOf(name));
+            const filtered = startup.find((record) => record.afterCommand === all.afterCommand
+              && requestKey('GET', record.url, undefined, new Set(), venueOf(name)) === key);
+            assert(filtered, `real TS ${instType} read must have its exact native reply: ${url}`);
+            assert.deepEqual(JSON.parse(filtered.body).data, url.pathname.endsWith('/account-position-risk')
+              ? allRows : allRows.filter((row) => row.instType === instType));
+            assert.notEqual(key, requestKey('GET', all.url, undefined, new Set(), venueOf(name)), 'optional filter stays part of exact matching');
+          }
+          url.searchParams.set('instType', 'OPTION');
+          assert(!startup.some((record) => requestKey('GET', record.url, undefined, new Set(), venueOf(name))
+            === requestKey('GET', url.href, undefined, new Set(), venueOf(name))), 'unrecorded product cannot reuse an unfiltered response');
+        }
+      }
+      const tape = new Tape([], venueOf(name));
+      for (const record of records.filter((record) => record.type === 'ws')) {
+        const message = JSON.parse(record.text);
+        if (!message.arg) continue;
+        const { channel } = message.arg;
+        const topics = channel === 'account' ? [{ channel }]
+          : record.url.endsWith('/public') ? rows.map((row) => ({ channel, instId: row.instId }))
+          : (name.startsWith('okxeu') ? ['SWAP', 'FUTURES'] : ['SWAP']).map((instType) => ({ channel, instType }));
+        const socket = { url: record.url, topics: new Map(topics.map((topic, index) => [index, topic])) };
+        assert.doesNotThrow(() => tape.assertSubscribed(socket, message), 'native channel/product must match every pushed row');
+        if (message.arg.instType === 'FUTURES') {
+          assert(message.data.every((row) => row.instType === 'FUTURES'));
+          assert.throws(() => tape.assertSubscribed(socket, { ...message, arg: { ...message.arg, instType: 'SWAP' } }), /Unsubscribed/);
+        }
+        if (record.url.endsWith('/public')) assert(message.data.every((row) => row.instId === message.arg.instId));
+        if (channel === 'account') assert.equal(message.arg.instType, undefined);
       }
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }

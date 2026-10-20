@@ -31,21 +31,44 @@ let clock = 0;
 let commandCount = 0;
 const envelope = (data) => ({ code: '0', msg: '', data });
 const http = (method, path, response, requestBody, metadata = {}) => {
-  if (eea && /^\/api\/v5\/(account\/(account-position-risk|positions)|trade\/(orders-pending|orders-algo-pending))\?/.test(path)) {
-    const native = new URL(REST + path); native.searchParams.delete('instType');
-    path = native.pathname + native.search;
-  }
-  records.push({
-  t: 0, type: 'http', method, url: `${REST}${path}`, status: 200,
-  ...metadata, ...(requestBody === undefined ? {} : { requestBody }), body: JSON.stringify(envelope(response)),
+  const record = (path, data) => records.push({
+    t: 0, type: 'http', method, url: `${REST}${path}`, status: 200,
+    ...metadata, ...(requestBody === undefined ? {} : { requestBody }), body: JSON.stringify(envelope(data)),
   });
+  if (eea && method === 'GET' && /^\/api\/v5\/(account\/(account-position-risk|positions)|trade\/(orders-pending|orders-algo-pending))\?/.test(path)) {
+    const native = new URL(REST + path);
+    native.searchParams.delete('instType');
+    record(native.pathname + native.search, response);
+    // Both calls are native API contracts: Rust omits the optional product
+    // filter, while the real TS reader requests each product independently.
+    for (const instType of ['SWAP', 'FUTURES']) {
+      native.searchParams.set('instType', instType);
+      const balance = native.pathname.endsWith('/account-position-risk');
+      if (!balance && response.some((row) => !['SWAP', 'FUTURES'].includes(row.instType)))
+        throw new Error(`Missing native OKX product in ${path}`);
+      record(native.pathname + native.search, balance ? response : response.filter((row) => row.instType === instType));
+    }
+    return;
+  }
+  record(path, response);
 };
 const ws = (socket, event) => records.push({ t: clock += 400, type: 'ws', url: `${WS}/${socket}`, text: JSON.stringify(event) });
 const command = (args) => {
   records.push({ t: clock += 400, type: 'command', ...args });
   return ++commandCount;
 };
-const push = (socket, channel, rows) => ws(socket, { arg: { channel, instType: 'SWAP' }, data: rows });
+const push = (socket, channel, rows) => {
+  if (channel === 'account') return ws(socket, { arg: { channel }, data: rows });
+  if (socket === 'public') {
+    for (const row of rows) ws(socket, { arg: { channel, instId: row.instId }, data: [row] });
+    return;
+  }
+  for (const instType of ['SWAP', 'FUTURES']) {
+    const product = rows.filter((row) => row.instType === instType);
+    if (product.length) ws(socket, { arg: { channel, instType }, data: product });
+  }
+  if (rows.some((row) => !['SWAP', 'FUTURES'].includes(row.instType))) throw new Error(`Missing native OKX product in ${channel}`);
+};
 const instrument = (instId, base, quote, ctVal, tickSz) => ({
   instType: 'SWAP', instId, uly: `${base}-${quote}`, instFamily: `${base}-${quote}`,
   ctType: 'linear', ctVal, ctValCcy: base, settleCcy: quote, baseCcy: '', quoteCcy: '',

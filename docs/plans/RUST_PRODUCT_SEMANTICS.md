@@ -140,3 +140,17 @@ request/write/signature/protocol contracts.
 | `bybitspot` | 4339 / 527 / 2 | 144.4 / 106.3 | 79.1 / 45.0 | 16.2 / 3.1 | PASS / PASS |
 | `bybitdemo` | 5833 / 912 / 2 | 222.3 / 162.5 | 112.9 / 63.6 | 21.8 / 5.0 | PASS / PASS |
 | `hyrotrader` | 160 / 2 / 2 | 19.6 / 18.9 | 3.8 / 3.4 | 13.3 / 0.8 | PASS / PASS |
+
+### Final matrix findings retained
+
+- The first EU private gate failed TS startup because the generator removed
+  optional `instType` from all records, leaving no exact scoped TS replies.
+  Native unfiltered and TS filtered product requests remain distinct; the
+  fixture is being partitioned by the raw native product, including pushed
+  subscription topics. This failure is not an accepted gate.
+- The first global OKX public gate matched output and memory but failed
+  steady CPU: TS 830.4 ms, Rust 833.1 ms; main CPU TS 1,138.1 / Rust
+  1,106.6 ms, retained 19.1 / 5.1 MB. The unchanged six-second fixture has
+  3,675 index updates; each scans 514 markets and performs a hash lookup,
+  about 1.89 million catalog lookups. A native index-to-market fanout cache
+  is being added before remeasurement. No threshold or fixture is changed.

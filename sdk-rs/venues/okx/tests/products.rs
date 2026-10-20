@@ -127,6 +127,30 @@ fn eea_indexes_deduplicate_underlying_and_fan_out_to_swap_and_xperp() {
     );
     assert_eq!(e.store().ticker("BTCUSD").unwrap().index, 41000.0);
     assert_eq!(e.store().ticker("BTCUSDUM").unwrap().index, 41000.0);
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().index, 40000.0);
+    ws(
+        &mut e,
+        public,
+        r#"{"arg":{"channel":"index-tickers","instId":"BTC-USD"},"data":[{"instId":"UNKNOWN-USD","idxPx":"1"},{"instId":"BTC-USD","idxPx":"42000"},{"instId":"BTC-USDT","idxPx":"43000"}]}"#,
+    );
+    assert_eq!(e.store().ticker("BTCUSD").unwrap().index, 42000.0);
+    assert_eq!(e.store().ticker("BTCUSDUM").unwrap().index, 42000.0);
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().index, 43000.0);
+}
+
+#[test]
+fn global_index_routes_keep_linear_and_inverse_underlyings_separate() {
+    let (mut e, initial) = startup(false, false);
+    let public = socket(&initial, "/public");
+    e.handle(3.0, Event::WsOpened { socket: public });
+    actions(&mut e);
+    ws(
+        &mut e,
+        public,
+        r#"{"arg":{"channel":"index-tickers","instId":"BTC-USD"},"data":[{"instId":"BTC-USD","idxPx":"41000"},{"instId":"UNKNOWN-USD","idxPx":"1"},{"instId":"BTC-USDT","idxPx":"42000"}]}"#,
+    );
+    assert_eq!(e.store().ticker("BTCUSD").unwrap().index, 41000.0);
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().index, 42000.0);
 }
 
 #[test]
