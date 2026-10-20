@@ -218,12 +218,14 @@ fn spot_stops_use_native_filter_and_derivative_controls_fail_before_writes() {
     h.command(Command::SetPositionMode {
         command: 3,
         hedged: true,
+        symbol: None,
     });
     assert!(h.result(3).unwrap().is_err());
     h.command(Command::SetLeverage {
         command: 4,
         symbol: "BTCUSDT".into(),
         leverage: 3.0,
+        side: None,
     });
     assert!(h.result(4).unwrap().is_err());
     assert!(h.requests.is_empty());

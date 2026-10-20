@@ -365,6 +365,7 @@ fn native_settings_requests_round_and_clamp_leverage() {
         command: 1,
         symbol: "BTCUSDT".into(),
         leverage: 125.6,
+        side: None,
     });
     let request = h.requests.remove(0);
     assert!(
@@ -392,6 +393,7 @@ fn native_settings_requests_round_and_clamp_leverage() {
     h.command(Command::SetPositionMode {
         command: 3,
         hedged: true,
+        symbol: None,
     });
     let request = h.requests.remove(0);
     assert!(request.url.contains("dualSidePosition=true"));
@@ -713,6 +715,7 @@ fn settings_ack_invalidates_older_position_risk_settings_snapshot() {
                     command: 1,
                     symbol: "BTCUSDT".into(),
                     leverage: 8.0,
+                    side: None,
                 },
                 "/leverage?",
             )

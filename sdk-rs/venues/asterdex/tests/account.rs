@@ -370,6 +370,7 @@ fn successful_mode_write_fences_startup_read_and_controls_subsequent_order_polic
         h.event(Event::Command(safe_cex_engine::Command::SetPositionMode {
             command: 20,
             hedged,
+            symbol: None,
         }));
         h.reply("/positionSide/dual", "{}");
         assert_eq!(h.engine.store().hedged(), hedged);

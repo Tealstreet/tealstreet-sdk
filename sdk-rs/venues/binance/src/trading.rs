@@ -311,6 +311,7 @@ impl BinanceFutures {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => (command, self.plan_leverage(cx, symbol, leverage)),
             Command::SetMarginType {
                 command,
@@ -327,7 +328,11 @@ impl BinanceFutures {
                 };
                 (command, plan)
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 let plan = if cx.store.positions().iter().any(|p| p.contracts > 0.0) {
                     Err("Please close all positions before switching position mode".to_owned())
                 } else {

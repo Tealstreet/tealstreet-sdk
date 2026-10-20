@@ -408,8 +408,17 @@ impl ConfigRow<'_> {
             } else {
                 self.cross_leverage
             },
+            buy_leverage: Some(if self.margin_type == "ISOLATED" {
+                self.isolated_long_leverage
+            } else {
+                self.cross_leverage
+            }),
+            sell_leverage: Some(if self.margin_type == "ISOLATED" {
+                self.isolated_short_leverage
+            } else {
+                self.cross_leverage
+            }),
             margin_type: Some(margin(&self.margin_type)),
-            ..MarketSetting::default()
         }
     }
 }

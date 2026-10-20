@@ -213,3 +213,15 @@ snapshot, stale frames cannot reopen terminal state, duplicate execution IDs emi
 once, malformed placement acknowledgements fail without invented IDs, partial
 cancellation failures retain rejected orders, and margin changes preserve each
 symbol's position mode. See `sdk-rs/harness/gate.mjs` and the venue tests.
+
+Rust `setLeverage(symbol, leverage, side)` preserves the opposite isolated
+leverage in the required pair of request fields, including on flat symbols.
+Only the selected leg's setting and positions change after success. Omitting
+side changes both isolated legs. Cross margin uses the coupled `crossLeverage`
+field and ignores side. An unknown opposite isolated leverage fails before a
+write rather than guessing its current setting.
+
+Rust `changePositionMode(hedged, symbol)` sends only the selected symbol's margin
+configuration, retaining its existing margin type. Omitting symbol retains the
+legacy positions-first, otherwise all-markets scope. Confirmed per-symbol modes
+remain in their own configuration caches for subsequent order and margin calls.

@@ -736,6 +736,7 @@ fn leverage_margin_and_position_mode_use_documented_account_routes() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 200.0,
+            side: None,
         },
     );
     let r = writes(&actions).pop().unwrap();
@@ -779,6 +780,7 @@ fn leverage_margin_and_position_mode_use_documented_account_routes() {
             command: 3,
             symbol: "BTCUSDT".into(),
             leverage: 50.0,
+            side: None,
         },
     );
     let r = writes(&actions).pop().unwrap();
@@ -792,6 +794,7 @@ fn leverage_margin_and_position_mode_use_documented_account_routes() {
         Command::SetPositionMode {
             command: 4,
             hedged: true,
+            symbol: None,
         },
     );
     let r = writes(&actions).pop().unwrap();
@@ -863,6 +866,7 @@ fn margin_change_preserves_symbol_mode_when_account_default_differs() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         },
     );
     let r = writes(&actions).pop().unwrap();
@@ -991,6 +995,7 @@ fn import_orders_with_socket(
             command: 900,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         },
     );
     let req = writes(&actions).pop().unwrap();
@@ -1156,6 +1161,7 @@ fn overlapping_settings_commands_fail_before_a_second_write_then_allow_retry() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         },
     );
     let first = writes(&actions).pop().unwrap();
@@ -1165,6 +1171,7 @@ fn overlapping_settings_commands_fail_before_a_second_write_then_allow_retry() {
             command: 2,
             symbol: "BTCUSDT".into(),
             leverage: 30.0,
+            side: None,
         },
     );
     assert!(writes(&actions).is_empty());
@@ -1180,6 +1187,7 @@ fn overlapping_settings_commands_fail_before_a_second_write_then_allow_retry() {
             command: 3,
             symbol: "BTCUSDT".into(),
             leverage: 30.0,
+            side: None,
         },
     );
     let second = writes(&actions).pop().unwrap();
@@ -1354,4 +1362,181 @@ fn fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliat
         "a fresh complete snapshot permits an explicit caller retry"
     );
     assert_eq!(writes(&actions)[0].method, Method::Delete);
+}
+
+#[test]
+fn isolated_side_leverage_keeps_the_other_payload_and_setting_leg() {
+    for side in [Some(PositionSide::Long), Some(PositionSide::Short), None] {
+        let mut e = engine();
+        e.store_mut().update_setting("BTCUSDT", |s| {
+            s.margin_type = Some(MarginType::Isolated);
+            s.leverage = 10.;
+            s.buy_leverage = Some(10.);
+            s.sell_leverage = Some(20.);
+        });
+        let a = command(
+            &mut e,
+            Command::SetLeverage {
+                command: 601,
+                symbol: "BTCUSDT".into(),
+                leverage: 37.,
+                side,
+            },
+        );
+        let r = &writes(&a)[0];
+        let long = if side == Some(PositionSide::Short) {
+            10.
+        } else {
+            37.
+        };
+        let short = if side == Some(PositionSide::Long) {
+            20.
+        } else {
+            37.
+        };
+        assert_eq!(
+            body(r),
+            json!({"symbol":"BTCUSDT","marginType":"ISOLATED","isolatedLongLeverage":long.to_string(),"isolatedShortLeverage":short.to_string()})
+        );
+        let a = response(&mut e, r, json!({"code":"200","msg":"success"}));
+        assert!(done(&a).is_ok());
+        let s = e.store().setting("BTCUSDT").unwrap();
+        assert_eq!((s.buy_leverage, s.sell_leverage), (Some(long), Some(short)));
+    }
+}
+
+#[test]
+fn weex_side_is_coupled_in_cross_and_rejections_keep_settings() {
+    let mut e = engine();
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 602,
+            symbol: "BTCUSDT".into(),
+            leverage: 37.,
+            side: Some(PositionSide::Short),
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(
+        body(r),
+        json!({"symbol":"BTCUSDT","marginType":"CROSSED","crossLeverage":"37"})
+    );
+    let a = response(&mut e, r, json!({"code":"200","msg":"success"}));
+    assert!(done(&a).is_ok());
+    assert_eq!(
+        e.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(37.)
+    );
+    e.store_mut().update_setting("BTCUSDT", |s| {
+        s.margin_type = Some(MarginType::Isolated);
+        s.sell_leverage = Some(20.);
+    });
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 603,
+            symbol: "BTCUSDT".into(),
+            leverage: 50.,
+            side: Some(PositionSide::Short),
+        },
+    );
+    let a = response(
+        &mut e,
+        &writes(&a)[0],
+        json!({"code":"400","msg":"rejected"}),
+    );
+    assert!(done(&a).is_err());
+    let s = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!((s.buy_leverage, s.sell_leverage), (Some(37.), Some(20.)));
+}
+
+#[test]
+fn targeted_weex_mode_changes_only_one_symbol_and_keeps_other_mode_in_requests() {
+    let mut e = engine();
+    let mut markets = e.store().markets().to_vec();
+    let mut eth = markets[0].clone();
+    eth.id = "ETHUSDT".into();
+    eth.symbol = "ETHUSDT".into();
+    eth.base = "ETH".into();
+    markets.push(eth);
+    e.store_mut().set_markets(markets);
+    e.store_mut().update_setting("ETHUSDT", |s| {
+        s.leverage = 10.;
+        s.margin_type = Some(MarginType::Isolated);
+    });
+    let a = command(
+        &mut e,
+        Command::SetPositionMode {
+            command: 801,
+            hedged: true,
+            symbol: Some("ETHUSDT".into()),
+        },
+    );
+    assert_eq!(writes(&a).len(), 1);
+    let r = &writes(&a)[0];
+    assert_eq!(
+        body(r),
+        json!({"symbol":"ETHUSDT","marginType":"ISOLATED","separatedType":"SEPARATED"})
+    );
+    let a = response(&mut e, r, json!({"code":"200","msg":"success"}));
+    assert!(done(&a).is_ok());
+    assert!(writes(&a).is_empty());
+    let a = command(
+        &mut e,
+        Command::SetPositionMode {
+            command: 802,
+            hedged: false,
+            symbol: Some("BTCUSDT".into()),
+        },
+    );
+    assert_eq!(writes(&a).len(), 1);
+    let r = &writes(&a)[0];
+    assert_eq!(body(r)["symbol"], "BTCUSDT");
+    let a = response(&mut e, r, json!({"code":"200","msg":"success"}));
+    assert!(done(&a).is_ok());
+    assert!(e.store().hedged());
+    let a = command(
+        &mut e,
+        Command::SetMarginType {
+            command: 803,
+            symbol: "ETHUSDT".into(),
+            isolated: false,
+        },
+    );
+    assert_eq!(body(&writes(&a)[0])["separatedType"], "SEPARATED");
+}
+
+#[test]
+fn weex_unknown_or_rejected_targeted_mode_does_not_emit_other_symbol_writes() {
+    for symbol in ["", "UNKNOWN"] {
+        let mut e = engine();
+        let a = command(
+            &mut e,
+            Command::SetPositionMode {
+                command: 804,
+                hedged: true,
+                symbol: Some(symbol.into()),
+            },
+        );
+        assert!(writes(&a).is_empty());
+        assert!(done(&a).is_err());
+    }
+    let mut e = engine();
+    let a = command(
+        &mut e,
+        Command::SetPositionMode {
+            command: 805,
+            hedged: true,
+            symbol: Some("BTCUSDT".into()),
+        },
+    );
+    let a = response(
+        &mut e,
+        &writes(&a)[0],
+        json!({"code":"400","msg":"rejected"}),
+    );
+    assert!(done(&a).is_err());
+    assert!(!e.store().hedged());
+    assert!(writes(&a).is_empty());
 }
