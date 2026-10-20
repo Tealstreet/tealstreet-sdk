@@ -237,6 +237,9 @@ impl Venue for ApexOmni {
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.start_public(cx);
     }
+    fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.revalue_public_positions(cx);
+    }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if !self.public_open(cx, socket) {
             self.account_open(cx, socket);

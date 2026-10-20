@@ -138,6 +138,7 @@ describe('Rust Hyperliquid wrapper', () => {
       testnet: true,
       publicDataOnly: false,
       enableSpotMarkets: false,
+      publicFeed: { mode: 'direct' },
     });
   });
 
