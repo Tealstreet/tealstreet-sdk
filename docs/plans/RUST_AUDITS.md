@@ -26,9 +26,24 @@ or a downstream caller that breaks. Fix to that bar, not to TS's shape.
    `'typescript' | 'rust'`, a per-venue downstream flag, and a live soak before
    deleting a family.
 
+Settled: Backpack spot retired; Kraken market+TP/SL rejects with a clear error;
+Bybit Partial TP/SL keeps TS semantics (sensitive, no change). Standing licence:
+obvious improvements (clearer errors, better messages) need no decision.
+
 Already defaulted to Rust with TS removed on this branch: `coinbase`,
 `coinbasespot`, the six Orderly brokers, `txflow`. The branch cannot reach master
 until 1–3 are settled for them.
+
+## Error handling (scoping)
+
+Owner flags error handling as one of safe-cex's weakest points. Scope a
+standard while the port is open: one error taxonomy across engine, bridge and
+TS callers (rejected by venue / invalid input / auth / rate limit / network /
+unsupported), venue code and message preserved, every failure visible to the
+user with its cause. Design pass first (Opus), then lanes apply it per layer.
+The client contract outside safe-cex (error shape, logger, exchange interface)
+may change when there is a good argument; update tealstreet-next callers with it.
+Audit results and the standards: `docs/plans/RUST_QUALITY.md`.
 
 ## Cutover
 
@@ -222,7 +237,7 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   intervals; option WS ticker field names likely wrong; no UNIFIED retry on the
   wallet call; demo reduce-only fill check missing; Hyro tears down on one bad
   poll (`account.rs:1838`); order/income history caps; Partial TP/SL amend
-  semantics (owner decision); spot create params (`marketUnit`); one unmappable
+  semantics — decided: match TS (flip SL/TP on drag), do not amend in place; spot create params (`marketUnit`); one unmappable
   order invalidates every later snapshot (`account.rs:1569`).
 - Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
   breadth; split-lot error handling; classic upnl; inverse reference price;
@@ -317,8 +332,8 @@ Futures matches TS on nearly every input; no high regression.
   `more_candles: true` fails the whole candle fetch, empty chart (`lib.rs:727`);
   spot `EGeneral:Permission denied` on an order deactivates the account
   (`spot/account.rs:513`).
-- Owner decision: market entry with attached TP/SL — TS silently drops the
-  legs, Rust rejects the order.
+- Decided: market entry with attached TP/SL is rejected (Rust behaviour);
+  the error must say the TP/SL legs are unsupported on market entry.
 - Low: income over 500 rows errors (TS partial); one bad row rejects
   catalogue/tickers/open orders and blocks private start (startup lane);
   missing funding field set to 0; raw error text; spot 3m candles.
@@ -570,8 +585,8 @@ with its production/proxy gate).
 ### Backpack
 Signing, order payloads (incl. app stop shapes), amend, cancel and positions match.
 - Medium: spot markets dropped — 88 SPOT pairs vanish and open spot orders
-  can't be seen or cancelled (`backpack/src/lib.rs:543`); owner decision: port
-  spot or retire it before cutover. A mark-price failure or one bad ticker row
+  can't be seen or cancelled (`backpack/src/lib.rs:543`); decided: retire
+  Backpack spot (remove any spot surface, no port). A mark-price failure or one bad ticker row
   blocks startup (`lib.rs:211,787`).
 - Low: one bad fill row fails fill history (`history.rs:312`). Verify live:
   open-order rows with `"quantity": null`.
