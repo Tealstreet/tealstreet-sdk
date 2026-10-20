@@ -133,8 +133,21 @@ pub struct WsTicker {
         deserialize_with = "optional_number"
     )]
     pub next_funding_rate_time: Option<f64>,
-    #[serde(default, alias = "open24h", deserialize_with = "optional_number")]
+    #[serde(
+        default,
+        alias = "open24h",
+        alias = "open",
+        deserialize_with = "optional_number"
+    )]
     pub open_24h: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub change: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub volume: Option<f64>,
+    #[serde(default, rename = "volumeQuote", deserialize_with = "optional_number")]
+    pub volume_quote: Option<f64>,
+    #[serde(default, rename = "openInterest", deserialize_with = "optional_number")]
+    pub open_interest: Option<f64>,
 }
 #[derive(Deserialize)]
 pub struct Level {

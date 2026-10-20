@@ -461,13 +461,23 @@ impl Venue for Kraken {
                     if let Some(v) = row.index {
                         t.index = v
                     }
-                    if let Some(v) = row.relative_funding_rate {
-                        t.funding_rate = v
+                    // Full ticker payloads omit relative funding when it is zero.
+                    t.funding_rate = row.relative_funding_rate.unwrap_or(0.0);
+                    if let Some(v) = row.volume {
+                        t.volume = v
+                    }
+                    if let Some(v) = row.volume_quote {
+                        t.quote_volume = v
+                    }
+                    if let Some(v) = row.open_interest {
+                        t.open_interest = v
                     }
                     if let Some(v) = row.next_funding_rate_time {
                         t.funding_time = v
                     }
-                    if let (Some(open), Some(last)) = (row.open_24h, row.last)
+                    if let Some(change) = row.change {
+                        t.percentage = change;
+                    } else if let (Some(open), Some(last)) = (row.open_24h, row.last)
                         && open > 0.0
                     {
                         t.percentage = (last - open) / open * 100.0;

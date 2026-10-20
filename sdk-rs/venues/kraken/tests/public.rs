@@ -265,3 +265,49 @@ fn malformed_credentials_report_a_signing_error_before_private_activation() {
     e.start(NOW);
     assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Log{level:safe_cex_engine::LogLevel::Error,message})if message.contains("base64"))));
 }
+
+#[test]
+fn full_ticker_omitted_funding_resets_zero() {
+    let (mut e, s) = public();
+    message(
+        &mut e,
+        s,
+        NOW,
+        r#"{"feed":"ticker","product_id":"PF_XBTUSD","last":110,"relative_funding_rate":0.0002}"#,
+    );
+    assert_eq!(e.store().ticker("PF_XBTUSD").unwrap().funding_rate, 0.0002);
+    message(
+        &mut e,
+        s,
+        NOW + 1000.0,
+        r#"{"feed":"ticker","product_id":"PF_XBTUSD","last":111}"#,
+    );
+    assert_eq!(e.store().ticker("PF_XBTUSD").unwrap().funding_rate, 0.0);
+}
+
+#[test]
+fn full_ticker_refreshes_native_statistics_after_rest_seed() {
+    let (mut e, s) = public();
+    message(
+        &mut e,
+        s,
+        NOW,
+        r#"{"feed":"ticker","product_id":"PF_XBTUSD","last":110,"open":100,"change":9.3,"volume":12,"volumeQuote":1320,"openInterest":7}"#,
+    );
+    let t = e.store().ticker("PF_XBTUSD").unwrap();
+    assert_eq!(
+        (t.percentage, t.volume, t.quote_volume, t.open_interest),
+        (9.3, 12.0, 1320.0, 7.0)
+    );
+    message(
+        &mut e,
+        s,
+        NOW + 1000.0,
+        r#"{"feed":"ticker","product_id":"PF_XBTUSD","last":120,"open":100,"volume":0,"volumeQuote":0,"openInterest":0}"#,
+    );
+    let t = e.store().ticker("PF_XBTUSD").unwrap();
+    assert_eq!(
+        (t.percentage, t.volume, t.quote_volume, t.open_interest),
+        (20.0, 0.0, 0.0, 0.0)
+    );
+}

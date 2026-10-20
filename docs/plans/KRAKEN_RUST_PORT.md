@@ -239,3 +239,11 @@ CI secret scan flagged only the deterministic base64 replay fixture whose decode
 value is the public literal replay-secret, paired with replay-key. Add an exact
 historical commit/path/rule/line fingerprint exception; no broad rule/path bypass.
 Both PR-range and initial-push-range local scans now pass (9 / 348 commits).
+
+Public review fixes accepted: complete native tickers reset omitted zero funding
+and update change/open, volume, quote volume and open interest. Both native
+regressions failed before and pass after (13 public tests). The oracle derives
+only those expected fields from recorded WS payloads and excludes subscription
+ACKs. Independent follow-up: original isolated proofs plus ACK proof 3/3 and
+harness 236/236 pass; units, change precedence and unrelated field preservation
+accepted with no remaining scoped findings. Listed as deliberate TS corrections.

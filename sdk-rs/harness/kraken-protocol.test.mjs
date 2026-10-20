@@ -76,3 +76,15 @@ test('TS redundant page normalization is exact, command-owned and cannot hide fu
  const mixed=output();fixKrakenOutput(mixed,[first,empty,other,full,legitimate]);assert.deepEqual(mixed.requests,[key(empty),key(other)]);
  const unowned=output();fixKrakenOutput(unowned,[{...first,afterCommand:undefined},{...empty,afterCommand:undefined},other]);assert.deepEqual(unowned.requests,[key(empty),key(other)]);
 });
+
+test('full ticker correction derives live statistics and zero funding only from native payloads',async()=>{
+ const {fixKrakenOutput}=await import('./known-ts-fixes.mjs');
+ const output={markets:[],books:{},requests:[],subscriptions:[],tickers:[{symbol:'PF_XBTUSD',fundingRate:0.5,percentage:-1,volume:2,quoteVolume:200,openInterest:4,mark:99}]};
+ const records=[
+  {feed:'ticker',product_id:'PF_XBTUSD',last:110,open:100,change:9.3,relative_funding_rate:0.0002,volume:12,volumeQuote:1320,openInterest:7},
+  {feed:'ticker',product_id:'PF_XBTUSD',last:120,open:100,volume:0,volumeQuote:0,openInterest:0},
+  {event:'subscribed',feed:'ticker',product_id:'PF_XBTUSD',relative_funding_rate:0.5},
+ ].map(message=>({type:'ws',text:JSON.stringify(message)}));
+ fixKrakenOutput(output,records);
+ assert.deepEqual(output.tickers,[{symbol:'PF_XBTUSD',fundingRate:0,percentage:20,volume:0,quoteVolume:0,openInterest:0,mark:99}]);
+});

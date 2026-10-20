@@ -119,6 +119,7 @@ export function fixLighterCommands(results, records) {
 export function fixKrakenOutput(ts,records){
  const books=new Map(Object.keys(ts.books).map(s=>[s,{seq:undefined,bids:new Map(),asks:new Map()}]));
  const markets=new Map(ts.markets.map(m=>[m.symbol,m]));
+ const tickers=new Map((ts.tickers??[]).map(t=>[t.symbol,t]));
  const fills=[],seen=new Set();let coins;
  const extraReads=new Set();
  const reads=records.filter(r=>r.type==='http'&&r.method==='GET'&&r.status===200);
@@ -166,6 +167,16 @@ export function fixKrakenOutput(ts,records){
   }
   if(record.type!=='ws')continue;
   const m=JSON.parse(record.text);
+  if(m.feed==='ticker'&&!m.event){
+   const t=tickers.get(m.product_id);
+   if(t){
+    // Full native tickers omit a zero relative rate; TS keeps its stale rate.
+    t.fundingRate=Number(m.relative_funding_rate??0);
+    for(const [native,field]of [['volume','volume'],['volumeQuote','quoteVolume'],['openInterest','openInterest'],['change','percentage']])if(m[native]!=null)t[field]=Number(m[native]);
+    const open=Number(m.open_24h??m.open24h??m.open);
+    if(m.change==null&&m.last!=null&&open>0)t.percentage=(Number(m.last)-open)/open*100;
+   }
+  }
   if(m.feed==='fills_snapshot'||m.feed==='fills')for(const f of m.fills??[]){
    if(!f.fill_id||seen.has(f.fill_id))continue;seen.add(f.fill_id);
    if(m.feed==='fills'&&markets.has(f.instrument))fills.push({id:String(f.order_id),symbol:f.instrument,side:f.buy?'buy':'sell',amount:Number(f.qty),price:Number(f.price)});

@@ -154,6 +154,7 @@ const KNOWN_TS_FIXES = {
     output: fixKrakenOutput,
     fixes: [
       'Retain full depth, reject sequence gaps/stale snapshots, unsubscribe unused books.',
+      'Full native ticker statistics stay live; omitted relative funding resets zero instead of retaining a stale rate.',
       'Negative instrument quantity precision is a positive power-of-ten step; TS clamps it to 0.1.',
       'Deduplicate native execution IDs; suppress historical fills snapshots.',
       'Use monotonic nonces beyond 1000 same-millisecond requests and clock regression.',
