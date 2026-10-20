@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 
 const wasm = vi.hoisted(() => ({ loads: [] as string[], engines: [] as string[] }));
 
@@ -32,6 +33,7 @@ vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
         wasm.engines.push(venue);
       }
 
+      capabilities = () => engineCapabilities('binance');
       private pending = false;
       start = () => { this.pending = true; return ''; };
       command = () => '';

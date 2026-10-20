@@ -444,6 +444,45 @@ source audit. The downstream tealstreet-next consumers are inventoried in
 [tealstreet-next callers at cutover](#tealstreet-next-callers-at-cutover).
 Existing in-repo consumers still need their factory and store contract.
 
+## tealstreet-next caller changes shipped at cutover
+
+These land in tealstreet-next together with the cutover, never before it. Each
+row is the exact edit the SDK contract change requires.
+
+### Capability record (RUST_QUALITY item 8)
+
+`isBaseCapabilityFallback`, `isInertCapability` and `isEmptyStubCapability` are
+no longer exported from `@tealstreet/safe-cex/src/exchanges/base`. The only
+reader is `exchange.capabilities` (`ExchangeCapabilities`, keys in
+`CAPABILITY_METHODS`); it also counts an unconditional `return []` as absent.
+Rust venues report theirs once the engine exists, so read after `start()`.
+
+| File | Old call | New call |
+| --- | --- | --- |
+| `apps/web/src/components/openPositions/ClosedPositions.tsx:114` | `isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')` | `!exchange.capabilities.closedPnl` (drop the line-11 import) |
+| `apps/web/src/utils/historical/collectAccountAxes.ts:162` | `!isBaseCapabilityFallback(exchange.fetchHistoricalOrders, 'fetchHistoricalOrders')` | `exchange.capabilities.orderHistory` |
+| `apps/web/src/utils/historical/collectAccountAxes.ts:164` | `isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')` | `!exchange.capabilities.fillHistory` (drop the line-5 import; `HistoryCapableExchange` gains `capabilities`; reword the line-143 comment) |
+| `packages/venue-data/src/journal/symbolScopedFills.ts:73` | `!isBaseCapabilityFallback(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')` | `exchange.capabilities.incomeRange` (parameter type `{ capabilities: ExchangeCapabilities }`) |
+| `packages/venue-data/src/journal/axis-grading.registry.test.ts:81` | `!isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')` | `exchange.capabilities.fillHistory` |
+| `scripts/history-audit/lib/axis-inventory.ts:81-83` | `isBaseCapabilityFallback(fn, method)` → `'base-fallback'`; `isEmptyStubCapability(fn)` → `'empty-stub'` | `exchange.capabilities[axis] ? 'implemented' : 'unavailable'`; the report merges the two absent states |
+| `scripts/history-audit/lib/closedPnl.ts:234` | `isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')` | `!exchange.capabilities.closedPnl` |
+| `scripts/history-audit/lib/venue-survey.ts:86` | `!isBaseCapabilityFallback(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')` | `exchange.capabilities.incomeRange` |
+| `scripts/history-audit/lib/venue-survey.ts:107` | `!isBaseCapabilityFallback(exchange.fetchClosedPnl, 'fetchClosedPnl')` | `exchange.capabilities.closedPnl` |
+| `scripts/history-audit/lib/venue-survey.ts:165` | `isBaseCapabilityFallback(exchange.fetchHistoricalFills, 'fetchHistoricalFills')` | `!exchange.capabilities.fillHistory` |
+
+Main-thread mirrors (`createExchangeFromAccount` objects that apply worker
+frames and never create an engine) do not know a Rust venue's record yet, so
+their history answers stay at the base defaults until frames carry the record
+(next capabilities PR). `apps/web/src/order/lostSendResolver.ts:82` needs no
+change: without an engine, `findOrderByClientOrderId` answers from open orders,
+never definitively, as before. Callers that need the record on an unstarted
+exchange await `exchange.loadCapabilities()` first, as `exchange-mcp` does.
+
+`RUST_VENUES` is now a `ReadonlySet<ExchangeName>` (use `isRustVenue`), and the
+engine host no longer has `accountId()` (`getAccount()` answers for every venue
+that reports an account lookup). No tealstreet-next file outside the mirrored
+packages uses either.
+
 ## Shared helpers that a venue-directory deletion would otherwise remove
 
 The class import list alone is insufficient. These surviving runtime imports

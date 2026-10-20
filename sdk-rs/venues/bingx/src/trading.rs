@@ -5,7 +5,9 @@ use safe_cex_engine::model::{
     MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
+};
 use serde::Deserialize;
 use std::{
     borrow::Cow,
@@ -77,10 +79,12 @@ struct Step {
 struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
-    error: Option<String>,
+    error: Option<VenueError>,
     continue_on_error: bool,
     // A trigger move cancels before placing; a failed placement must say so.
     replaces_cancelled: bool,
+    /// A step took effect, so a later rejection cannot mean nothing happened.
+    effective: bool,
 }
 struct Observation {
     order: Order,
@@ -217,21 +221,61 @@ struct Envelope<'a> {
     data: Option<Data<'a>>,
 }
 
-fn response_data<'a>(response: Response<'a>, absent_ok: bool) -> Result<(Data<'a>, bool), String> {
+fn response_data<'a>(
+    response: Response<'a>,
+    absent_ok: bool,
+) -> Result<(Data<'a>, bool), VenueError> {
     let envelope: Envelope<'_> = serde_json::from_str(response.body)
-        .map_err(|e| format!("Invalid BingX trading response: {e}"))?;
+        .map_err(|e| unknown(format!("Invalid BingX trading response: {e}")))?;
     let absent = absent_ok && envelope.code == 80016;
     if !(200..300).contains(&response.status) || (envelope.code != 0 && !absent) {
-        return Err(format!("BingX {}: {}", envelope.code, envelope.msg));
+        let message = format!("BingX {}: {}", envelope.code, envelope.msg);
+        let mut error = rejection(envelope.code, message, &envelope.msg);
+        // A gateway failure is unproven whatever body it carries.
+        if response.status == 408 || response.status >= 500 {
+            error.outcome = Some(Outcome::Unknown);
+        }
+        return Err(error);
     }
     Ok((envelope.data.unwrap_or_default(), absent))
 }
-fn placement_id(data: &Data<'_>) -> Result<String, String> {
-    data.accepted()?;
-    data.id()?
-        .ok_or_else(|| "BingX place response omitted the order id".into())
+/// A BingX coded failure; internal errors may follow execution.
+/// Codes not listed here (e.g. 80001 "request failed", 109500 "busy") leave
+/// the outcome unclassified rather than claim the write did not execute.
+fn rejection(code: i64, message: String, venue_message: &str) -> VenueError {
+    let (kind, outcome) = match code {
+        100001 | 100412 | 100413 => (Some(ErrorKind::AuthInvalid), Some(Outcome::Rejected)),
+        100004 | 100419 => (Some(ErrorKind::AuthPermission), Some(Outcome::Rejected)),
+        100410 => (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+        80014 | 100400 => (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        80016 | 80020 | 100202 | 100440 | 101204 => {
+            (Some(ErrorKind::Rejected), Some(Outcome::Rejected))
+        }
+        80012 | 100500 | 100503 => (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
+        _ => (None, None),
+    };
+    let mut error = VenueError::new(message)
+        .venue_code(code.to_string())
+        .venue_message(venue_message);
+    error.kind = kind;
+    error.outcome = outcome;
+    error
 }
-fn validated_placement(response: Response<'_>) -> Result<String, String> {
+/// The write may have executed; reconcile before resending.
+fn unknown(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::Unknown)
+}
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+fn placement_id(data: &Data<'_>) -> Result<String, VenueError> {
+    data.accepted()?;
+    data.id()
+        .map_err(unknown)?
+        .ok_or_else(|| unknown("BingX place response omitted the order id"))
+}
+fn validated_placement(response: Response<'_>) -> Result<String, VenueError> {
     let (data, _) = response_data(response, false)?;
     placement_id(&data)
 }
@@ -329,14 +373,12 @@ impl Trading {
             _ => return false,
         };
         if credentials.is_none() {
-            cx.done(
-                id,
-                Err("BingX trading requires an API key and secret".into()),
-            );
+            let error = not_sent("BingX trading requires an API key and secret");
+            cx.fail(id, error.kind(ErrorKind::AuthInvalid));
             return true;
         }
         if self.jobs.contains_key(&id) {
-            cx.done(id, Err("Command id is already in progress".into()));
+            cx.fail(id, not_sent("Command id is already in progress"));
             return true;
         }
         match result {
@@ -346,7 +388,7 @@ impl Trading {
             }
             Err(error) => {
                 cx.command_error(id, error.clone());
-                cx.done(id, Err(error));
+                cx.fail(id, not_sent(error).kind(ErrorKind::InvalidInput));
             }
         }
         true
@@ -380,13 +422,19 @@ impl Trading {
             );
         } else {
             let job = self.jobs.remove(&command).expect("job exists");
-            cx.done(
-                command,
-                match job.error {
-                    Some(error) => Err(error),
-                    None => Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
-                },
-            );
+            match job.error {
+                Some(mut error) => {
+                    // A later rejection after a step took effect cannot mean nothing happened.
+                    if job.effective && error.outcome == Some(Outcome::Rejected) {
+                        error.outcome = None;
+                    }
+                    cx.fail(command, error);
+                }
+                None => cx.done(
+                    command,
+                    Ok(serde_json::to_string(&job.ids).unwrap_or_default()),
+                ),
+            }
         }
     }
 
@@ -398,7 +446,8 @@ impl Trading {
         error: &str,
     ) {
         let places = request.places_order();
-        self.finish(cx, credentials, request.command, places, Err(error.into()));
+        let error = unknown(error).kind(ErrorKind::Network);
+        self.finish(cx, credentials, request.command, places, Err(error));
     }
 
     pub fn on_response(
@@ -417,20 +466,26 @@ impl Trading {
                     ..
                 }
             );
-            let (data, absent) = response_data(response, absent_ok)?;
+            let replace = matches!(&request.call, Call::Replace { .. });
+            let (data, absent) = response_data(response, absent_ok).map_err(|mut error| {
+                // STOP_ON_FAILURE can cancel the original before the new order fails.
+                if replace && error.outcome == Some(Outcome::Rejected) {
+                    error.outcome = None;
+                }
+                error
+            })?;
             match request.call {
                 Call::Place => Ok(vec![placement_id(&data)?]),
                 Call::Cancel { ids, .. } => {
                     if !absent {
                         data.canceled()?;
-                        if let Some(id) = data.id()?
+                        if let Some(id) = data.id().map_err(unknown)?
                             && ids.len() == 1
                             && id != ids[0]
                         {
-                            return Err(
-                                "BingX cancellation acknowledgement identifies another order"
-                                    .into(),
-                            );
+                            return Err(unknown(
+                                "BingX cancellation acknowledgement identifies another order",
+                            ));
                         }
                     }
                     if !data.failed.is_empty() {
@@ -455,12 +510,14 @@ impl Trading {
                     step,
                 } => {
                     data.accepted()?;
-                    if data.id()?.as_deref() != Some(&id)
+                    if data.id().map_err(unknown)?.as_deref() != Some(&id)
                         || data.symbol.replace('-', "") != symbol
                         || data.quantity.as_ref().map(|v| num::adjust(v.value(), step))
                             != Some(quantity)
                     {
-                        return Err("BingX amendment acknowledgement does not confirm order, symbol and quantity".into());
+                        return Err(unknown(
+                            "BingX amendment acknowledgement does not confirm order, symbol and quantity",
+                        ));
                     }
                     self.observed.remove(&id);
                     Ok(vec![id])
@@ -468,7 +525,7 @@ impl Trading {
                 Call::Replace { old_id } => {
                     let success = |s: &str| matches!(s, "SUCCESS" | "true" | "TRUE");
                     if !success(&data.cancel_result) {
-                        return Err("BingX replacement did not confirm cancellation".into());
+                        return Err(unknown("BingX replacement did not confirm cancellation"));
                     }
                     if cx
                         .store
@@ -479,11 +536,11 @@ impl Trading {
                     }
                     self.observed.remove(&old_id);
                     if !success(&data.new_order_result) && !success(&data.replace_result) {
-                        return Err("BingX replacement did not confirm placement".into());
+                        return Err(unknown("BingX replacement did not confirm placement"));
                     }
                     let nested = if let Some(order) = &data.new_order_response {
                         order.accepted()?;
-                        order.id()?
+                        order.id().map_err(unknown)?
                     } else {
                         None
                     };
@@ -491,9 +548,12 @@ impl Trading {
                         nested
                             .into_iter()
                             .chain(data.new_order_id.as_ref().map(Id::text)),
-                    )?
+                    )
+                    .map_err(unknown)?
                     .filter(|id| *id != old_id)
-                    .ok_or("BingX replacement response omitted a fresh order id")?;
+                    .ok_or_else(|| {
+                        unknown("BingX replacement response omitted a fresh order id")
+                    })?;
                     // The account stream and reconciliation own the replacement row.
                     Ok(vec![id])
                 }
@@ -546,21 +606,30 @@ impl Trading {
         credentials: Option<&Credentials>,
         command: CommandId,
         places: bool,
-        result: Result<Vec<String>, String>,
+        result: Result<Vec<String>, VenueError>,
     ) {
         let Some(job) = self.jobs.get_mut(&command) else {
             return;
         };
         match result {
-            Ok(ids) => job.ids.extend(ids),
-            Err(error) => {
-                let error = if places && job.replaces_cancelled {
-                    format!("original bracket cancelled; replacement failed: {error}")
-                } else {
-                    error
-                };
-                cx.command_error(command, error.clone());
-                job.error.get_or_insert(error);
+            Ok(ids) => {
+                job.effective = true;
+                job.ids.extend(ids);
+            }
+            Err(mut error) => {
+                if places && job.replaces_cancelled {
+                    error.message = format!(
+                        "original bracket cancelled; replacement failed: {}",
+                        error.message
+                    );
+                }
+                cx.command_error(command, error.message.clone());
+                // The first failure names the error; any unproven one makes it unknown.
+                let unknown = error.outcome == Some(Outcome::Unknown);
+                let recorded = job.error.get_or_insert(error);
+                if unknown {
+                    recorded.outcome = Some(Outcome::Unknown);
+                }
             }
         }
         self.advance(cx, credentials, command);

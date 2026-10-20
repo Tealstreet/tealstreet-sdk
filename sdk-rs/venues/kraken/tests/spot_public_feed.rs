@@ -97,18 +97,20 @@ impl Rig {
         panic!("native spot fixture did not settle");
     }
     fn fire(&mut self, at: f64) {
-        let due: Vec<_> = self
+        let mut fired = false;
+        while let Some((timer, time)) = self
             .timers
             .iter()
-            .filter(|(_, time)| *time == at)
-            .map(|(id, _)| *id)
-            .collect();
-        assert!(!due.is_empty(), "missing native timer at {at}");
-        self.timers.retain(|(_, time)| *time != at);
-        for timer in due {
-            self.engine.handle(at, Event::TimerFired { timer });
+            .copied()
+            .filter(|(_, time)| *time <= at)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        {
+            fired = true;
+            self.timers.retain(|(id, _)| *id != timer);
+            self.engine.handle(time, Event::TimerFired { timer });
+            self.drain(time);
         }
-        self.drain(at);
+        assert!(fired, "missing native timer by {at}");
     }
     fn quote(&mut self, policy: PublicFeedPolicy, now: f64, price: f64) {
         if policy == PublicFeedPolicy::Direct {
