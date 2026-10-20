@@ -566,3 +566,45 @@ fn filtered_history_page_cap_fails_without_returning_partial_data() {
             .all(|request| !request.url.ends_with("fill_history"))
     );
 }
+
+#[test]
+fn filtered_current_order_walk_starts_near_creation_without_changing_explicit_bounds() {
+    for (known, from, to, expected) in [
+        (true, 0., NOW, "1699999699999000000"),
+        (true, NOW - 500., NOW, "1699999999500000000"),
+        (false, 0., NOW, "0"),
+        (true, 0., NOW - 600_000., "1699999400000000000"),
+    ] {
+        let mut h = Harness::new(true);
+        if known {
+            know_current_native(&mut h, "0xaabb");
+        }
+        h.query(Query::Fills {
+            symbol: Some("BTC_USDT_PERP".into()),
+            order_id: Some("9223372036854775807".into()),
+            from_ms: Some(from),
+            to_ms: Some(to),
+            limit: None,
+        });
+        let first = h.take("fill_history");
+        assert!(
+            first
+                .body
+                .as_deref()
+                .unwrap()
+                .contains(&format!(r#""st":"{expected}""#))
+        );
+        h.respond(first, &format!(r#"{{"r":[{FILL}],"n":"next"}}"#), "");
+        let second = h.take("fill_history");
+        assert!(
+            second
+                .body
+                .as_deref()
+                .unwrap()
+                .contains(&format!(r#""st":"{expected}""#))
+        );
+        h.respond(second, r#"{"r":[],"n":""}"#, "");
+        let rows: Vec<Execution> = serde_json::from_str(&h.result().unwrap()).unwrap();
+        assert_eq!(rows.len(), usize::from(to == NOW));
+    }
+}

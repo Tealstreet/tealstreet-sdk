@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 const PAGE_SIZE: usize = 1000;
 const PAGE_CAP: usize = 50;
+const CREATION_SKEW_NS: u64 = 300_000_000_000;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Fills,
@@ -81,6 +82,18 @@ impl Request {
     }
     fn complete_fills(&self) -> bool {
         self.kind == Kind::Fills && self.order_id.is_some()
+    }
+    fn wire_start(&self) -> Option<u64> {
+        if self.complete_fills()
+            && let Some(created) = self.target_created
+        {
+            // Earlier lifecycle rows are already excluded from filtered results.
+            // Bound the native walk so a new chaser avoids lifetime account history.
+            let anchor = created.saturating_sub(CREATION_SKEW_NS).min(self.to);
+            Some(self.from.unwrap_or(0).max(anchor))
+        } else {
+            self.from
+        }
     }
     fn path(&self) -> &'static str {
         match self.kind {
@@ -480,7 +493,7 @@ impl Grvt {
                 } else {
                     request.quote.as_deref().map(|s| [s])
                 },
-                st: request.from.map(|t| t.to_string()),
+                st: request.wire_start().map(|t| t.to_string()),
                 et: request.to.to_string(),
                 l: PAGE_SIZE,
                 c: &request.cursor,
