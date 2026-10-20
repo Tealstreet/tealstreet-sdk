@@ -9,6 +9,9 @@ import { loadEngine } from './engine.mjs';
 import { runLiveSmoke, fencedTransport } from './live-smoke.mjs';
 import { liveSmokeProfile } from './live-smoke-venues.mjs';
 import { venueOf } from './venues.mjs';
+import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
+import { expectedCheckpointPlan } from './tape.mjs';
+import { checkpointCoverageErrors, snapshotCoverageErrors } from './snapshot-compare.mjs';
 
 function fakeBinance({ startupOrders = [], losePlacement = false, failAmend = false, delayPlacementMs = 0, unknownLeverage = false,
   lyingCancel = false, staleLeverage = false } = {}) {
@@ -100,7 +103,7 @@ const profile = liveSmokeProfile('binance', 'testnet', {
 const run = async (fake, records, signal, Engine = WasmEngine) => runLiveSmoke({ venue: venueOf('binance'), profile,
   transport: fencedTransport(fake.transport, profile), write: (row) => records.push(row), symbol: 'BTCUSDT', timeoutMs: 2000, WasmEngine: Engine, signal });
 
-test('real Wasm lifecycle through fake transport records a TS/Rust-replayable private tape', async () => {
+test('real Wasm scripted lifecycle replays every command and protocol through TS and Rust', async () => {
   const fake = fakeBinance(), records = [];
   const result = await run(fake, records);
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -114,9 +117,33 @@ test('real Wasm lifecycle through fake transport records a TS/Rust-replayable pr
   const directory = mkdtempSync(join(tmpdir(), 'rust-live-smoke-'));
   try {
     const tape = join(directory, 'private.jsonl'); writeFileSync(tape, serialized, { mode: 0o600 });
-    const gate = spawnSync('corepack', ['yarn', '-s', 'rust:gate', '--venue', 'binance', '--tape', tape, '--books', '', '--runs', '1'], { encoding: 'utf8', timeout: 120000 });
-    assert.equal(gate.status, 0, `${gate.stdout}\n${gate.stderr}`);
-    assert.match(gate.stdout, /PASS/);
+    // A fresh capture has random client IDs and wall timestamps. Its job here
+    // is lifecycle and transport evidence, not a parity claim. CI separately
+    // runs the full strict financial gate on the checked-in, byte-stable
+    // fixtures/binance-scripted-lifecycle-private.jsonl case, whose genuine
+    // divergences can only be declared by its exact SHA in the single manifest.
+    const proof = assertLiveSmokeComplete(records);
+    const venue = venueOf('binance');
+    for (const impl of ['ts', 'rust']) {
+      const out = join(directory, `${impl}.json`);
+      const replay = spawnSync('corepack', ['yarn', '-s', 'rust:replay', '--impl', impl,
+        '--venue', 'binance', '--tape', tape, '--books', proof.symbol, '--out', out],
+      { encoding: 'utf8', timeout: 120000 });
+      assert.equal(replay.status, 0, `${impl}: ${replay.stdout}\n${replay.stderr}`);
+      const output = JSON.parse(readFileSync(out, 'utf8'));
+      assert.equal(output.commands.length, proof.commands.length, `${impl}: every lifecycle command completed`);
+      for (const [index, command] of output.commands.entries()) {
+        assert.equal(Object.hasOwn(command, 'ok'), true, `${impl}: ${proof.commands[index]} failed: ${JSON.stringify(command)}`);
+        assert.equal(Object.hasOwn(command, 'error'), false, `${impl}: ${proof.commands[index]} rejected`);
+      }
+      for (const field of ['unserved', 'missingWrites', 'unusedWrites', 'invalidSignatures'])
+        assert.equal(output[field], 0, `${impl}: ${field}`);
+      assert.deepEqual(output.protocolErrors, [], `${impl}: protocol audit`);
+      assert.deepEqual(snapshotCoverageErrors(output, `${impl} final`, { isPrivate: true }), []);
+      assert.deepEqual(checkpointCoverageErrors(output.checkpoints, expectedCheckpointPlan(records, venue, impl), impl, { isPrivate: true }), []);
+      assert(output.markets.length > 0 && output.tickers.length > 0, `${impl}: public seed present`);
+      assert(Object.hasOwn(output.books, proof.symbol), `${impl}: production book egress present`);
+    }
     if (process.env.RUST_LIVE_SMOKE_FAKE_TAPE_OUT) writeFileSync(process.env.RUST_LIVE_SMOKE_FAKE_TAPE_OUT, readFileSync(tape), { mode: 0o600 });
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

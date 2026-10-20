@@ -1,6 +1,7 @@
 //! Indexed history is paged independently of live reconciliation.
 use crate::{Pending, TxFlow};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::paging::{OffsetStep, OffsetWalk};
 use safe_cex_engine::{CommandId, Cx, Query, Response, json::ArrayAt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -13,10 +14,19 @@ enum Kind {
     Funding,
     Ledger,
 }
+/// Pages of the venue's 2000-row limit, up to offset 200000 like the TS
+/// reference; the venue serves full pages while it reports more.
+fn offset_walk() -> OffsetWalk {
+    OffsetWalk::new(u32::MAX)
+        .fixed_step(2000)
+        .max_offset(200_000)
+        .stall_on_no_new_rows()
+}
+
 pub struct Request {
     command: CommandId,
     kind: Kind,
-    offset: u32,
+    walk: OffsetWalk,
     count: u32,
     fresh: u32,
     valid: bool,
@@ -285,7 +295,7 @@ impl TxFlow {
         let mut request = Request {
             command,
             kind,
-            offset: 0,
+            walk: offset_walk(),
             count: 0,
             fresh: 0,
             valid: true,
@@ -346,7 +356,8 @@ impl TxFlow {
             start_time_ms: request.from.map(|n| n as u64),
             end_time_ms: request.to.map(|n| n as u64),
             delta_types: (request.kind == Kind::Ledger).then_some(["deposit", "withdraw"]),
-            offset: request.offset,
+            // The offset cap bounds it far below u32::MAX.
+            offset: request.walk.offset() as u32,
             limit: 2000,
         })
         .unwrap();
@@ -587,19 +598,24 @@ impl TxFlow {
                 return;
             }
         };
-        if page.has_more {
-            if r.count == 0 || r.fresh == 0 || r.offset >= 200_000 {
+        match r
+            .walk
+            .advance(r.count as usize, r.fresh as usize, page.has_more)
+        {
+            OffsetStep::More(_) => {
+                r.count = 0;
+                r.fresh = 0;
+                self.history_page(cx, r);
+                return;
+            }
+            OffsetStep::Stalled(_) => {
                 cx.done(
                     r.command,
                     Err("Incomplete TxFlow history: stalled page or offset cap".into()),
                 );
                 return;
             }
-            r.offset += 2000;
-            r.count = 0;
-            r.fresh = 0;
-            self.history_page(cx, r);
-            return;
+            OffsetStep::Done => {}
         }
         let next = match r.kind {
             Kind::IncomeFills if r.include("FUNDING_FEE") => Some(Kind::Funding),
@@ -612,7 +628,7 @@ impl TxFlow {
         };
         if let Some(kind) = next {
             r.kind = kind;
-            r.offset = 0;
+            r.walk.restart();
             r.count = 0;
             r.fresh = 0;
             self.history_page(cx, r);

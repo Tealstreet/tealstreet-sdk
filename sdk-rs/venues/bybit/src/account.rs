@@ -1145,13 +1145,25 @@ impl BybitLinear {
             return;
         }
         let snapshot = self.account.snapshot.take().expect("checked above");
-        if snapshot.revision != self.account.revision {
-            if self.account.snapshot_attempts >= 3 {
-                self.fail_hyro(cx, "private state did not stabilize during reconciliation");
-            } else {
-                self.start_hyro_snapshot(cx);
+        let moved = snapshot.revision != self.account.revision;
+        if moved && self.account.snapshot_attempts < 3 {
+            if self.account.ready {
+                // Hyro streams no wallet, so order/position frames cannot make it stale.
+                self.account.wallet = snapshot.wallet;
+                self.account.coins = Some(snapshot.coins);
+                self.account.hyro_transient_streak = 0;
+                self.commit_balance(cx);
             }
+            self.start_hyro_snapshot(cx);
             return;
+        }
+        // Steady frames must not turn reconciliation into a reconnect loop: after
+        // three overtaken reads, admit this one; the next tick reconciles again.
+        if moved {
+            cx.log(
+                LogLevel::Warning,
+                "HyroTrader private stream kept moving during reconciliation; using the latest snapshot",
+            );
         }
         let mut orders = Vec::new();
         self.account.position_bound.clear();

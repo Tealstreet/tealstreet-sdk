@@ -1,7 +1,8 @@
 //! Orderly limits each public socket to one hundred topics. Keep funding on
 //! dedicated ninety-topic shards so books and candles retain the main socket.
 use crate::{Connection, Orderly, Pending, wire::Envelope};
-use safe_cex_engine::{Cx, LogLevel, SocketId, TimerId};
+use safe_cex_engine::socket::{Tick as SocketTick, Timeout};
+use safe_cex_engine::{Cx, LogLevel, PublicFeedPolicy, SocketId, TimerId};
 use serde::Serialize;
 
 const TOPICS_PER_SOCKET: usize = 90;
@@ -17,35 +18,40 @@ struct Shard {
 
 impl Orderly {
     pub(crate) fn funding_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        for shard in std::mem::take(&mut self.funding.shards) {
+        for mut shard in std::mem::take(&mut self.funding.shards) {
             if let Some(socket) = shard.connection.socket {
                 cx.close(socket);
             }
-            for timer in [shard.connection.watchdog, shard.connection.reconnect]
-                .into_iter()
-                .flatten()
-            {
-                cx.clear_timer(timer);
-            }
+            shard.connection.supervisor.cancel(cx);
         }
         let mut natives: Vec<_> = self.native.values().cloned().collect();
         natives.sort();
         for (index, chunk) in natives.chunks(TOPICS_PER_SOCKET).enumerate() {
             self.funding.shards.push(Shard {
-                connection: Connection {
-                    socket: Some(cx.connect_feed(
-                        self.public_url(),
-                        safe_cex_engine::SocketChannel::Public,
-                        format!("funding-{index}"),
-                        false,
-                    )),
-                    received: cx.now,
-                    payload_at: cx.now,
-                    watchdog: Some(cx.set_timer(10000.0)),
-                    ..Default::default()
-                },
+                connection: Connection::new(None),
                 natives: chunk.to_vec(),
             });
+            self.funding_connect(cx, index);
+        }
+    }
+    fn funding_connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
+        let url = self.public_url();
+        let connection = &mut self.funding.shards[index].connection;
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            connection.supervisor.connecting(cx);
+        }
+        connection.socket = Some(cx.connect_feed(
+            url,
+            safe_cex_engine::SocketChannel::Public,
+            format!("funding-{index}"),
+            connection.recover,
+        ));
+        connection.payload_at = cx.now;
+    }
+    fn funding_drop(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
+        if let Some(socket) = self.funding.shards[index].connection.socket {
+            cx.close(socket);
+            self.funding_close(cx, socket);
         }
     }
     pub(crate) fn funding_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
@@ -63,12 +69,8 @@ impl Orderly {
             return true;
         }
         connection.open = true;
-        connection.received = cx.now;
         connection.ping_at = cx.now;
-        if let Some(timer) = connection.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        connection.watchdog = Some(cx.set_timer(10000.0));
+        connection.supervisor.opened(cx);
         cx.send(socket, "{\"event\":\"ping\"}");
         #[derive(Serialize)]
         struct Subscription<'a> {
@@ -108,7 +110,7 @@ impl Orderly {
         let result: Result<(), String> = (|| {
             let env: Envelope<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
             let connection = &mut self.funding.shards[index].connection;
-            connection.received = cx.now;
+            connection.supervisor.received(cx.now);
             match env.event.as_ref() {
                 "ping" => {
                     cx.send(socket, "{\"event\":\"pong\"}");
@@ -134,7 +136,6 @@ impl Orderly {
                 }
                 let data = env.data.ok_or("Orderly funding update missing data")?;
                 self.apply_funding(cx, native, data.get())?;
-                self.funding.shards[index].connection.attempts = 0;
                 self.funding.shards[index].connection.payload_at = cx.now;
                 self.funding.shards[index].connection.recover = false;
             }
@@ -162,64 +163,38 @@ impl Orderly {
         let connection = &mut shard.connection;
         connection.socket = None;
         connection.open = false;
-        for timer in [connection.watchdog.take(), connection.reconnect.take()]
-            .into_iter()
-            .flatten()
-        {
-            cx.clear_timer(timer);
-        }
-        connection.attempts = connection.attempts.saturating_add(1);
-        connection.reconnect = Some(
-            cx.set_timer((1000.0 * 2f64.powi(connection.attempts.min(6) as i32 - 1)).min(30000.0)),
-        );
+        connection.supervisor.retry(cx);
         true
     }
     pub(crate) fn funding_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if let Some(index) = self
+        let Some(index) = self
             .funding
             .shards
             .iter()
-            .position(|s| s.connection.reconnect == Some(timer))
-        {
-            let socket = cx.connect_feed(
-                self.public_url(),
-                safe_cex_engine::SocketChannel::Public,
-                format!("funding-{index}"),
-                self.funding.shards[index].connection.recover,
-            );
-            let connection = &mut self.funding.shards[index].connection;
-            connection.reconnect = None;
-            connection.socket = Some(socket);
-            connection.received = cx.now;
-            connection.payload_at = cx.now;
-            connection.watchdog = Some(cx.set_timer(10000.0));
-            return true;
-        }
-        if let Some(index) = self
-            .funding
-            .shards
-            .iter()
-            .position(|s| s.connection.watchdog == Some(timer))
-        {
-            let connection = &mut self.funding.shards[index].connection;
-            connection.watchdog = None;
-            if let Some(socket) = connection.socket {
-                if !connection.open
-                    || cx.now - connection.received >= 20000.0
-                    || cx.now - connection.payload_at >= 30000.0
-                {
-                    connection.recover =
-                        !connection.open || cx.now - connection.payload_at >= 30000.0;
-                    cx.close(socket);
-                    self.funding_close(cx, socket);
-                } else {
+            .position(|s| s.connection.supervisor.owns_timer(timer))
+        else {
+            return false;
+        };
+        let connection = &mut self.funding.shards[index].connection;
+        match connection.supervisor.on_timer(cx, timer) {
+            SocketTick::Reconnect => self.funding_connect(cx, index),
+            SocketTick::Ping if connection.payload_stale(cx.now) => {
+                connection.recover = true;
+                self.funding_drop(cx, index);
+            }
+            SocketTick::Ping => {
+                if let Some(socket) = connection.socket {
                     connection.ping_at = cx.now;
                     cx.send(socket, "{\"event\":\"ping\"}");
-                    connection.watchdog = Some(cx.set_timer(10000.0));
                 }
             }
-            return true;
+            SocketTick::TimedOut(timeout) => {
+                connection.recover =
+                    timeout == Timeout::Connect || connection.payload_stale(cx.now);
+                self.funding_drop(cx, index);
+            }
+            SocketTick::Handled | SocketTick::Unhandled => {}
         }
-        false
+        true
     }
 }
