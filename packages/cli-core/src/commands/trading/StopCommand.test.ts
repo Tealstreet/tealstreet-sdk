@@ -319,8 +319,19 @@ describe('StopCommand — sized stops (partial)', () => {
     await cmd.execute(ctx(['stop', '$500', 'at', '1%'], ex));
     const order = lastOrder(ex);
     expect(order.price).toBe(50500); // +1%
-    // $500 / 50000 = 0.01 (rounded to 0.001 amount precision)
+    // $500 / 50500 rounds to 0.01 at the 0.001 lot step.
     expect(order.amount).toBe(0.01);
+  });
+
+  it('sizes USD at the stop price, not the trigger or last price', async () => {
+    const ex = makeExchange([pos()]);
+    ex.store!.tickers![0].last = 80_000;
+    ex.store!.tickers![0].mark = 80_000;
+
+    const result = await cmd.execute(ctx(['stop', '600$', 'at', '60000', 'trigger', '65000'], ex));
+
+    expect(result.success).toBe(true);
+    expect(lastOrder(ex)).toMatchObject({ price: 60_000, triggerPrice: 65_000, amount: 0.01 });
   });
 
   it('"500$ at -1%" suffix form also resolves', async () => {
@@ -488,12 +499,13 @@ describe('StopCommand — suffix-USD size regression', () => {
 
   it('e2e: `stop 1000$ at 49000` (suffix size) places a sized stop on the focused symbol', async () => {
     const ex = makeExchange([pos({ side: PositionSide.Long, contracts: 1 })]);
+    ex.store!.markets![0].precision.amount = 0.000001;
     await cmd.execute(ctx(['stop', '1000$', 'at', '49000'], ex));
     const order = lastOrder(ex);
     expect(order.symbol).toBe('BTCUSDT');
     expect(order.price).toBe(49000);
-    // $1000 / 50000 = 0.02 BTC contracts
-    expect(order.amount).toBeCloseTo(0.02);
+    // $1000 / 49000, rounded to the 0.000001 lot step.
+    expect(order.amount).toBe(0.020408);
   });
 
   it('e2e: `stop 1000$ at 49000` with a base="1000" market still uses focused symbol', async () => {

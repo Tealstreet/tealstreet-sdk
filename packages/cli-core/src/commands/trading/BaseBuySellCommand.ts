@@ -393,7 +393,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       const blocked = this.healthGate(ctx);
       if (blocked) throw new Error(blocked);
     }
-    const amount = this.parseSizeForEntry(exchange, symbol, sizeArg, reduceOnly);
+    const amount = this.parseSizeForEntry(exchange, symbol, sizeArg, reduceOnly, price);
     let budgetNotional = 0;
     if (!reduceOnly) {
       this.enforceFatfinger(ctx, symbol, amount);
@@ -426,6 +426,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     symbol: string,
     size: string,
     reduceOnly = false,
+    price?: number,
   ): number {
     // A reduce-only order closes the OPPOSITE side — a buy reduces a
     // short, a sell reduces a long. Pass that PositionSide so a bare `%`
@@ -439,6 +440,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       true,
       reduceSide,
       reduceOnly ? 'position' : 'balance',
+      price,
     );
     if (!(amount > 0)) {
       throw new Error(`Size "${size}" rounds to 0 ${symbol} at this market's precision — order not placed.`);
