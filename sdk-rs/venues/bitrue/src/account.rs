@@ -576,7 +576,7 @@ impl Bitrue {
             Method::Get,
             &format!(
                 "/fapi/v2/openOrders?contractName={}",
-                crate::history::query_component(&symbol)
+                safe_cex_engine::url::encode(&symbol)
             ),
             None,
             Some(ArrayAt::Field("data")),
@@ -1256,7 +1256,7 @@ impl Bitrue {
                 Method::Get,
                 &format!(
                     "/fapi/v2/leverageBracket?contractName={}",
-                    crate::history::query_component(contract)
+                    safe_cex_engine::url::encode(contract)
                 ),
                 None,
                 None,
@@ -1282,6 +1282,16 @@ impl Bitrue {
         self.account.settings_revision += 1;
         self.refresh_account(cx);
         true
+    }
+    fn report_leverage_error(&self, cx: &mut Cx<'_, Pending>, message: impl Into<String>) {
+        let message = message.into();
+        if self.account.leverage_queries.is_empty() {
+            cx.log(LogLevel::Error, message);
+        } else {
+            for (command, _) in &self.account.leverage_queries {
+                cx.command_error(*command, message.clone());
+            }
+        }
     }
     fn finish_leverage(
         &mut self,
@@ -1506,11 +1516,11 @@ impl Bitrue {
                 let schema = serde_json::from_str::<SnapshotEnvelope>(response.body)
                     .is_ok_and(|v| v.data.account.is_empty());
                 if !schema || data.invalid || data.balances.is_empty() {
-                    self.finish_leverage(cx, None, "Malformed Bitrue account snapshot");
-                    cx.log(
-                        LogLevel::Error,
+                    self.report_leverage_error(
+                        cx,
                         "Malformed Bitrue account snapshot; retaining previous state",
                     );
+                    self.finish_leverage(cx, None, "Malformed Bitrue account snapshot");
                 } else if revision == self.account.settings_revision {
                     let closed: Vec<String> = cx
                         .store
@@ -1685,12 +1695,9 @@ impl Bitrue {
                 self.restart_private(cx);
             }
             Request::Snapshot { .. } => {
+                self.report_leverage_error(cx, format!("Bitrue account read failed: {error}"));
                 self.finish_leverage(cx, None, error);
                 self.account.snapshot_pending = false;
-                cx.log(
-                    LogLevel::Error,
-                    format!("Bitrue account read failed: {error}"),
-                );
                 if std::mem::take(&mut self.account.snapshot_again) {
                     self.refresh_account(cx);
                 }
@@ -1701,13 +1708,16 @@ impl Bitrue {
                 lookup,
                 ..
             } => {
-                cx.log(
-                    LogLevel::Error,
-                    format!("Bitrue order read failed: {error}"),
-                );
+                let message = format!("Bitrue order read failed: {error}");
                 if let Some((command, client_order_id)) = lookup {
+                    cx.command_error(command, message);
                     Self::finish_lookup(cx, command, &symbol, &client_order_id, None);
                 } else {
+                    // A census owned by a placement fails that command, which reports it.
+                    match self.census_owner(&symbol, revision) {
+                        Some(command) => cx.command_error(command, message),
+                        None => cx.log(LogLevel::Error, message),
+                    }
                     self.trade_census(cx, &symbol, revision, false);
                     self.order_finished(cx, symbol, false);
                 }

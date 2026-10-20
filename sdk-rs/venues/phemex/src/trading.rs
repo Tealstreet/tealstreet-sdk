@@ -2,9 +2,10 @@
 //! ambiguous transport failures never cause a mutation to be retried.
 use crate::{Pending, PhemexPerpetuals};
 use safe_cex_engine::model::{
-    MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionMode,
-    PositionSide, StopTriggerType, TimeInForce,
+    MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
+    PlaceOrderOpts, PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
+pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -17,6 +18,13 @@ pub(crate) struct State {
     sides: HashMap<String, String>,
     brackets: HashMap<String, Brackets>,
 }
+impl State {
+    pub(crate) fn placing(&self, symbol: &str) -> bool {
+        self.jobs
+            .values()
+            .any(|job| job.placing.iter().any(|s| s == symbol))
+    }
+}
 #[derive(Clone, Copy)]
 struct Brackets {
     tp: Option<StopTriggerType>,
@@ -26,12 +34,27 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     settings: bool,
+    /// Symbols a `PlaceOrders` job may leave with an unknown outcome.
+    placing: Vec<String>,
 }
 pub struct Request {
     command: CommandId,
     call: Call,
     revision: u64,
+    /// Phemex refuses this write once its signed expiry passes (ms, client clock).
+    signed_until: f64,
 }
+/// How a failed write ended, which decides when its open orders are read.
+pub(crate) enum Outcome {
+    /// The venue proved no order was created; no read is owed.
+    Rejected,
+    /// The venue answered without proving the outcome; read now.
+    Unknown,
+    /// No usable answer (transport, non-2xx): the write may still land.
+    Late,
+}
+/// Margin for the client clock running ahead of Phemex's when bounding a late write.
+const CLOCK_SKEW_MS: f64 = 5_000.;
 struct Step {
     method: Method,
     path: &'static str,
@@ -100,20 +123,8 @@ enum CancelResult {
 }
 
 fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: String) {
-    cx.log(LogLevel::Error, &error);
+    cx.command_error(command, &error);
     cx.done(command, Err(error));
-}
-pub(crate) fn encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-            out.push(b as char);
-        } else {
-            use std::fmt::Write;
-            let _ = write!(out, "%{b:02X}");
-        }
-    }
-    out
 }
 fn query(pairs: Vec<(&str, String)>) -> String {
     pairs
@@ -818,6 +829,7 @@ impl PhemexPerpetuals {
             command,
             Command::PlaceOrders { .. } | Command::AmendOrder { .. }
         );
+        let placement = matches!(command, Command::PlaceOrders { .. });
         let (id, planned) = match command {
             Command::CancelOrdersWithSymbols { command, .. }
             | Command::FetchStpMode { command }
@@ -966,12 +978,21 @@ impl PhemexPerpetuals {
         match planned {
             Err(error) => reject(cx, id, error),
             Ok(steps) => {
+                let mut placing = Vec::new();
+                for step in steps.iter().filter(|_| placement) {
+                    if let Call::Place { order, .. } = &step.call
+                        && !placing.contains(&order.symbol)
+                    {
+                        placing.push(order.symbol.clone());
+                    }
+                }
                 self.trading.jobs.insert(
                     id,
                     Job {
                         steps,
                         ids: Vec::new(),
                         settings: is_settings,
+                        placing,
                     },
                 );
                 self.trade_next(cx, id);
@@ -987,15 +1008,18 @@ impl PhemexPerpetuals {
         let Some(step) = job.steps.pop_front() else {
             let job = self.trading.jobs.remove(&id).unwrap();
             cx.done(id, Ok(serde_json::to_string(&job.ids).unwrap()));
+            self.orders_reconcile(cx);
             return;
         };
         if cx.now < self.paused_until {
-            self.trading.jobs.remove(&id);
+            let job = self.trading.jobs.remove(&id).unwrap();
             reject(
                 cx,
                 id,
                 "Phemex requests are rate limited; mutation was not sent".into(),
             );
+            // Earlier steps of this batch were sent, so the batch outcome is open.
+            self.orders_uncertain(cx, job.placing, cx.now);
             return;
         }
         if let Some(g) = &step.replacement
@@ -1012,7 +1036,19 @@ impl PhemexPerpetuals {
             return;
         }
         match &step.call {
-            Call::Place { order, .. } => cx.store.upsert_order((**order).clone()),
+            Call::Place { order, .. } => {
+                if let Some(identity) = &order.client_order_id {
+                    cx.command_progress(
+                        id,
+                        vec![OrderIdentityReceipt {
+                            symbol: order.symbol.clone(),
+                            kind: OrderIdentityKind::ClientOrderId,
+                            identity: identity.clone(),
+                        }],
+                    );
+                }
+                cx.store.upsert_order((**order).clone());
+            }
             Call::Cancel { before, .. } => {
                 for o in before {
                     cx.store.set_order_status(&o.id, OrderStatus::Canceling);
@@ -1032,6 +1068,7 @@ impl PhemexPerpetuals {
                 command: id,
                 call: step.call,
                 revision,
+                signed_until: crate::sign::Credentials::expiry(cx.now) as f64 * 1000.,
             }),
             None,
         );
@@ -1043,6 +1080,7 @@ impl PhemexPerpetuals {
         request: Request,
         response: Response<'_>,
     ) {
+        let mut resolved = false;
         let result = (|| {
             if !(200..300).contains(&response.status) {
                 return Err(format!("Phemex HTTP {}", response.status));
@@ -1071,6 +1109,7 @@ impl PhemexPerpetuals {
                     )
                 {
                     cx.placement_resolved(request.command);
+                    resolved = true;
                 }
                 return Err(format!("Phemex {} {}", env.code, env.msg));
             }
@@ -1132,6 +1171,7 @@ impl PhemexPerpetuals {
                             && native(&identity.order_id)? == identity.order_id
                         {
                             cx.placement_resolved(request.command);
+                            resolved = true;
                         }
                         return Err(format!(
                             "Phemex order rejected: bizError {}",
@@ -1328,7 +1368,14 @@ impl PhemexPerpetuals {
                 self.account_refresh(cx);
                 self.trade_next(cx, request.command);
             }
-            Err(error) => self.trade_failed(cx, request, error),
+            Err(error) => {
+                let outcome = if resolved {
+                    Outcome::Rejected
+                } else {
+                    Outcome::Unknown
+                };
+                self.trade_failed(cx, request, error, outcome)
+            }
         }
     }
 
@@ -1337,6 +1384,7 @@ impl PhemexPerpetuals {
         cx: &mut Cx<'_, Pending>,
         request: Request,
         error: impl Into<String>,
+        outcome: Outcome,
     ) {
         match &request.call {
             Call::Place { order, .. } => cx.store.remove_orders(&[order.id.as_str()]),
@@ -1353,8 +1401,19 @@ impl PhemexPerpetuals {
             }
             _ => {}
         }
-        self.trading.jobs.remove(&request.command);
+        let job = self.trading.jobs.remove(&request.command);
         self.account_refresh(cx);
         reject(cx, request.command, error.into());
+        // Read only after `reject` raises the fence, so the read postdates the failure.
+        // A late write cannot land after its signed expiry, so read once that passes.
+        let (symbols, not_before) = match outcome {
+            Outcome::Rejected => (vec![], cx.now),
+            Outcome::Unknown => (job.map(|job| job.placing).unwrap_or_default(), cx.now),
+            Outcome::Late => (
+                job.map(|job| job.placing).unwrap_or_default(),
+                request.signed_until + CLOCK_SKEW_MS,
+            ),
+        };
+        self.orders_uncertain(cx, symbols, not_before);
     }
 }

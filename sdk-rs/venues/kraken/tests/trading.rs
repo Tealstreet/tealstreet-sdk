@@ -95,6 +95,44 @@ fn cancel_ack(e: &mut Engine<Kraken>, r: &HttpRequest, id: &str) {
     );
 }
 #[test]
+fn each_futures_bracket_step_receipts_its_actual_cli_ord_id_before_write() {
+    let (mut e, _) = ready();
+    let mut order = limit();
+    order.stop_loss = Some(90.);
+    order.take_profit = Some(110.);
+    place(&mut e, vec![order]);
+    let mut identities = std::collections::HashSet::new();
+    for index in 0..3 {
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let (at, receipts) = actions
+            .iter()
+            .enumerate()
+            .find_map(|(i, action)| match action {
+                Action::Notice(Notice::CommandProgress {
+                    command: 7,
+                    receipts,
+                }) => Some((i, receipts)),
+                _ => None,
+            })
+            .unwrap();
+        let (write_at, request) = actions
+            .iter()
+            .enumerate()
+            .find_map(|(i, action)| match action {
+                Action::Http(request) if request.url.ends_with("sendorder") => Some((i, request)),
+                _ => None,
+            })
+            .unwrap();
+        assert!(at < write_at);
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].symbol, "PF_XBTUSD");
+        assert_eq!(receipts[0].kind, OrderIdentityKind::ClientOrderId);
+        assert_eq!(receipts[0].identity, param(request, "cliOrdId").unwrap());
+        assert!(identities.insert(receipts[0].identity.clone()));
+        ack(&mut e, request, &format!("accepted-{index}"), "placed");
+    }
+}
+#[test]
 fn batch_prevalidates_every_caller_id_before_writes() {
     for kind in [
         OrderType::Limit,
@@ -944,4 +982,36 @@ fn market_entry_with_tpsl_names_the_unsupported_legs() {
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 41, result: Err(m) }) if m.contains("take-profit/stop-loss legs on a market entry"))));
+}
+#[test]
+fn zero_bracket_prices_mean_no_leg_on_market_and_limit_entries() {
+    for (command, kind) in [
+        (42, r#""type":"market""#),
+        (43, r#""type":"limit","price":100"#),
+    ] {
+        let (mut e, _) = ready();
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![serde_json::from_str(&format!(
+                    r#"{{"symbol":"PF_XBTUSD",{kind},"side":"buy","amount":1,"stopLoss":0,"takeProfit":0}}"#
+                ))
+                .unwrap()],
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let writes = actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+            .count();
+        assert_eq!(writes, 1, "{kind}: only the entry is sent");
+        assert!(
+            !actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            )),
+            "{kind}"
+        );
+    }
 }

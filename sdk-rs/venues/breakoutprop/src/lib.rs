@@ -341,6 +341,9 @@ impl BreakoutProp {
         url.push_str(BASE_URL);
         url.push('/');
         url.push_str(path);
+        if let Operation::Trade(request) = &pending.operation {
+            request.report_progress(cx);
+        }
         let id = cx.request(method, url, headers, body, pending);
         cx.request_timeout(id, self.options.timeout_ms);
         if let Some(stream) = stream {
@@ -387,25 +390,31 @@ impl BreakoutProp {
             }
             Operation::Portfolio { .. } => (
                 Method::Get,
-                format!("accounts/{}/portfolio", wire::path_segment(account)),
+                format!(
+                    "accounts/{}/portfolio",
+                    safe_cex_engine::url::encode(account)
+                ),
                 None,
             ),
             Operation::Discover => (
                 Method::Get,
-                format!("users/{}", wire::path_segment(&self.options.key)),
+                format!("users/{}", safe_cex_engine::url::encode(&self.options.key)),
                 None,
             ),
             Operation::Instruments { .. } => (
                 Method::Get,
                 format!(
                     "instruments/query?accountCode={}",
-                    wire::path_segment(account)
+                    safe_cex_engine::url::encode(account)
                 ),
                 None,
             ),
             Operation::Details { .. } => (
                 Method::Get,
-                format!("accounts/{}/instruments/query", wire::path_segment(account)),
+                format!(
+                    "accounts/{}/instruments/query",
+                    safe_cex_engine::url::encode(account)
+                ),
                 None,
             ),
             Operation::Quotes { .. } => {

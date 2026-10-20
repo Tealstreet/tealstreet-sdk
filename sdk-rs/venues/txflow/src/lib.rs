@@ -76,6 +76,8 @@ struct Ladder {
     subscribers: usize,
     book: Book,
     time: Option<f64>,
+    /// A snapshot was accepted; resync keeps the ladder listed so snapshots clear it.
+    published: bool,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -393,6 +395,7 @@ impl TxFlow {
                         );
                     }
                     ladder.time = Some(row.time);
+                    ladder.published = true;
                     cx.book_changed(&symbol);
                 }
             }
@@ -1023,6 +1026,7 @@ impl Venue for TxFlow {
         Box::new(
             self.books
                 .iter()
+                .filter(|(_, l)| l.published)
                 .map(|(symbol, ladder)| (symbol.as_str(), &ladder.book)),
         )
     }

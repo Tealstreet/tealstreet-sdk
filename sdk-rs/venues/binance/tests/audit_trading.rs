@@ -685,3 +685,42 @@ fn pm_known_old_snapshot_before_cancel_ack_preserves_new_symbol_but_unseen_nativ
         assert!(h.result(100).unwrap().is_ok());
     }
 }
+
+#[test]
+fn usdm_stale_open_orders_snapshot_cannot_reopen_an_acked_cancel() {
+    let variant = Variant::UsdM;
+    let open = r#"[{"symbol":"BTCUSDT","orderId":12,"clientOrderId":"maker","price":"100","origQty":"7","executedQty":"2","type":"LIMIT","side":"BUY","status":"PARTIALLY_FILLED","timeInForce":"GTC"}]"#;
+    let mut h = ready(variant);
+    let refresh = r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"BTCUSDT","c":"other","i":99,"S":"BUY","o":"LIMIT","f":"GTC","q":"1","p":"90","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","t":0}}"#;
+    h.message(socket(variant), refresh);
+    h.advance(10_000.0);
+    let in_flight = h.take("/fapi/v1/openOrders");
+    h.event(Event::Command(Command::CancelOrders {
+        command: 97,
+        ids: vec!["12".into()],
+    }));
+    let cancel = h.take("/fapi/v1/order");
+    assert_eq!(cancel.method, Method::Delete);
+    h.reply(cancel.id, 200, "", &ack(2, "CANCELED"));
+    assert!(h.result(97).unwrap().is_ok());
+    assert_eq!(
+        h.engine.store().order("12").unwrap().status,
+        OrderStatus::Canceled
+    );
+    h.reply(in_flight.id, 200, "", open);
+    h.respond("/fapi/v1/openAlgoOrders", 200, "[]");
+    assert_eq!(
+        h.engine.store().order("12").unwrap().status,
+        OrderStatus::Canceled,
+        "in-flight snapshot reopened the canceled order"
+    );
+    h.message(socket(variant), refresh);
+    h.advance(10_000.0);
+    h.respond("/fapi/v1/openOrders", 200, open);
+    h.respond("/fapi/v1/openAlgoOrders", 200, "[]");
+    assert_eq!(
+        h.engine.store().order("12").unwrap().status,
+        OrderStatus::Canceled,
+        "post-ack snapshot reopened the canceled order"
+    );
+}

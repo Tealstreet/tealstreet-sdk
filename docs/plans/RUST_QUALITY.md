@@ -107,9 +107,10 @@ Low risk, do first:
    reject blanks). Named strict and lenient variants; pin current behaviour
    per venue, then migrate in batches.~~ Done: `engine::de` and
    `num::parse_decimal`; every venue migrated.
-2. `engine::url`: one RFC 3986 encoder copied in 7+ venues, plus
+2. ~~`engine::url`: one RFC 3986 encoder copied in 7+ venues, plus
    `encodeURIComponent` and axios dialects; 5 `Query` types. Signing vectors
-   settle it.
+   settle it.~~ Done: `engine::url` dialects and `Query`; Kraken's form
+   spelling and AsterDEX's raw-value query stay venue-specific.
 3. `engine::backoff::Backoff`: ~~~40 inline exponential formulas, no jitter.
    Migrate with constants unchanged, then jitter~~ (done: one schedule shared
    with `engine::socket::Supervisor`, reconnects jittered); then one

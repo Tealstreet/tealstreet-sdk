@@ -1,11 +1,11 @@
 //! Market discovery and one quote socket with reference-counted consumers.
 use crate::{ApexOmni, Pending, public_wire as wire};
-use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, PositionSide, Precision, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Response, SocketChannel, SocketId, TimerId,
+    Command, CommandId, Cx, LogLevel, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -52,20 +52,38 @@ struct CandleState {
     count: u32,
     last: Option<Candle>,
 }
-#[derive(Default)]
 pub struct Public {
     pub books: HashMap<String, Depth>,
     candles: HashMap<(String, String), CandleState>,
     socket: Option<SocketId>,
     open: bool,
-    received: f64,
     ping_at: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
     seed_retry: Option<TimerId>,
-    attempts: u32,
     unlisted: HashSet<String>,
     unlisted_reported: HashSet<String>,
+    supervisor: Supervisor,
+}
+impl Default for Public {
+    fn default() -> Self {
+        Self {
+            books: HashMap::new(),
+            candles: HashMap::new(),
+            socket: None,
+            open: false,
+            ping_at: 0.0,
+            seed_retry: None,
+            unlisted: HashSet::new(),
+            unlisted_reported: HashSet::new(),
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 30_000.0,
+                idle_timeout_ms: 30_000.0,
+                ping_interval_ms: Some(10_000.0),
+                backoff_base_ms: 1_000.0,
+                backoff_cap_ms: 16_000.0,
+                ..Config::default()
+            }),
+        }
+    }
 }
 impl Public {
     pub(crate) fn has_unlisted(&self) -> bool {
@@ -384,6 +402,10 @@ impl ApexOmni {
         } else {
             "quote.omni.apex.exchange"
         };
+        // Suppressed public feeds never open; supervising them would only churn retries.
+        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
+            self.public.supervisor.connecting(cx);
+        }
         self.public.socket = Some(cx.connect_channel(
             format!(
                 "wss://{host}/realtime_public?v=2&timestamp={}&requestId=rust-{}",
@@ -391,8 +413,6 @@ impl ApexOmni {
             ),
             SocketChannel::Public,
         ));
-        self.public.received = cx.now;
-        self.public.watchdog = Some(cx.set_timer(10_000.0));
     }
     fn public_topics(&self) -> Vec<String> {
         let mut topics = vec!["instrumentInfo.all".to_owned()];
@@ -434,15 +454,10 @@ impl ApexOmni {
             return false;
         }
         self.public.open = true;
-        self.public.received = cx.now;
-        self.public.attempts = 0;
+        self.public.supervisor.opened(cx);
         self.public_subscribe(cx, "subscribe", &self.public_topics());
         cx.send(socket, r#"{"op":"ping"}"#);
         self.public.ping_at = cx.now;
-        if let Some(timer) = self.public.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        self.public.watchdog = Some(cx.set_timer(10_000.0));
         true
     }
     pub(crate) fn public_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
@@ -451,9 +466,6 @@ impl ApexOmni {
         }
         self.public.socket = None;
         self.public.open = false;
-        if let Some(t) = self.public.watchdog.take() {
-            cx.clear_timer(t);
-        }
         for (symbol, depth) in &mut self.public.books {
             if !depth.book.is_empty() {
                 depth.book.clear();
@@ -461,15 +473,7 @@ impl ApexOmni {
             }
             depth.sequence = None;
         }
-        if self.public.reconnect.is_none() {
-            self.public.attempts = self.public.attempts.saturating_add(1);
-            self.public.reconnect = Some(
-                cx.set_timer(
-                    Backoff::new(1_000.0, 4, 30_000.0)
-                        .jittered(self.public.attempts.saturating_sub(1), cx.now),
-                ),
-            );
-        }
+        self.public.supervisor.retry(cx);
         true
     }
     pub(crate) fn public_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
@@ -478,26 +482,22 @@ impl ApexOmni {
             self.start_public(cx);
             return true;
         }
-        if self.public.reconnect == Some(timer) {
-            self.public.reconnect = None;
-            self.connect_public(cx);
-            return true;
-        }
-        if self.public.watchdog != Some(timer) {
-            return false;
-        }
-        self.public.watchdog = None;
-        if let Some(socket) = self.public.socket {
-            if cx.now - self.public.received >= 30_000.0 {
-                cx.close(socket);
-                self.public_close(cx, socket);
-            } else {
-                if self.public.open {
+        match self.public.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => return false,
+            Tick::Reconnect => self.connect_public(cx),
+            Tick::Ping => {
+                if let Some(socket) = self.public.socket {
                     cx.send(socket, r#"{"op":"ping"}"#);
                     self.public.ping_at = cx.now;
                 }
-                self.public.watchdog = Some(cx.set_timer(10_000.0));
             }
+            Tick::TimedOut(_) => {
+                if let Some(socket) = self.public.socket {
+                    cx.close(socket);
+                    self.public_close(cx, socket);
+                }
+            }
+            Tick::Handled => (),
         }
         true
     }
@@ -510,7 +510,7 @@ impl ApexOmni {
         if self.public.socket != Some(socket) {
             return false;
         }
-        self.public.received = cx.now;
+        self.public.supervisor.received(cx.now);
         let Ok(message) = serde_json::from_str::<wire::Message<'_>>(text) else {
             return true;
         };
