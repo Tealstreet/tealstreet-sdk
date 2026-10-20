@@ -9,11 +9,13 @@ use std::collections::{HashSet, VecDeque};
 enum Accepted {
     Place,
     Cancel(Vec<String>),
+    AmendCancel,
     CancelSymbol(String),
     Leverage(String, f64),
 }
 enum Step {
     Build(Vec<PlaceOrderOpts>),
+    Amend(String, Option<f64>, Option<f64>),
     Write(sign::Request, Accepted),
     Delay,
 }
@@ -27,12 +29,43 @@ pub struct Request {
     command: CommandId,
     accepted: Accepted,
 }
+struct Amendment {
+    id: String,
+    order: PlaceOrderOpts,
+    total_amount: f64,
+    baseline_filled: f64,
+    filled: f64,
+    fill_total: f64,
+    fills: Vec<(f64, f64)>,
+    reported: f64,
+    reported_at: f64,
+    overflow: bool,
+    terminal: bool,
+    default_amount: bool,
+    started: f64,
+    prepared: Vec<Step>,
+}
+impl Amendment {
+    fn observe(&mut self) {
+        let after_report = self
+            .fills
+            .iter()
+            .filter(|(timestamp, _)| *timestamp > self.reported_at)
+            .map(|(_, amount)| amount)
+            .sum::<f64>();
+        self.filled = self
+            .filled
+            .max(self.baseline_filled + self.fill_total)
+            .max(self.reported + after_report);
+    }
+}
 #[derive(Default)]
 pub struct Trading {
     queue: VecDeque<Job>,
     active: Option<Job>,
     waiting: bool,
     timer: Option<TimerId>,
+    amendment: Option<Amendment>,
 }
 
 fn positive(value: f64) -> bool {
@@ -194,7 +227,9 @@ fn replacement(
         .store
         .order(base_id)
         .ok_or_else(|| format!("ApeX Omni parent order {base_id} not found"))?;
-    if !matches!(parent.status, OrderStatus::Open | OrderStatus::Creating) {
+    if !matches!(parent.status, OrderStatus::Open | OrderStatus::Creating)
+        || parent.remaining <= 0.0
+    {
         return Err("ApeX Omni cannot amend a terminal order".into());
     }
     let tp = cx.store.order(&format!("{base_id}__take_profit"));
@@ -203,7 +238,7 @@ fn replacement(
         symbol: parent.symbol.clone(),
         kind: parent.kind,
         side: parent.side,
-        amount: amount.unwrap_or(parent.amount),
+        amount: amount.unwrap_or(parent.remaining),
         price: Some(parent.price),
         trigger_price: None,
         max_slippage_pct: None,
@@ -481,31 +516,14 @@ impl ApexOmni {
                 price,
                 amount,
             } => {
-                let replacement = replacement(cx, &id, price, amount).and_then(|order| {
-                    validate(std::slice::from_ref(&order), cx)?;
-                    let mut issued = cx
-                        .store
-                        .orders()
-                        .iter()
-                        .filter_map(|o| o.client_order_id.clone())
-                        .collect();
-                    self.prepare_order(cx, &order, &mut issued)
-                });
-                let steps = match replacement {
-                    Ok(steps) => steps,
-                    Err(error) => {
-                        cx.log(LogLevel::Error, &error);
-                        cx.done(command, Err(error));
-                        return Ok(());
-                    }
-                };
-                let parent = parent_id(&id).to_owned();
-                let mut all = vec![Step::Write(
-                    sign::Request::form("/v3/delete-order", vec![pair("id", parent.clone())]),
-                    Accepted::Cancel(vec![parent]),
-                )];
-                all.extend(steps);
-                (command, all, true)
+                if price.is_none() && amount.is_none() {
+                    cx.done(
+                        command,
+                        Err("ApeX Omni amendment requires a price or amount".into()),
+                    );
+                    return Ok(());
+                }
+                (command, vec![Step::Amend(id, price, amount)], true)
             }
             Command::CancelOrders { command, ids } => {
                 let mut unique = HashSet::new();
@@ -657,6 +675,52 @@ impl ApexOmni {
                 continue;
             };
             match step {
+                Step::Amend(id, price, amount) => {
+                    let result = replacement(cx, &id, price, amount).and_then(|order| {
+                        validate(std::slice::from_ref(&order), cx)?;
+                        let mut issued = cx
+                            .store
+                            .orders()
+                            .iter()
+                            .filter_map(|o| o.client_order_id.clone())
+                            .collect();
+                        let prepared = self.prepare_order(cx, &order, &mut issued)?;
+                        let parent = cx.store.order(parent_id(&id)).unwrap();
+                        Ok(Amendment {
+                            id: parent.id.clone(),
+                            order,
+                            total_amount: parent.amount,
+                            baseline_filled: parent.filled,
+                            filled: parent.filled,
+                            fill_total: 0.0,
+                            fills: Vec::new(),
+                            reported: parent.filled,
+                            reported_at: cx.now,
+                            overflow: false,
+                            terminal: false,
+                            default_amount: amount.is_none(),
+                            started: cx.now,
+                            prepared,
+                        })
+                    });
+                    let amendment = match result {
+                        Ok(amendment) => amendment,
+                        Err(error) => {
+                            cx.log(LogLevel::Error, &error);
+                            cx.done(job.command, Err(error));
+                            continue;
+                        }
+                    };
+                    job.steps.push_front(Step::Write(
+                        sign::Request::form(
+                            "/v3/delete-order",
+                            vec![pair("id", amendment.id.clone())],
+                        ),
+                        Accepted::AmendCancel,
+                    ));
+                    self.trading.amendment = Some(amendment);
+                    self.trading.active = Some(job);
+                }
                 Step::Build(orders) => {
                     let mut prepared = Vec::new();
                     let mut issued: HashSet<_> = cx
@@ -705,6 +769,7 @@ impl ApexOmni {
 
     fn fail_trading(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
         self.trading.waiting = false;
+        self.trading.amendment = None;
         if let Some(job) = self.trading.active.take() {
             cx.log(LogLevel::Error, error);
             cx.done(job.command, Err(error.into()));
@@ -726,6 +791,44 @@ impl ApexOmni {
             true
         } else {
             false
+        }
+    }
+    pub(crate) fn trading_order_progress(
+        &mut self,
+        id: &str,
+        filled: f64,
+        terminal: bool,
+        timestamp: f64,
+    ) {
+        if let Some(amendment) = self.trading.amendment.as_mut()
+            && amendment.id == id
+            && filled.is_finite()
+            && filled >= 0.0
+        {
+            if filled > amendment.reported && timestamp.is_finite() {
+                amendment.reported = filled;
+                amendment.reported_at = timestamp;
+            }
+            amendment.filled = amendment.filled.max(filled);
+            amendment.observe();
+            amendment.terminal |= terminal;
+        }
+    }
+    pub(crate) fn trading_fill_progress(&mut self, id: &str, amount: f64, timestamp: f64) {
+        if let Some(amendment) = self.trading.amendment.as_mut()
+            && amendment.id == id
+            && positive(amount)
+            && timestamp.is_finite()
+            && timestamp >= amendment.started
+        {
+            if amendment.fills.len() == 4096 {
+                amendment.overflow = true;
+                return;
+            }
+            amendment.fill_total += amount;
+            amendment.fills.push((timestamp, amount));
+            // Only executions after a cumulative report's watermark add to it.
+            amendment.observe();
         }
     }
     pub(crate) fn trading_response(
@@ -766,6 +869,57 @@ impl ApexOmni {
                 self.heal_orders(cx);
             }
             Accepted::Cancel(ids) => self.note_cancel(cx, &ids),
+            Accepted::AmendCancel => {
+                let Some(mut amendment) = self.trading.amendment.take() else {
+                    self.fail_trading(cx, "ApeX Omni amendment state is unavailable");
+                    return;
+                };
+                if let Some(parent) = cx.store.order(&amendment.id) {
+                    amendment.filled = amendment.filled.max(parent.filled);
+                    amendment.terminal |=
+                        parent.remaining <= 0.0 || parent.status == OrderStatus::Closed;
+                }
+                self.note_cancel(cx, &[amendment.id]);
+                if amendment.overflow {
+                    self.fail_trading(cx, "ApeX Omni amendment exceeded the observed fill limit");
+                    return;
+                }
+                if amendment.default_amount {
+                    amendment.order.amount -=
+                        (amendment.filled - amendment.baseline_filled).max(0.0);
+                }
+                if !amendment.terminal
+                    && amendment.filled < amendment.total_amount
+                    && amendment.order.amount > 0.0
+                {
+                    let prepared = if amendment.default_amount
+                        && amendment.filled > amendment.baseline_filled
+                    {
+                        validate(std::slice::from_ref(&amendment.order), cx).and_then(|()| {
+                            let mut issued = cx
+                                .store
+                                .orders()
+                                .iter()
+                                .filter_map(|o| o.client_order_id.clone())
+                                .collect();
+                            self.prepare_order(cx, &amendment.order, &mut issued)
+                        })
+                    } else {
+                        Ok(amendment.prepared)
+                    };
+                    match prepared {
+                        Ok(prepared) => {
+                            if let Some(job) = self.trading.active.as_mut() {
+                                job.steps.extend(prepared);
+                            }
+                        }
+                        Err(error) => {
+                            self.fail_trading(cx, &error);
+                            return;
+                        }
+                    }
+                }
+            }
             Accepted::CancelSymbol(symbol) => {
                 let ids = cx
                     .store

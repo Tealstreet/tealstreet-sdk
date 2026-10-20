@@ -28,6 +28,7 @@ impl Request {
 }
 struct Entry {
     key: String,
+    timestamp_ms: f64,
     row: Execution,
 }
 #[derive(Clone, Serialize)]
@@ -115,17 +116,14 @@ fn first<'a>(values: &[&'a Option<String>]) -> Option<&'a str> {
 fn numeric(value: Option<&str>) -> Option<f64> {
     value?.parse::<f64>().ok().filter(|v| v.is_finite())
 }
-fn seconds(value: &str) -> Option<f64> {
+fn milliseconds(value: &str) -> Option<f64> {
     if let Ok(value) = value.parse::<f64>() {
-        return (value.is_finite() && value > 0.0).then_some(if value > 1e12 {
-            (value / 1000.0).floor()
-        } else {
-            value.floor()
-        });
+        return (value.is_finite() && value > 0.0)
+            .then_some(crate::account::execution_milliseconds(value));
     }
-    iso_seconds(value)
+    iso_milliseconds(value)
 }
-fn iso_seconds(value: &str) -> Option<f64> {
+fn iso_milliseconds(value: &str) -> Option<f64> {
     let (date, time) = value.split_once('T').or_else(|| value.split_once(' '))?;
     let mut date = date.split('-');
     let year = date.next()?.parse::<i64>().ok()?;
@@ -165,7 +163,7 @@ fn iso_seconds(value: &str) -> Option<f64> {
     let m = month + if month > 2 { -3 } else { 9 };
     let doy = (153 * m + 2) / 5 + day - 1;
     let days = era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
-    Some((days * 86400 + hour * 3600 + minute * 60 - offset) as f64 + second.floor())
+    Some((days * 86400 + hour * 3600 + minute * 60 - offset) as f64 * 1000.0 + second * 1000.0)
         .filter(|n| *n > 0.0)
 }
 impl Request {
@@ -259,9 +257,8 @@ impl Request {
             &raw.t,
             &raw.t_upper,
         ])?;
-        let timestamp = seconds(source_time)?;
-        if self.from.is_some_and(|n| timestamp * 1000.0 < n)
-            || self.to.is_some_and(|n| timestamp * 1000.0 > n)
+        let timestamp_ms = milliseconds(source_time)?;
+        if self.from.is_some_and(|n| timestamp_ms < n) || self.to.is_some_and(|n| timestamp_ms > n)
         {
             return None;
         }
@@ -320,8 +317,9 @@ impl Request {
         };
         Some(Entry {
             key,
+            timestamp_ms,
             row: Execution {
-                timestamp,
+                timestamp: (timestamp_ms / 1000.0).floor(),
                 symbol: self.symbol.clone(),
                 order_id,
                 price,
@@ -405,7 +403,7 @@ impl ApexOmni {
             params.push(("beginTimeInclusive".into(), num::format(from.floor())));
         }
         if let Some(to) = request.to {
-            params.push(("endTimeExclusive".into(), num::format(to.floor())));
+            params.push(("endTimeExclusive".into(), num::format(to.floor() + 1.0)));
         }
         if request.fallback {
             params.push(("orderType".into(), "HISTORY".into()));
@@ -449,7 +447,7 @@ impl ApexOmni {
         }
         request
             .current
-            .sort_by(|a, b| b.row.timestamp.total_cmp(&a.row.timestamp));
+            .sort_by(|a, b| b.timestamp_ms.total_cmp(&a.timestamp_ms));
         request.current.truncate(request.limit);
     }
     pub(crate) fn history_response(
@@ -505,11 +503,12 @@ impl ApexOmni {
                             .order_id
                             .as_ref()
                             .is_none_or(|id| r.order_id.as_ref().is_none_or(|raw| raw == id))
-                        && request.from.is_none_or(|from| r.timestamp * 1000.0 >= from)
-                        && request.to.is_none_or(|to| r.timestamp * 1000.0 <= to)
+                        && request.from.is_none_or(|from| r.timestamp_ms >= from)
+                        && request.to.is_none_or(|to| r.timestamp_ms <= to)
                 })
                 .map(|r| Entry {
                     key: r.identity.clone(),
+                    timestamp_ms: r.timestamp_ms,
                     row: Execution {
                         timestamp: r.timestamp,
                         symbol: r.symbol.clone(),
@@ -530,7 +529,7 @@ impl ApexOmni {
         request.current.retain(|row| seen.insert(row.key.clone()));
         request
             .current
-            .sort_by(|a, b| b.row.timestamp.total_cmp(&a.row.timestamp));
+            .sort_by(|a, b| b.timestamp_ms.total_cmp(&a.timestamp_ms));
         request.current.truncate(request.limit);
         let rows: Vec<_> = request.current.into_iter().map(|row| row.row).collect();
         cx.done(

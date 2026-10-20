@@ -73,6 +73,8 @@ pub(crate) struct Execution {
     #[serde(skip)]
     pub(crate) identity: String,
     pub timestamp: f64,
+    #[serde(skip)]
+    pub(crate) timestamp_ms: f64,
     pub symbol: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order_id: Option<String>,
@@ -195,9 +197,13 @@ impl Account {
     fn cache(&mut self, execution: Execution) {
         self.recent_executions.insert(0, execution);
         self.recent_executions
-            .sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
+            .sort_by(|a, b| b.timestamp_ms.total_cmp(&a.timestamp_ms));
         self.recent_executions.truncate(500);
     }
+}
+
+pub(crate) fn execution_milliseconds(time: f64) -> f64 {
+    if time > 1e12 { time } else { time * 1000.0 }
 }
 
 pub(crate) fn side(value: &str) -> Option<OrderSide> {
@@ -235,6 +241,9 @@ pub(crate) fn map_order(
     raw: &wire::OrderRow<'_>,
     now: f64,
 ) -> Result<Vec<Order>, String> {
+    if raw.symbol.trim().is_empty() || raw.id.trim().is_empty() {
+        return Err("missing order symbol or ID".into());
+    }
     let Some(market) = store
         .market_by_id(&raw.symbol)
         .or_else(|| store.market(&raw.symbol))
@@ -371,6 +380,9 @@ impl ApexOmni {
         raw: &wire::PositionRow<'_>,
         now: f64,
     ) -> Result<Option<Position>, String> {
+        if raw.symbol.trim().is_empty() {
+            return Err("missing position symbol".into());
+        }
         let Some(market) = store
             .market_by_id(&raw.symbol)
             .or_else(|| store.market(&raw.symbol))
@@ -1242,6 +1254,9 @@ impl ApexOmni {
         self.account
             .recent_executions
             .retain(|execution| execution.qty > 0.0);
+        if !snapshot {
+            self.trading_fill_progress(&raw.order_id, qty, execution_milliseconds(time));
+        }
         self.account.cache(Execution {
             identity: key,
             timestamp: if time > 1e12 {
@@ -1249,6 +1264,7 @@ impl ApexOmni {
             } else {
                 time.floor()
             },
+            timestamp_ms: execution_milliseconds(time),
             symbol: symbol.clone(),
             order_id: (!raw.order_id.is_empty()).then(|| raw.order_id.clone()),
             price,
@@ -1288,6 +1304,15 @@ impl ApexOmni {
         {
             return;
         }
+        self.trading_order_progress(
+            &raw.id,
+            raw.cum_success_fill_size.unwrap_or(0.0),
+            matches!(raw.status.as_ref(), "FILLED" | "EXPIRED"),
+            raw.updated_at
+                .or(raw.updated_time)
+                .map(execution_milliseconds)
+                .unwrap_or(cx.now),
+        );
         if self.account.terminal.contains_key(&raw.id) {
             return;
         }
@@ -1329,6 +1354,7 @@ impl ApexOmni {
                     } else {
                         time.floor()
                     },
+                    timestamp_ms: execution_milliseconds(time),
                     symbol: order.symbol.clone(),
                     order_id: Some(raw.id.clone()),
                     price,

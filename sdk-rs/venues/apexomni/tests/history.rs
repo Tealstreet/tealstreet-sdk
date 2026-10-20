@@ -93,7 +93,7 @@ fn native_fills_are_signed_without_token_or_page_zero_and_exact_bounds() {
     assert!(r.url.contains("/v3/fills?"));
     assert!(r.url.contains("symbol=BTC-USDT"));
     assert!(r.url.contains("beginTimeInclusive=1699999999000"));
-    assert!(r.url.contains("endTimeExclusive=1700000001000"));
+    assert!(r.url.contains("endTimeExclusive=1700000001001"));
     assert!(r.url.contains("limit=100"));
     assert!(!r.url.contains("token="));
     assert!(!r.url.contains("page="));
@@ -231,7 +231,7 @@ fn malformed_fee_is_absent_and_zero_fee_remains_zero() {
     assert_eq!(rows[0].commission, None);
 }
 #[test]
-fn bounds_filters_in_seconds_and_limit_sorts_latest_first() {
+fn bounds_filters_and_limit_sorts_latest_first() {
     let mut e = seeded();
     query(
         &mut e,
@@ -375,7 +375,7 @@ fn anonymous_ws_cache_preserves_raw_execution_identity_across_second_precision_o
 }
 
 #[test]
-fn same_second_ws_cache_uses_most_recent_arrival_before_limit() {
+fn same_second_ws_cache_uses_latest_execution_before_limit() {
     let (mut e, socket) = seeded_socket();
     ws(
         &mut e,
@@ -416,4 +416,81 @@ fn duplicate_rest_execution_preserves_first_seen_order_for_equal_second_timestam
     );
     let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
     assert_eq!(rows.iter().map(|r| r.qty).collect::<Vec<_>>(), [2.0, 3.0]);
+}
+
+#[test]
+fn millisecond_bounds_are_inclusive_and_sort_raw_times_before_truncating_output() {
+    for format in ["milliseconds", "seconds", "iso"] {
+        let mut e = seeded();
+        query(
+            &mut e,
+            None,
+            Some(1700000000100.0),
+            Some(1700000000456.0),
+            None,
+        );
+        let request = requests(&mut e).remove(0);
+        assert!(request.url.contains("endTimeExclusive=1700000000457"));
+        let rows = [99, 100, 123, 456, 457].map(|millis| {
+            let time = if format == "iso" { format!(r#""2023-11-15T00:13:20.{millis:03}+02:00""#) }
+                else if format == "seconds" { format!("1700000000.{millis:03}") }
+                else { format!("{}", 1700000000000u64 + millis) };
+            format!(r#"{{"tradeId":"trade-{millis}","orderId":"order-{millis}","symbol":"BTC-USDT","side":"BUY","price":"100","size":"1","createdAt":{time}}}"#)
+        }).join(",");
+        response(
+            &mut e,
+            &request,
+            30.0,
+            &format!(r#"{{"code":0,"data":[{rows}]}}"#),
+        );
+        let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|r| r.order_id.as_deref().unwrap())
+                .collect::<Vec<_>>(),
+            ["order-456", "order-123", "order-100"]
+        );
+        assert!(rows.iter().all(|r| r.timestamp == 1700000000.0));
+    }
+}
+
+#[test]
+fn ws_and_synthetic_cache_filter_and_sort_using_original_milliseconds() {
+    for synthetic in [false, true] {
+        let (mut e, socket) = seeded_socket();
+        let contents = if synthetic {
+            let orders = [456, 457, 123].map(|millis| format!(r#"{{"id":"order-{millis}","symbol":"BTC-USDT","side":"BUY","type":"LIMIT","status":"OPEN","size":"1","price":"100","cumSuccessFillSize":"1","updatedAt":{}}}"#, 1700000000000u64 + millis)).join(",");
+            format!(r#"{{"orders":[{orders}]}}"#)
+        } else {
+            let fills = [456, 457, 123].map(|millis| format!(r#"{{"orderId":"order-{millis}","symbol":"BTC-USDT","side":"BUY","size":"1","price":"100","createdAt":{}}}"#, 1700000000000u64 + millis)).join(",");
+            format!(r#"{{"fills":[{fills}]}}"#)
+        };
+        ws(
+            &mut e,
+            socket,
+            15.0,
+            &format!(r#"{{"topic":"ws_zk_accounts_v3","type":"delta","contents":{contents}}}"#),
+        );
+        e.drain_actions().for_each(drop);
+        query(
+            &mut e,
+            None,
+            Some(1700000000100.0),
+            Some(1700000000456.0),
+            Some(1),
+        );
+        for offset in 0..4 {
+            let request = requests(&mut e).remove(0);
+            response(
+                &mut e,
+                &request,
+                30.0 + offset as f64,
+                r#"{"code":0,"data":[]}"#,
+            );
+        }
+        let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].order_id.as_deref(), Some("order-456"));
+        assert_eq!(rows[0].timestamp, 1700000000.0);
+    }
 }

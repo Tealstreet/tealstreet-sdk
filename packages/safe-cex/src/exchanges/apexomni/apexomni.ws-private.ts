@@ -336,6 +336,7 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
       progress.topic += execution.qty;
       if (covered > 0) this.parent.consumeSyntheticExecutions(orderId, covered);
       if (!snapshot) {
+        this.parent.noteAmendFillProgress(execution, execution.qty);
         this.emitter.emit('fill', {
           id: orderId,
           symbol: execution.symbol,
@@ -350,7 +351,6 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
   handleOrderTopic = (data: WsZkAccountsV3Message['contents']['orders'], snapshot = false) => {
     if (!data.some((order) => order.status === 'CANCELED')) this.throttleFetchOrders();
     data.forEach((order) => {
-      if (this.parent.recentlyCancelledOrders.has(order.id) || this.terminalOrderIds.has(order.id)) return;
       let orders;
       try {
         orders = this.parent.mapOrder(order);
@@ -362,9 +362,18 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
       const price = parseFloat(v(order, 'price'));
       const amount = parseFloat(v(order, 'size'));
       if (order.status === 'FILLED' && price <= 0 && amount <= 0) return;
+      const cumulative = Number.parseFloat(v(order, 'cumSuccessFillSize') || '0');
+      if (Number.isFinite(cumulative) && cumulative >= 0 && cumulative <= amount) {
+        this.parent.noteAmendOrderProgress(
+          String(order.id),
+          cumulative,
+          order.status === 'FILLED' || order.status === 'EXPIRED',
+          v(order, 'updatedAt') || v(order, 'updatedTime'),
+        );
+      }
+      if (this.parent.recentlyCancelledOrders.has(order.id) || this.terminalOrderIds.has(order.id)) return;
 
       const progress = this.progressFor(String(order.id));
-      const cumulative = Number.parseFloat(v(order, 'cumSuccessFillSize') || '0');
       const delta = Math.max(cumulative - Math.max(progress.reported, progress.topic), 0);
       const fee = Number.parseFloat(v(order, 'cumSuccessFillFee') || '0');
       const feeDelta = Number.isFinite(fee) ? Math.max(fee - progress.fee, 0) : 0;

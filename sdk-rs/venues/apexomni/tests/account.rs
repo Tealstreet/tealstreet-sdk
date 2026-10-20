@@ -913,3 +913,140 @@ fn acknowledged_leverage_survives_older_snapshot_and_cached_position_heal() {
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
     assert_eq!(e.store().position("BTCUSDT:long").unwrap().leverage, 20.0);
 }
+
+#[test]
+fn missing_or_blank_position_symbol_rejects_rest_heal_without_clearing_state() {
+    for symbol in [None, Some(""), Some(" ")] {
+        let (mut e, socket) = ready();
+        let request = begin_position_heal(&mut e, socket, 100.0);
+        let symbol_field = symbol
+            .map(|s| format!(r#""symbol":"{s}","#))
+            .unwrap_or_default();
+        let body = ACCOUNT.replace(r#""symbol":"BTC-USDT","#, &symbol_field);
+        response(&mut e, &request, 3000.0, &body);
+        assert_eq!(e.store().position("BTCUSDT:long").unwrap().contracts, 2.0);
+    }
+}
+
+#[test]
+fn missing_or_blank_order_identifiers_reject_rest_heal_without_clearing_state() {
+    for (field, value) in [
+        ("symbol", None),
+        ("symbol", Some("")),
+        ("symbol", Some(" ")),
+        ("id", None),
+        ("id", Some("")),
+        ("id", Some(" ")),
+    ] {
+        let (mut e, socket) = ready();
+        ws(&mut e, socket, 100.0, &frame("delta", r#"{"orders":[]}"#));
+        let timer = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer {
+                    timer,
+                    at_ms: 1100.0,
+                } => Some(timer),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(1100.0, Event::TimerFired { timer });
+        let request = requests(&mut e).remove(0);
+        let original = if field == "symbol" {
+            r#""symbol":"BTC-USDT","#
+        } else {
+            r#""id":"parent","#
+        };
+        let replacement = value
+            .map(|v| format!(r#""{field}":"{v}","#))
+            .unwrap_or_default();
+        response(
+            &mut e,
+            &request,
+            3000.0,
+            &ORDERS.replace(original, &replacement),
+        );
+        assert_eq!(e.store().orders().len(), 3);
+        assert_eq!(e.store().order("parent").unwrap().status, OrderStatus::Open);
+    }
+}
+
+#[test]
+fn malformed_terminal_ws_identity_cannot_remove_or_tombstone_a_live_order() {
+    let (mut e, socket) = ready();
+    let malformed = order("parent", "CANCELED", "0").replace("BTC-USDT", " ");
+    ws(
+        &mut e,
+        socket,
+        100.0,
+        &frame("delta", &format!(r#"{{"orders":[{malformed}]}}"#)),
+    );
+    assert_eq!(e.store().orders().len(), 3);
+    let valid = order("parent", "OPEN", "0.5");
+    ws(
+        &mut e,
+        socket,
+        110.0,
+        &frame("delta", &format!(r#"{{"orders":[{valid}]}}"#)),
+    );
+    assert_eq!(e.store().order("parent").unwrap().filled, 0.5);
+}
+
+#[test]
+fn account_identity_can_be_read_before_start_without_an_omni_seed() {
+    let mut engine = Engine::new(ApexOmni::new(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("passphrase".into()),
+        omni_key_seed: None,
+        ..Default::default()
+    }));
+    engine.handle(
+        1700000000123.0,
+        Event::Command(Command::FetchAccount { command: 77 }),
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    assert_eq!(
+        actions.len(),
+        1,
+        "identity must not start sockets or timers"
+    );
+    let Action::Http(request) = &actions[0] else {
+        panic!("identity must issue exactly one signed account read");
+    };
+    assert_eq!(request.method, safe_cex_engine::Method::Get);
+    assert_eq!(request.url, "https://omni.apex.exchange/api/v3/account");
+    assert!(
+        request
+            .headers
+            .iter()
+            .any(|(name, value)| *name == "APEX-API-KEY" && value == "key")
+    );
+    assert!(
+        request
+            .headers
+            .iter()
+            .any(|(name, value)| *name == "APEX-SIGNATURE" && !value.is_empty())
+    );
+    response(
+        &mut engine,
+        request,
+        1700000000130.0,
+        r#"{"code":0,"data":{"id":"611779989544632629"}}"#,
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    assert_eq!(actions.len(), 1);
+    assert!(
+        matches!(&actions[0], Action::Notice(Notice::CommandDone { command: 77, result: Ok(body) }) if body == r#"{"userId":"611779989544632629","affiliateId":null}"#)
+    );
+    let loaded = engine.store().loaded();
+    assert!(
+        !loaded.markets
+            && !loaded.tickers
+            && !loaded.positions
+            && !loaded.orders
+            && !loaded.balance
+    );
+    assert!(engine.store().positions().is_empty());
+    assert!(engine.store().orders().is_empty());
+}

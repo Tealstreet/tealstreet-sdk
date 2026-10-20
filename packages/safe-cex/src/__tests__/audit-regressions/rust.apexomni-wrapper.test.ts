@@ -31,8 +31,9 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
   const result = vi.fn((_command: Record<string, unknown>): unknown => []);
   const commands: Array<Record<string, unknown>> = [];
   const noActions = () => '[]';
+  const start = vi.fn(noActions);
   const engine: WasmEngineLike = {
-    start: noActions,
+    start,
     command: (json) => {
       const command = JSON.parse(json);
       if (command.op === 'setTickerSymbols') return noActions();
@@ -70,7 +71,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
     },
     store,
   );
-  return { exchange, store, construct, commands, result };
+  return { exchange, store, construct, commands, result, start };
 };
 
 describe('Rust ApeX Omni SDK boundary', () => {
@@ -171,26 +172,43 @@ describe('Rust ApeX Omni SDK boundary', () => {
     expect(commands).toEqual([]);
   });
 
-  it('starts a fresh exchange before fetching the native account ID', async () => {
-    const { exchange, commands, result } = setup();
+  it('creates a host for native account identity without starting venue streams', async () => {
+    const { exchange, commands, result, start } = setup();
     result.mockReturnValue({ userId: '611779989544632629', affiliateId: null });
     await expect(exchange.getAccount()).resolves.toEqual({ userId: '611779989544632629', affiliateId: null });
     expect(commands).toEqual([{ op: 'getAccount', command: 1 }]);
+    expect(start).not.toHaveBeenCalled();
   });
 
-  it('waits for account readiness before dispatching identity on an existing host', async () => {
-    const { exchange, store, commands, result, construct } = setup();
+  it('fetches identity without an Omni seed or loaded account while sharing concurrent startup', async () => {
+    const { exchange, store, commands, result, construct, start } = setup({ omniKeySeed: undefined });
     store.update({ loaded: { ...store.loaded, balance: false, orders: false, positions: false } });
     const startup = exchange.start();
-    await vi.waitFor(() => expect(construct).toHaveBeenCalledOnce());
+    void startup.catch(() => {});
     result.mockReturnValue({ userId: 'account-id', affiliateId: null });
     const account = exchange.getAccount();
-    await Promise.resolve();
-    expect(commands).toEqual([]);
-    store.update({ loaded: { ...store.loaded, balance: true, orders: true, positions: true } });
-    await startup;
+    await vi.waitFor(() => expect(construct).toHaveBeenCalledOnce());
     await expect(account).resolves.toEqual({ userId: 'account-id', affiliateId: null });
     expect(commands).toEqual([{ op: 'getAccount', command: 1 }]);
+    expect(store.loaded.balance).toBe(false);
+    expect(store.loaded.positions).toBe(false);
+    expect(JSON.parse(construct.mock.calls[0][1])).not.toHaveProperty('omniKeySeed');
+    await expect(exchange.getAccount()).resolves.toEqual({ userId: 'account-id', affiliateId: null });
+    expect(commands).toHaveLength(2);
+    store.update({ loaded: { ...store.loaded, balance: true, orders: true, positions: true } });
+    await startup;
+    expect(construct).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it('fetches identity with API credentials while every account section remains unloaded', async () => {
+    const { exchange, store, commands, result, start } = setup({ omniKeySeed: undefined });
+    store.update({ loaded: { markets: false, tickers: false, balance: false, orders: false, positions: false } });
+    result.mockReturnValue({ userId: 'account-id', affiliateId: null });
+    await expect(exchange.getAccount()).resolves.toEqual({ userId: 'account-id', affiliateId: null });
+    expect(commands).toEqual([{ op: 'getAccount', command: 1 }]);
+    expect(store.loaded.balance).toBe(false);
+    expect(start).not.toHaveBeenCalled();
   });
 
   it('propagates startup failure from identity lookup without dispatching a command', async () => {
@@ -202,6 +220,18 @@ describe('Rust ApeX Omni SDK boundary', () => {
     await expect(exchange.getAccount()).rejects.toBe(failure);
     expect(construct).not.toHaveBeenCalled();
     expect(commands).toEqual([]);
+  });
+
+  it('starts account validation after an identity-only host was created', async () => {
+    const { exchange, store, construct, start } = setup();
+    store.update({ loaded: { ...store.loaded, balance: false } });
+    await exchange.getAccount();
+    expect(start).not.toHaveBeenCalled();
+    const validation = exchange.validateAccount();
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    store.update({ loaded: { ...store.loaded, balance: true } });
+    await expect(validation).resolves.toEqual({ error: '', balance: store.balance });
+    expect(construct).toHaveBeenCalledOnce();
   });
 
   it('rejects identity lookup when disposed while the loader is pending', async () => {

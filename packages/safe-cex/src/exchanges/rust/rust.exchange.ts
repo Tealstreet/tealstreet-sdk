@@ -181,6 +181,7 @@ const STORE_FLUSH_MS = 250;
 export class RustEngineExchange extends BaseExchange {
   protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private host?: EngineHostType;
+  private hostInitialization?: Promise<void>;
   private startup?: Promise<void>;
   private startupFailure?: Error;
   private readonly startupWaiters = new Set<() => void>();
@@ -203,8 +204,7 @@ export class RustEngineExchange extends BaseExchange {
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     if (exchangeName === 'apexomni') {
       this.getAccount = async () => {
-        if (!this.host) await this.start();
-        await this.untilLoaded();
+        await this.ensureHost();
         return this.command<ExchangeAccount>({ op: 'getAccount' });
       };
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
@@ -258,7 +258,12 @@ export class RustEngineExchange extends BaseExchange {
     return (this.startup ??= this.startEngine());
   };
 
-  private startEngine = async () => {
+  private ensureHost = (): Promise<void> => {
+    if (this.isDisposed) return Promise.reject(new Error('Exchange disposed during startup'));
+    return (this.hostInitialization ??= this.createHost());
+  };
+
+  private createHost = async () => {
     assertEngineAccountRouting(this.options);
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
@@ -355,6 +360,11 @@ export class RustEngineExchange extends BaseExchange {
         },
       },
     );
+  };
+
+  private startEngine = async () => {
+    await this.ensureHost();
+    if (this.isDisposed || !this.host) throw new Error('Exchange disposed during startup');
     this.host.start();
     this.updateTickerSymbols();
     // Books, candles and fills go out at the venue's book cadence, the rest
@@ -456,7 +466,7 @@ export class RustEngineExchange extends BaseExchange {
       const unsubscribe = this.store.subscribe(loaded);
       const timeout = setTimeout(() => finish({ error: 'Timed out validating the account' }), 15_000);
       loaded();
-      if (!this.host) this.start().catch((error) => onError(String(error?.message ?? error)));
+      if (!this.host || !this.startup) this.start().catch((error) => onError(String(error?.message ?? error)));
     });
 
   private command = <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {

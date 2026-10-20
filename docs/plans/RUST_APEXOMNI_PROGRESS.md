@@ -263,3 +263,20 @@ generated ID and preserves both virtual siblings when editing one leg.
 - Paired native/TS identifier and raw-time fixes pass 86 native / 58 TS tests
   before amendment observer hooks. Final combined verification waits for the
   bounded partial-amendment fix and expanded private tape.
+
+### Review fixes ready for landing integration
+
+- Paired identifier/raw-time fixes, native/TS partial-amendment residual and
+  observed-fill watermark guards, finite/no-op amend preflight, and API-only
+  identity host creation are complete. Each fix passed an independent bounded
+  code-correctness cross-review; the original malformed/time/mixed-fill
+  reproductions now pass. Explicit replacement amounts retain API semantics.
+- Focused checks: 23 native trading tests; 75 TS auth/public/parity/amend tests;
+  57 ApeX/Orderly wrapper tests; package typecheck and lint pass. Real native
+  identity before start, without an Omni seed, passes without streams/timers.
+- Expanded private tape adds raw-millisecond REST and cache ranges plus a
+  partial-fill price-only amendment. Final replay and size/performance checks
+  will run after KuCoin landing integration (`373cc09864`, PR #1312).
+- Replacement sizing observes events through the cancel acknowledgement and
+  source timestamp watermarks. It does not claim atomic venue amendment or
+  knowledge of unseen/later fills; observation storage is bounded.

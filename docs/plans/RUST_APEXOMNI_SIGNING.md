@@ -137,6 +137,15 @@ must complete before subscription; generation guards suppress stale sends.
 
 ## Test evidence and remaining phase checks
 
+Cancel/replace resolves its source at FIFO activation and prepares signatures
+before cancellation. Price-only amendments use remaining quantity; explicit
+amount updates retain their replacement-quantity meaning. During cancellation,
+bounded observations reconcile cumulative order totals with genuine executions
+using source timestamps, then re-sign the remaining parent and bracket legs if
+quantity changed. Full fills suppress replacement; failed cancellation never
+places it. This uses observations through the cancel acknowledgement, rather
+than claiming an atomic amendment or knowledge of later/unobserved fills.
+
 `tests/sign.rs` pins independent HMAC values, exact raw legacy order bytes,
 multipart canonical/body separation, nested login encoding, invalid credentials
 and seed, fixed-18 decimal truncation, and fee rounding. Fresh signatures captured

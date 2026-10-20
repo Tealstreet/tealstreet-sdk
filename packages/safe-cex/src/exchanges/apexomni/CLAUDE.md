@@ -170,6 +170,7 @@ Execution-history behavior (`fetchHistoricalFills`):
 - Normalizes to `Execution[]` with Unix-second timestamps, symbol guards, side/price/qty field fallbacks, and fee/orderId mapping when present
 - Supports both verbose row fields (for example `symbol/side/price/size/createdAt`) and compact fill rows (`s/S/p/v/T/i`)
 - Keeps a bounded private-WS fills cache and returns cached executions when REST execution-history requests timeout
+- Execution range filtering and sorting retain raw millisecond timestamps (including fractional ISO timestamps); only returned timestamps use whole Unix seconds. Both range bounds are inclusive, so the venue's `endTimeExclusive` is sent as one millisecond after the requested upper bound.
 - Execution IDs are internal deduplication keys; equal fills in the same second remain distinct when their native IDs differ. The returned `Execution` shape is unchanged.
 - REST execution identity prefers `tradeId`, `tradeID`, `fillId`, `execId`, `id`, then compact `i`; history-order fallback rows use the same native-row identity. Private socket identity prefers documented fill `id`, then `matchFillId`. Synthetic order cache entries never reserve genuine execution replay identities.
 
@@ -552,7 +553,7 @@ Position leverage (`apexomni.exchange.ts:1218-1225`):
   helper and throttled WebSocket heal commit successful results with
   `store.addOrUpdateOrdersFull()` (full replacement), which removes orders no
   longer in the API response.
-- Missing arrays and malformed financial rows reject the read; they never become an authoritative empty snapshot.
+- Missing arrays and malformed financial rows reject the read; they never become an authoritative empty snapshot. Missing or blank symbols/order IDs fail before unknown-market rows are skipped.
 - WebSocket `handleOrderTopic()` uses `store.addOrUpdateOrders()` (partial update) and `store.removeOrders()` for cancellations.
 
 ### Fake Positions

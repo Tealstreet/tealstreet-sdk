@@ -29,6 +29,7 @@ import {
   Order,
   OrderBook,
   OrderSide,
+  OrderStatus,
   OrderStopTriggerType,
   OrderTimeInForce,
   OrderType,
@@ -145,6 +146,7 @@ export class ApexOmniExchange extends BaseExchange {
   recentlyCancelledOrders: Map<string, number> = new Map();
   recentWsExecutions: Execution[] = [];
   private executionIdentities = new WeakMap<Execution, string>();
+  private executionTimestamps = new WeakMap<Execution, number>();
   private syntheticExecutions = new WeakSet<Execution>();
   private seenWsExecutions = new Set<string>();
   private seenWsExecutionQueue: string[] = [];
@@ -491,23 +493,21 @@ export class ApexOmniExchange extends BaseExchange {
       .replace(/PERP$/, '')
       .replace(/SWAP$/, '');
 
-  private normalizeExecutionTimestampToSeconds = (value: unknown) => {
-    if (value === undefined || value === null) {
-      return undefined;
-    }
-
-    if (typeof value === 'string' && !/^\d+$/.test(value)) {
-      const parsedDate = Date.parse(value);
-      return Number.isFinite(parsedDate) ? Math.floor(parsedDate / 1000) : undefined;
-    }
-
-    const parsed = Number.parseInt(String(value), 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      return undefined;
-    }
-
-    return parsed > 1_000_000_000_000 ? Math.floor(parsed / 1000) : parsed;
+  private normalizeExecutionTimestampToMilliseconds = (value: unknown) => {
+    if (!['number', 'string'].includes(typeof value) || `${value}`.trim() === '') return undefined;
+    const numeric = Number(value);
+    const timestamp = Number.isFinite(numeric)
+      ? numeric > 1_000_000_000_000
+        ? numeric
+        : numeric * 1000
+      : typeof value === 'string'
+        ? Date.parse(value)
+        : NaN;
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : undefined;
   };
+
+  private executionTimestamp = (execution: Execution) =>
+    this.executionTimestamps.get(execution) ?? execution.timestamp * 1000;
 
   private executionIdentity = (execution: Execution) =>
     this.executionIdentities.get(execution) ||
@@ -549,6 +549,8 @@ export class ApexOmniExchange extends BaseExchange {
           ? `execution:${id}`
           : `${execution.orderId || 'no-order'}:${time || execution.timestamp}:${execution.price}:${execution.qty}:${execution.side}`;
     this.executionIdentities.set(execution, identity);
+    const timestamp = this.normalizeExecutionTimestampToMilliseconds(time);
+    if (timestamp !== undefined) this.executionTimestamps.set(execution, timestamp);
     if (source === 'synthetic') this.syntheticExecutions.add(execution);
     return identity;
   };
@@ -568,6 +570,7 @@ export class ApexOmniExchange extends BaseExchange {
         commission: (execution.commission || 0) * ((execution.qty - reduction) / execution.qty),
       };
       this.executionIdentities.set(updated, this.executionIdentity(execution));
+      this.executionTimestamps.set(updated, this.executionTimestamp(execution));
       this.syntheticExecutions.add(updated);
       return [updated];
     });
@@ -606,7 +609,7 @@ export class ApexOmniExchange extends BaseExchange {
       return;
     }
 
-    const timestamp = this.normalizeExecutionTimestampToSeconds(
+    const timestampMs = this.normalizeExecutionTimestampToMilliseconds(
       row.createdAt ||
         row.fillTime ||
         row.createdTime ||
@@ -622,7 +625,7 @@ export class ApexOmniExchange extends BaseExchange {
         row.t ||
         row.T,
     );
-    if (!timestamp) {
+    if (timestampMs === undefined) {
       return;
     }
 
@@ -651,7 +654,7 @@ export class ApexOmniExchange extends BaseExchange {
     );
 
     const execution = omitUndefined({
-      timestamp,
+      timestamp: Math.floor(timestampMs / 1000),
       symbol: resolvedMarket?.symbol || rowSymbol,
       orderId: orderId || undefined,
       price,
@@ -675,7 +678,7 @@ export class ApexOmniExchange extends BaseExchange {
       execution,
       ...this.recentWsExecutions.filter((item) => this.executionIdentity(item) !== executionKey),
     ]
-      .sort((a, b) => b.timestamp - a.timestamp)
+      .sort((a, b) => this.executionTimestamp(b) - this.executionTimestamp(a))
       .slice(0, APEX_WS_EXECUTION_CACHE_LIMIT);
     return execution;
   };
@@ -700,15 +703,15 @@ export class ApexOmniExchange extends BaseExchange {
         if (orderId && execution.orderId && execution.orderId !== String(orderId)) {
           return false;
         }
-        if (fromMilliseconds && execution.timestamp * 1000 < fromMilliseconds) {
+        if (fromMilliseconds !== undefined && this.executionTimestamp(execution) < fromMilliseconds) {
           return false;
         }
-        if (toMilliseconds && execution.timestamp * 1000 > toMilliseconds) {
+        if (toMilliseconds !== undefined && this.executionTimestamp(execution) > toMilliseconds) {
           return false;
         }
         return true;
       })
-      .sort((a, b) => b.timestamp - a.timestamp)
+      .sort((a, b) => this.executionTimestamp(b) - this.executionTimestamp(a))
       .slice(0, limit);
   };
 
@@ -742,21 +745,6 @@ export class ApexOmniExchange extends BaseExchange {
         return undefined;
       }
       return value > 1_000_000_000_000 ? Math.floor(value) : Math.floor(value * 1000);
-    };
-
-    const normalizeToSeconds = (value: unknown) => {
-      if (value === undefined || value === null) {
-        return undefined;
-      }
-      if (typeof value === 'string' && !/^\d+$/.test(value)) {
-        const parsedDate = Date.parse(value);
-        return Number.isFinite(parsedDate) ? Math.floor(parsedDate / 1000) : undefined;
-      }
-      const parsed = Number.parseInt(String(value), 10);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        return undefined;
-      }
-      return parsed > 1_000_000_000_000 ? Math.floor(parsed / 1000) : parsed;
     };
 
     const fromMilliseconds = normalizeToMilliseconds(from);
@@ -853,7 +841,7 @@ export class ApexOmniExchange extends BaseExchange {
           return acc;
         }
 
-        const timestamp = normalizeToSeconds(
+        const timestampMs = this.normalizeExecutionTimestampToMilliseconds(
           row.createdAt ||
             row.fillTime ||
             row.createdTime ||
@@ -869,7 +857,7 @@ export class ApexOmniExchange extends BaseExchange {
             row.t ||
             row.T,
         );
-        if (!timestamp) {
+        if (timestampMs === undefined) {
           return acc;
         }
 
@@ -886,7 +874,7 @@ export class ApexOmniExchange extends BaseExchange {
           ),
         );
         const execution = omitUndefined({
-          timestamp,
+          timestamp: Math.floor(timestampMs / 1000),
           symbol: market.symbol,
           orderId: executionOrderId || undefined,
           price,
@@ -932,7 +920,7 @@ export class ApexOmniExchange extends BaseExchange {
                   symbol: symbolCandidate,
                   token: tokenCandidate,
                   beginTimeInclusive: fromMilliseconds,
-                  endTimeExclusive: toMilliseconds,
+                  endTimeExclusive: toMilliseconds === undefined ? undefined : toMilliseconds + 1,
                   side: undefined,
                 }),
               } as any);
@@ -978,7 +966,7 @@ export class ApexOmniExchange extends BaseExchange {
                 token: tokenCandidate,
                 orderType: 'HISTORY',
                 beginTimeInclusive: fromMilliseconds,
-                endTimeExclusive: toMilliseconds,
+                endTimeExclusive: toMilliseconds === undefined ? undefined : toMilliseconds + 1,
               }),
             } as any);
             const rows = extractRows(response?.data).filter((row) => parseFloat(row.cumSuccessFillSize || '0') > 0);
@@ -1038,16 +1026,18 @@ export class ApexOmniExchange extends BaseExchange {
       const deduped = new Map<string, Execution>();
 
       for (const execution of [...restExecutions, ...wsFallbackExecutions]) {
-        if (fromMilliseconds && execution.timestamp * 1000 < fromMilliseconds) {
+        if (fromMilliseconds !== undefined && this.executionTimestamp(execution) < fromMilliseconds) {
           continue;
         }
-        if (toMilliseconds && execution.timestamp * 1000 > toMilliseconds) {
+        if (toMilliseconds !== undefined && this.executionTimestamp(execution) > toMilliseconds) {
           continue;
         }
         const key = this.executionIdentity(execution);
         deduped.set(key, execution);
       }
-      return [...deduped.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, maxLimit);
+      return [...deduped.values()]
+        .sort((a, b) => this.executionTimestamp(b) - this.executionTimestamp(a))
+        .slice(0, maxLimit);
     } catch (err: any) {
       const message = err?.response?.data?.msg || err?.message || String(err);
       const wsFallbackExecutions = getWsFallbackExecutions();
@@ -1637,68 +1627,115 @@ export class ApexOmniExchange extends BaseExchange {
     return signature.tx.signature.signature;
   };
 
+  // Cancellation removes and blacklists the parent before its reply arrives.
+  private amendmentObservers = new Map<
+    string,
+    Set<(quantity: number, terminal: boolean, fill: boolean, timestamp?: number) => void>
+  >();
+
+  noteAmendOrderProgress = (id: string, filled: number, terminal: boolean, updatedAt?: unknown) => {
+    if (!id || !Number.isFinite(filled) || filled < 0) return;
+    const timestamp = this.normalizeExecutionTimestampToMilliseconds(updatedAt) ?? virtualClock.getCurrentTimeMs();
+    this.amendmentObservers.get(id)?.forEach((observe) => observe(filled, terminal, false, timestamp));
+  };
+
+  noteAmendFillProgress = (execution: Execution, amount: number) => {
+    const id = execution.orderId;
+    const timestamp = this.executionTimestamp(execution);
+    if (!id || !Number.isFinite(amount) || amount <= 0) return;
+    if (!Number.isFinite(timestamp)) return;
+    this.amendmentObservers.get(id)?.forEach((observe) => observe(amount, false, true, timestamp));
+  };
+
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
-    if (order.id.includes('__take_profit') || order.id.includes('__stop_loss')) {
-      const baseOrderId = order.id.split('__')[0];
-      const baseOrder = this.store.orders.find((o) => o?.info?.id === baseOrderId);
+    const explicitAmount = 'amount' in update ? update.amount : undefined;
+    const explicitPrice = 'price' in update ? update.price : undefined;
+    if (explicitAmount === undefined && explicitPrice === undefined) {
+      throw new Error('ApeX Omni amendment requires a price or amount');
+    }
+    if (
+      [explicitAmount, explicitPrice].some((value) => value !== undefined && (!Number.isFinite(value) || value <= 0))
+    ) {
+      throw new Error('ApeX Omni amendment values must be finite and positive');
+    }
+    const baseOrderId = order.id.replace(/__(take_profit|stop_loss)$/, '');
+    const baseOrder = this.store.orders.find((stored) => stored.id === baseOrderId);
+    if (!baseOrder) throw new Error(`Base order ${baseOrderId} not found`);
+    if (![OrderStatus.Open, OrderStatus.Creating].includes(baseOrder.status) || baseOrder.remaining <= 0) {
+      throw new Error('ApeX Omni cannot amend a terminal order');
+    }
+    const stopLossOrder = this.store.orders.find((stored) => stored.id === `${baseOrderId}__stop_loss`);
+    const takeProfitOrder = this.store.orders.find((stored) => stored.id === `${baseOrderId}__take_profit`);
+    const newOrder: Writable<PlaceOrderOpts> = {
+      symbol: baseOrder.symbol,
+      type: baseOrder.type,
+      side: baseOrder.side,
+      price: baseOrder.price,
+      amount: explicitAmount ?? baseOrder.remaining,
+      reduceOnly: baseOrder.reduceOnly || false,
+      ...(stopLossOrder && { stopLoss: stopLossOrder.price, slTriggerType: stopLossOrder.slTriggerType }),
+      ...(takeProfitOrder && { takeProfit: takeProfitOrder.price, tpTriggerType: takeProfitOrder.tpTriggerType }),
+    };
+    if (!Number.isFinite(newOrder.amount) || newOrder.amount <= 0) {
+      throw new Error('ApeX Omni replacement amount must be finite and positive');
+    }
+    if ('tpTriggerType' in baseOrder) newOrder.tpTriggerType = baseOrder.tpTriggerType;
+    if ('slTriggerType' in baseOrder) newOrder.slTriggerType = baseOrder.slTriggerType;
+    if (explicitPrice !== undefined) {
+      if (order.id.endsWith('__take_profit')) newOrder.takeProfit = explicitPrice;
+      else if (order.id.endsWith('__stop_loss')) newOrder.stopLoss = explicitPrice;
+      else newOrder.price = explicitPrice;
+    }
 
-      if (!baseOrder) {
-        throw new Error(`Base order ${baseOrderId} not found`);
-      }
-      const stopLossOrder = this.store.orders.find((o) => o.id === `${baseOrderId}__stop_loss`);
-      const takeProfitOrder = this.store.orders.find((o) => o.id === `${baseOrderId}__take_profit`);
-      const newOrder: Writable<PlaceOrderOpts> = {
-        symbol: baseOrder.symbol,
-        type: baseOrder.type,
-        side: baseOrder.side,
-        price: baseOrder.price,
-        amount: baseOrder.amount,
-        reduceOnly: baseOrder.reduceOnly || false,
-        ...(stopLossOrder && {
-          stopLoss: stopLossOrder.price,
-          slTriggerType: stopLossOrder.slTriggerType,
-        }),
-        ...(takeProfitOrder && {
-          takeProfit: takeProfitOrder.price,
-          tpTriggerType: takeProfitOrder.tpTriggerType,
-        }),
-      };
-
-      if ('price' in update) {
-        if (order.id.includes('__take_profit')) {
-          newOrder.takeProfit = update.price;
-        } else if (order.id.includes('__stop_loss')) {
-          newOrder.stopLoss = update.price;
-        } else {
-          newOrder.price = update.price;
+    const baselineFilled = baseOrder.filled;
+    const baselineRemaining = baseOrder.remaining;
+    const totalAmount = baseOrder.amount;
+    const started = virtualClock.getCurrentTimeMs();
+    let filled = baselineFilled;
+    let fillTotal = 0;
+    const fills: Array<[number, number]> = [];
+    let reported = baselineFilled;
+    let reportedAt = started;
+    let overflow = false;
+    let terminal = false;
+    const observe = (quantity: number, closed: boolean, execution: boolean, timestamp?: number) => {
+      if (execution && (timestamp === undefined || timestamp < started)) return;
+      if (execution) {
+        if (fills.length === 4096) {
+          overflow = true;
+          return;
         }
+        fillTotal += quantity;
+        fills.push([timestamp!, quantity]);
+      } else {
+        if (quantity > reported && timestamp !== undefined) {
+          reported = quantity;
+          reportedAt = timestamp;
+        }
+        filled = Math.max(filled, quantity);
       }
-      if ('amount' in update) newOrder.amount = update.amount;
-
+      const afterReport = fills.reduce((total, [time, amount]) => total + (time > reportedAt ? amount : 0), 0);
+      filled = Math.max(filled, baselineFilled + fillTotal, reported + afterReport);
+      terminal ||= closed;
+    };
+    const observers = this.amendmentObservers.get(baseOrderId) ?? new Set();
+    observers.add(observe);
+    this.amendmentObservers.set(baseOrderId, observers);
+    try {
       await this.cancelOrders([baseOrder]);
+      const latest = this.store.orders.find((stored) => stored.id === baseOrderId);
+      if (latest) {
+        filled = Math.max(filled, latest.filled);
+        terminal ||= latest.status === OrderStatus.Closed || latest.remaining <= 0;
+      }
+      if (overflow) throw new Error('ApeX Omni amendment exceeded the observed fill limit');
+      if (terminal || filled >= totalAmount) return [];
+      if (explicitAmount === undefined) newOrder.amount = Math.max(0, baselineRemaining - (filled - baselineFilled));
+      if (newOrder.amount <= 0) return [];
       return await this.placeOrder(newOrder);
-    } else {
-      const stopLossOrder = this.store.orders.find((stored) => stored.id === `${order.id}__stop_loss`);
-      const takeProfitOrder = this.store.orders.find((stored) => stored.id === `${order.id}__take_profit`);
-      const newOrder: Writable<PlaceOrderOpts> = {
-        symbol: order.symbol,
-        type: order.type,
-        side: order.side,
-        price: order.price,
-        amount: order.amount,
-        reduceOnly: order.reduceOnly || false,
-        ...(stopLossOrder && { stopLoss: stopLossOrder.price, slTriggerType: stopLossOrder.slTriggerType }),
-        ...(takeProfitOrder && { takeProfit: takeProfitOrder.price, tpTriggerType: takeProfitOrder.tpTriggerType }),
-      };
-
-      if ('tpTriggerType' in order) newOrder.tpTriggerType = order.tpTriggerType;
-      if ('slTriggerType' in order) newOrder.slTriggerType = order.slTriggerType;
-
-      if ('price' in update) newOrder.price = update.price;
-      if ('amount' in update) newOrder.amount = update.amount;
-
-      await this.cancelOrders([order]);
-      return await this.placeOrder(newOrder);
+    } finally {
+      observers.delete(observe);
+      if (observers.size === 0) this.amendmentObservers.delete(baseOrderId);
     }
   };
 
@@ -1840,6 +1877,9 @@ export class ApexOmniExchange extends BaseExchange {
   };
 
   mapPosition(p: Record<string, any>) {
+    if (typeof p.symbol !== 'string' || !p.symbol.trim()) {
+      throw new Error('ApeX position snapshot carried an invalid symbol');
+    }
     const entryPrice = parseFloat(v(p, 'avgPrice') || v(p, 'entryPrice') || 0);
     const contracts = parseFloat(p.size ?? 0);
     // const side =
@@ -2021,6 +2061,15 @@ export class ApexOmniExchange extends BaseExchange {
   // "remainingSize": "0.001",
   // "status": "OPEN"
   mapOrder(o: Record<string, any>) {
+    if (
+      typeof o.symbol !== 'string' ||
+      !o.symbol.trim() ||
+      !['string', 'number'].includes(typeof o.id) ||
+      !`${o.id}`.trim() ||
+      (typeof o.id === 'number' && !Number.isFinite(o.id))
+    ) {
+      throw new Error('ApeX order snapshot carried an invalid symbol or ID');
+    }
     // const isStop = o.stopOrderType !== 'UNKNOWN' && o.stopOrderType !== '';
     //
     // const oPrice = isStop ? v(o, 'triggerPrice') : o.price;

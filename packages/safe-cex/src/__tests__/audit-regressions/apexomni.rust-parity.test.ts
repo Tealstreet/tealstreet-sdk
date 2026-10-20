@@ -372,3 +372,125 @@ describe('ApeX Omni Rust parity corrections', () => {
     expect(post.mock.calls.every((call: any[]) => call[0] === ENDPOINTS.CREATE_ORDER)).toBe(true);
   });
 });
+
+describe('ApeX snapshot identifiers and execution range precision', () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it.each([undefined, null, '', '   '])('rejects missing or blank snapshot symbols: %j', async (symbol) => {
+    const { exchange, store, websocket } = fixture();
+    const initialPosition = exchange.mapPosition({ symbol: 'BTC-USDT', side: 'LONG', size: '2', entryPrice: '100' })!;
+    store.addOrUpdatePositionsFull([initialPosition]);
+    store.addOrUpdateOrders(exchange.mapOrder(row()));
+    exchange.xhr = {
+      get: vi.fn(async (path) => ({
+        data: {
+          data:
+            path === ENDPOINTS.ACCOUNT
+              ? { positions: [{ symbol, side: 'LONG', size: '2', entryPrice: '100' }] }
+              : [row({ symbol })],
+        },
+      })),
+    } as any;
+    await expect(exchange.fetchPositions()).rejects.toThrow('invalid symbol');
+    await expect(exchange.fetchOrders()).rejects.toThrow('invalid symbol or ID');
+    websocket.handleOrderTopic([row({ status: 'CANCELED', symbol })] as any);
+    expect(store.positions).toEqual([initialPosition]);
+    expect(store.orders).toHaveLength(1);
+    websocket.handleOrderTopic([row({ cumSuccessFillSize: '0.5' })] as any);
+    expect(store.orders[0].filled).toBe(0.5);
+  });
+
+  it.each([undefined, null, '', '   '])(
+    'rejects missing or blank order IDs before unknown-market skips: %j',
+    async (id) => {
+      const { exchange } = fixture();
+      exchange.xhr = { get: vi.fn(async () => ({ data: { data: [row({ id, symbol: 'UNKNOWN' })] } })) } as any;
+      await expect(exchange.fetchOrders()).rejects.toThrow('invalid symbol or ID');
+    },
+  );
+
+  it.each([1_700_000_000_123, '1700000000.123', '2023-11-14T22:13:20.123Z', '2023-11-15T00:13:20.123+02:00'])(
+    'filters raw REST time inclusively before exposing second precision: %j',
+    async (createdAt) => {
+      const { exchange } = fixture();
+      const get = vi.fn(async () => ({
+        data: {
+          data: {
+            fills: [
+              execution('before', { createdAt: 1_700_000_000_099 }),
+              execution('inside', { createdAt }),
+              execution('after', { createdAt: 1_700_000_000_124 }),
+            ],
+          },
+        },
+      }));
+      exchange.xhr = { get } as any;
+      const result = await exchange.fetchHistoricalFills({
+        symbol: 'BTCUSDT',
+        from: 1_700_000_000_100,
+        to: 1_700_000_000_123,
+      });
+      expect(result).toHaveLength(1);
+      expect(result[0].timestamp).toBe(1_700_000_000);
+      expect(get.mock.calls[0]).toEqual([
+        ENDPOINTS.FILLS,
+        expect.objectContaining({
+          params: expect.objectContaining({
+            beginTimeInclusive: 1_700_000_000_100,
+            endTimeExclusive: 1_700_000_000_124,
+          }),
+        }),
+      ]);
+    },
+  );
+
+  it('sorts REST executions by their raw subsecond times before applying a limit', async () => {
+    const { exchange } = fixture();
+    exchange.xhr = {
+      get: vi.fn(async () => ({
+        data: {
+          data: {
+            fills: [
+              execution('older', { createdAt: 1_700_000_000_123, orderId: 'older' }),
+              execution('newer', { createdAt: '2023-11-14T22:13:20.456Z', orderId: 'newer' }),
+            ],
+          },
+        },
+      })),
+    } as any;
+    const result = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT', limit: 1 });
+    expect(result.map((fill) => fill.orderId)).toEqual(['newer']);
+  });
+
+  it.each(['fills', 'synthetic', 'consumed synthetic'] as const)(
+    'keeps original milliseconds through %s cache filtering, sorting and limiting',
+    async (source) => {
+      const { exchange, websocket } = fixture();
+      for (const millis of [456, 457, 123]) {
+        if (source === 'fills') {
+          websocket.handleFillTopic([
+            execution('', { id: undefined, orderId: `order-${millis}`, createdAt: 1_700_000_000_000 + millis }),
+          ] as any);
+        } else {
+          websocket.handleOrderTopic([
+            row({ id: `order-${millis}`, updatedAt: 1_700_000_000_000 + millis, cumSuccessFillSize: '2' }),
+          ] as any);
+        }
+      }
+      if (source === 'consumed synthetic') exchange.consumeSyntheticExecutions('order-456', 0.5);
+      exchange.xhr = { get: vi.fn(async () => ({ data: { data: [] } })) } as any;
+      const result = await exchange.fetchHistoricalFills({
+        symbol: 'BTCUSDT',
+        from: 1_700_000_000_100,
+        to: 1_700_000_000_456,
+        limit: 1,
+      });
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        orderId: 'order-456',
+        timestamp: 1_700_000_000,
+        qty: source === 'fills' ? 1 : source === 'synthetic' ? 2 : 1.5,
+      });
+    },
+  );
+});

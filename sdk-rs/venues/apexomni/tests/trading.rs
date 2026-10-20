@@ -1,12 +1,17 @@
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Response};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Notice, Response, SocketChannel, SocketId,
+};
 use safe_cex_venue_apexomni::{ApexOmni, Options};
 use std::collections::HashMap;
 use support::*;
 
 const NOW: f64 = 1_700_000_000_123.0;
 fn ready() -> TestEngine {
+    ready_with_socket().0
+}
+fn ready_with_socket() -> (TestEngine, SocketId) {
     let mut e = Engine::new(ApexOmni::new(Options {
         key: Some("api-key".into()),
         secret: Some("mysecret".into()),
@@ -17,7 +22,22 @@ fn ready() -> TestEngine {
     e.start(NOW);
     let symbols = requests(&mut e).remove(0);
     response(&mut e, &symbols, NOW + 1.0, MARKETS);
-    let reads = requests(&mut e);
+    let mut socket = None;
+    let reads = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            Action::WsConnect {
+                socket: id,
+                channel: Some(SocketChannel::Private),
+                ..
+            } => {
+                socket = Some(id);
+                None
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     for request in reads {
         response(
             &mut e,
@@ -43,7 +63,7 @@ fn ready() -> TestEngine {
         t.mark = 60000.0;
     });
     e.drain_actions().for_each(drop);
-    e
+    (e, socket.unwrap())
 }
 fn order(extra: serde_json::Value) -> PlaceOrderOpts {
     let mut base = serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":60000});
@@ -383,4 +403,241 @@ fn leverage_uses_real_multipart_and_clamps_to_market_rails() {
     let body = request.body.unwrap();
     assert!(body.contains("\r\n\r\n0.01000\r\n"));
     assert!(body.contains("\r\n\r\nBTC-USDT\r\n"));
+}
+
+fn parent_update(
+    e: &mut TestEngine,
+    socket: SocketId,
+    at: f64,
+    filled: f64,
+    status: &str,
+    snapshot: bool,
+) {
+    ws(
+        e,
+        socket,
+        at,
+        &format!(
+            r#"{{"topic":"ws_zk_accounts_v3","type":"{}","contents":{{"orders":[{{"id":"parent","symbol":"BTC-USDT","side":"BUY","type":"LIMIT","status":"{status}","size":"10","price":"60000","cumSuccessFillSize":"{filled}","updatedAt":{at},"openSlParam":{{"triggerPrice":"50000","triggerPriceType":"INDEX"}},"openTpParams":{{"triggerPrice":"65000","triggerPriceType":"MARKET"}}}}]}}}}"#,
+            if snapshot { "snapshot" } else { "delta" },
+        ),
+    );
+}
+
+fn amend(e: &mut TestEngine, id: &str, amount: Option<f64>) -> Vec<HttpRequest> {
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::AmendOrder {
+            command: 99,
+            id: id.into(),
+            price: Some(59000.0),
+            amount,
+        }),
+    );
+    requests(e)
+}
+
+fn amend_fill(e: &mut TestEngine, socket: SocketId, created_at: f64, size: f64) {
+    ws(
+        e,
+        socket,
+        NOW + 12.0,
+        &format!(
+            r#"{{"topic":"ws_zk_accounts_v3","type":"delta","contents":{{"fills":[{{"id":"new-fill","orderId":"parent","symbol":"BTC-USDT","side":"BUY","size":"{size}","price":"60000","fee":"0","createdAt":{created_at}}}]}}}}"#,
+        ),
+    );
+}
+
+#[test]
+fn partial_parent_and_virtual_amendments_replace_only_remaining_and_keep_siblings() {
+    for id in ["parent", "parent__take_profit"] {
+        let (mut e, socket) = ready_with_socket();
+        parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+        e.drain_actions().for_each(drop);
+        let cancel = amend(&mut e, id, None).remove(0);
+        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        let replacement = requests(&mut e).remove(0);
+        let fields = form(&replacement);
+        assert_eq!(fields["size"], "4");
+        assert_eq!(fields["slSize"], "4");
+        assert_eq!(fields["tpSize"], "4");
+        assert_eq!(fields["slTriggerPrice"], "50000");
+        assert_eq!(
+            fields["tpTriggerPrice"],
+            if id == "parent" { "65000" } else { "59000" }
+        );
+    }
+}
+
+#[test]
+fn amend_rechecks_remaining_when_its_fifo_turn_starts() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    assert!(amend(&mut e, "parent", None).is_empty());
+    parent_update(&mut e, socket, NOW + 11.0, 8.0, "OPEN", false);
+    e.handle(
+        NOW + 12.0,
+        Event::HttpFailed {
+            request: first.id,
+            error: "lost placement response",
+        },
+    );
+    let cancel = requests(&mut e).remove(0);
+    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
+}
+
+#[test]
+fn in_flight_amend_counts_same_execution_once_in_both_topic_orders() {
+    for fill_first in [true, false] {
+        let (mut e, socket) = ready_with_socket();
+        parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+        e.drain_actions().for_each(drop);
+        let cancel = amend(&mut e, "parent", None).remove(0);
+        if fill_first {
+            amend_fill(&mut e, socket, NOW + 11.0, 1.0);
+        }
+        parent_update(&mut e, socket, NOW + 12.0, 7.0, "OPEN", false);
+        if !fill_first {
+            amend_fill(&mut e, socket, NOW + 11.0, 1.0);
+        }
+        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        assert_eq!(form(&requests(&mut e).remove(0))["size"], "3");
+    }
+}
+
+#[test]
+fn delayed_pre_amend_fill_does_not_reduce_the_captured_remaining_again() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    let cancel = amend(&mut e, "parent", None).remove(0);
+    amend_fill(&mut e, socket, NOW + 4.0, 6.0);
+    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    assert_eq!(form(&requests(&mut e).remove(0))["size"], "4");
+}
+
+#[test]
+fn new_genuine_amend_fill_counts_despite_outstanding_old_synthetic_coverage() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    parent_update(&mut e, socket, NOW + 6.0, 7.0, "OPEN", false);
+    e.drain_actions().for_each(drop);
+    let cancel = amend(&mut e, "parent", None).remove(0);
+    amend_fill(&mut e, socket, NOW + 11.0, 1.0);
+    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
+}
+
+#[test]
+fn distinct_execution_after_a_cumulative_report_reduces_remaining_again() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    let cancel = amend(&mut e, "parent", None).remove(0);
+    parent_update(&mut e, socket, NOW + 11.0, 7.0, "OPEN", false);
+    amend_fill(&mut e, socket, NOW + 12.0, 1.0);
+    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
+}
+
+#[test]
+fn genuine_full_fill_during_cancel_suppresses_explicit_replacement_quantity() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    let cancel = amend(&mut e, "parent", Some(2.5)).remove(0);
+    amend_fill(&mut e, socket, NOW + 11.0, 4.0);
+    e.drain_actions().for_each(drop);
+    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: Ok(ids) }) if ids == "[]")));
+    assert!(http(actions).is_empty());
+}
+
+#[test]
+fn fully_filled_parent_while_amend_is_queued_never_sends_cancellation() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    assert!(amend(&mut e, "parent", None).is_empty());
+    parent_update(&mut e, socket, NOW + 11.0, 10.0, "FILLED", false);
+    e.handle(
+        NOW + 12.0,
+        Event::HttpFailed {
+            request: first.id,
+            error: "lost placement response",
+        },
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone {
+            command: 99,
+            result: Err(_)
+        })
+    )));
+    assert!(http(actions).is_empty());
+}
+
+#[test]
+fn unchanged_or_invalid_amendment_rejects_before_cancellation() {
+    for price in [None, Some(f64::NAN), Some(f64::INFINITY), Some(0.0)] {
+        let (mut e, socket) = ready_with_socket();
+        parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+        e.drain_actions().for_each(drop);
+        e.handle(
+            NOW + 10.0,
+            Event::Command(Command::AmendOrder {
+                command: 99,
+                id: "parent".into(),
+                price,
+                amount: None,
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone {
+                command: 99,
+                result: Err(_)
+            })
+        )));
+        assert!(http(actions).is_empty());
+        assert_eq!(e.store().order("parent").unwrap().remaining, 4.0);
+    }
+}
+
+#[test]
+fn own_cancel_event_keeps_replacement_but_full_fill_suppresses_it() {
+    for (status, filled) in [("CANCELED", 8.0), ("FILLED", 10.0)] {
+        let (mut e, socket) = ready_with_socket();
+        parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+        e.drain_actions().for_each(drop);
+        let cancel = amend(&mut e, "parent", None).remove(0);
+        parent_update(&mut e, socket, NOW + 12.0, filled, status, false);
+        e.drain_actions().for_each(drop);
+        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        if status == "FILLED" {
+            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: Ok(ids) }) if ids == "[]")));
+            assert!(http(actions).is_empty());
+        } else {
+            assert_eq!(form(&http(actions).remove(0))["size"], "2");
+        }
+    }
+}
+
+#[test]
+fn explicit_amend_quantity_remains_verbatim_after_an_additional_fill() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    let cancel = amend(&mut e, "parent", Some(2.5)).remove(0);
+    parent_update(&mut e, socket, NOW + 12.0, 7.0, "OPEN", false);
+    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    assert_eq!(form(&requests(&mut e).remove(0))["size"], "2.5");
 }
