@@ -170,8 +170,9 @@ Implemented on the gate-honesty lane:
 Remaining evidence limitations:
 
 - No venue has live private evidence; private tapes are documented/synthetic.
-  Ordinary live fill events/frame rows do not carry timestamps or execution IDs;
-  null/null equality cannot establish those capabilities. Missing wire fields
+  Several TS handlers emit execution identity or timestamps, now preserved by
+  the comparison. Rust live-fill frames lack those fields; other TS handlers
+  lack them too. Null/null equality cannot establish those capabilities. Missing wire fields
   remain missing, never reconstructed into candidate output from the tape.
 - Some tape-derived TS corrections still rebuild sections. Their declared leaf
   fields and overwrite counts are visible; raw checkpoints do not use them.

@@ -102,10 +102,52 @@ export class ReplayClock {
     };
     timer.at = Date.now() + timer.delay;
     this.timers.set(timer, timer);
-    if (!this.active) timer.handle = this.original.setTimeout(() => this.fire(timer), timer.delay);
+    if (!this.active) this.arm(timer);
     return timer;
   }
+  arm(timer) {
+    const generation = (timer.generation ?? 0) + 1;
+    timer.generation = generation;
+    timer.handle = this.original.setTimeout(() => {
+      if (timer.generation === generation) return this.fire(timer);
+    }, timer.delay);
+  }
   fire(timer) {
+    if (!this.timers.has(timer)) return;
+    if (this.freezeStartup && !this.active) {
+      // Wall-time stalls can queue a later native wake before an earlier
+      // logical child timer even exists. Drain by logical deadline, including
+      // timers created by callbacks, rather than trusting native queue order.
+      this.startupTarget = Math.max(this.startupTarget ?? this.time, timer.at);
+      if (!this.drainingStartup) {
+        this.drainingStartup = true;
+        this.startupDrain = this.drainStartup();
+      }
+      return this.startupDrain;
+    }
+    this.fireTimer(timer);
+  }
+  async drainStartup() {
+    try {
+      while (!this.active) {
+        let next;
+        for (const pending of this.timers.values())
+          if (pending.at <= this.startupTarget && (!next || pending.at < next.at)) next = pending;
+        if (!next) break;
+        this.original.clearTimeout(next.handle);
+        next.generation = (next.generation ?? 0) + 1;
+        this.fireTimer(next);
+        // Native timer callbacks also drain their Promise continuations before
+        // another callback. A token queue may schedule its child timer there.
+        await new Promise(setImmediate);
+      }
+    } finally {
+      this.drainingStartup = false;
+      this.startupTarget = undefined;
+      this.startupDrain = undefined;
+    }
+  }
+  fireTimer(timer) {
     if (!this.timers.has(timer)) return;
     // Frozen startup still has timed prerequisites (rate limits, paced request
     // queues). Advance on their scheduled logical deadline, never the wall
@@ -113,7 +155,7 @@ export class ReplayClock {
     if (this.freezeStartup && !this.active) this.time = Math.max(this.time, timer.at);
     if (timer.repeat) {
       timer.at = Date.now() + timer.delay;
-      if (!this.active) timer.handle = this.original.setTimeout(() => this.fire(timer), timer.delay);
+      if (!this.active) this.arm(timer);
     } else this.timers.delete(timer);
     timer.fn(...timer.args);
   }
@@ -121,6 +163,7 @@ export class ReplayClock {
     const wall = this.freezeStartup ? this.time : this.original.now();
     for (const timer of this.timers.values()) {
       this.original.clearTimeout(timer.handle);
+      timer.generation = (timer.generation ?? 0) + 1;
       timer.at = this.epoch + Math.max(0, timer.at - wall);
     }
     this.active = true;

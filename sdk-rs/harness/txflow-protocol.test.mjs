@@ -164,7 +164,7 @@ test('both socket control planes require a subscription channel and exact placem
   assert.throws(() => validateTxFlowSocketMessage({ url: 'wss://rpc.txflow.com/ws' }, '{"method":"ping"}'));
 });
 
-test('private replay freezes the startup epoch and advances pacing and 10-second pings without wall waits', { timeout: 5000 }, async () => {
+test('private replay advances logical startup deadlines then rebases pacing and 10-second pings without wall waits', { timeout: 5000 }, async () => {
   const clock = new ReplayClock(EPOCH, true);
   const tape = new Tape([{ type: 'command', t: 0, op: 'pacedWrite' }, { type: 'command', t: 10_000, op: 'afterPings' }], { virtualPrivateClock: true }, true, 2000);
   clock.install();
@@ -174,7 +174,7 @@ test('private replay freezes the startup epoch and advances pacing and 10-second
   try {
     assert.equal(Date.now(), EPOCH);
     await new Promise((resolve) => setTimeout(resolve, 1));
-    assert.equal(Date.now(), EPOCH);
+    assert.equal(Date.now(), EPOCH + 1);
     const interval = setInterval(() => pings.push(Date.now()), 10_000);
     const frames = await tape.play(undefined, async () => {}, async (frame) => {
       timestamps.push(Date.now());

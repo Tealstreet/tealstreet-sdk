@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { deterministicReplay, frozenReplayStartup } from './polling.mjs';
 import { ReplayClock } from './tape.mjs';
 import { EngineHost } from '../hosts/wasm/js/host.mjs';
+import { setTimeout as realTimeout } from 'node:timers';
 
 test('startup wall jitter cannot change public or polling virtual poll deadlines', async () => {
   const epoch = 1700000000000;
@@ -64,7 +65,7 @@ test('frozen startup timers advance paced prerequisites by logical deadlines and
         const next = [...clock.timers.values()].sort((a, b) => a.at - b.at)[0];
         clock.original.clearTimeout(next.handle);
         wall += 1000 + jitter;
-        clock.fire(next);
+        await clock.fire(next);
       }
       assert.deepEqual(events, [epoch + 1000, epoch + 2000]);
       setTimeout(() => events.push(Date.now()), 10_000);
@@ -80,6 +81,69 @@ test('frozen startup timers advance paced prerequisites by logical deadlines and
     }
   }
   for (const trace of traces) assert.deepEqual(trace, [epoch + 1000, epoch + 2000, epoch + 10_000]);
+});
+
+test('blocked native startup dispatch retains logical priority for nested timers and Promise children', async () => {
+  const run = async (blocked, legacy, promiseChild) => {
+    const epoch = 1700000000000;
+    const clock = new ReplayClock(epoch, true);
+    if (legacy) clock.fire = (timer) => clock.fireTimer(timer);
+    clock.install();
+    const events = [];
+    let complete;
+    const done = new Promise(resolve => { complete = resolve; });
+    const record = (name) => {
+      events.push([name, Date.now() - epoch]);
+      if (events.length === 3) complete();
+    };
+    try {
+      setTimeout(() => {
+        record('A');
+        const child = () => setTimeout(() => record('child'), 5);
+        if (promiseChild) Promise.resolve().then(child);
+        else child();
+      }, 10);
+      setTimeout(() => record('B'), 20);
+      if (blocked) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 35);
+      let deadline;
+      try {
+        await Promise.race([done, new Promise((_, reject) => { deadline = realTimeout(() => reject(new Error('startup callbacks did not complete')), 2000); })]);
+      } finally { clearTimeout(deadline); }
+      return events;
+    } finally { clock.restore(); }
+  };
+  assert.deepEqual(await run(true, true, false), [['A', 10], ['B', 20], ['child', 20]]);
+  for (const blocked of [false, true])
+    for (const promiseChild of [false, true])
+      assert.deepEqual(await run(blocked, false, promiseChild), [['A', 10], ['child', 15], ['B', 20]]);
+});
+
+test('startup interval drains invalidate native callbacks already queued before rearm and tape start', async () => {
+  const epoch = 1700000000000;
+  const clock = new ReplayClock(epoch, true);
+  const originals = { ...clock.original };
+  const wakes = [];
+  clock.original.setTimeout = (callback) => { wakes.push(callback); return {}; };
+  clock.original.clearTimeout = () => {};
+  clock.install();
+  const events = [];
+  try {
+    setInterval(() => events.push(['repeat', Date.now() - epoch]), 10);
+    setTimeout(() => events.push(['B', Date.now() - epoch]), 25);
+    await wakes[1](); // A later queued wake must drain repeats at 10 and 20.
+    assert.deepEqual(events, [['repeat', 10], ['repeat', 20], ['B', 25]]);
+    await wakes[0](); // Stale native repeat callback was already queued.
+    assert.equal(events.length, 3);
+    const pendingWake = wakes.at(-1);
+    clock.start();
+    await pendingWake(); // start() must invalidate already-queued wakes too.
+    assert.equal(events.length, 3);
+    await clock.advance(5);
+    assert.deepEqual(events.at(-1), ['repeat', 5]);
+  } finally {
+    Object.assign(clock.original, originals);
+    clock.restore();
+  }
 });
 
 test('native watchdog heartbeat counts do not shift across the OKX EU tape horizon with startup audit cost', async () => {

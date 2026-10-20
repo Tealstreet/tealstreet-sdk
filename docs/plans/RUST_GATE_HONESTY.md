@@ -193,3 +193,23 @@ never retry an unchanged failed performance measurement to obtain a pass.
   differences without inventing facts. Shared erasure controls, including final
   outputs, pass 17/17 CLI tests; unit controls 33/33 and lifecycle 9/9 PASS.
   Presence does not establish facts absent in both production consumers.
+- Priority dispatch closes the remaining real native-timer jitter path: a
+  delayed parent wake now drains earlier logical children before later timers,
+  including Promise children and intervals; callback generations reject stale
+  queued/rearmed wakes and the ready transition. Independent adversarial review
+  PASS (ties, clears, repeats, reentrant start); 140 scoped controls PASS.
+  Actual Hyperliquid public and Breakout private correctness replays complete
+  with exact unchanged receipts. Integrated harness then 764/764 PASS.
+- Initial known-failure declarations cover 49,262 exact diagnostic paths from
+  104 completed corrected-head CI cases plus two corrected private pairs
+  (106 distinct cases: 25 strict PASS / 81 strict FAIL). Hyperliquid public still
+  requires the complete n>=7 CI result. Preserve the earlier Hyro seven-pair
+  steady-CPU miss as an additional historical declaration even though the next
+  run passed; no favorable-run selection. Group only exact literal paths sharing
+  a rationale to avoid repeating prose; no patterns/ranges are permitted.
+  All 106 collected reports independently validate against these declarations
+  with zero integrity/unknown errors; full final-head CI remains required.
+- Independent normalization/schema/null-oracle review PASS, 99/99 scoped tests.
+  Existing Orderly missing-value corrections now accept the serialized null
+  spelling only under the same native limit/zero-market payload evidence;
+  unexpected populated values still fail. No additional correction fields.

@@ -403,6 +403,12 @@ fixture assumptions, not a live-feed bandwidth forecast.
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and each venue's generated private tape gated on identical account state.
 
+The stricter gate-honesty matrix has 107 mandatory cases. Its single
+[`known-gate-failures.json`](../../sdk-rs/harness/known-gate-failures.json)
+list records exact venue/tape/diagnostic failures; accepted known failures stay
+FAIL and do not certify parity. Port states below describe implementation and
+historical checks, not a claim that every stricter replay case passes.
+
 ### 8. Remaining venues — in progress
 
 One Codex lane per venue, each in its own aimux worktree on

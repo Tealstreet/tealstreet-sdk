@@ -75,6 +75,22 @@ test('native TIF correction accepts optional omissions but rejects unexpected fi
   assert.throws(() => fixOrderly({ commands: [], account: { ...account(), orders: [{ id: '2', timeInForce: 'FillOrKill' }] } }, records), /unexpected TS missing native TIF/);
 });
 
+test('serialized missing order type and zero market price retain strict tape-derived corrections', () => {
+  for (const absent of [null, undefined]) {
+    const records = [meta,
+      ws('executionreport', { orderId: 2, symbol: BTC, type: 'POST_ONLY', status: 'NEW' }),
+      ws('executionreport', { orderId: 3, symbol: BTC, type: 'MARKET', price: 0, status: 'NEW' })];
+    const output = { commands: [], account: { ...account(), orders: [
+      { id: '2', type: absent, timeInForce: null }, { id: '3', type: 'market', price: absent },
+    ] } };
+    fixOrderly(output, records);
+    assert.equal(output.account.orders[0].type, 'limit');
+    assert.equal(output.account.orders[1].price, 0);
+    const unexpected = { commands: [], account: { ...account(), orders: [{ id: '3', type: 'market', price: 1 }] } };
+    assert.throws(() => fixOrderly(unexpected, records), /unexpected TS missing zero market price/);
+  }
+});
+
 test('query oracle refuses unexpected TS errors or nonempty data', () => {
   const records = [meta, command('fetchFills', { limit: 2 }),
     http('GET', '/v1/trades?page=1&size=500', { rows: [fill], meta: { total: 1 } })];
