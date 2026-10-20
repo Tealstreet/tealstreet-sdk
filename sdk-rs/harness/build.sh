@@ -25,6 +25,9 @@ if [[ $# -gt 0 ]]; then
   elif [[ $2 == bitrue ]]; then
     # Spend standalone size headroom on decoder throughput; combined builds keep the size profile.
     build_args+=(--config 'profile.release.package.safe-cex-venue-bitrue.opt-level=3')
+  elif [[ $2 == okx ]]; then
+    # EU's steady public decoder needs throughput within the same standalone size budget.
+    build_args+=(--config 'profile.release.package.safe-cex-venue-okx.opt-level=3')
   fi
 fi
 cd "$(dirname "$0")/.."

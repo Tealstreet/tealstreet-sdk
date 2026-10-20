@@ -2835,3 +2835,38 @@ in their full logs. OKXmodule798,235bytes buildsPASS, but host CPU rises
 673.1→704.3→838.6percent before its qualification; no OKXmeasurement has
 started. Preserve the continuing wait. Remaining planned OKX/Paradex/Bitrue
 replays and exact-head CI still must finish before landing.
+
+
+The final batch STOPS at its first completed performance failure, OKXEU public:
+37,817frames/755markets/750tickers/twobooks equality and memory pass, but TS/
+Rust main704.2/774.6ms and steady452.1/506.8 fail CPU. Process946.6/1039.3,
+retained8.7/6.1MB, peak25.1/14.7, linear1.8MB. Preserve full
+/tmp/bitunix-fc809-okxeu-public.log and stopped batch. No xperp, Paradex or
+Bitrue steps ran. All four OKX private profiles and base/inverse public passed
+before this failure; do not replace or silently repeat any completed result.
+
+Bounded performance plan: OKX's native public decoder still uses the global
+size-optimized z profile, despite its isolated module using only798,235bytes
+of1,258,291budget. Spend this known standalone headroom on throughput using
+an isolated --venueokx opt-level3 crate override, exactly the existing Bitrue
+build pattern. Keep combined size profile and every Rust/data/formula/parser/
+clock/memory/deadline/equality policy unchanged. Independent plan audit, then
+rebuild and enforce unchanged module budget. Recheck failing OKXEU public first
+on the newly optimized artifact after host qualification, with all samples
+retained. If it passes, check the other seven OKXpublic/privatecontrols and
+continue remaining builds. No unchanged rerun-to-green or threshold change.
+
+
+Independent plan and implementation audits PASS for the three-line standalone
+OKX override. Shellsyntax and rebuild PASS; corrected module861,613bytes,
+SHA256 b7345a8d64fbcafe565c0280c1d3e26d73f5aaa830a07bd8229d2e40bc718484,
+under the unchanged budget. Failed z artifact798,235bytes/hash
+9ae65cbaff19323e5972074f83b77d7f8af8e5adf5ff34000746d1b76e8d20d0 and all
+six raw failure samples are retained by hash/results. The new candidate has
+not begun performance measurement: host load repeatedly breaks the same
+below500percent/two-reading qualification. No CPU win is claimed. Running
+/tmp/bitunix-fc809-okx3-gates.sh waits for qualification, then failed EUfirst,
+othersevenOKXcontrols, Paradex andBitrue; stop onanyfailure. Commit this built,
+reviewed compiler candidate as a checkpoint, with gate phase explicitly open.
+Use the wait for read-only prepublication adversarial review across private,
+public/hosts and sharedharness; verify actual PR head again after publication.
