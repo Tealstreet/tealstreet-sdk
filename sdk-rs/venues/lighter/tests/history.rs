@@ -403,3 +403,24 @@ fn historical_orders_share_native_hyphenated_conditional_and_terminal_mapping() 
     assert_eq!(rows[0]["status"], "canceled");
     assert_eq!(rows[0]["price"], 90.0);
 }
+
+#[test]
+fn windowed_fills_stop_paging_once_rows_are_older_than_the_window() {
+    let (mut e, _) = ready();
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("ETH".into()),
+            order_id: None,
+            from_ms: Some(NOW - 1_000.0),
+            to_ms: Some(NOW),
+            limit: Some(200),
+        },
+    );
+    let mut rows = vec![trade("in", NOW as u64 - 500)];
+    rows.extend((0..99).map(|i| trade(&format!("old{i}"), NOW as u64 - 5_000)));
+    answer(&mut e, &r, rows, Some("next-page"));
+    let rows = result(&mut e).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["id"], "in");
+}
