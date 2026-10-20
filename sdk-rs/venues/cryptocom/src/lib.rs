@@ -8,6 +8,7 @@ mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::{Balance, Candle, Market, Ticker};
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
@@ -43,13 +44,27 @@ pub enum Pending {
     },
 }
 
-#[derive(Default)]
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last: f64,
+    authenticated: bool,
     ready: Option<TimerId>,
-    reconnect: Option<TimerId>,
+    supervisor: Supervisor,
+}
+impl Connection {
+    fn new(private: bool) -> Self {
+        Self {
+            socket: None,
+            open: false,
+            authenticated: false,
+            ready: None,
+            supervisor: Supervisor::new(Config {
+                idle_timeout_ms: 90_000.0,
+                auth_timeout_ms: private.then_some(10_000.0),
+                ..Config::default()
+            }),
+        }
+    }
 }
 
 struct BookState {
@@ -62,7 +77,6 @@ pub struct Cryptocom {
     options: Options,
     rest: &'static str,
     sockets: [Connection; 2],
-    watchdog: Option<TimerId>,
     subscriptions: BTreeMap<String, u32>,
     indexes: HashMap<String, String>,
     books: HashMap<String, BookState>,
@@ -126,8 +140,7 @@ impl Cryptocom {
                 "https://api.crypto.com/exchange/v1"
             },
             options,
-            sockets: Default::default(),
-            watchdog: None,
+            sockets: [Connection::new(false), Connection::new(true)],
             subscriptions: BTreeMap::new(),
             indexes: HashMap::new(),
             books: HashMap::new(),
@@ -136,6 +149,10 @@ impl Cryptocom {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
+        if self.sockets[channel].socket.is_some() {
+            return;
+        }
+        self.sockets[channel].supervisor.connecting(cx);
         let root = if self.options.testnet {
             "wss://uat-stream.3ona.co"
         } else {
@@ -352,12 +369,15 @@ impl Venue for Cryptocom {
                 invalid: false,
             },
         );
-        self.watchdog = Some(cx.set_timer(5_000.0));
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if let Some(state) = self.sockets.iter_mut().find(|s| s.socket == Some(socket)) {
+            if state.open {
+                return;
+            }
             state.open = true;
-            state.last = cx.now;
+            state.authenticated = false;
+            state.supervisor.opened(cx);
             state.ready = Some(cx.set_timer(1_000.0));
         }
     }
@@ -365,7 +385,7 @@ impl Venue for Cryptocom {
         let Some(channel) = self.sockets.iter().position(|s| s.socket == Some(socket)) else {
             return;
         };
-        self.sockets[channel].last = cx.now;
+        self.sockets[channel].supervisor.received(cx.now);
         if channel == 0
             && let Ok(push) = serde_json::from_str::<TickerPush>(text)
             && push.code == 0
@@ -387,8 +407,23 @@ impl Venue for Cryptocom {
                         envelope.id
                     ),
                 );
-            } else if channel == 1 && envelope.method == "public/auth" && envelope.code == 0 {
-                self.authenticated(cx, &envelope);
+            } else if channel == 1 && envelope.method == "public/auth" {
+                let code = serde_json::from_str::<AuthenticationReply>(text)?.code;
+                if code != 0 {
+                    cx.log(
+                        LogLevel::Error,
+                        format!(
+                            "Crypto.com private login rejected: {} {}",
+                            envelope.code, envelope.message
+                        ),
+                    );
+                    cx.close(socket);
+                    self.on_close(cx, socket, 1008);
+                } else if !self.sockets[channel].authenticated {
+                    self.sockets[channel].authenticated = true;
+                    self.sockets[channel].supervisor.authenticated(cx);
+                    self.authenticated(cx, &envelope);
+                }
             } else if envelope.code != 0 {
                 cx.log(
                     LogLevel::Error,
@@ -417,13 +452,12 @@ impl Venue for Cryptocom {
         if let Some(channel) = self.sockets.iter().position(|s| s.socket == Some(socket)) {
             let state = &mut self.sockets[channel];
             state.open = false;
+            state.authenticated = false;
             state.socket = None;
             if let Some(timer) = state.ready.take() {
                 cx.clear_timer(timer);
             }
-            if state.reconnect.is_none() {
-                state.reconnect = Some(cx.set_timer(1_000.0));
-            }
+            state.supervisor.retry(cx);
             if channel == 0 {
                 for state in self.books.values_mut() {
                     state.synced = false;
@@ -585,23 +619,21 @@ impl Venue for Cryptocom {
             self.reconcile(cx);
             return;
         }
-        if self.watchdog == Some(timer) {
-            for channel in 0..2 {
-                let state = &self.sockets[channel];
-                if state.open && cx.now - state.last >= 90_000.0 {
-                    let socket = state.socket.unwrap();
-                    cx.close(socket);
-                    self.on_close(cx, socket, 1006);
-                }
-            }
-            self.watchdog = Some(cx.set_timer(5_000.0));
-            return;
-        }
         for channel in 0..2 {
-            if self.sockets[channel].reconnect == Some(timer) {
-                self.sockets[channel].reconnect = None;
-                self.connect(cx, channel);
-                return;
+            match self.sockets[channel].supervisor.on_timer(cx, timer) {
+                Tick::Reconnect => {
+                    self.connect(cx, channel);
+                    return;
+                }
+                Tick::TimedOut(_) => {
+                    if let Some(socket) = self.sockets[channel].socket {
+                        cx.close(socket);
+                        self.on_close(cx, socket, 1006);
+                    }
+                    return;
+                }
+                Tick::Handled | Tick::Ping => return,
+                Tick::Unhandled => {}
             }
             if self.sockets[channel].ready == Some(timer) {
                 self.sockets[channel].ready = None;
