@@ -430,3 +430,26 @@ Signing, integer scaling, tx encoding and nonces match TS.
 - Low: thinner error mapping (rate-limit guidance, 21613 refresh); reduce-only
   re-check races a fixed 2 s timer. Shared with TS: amend re-places the full
   original size after a partial fill.
+
+### WOO
+No confirmed highs; valid data matches TS.
+- Medium: algo child rows don't inherit the parent's side/status/reduceOnly, so
+  fills can be lost (`woo/src/account.rs:700`; verify one live frame); one bad
+  position row freezes positions (`account.rs:749,949`); one unmappable
+  fill/order-history/instrument/ticker row fails the read or startup.
+- Low: SL trigger falls back to `triggerType`; algo reduceOnly default; leverage
+  readback can report a false error; isolated warning; stop without reference
+  price rejects the snapshot.
+
+### AsterDEX
+No confirmed highs.
+- Medium: failed position-mode read silently leaves one-way, never retried, and
+  orders can go before it lands (`asterdex/src/account.rs:566`); order events
+  with unmapped types (e.g. `LIQUIDATION`) dropped with their fills
+  (`account.rs:817`); one malformed row halts startup (`lib.rs:849,781`); one bad
+  row discards open-orders/positions snapshots (`account.rs:402,415`); hedge
+  amend of a closing order may open the opposite side (shared with TS; reuse the
+  row's `positionSide`).
+- Low: no credential check at start; ACCOUNT_UPDATE strict on `ep`/`cr`; fills
+  history fails on one row and refuses >7 day windows; listen-key keepalive
+  omits `listenKey` and tears down on failure; partial balance rows skipped.
