@@ -399,3 +399,28 @@ Independent audit passes; no explicit internal-cache deletion proof is claimed.
 Freeze final shared helpers/TS/dependencies only after candidate checks/release.
 Prior controls and stopped cohorts remain immutable. Full performance goals and
 PR landing remain unfinished; no public samples ran in this integration phase.
+
+## Product release and final collection readiness
+
+All 26 fresh family releases and isolated feature Clippy checks pass. The native
+fixture, frame-wire and session-adapter checks pass. Independent physical audit
+verifies 418 source/build inputs, 234 bindings and 243 preserved archive files;
+original control source/binaries and historical proofs remain unchanged.
+Actual release tests pass SDK 423 (13 files), host 167, and 36 combined parity,
+lifecycle, spot and derivative-product checks. All 52 family size checks pass.
+
+Preserve the failed original-cap check. Two independently reviewed exceptions
+use actual bytes plus 3%, rounded up to KiB: Bybit 1,140,161 bytes gets a
+1,174,528 cap for incoming options/combined accounts and product features;
+Breakout 703,407 bytes gets a 724,992 cap. Breakout adds no product: landing
+explicitly trades subscription parser bytes for startup CPU, alongside shared
+command/order schema changes. This explains the accepted scope, without exact
+byte attribution or claiming a measured CPU win. Other 24 caps remain fixed.
+`RUST_PERF_DELIVERY26_PRODUCTS_RELEASE.json.gz` preserves proofs, passing logs
+and the failed size log. Runtime/source files are unchanged since `86d816d98c`.
+
+Freeze the reviewed 37-public/63-private method and dependencies now. Review the
+actual frozen configuration, then run private checks followed by the fixed
+three-run public comparisons with all compilers and other tests quiet. Keep
+all numerical failures and report narrower margins; no directional retries.
+CPU/memory goals and PR landing remain pending.

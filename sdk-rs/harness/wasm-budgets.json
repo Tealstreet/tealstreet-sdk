@@ -1,6 +1,6 @@
 {
   "binance": 960512,
-  "bybit": 1016832,
+  "bybit": 1174528,
   "okx": 835584,
   "cryptocom": 740352,
   "weex": 884736,
@@ -23,6 +23,6 @@
   "coinbase": 1058816,
   "polymarket": 902144,
   "grvt": 1015808,
-  "breakoutprop": 698368,
+  "breakoutprop": 724992,
   "txflow": 1003520
 }
