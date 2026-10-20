@@ -4,13 +4,14 @@ use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::{CommandId, Cx, Query, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet};
 
 const PAGE_SIZE: usize = 1000;
-const PAGE_CAP: usize = 50;
+const PAGE_CAP: u32 = 50;
 const CREATION_SKEW_NS: u64 = 300_000_000_000;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -39,9 +40,7 @@ pub(crate) struct Request {
     limit: usize,
     income_kind: Option<String>,
     combine_income: bool,
-    cursor: String,
-    cursors: HashSet<String>,
-    pages: usize,
+    walk: CursorWalk,
     seen: HashSet<String>,
     page_seen: HashSet<String>,
     raw_seen: HashSet<String>,
@@ -440,9 +439,9 @@ impl Grvt {
             limit: limit.unwrap_or(1000).clamp(1, 1000) as usize,
             income_kind,
             combine_income,
-            cursor: String::new(),
-            cursors: HashSet::new(),
-            pages: 0,
+            walk: CursorWalk::new(PAGE_CAP)
+                .stall_on_empty_page()
+                .stall_on_no_new_rows(),
             seen: HashSet::new(),
             page_seen: HashSet::new(),
             raw_seen: HashSet::new(),
@@ -493,7 +492,7 @@ impl Grvt {
                 st: request.wire_start().map(|t| t.to_string()),
                 et: request.to.to_string(),
                 l: PAGE_SIZE,
-                c: &request.cursor,
+                c: request.walk.cursor().unwrap_or(""),
             })
             .expect("query")
         };
@@ -809,42 +808,45 @@ impl Grvt {
                 return;
             }
         };
-        r.pages += 1;
         if r.complete_fills() && r.count() > r.limit {
             self.history_failed(cx, r, "INCOMPLETE: GRVT order fills exceed requested limit");
             return;
         }
-        if !cursor.is_empty()
-            && (r.page_count == 0
-                || !r.cursors.insert(cursor.clone())
-                || r.page_raw.iter().all(|id| r.raw_seen.contains(id)))
-        {
-            self.history_failed(
-                cx,
-                r,
-                "INCOMPLETE: GRVT history cursor stalled or page cap reached",
-            );
-            return;
-        }
+        // Raw identities commit only with their page, so a retried page is not a repeat.
+        let page = CursorPage {
+            next: Some(cursor),
+            rows: r.page_count,
+            fresh: r
+                .page_raw
+                .iter()
+                .filter(|id| !r.raw_seen.contains(*id))
+                .count(),
+            want_more: r.complete_fills() || r.stage_count + r.staged.len() < r.limit,
+        };
+        let more = match r.walk.advance(page) {
+            CursorStep::More(_) => true,
+            CursorStep::Done => false,
+            CursorStep::Stalled(Stall::PageBudget) => {
+                self.history_failed(cx, r, "INCOMPLETE: GRVT history page cap reached");
+                return;
+            }
+            CursorStep::Stalled(_) => {
+                self.history_failed(cx, r, "INCOMPLETE: GRVT history cursor stalled");
+                return;
+            }
+        };
         r.stage_count += r.staged.len();
         r.seen.extend(r.page_seen.drain());
         r.raw_seen.extend(r.page_raw.drain());
         r.lifecycles.extend(r.page_lifecycles.drain());
         r.rows.append(&mut r.staged);
-        let more = !cursor.is_empty() && (r.complete_fills() || r.stage_count < r.limit);
-        if more && r.pages >= PAGE_CAP {
-            self.history_failed(cx, r, "INCOMPLETE: GRVT history page cap reached");
-            return;
-        }
         if !r.complete_fills() {
             r.rows.sort_by(|a, b| b.time().total_cmp(&a.time()));
             r.rows.truncate(r.limit);
         }
         if !more && r.combine_income && r.kind == Kind::Funding {
             r.kind = Kind::IncomeFills;
-            r.cursor.clear();
-            r.cursors.clear();
-            r.pages = 0;
+            r.walk.restart();
             r.stage_count = 0;
             r.raw_seen.clear();
             r.reset();
@@ -852,7 +854,6 @@ impl Grvt {
             return;
         }
         if more {
-            r.cursor = cursor;
             r.reset();
             self.history_send(cx, r);
             return;

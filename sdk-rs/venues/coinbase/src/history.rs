@@ -2,11 +2,14 @@
 use crate::{Coinbase, Pending, ProductKind, account, account_wire::Decimal, public::ws_symbol};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 const MAX_OUTPUT: usize = 1000;
+/// Pages per product family before a read with a pending cursor fails.
+const MAX_PAGES: u32 = 50;
 const MAX_TIME: f64 = 253402300799999.0;
 #[derive(Default)]
 pub struct History {
@@ -27,9 +30,8 @@ pub struct Request {
     from: Option<f64>,
     to: Option<f64>,
     limit: usize,
-    page: usize,
     page_items: usize,
-    cursors: HashSet<String>,
+    walk: CursorWalk,
     families: VecDeque<ProductKind>,
     family: ProductKind,
     family_rows: usize,
@@ -299,9 +301,8 @@ impl Coinbase {
                 from,
                 to,
                 limit,
-                page: 1,
                 page_items: 0,
-                cursors: HashSet::new(),
+                walk: CursorWalk::new(MAX_PAGES),
                 families,
                 family,
                 family_rows: 0,
@@ -653,12 +654,30 @@ impl Coinbase {
             } else {
                 req.page_items > 0 && !page.cursor.is_empty()
             };
-        if more && req.family_rows < req.limit {
-            if req.page >= 50
-                || page.cursor.is_empty()
-                || page.cursor.len() > 2048
-                || !req.cursors.insert(page.cursor.clone())
-            {
+        let want_more = req.family_rows < req.limit;
+        // Orders announce more pages with has_next; that flag without a usable
+        // cursor cannot be followed.
+        if more && want_more && (page.cursor.is_empty() || page.cursor.len() > 2048) {
+            self.history_failed(
+                cx,
+                req,
+                "Coinbase history cursor repeated or page limit exceeded",
+            );
+            return;
+        }
+        let step = req.walk.advance(CursorPage {
+            next: more.then_some(page.cursor),
+            rows: req.page_items,
+            fresh: req.page_items,
+            want_more,
+        });
+        match step {
+            CursorStep::More(cursor) => {
+                req.page_items = 0;
+                self.history_read(cx, req, Some(&cursor));
+                return;
+            }
+            CursorStep::Stalled(_) => {
                 self.history_failed(
                     cx,
                     req,
@@ -666,17 +685,13 @@ impl Coinbase {
                 );
                 return;
             }
-            req.page += 1;
-            req.page_items = 0;
-            self.history_read(cx, req, Some(&page.cursor));
-            return;
+            CursorStep::Done => {}
         }
         if let Some(next) = req.families.pop_front() {
             req.family = next;
-            req.page = 1;
             req.page_items = 0;
             req.family_rows = 0;
-            req.cursors.clear();
+            req.walk.restart();
             self.history_read(cx, req, None);
             return;
         }

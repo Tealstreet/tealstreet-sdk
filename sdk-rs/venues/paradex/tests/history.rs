@@ -388,3 +388,81 @@ fn zero_order_limit_means_unbounded_and_public_trade_limit_clamps_to_one() {
     let rows: Vec<serde_json::Value> = serde_json::from_str(h.result(18).unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
 }
+
+/// Pins the exact request sequence of each paged read. Paging refactors keep
+/// it; a deliberate request change updates it with its bug-fix regression.
+#[test]
+fn paged_request_sequences_are_pinned() {
+    let path = |url: &str| url.split_once("/v1").map_or(url, |(_, p)| p).to_owned();
+    let mut sent = Vec::new();
+    let mut h = private();
+    let page = |id: &str, next: Option<&str>, row: &str| {
+        let row = row
+            .replace("fill-a", id)
+            .replace(r#""id":"123""#, &format!(r#""id":"{id}""#));
+        match next {
+            Some(n) => format!(r#"{{"next":"{n}","results":[{row}]}}"#),
+            None => format!(r#"{{"results":[{row}]}}"#),
+        }
+    };
+    read(
+        &mut h,
+        1,
+        Query::Fills {
+            symbol: Some("BTC-USD-PERP".into()),
+            order_id: None,
+            from_ms: Some(1_681_375_000_000.),
+            to_ms: Some(1_681_375_200_000.),
+            limit: Some(5),
+        },
+    );
+    for (id, next) in [("f1", Some("c1")), ("f2", None)] {
+        let r = h.take("/fills?");
+        sent.push(path(&r.url));
+        h.respond(r, 200, &page(id, next, FILL));
+    }
+    assert!(h.result(1).is_ok());
+    read(
+        &mut h,
+        2,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: Some(1_681_375_000_000.),
+            to_ms: Some(1_681_375_200_000.),
+            limit: None,
+        },
+    );
+    for (id, next) in [("o1", Some("c2")), ("o2", None)] {
+        let r = h.take("/orders-history?");
+        sent.push(path(&r.url));
+        h.respond(r, 200, &page(id, next, ORDER));
+    }
+    assert!(h.result(2).is_ok());
+    read(
+        &mut h,
+        3,
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: Some(1_681_375_000_000.),
+            to_ms: Some(1_681_375_200_000.),
+            limit: None,
+        },
+    );
+    for (id, next) in [("i1", Some("c3")), ("i2", None)] {
+        let r = h.take("/fills?");
+        sent.push(path(&r.url));
+        h.respond(r, 200, &page(id, next, FILL));
+    }
+    assert!(h.result(3).is_ok());
+    assert_eq!(sent, PINNED);
+}
+
+const PINNED: [&str; 6] = [
+    "/fills?market=BTC-USD-PERP&page_size=5&end_at=1681375200000",
+    "/fills?market=BTC-USD-PERP&page_size=5&end_at=1681375200000&cursor=c1",
+    "/orders-history?market=BTC-USD-PERP&page_size=100&start_at=1681375000000&end_at=1681375200000",
+    "/orders-history?market=BTC-USD-PERP&page_size=100&start_at=1681375000000&end_at=1681375200000&cursor=c2",
+    "/fills?page_size=500&start_at=1681375000000&end_at=1681375200000",
+    "/fills?page_size=500&start_at=1681375000000&end_at=1681375200000&cursor=c3",
+];

@@ -2,10 +2,14 @@
 use crate::{Lighter, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use std::{borrow::Cow, collections::HashSet};
+use std::borrow::Cow;
+
+/// Pages per stage before a read that still has a cursor fails as incomplete.
+const MAX_PAGES: u32 = 1000;
 
 pub struct Request {
     command: CommandId,
@@ -18,13 +22,10 @@ pub struct Request {
     from: Option<f64>,
     to: Option<f64>,
     limit: usize,
-    cursor: Option<String>,
-    cursors: HashSet<String>,
-    seen: HashSet<String>,
+    walk: CursorWalk,
     rows: Vec<Row>,
     count: usize,
     failed: Option<String>,
-    pages: u32,
     /// Trades arrive newest first; a row older than `from` ends the window.
     past_window: bool,
 }
@@ -392,13 +393,10 @@ impl Lighter {
             from,
             to,
             limit: limit.unwrap_or(100).clamp(1, 200) as usize,
-            cursor: None,
-            cursors: HashSet::new(),
-            seen: HashSet::new(),
+            walk: CursorWalk::new(MAX_PAGES),
             rows: Vec::new(),
             count: 0,
             failed: None,
-            pages: 0,
             past_window: false,
         };
         self.history_request(cx, request);
@@ -406,7 +404,6 @@ impl Lighter {
 
     fn history_request(&self, cx: &mut Cx<'_, Pending>, mut request: Request) {
         request.count = 0;
-        request.pages += 1;
         let path = match request.stage {
             Stage::Trades => "trades",
             Stage::Orders => "accountInactiveOrders",
@@ -438,7 +435,7 @@ impl Lighter {
                 }
             }
         }
-        if let Some(cursor) = &request.cursor {
+        if let Some(cursor) = request.walk.cursor() {
             url.push_str(&format!("&cursor={}", encode(cursor)));
         }
         let mut headers = Vec::new();
@@ -508,7 +505,7 @@ impl Lighter {
         if !within(request, timestamp) {
             return Ok(());
         }
-        if !request.seen.insert(format!("trade:{}:{id}", t.market_id.0)) {
+        if !request.walk.fresh(format!("trade:{}:{id}", t.market_id.0)) {
             return Ok(());
         }
         let quote = t.usd_amount.as_ref().map_or(t.price.0 * t.size.0, |n| n.0);
@@ -648,8 +645,8 @@ impl Lighter {
         }
         if within(request, timestamp)
             && request
-                .seen
-                .insert(format!("funding:{}:{}", f.market_id.0, f.funding_id.0))
+                .walk
+                .fresh(format!("funding:{}:{}", f.market_id.0, f.funding_id.0))
         {
             request.rows.push(Row::Income(Income {
                 symbol: symbol.into(),
@@ -690,8 +687,8 @@ impl Lighter {
             .ok_or("Lighter historical order has no timestamp")?;
         if !within(request, timestamp)
             || !request
-                .seen
-                .insert(format!("order:{}:{}", order.symbol, order.id))
+                .walk
+                .fresh(format!("order:{}:{}", order.symbol, order.id))
         {
             return Ok(());
         }
@@ -761,17 +758,25 @@ impl Lighter {
             .filter(|c| !c.is_empty())
             .map(Cow::into_owned);
         let enough = enough || request.past_window;
-        if !enough && let Some(cursor) = cursor {
-            if !request.cursors.insert(cursor.clone()) || request.pages >= 1000 {
+        let page = CursorPage {
+            next: cursor,
+            rows: request.count,
+            fresh: request.count,
+            want_more: !enough,
+        };
+        match request.walk.advance(page) {
+            CursorStep::More(_) => {
+                self.history_request(cx, request);
+                return;
+            }
+            CursorStep::Stalled(_) => {
                 cx.done(
                     request.command,
                     Err("Lighter history cursor did not make progress".into()),
                 );
                 return;
             }
-            request.cursor = Some(cursor);
-            self.history_request(cx, request);
-            return;
+            CursorStep::Done => {}
         }
         if !enough && request.count >= 100 {
             cx.done(
@@ -782,8 +787,7 @@ impl Lighter {
         }
         if request.stage == Stage::Trades && matches!(request.read, Read::Income(IncomeKind::All)) {
             request.stage = Stage::Funding;
-            request.cursor = None;
-            request.cursors.clear();
+            request.walk.restart();
             request.past_window = false;
             self.history_request(cx, request);
             return;
