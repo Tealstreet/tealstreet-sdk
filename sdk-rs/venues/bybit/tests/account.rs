@@ -1544,3 +1544,44 @@ fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
     assert_eq!(rows.len(), 1000);
     assert!(h.logs.iter().any(|m| m.contains("page limit")));
 }
+
+/// Pins the exact request sequence of a windowed, cursor-paged read: 7-day
+/// windows newest first, the first walked over two cursor pages. Paging
+/// refactors keep it.
+#[test]
+fn windowed_fill_request_sequence_is_pinned() {
+    let mut h = ready();
+    let day = 86_400_000.0;
+    let to = 1_672_000_000_000.0;
+    h.command(Command::Query {
+        command: 35,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(to - 15.0 * day),
+            to_ms: Some(to),
+            limit: None,
+        },
+    });
+    let page = |id: &str, cursor: &str| {
+        format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"nextPageCursor":"{cursor}","list":[{{"symbol":"BTCUSDT","execId":"{id}","orderId":"o","side":"Buy","execPrice":"100","execQty":"1","execFee":"0.1","execType":"Trade","execTime":"1671999000000","isMaker":false}}]}}}}"#
+        )
+    };
+    let mut sent = Vec::new();
+    for (id, cursor) in [("e1", "c1"), ("e2", ""), ("e3", ""), ("e4", "")] {
+        let request = h.take("/v5/execution/list");
+        sent.push(request.url.split_once("/v5/").unwrap().1.to_owned());
+        h.reply(request.id, 200, &page(id, cursor));
+    }
+    assert!(h.result(35).unwrap().is_ok());
+    assert_eq!(
+        sent,
+        [
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=50",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=50&cursor=c1",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670790400001&endTime=1671395200000&limit=50",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670704000000&endTime=1670790400000&limit=50",
+        ]
+    );
+}

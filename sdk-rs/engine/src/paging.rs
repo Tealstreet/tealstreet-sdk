@@ -155,6 +155,55 @@ impl RangeWalk {
     }
 }
 
+/// Which end of a range the first window covers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowOrder {
+    NewestFirst,
+    OldestFirst,
+}
+
+/// Splits the inclusive range `[from, to]` into disjoint inclusive windows
+/// `[a, b]` with `b - a <= width`, each starting 1 ms past its neighbour, as
+/// venues with a maximum query span require. `None` when more than
+/// `max_windows` would be needed or the range is empty or invalid.
+pub fn windows(
+    from: f64,
+    to: f64,
+    width: f64,
+    order: WindowOrder,
+    max_windows: usize,
+) -> Option<std::collections::VecDeque<(f64, f64)>> {
+    if !(from <= to && width >= 0.0 && from.is_finite() && to.is_finite() && width.is_finite()) {
+        return None;
+    }
+    let mut out = std::collections::VecDeque::new();
+    match order {
+        WindowOrder::OldestFirst => {
+            let mut a = from;
+            while a <= to {
+                if out.len() >= max_windows {
+                    return None;
+                }
+                let b = (a + width).min(to);
+                out.push_back((a, b));
+                a = b + 1.0;
+            }
+        }
+        WindowOrder::NewestFirst => {
+            let mut b = to;
+            while b >= from {
+                if out.len() >= max_windows {
+                    return None;
+                }
+                let a = (b - width).max(from);
+                out.push_back((a, b));
+                b = a - 1.0;
+            }
+        }
+    }
+    Some(out)
+}
+
 /// Why a continuation walk stopped before the venue said it was done.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stall {
@@ -436,6 +485,30 @@ mod tests {
             walk.advance(page(Some("a"), 1, 1)),
             CursorStep::More("a".into())
         );
+    }
+
+    #[test]
+    fn windows_tile_the_range_disjointly_in_either_order() {
+        let oldest: Vec<_> = windows(0.0, 25.0, 9.0, WindowOrder::OldestFirst, 10)
+            .unwrap()
+            .into();
+        assert_eq!(oldest, [(0.0, 9.0), (10.0, 19.0), (20.0, 25.0)]);
+        let newest: Vec<_> = windows(0.0, 25.0, 9.0, WindowOrder::NewestFirst, 10)
+            .unwrap()
+            .into();
+        assert_eq!(newest, [(16.0, 25.0), (6.0, 15.0), (0.0, 5.0)]);
+        // A single millisecond, an exact fit and the window budget.
+        assert_eq!(
+            windows(5.0, 5.0, 9.0, WindowOrder::NewestFirst, 1).unwrap(),
+            [(5.0, 5.0)]
+        );
+        assert_eq!(
+            windows(0.0, 9.0, 9.0, WindowOrder::OldestFirst, 1).unwrap(),
+            [(0.0, 9.0)]
+        );
+        assert!(windows(0.0, 10.0, 9.0, WindowOrder::OldestFirst, 1).is_none());
+        assert!(windows(2.0, 1.0, 9.0, WindowOrder::OldestFirst, 10).is_none());
+        assert!(windows(0.0, f64::NAN, 9.0, WindowOrder::OldestFirst, 10).is_none());
     }
 
     #[test]

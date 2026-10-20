@@ -6,6 +6,7 @@ use crate::sign::Query;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Pending, Rest, Then, venue_error};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::paging::{self, WindowOrder};
 use safe_cex_engine::{CommandId, Cx, LogLevel, Query as Read, Response};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -203,17 +204,21 @@ fn windows(from: Option<f64>, to: Option<f64>) -> VecDeque<(Option<f64>, Option<
     let (Some(from), Some(to)) = (from, to) else {
         return VecDeque::from([(from, to)]);
     };
-    let mut windows = VecDeque::new();
-    let mut end = to;
-    loop {
-        let start = from.max(end - MAX_WINDOW_MS);
-        windows.push_back((Some(start), Some(end)));
-        if start <= from {
-            break;
-        }
-        end = start - 1.0;
-    }
-    windows
+    paging::windows(
+        from,
+        to,
+        MAX_WINDOW_MS,
+        WindowOrder::NewestFirst,
+        usize::MAX,
+    )
+    .map(|windows| {
+        windows
+            .into_iter()
+            .map(|(a, b)| (Some(a), Some(b)))
+            .collect()
+    })
+    // An inverted range keeps its single window for Bybit to reject.
+    .unwrap_or_else(|| VecDeque::from([(Some(from), Some(to))]))
 }
 
 fn nontrade_execution(kind: &str) -> bool {

@@ -1,6 +1,7 @@
 //! Native cursor reads; response lists stream and never enter the flush frame.
 use crate::wire::{Envelope, Identifier, Number};
 use crate::{BitgetFutures, Pending, paths, sign};
+use safe_cex_engine::paging::{self, WindowOrder};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, json::ArrayAt, num};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::collections::{HashSet, VecDeque};
@@ -283,23 +284,23 @@ impl BitgetFutures {
             cx.done(command, Err("invalid Bitget history range".into()));
             return;
         }
-        let mut windows = VecDeque::new();
-        if let (Some(mut a), Some(b)) = (from, to) {
-            while a <= b {
-                if windows.len() >= 1000 {
+        let mut windows: VecDeque<_> = if let (Some(a), Some(b)) = (from, to) {
+            match paging::windows(a, b, 30.0 * DAY - 1.0, WindowOrder::OldestFirst, 1000) {
+                Some(windows) => windows
+                    .into_iter()
+                    .map(|(a, b)| (Some(a), Some(b)))
+                    .collect(),
+                None => {
                     cx.done(
                         command,
                         Err("Bitget history range exceeds 1000 windows".into()),
                     );
                     return;
                 }
-                let end = (a + 30.0 * DAY - 1.0).min(b);
-                windows.push_back((Some(a), Some(end)));
-                a = end + 1.0;
             }
         } else {
-            windows.push_back((from, to));
-        }
+            VecDeque::from([(from, to)])
+        };
         let window = windows.pop_front().expect("one window");
         let request = Request {
             command,
