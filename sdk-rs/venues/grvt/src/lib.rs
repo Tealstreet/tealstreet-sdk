@@ -13,7 +13,7 @@ use safe_cex_engine::{
 use serde::Serialize;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
@@ -22,19 +22,6 @@ pub struct Options {
     pub trading_account_id: Option<String>,
     pub signer_address: Option<String>,
     pub session_proxy: bool,
-}
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            testnet: false,
-            public_data_only: false,
-            key: None,
-            secret: None,
-            trading_account_id: None,
-            signer_address: None,
-            session_proxy: true,
-        }
-    }
 }
 #[derive(Clone)]
 pub struct InstrumentInfo {

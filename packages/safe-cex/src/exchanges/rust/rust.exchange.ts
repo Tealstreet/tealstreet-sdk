@@ -27,7 +27,6 @@ import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
-import { resolveTransportRouting } from '../../transport/registry';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
@@ -245,8 +244,8 @@ export class RustEngineExchange extends BaseExchange {
         ...(this.name === 'grvt' ? {
           grvtTradingAccountId: this.options.grvtTradingAccountId,
           grvtSignerAddress: this.options.grvtSignerAddress,
-          grvtSessionProxy: Boolean(resolveTransportRouting(this.name, this.options).wsPrivate.host),
         } : {}),
+        ...transport.engineOptions,
         ...(this.name === 'weex' ? { privateWsHeaders: Boolean(transport.webSocketHeaders) } : {}),
       }),
     );

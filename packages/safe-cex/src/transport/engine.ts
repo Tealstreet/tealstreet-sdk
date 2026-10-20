@@ -319,6 +319,12 @@ export const createEngineTransport = (
   const fallbacks = new Map<string, WsDirectFallback>();
   const http = httpTransport(exchange, options, transport, provider, restRouting);
   return {
+    // Protocol negotiation must use the same resolved route as connect(),
+    // including hosts (such as Workers) which construct the engine themselves.
+    engineOptions: {
+      ...transport.engineOptions,
+      ...(exchange === 'grvt' ? { grvtSessionProxy: Boolean(routes.private.host) } : {}),
+    },
     webSocketHeaders: transport.webSocketHeaders,
     now: () => transport.now(),
     setTimeout: (fn, ms) => transport.setTimeout(fn, ms),

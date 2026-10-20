@@ -16,11 +16,16 @@ struct Harness {
 }
 impl Harness {
     fn new(proxy: bool) -> Self {
+        Self::with_options(Options {
+            session_proxy: proxy,
+            ..Options::default()
+        })
+    }
+    fn with_options(options: Options) -> Self {
         let mut engine = Engine::new(Grvt::new(Options {
             key: Some("fixture-api-key".into()),
             secret: Some(format!("0x{}", "01".repeat(32))),
-            session_proxy: proxy,
-            ..Options::default()
+            ..options
         }));
         engine.start(NOW);
         let mut h = Self {
@@ -213,7 +218,7 @@ fn zero_available_is_zero_and_auto_detected_account_precedes_reads() {
 }
 
 #[test]
-fn proxy_auth_is_first_and_native_direct_auth_uses_upgrade_headers() {
+fn proxy_auth_is_first_and_native_defaults_use_upgrade_headers() {
     let mut proxy = Harness::new(true);
     proxy.authenticate();
     let socket = proxy.socket.unwrap();
@@ -242,7 +247,7 @@ fn proxy_auth_is_first_and_native_direct_auth_uses_upgrade_headers() {
     assert_eq!(messages.len(), 4);
     assert!(messages[1].contains(r#""stream":"v1.order""#));
     assert!(messages[1].contains(r#""feed":["777"]"#));
-    let mut native = Harness::new(false);
+    let mut native = Harness::with_options(Options::default());
     native.authenticate();
     let socket = native.socket.unwrap();
     assert!(native.actions.iter().any(|a|matches!(a,Action::WsConnectWithHeaders {socket:s,url,headers,channel:Some(SocketChannel::Private),..} if *s==socket && url=="wss://trades.grvt.io/ws" && headers.iter().any(|(k,v)|*k=="Cookie" && v=="rm=true; gravity=fixture-session"))));

@@ -258,3 +258,29 @@ test('a Workers raw socket failure reports one abnormal close despite a followin
   raw.close(1000);
   assert.deepEqual(events, ['error', 1006]);
 });
+
+test('Workers applies factory protocol options after caller flags while retaining upgrade capability', async () => {
+  for (const sessionProxy of [true, false]) {
+    let received;
+    const EngineObject = createEngineObject({
+      loadEngine: async () => ({ WasmEngine: class {
+        constructor(_venue, json) { received = JSON.parse(json); }
+        start() { return ''; }
+      } }),
+      createTransport: (_venue, _options, raw) => ({
+        ...raw,
+        engineOptions: { grvtSessionProxy: sessionProxy },
+      }),
+    });
+    const object = new EngineObject({ storage: { setAlarm() {} } });
+    const client = { send() {} };
+    try {
+      await object.receive(client, JSON.stringify({ op: 'start', venue: 'grvt', options: {
+        key: 'fixture-key', grvtSessionProxy: !sessionProxy, privateWsHeaders: false,
+      } }));
+      assert.equal(received.grvtSessionProxy, sessionProxy);
+      assert.equal(received.privateWsHeaders, true);
+      assert.equal(received.key, 'fixture-key');
+    } finally { object.leave(client); }
+  }
+});

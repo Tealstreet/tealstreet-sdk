@@ -16,6 +16,7 @@ fn boot_with_socket() -> (Engine<Grvt>, SocketId) {
         key: Some("grvt-test-key".into()),
         secret: Some(format!("0x{}", "01".repeat(32))),
         trading_account_id: Some("9007199254740993".into()),
+        session_proxy: true,
         ..Options::default()
     }));
     e.start(NOW);
