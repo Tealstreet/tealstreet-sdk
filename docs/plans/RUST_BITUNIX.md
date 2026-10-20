@@ -2403,3 +2403,23 @@ receipts: 28,694 frames, 697 markets/tickers, two books; TS/Rust main CPU
 1,330.4/1,252.6 ms, steady 757.8/719.4 ms, retained 3.7/2.6 MB, sampled peak
 12.1/5.1 MB. No unchanged retry or measurement-policy change. Binance controls
 and remaining venue checks continue under /tmp/bitunix-df2-identityscope-*.
+
+
+KuCoin startup causal proof is complete. Actual unchanged TS diagnostic dispatches
+contracts 0→334, tickers 334→495, first bullet 495→628. The first recorded OPEN
+at 952 requires the second token, whose real shared quota slot is at 1000.
+At the blocked prefix there are no held callbacks, work, pending responses,
+unserved requests or invalid signatures; only the first token's socket exists.
+The scheduler correctly refuses to fire the 1000 timer past OPEN 952. Exact
+trace is /tmp/bitunix-kucoin-causal-ts.log. Generic write identity is excluded:
+bullet POST is a read and appends no write/outbound entry in a production probe.
+The old fixture predates the native quota correction and is obsolete evidence.
+
+Preserve its gzip/raw copies and hashes outside the repository, then acquire a
+NEW actual native KuCoin public recording using the current corrected budget,
+standard 20-second acquisition and the same BTCUSDT/ETHUSDT books. Keep every
+real startup record; no retiming, padding, after-ready policy or duration change.
+Independent causal/provenance review and strict TS/Rust functional replay must
+validate the new capture before its performance gate. Native production,
+clock, deadlines, matching, hashes and thresholds remain unchanged. Related
+Bitunix/Binance controls are already green under the latest shared identity.
