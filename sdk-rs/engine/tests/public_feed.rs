@@ -586,3 +586,66 @@ fn non_ticker_packets_do_not_replay_valuation_or_dirty_positions_but_pending_nat
     assert_eq!(engine.store().ticker("A").unwrap().bid, 124.);
     assert_eq!(engine.store().positions()[0].unrealized_pnl, 24.);
 }
+
+#[test]
+fn shared_book_snapshots_and_clears_do_not_depend_on_a_venue_native_book() {
+    for deltas in [false, true] {
+        let mut engine = shared();
+        #[cfg(feature = "book-deltas")]
+        engine.set_book_deltas(deltas);
+        #[cfg(not(feature = "book-deltas"))]
+        let _ = deltas;
+        assert!(engine.venue().book("A").is_none());
+        assert_eq!(engine.venue().books().count(), 0);
+        engine.take_frame(0.);
+        engine.apply_public_feed(1., update(r#"{"op":"publicFeedUpdate","books":[{"symbol":"A","bids":[[99,2]],"asks":[[101,3]]}]}"#)).unwrap();
+        for frame in [
+            engine.take_frame(1.).unwrap().to_vec(),
+            engine.snapshot_frame(2.).to_vec(),
+        ] {
+            let payload = sections(&frame)
+                .find(|(kind, _)| *kind == section::BOOK)
+                .unwrap()
+                .1;
+            assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 1);
+            assert_eq!(u32::from_le_bytes(payload[4..8].try_into().unwrap()), 1);
+            assert_eq!(u32::from_le_bytes(payload[8..12].try_into().unwrap()), 1);
+            assert_eq!(f64::from_le_bytes(payload[16..24].try_into().unwrap()), 99.);
+            assert_eq!(f64::from_le_bytes(payload[24..32].try_into().unwrap()), 2.);
+            assert_eq!(
+                f64::from_le_bytes(payload[40..48].try_into().unwrap()),
+                101.
+            );
+            assert_eq!(f64::from_le_bytes(payload[48..56].try_into().unwrap()), 3.);
+        }
+        engine
+            .apply_public_feed(
+                3.,
+                update(r#"{"op":"publicFeedUpdate","books":[{"symbol":"A","bids":[],"asks":[]}]}"#),
+            )
+            .unwrap();
+        // The worker sent the invalidation, but a suspended consumer missed it.
+        let clear = engine.take_frame(3.).unwrap().to_vec();
+        let recovery = engine.snapshot_frame(4.).to_vec();
+        for frame in [clear, recovery] {
+            let payload = sections(&frame)
+                .find(|(kind, _)| *kind == section::BOOK)
+                .unwrap()
+                .1;
+            assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 1);
+            assert_eq!(&payload[4..], &[0; 12]);
+        }
+        engine.apply_public_feed(5., update(r#"{"op":"publicFeedUpdate","books":[{"symbol":"A","bids":[],"asks":[[102,4]]}]}"#)).unwrap();
+        let frame = engine.snapshot_frame(5.);
+        let payload = sections(frame)
+            .find(|(kind, _)| *kind == section::BOOK)
+            .unwrap()
+            .1;
+        assert_eq!(u32::from_le_bytes(payload[4..8].try_into().unwrap()), 0);
+        assert_eq!(u32::from_le_bytes(payload[8..12].try_into().unwrap()), 1);
+        assert_eq!(
+            f64::from_le_bytes(payload[16..24].try_into().unwrap()),
+            102.
+        );
+    }
+}
