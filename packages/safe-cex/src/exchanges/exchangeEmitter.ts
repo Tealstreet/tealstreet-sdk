@@ -32,6 +32,10 @@ export class ExchangeEmitter extends TinyEmitter {
     if (failure) throw failure.cause;
   }
 
+  hasListeners(event: string): boolean {
+    return this.listeners(event).length > 0;
+  }
+
   private listeners(event: string): Listener[] {
     // TinyEmitter's inherited on/once/off own these records; snapshot before
     // dispatch so subscription changes retain its current-emission semantics.

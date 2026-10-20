@@ -31,8 +31,8 @@ import type {
   ValidateAccountResult,
 } from '../../types';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
-import type { CallableMethodsInWorker } from '../base';
-import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
+import type { CallableMethodsInWorker, WorkerTradingMethod } from '../base';
+import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
 import type { EngineSnapshot } from '../base';
 
 import bs58 from 'bs58';
@@ -57,7 +57,14 @@ import {
   resolveAsterDEXApiVersion,
   resolveAsterDEXV3AuthContext,
 } from '../asterdex/asterdex.types';
-import { BaseExchange, type ExchangeCapabilities, markBaseCapabilityFallback } from '../base';
+import {
+  BaseExchange,
+  type ExchangeCapabilities,
+  markBaseCapabilityFallback,
+  WORKER_TRADING_METHODS,
+  WORKER_WRITE_METHODS,
+  workerCallClientOrderIds,
+} from '../base';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import {
   HYROTRADER_PROD_URL,
@@ -65,7 +72,12 @@ import {
   HYROTRADER_SIMULATOR_URL,
   HYROTRADER_SIMULATOR_WS_URL,
 } from '../bybit/bybit.types';
-import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
+import {
+  decodeWorkerOrderIds,
+  isRegularClientOrderShape,
+  patternClientOrderIdRule,
+  withReplacementClientOrderId,
+} from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
@@ -233,6 +245,14 @@ let engineTransport: () => Transport = nativeTransport;
 export const setRustEngineTransport = (factory: () => Transport) => {
   engineTransport = factory;
 };
+
+const MULTI_COMMAND_WORKER_METHODS = new Set<CallableMethodsInWorker>([
+  'cancelAllOrders',
+  'nuke',
+  'nukePositions',
+  'nukeOrders',
+]);
+const MULTI_COMMAND_WAIT_FACTOR = 5;
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
@@ -403,6 +423,7 @@ export class RustEngineExchange extends BaseExchange {
         });
       };
     }
+    this.forwardTradingToWorker();
   }
 
   get isPublicDataOnly(): boolean {
@@ -687,16 +708,47 @@ export class RustEngineExchange extends BaseExchange {
     this.host = host;
   };
 
-  protected override workerCommandTimeoutMs = () => this.commandTimeoutMs + 1000;
+  // Nuke and cancel-all run several engine commands in sequence on the worker.
+  protected override workerCommandTimeoutMs = (method: CallableMethodsInWorker) =>
+    Math.min(
+      (MULTI_COMMAND_WORKER_METHODS.has(method) ? MULTI_COMMAND_WAIT_FACTOR : 1) * this.commandTimeoutMs + 1000,
+      2_147_483_647,
+    );
 
-  protected override workerCommandTimeoutError = (method: CallableMethodsInWorker): Error =>
-    Object.assign(new Error('Rust worker command timed out; reconcile interrupted writes before retrying'), {
+  protected override workerCommandTimeoutError = (method: CallableMethodsInWorker, args: unknown[]): Error => {
+    const clientOrderIds = workerCallClientOrderIds(method, args);
+    return Object.assign(new Error('Rust worker command timed out; reconcile interrupted writes before retrying'), {
       code: 'COMMAND_TIMEOUT',
       command: method,
-      ...(['setLeverage', 'scheduleCancel', 'changePositionMode', 'changeMarginType'].includes(method)
-        ? { outcome: 'unknown' as const }
-        : {}),
+      ...(WORKER_WRITE_METHODS.has(method) ? { outcome: 'unknown' as const } : {}),
+      ...(clientOrderIds ? { clientOrderIds } : {}),
     });
+  };
+
+  /**
+   * The host's worker bridge listens for `callMethod` on a main-thread instance;
+   * the worker's instance owns the engine and never has that listener. Trading
+   * runs there whole, so preflight, placement scopes and nuke retries see the
+   * authoritative state, even if a main-thread read started a local engine.
+   */
+  private get routesToWorker(): boolean {
+    return this.emitter.hasListeners('callMethod');
+  }
+
+  private forwardTradingToWorker() {
+    for (const method of WORKER_TRADING_METHODS) {
+      const local = this[method] as (...args: unknown[]) => Promise<unknown>;
+      (this as Record<WorkerTradingMethod, unknown>)[method] = async (...args: unknown[]) => {
+        if (!this.routesToWorker) return local(...args);
+        const result = await (this.callMethodInWorker as (m: WorkerTradingMethod, ...a: unknown[]) => Promise<unknown>)(
+          method,
+          ...args,
+        );
+        // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
+        return method === 'updateOrder' ? decodeWorkerOrderIds(result as WorkerOrderIds) : result;
+      };
+    }
+  }
 
   private receiveCommandProgress = (progress: CommandProgress) => {
     if (this.isDisposed || this.engineFailure) return;

@@ -120,6 +120,21 @@ never from venue names, and adopts it once the engine exists (`ensureHost` or
 take the branded base fallbacks, so `exchange.capabilities` reports them absent
 once the engine exists.
 
+## Rust main-thread trading
+
+The web builds a second `RustEngineExchange` on the main thread; the worker's
+instance owns the engine. An instance with a `callMethod` listener (the host's
+worker bridge) forwards the `WORKER_TRADING_METHODS` in `exchanges/base.ts` whole
+through `callMethodInWorker`, so preflight, placement scopes and nuke retries run
+against the worker's state and report there once. This holds even if a
+main-thread read (`fetchMarkets` during warm start) started a local engine; the
+worker never has that listener. Without a bridge, an instance runs locally.
+`updateOrder` crosses as `{ orderIds, clientOrderId }` because array properties
+do not survive a JSON bridge. Interrupted forwarded writes carry
+`outcome: 'unknown'` and the caller's client order IDs (`WORKER_WRITE_METHODS`,
+`workerCallClientOrderIds`); requests still buffered when a worker stops before
+startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
+
 ## Rust engine failure
 
 A native WASM trap makes that exchange instance terminal (`isEngineDead`),
