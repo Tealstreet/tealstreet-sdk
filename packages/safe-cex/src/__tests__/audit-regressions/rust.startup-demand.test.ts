@@ -227,7 +227,8 @@ it('registers the first book/candle callback before immediate data and forwards 
   expect(f.commands.some(({ op }) => op.startsWith('unsubscribe'))).toBe(false);
 });
 
-it('Aster retains independent registrations and canonical interval demand', async () => {
+// Intervals reach the engine unchanged; it rejects what Aster cannot serve.
+it('Aster retains independent registrations and forwards interval demand unchanged', async () => {
   const f = fixture('asterdex', { publicDataOnly: true });
   const callback = vi.fn();
   const stop1 = f.exchange.listenOrderBook('BTC:USD', callback);
@@ -239,13 +240,13 @@ it('Aster retains independent registrations and canonical interval demand', asyn
   await vi.waitFor(() => expect(f.constructed).toBe(1));
   f.ready();
   await read;
-  expect(subscriptions(f.commands)).toContainEqual({ op: 'subscribeCandles', symbol: 'BTC:USD', interval: '1h' });
+  expect(subscriptions(f.commands)).toContainEqual({ op: 'subscribeCandles', symbol: 'BTC:USD', interval: '8h' });
   f.deliver({}, true);
   expect(callback).toHaveBeenCalledOnce();
   stop2();
   stopCandle();
   expect(f.commands).toContainEqual({ op: 'unsubscribeOrderBook', symbol: 'BTC:USD' });
-  expect(f.commands).toContainEqual({ op: 'unsubscribeCandles', symbol: 'BTC:USD', interval: '1h' });
+  expect(f.commands).toContainEqual({ op: 'unsubscribeCandles', symbol: 'BTC:USD', interval: '8h' });
 });
 
 it('a newly registered topic receives the synchronous first book and candle', async () => {

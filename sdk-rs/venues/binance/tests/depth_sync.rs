@@ -58,7 +58,16 @@ fn a_snapshot_frame_carries_the_whole_state_without_draining_changes() {
     assert_eq!(
         kinds(&snapshot),
         [
-            MARKETS, TICKERS, ORDERS, POSITIONS, BALANCE, SETTINGS, STATUS, BOOK, STRINGS
+            MARKETS,
+            TICKERS,
+            ORDERS,
+            POSITIONS,
+            BALANCE,
+            SETTINGS,
+            STATUS,
+            CAPABILITIES,
+            BOOK,
+            STRINGS
         ]
     );
     let frame = h

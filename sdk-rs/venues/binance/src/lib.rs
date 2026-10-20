@@ -9,7 +9,7 @@ pub mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
@@ -222,7 +222,7 @@ pub struct BinanceFutures {
     books: HashMap<String, BookState>,
     /// Removing and re-adding a book must not reuse an in-flight snapshot ID.
     snapshot_generation: u64,
-    candles: HashMap<(String, String), u32>,
+    candles: HashMap<(String, Interval), u32>,
     ticker_seed: TickerSeed,
     discovery: safe_cex_engine::startup::Backoff<u8>,
     catalogue_partial: bool,
@@ -291,6 +291,16 @@ impl BinanceFutures {
 
     fn is_spot(&self) -> bool {
         self.options.variant == Variant::Spot
+    }
+
+    /// Binance kline codes are the TS spellings; only Spot serves `1s`.
+    fn supports(&self, interval: Interval) -> bool {
+        use Interval::*;
+        match interval {
+            S1 => self.is_spot(),
+            M1 | M3 | M5 | M15 | M30 | H1 | H2 | H4 | H6 | H8 | H12 | D1 | D3 | W1 | Mo1 => true,
+            _ => false,
+        }
     }
 
     fn is_inverse(&self) -> bool {
@@ -944,11 +954,14 @@ impl BinanceFutures {
             Some("kline") => {
                 if let Ok(event) = serde_json::from_str::<KlineEvent>(text) {
                     let k = &event.k;
-                    if self
-                        .candles
-                        .contains_key(&(k.s.to_string(), k.i.to_string()))
+                    if let Some(interval) = Interval::parse(&k.i)
+                        && self.candles.contains_key(&(k.s.to_string(), interval))
                     {
-                        cx.candle(&k.s, &k.i, kline_candle(k.t, &k.o, &k.h, &k.l, &k.c, &k.v));
+                        cx.candle(
+                            &k.s,
+                            interval,
+                            kline_candle(k.t, &k.o, &k.h, &k.l, &k.c, &k.v),
+                        );
                     }
                 }
             }
@@ -1286,7 +1299,11 @@ impl Venue for BinanceFutures {
                 client_order_lookup: true,
                 ..safe_cex_engine::Capabilities::BASE
             },
-            Variant::Spot | Variant::CoinM => safe_cex_engine::Capabilities::NO_HISTORY,
+            Variant::Spot => safe_cex_engine::Capabilities::NO_HISTORY,
+            Variant::CoinM => safe_cex_engine::Capabilities {
+                quantity_units: safe_cex_engine::QuantityUnits::InverseContractSized,
+                ..safe_cex_engine::Capabilities::NO_HISTORY
+            },
         }
     }
 
@@ -1600,19 +1617,18 @@ impl Venue for BinanceFutures {
             Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
             Command::UnsubscribeOrderBook { symbol } => self.unsubscribe_book(cx, &symbol),
             Command::SubscribeCandles { symbol, interval } => {
+                if !self.supports(interval) {
+                    cx.log(LogLevel::Error, interval.unsupported("Binance"));
+                    return;
+                }
                 if self.is_spot()
-                    && !self
-                        .candles
-                        .contains_key(&(symbol.clone(), interval.clone()))
+                    && !self.candles.contains_key(&(symbol.clone(), interval))
                     && self.books.len() + self.candles.len() >= 1_024
                 {
                     cx.log(LogLevel::Error, "Binance Spot supports at most 1024 combined book/candle streams per account");
                     return;
                 }
-                let count = self
-                    .candles
-                    .entry((symbol.clone(), interval.clone()))
-                    .or_insert(0);
+                let count = self.candles.entry((symbol.clone(), interval)).or_insert(0);
                 *count += 1;
                 if *count == 1 {
                     let topic = format!("{}@kline_{interval}", symbol.to_lowercase());
@@ -1638,8 +1654,11 @@ impl Venue for BinanceFutures {
                 from_ms,
                 to_ms,
             } => {
-                let query = match candles::query(&symbol, &interval, limit, from_ms, to_ms, cx.now)
-                {
+                if !self.supports(interval) {
+                    cx.done(command, Err(interval.unsupported("Binance")));
+                    return;
+                }
+                let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
                     Ok(query) => query,
                     Err(error) => {
                         cx.done(command, Err(error.into()));

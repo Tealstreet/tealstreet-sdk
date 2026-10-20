@@ -1,6 +1,7 @@
 //! Futures account snapshots and the listen-key stream.
 use crate::wire::{Number, Text};
 use crate::{Bitrue, Job, Pending};
+use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{
     Balance, CurrencyBalance, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
@@ -19,6 +20,8 @@ const LISTEN_URL: &str = "https://fapiws-auth.bitrue.com/user_stream/api/v1/list
 const PRIVATE_URL: &str = "wss://fapiws.bitrue.com/stream";
 const REFRESH_MS: f64 = 30.0 * 60_000.0;
 const HISTORY_LIMIT: usize = 500;
+/// Consecutive event-fenced snapshots discarded before one commits anyway.
+const STALE_SNAPSHOT_LIMIT: u8 = 2;
 const ORDER_RETRY_INITIAL_MS: f64 = 500.0;
 const ORDER_RETRY_CAP_MS: f64 = 30_000.0;
 
@@ -109,6 +112,7 @@ pub struct Account {
     fast: Option<TimerId>,
     snapshot_pending: bool,
     snapshot_again: bool,
+    snapshot_guard: StaleGuard,
     order_queue: VecDeque<String>,
     order_active: Option<String>,
     order_timer: Option<TimerId>,
@@ -1613,13 +1617,24 @@ impl Bitrue {
                 }
                 let schema = serde_json::from_str::<SnapshotEnvelope>(response.body)
                     .is_ok_and(|v| v.data.account.is_empty());
-                if !schema || data.invalid || data.balances.is_empty() {
+                let malformed = !schema || data.invalid || data.balances.is_empty();
+                let current = revision == self.account.settings_revision;
+                // A leverage command waits for a snapshot issued after its write.
+                let admit = !malformed
+                    && if self.account.leverage_queries.is_empty() {
+                        self.account
+                            .snapshot_guard
+                            .admit(current, STALE_SNAPSHOT_LIMIT)
+                    } else {
+                        current
+                    };
+                if malformed {
                     self.report_leverage_error(
                         cx,
                         "Malformed Bitrue account snapshot; retaining previous state",
                     );
                     self.finish_leverage(cx, None, "Malformed Bitrue account snapshot");
-                } else if revision == self.account.settings_revision {
+                } else if admit {
                     if data.valuation_pending {
                         cx.log(
                             LogLevel::Warning,

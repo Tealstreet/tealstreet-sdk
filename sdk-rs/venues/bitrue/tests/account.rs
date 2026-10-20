@@ -260,6 +260,21 @@ fn a_newer_balance_event_invalidates_an_older_account_snapshot() {
     assert!(h.e.store().positions().is_empty());
 }
 #[test]
+fn steady_balance_events_cannot_starve_the_account_snapshot() {
+    let mut h = Harness::new();
+    for _ in 0..2 {
+        h.ws(r#"{"e":"ACCOUNT_UPDATE"}"#);
+        h.reply("/account", POSITION);
+        assert!(h.e.store().positions().is_empty());
+    }
+    h.ws(r#"{"e":"ACCOUNT_UPDATE"}"#);
+    h.reply("/account", POSITION);
+    assert_eq!(h.e.store().positions().len(), 1);
+    // The stale commit is re-read at once.
+    h.reply("/account", EMPTY);
+    assert!(h.e.store().positions().is_empty());
+}
+#[test]
 fn market_fills_have_stable_units_exact_ids_execution_prices_and_no_replays() {
     let mut h = Harness::new();
     h.seed();

@@ -106,7 +106,7 @@ pub struct BitgetFutures {
     ticker_index: Vec<Option<u32>>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     books: HashMap<String, BookState>,
-    candles: HashMap<(String, String), usize>,
+    candles: HashMap<(String, Interval), usize>,
 }
 
 impl BitgetFutures {
@@ -394,11 +394,11 @@ impl BitgetFutures {
                     && let Some((_, value)) = self
                         .candles
                         .keys()
-                        .find(|(s, i)| s == symbol && interval(i) == Some(native))
+                        .find(|(s, i)| s == symbol && interval(*i) == Some(native))
                 {
                     for row in rows {
                         if row.iter().all(|n| n.0.is_some()) {
-                            cx.candle(symbol, value, candle(&row));
+                            cx.candle(symbol, *value, candle(&row));
                         } else {
                             cx.log(LogLevel::Warning, "invalid Bitget candle");
                         }
@@ -497,20 +497,21 @@ fn market(row: &Contract<'_>) -> Market {
     }
 }
 
-fn interval(value: &str) -> Option<&'static str> {
+fn interval(value: Interval) -> Option<&'static str> {
+    use Interval::*;
     Some(match value {
-        "1m" => "1m",
-        "3m" => "3m",
-        "5m" => "5m",
-        "15m" => "15m",
-        "30m" => "30m",
-        "1h" => "1H",
-        "2h" => "2H",
-        "4h" => "4H",
-        "6h" => "6Hutc",
-        "12h" => "12Hutc",
-        "1d" => "1Dutc",
-        "1w" => "1Wutc",
+        M1 => "1m",
+        M3 => "3m",
+        M5 => "5m",
+        M15 => "15m",
+        M30 => "30m",
+        H1 => "1H",
+        H2 => "2H",
+        H4 => "4H",
+        H6 => "6Hutc",
+        H12 => "12Hutc",
+        D1 => "1Dutc",
+        W1 => "1Wutc",
         _ => return None,
     })
 }
@@ -530,6 +531,11 @@ impl Venue for BitgetFutures {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
+            quantity_units: if self.inverse() {
+                safe_cex_engine::QuantityUnits::InverseNative
+            } else {
+                safe_cex_engine::QuantityUnits::Base
+            },
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -582,7 +588,7 @@ impl Venue for BitgetFutures {
             topics.extend(
                 self.candles
                     .keys()
-                    .filter_map(|(s, i)| Some((format!("candle{}", interval(i)?), s.clone()))),
+                    .filter_map(|(s, i)| Some((format!("candle{}", interval(*i)?), s.clone()))),
             );
         }
         self.send_topics(cx, socket, "subscribe", &topics);
@@ -859,7 +865,8 @@ impl Venue for BitgetFutures {
                 symbol,
                 interval: value,
             } => {
-                let Some(native) = interval(&value) else {
+                let Some(native) = interval(value) else {
+                    cx.log(LogLevel::Error, value.unsupported("Bitget"));
                     return;
                 };
                 let count = self.candles.entry((symbol.clone(), value)).or_default();
@@ -877,7 +884,7 @@ impl Venue for BitgetFutures {
                     *count -= 1;
                     if *count == 0 {
                         self.candles.remove(&key);
-                        if let Some(native) = interval(&key.1) {
+                        if let Some(native) = interval(key.1) {
                             self.subscribe(
                                 cx,
                                 "unsubscribe",
@@ -895,24 +902,14 @@ impl Venue for BitgetFutures {
                 from_ms,
                 to_ms,
             } => {
-                let Some(native) = interval(&value) else {
-                    cx.done(command, Err("unsupported Bitget interval".to_owned()));
+                let Some(native) = interval(value) else {
+                    cx.done(command, Err(value.unsupported("Bitget")));
                     return;
                 };
                 let limit = limit.unwrap_or(500).clamp(1, 1000);
                 let mut end = to_ms.unwrap_or(cx.now);
                 if let Some(start) = from_ms {
-                    let seconds = match value.as_str() {
-                        "1w" => 604800.0,
-                        "1d" => 86400.0,
-                        _ => {
-                            value[..value.len() - 1].parse::<f64>().unwrap_or(1.0)
-                                * if value.ends_with('h') { 3600.0 } else { 60.0 }
-                        }
-                    };
-                    end = end.min(
-                        start + (seconds * 1000.0 * f64::from(limit)).min(90.0 * 86_400_000.0),
-                    );
+                    end = end.min(start + (value.ms() * f64::from(limit)).min(90.0 * 86_400_000.0));
                 }
                 let mut path = format!(
                     "{}?symbol={symbol}&granularity={native}&endTime={}&productType={}&limit={limit}",
