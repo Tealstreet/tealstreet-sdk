@@ -1,9 +1,9 @@
 //! Payloads from the official info/perpetuals and websocket/subscriptions docs.
 //! https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api
 mod support;
-use support::TestEngine as Engine;
 use safe_cex_engine::{Action, Command, Event, RequestId, Response, SocketId};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+use support::TestEngine as Engine;
 
 fn response(engine: &mut Engine<Hyperliquid>, request: RequestId, body: &str) {
     engine.handle(
@@ -34,7 +34,12 @@ fn start() -> (Engine<Hyperliquid>, SocketId) {
         r#"[{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50},{"name":"ETH","szDecimals":4,"maxLeverage":50}]},[{"midPx":"97500.5","markPx":"97500.5","oraclePx":"97500","prevDayPx":"95000","dayNtlVlm":"195001","openInterest":"2","funding":"0.0001"},{"midPx":"3650.25","markPx":"3650.25","szDecimals":4}]]"#,
     );
     let fee = e.wait_http(|r| support::kind(r) == "userFees");
-    support::reply(&mut e, &fee, 200, r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#);
+    support::reply(
+        &mut e,
+        &fee,
+        200,
+        r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#,
+    );
     let id = request(&mut e);
     response(&mut e, id, "[null]");
     let socket = e
@@ -67,25 +72,41 @@ fn dex_mids_subscription_matches_ts_account_session_requirement() {
             ..Options::default()
         }));
         e.start(1000.0);
-        let id = request(&mut e);
-        response(&mut e, id, r#"[{"universe":[]},[]]"#);
-        let fee = e.wait_http(|r| support::kind(r) == "userFees");
-        support::reply(&mut e, &fee, 200, "{}");
-        let id = request(&mut e);
-        response(&mut e, id, r#"[null,{"name":"xyz"}]"#);
-        let id = request(&mut e);
-        response(
-            &mut e,
-            id,
-            r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50"}]]"#,
-        );
-        let socket = e
-            .drain_actions()
-            .find_map(|action| match action {
-                Action::WsConnect { socket, .. } => Some(socket),
-                _ => None,
-            })
-            .unwrap();
+        let mut socket = None;
+        for _ in 0..100 {
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            let mut had_http = false;
+            for action in actions {
+                match action {
+                    Action::Http(r) => {
+                        had_http = true;
+                        let body = match support::kind(&r).as_str() {
+                            "metaAndAssetCtxs" if r.body.as_ref().unwrap().contains("xyz") => {
+                                r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50"}]]"#
+                            }
+                            "metaAndAssetCtxs" => r#"[{"universe":[]},[]]"#,
+                            "userFees" => "{}",
+                            "perpDexs" => r#"[null,{"name":"xyz"}]"#,
+                            "userAbstraction" => r#""disabled""#,
+                            "maxBuilderFee" => "0",
+                            "clearinghouseState" => r#"{"assetPositions":[],"time":1000}"#,
+                            "frontendOpenOrders" => "[]",
+                            other => panic!("unexpected request {other}"),
+                        };
+                        support::reply(&mut e, &r, 200, body);
+                    }
+                    Action::WsConnect { socket: id, .. } => socket = Some(id),
+                    _ => {}
+                }
+            }
+            if socket.is_some() {
+                break;
+            }
+            if !had_http {
+                assert!(e.advance_next_timer());
+            }
+        }
+        let socket = socket.unwrap();
         e.handle(1000.0, Event::WsOpened { socket });
         let dex_mids = e.drain_actions().any(|action| match action {
             Action::WsSend { text, .. } => {
@@ -287,8 +308,14 @@ fn bootstrap_does_not_publish_a_partial_catalog_before_fees_and_dexs() {
         request: core,
         response: Response { status: 200, headers: "", body: r#"[{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50}]},[{"midPx":"100","markPx":"100","oraclePx":"100"}]]"# },
     });
-    assert!(!e.store().loaded().markets, "core metadata alone is not the complete startup catalog");
+    assert!(
+        !e.store().loaded().markets,
+        "core metadata alone is not the complete startup catalog"
+    );
     assert!(!e.store().loaded().tickers);
     assert!(e.store().markets().is_empty());
-    assert!(!e.drain_actions().any(|action| matches!(action, Action::WsConnect { .. })));
+    assert!(
+        !e.drain_actions()
+            .any(|action| matches!(action, Action::WsConnect { .. }))
+    );
 }

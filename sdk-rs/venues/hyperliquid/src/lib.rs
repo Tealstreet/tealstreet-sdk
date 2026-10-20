@@ -10,9 +10,7 @@ use base64::Engine as _;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Response, SocketId, TimerId, Venue,
-};
+use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Response, SocketId, TimerId, Venue};
 use serde::Serialize;
 use std::collections::HashMap;
 use wire::*;
@@ -67,6 +65,7 @@ pub enum Pending {
 }
 #[derive(Default)]
 struct Connection {
+    opened_once: bool,
     socket: Option<SocketId>,
     open: bool,
     last_received: f64,
@@ -102,6 +101,7 @@ pub struct Hyperliquid {
 }
 #[derive(Default)]
 struct Bootstrap {
+    started: bool,
     core_ready: bool,
     fees_ready: bool,
     dexs_ready: bool,
@@ -173,15 +173,37 @@ impl Hyperliquid {
         }
     }
     fn info(&mut self, cx: &mut Cx<'_, Pending>, body: String, at: ArrayAt, pending: Pending) {
-        let limited = self.spot || match &pending {
-            Pending::Meta { dex, attempt, .. } => !dex.is_empty() || *attempt > 0,
-            Pending::Dexs { .. } | Pending::Candles { .. } => true,
-            _ => false,
-        };
+        let limited = self.spot
+            || match &pending {
+                Pending::Meta { dex, attempt, .. } => !dex.is_empty() || *attempt > 0,
+                Pending::Dexs { .. } | Pending::Candles { .. } => true,
+                _ => false,
+            };
         self.http_info(cx, body, Some(at), pending, limited);
     }
+    fn public_bootstrap(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.bootstrap.started {
+            return;
+        }
+        self.bootstrap.started = true;
+        self.meta(cx, String::new(), 0);
+        self.start_fees(cx);
+        self.info(
+            cx,
+            "{\"type\":\"perpDexs\"}".into(),
+            ArrayAt::Root,
+            Pending::Dexs {
+                dexs: Vec::new(),
+                index: 0,
+            },
+        );
+    }
     fn bootstrap_next(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.bootstrap.core_ready && self.bootstrap.fees_ready && self.bootstrap.dexs_ready && !self.bootstrap.failed {
+        if self.bootstrap.core_ready
+            && self.bootstrap.fees_ready
+            && self.bootstrap.dexs_ready
+            && !self.bootstrap.failed
+        {
             self.next_dex(cx);
         }
     }
@@ -228,7 +250,8 @@ impl Hyperliquid {
                     }
                 }
                 cx.store.set_markets(markets);
-                cx.store.set_tickers(std::mem::take(&mut self.bootstrap.tickers));
+                cx.store
+                    .set_tickers(std::mem::take(&mut self.bootstrap.tickers));
             }
             self.account_start(cx);
             self.connection.socket = Some(cx.connect_channel(
@@ -746,22 +769,24 @@ impl Venue for Hyperliquid {
         if self.spot {
             self.spot_meta(cx);
         } else {
-            self.meta(cx, String::new(), 0);
-            self.start_fees(cx);
-            self.info(cx, "{\"type\":\"perpDexs\"}".into(), ArrayAt::Root,
-                Pending::Dexs { dexs: Vec::new(), index: 0 });
+            self.perp_bootstrap(cx);
         }
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.connection.socket != Some(socket) {
             return;
         }
+        let reconnected = std::mem::replace(&mut self.connection.opened_once, true);
         self.connection.open = true;
         self.connection.attempts = 0;
         self.connection.last_received = cx.now;
         self.connection.ping = Some(cx.set_timer(15_000.0));
         self.private_subscribe(cx);
-        if self.account.started && self.user().is_some() && !self.options.public_data_only {
+        if (self.spot || reconnected)
+            && self.account.started
+            && self.user().is_some()
+            && !self.options.public_data_only
+        {
             self.refresh_account(cx);
         }
         self.subscription(cx, "subscribe", "allMids", None, None, None);
@@ -878,7 +903,7 @@ impl Venue for Hyperliquid {
                 self.next_dex(cx);
             }
             Pending::Account(request) => {
-                let builder = matches!(request, account::Request::Builder);
+                let builder = matches!(request, account::Request::Builder { .. });
                 self.account_response(cx, request, response);
                 if builder {
                     self.builder_result(cx);
@@ -1030,7 +1055,7 @@ impl Venue for Hyperliquid {
                 cx.log(LogLevel::Warning, error);
             }
             Pending::Account(request) => {
-                let builder = matches!(request, account::Request::Builder);
+                let builder = matches!(request, account::Request::Builder { .. });
                 self.account_failed(cx, request, error);
                 if builder {
                     self.builder_result(cx);
@@ -1042,7 +1067,7 @@ impl Venue for Hyperliquid {
             Pending::Dexs { .. } => {
                 self.bootstrap.dexs_ready = true;
                 self.bootstrap_next(cx);
-            },
+            }
             Pending::Meta {
                 dex,
                 offset,

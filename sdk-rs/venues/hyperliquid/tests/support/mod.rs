@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 use safe_cex_engine::{Action, Event, HttpRequest, Response, SocketId, TimerId, Venue};
+use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 use std::collections::{HashMap, VecDeque};
 use std::ops::{Deref, DerefMut};
-use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 /// Scripted fixtures retain all emitted actions. Only explicit HTTP-wait helpers
 /// advance causal timers. Host event time is monotonic; raw venue timestamps
 /// remain unchanged, independently exercising the account's revision fences.
@@ -14,25 +14,45 @@ pub struct TestEngine<V: Venue> {
 }
 impl<V: Venue> Deref for TestEngine<V> {
     type Target = safe_cex_engine::Engine<V>;
-    fn deref(&self) -> &Self::Target { &self.inner }
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
 }
 impl<V: Venue> DerefMut for TestEngine<V> {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.inner }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
 }
 impl<V: Venue> TestEngine<V> {
-    pub fn new(venue: V) -> Self { Self { inner: safe_cex_engine::Engine::new(venue), pending: VecDeque::new(), timers: HashMap::new(), now: 0.0 } }
-    pub fn start(&mut self, now: f64) { self.now = now; self.inner.start(now); }
+    pub fn new(venue: V) -> Self {
+        Self {
+            inner: safe_cex_engine::Engine::new(venue),
+            pending: VecDeque::new(),
+            timers: HashMap::new(),
+            now: 0.0,
+        }
+    }
+    pub fn start(&mut self, now: f64) {
+        self.now = now;
+        self.inner.start(now);
+    }
     pub fn handle(&mut self, now: f64, event: Event<'_>) {
         let now = now.max(self.now);
         self.now = now;
-        if let Event::TimerFired { timer } = event { self.timers.remove(&timer); }
+        if let Event::TimerFired { timer } = event {
+            self.timers.remove(&timer);
+        }
         self.inner.handle(now, event);
     }
     fn collect(&mut self) {
         for action in self.inner.drain_actions() {
             match &action {
-                Action::SetTimer { timer, at_ms } => { self.timers.insert(*timer, *at_ms); }
-                Action::ClearTimer { timer } => { self.timers.remove(timer); }
+                Action::SetTimer { timer, at_ms } => {
+                    self.timers.insert(*timer, *at_ms);
+                }
+                Action::ClearTimer { timer } => {
+                    self.timers.remove(timer);
+                }
                 _ => {}
             }
             self.pending.push_back(action);
@@ -42,20 +62,51 @@ impl<V: Venue> TestEngine<V> {
         self.collect();
         std::mem::take(&mut self.pending).into_iter()
     }
+    pub fn has_near_timer(&self) -> bool {
+        self.timers.values().any(|at| *at <= self.now + 2000.0)
+    }
     pub fn advance_next_timer(&mut self) -> bool {
         self.collect();
-        let Some((&timer, &at)) = self.timers.iter().min_by(|a,b| a.1.total_cmp(b.1).then_with(|| a.0.0.cmp(&b.0.0))) else { return false; };
+        let Some((&timer, &at)) = self
+            .timers
+            .iter()
+            .min_by(|a, b| a.1.total_cmp(b.1).then_with(|| a.0.0.cmp(&b.0.0)))
+        else {
+            return false;
+        };
         self.handle(at.max(self.now), Event::TimerFired { timer });
         true
+    }
+    pub fn wait_done(&mut self, command: u32) -> Vec<Action> {
+        for _ in 0..200 {
+            self.collect();
+            if self.pending.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { command: c, .. }) if *c == command)) {
+                return self.drain_actions().collect();
+            }
+            assert!(
+                self.advance_next_timer(),
+                "expected command completion, no live timer remains"
+            );
+        }
+        panic!("command did not complete within 200 causal timers");
     }
     pub fn wait_http(&mut self, matches: impl Fn(&HttpRequest) -> bool) -> HttpRequest {
         for _ in 0..200 {
             self.collect();
-            if let Some(index) = self.pending.iter().position(|action| matches!(action, Action::Http(r) if matches(r))) {
-                let Action::Http(request) = self.pending.remove(index).unwrap() else { unreachable!() };
+            if let Some(index) = self
+                .pending
+                .iter()
+                .position(|action| matches!(action, Action::Http(r) if matches(r)))
+            {
+                let Action::Http(request) = self.pending.remove(index).unwrap() else {
+                    unreachable!()
+                };
                 return request;
             }
-            assert!(self.advance_next_timer(), "expected an HTTP request, no live timer remains");
+            assert!(
+                self.advance_next_timer(),
+                "expected an HTTP request, no live timer remains"
+            );
         }
         panic!("HTTP request did not appear within 200 causal timers");
     }
@@ -117,10 +168,23 @@ pub fn ready_identity(
     for _ in 0..200 {
         let actions = e.drain_actions().collect::<Vec<_>>();
         if actions.is_empty() {
-            let basic = ["userAbstraction:", "maxBuilderFee:", "clearinghouseState:", "frontendOpenOrders:"].iter().all(|key| answered.contains(*key));
-            let hip_ready = !hip || ["clearinghouseState:xyz", "frontendOpenOrders:xyz"].iter().all(|key| answered.contains(*key));
-            let spot_ready = !matches!(mode, "unifiedAccount" | "portfolioMargin") || answered.contains("spotClearinghouseState:");
-            if socket.is_some() && basic && hip_ready && spot_ready { break; }
+            let basic = [
+                "userAbstraction:",
+                "maxBuilderFee:",
+                "clearinghouseState:",
+                "frontendOpenOrders:",
+            ]
+            .iter()
+            .all(|key| answered.contains(*key));
+            let hip_ready = !hip
+                || ["clearinghouseState:xyz", "frontendOpenOrders:xyz"]
+                    .iter()
+                    .all(|key| answered.contains(*key));
+            let spot_ready = !matches!(mode, "unifiedAccount" | "portfolioMargin")
+                || answered.contains("spotClearinghouseState:");
+            if socket.is_some() && basic && hip_ready && spot_ready && !e.has_near_timer() {
+                break;
+            }
             assert!(e.advance_next_timer(), "private bootstrap stalled");
             continue;
         }

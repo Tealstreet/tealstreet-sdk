@@ -29,7 +29,9 @@ pub enum Request {
         symbol: String,
         revision: u64,
     },
-    Builder,
+    Builder {
+        generation: u64,
+    },
     Fees,
 }
 struct SettingBarrier {
@@ -41,6 +43,9 @@ struct SettingBarrier {
 #[derive(Default)]
 pub struct Account {
     pub started: bool,
+    pre_started: bool,
+    role_checked: bool,
+    early_core: Option<(Clearinghouse<'static>, u64, u64)>,
     mode: Mode,
     mode_resolved: bool,
     mode_timer: Option<TimerId>,
@@ -85,6 +90,8 @@ pub struct Account {
     pub preplacements: VecDeque<Placement>,
     pub pending: HashMap<String, Placement>,
     pub builder_approved: Option<bool>,
+    builder_generation: u64,
+    builder_timer: Option<TimerId>,
 }
 #[derive(Default, PartialEq, Eq)]
 enum Mode {
@@ -179,14 +186,26 @@ impl Hyperliquid {
         streamed: bool,
     ) {
         // Builder approval uses a direct fetch in the TS reference and bypasses
-        // both Axios limiters. All other reads retain their actual client scope.
-        let limited = self.spot || matches!(&request, Request::Orders { .. })
+        // both reference limiters. All other reads retain their actual client scope.
+        let limited = self.spot
+            || matches!(&request, Request::Orders { .. })
             || matches!(&request, Request::State { dex, .. } if !dex.is_empty());
-        if matches!(request, Request::Builder) {
-            cx.request(Method::Post, format!("{}/info", self.rest()),
-                vec![("Content-Type", "application/json".into())], Some(body), Pending::Account(request));
+        if matches!(request, Request::Builder { .. }) {
+            cx.request(
+                Method::Post,
+                format!("{}/info", self.rest()),
+                vec![("Content-Type", "application/json".into())],
+                Some(body),
+                Pending::Account(request),
+            );
         } else {
-            self.http_info(cx, body, streamed.then_some(ArrayAt::Root), Pending::Account(request), limited);
+            self.http_info(
+                cx,
+                body,
+                streamed.then_some(ArrayAt::Root),
+                Pending::Account(request),
+                limited,
+            );
         }
     }
     pub(crate) fn account_read_live(&mut self, request: &Request) -> bool {
@@ -195,30 +214,91 @@ impl Hyperliquid {
             Request::Mode => !self.account.mode_resolved,
             Request::State { dex, revision, .. } => {
                 let live = self.account.state_revision.get(dex).copied().unwrap_or(0) == *revision;
-                if !live { self.account.inflight.remove(&format!("state:{dex}")); }
+                if !live {
+                    self.account.inflight.remove(&format!("state:{dex}"));
+                }
                 live
             }
             Request::Orders { dex, revision, .. } => {
                 let live = self.account.orders_revision.get(dex).copied().unwrap_or(0) == *revision;
-                if !live { self.account.inflight.remove(&format!("orders:{dex}")); }
+                if !live {
+                    self.account.inflight.remove(&format!("orders:{dex}"));
+                }
                 live
             }
             Request::Spot { revision } => {
                 let live = self.account.spot_revision == *revision;
-                if !live { self.account.spot_inflight = false; }
+                if !live {
+                    self.account.spot_inflight = false;
+                }
                 live
             }
-            Request::Asset { symbol, revision } => self.account.settings_barriers.get(symbol).map_or(0, |b| b.revision) == *revision,
+            Request::Asset { symbol, revision } => {
+                self.account
+                    .settings_barriers
+                    .get(symbol)
+                    .map_or(0, |b| b.revision)
+                    == *revision
+            }
             _ => true,
         }
     }
     pub(crate) fn start_fees(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account_read(cx, "userFees", None, Request::Fees, false);
     }
-    pub(crate) fn history_read(&mut self, cx: &mut Cx<'_, Pending>, body: String, request: crate::history::Request) {
+    pub(crate) fn history_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        body: String,
+        request: crate::history::Request,
+    ) {
         let streamed = request.streamed();
         let limited = request.xhr_limited();
-        self.http_info(cx, body, streamed.then_some(ArrayAt::Root), Pending::History(Box::new(request)), limited);
+        self.http_info(
+            cx,
+            body,
+            streamed.then_some(ArrayAt::Root),
+            Pending::History(Box::new(request)),
+            limited,
+        );
+    }
+    pub(crate) fn perp_bootstrap(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.bootstrap.started {
+            return;
+        }
+        if !self.options.public_data_only
+            && self.user().is_none()
+            && !self.account.role_checked
+            && let Some(key) = self.options.key.as_deref()
+        {
+            if self.account.role_timer.is_some() {
+                return;
+            }
+            #[derive(Serialize)]
+            struct Read<'a> {
+                r#type: &'static str,
+                user: &'a str,
+            }
+            self.read_body(
+                cx,
+                serde_json::to_string(&Read {
+                    r#type: "userRole",
+                    user: key,
+                })
+                .unwrap(),
+                Request::Role,
+            );
+            self.account.role_timer = Some(cx.set_timer(6000.0));
+            return;
+        }
+        if !self.options.public_data_only && self.user().is_some() && !self.account.pre_started {
+            self.account.pre_started = true;
+            self.account_read(cx, "userAbstraction", None, Request::Mode, false);
+            self.account.mode_timer = Some(cx.set_timer(6000.0));
+            self.refresh_state(cx, "");
+            self.check_builder(cx);
+        }
+        self.public_bootstrap(cx);
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.started {
@@ -274,37 +354,29 @@ impl Hyperliquid {
             return;
         }
         if self.user().is_none() {
-            if let Some(key) = self.options.key.as_deref() {
-                #[derive(Serialize)]
-                struct Read<'a> {
-                    r#type: &'static str,
-                    user: &'a str,
-                }
-                self.read_body(
-                    cx,
-                    serde_json::to_string(&Read {
-                        r#type: "userRole",
-                        user: key,
-                    })
-                    .unwrap(),
-                    Request::Role,
-                );
-                self.account.role_timer = Some(cx.set_timer(6000.0));
-            }
             return;
         }
-        self.private_bootstrap(cx);
-    }
-    fn private_bootstrap(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account_read(cx, "userAbstraction", None, Request::Mode, false);
-        self.account.mode_timer = Some(cx.set_timer(6000.0));
-        self.check_builder(cx);
-        self.refresh_account(cx);
+        if let Some((state, revision, settings_revision)) = self.account.early_core.take()
+            && self.account.state_revision.get("").copied().unwrap_or(0) == revision
+        {
+            self.apply_state(cx, "", &state, true, Some(settings_revision));
+        }
+        self.refresh_orders_scope(cx, "");
+        for dex in self.dex_names.clone() {
+            self.refresh_state(cx, &dex);
+            self.refresh_orders_scope(cx, &dex);
+        }
+        if self.account.mode_resolved && self.account.mode != Mode::Standard {
+            self.refresh_spot(cx, true);
+        }
         if !self.dex_names.is_empty() {
             self.account.sync_timer = Some(cx.set_timer(120_000.0));
         }
     }
     pub(crate) fn check_builder(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.builder_timer.is_some() || self.account.builder_approved.is_some() {
+            return;
+        }
         let Some(user) = self.options.application_id.as_deref() else {
             self.account.builder_approved = Some(false);
             return;
@@ -316,6 +388,9 @@ impl Hyperliquid {
             builder: &'a str,
         }
         let b = self.builder();
+        self.account.builder_generation = self.account.builder_generation.saturating_add(1);
+        let generation = self.account.builder_generation;
+        self.account.builder_timer = Some(cx.set_timer(8000.0));
         self.read_body(
             cx,
             serde_json::to_string(&Read {
@@ -324,7 +399,7 @@ impl Hyperliquid {
                 builder: &b.b,
             })
             .unwrap(),
-            Request::Builder,
+            Request::Builder { generation },
         );
     }
     pub(crate) fn builder(&self) -> crate::Builder {
@@ -447,7 +522,7 @@ impl Hyperliquid {
             cx.clear_timer(t);
         }
         self.private_subscribe(cx);
-        if self.account.mode != Mode::Standard {
+        if self.account.started && self.account.mode != Mode::Standard {
             self.refresh_spot(cx, true);
         }
     }
@@ -556,7 +631,9 @@ impl Hyperliquid {
         let raw = response.body;
         match request {
             Request::Role => {
-                if self.account.role_expired { return; }
+                if self.account.role_expired {
+                    return;
+                }
                 if self.account.role_timer.is_none() {
                     return;
                 }
@@ -576,17 +653,16 @@ impl Hyperliquid {
                         _ => {}
                     }
                 }
-                if self.user().is_some() {
-                    self.private_bootstrap(cx);
-                } else {
+                self.account.role_checked = true;
+                if self.user().is_none() {
                     cx.log(
                         LogLevel::Error,
                         "Hyperliquid account identity could not be resolved; re-add this account",
                     );
                 }
+                self.perp_bootstrap(cx);
             }
             Request::Mode => {
-                if self.account.mode_resolved { return; }
                 if self.account.mode_resolved {
                     return;
                 }
@@ -597,10 +673,19 @@ impl Hyperliquid {
                 };
                 self.mode_ready(cx);
             }
-            Request::Builder => {
-                self.account.builder_approved = serde_json::from_str::<Num>(raw)
-                    .ok()
-                    .map(|n| n.0 >= f64::from(self.builder().f));
+            Request::Builder { generation } => {
+                if generation != self.account.builder_generation
+                    || self.account.builder_timer.is_none()
+                {
+                    return;
+                }
+                if let Some(timer) = self.account.builder_timer.take() {
+                    cx.clear_timer(timer);
+                }
+                self.account.builder_approved = Some(
+                    serde_json::from_str::<Num>(raw)
+                        .is_ok_and(|n| n.0 >= f64::from(self.builder().f)),
+                );
             }
             Request::Fees => {
                 #[derive(serde::Deserialize)]
@@ -624,6 +709,11 @@ impl Hyperliquid {
             } => {
                 self.account.inflight.remove(&format!("state:{dex}"));
                 if let Ok(state) = serde_json::from_str::<Clearinghouse>(raw) {
+                    if !self.account.started && dex.is_empty() {
+                        self.account.early_core =
+                            Some((state.into_owned(), revision, settings_revision));
+                        return;
+                    }
                     let changed =
                         self.account.state_revision.get(&dex).copied().unwrap_or(0) != revision;
                     if !changed
@@ -771,6 +861,8 @@ impl Hyperliquid {
                 if let Some(t) = self.account.role_timer.take() {
                     cx.clear_timer(t);
                 }
+                self.account.role_checked = true;
+                self.perp_bootstrap(cx);
             }
             Request::State { dex, .. } => {
                 self.account.inflight.remove(&format!("state:{dex}"));
@@ -787,7 +879,16 @@ impl Hyperliquid {
                     }
                 }
             }
-            Request::Builder => self.account.builder_approved = None,
+            Request::Builder { generation } => {
+                if generation == self.account.builder_generation
+                    && self.account.builder_timer.is_some()
+                {
+                    if let Some(timer) = self.account.builder_timer.take() {
+                        cx.clear_timer(timer);
+                    }
+                    self.account.builder_approved = Some(false);
+                }
+            }
             Request::Fees => {
                 self.bootstrap.fees_ready = true;
                 self.bootstrap_next(cx);
@@ -796,6 +897,11 @@ impl Hyperliquid {
         cx.log(LogLevel::Warning, error);
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account.builder_timer == Some(timer) {
+            self.account.builder_timer = None;
+            self.account.builder_approved = Some(false);
+            self.builder_result(cx);
+        }
         if self.account.asset_retry_timer == Some(timer) {
             self.account.asset_retry_timer = None;
             for symbol in std::mem::take(&mut self.account.asset_retry) {
@@ -825,6 +931,8 @@ impl Hyperliquid {
         if self.account.role_timer == Some(timer) {
             self.account.role_timer = None;
             self.account.role_expired = true;
+            self.account.role_checked = true;
+            self.perp_bootstrap(cx);
             cx.log(
                 LogLevel::Warning,
                 "Hyperliquid identity resolution timed out",
@@ -1723,4 +1831,48 @@ pub(crate) fn terminal(status: &str) -> bool {
         || status == "rejected"
         || status.ends_with("Canceled")
         || status.ends_with("Rejected")
+}
+
+#[cfg(test)]
+mod budget_liveness_tests {
+    use super::*;
+    use crate::Options;
+    #[test]
+    fn abandoned_queued_account_reads_release_only_their_scope_and_expired_identity_stays_closed() {
+        let mut venue = Hyperliquid::new(Options::default());
+        venue
+            .account
+            .inflight
+            .extend(["state:".into(), "orders:xyz".into(), "state:other".into()]);
+        venue.account.state_revision.insert(String::new(), 2);
+        venue.account.orders_revision.insert("xyz".into(), 2);
+        venue.account.spot_revision = 2;
+        venue.account.spot_inflight = true;
+        assert!(!venue.account_read_live(&Request::State {
+            dex: String::new(),
+            revision: 1,
+            settings_revision: 0
+        }));
+        assert!(!venue.account_read_live(&Request::Orders {
+            dex: "xyz".into(),
+            revision: 1,
+            orders: vec![],
+            seen: HashSet::new(),
+            valid: true
+        }));
+        assert!(!venue.account_read_live(&Request::Spot { revision: 1 }));
+        assert!(!venue.account.inflight.contains("state:"));
+        assert!(!venue.account.inflight.contains("orders:xyz"));
+        assert!(venue.account.inflight.contains("state:other"));
+        assert!(!venue.account.spot_inflight);
+        venue.account.role_expired = true;
+        venue.account.mode_resolved = true;
+        assert!(!venue.account_read_live(&Request::Role));
+        assert!(!venue.account_read_live(&Request::Mode));
+        assert!(venue.account_read_live(&Request::State {
+            dex: "other".into(),
+            revision: 0,
+            settings_revision: 0
+        }));
+    }
 }

@@ -1,12 +1,10 @@
 //! Documented spot metadata, balances and spot asset ID payloads.
 //! https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/spot
 mod support;
-use support::TestEngine as Engine;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{
-    Action, Command, Event, HttpRequest, Notice, Query, SocketId, Venue,
-};
+use safe_cex_engine::{Action, Command, Event, HttpRequest, Notice, Query, SocketId, Venue};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+use support::TestEngine as Engine;
 const META: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"PURR","index":1,"szDecimals":0},{"name":"HFUN","index":2,"szDecimals":2}],"universe":[{"name":"PURR/USDC","tokens":[1,0],"index":0},{"name":"@1","tokens":[2,0],"index":1}]},[{"coin":"@1","midPx":"0.00093722","markPx":"0.00094","prevDayPx":"0.0009","dayNtlVlm":"937.22"},{"coin":"PURR/USDC","midPx":"0.209265","markPx":"0.14","prevDayPx":"0.20432","dayNtlVlm":"8906.0"}]]"#;
 fn ready(private: bool) -> (Engine<Hyperliquid>, SocketId) {
     let mut e = Engine::new(Hyperliquid::new_spot(Options {
@@ -22,10 +20,17 @@ fn ready(private: bool) -> (Engine<Hyperliquid>, SocketId) {
     support::reply(&mut e, &r, 200, META);
     if private {
         let balance = e.wait_http(|r| support::kind(r) == "spotClearinghouseState");
-        support::reply(&mut e, &balance, 200,
-            r#"{"balances":[{"coin":"USDC","token":0,"hold":"2","total":"14.625485"},{"coin":"PURR","token":1,"hold":"10","total":"2000"}]}"#);
+        support::reply(
+            &mut e,
+            &balance,
+            200,
+            r#"{"balances":[{"coin":"USDC","token":0,"hold":"2","total":"14.625485"},{"coin":"PURR","token":1,"hold":"10","total":"2000"}]}"#,
+        );
     }
-    let socket = e.drain_actions().find_map(|action| match action { Action::WsConnect { socket, .. } => Some(socket), _ => None });
+    let socket = e.drain_actions().find_map(|action| match action {
+        Action::WsConnect { socket, .. } => Some(socket),
+        _ => None,
+    });
     let s = socket.unwrap();
     e.handle(1000.0, Event::WsOpened { socket: s });
     (e, s)
@@ -772,6 +777,8 @@ fn custom_spot(meta: &str) -> (Engine<Hyperliquid>, SocketId) {
     e.start(1000.0);
     let r = take_http(&mut e);
     support::reply(&mut e, &r, 200, meta);
+    let balance = e.wait_http(|r| support::kind(r) == "spotClearinghouseState");
+    support::reply(&mut e, &balance, 200, r#"{"balances":[]}"#);
     let socket = e
         .drain_actions()
         .find_map(|a| {

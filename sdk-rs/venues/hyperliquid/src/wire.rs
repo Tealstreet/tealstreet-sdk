@@ -173,6 +173,38 @@ pub struct Clearinghouse<'a> {
     #[serde(default)]
     pub server_time: Option<f64>,
 }
+impl Clearinghouse<'_> {
+    pub fn into_owned(self) -> Clearinghouse<'static> {
+        Clearinghouse {
+            asset_positions: self
+                .asset_positions
+                .into_iter()
+                .map(|row| {
+                    let p = row.position;
+                    AssetPosition {
+                        position: PositionRow {
+                            coin: Cow::Owned(p.coin.into_owned()),
+                            szi: p.szi,
+                            entry_px: p.entry_px,
+                            position_value: p.position_value,
+                            unrealized_pnl: p.unrealized_pnl,
+                            liquidation_px: p.liquidation_px,
+                            margin_used: p.margin_used,
+                            leverage: Leverage {
+                                kind: Cow::Owned(p.leverage.kind.into_owned()),
+                                value: p.leverage.value,
+                            },
+                        },
+                    }
+                })
+                .collect(),
+            margin_summary: self.margin_summary,
+            cross_margin_summary: self.cross_margin_summary,
+            time: self.time,
+            server_time: self.server_time,
+        }
+    }
+}
 #[derive(Deserialize)]
 pub struct AssetPosition<'a> {
     #[serde(borrow)]

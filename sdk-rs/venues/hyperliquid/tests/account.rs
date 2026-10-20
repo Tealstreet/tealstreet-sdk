@@ -1,7 +1,30 @@
 //! Official clearinghouseState, frontendOpenOrders and WsUserFills payload shapes.
 mod support;
 use safe_cex_engine::{Action, Event};
+use support::TestEngine;
 use support::*;
+fn reconnect_reads(
+    e: &mut TestEngine<safe_cex_venue_hyperliquid::Hyperliquid>,
+    hip: bool,
+) -> Vec<safe_cex_engine::HttpRequest> {
+    let mut requests = vec![
+        e.wait_http(|r| {
+            kind(r) == "clearinghouseState" && !r.body.as_ref().unwrap().contains("xyz")
+        }),
+        e.wait_http(|r| {
+            kind(r) == "frontendOpenOrders" && !r.body.as_ref().unwrap().contains("xyz")
+        }),
+    ];
+    if hip {
+        requests.push(e.wait_http(|r| {
+            kind(r) == "clearinghouseState" && r.body.as_ref().unwrap().contains("xyz")
+        }));
+        requests.push(e.wait_http(|r| {
+            kind(r) == "frontendOpenOrders" && r.body.as_ref().unwrap().contains("xyz")
+        }));
+    }
+    requests
+}
 #[test]
 fn private_bootstrap_separates_positions_and_market_settings() {
     let (e, _) = ready("disabled");
@@ -16,16 +39,7 @@ fn private_bootstrap_separates_positions_and_market_settings() {
 fn newer_stream_state_wins_over_inflight_rest_and_failed_reads_preserve_state() {
     let (mut e, s) = ready("disabled");
     e.handle(2000.0, Event::WsOpened { socket: s });
-    let requests = e
-        .drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
+    let requests = reconnect_reads(&mut e, false);
     message(
         &mut e,
         s,
@@ -153,16 +167,7 @@ fn user_event_order_objects_and_raw_arrays_remove_terminal_orders() {
 fn newer_authoritative_rest_closes_positions_after_partial_stream() {
     let (mut e, s) = ready("disabled");
     e.handle(2000.0, Event::WsOpened { socket: s });
-    let requests = e
-        .drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
+    let requests = reconnect_reads(&mut e, false);
     let partial = r#"{"assetPositions":[{"position":{"coin":"ETH","szi":"1","entryPx":"200","positionValue":"200","unrealizedPnl":"0","leverage":{"type":"cross","value":20}}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"10"},"time":3000}"#;
     message(
         &mut e,
@@ -236,38 +241,30 @@ fn fill_count(frame: &[u8]) -> u32 {
 fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
     let (mut e, s) = ready_with_dex("disabled", true);
     e.handle(2000.0, Event::WsOpened { socket: s });
-    let requests = e
-        .drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
+    let requests = reconnect_reads(&mut e, true);
     message(
         &mut e,
         s,
         3000.0,
         r#"{"channel":"userFills","data":{"fills":[{"coin":"xyz:FOO","side":"B","px":"50","sz":"2","time":3000,"tid":11,"oid":91,"dir":"Open Long","startPosition":"0","closedPnl":"0","fee":"0.01"}]}}"#,
     );
+    let refresh_at = e.now + 350.0;
     let timer = e
         .drain_actions()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
-                (at_ms == 3350.0).then_some(timer)
+                (at_ms == refresh_at).then_some(timer)
             } else {
                 None
             }
         })
         .unwrap();
-    e.handle(3350.0, Event::TimerFired { timer });
+    e.handle(refresh_at, Event::TimerFired { timer });
     let next = e
         .drain_actions()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
-                (at_ms == 3700.0).then_some(timer)
+                (at_ms == refresh_at + 350.0).then_some(timer)
             } else {
                 None
             }
@@ -285,8 +282,10 @@ fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
         };
         reply(&mut e, &r, 200, body);
     }
-    e.handle(3700.0, Event::TimerFired { timer: next });
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Http(r) if kind(&r)=="clearinghouseState" && r.body.as_ref().unwrap().contains("xyz"))));
+    e.handle(refresh_at + 350.0, Event::TimerFired { timer: next });
+    let refreshed = e
+        .wait_http(|r| kind(r) == "clearinghouseState" && r.body.as_ref().unwrap().contains("xyz"));
+    assert!(refreshed.body.as_ref().unwrap().contains("xyz"));
 }
 #[test]
 fn rest_after_cancel_trust_window_reenables_live_order_updates() {
@@ -298,16 +297,7 @@ fn rest_after_cancel_trust_window_reenables_live_order_updates() {
         r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","origSz":"1","sz":"0"},"status":"canceled"}]}"#,
     );
     e.handle(40000.0, Event::WsOpened { socket: s });
-    let requests = e
-        .drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
+    let requests = reconnect_reads(&mut e, false);
     for r in requests {
         let body = if kind(&r) == "frontendOpenOrders" {
             r#"[{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}]"#
@@ -393,16 +383,7 @@ fn delayed_hip3_state_preserves_position_after_newer_fill() {
 fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
     let (mut e, s) = ready("disabled");
     e.handle(2000.0, Event::WsOpened { socket: s });
-    let requests = e
-        .drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
+    let requests = reconnect_reads(&mut e, false);
     message(
         &mut e,
         s,
@@ -429,27 +410,19 @@ fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
         );
     }
     assert!(e.store().order("9").is_some());
+    let retry_at = e.now + 500.0;
     let timer = e
         .drain_actions()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
-                (at_ms == 2700.0).then_some(timer)
+                (at_ms == retry_at).then_some(timer)
             } else {
                 None
             }
         })
         .expect("invalidated reconnect snapshot must retry");
-    e.handle(2700.0, Event::TimerFired { timer });
-    let r = e
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                (kind(&r) == "frontendOpenOrders").then_some(r)
-            } else {
-                None
-            }
-        })
-        .unwrap();
+    e.handle(retry_at, Event::TimerFired { timer });
+    let r = e.wait_http(|r| kind(r) == "frontendOpenOrders");
     e.handle(
         2800.0,
         Event::HttpResponse {
@@ -477,16 +450,7 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
             &format!(r#"{{"channel":"orderUpdates","data":[{{"order":{row},"status":"open"}}]}}"#),
         );
         e.handle(2100.0, Event::WsOpened { socket: s });
-        let r = e
-            .drain_actions()
-            .find_map(|a| {
-                if let Action::Http(r) = a {
-                    (kind(&r) == "frontendOpenOrders").then_some(r)
-                } else {
-                    None
-                }
-            })
-            .unwrap();
+        let r = e.wait_http(|r| kind(r) == "frontendOpenOrders");
         e.handle(
             2200.0,
             Event::HttpStart {
@@ -509,16 +473,7 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
                 ids: vec!["9".into()],
             }),
         );
-        let cancel = e
-            .drain_actions()
-            .find_map(|a| {
-                if let Action::Http(r) = a {
-                    r.url.ends_with("/exchange").then_some(r)
-                } else {
-                    None
-                }
-            })
-            .unwrap();
+        let cancel = e.wait_http(|r| r.url.ends_with("/exchange"));
         e.handle(2301.0, Event::HttpResponse {
         request: cancel.id,
         response: safe_cex_engine::Response {status: 200, headers: "", body: r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#},
@@ -528,9 +483,8 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
         e.handle(finished_at, Event::HttpEnd { request: r.id });
         assert!(e.store().order("9").is_none());
         assert!(
-            e.drain_actions().any(
-                |a| matches!(a, Action::SetTimer { at_ms, .. } if at_ms == finished_at + 500.0)
-            )
+            e.drain_actions()
+                .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if at_ms == e.now + 500.0))
         );
     }
 }
