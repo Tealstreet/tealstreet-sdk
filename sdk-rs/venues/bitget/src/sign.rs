@@ -1,5 +1,6 @@
 use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::num;
+pub use safe_cex_engine::url::encode;
 
 pub fn signature(secret: &str, timestamp: &str, method: &str, path: &str, body: &str) -> String {
     hmac_sha256(
@@ -30,17 +31,4 @@ pub fn headers(
         ("X-CHANNEL-API-CODE", "Tealstreet".to_owned()),
         ("Content-Type", "application/json".to_owned()),
     ]
-}
-
-pub fn encode(value: &str) -> String {
-    let mut out = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(char::from(byte))
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }
