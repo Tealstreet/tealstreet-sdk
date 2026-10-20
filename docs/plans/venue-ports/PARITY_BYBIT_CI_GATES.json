@@ -1,0 +1,1473 @@
+{
+  "status": "PASS",
+  "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+  "normalEgress": true,
+  "wasmByteBudget": 1258291,
+  "reason": "Required CI follow-up: preserve exact numeric results while reducing short-decimal parsing cost in the Bybit family.",
+  "build": {
+    "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+    "buildCommand": "corepack yarn -s rust:build-wasm --venue bybit",
+    "budget": 1258291,
+    "builtAtUnixNs": 1792483481517220000,
+    "files": [
+      {
+        "path": "sdk-rs/hosts/wasm/pkg/web/safe_cex_wasm_bg.wasm",
+        "bytes": 957021,
+        "sha256": "43734e52829af1a6f286d97919e4ab18036633adcc0aa8a2e73ce6225d91ec98",
+        "mtimeNs": 1792483481360845408,
+        "savedPath": "/tmp/parity-bybit-final-web.wasm"
+      },
+      {
+        "path": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+        "bytes": 957021,
+        "sha256": "43734e52829af1a6f286d97919e4ab18036633adcc0aa8a2e73ce6225d91ec98",
+        "mtimeNs": 1792483481451298582,
+        "savedPath": "/tmp/parity-bybit-final-node.wasm"
+      }
+    ],
+    "log": "/tmp/parity-bybit-final-build.log",
+    "logSha256": "a70da5408e7a6da7efe97b23011504833b16a7875bda14543f2504b5b8c7d97a"
+  },
+  "gates": [
+    {
+      "venue": "bybit",
+      "stage": "public",
+      "sourceHeadBefore": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "sourceHeadAfter": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "normalEgress": true,
+      "command": "corepack yarn -s rust:gate --venue bybit --tape sdk-rs/harness/fixtures/bybit-public.jsonl.gz --runs 3 --books BTCUSDT,ETHUSDT",
+      "tape": {
+        "path": "sdk-rs/harness/fixtures/bybit-public.jsonl.gz",
+        "sha256": "e9cbcf3f61fca67d96bab52657f3aceb8a05375704652adb47526341bd847356",
+        "records": 8746
+      },
+      "out": "sdk-rs/harness/out/bybit-49978",
+      "pass": true,
+      "log": "/tmp/parity-bybit-final-bybit-public.log",
+      "logSha256": "1580df6a419892f093d5d6d151ab478ad327308ae146d8a7956d62770a492fb5",
+      "implementations": {
+        "ts": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybit-49978/ts-0.json",
+              "sha256": "c88d771c310cfc5a238994c2f04b7e7156209b5dce8968e84317bdcbb9b7cffb",
+              "frames": 8743,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 912,
+              "tickers": 912,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 252.657,
+                "steadyCpuMs": 138.871,
+                "processCpuMs": 379.342,
+                "wallMs": 1275.295375,
+                "rssBytes": 127844352,
+                "heapBeforeBytes": 14129968,
+                "heapUsedBytes": 36304744,
+                "heapRetainedBytes": 22174776,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1641497,
+                "buffersAfter": 1709282,
+                "wasmBytes": 0,
+                "retainedBytes": 22242561
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybit-49978/ts-1.json",
+              "sha256": "25f23af06b28105d352e5652c2360fe7d4b239ef504b584674fe7fca9dc23550",
+              "frames": 8743,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 912,
+              "tickers": 912,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 246.156,
+                "steadyCpuMs": 131.421,
+                "processCpuMs": 374.953,
+                "wallMs": 1257.243791,
+                "rssBytes": 125108224,
+                "heapBeforeBytes": 14129640,
+                "heapUsedBytes": 36318080,
+                "heapRetainedBytes": 22188440,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1641497,
+                "buffersAfter": 1709282,
+                "wasmBytes": 0,
+                "retainedBytes": 22256225
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybit-49978/ts-2.json",
+              "sha256": "4d9f4f176964ba278920107f025ef11697f447cdcdbc2b78ef88edd89b06b977",
+              "frames": 8743,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 912,
+              "tickers": 912,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 256.609,
+                "steadyCpuMs": 139.275,
+                "processCpuMs": 389.755,
+                "wallMs": 1278.222916,
+                "rssBytes": 126910464,
+                "heapBeforeBytes": 14129920,
+                "heapUsedBytes": 36266416,
+                "heapRetainedBytes": 22136496,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1641497,
+                "buffersAfter": 1709282,
+                "wasmBytes": 0,
+                "retainedBytes": 22204281
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 252.657,
+            "steadyCpuMs": 138.871,
+            "retainedBytes": 22242561,
+            "processCpuMs": 379.342
+          }
+        },
+        "rust": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybit-49978/rust-0.json",
+              "sha256": "fb5209b436d1ca71fd93600822c66e7a00e5fb2894dcee679ced7d3d608a896d",
+              "frames": 8743,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 912,
+              "tickers": 912,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 179.762,
+                "steadyCpuMs": 73.047,
+                "processCpuMs": 360.351,
+                "wallMs": 1161.7396250000002,
+                "rssBytes": 100433920,
+                "heapBeforeBytes": 10801592,
+                "heapUsedBytes": 13446056,
+                "heapRetainedBytes": 2644464,
+                "bufferRetainedBytes": 300908,
+                "buffersBefore": 584457,
+                "buffersAfter": 885365,
+                "wasmBytes": 1507328,
+                "retainedBytes": 4452700
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybit-49978/rust-1.json",
+              "sha256": "bf40e41c425a2e3b160db5ac1754f70957dd5aee2a2ac4a4440434dc73af1a78",
+              "frames": 8743,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 912,
+              "tickers": 912,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 174.396,
+                "steadyCpuMs": 73.203,
+                "processCpuMs": 355.316,
+                "wallMs": 1177.859167,
+                "rssBytes": 99008512,
+                "heapBeforeBytes": 10801592,
+                "heapUsedBytes": 13447528,
+                "heapRetainedBytes": 2645936,
+                "bufferRetainedBytes": 300908,
+                "buffersBefore": 584457,
+                "buffersAfter": 885365,
+                "wasmBytes": 1507328,
+                "retainedBytes": 4454172
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybit-49978/rust-2.json",
+              "sha256": "4c299f497ede84bd5ae2248e9db82676608743e303f05cff56c20dceeb2eb373",
+              "frames": 8743,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 912,
+              "tickers": 912,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 170.93,
+                "steadyCpuMs": 74.966,
+                "processCpuMs": 350.3,
+                "wallMs": 1171.0432500000002,
+                "rssBytes": 98582528,
+                "heapBeforeBytes": 10801592,
+                "heapUsedBytes": 13452288,
+                "heapRetainedBytes": 2650696,
+                "bufferRetainedBytes": 300908,
+                "buffersBefore": 584457,
+                "buffersAfter": 885365,
+                "wasmBytes": 1507328,
+                "retainedBytes": 4458932
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 174.396,
+            "steadyCpuMs": 73.203,
+            "retainedBytes": 4454172,
+            "processCpuMs": 355.316
+          }
+        }
+      }
+    },
+    {
+      "venue": "bybit",
+      "stage": "private",
+      "sourceHeadBefore": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "sourceHeadAfter": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "normalEgress": true,
+      "command": "corepack yarn -s rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''",
+      "tape": {
+        "path": "sdk-rs/harness/tapes/bybit-private.jsonl",
+        "sha256": "56798558c75cb19e17c87699cdac6e458702c96fe225fdf77fddf3861208990b",
+        "records": 33
+      },
+      "out": "sdk-rs/harness/out/bybit-51277",
+      "pass": true,
+      "log": "/tmp/parity-bybit-final-bybit-private.log",
+      "logSha256": "824608ff019ba63db171173a9acb0d8508ea624dadb371a14d771c2a684334a5",
+      "implementations": {
+        "ts": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybit-51277/ts-0.json",
+              "sha256": "4ed6763503c958d4f4e8620d4231a209b2f49172c1908dee3fcadc97ab9ad0c0",
+              "frames": 18,
+              "commands": 4,
+              "writeCount": 4,
+              "markets": 2,
+              "tickers": 2,
+              "books": 0,
+              "metrics": {
+                "cpuMs": 99.382,
+                "steadyCpuMs": 49.313,
+                "processCpuMs": 180.204,
+                "wallMs": 9211.770208,
+                "rssBytes": 100007936,
+                "heapBeforeBytes": 8002888,
+                "heapUsedBytes": 24882640,
+                "heapRetainedBytes": 16879752,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1103559,
+                "buffersAfter": 1171344,
+                "wasmBytes": 0,
+                "retainedBytes": 16947537
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 99.382,
+            "steadyCpuMs": 49.313,
+            "retainedBytes": 16947537,
+            "processCpuMs": 180.204
+          }
+        },
+        "rust": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybit-51277/rust-0.json",
+              "sha256": "e3f3007c5dbaff6743db9aed691cd8b536a8affbf3937dc76cc7e78cc1dc9154",
+              "frames": 18,
+              "commands": 4,
+              "writeCount": 4,
+              "markets": 2,
+              "tickers": 2,
+              "books": 0,
+              "metrics": {
+                "cpuMs": 30.406,
+                "steadyCpuMs": 14.8,
+                "processCpuMs": 34.293,
+                "wallMs": 7215.246249999999,
+                "rssBytes": 66125824,
+                "heapBeforeBytes": 4677544,
+                "heapUsedBytes": 5328448,
+                "heapRetainedBytes": 650904,
+                "bufferRetainedBytes": 6396,
+                "buffersBefore": 46519,
+                "buffersAfter": 52915,
+                "wasmBytes": 327680,
+                "retainedBytes": 984980
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 30.406,
+            "steadyCpuMs": 14.8,
+            "retainedBytes": 984980,
+            "processCpuMs": 34.293
+          }
+        }
+      }
+    },
+    {
+      "venue": "bybitinverse",
+      "stage": "public",
+      "sourceHeadBefore": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "sourceHeadAfter": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "normalEgress": true,
+      "command": "corepack yarn -s rust:gate --venue bybitinverse --tape sdk-rs/harness/fixtures/bybitinverse-public.jsonl.gz --runs 3 --books BTCUSD,ETHUSD",
+      "tape": {
+        "path": "sdk-rs/harness/fixtures/bybitinverse-public.jsonl.gz",
+        "sha256": "05f43edaa491c4b84c8da37f0f817f40479657192f6eb88c328651e11cbe2971",
+        "records": 711
+      },
+      "out": "sdk-rs/harness/out/bybitinverse-53067",
+      "pass": true,
+      "log": "/tmp/parity-bybit-final-bybitinverse-public.log",
+      "logSha256": "966bbabf0f673ac5769bc3f183b8322f3dff0cf4222c4d1ac9bb5172c3f9e873",
+      "implementations": {
+        "ts": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybitinverse-53067/ts-0.json",
+              "sha256": "cb232da82ee37be413ade5eaaebb9d159db1d8c76dea17c7ddc980434911f546",
+              "frames": 708,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 26,
+              "tickers": 26,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 136.025,
+                "steadyCpuMs": 78.782,
+                "processCpuMs": 202.676,
+                "wallMs": 145.074791,
+                "rssBytes": 99319808,
+                "heapBeforeBytes": 8378016,
+                "heapUsedBytes": 22877048,
+                "heapRetainedBytes": 14499032,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1129277,
+                "buffersAfter": 1197062,
+                "wasmBytes": 0,
+                "retainedBytes": 14566817
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybitinverse-53067/ts-1.json",
+              "sha256": "6c346d3ef43d5c9dbdf5ff402608717fa7d44db16393f14268724fcefba2beed",
+              "frames": 708,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 26,
+              "tickers": 26,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 109.385,
+                "steadyCpuMs": 69.269,
+                "processCpuMs": 140.071,
+                "wallMs": 222.38550000000004,
+                "rssBytes": 97009664,
+                "heapBeforeBytes": 8378160,
+                "heapUsedBytes": 22539784,
+                "heapRetainedBytes": 14161624,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1129277,
+                "buffersAfter": 1197062,
+                "wasmBytes": 0,
+                "retainedBytes": 14229409
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybitinverse-53067/ts-2.json",
+              "sha256": "3d96c8137de1d5dded6ea1f0f4bf839a611349e07ca95c0f931b4e6a047dd353",
+              "frames": 708,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 26,
+              "tickers": 26,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 114.294,
+                "steadyCpuMs": 72.259,
+                "processCpuMs": 145.809,
+                "wallMs": 228.905084,
+                "rssBytes": 98811904,
+                "heapBeforeBytes": 8377888,
+                "heapUsedBytes": 22540152,
+                "heapRetainedBytes": 14162264,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1129277,
+                "buffersAfter": 1197062,
+                "wasmBytes": 0,
+                "retainedBytes": 14230049
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 114.294,
+            "steadyCpuMs": 72.259,
+            "retainedBytes": 14230049,
+            "processCpuMs": 145.809
+          }
+        },
+        "rust": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybitinverse-53067/rust-0.json",
+              "sha256": "0d6b3bd0c508f335294f034d1eda5bdec46074be8f806ef63ef5b3a01ff6e537",
+              "frames": 708,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 26,
+              "tickers": 26,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 29.769,
+                "steadyCpuMs": 11.841,
+                "processCpuMs": 59.713,
+                "wallMs": 55.478583999999984,
+                "rssBytes": 75857920,
+                "heapBeforeBytes": 5049584,
+                "heapUsedBytes": 5954832,
+                "heapRetainedBytes": 905248,
+                "bufferRetainedBytes": 105852,
+                "buffersBefore": 72237,
+                "buffersAfter": 178089,
+                "wasmBytes": 655360,
+                "retainedBytes": 1666460
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybitinverse-53067/rust-1.json",
+              "sha256": "92403f659e7e15cc3b73dda6581174cb9d6609be0b13a299c0253206ddcc4159",
+              "frames": 708,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 26,
+              "tickers": 26,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 31.104,
+                "steadyCpuMs": 12.055,
+                "processCpuMs": 62.922,
+                "wallMs": 56.65058299999998,
+                "rssBytes": 75399168,
+                "heapBeforeBytes": 5049632,
+                "heapUsedBytes": 5954856,
+                "heapRetainedBytes": 905224,
+                "bufferRetainedBytes": 105852,
+                "buffersBefore": 72237,
+                "buffersAfter": 178089,
+                "wasmBytes": 655360,
+                "retainedBytes": 1666436
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybitinverse-53067/rust-2.json",
+              "sha256": "ec63cd01c27ed6e0219f01bfd107c684c9d4a87b73241b58b32aae50ee3c8d6a",
+              "frames": 708,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 26,
+              "tickers": 26,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 30.953,
+                "steadyCpuMs": 12.379,
+                "processCpuMs": 64.567,
+                "wallMs": 56.43995899999999,
+                "rssBytes": 75612160,
+                "heapBeforeBytes": 5049632,
+                "heapUsedBytes": 5954824,
+                "heapRetainedBytes": 905192,
+                "bufferRetainedBytes": 105852,
+                "buffersBefore": 72237,
+                "buffersAfter": 178089,
+                "wasmBytes": 655360,
+                "retainedBytes": 1666404
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 30.953,
+            "steadyCpuMs": 12.055,
+            "retainedBytes": 1666436,
+            "processCpuMs": 62.922
+          }
+        }
+      }
+    },
+    {
+      "venue": "bybitinverse",
+      "stage": "private",
+      "sourceHeadBefore": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "sourceHeadAfter": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "normalEgress": true,
+      "command": "corepack yarn -s rust:gate --venue bybitinverse --tape sdk-rs/harness/tapes/bybitinverse-private.jsonl --runs 1 --books ''",
+      "tape": {
+        "path": "sdk-rs/harness/tapes/bybitinverse-private.jsonl",
+        "sha256": "f9253b219a9a58c3bb6ec891ace5540d156a31bef858789e3567dc9fc7afb719",
+        "records": 26
+      },
+      "out": "sdk-rs/harness/out/bybitinverse-53445",
+      "pass": true,
+      "log": "/tmp/parity-bybit-final-bybitinverse-private.log",
+      "logSha256": "a0d201dd968470c85c705dc4611b088f9120a32bf58cf967b01e57dc1b7eb25c",
+      "implementations": {
+        "ts": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybitinverse-53445/ts-0.json",
+              "sha256": "6e3654b574e74ed3b363e4b6d939cc1719ca254ddf7d5ea465b11450a17afe55",
+              "frames": 14,
+              "commands": 3,
+              "writeCount": 3,
+              "markets": 2,
+              "tickers": 2,
+              "books": 0,
+              "metrics": {
+                "cpuMs": 44.234,
+                "steadyCpuMs": 21.752,
+                "processCpuMs": 61.52,
+                "wallMs": 4515.6286660000005,
+                "rssBytes": 94748672,
+                "heapBeforeBytes": 7990352,
+                "heapUsedBytes": 21439928,
+                "heapRetainedBytes": 13449576,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1088851,
+                "buffersAfter": 1156636,
+                "wasmBytes": 0,
+                "retainedBytes": 13517361
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 44.234,
+            "steadyCpuMs": 21.752,
+            "retainedBytes": 13517361,
+            "processCpuMs": 61.52
+          }
+        },
+        "rust": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybitinverse-53445/rust-0.json",
+              "sha256": "d31ef5a9c17952b6445114a89285d8936e00b30e3c7e4f965e22540a4be5352c",
+              "frames": 14,
+              "commands": 3,
+              "writeCount": 3,
+              "markets": 2,
+              "tickers": 2,
+              "books": 0,
+              "metrics": {
+                "cpuMs": 27.313,
+                "steadyCpuMs": 12.42,
+                "processCpuMs": 31.295,
+                "wallMs": 3515.238042,
+                "rssBytes": 66502656,
+                "heapBeforeBytes": 4664280,
+                "heapUsedBytes": 5286224,
+                "heapRetainedBytes": 621944,
+                "bufferRetainedBytes": 5396,
+                "buffersBefore": 31811,
+                "buffersAfter": 37207,
+                "wasmBytes": 327680,
+                "retainedBytes": 955020
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 27.313,
+            "steadyCpuMs": 12.42,
+            "retainedBytes": 955020,
+            "processCpuMs": 31.295
+          }
+        }
+      }
+    },
+    {
+      "venue": "bybitspot",
+      "stage": "public",
+      "sourceHeadBefore": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "sourceHeadAfter": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "normalEgress": true,
+      "command": "corepack yarn -s rust:gate --venue bybitspot --tape sdk-rs/harness/fixtures/bybitspot-public.jsonl.gz --runs 3 --books BTCUSDT,ETHUSDT",
+      "tape": {
+        "path": "sdk-rs/harness/fixtures/bybitspot-public.jsonl.gz",
+        "sha256": "f242be14942d09476e7dcac0587bf9a645780c80603a7a4fb2da0e3b32f8e219",
+        "records": 4341
+      },
+      "out": "sdk-rs/harness/out/bybitspot-54325",
+      "pass": true,
+      "log": "/tmp/parity-bybit-final-bybitspot-public.log",
+      "logSha256": "08ecacf7f469a5575f227df5d7cc5a326e43b3a96482e1175f45b57c64ff4504",
+      "implementations": {
+        "ts": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybitspot-54325/ts-0.json",
+              "sha256": "4620c8e988448620960c01d3b302c37ed11014252ab891abdf8e1263ff537cba",
+              "frames": 4339,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 527,
+              "tickers": 527,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 176.493,
+                "steadyCpuMs": 80.606,
+                "processCpuMs": 333.643,
+                "wallMs": 723.2869580000001,
+                "rssBytes": 105988096,
+                "heapBeforeBytes": 10425800,
+                "heapUsedBytes": 27008992,
+                "heapRetainedBytes": 16583192,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1380650,
+                "buffersAfter": 1448435,
+                "wasmBytes": 0,
+                "retainedBytes": 16650977
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybitspot-54325/ts-1.json",
+              "sha256": "419537cac48f2dc9fe8a9ff67155c286f135c5a7a8f15c15dc19b6bda142d0d9",
+              "frames": 4339,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 527,
+              "tickers": 527,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 159.09,
+                "steadyCpuMs": 87.083,
+                "processCpuMs": 270.103,
+                "wallMs": 736.7076249999999,
+                "rssBytes": 105086976,
+                "heapBeforeBytes": 10427272,
+                "heapUsedBytes": 26621768,
+                "heapRetainedBytes": 16194496,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1380650,
+                "buffersAfter": 1448435,
+                "wasmBytes": 0,
+                "retainedBytes": 16262281
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybitspot-54325/ts-2.json",
+              "sha256": "0524276733a80bf90fecaca8bda851aac808fab4fe62efaa998862b71b8701d7",
+              "frames": 4339,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 527,
+              "tickers": 527,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 147.445,
+                "steadyCpuMs": 78.575,
+                "processCpuMs": 258.587,
+                "wallMs": 716.5415,
+                "rssBytes": 105152512,
+                "heapBeforeBytes": 10427432,
+                "heapUsedBytes": 26636696,
+                "heapRetainedBytes": 16209264,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1380650,
+                "buffersAfter": 1448435,
+                "wasmBytes": 0,
+                "retainedBytes": 16277049
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 159.09,
+            "steadyCpuMs": 80.606,
+            "retainedBytes": 16277049,
+            "processCpuMs": 270.103
+          }
+        },
+        "rust": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybitspot-54325/rust-0.json",
+              "sha256": "af42b09cc1cd3e1e7ef7133f676137d6007fe77ac1b6d30265bf86e79b09eef3",
+              "frames": 4339,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 527,
+              "tickers": 527,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 112.797,
+                "steadyCpuMs": 52.718,
+                "processCpuMs": 257.685,
+                "wallMs": 672.812,
+                "rssBytes": 85065728,
+                "heapBeforeBytes": 7096864,
+                "heapUsedBytes": 8773264,
+                "heapRetainedBytes": 1676400,
+                "bufferRetainedBytes": 133988,
+                "buffersBefore": 323610,
+                "buffersAfter": 457598,
+                "wasmBytes": 917504,
+                "retainedBytes": 2727892
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybitspot-54325/rust-1.json",
+              "sha256": "4e591deec4a3ba788e8f863047652a51c10650ca9a791129f423ea988ca0b968",
+              "frames": 4339,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 527,
+              "tickers": 527,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 106.907,
+                "steadyCpuMs": 45.859,
+                "processCpuMs": 248.773,
+                "wallMs": 667.643917,
+                "rssBytes": 86343680,
+                "heapBeforeBytes": 7096864,
+                "heapUsedBytes": 8773944,
+                "heapRetainedBytes": 1677080,
+                "bufferRetainedBytes": 133988,
+                "buffersBefore": 323610,
+                "buffersAfter": 457598,
+                "wasmBytes": 917504,
+                "retainedBytes": 2728572
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybitspot-54325/rust-2.json",
+              "sha256": "cd9b06e67222601da0e7e672fe1f926f6b5a128dbae3411542cada6e2298488b",
+              "frames": 4339,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 527,
+              "tickers": 527,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 111.483,
+                "steadyCpuMs": 48.537,
+                "processCpuMs": 254.064,
+                "wallMs": 680.552333,
+                "rssBytes": 84197376,
+                "heapBeforeBytes": 7096864,
+                "heapUsedBytes": 8765784,
+                "heapRetainedBytes": 1668920,
+                "bufferRetainedBytes": 133988,
+                "buffersBefore": 323610,
+                "buffersAfter": 457598,
+                "wasmBytes": 917504,
+                "retainedBytes": 2720412
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 111.483,
+            "steadyCpuMs": 48.537,
+            "retainedBytes": 2727892,
+            "processCpuMs": 254.064
+          }
+        }
+      }
+    },
+    {
+      "venue": "bybitspot",
+      "stage": "private",
+      "sourceHeadBefore": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "sourceHeadAfter": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "normalEgress": true,
+      "command": "corepack yarn -s rust:gate --venue bybitspot --tape sdk-rs/harness/tapes/bybitspot-private.jsonl --runs 1 --books ''",
+      "tape": {
+        "path": "sdk-rs/harness/tapes/bybitspot-private.jsonl",
+        "sha256": "c0cf53f0f968673ce7878e2728f0623c6821257299e8849c3cbf309a58b312f8",
+        "records": 23
+      },
+      "out": "sdk-rs/harness/out/bybitspot-55139",
+      "pass": true,
+      "log": "/tmp/parity-bybit-final-bybitspot-private.log",
+      "logSha256": "f7bf2a17ca4effcf4cb7816f39d53ebed3dbf85753e318641121b08732e3a92d",
+      "implementations": {
+        "ts": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybitspot-55139/ts-0.json",
+              "sha256": "a4ac435cc2c80a0bc52d169ee16a019c83e4b493c66ef51e5df81fd33133086b",
+              "frames": 11,
+              "commands": 2,
+              "writeCount": 2,
+              "markets": 2,
+              "tickers": 2,
+              "books": 0,
+              "metrics": {
+                "cpuMs": 26.41,
+                "steadyCpuMs": 11.198,
+                "processCpuMs": 26.609,
+                "wallMs": 2766.77275,
+                "rssBytes": 96550912,
+                "heapBeforeBytes": 7989536,
+                "heapUsedBytes": 20745816,
+                "heapRetainedBytes": 12756280,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1087675,
+                "buffersAfter": 1155460,
+                "wasmBytes": 0,
+                "retainedBytes": 12824065
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 26.41,
+            "steadyCpuMs": 11.198,
+            "retainedBytes": 12824065,
+            "processCpuMs": 26.609
+          }
+        },
+        "rust": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybitspot-55139/rust-0.json",
+              "sha256": "33e95a5663df32ce883f852913198649047824ab3701bf63950411115007a3e1",
+              "frames": 11,
+              "commands": 2,
+              "writeCount": 4,
+              "markets": 2,
+              "tickers": 2,
+              "books": 0,
+              "metrics": {
+                "cpuMs": 23.328,
+                "steadyCpuMs": 10.033,
+                "processCpuMs": 27.201,
+                "wallMs": 2763.3169159999998,
+                "rssBytes": 66125824,
+                "heapBeforeBytes": 4663456,
+                "heapUsedBytes": 5248224,
+                "heapRetainedBytes": 584768,
+                "bufferRetainedBytes": 5036,
+                "buffersBefore": 30635,
+                "buffersAfter": 35671,
+                "wasmBytes": 327680,
+                "retainedBytes": 917484
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 23.328,
+            "steadyCpuMs": 10.033,
+            "retainedBytes": 917484,
+            "processCpuMs": 27.201
+          }
+        }
+      }
+    },
+    {
+      "venue": "bybitdemo",
+      "stage": "public",
+      "sourceHeadBefore": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "sourceHeadAfter": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "normalEgress": true,
+      "command": "corepack yarn -s rust:gate --venue bybitdemo --tape sdk-rs/harness/fixtures/bybitdemo-public.jsonl.gz --runs 3 --books BTCUSDT,ETHUSDT",
+      "tape": {
+        "path": "sdk-rs/harness/fixtures/bybitdemo-public.jsonl.gz",
+        "sha256": "dc63934ea16fe640e3b0975638aa6900436c135676ae560af425e2fa9a74d93c",
+        "records": 5836
+      },
+      "out": "sdk-rs/harness/out/bybitdemo-55782",
+      "pass": true,
+      "log": "/tmp/parity-bybit-final-bybitdemo-public.log",
+      "logSha256": "d67019ddd3923c1412d41e51ea287f5fef66eff1e712faa5e5d162017c03ebf8",
+      "implementations": {
+        "ts": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybitdemo-55782/ts-0.json",
+              "sha256": "b62059214e55eef895decb4877fcfe89d55fda96760bd5cb8729f746daa9e0e7",
+              "frames": 5833,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 912,
+              "tickers": 912,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 267.331,
+                "steadyCpuMs": 117.348,
+                "processCpuMs": 434.297,
+                "wallMs": 1212.108375,
+                "rssBytes": 124370944,
+                "heapBeforeBytes": 13116848,
+                "heapUsedBytes": 35100248,
+                "heapRetainedBytes": 21983400,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1537521,
+                "buffersAfter": 1605306,
+                "wasmBytes": 0,
+                "retainedBytes": 22051185
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybitdemo-55782/ts-1.json",
+              "sha256": "89bf80b5d32824d259d50f17edd99e99d7669e8f4717f954c100a08773482677",
+              "frames": 5833,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 912,
+              "tickers": 912,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 218.302,
+                "steadyCpuMs": 112.714,
+                "processCpuMs": 334.941,
+                "wallMs": 1193.444708,
+                "rssBytes": 123961344,
+                "heapBeforeBytes": 13123392,
+                "heapUsedBytes": 34893784,
+                "heapRetainedBytes": 21770392,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1537521,
+                "buffersAfter": 1605306,
+                "wasmBytes": 0,
+                "retainedBytes": 21838177
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybitdemo-55782/ts-2.json",
+              "sha256": "954b131b091ab75764ed52cb3da522b3df0648197594562b01da3522db407d96",
+              "frames": 5833,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 912,
+              "tickers": 912,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 201.819,
+                "steadyCpuMs": 104.953,
+                "processCpuMs": 311.318,
+                "wallMs": 1185.2746670000001,
+                "rssBytes": 124747776,
+                "heapBeforeBytes": 13117360,
+                "heapUsedBytes": 34907328,
+                "heapRetainedBytes": 21789968,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1537521,
+                "buffersAfter": 1605306,
+                "wasmBytes": 0,
+                "retainedBytes": 21857753
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 218.302,
+            "steadyCpuMs": 112.714,
+            "retainedBytes": 21857753,
+            "processCpuMs": 334.941
+          }
+        },
+        "rust": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybitdemo-55782/rust-0.json",
+              "sha256": "1639389af2a2288246e01b9d138f0513b84d37807664f0933996def2c50d5934",
+              "frames": 5833,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 912,
+              "tickers": 912,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 154.96,
+                "steadyCpuMs": 59.147,
+                "processCpuMs": 341.356,
+                "wallMs": 1113.032667,
+                "rssBytes": 96911360,
+                "heapBeforeBytes": 9787880,
+                "heapUsedBytes": 12399528,
+                "heapRetainedBytes": 2611648,
+                "bufferRetainedBytes": 297564,
+                "buffersBefore": 480481,
+                "buffersAfter": 778045,
+                "wasmBytes": 1572864,
+                "retainedBytes": 4482076
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybitdemo-55782/rust-1.json",
+              "sha256": "ace1e3359d2906f3e50b47078734b8ed32e39f59663e215dadc9598f9e884e0b",
+              "frames": 5833,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 912,
+              "tickers": 912,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 138.645,
+                "steadyCpuMs": 52.341,
+                "processCpuMs": 321.193,
+                "wallMs": 1094.3251249999998,
+                "rssBytes": 96059392,
+                "heapBeforeBytes": 9788416,
+                "heapUsedBytes": 12395520,
+                "heapRetainedBytes": 2607104,
+                "bufferRetainedBytes": 297564,
+                "buffersBefore": 480481,
+                "buffersAfter": 778045,
+                "wasmBytes": 1572864,
+                "retainedBytes": 4477532
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/bybitdemo-55782/rust-2.json",
+              "sha256": "de31be498cf1cfe5c7235a6ba823e5acad015f443aae3205d6ab11d6e0714845",
+              "frames": 5833,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 912,
+              "tickers": 912,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 133.405,
+                "steadyCpuMs": 49.542,
+                "processCpuMs": 311.757,
+                "wallMs": 1097.133084,
+                "rssBytes": 97583104,
+                "heapBeforeBytes": 9788344,
+                "heapUsedBytes": 12399552,
+                "heapRetainedBytes": 2611208,
+                "bufferRetainedBytes": 297564,
+                "buffersBefore": 480481,
+                "buffersAfter": 778045,
+                "wasmBytes": 1572864,
+                "retainedBytes": 4481636
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 138.645,
+            "steadyCpuMs": 52.341,
+            "retainedBytes": 4481636,
+            "processCpuMs": 321.193
+          }
+        }
+      }
+    },
+    {
+      "venue": "bybitdemo",
+      "stage": "private",
+      "sourceHeadBefore": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "sourceHeadAfter": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "normalEgress": true,
+      "command": "corepack yarn -s rust:gate --venue bybitdemo --tape sdk-rs/harness/tapes/bybitdemo-private.jsonl --runs 1 --books ''",
+      "tape": {
+        "path": "sdk-rs/harness/tapes/bybitdemo-private.jsonl",
+        "sha256": "54fb571d1e33aea9a1f14c235ed45c69c3b2198cb40e82cad27fdfc634bcab14",
+        "records": 28
+      },
+      "out": "sdk-rs/harness/out/bybitdemo-56946",
+      "pass": true,
+      "log": "/tmp/parity-bybit-final-bybitdemo-private.log",
+      "logSha256": "58024b53482c66616a78afc6db0c86453620ced0c41797401f195481eb3d1c94",
+      "implementations": {
+        "ts": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybitdemo-56946/ts-0.json",
+              "sha256": "1fe9ed3967b9409109990c2ec0e6f17e88b35ef06c1c4c10ae36b029f89446c7",
+              "frames": 14,
+              "commands": 3,
+              "writeCount": 3,
+              "markets": 2,
+              "tickers": 2,
+              "books": 0,
+              "metrics": {
+                "cpuMs": 64.676,
+                "steadyCpuMs": 28.158,
+                "processCpuMs": 106.618,
+                "wallMs": 5510.921208,
+                "rssBytes": 96223232,
+                "heapBeforeBytes": 7991072,
+                "heapUsedBytes": 21544560,
+                "heapRetainedBytes": 13553488,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1089562,
+                "buffersAfter": 1157347,
+                "wasmBytes": 0,
+                "retainedBytes": 13621273
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 64.676,
+            "steadyCpuMs": 28.158,
+            "retainedBytes": 13621273,
+            "processCpuMs": 106.618
+          }
+        },
+        "rust": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/bybitdemo-56946/rust-0.json",
+              "sha256": "a6b197087a7896aecb2d8b75f78e99f0ccb0a8924182020b1d6f48fca9a00a29",
+              "frames": 14,
+              "commands": 3,
+              "writeCount": 3,
+              "markets": 2,
+              "tickers": 2,
+              "books": 0,
+              "metrics": {
+                "cpuMs": 28.28,
+                "steadyCpuMs": 12.776,
+                "processCpuMs": 32.197,
+                "wallMs": 3514.053875,
+                "rssBytes": 66289664,
+                "heapBeforeBytes": 4664992,
+                "heapUsedBytes": 5301360,
+                "heapRetainedBytes": 636368,
+                "bufferRetainedBytes": 5284,
+                "buffersBefore": 32522,
+                "buffersAfter": 37806,
+                "wasmBytes": 327680,
+                "retainedBytes": 969332
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 28.28,
+            "steadyCpuMs": 12.776,
+            "retainedBytes": 969332,
+            "processCpuMs": 32.197
+          }
+        }
+      }
+    },
+    {
+      "venue": "hyrotrader",
+      "stage": "public",
+      "sourceHeadBefore": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "sourceHeadAfter": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "normalEgress": true,
+      "command": "corepack yarn -s rust:gate --venue hyrotrader --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz --runs 3 --books BTCUSDT,ETHUSDT",
+      "tape": {
+        "path": "sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz",
+        "sha256": "3b8707627d73033b373751308e10655a8a9c70363e03ec1a43f1c820cfdbc6e0",
+        "records": 164
+      },
+      "out": "sdk-rs/harness/out/hyrotrader-57888",
+      "pass": true,
+      "log": "/tmp/parity-bybit-final-hyrotrader-public.log",
+      "logSha256": "17ae90cf527549c0473181c2459d8fde2695c2f962eb5aa3e0bfb950049a601d",
+      "implementations": {
+        "ts": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/hyrotrader-57888/ts-0.json",
+              "sha256": "d57570f82b2cb3e2a369e637dd782152aaa6f37a2796b951a18884a77f2031cd",
+              "frames": 160,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 2,
+              "tickers": 2,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 21.83,
+                "steadyCpuMs": 4.854,
+                "processCpuMs": 22.911,
+                "wallMs": 124.83170900000005,
+                "rssBytes": 96157696,
+                "heapBeforeBytes": 8031520,
+                "heapUsedBytes": 21339424,
+                "heapRetainedBytes": 13307904,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1075679,
+                "buffersAfter": 1143464,
+                "wasmBytes": 0,
+                "retainedBytes": 13375689
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/hyrotrader-57888/ts-1.json",
+              "sha256": "92fef27658c63e65869a5efe195fdaaa6dae62cf444f9675c90bb579dbd7fe67",
+              "frames": 160,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 2,
+              "tickers": 2,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 20.396,
+                "steadyCpuMs": 3.993,
+                "processCpuMs": 21.453,
+                "wallMs": 123.00066599999991,
+                "rssBytes": 95977472,
+                "heapBeforeBytes": 8031432,
+                "heapUsedBytes": 21343048,
+                "heapRetainedBytes": 13311616,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1075679,
+                "buffersAfter": 1143464,
+                "wasmBytes": 0,
+                "retainedBytes": 13379401
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/hyrotrader-57888/ts-2.json",
+              "sha256": "2fb3a95adf012f1d29fb373d04b08d36d73e0c297fda0d62db9c29d188c881e6",
+              "frames": 160,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 2,
+              "tickers": 2,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 21.744,
+                "steadyCpuMs": 3.883,
+                "processCpuMs": 38.76,
+                "wallMs": 126.51329199999998,
+                "rssBytes": 94322688,
+                "heapBeforeBytes": 8032856,
+                "heapUsedBytes": 21359456,
+                "heapRetainedBytes": 13326600,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1075679,
+                "buffersAfter": 1143464,
+                "wasmBytes": 0,
+                "retainedBytes": 13394385
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 21.744,
+            "steadyCpuMs": 3.993,
+            "retainedBytes": 13379401,
+            "processCpuMs": 22.911
+          }
+        },
+        "rust": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/hyrotrader-57888/rust-0.json",
+              "sha256": "852c8fbda66b93495b819daacc3f26c20a902ebaf10492290ef9c22bbe4c5e70",
+              "frames": 160,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 2,
+              "tickers": 2,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 16.683,
+                "steadyCpuMs": 2.982,
+                "processCpuMs": 16.787,
+                "wallMs": 18.57441700000001,
+                "rssBytes": 63619072,
+                "heapBeforeBytes": 4695864,
+                "heapUsedBytes": 5200176,
+                "heapRetainedBytes": 504312,
+                "bufferRetainedBytes": 4900,
+                "buffersBefore": 26831,
+                "buffersAfter": 31731,
+                "wasmBytes": 327680,
+                "retainedBytes": 836892
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/hyrotrader-57888/rust-1.json",
+              "sha256": "fdb661680bda2076ae93fb0fed696ce83fa1bbea914c6c5c8516004576579ff5",
+              "frames": 160,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 2,
+              "tickers": 2,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 16.216,
+                "steadyCpuMs": 2.871,
+                "processCpuMs": 16.307,
+                "wallMs": 18.21995899999999,
+                "rssBytes": 63537152,
+                "heapBeforeBytes": 4696368,
+                "heapUsedBytes": 5200032,
+                "heapRetainedBytes": 503664,
+                "bufferRetainedBytes": 4900,
+                "buffersBefore": 26831,
+                "buffersAfter": 31731,
+                "wasmBytes": 327680,
+                "retainedBytes": 836244
+              }
+            },
+            {
+              "path": "sdk-rs/harness/out/hyrotrader-57888/rust-2.json",
+              "sha256": "36d2a5b9d6b2999514571a4ba1db31bbf8035fa54b1a32690a1dd75c427f36db",
+              "frames": 160,
+              "commands": 0,
+              "writeCount": 0,
+              "markets": 2,
+              "tickers": 2,
+              "books": 2,
+              "metrics": {
+                "cpuMs": 15.99,
+                "steadyCpuMs": 2.948,
+                "processCpuMs": 16.065,
+                "wallMs": 17.91508299999998,
+                "rssBytes": 63291392,
+                "heapBeforeBytes": 4696368,
+                "heapUsedBytes": 5200176,
+                "heapRetainedBytes": 503808,
+                "bufferRetainedBytes": 4900,
+                "buffersBefore": 26831,
+                "buffersAfter": 31731,
+                "wasmBytes": 327680,
+                "retainedBytes": 836388
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 16.216,
+            "steadyCpuMs": 2.948,
+            "retainedBytes": 836388,
+            "processCpuMs": 16.307
+          }
+        }
+      }
+    },
+    {
+      "venue": "hyrotrader",
+      "stage": "private",
+      "sourceHeadBefore": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "sourceHeadAfter": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "normalEgress": true,
+      "command": "corepack yarn -s rust:gate --venue hyrotrader --tape sdk-rs/harness/tapes/hyrotrader-private.jsonl --runs 1 --books ''",
+      "tape": {
+        "path": "sdk-rs/harness/tapes/hyrotrader-private.jsonl",
+        "sha256": "d950c8d866bffaa14a08439a36b77174a3c8421155481accfede6dd5cd0b66ac",
+        "records": 26
+      },
+      "out": "sdk-rs/harness/out/hyrotrader-58396",
+      "pass": true,
+      "log": "/tmp/parity-bybit-final-hyrotrader-private.log",
+      "logSha256": "34368f26fcd6696847d3c5854c8aeb3b978d37d6f90b622f8c5027557c96ad7f",
+      "implementations": {
+        "ts": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/hyrotrader-58396/ts-0.json",
+              "sha256": "6aed11fc07700d5accf5b14f678a9ac7a5652f321b30a337a655eba867b8a6a8",
+              "frames": 13,
+              "commands": 3,
+              "writeCount": 3,
+              "markets": 2,
+              "tickers": 2,
+              "books": 0,
+              "metrics": {
+                "cpuMs": 36.978,
+                "steadyCpuMs": 18.486,
+                "processCpuMs": 55.856,
+                "wallMs": 3269.333917,
+                "rssBytes": 95141888,
+                "heapBeforeBytes": 7990392,
+                "heapUsedBytes": 21773272,
+                "heapRetainedBytes": 13782880,
+                "bufferRetainedBytes": 67785,
+                "buffersBefore": 1089193,
+                "buffersAfter": 1156978,
+                "wasmBytes": 0,
+                "retainedBytes": 13850665
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 36.978,
+            "steadyCpuMs": 18.486,
+            "retainedBytes": 13850665,
+            "processCpuMs": 55.856
+          }
+        },
+        "rust": {
+          "runs": [
+            {
+              "path": "sdk-rs/harness/out/hyrotrader-58396/rust-0.json",
+              "sha256": "73a70d7139e2d27f3bb91f6a5f6dc2c67b64bef12298c203adf54147eea76e8d",
+              "frames": 13,
+              "commands": 3,
+              "writeCount": 3,
+              "markets": 2,
+              "tickers": 2,
+              "books": 0,
+              "metrics": {
+                "cpuMs": 29.254,
+                "steadyCpuMs": 14.289,
+                "processCpuMs": 33.05,
+                "wallMs": 3261.16775,
+                "rssBytes": 66633728,
+                "heapBeforeBytes": 4665304,
+                "heapUsedBytes": 5301968,
+                "heapRetainedBytes": 636664,
+                "bufferRetainedBytes": 5684,
+                "buffersBefore": 32153,
+                "buffersAfter": 37837,
+                "wasmBytes": 327680,
+                "retainedBytes": 970028
+              }
+            }
+          ],
+          "median": {
+            "cpuMs": 29.254,
+            "steadyCpuMs": 14.289,
+            "retainedBytes": 970028,
+            "processCpuMs": 33.05
+          }
+        }
+      }
+    }
+  ],
+  "preliminaryComparison": {
+    "source": "Source-equivalent working candidate before its 2f5433ff7b commit; preliminary only. Final committed-source gates are recorded separately.",
+    "baselineRustSteadyMs": 3.693,
+    "candidateRustSteadyMs": 3.205,
+    "baselineBytes": 958115,
+    "candidateBytes": 957021,
+    "baseHead": "2dfeb2668db68ce22dc96f8b71ce1a3699f10fd8",
+    "candidateCommittedAs": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c"
+  },
+  "failedCI": {
+    "head": "2dfeb2668db68ce22dc96f8b71ce1a3699f10fd8",
+    "initialHyroSteadyMs": {
+      "ts": 7.3,
+      "rust": 7.6
+    },
+    "singleUnchangedRerunHyroSteadyMsRounded": {
+      "ts": 7.4,
+      "rust": 7.4
+    },
+    "note": "Two strict steady-CPU failures; parity/main CPU/memory passed. No criteria or tape changes.",
+    "initialJob": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39388108271/job/118512784268",
+    "rerunJob": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39388108271/job/118517352557"
+  },
+  "native": {
+    "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+    "scope": "Workspace native tests include all 124 Bybit tests.",
+    "workspacePassed": 2538,
+    "bybitPassed": 124,
+    "log": "/tmp/parity-final11-native.log",
+    "logSha256": "9669dbf2c3df0d6c5f2180848612a94be6fef8abdcd613b274a12880996cabde"
+  },
+  "clippy": {
+    "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+    "scope": "Workspace all-target Clippy, warnings denied.",
+    "log": "/tmp/parity-final11-clippy.log",
+    "logSha256": "398405dbefb6920c9304acc03c41ea5525b1e1d6d48838a390f20faafbe913f3"
+  },
+  "criteria": {
+    "public": "Exact output parity; three-run median main-thread CPU, steady CPU and retained memory strictly below TS.",
+    "private": "Exact output parity; CPU/memory informational.",
+    "finalization": "Reconstruction and clone inside both CPU windows; detach endpoint before async GC.",
+    "memory": "Unclamped heap plus backing-buffer delta plus reserved WASM memory."
+  },
+  "roundingNegativeControl": {
+    "mutation": "Admit 16 digits and 17 text bytes; the regression rejects .9999999999999999 rounding to 1.0. Exact committed 15-digit source restored, then the regression passes.",
+    "failedLog": "/tmp/parity-bybit-decimal-mutation.log",
+    "failedLogSha256": "348ab07dccc035d5c50cb67e2126fe8d80255798e5d76388f209f2875e94a320",
+    "restoredLog": "/tmp/parity-bybit-decimal-restored.log",
+    "restoredLogSha256": "004b2bfa06244fc1a35b330735b2b8ebbdcb9c87acd7f6e43ef81f5a3e887d29"
+  }
+}

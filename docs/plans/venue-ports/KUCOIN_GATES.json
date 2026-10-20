@@ -778,5 +778,10 @@
   "measurement": "Both implementations capture detached logical-end snapshots before memory settling; reconstruction is included in the main-thread CPU window through finalizeReplay.",
   "supersedesHistoricalSourceHeads": [
     "41e28f774aba143e524a295b6bc58c1537751e7a"
-  ]
+  ],
+  "sourceScopeAfterCIFollowup": {
+    "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+    "changedRuntimeFile": "sdk-rs/venues/bybit/src/wire.rs",
+    "reason": "The standard KuCoin/Spot features exclude the optional Bybit crate. Their compiled inputs/harness and recorded e0abc source attribution remain unchanged."
+  }
 }

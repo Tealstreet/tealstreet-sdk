@@ -920,37 +920,37 @@
     }
   ],
   "integrationVerification": {
-    "runtimeSourceHead": "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+    "runtimeSourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
     "combinedBuild": {
       "command": "corepack yarn -s rust:build-wasm",
       "pass": true,
-      "bytesPerArtifact": 11395815,
-      "sha256": "20acd64815c43d188fb08be5a6e0ca64440fec909732c65ec88c82c1de94b665",
+      "bytesPerArtifact": 11394719,
+      "sha256": "bd492668238e4c0ce5f6df8fa6528c27d7974b645e631d411e6b51c505c5698c",
       "formats": [
         "web",
         "node"
       ],
       "purpose": "Default-feature integration artifact; standalone artifacts use the fixed per-venue byte budget.",
-      "log": "/tmp/parity-final10-build.log",
-      "logSha256": "fc7c7c411309fd15f512f509188788ed2fc633b6728d8e8d615f5c6c5a2305f4"
+      "log": "/tmp/parity-final11-build.log",
+      "logSha256": "a8a8890e0ecb33bd698237c3805513607c9d1c0d165ba563458e8cfe30e6847c"
     },
     "checks": [
       {
         "name": "native workspace",
-        "sourceHead": "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+        "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
         "pass": true,
-        "passed": 2537,
-        "log": "/tmp/parity-final9-native.log",
-        "logSha256": "f92b0d56e38e5f7b129fd21c860cac1f7e1c66550b6f04eef54abf52895e8d8b"
+        "passed": 2538,
+        "log": "/tmp/parity-final11-native.log",
+        "logSha256": "9669dbf2c3df0d6c5f2180848612a94be6fef8abdcd613b274a12880996cabde"
       },
       {
         "name": "KuCoin including Spot",
-        "sourceHead": "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+        "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
         "pass": true,
         "passed": 143,
         "spotIntegrationPassed": 42,
-        "log": "/tmp/parity-final10-kucoin-native.log",
-        "logSha256": "313ced330648b0e41f7e2303ed450509fa831e9fb1e9ea68051c440e49995686"
+        "log": "/tmp/parity-final11-kucoin-native.log",
+        "logSha256": "6ec61b6394e7b33ba9fda26fad8b63e8d1408ad169fd7fc30c64851440532787"
       },
       {
         "name": "native frame integration",
@@ -958,7 +958,8 @@
         "pass": true,
         "passed": 1,
         "log": "/tmp/parity-final9-frame-wire.log",
-        "logSha256": "f3a9380101b8273434cda2d1551fd971b1131541ec2ea7409e6ea0183c8feb34"
+        "logSha256": "f3a9380101b8273434cda2d1551fd971b1131541ec2ea7409e6ea0183c8feb34",
+        "unchangedScope": "Only Bybit wire numeric parsing changed after this exact-source check; the checked TS/harness/server scope is unchanged."
       },
       {
         "name": "native server adapter",
@@ -966,32 +967,33 @@
         "pass": true,
         "passed": 1,
         "log": "/tmp/parity-final9-server-adapter.log",
-        "logSha256": "898c95b1914dbef1b3296582798c42582b808d6e8407352ae435873fdf36ad70"
+        "logSha256": "898c95b1914dbef1b3296582798c42582b808d6e8407352ae435873fdf36ad70",
+        "unchangedScope": "Only Bybit wire numeric parsing changed after this exact-source check; the checked TS/harness/server scope is unchanged."
       },
       {
         "name": "scripted live-smoke integration",
-        "sourceHead": "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+        "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
         "pass": true,
         "passed": 9,
-        "log": "/tmp/parity-final10-live-smoke.log",
-        "logSha256": "431c8754d0987d2d9579bddc74ee8ef0a4e2a54ede78e9fe267487b6af60f474"
+        "log": "/tmp/parity-final11-live-smoke.log",
+        "logSha256": "bac5fac38bfed3d0a190dba4735ff21cef8b5645a9fba94f31826a17e128a81d"
       },
       {
         "name": "JS host",
-        "sourceHead": "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+        "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
         "pass": true,
         "passed": 74,
-        "log": "/tmp/parity-final10-host.log",
-        "logSha256": "2b9d7ca4028ad420b3eb902e849619d49c23491032d4af8ea4478cbd3d929da9"
+        "log": "/tmp/parity-final11-host.log",
+        "logSha256": "a6dfc1c4b1ed4af97fc70924f8251bcbf27f1e85b51423d4c9be0ccef20e2b09"
       },
       {
         "name": "combined SDK/WASM",
-        "sourceHead": "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+        "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
         "pass": true,
         "passed": 415,
         "filesPassed": 14,
-        "log": "/tmp/parity-final10-sdk.log",
-        "logSha256": "f96bcd443ca0f89881f664e5d05b56afbb734a0bc396e003f60f83e1c71add8b"
+        "log": "/tmp/parity-final11-sdk.log",
+        "logSha256": "439e258e3128c89407ae5eaaa58eba96be1e223ce6c3c26a08c16d9a19b80783"
       },
       {
         "name": "repository tests",
@@ -1000,7 +1002,8 @@
         "tasksPassed": 27,
         "safeCexPassedPerInvocation": 7513,
         "log": "/tmp/parity-final9-repo-tests.log",
-        "logSha256": "51f0370a02cbe761619ac05f6ead9273c0d2cf41e8bc119b06015eb962cbafbf"
+        "logSha256": "51f0370a02cbe761619ac05f6ead9273c0d2cf41e8bc119b06015eb962cbafbf",
+        "unchangedScope": "Only Bybit wire numeric parsing changed after this exact-source check; the checked TS/harness/server scope is unchanged."
       },
       {
         "name": "harness",
@@ -1008,7 +1011,8 @@
         "pass": true,
         "passed": 568,
         "log": "/tmp/parity-merge9-harness.log",
-        "logSha256": "19097f487e0cf497ed38db3c3cedc3d9889a7ceafd54c5ea7f84f0d4f223bf83"
+        "logSha256": "19097f487e0cf497ed38db3c3cedc3d9889a7ceafd54c5ea7f84f0d4f223bf83",
+        "unchangedScope": "Only Bybit wire numeric parsing changed after this exact-source check; the checked TS/harness/server scope is unchanged."
       },
       {
         "name": "typecheck",
@@ -1016,7 +1020,8 @@
         "pass": true,
         "tasksPassed": 44,
         "log": "/tmp/parity-final9-typecheck.log",
-        "logSha256": "3ed0f6d238b076b739e307405e7e8c1371784001cb77439196b246f180865b7a"
+        "logSha256": "3ed0f6d238b076b739e307405e7e8c1371784001cb77439196b246f180865b7a",
+        "unchangedScope": "Only Bybit wire numeric parsing changed after this exact-source check; the checked TS/harness/server scope is unchanged."
       },
       {
         "name": "lint",
@@ -1024,42 +1029,43 @@
         "pass": true,
         "tasksPassed": 28,
         "log": "/tmp/parity-final9-lint.log",
-        "logSha256": "65971bd6255c4c7ece5b2a79951e9484326627cb280faa5de2a3e741d39eb958"
+        "logSha256": "65971bd6255c4c7ece5b2a79951e9484326627cb280faa5de2a3e741d39eb958",
+        "unchangedScope": "Only Bybit wire numeric parsing changed after this exact-source check; the checked TS/harness/server scope is unchanged."
       },
       {
         "name": "fmt",
-        "sourceHead": "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+        "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
         "pass": true,
-        "log": "/tmp/parity-merge9-fmt.log",
+        "log": "/tmp/parity-final11-fmt.log",
         "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       {
         "name": "workspace all-target Clippy",
-        "sourceHead": "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+        "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
         "pass": true,
-        "log": "/tmp/parity-final9-clippy.log",
-        "logSha256": "288e1f2177f740ad0499e81d865b37c9acb3f4c0cd95bf9c7946723be1068095"
+        "log": "/tmp/parity-final11-clippy.log",
+        "logSha256": "398405dbefb6920c9304acc03c41ea5525b1e1d6d48838a390f20faafbe913f3"
       },
       {
         "name": "wasm32 Clippy",
-        "sourceHead": "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+        "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
         "pass": true,
-        "log": "/tmp/parity-final9-wasm-clippy.log",
-        "logSha256": "8b638e7b5dfe477031950b4b4dc176f5d0aee083ad144ca0d476f679dcf2499c"
+        "log": "/tmp/parity-final11-wasm-clippy.log",
+        "logSha256": "fd174fc709aa434077bd97f4532229c42fe155213c311ee51b38600ad83a303e"
       },
       {
         "name": "bans",
-        "sourceHead": "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+        "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
         "pass": true,
-        "log": "/tmp/parity-final9-bans.log",
+        "log": "/tmp/parity-final11-bans.log",
         "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       {
         "name": "PR-range secret scan",
-        "sourceHead": "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+        "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
         "pass": true,
-        "log": "/tmp/parity-final9-secret-scan.log",
-        "logSha256": "38b4edf4689c7206e9fdad8bcc7c80def02ee80617605318aabb018737650ffa"
+        "log": "/tmp/parity-final11-secret-scan.log",
+        "logSha256": "a03741df06410075600801bb35ccfcaa742a3a8c8cf4969fd7a29d5f33b2dc9f"
       }
     ],
     "linuxParadexSize": {
@@ -1071,5 +1077,20 @@
       "log": "/tmp/pr1338-e0abc-paradex-ci.log",
       "logSha256": "05dc5f7b1ce448057c30506e1835e8694bb150e32bad38a7d69ee36d9f92b773"
     }
-  }
+  },
+  "sourceScopeAfterCIFollowup": {
+    "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+    "gateSourceHead": "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+    "changedRuntimeFile": "sdk-rs/venues/bybit/src/wire.rs",
+    "unaffectedArtifacts": [
+      "paradex",
+      "binance",
+      "bitrue",
+      "polymarket",
+      "kucoin",
+      "kucoinspot"
+    ],
+    "reason": "These six standard builds disable default features and exclude the optional Bybit crate. Their compiled inputs and harness are unchanged; their recorded source attribution remains exact. The combined/native checks include Bybit and were refreshed separately."
+  },
+  "ciFollowupEvidence": "PARITY_BYBIT_CI_GATES.json"
 }

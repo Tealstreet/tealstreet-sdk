@@ -481,7 +481,51 @@ random mantissas per width, boundary values and existing fallback/signed-zero
 cases. All **124 Bybit native tests**, Clippy, fmt and bans pass. Preliminary
 standard public replay3 improves local Rust steady CPU from **3.693 to 3.205 ms**;
 main CPU remains below TS. The standard artifact shrinks from **958,115 to
-957,021 bytes** without a profile or budget change. Before retaining this fix,
-run all five Bybit-family public/private gates and refresh native/combined host
-verification on the committed source. The six earlier standalone builds exclude
+957,021 bytes** without a profile or budget change. All five Bybit-family public/private gates and refreshed native/combined host
+verification pass on the committed source. The six earlier standalone builds exclude
 the Bybit crate, so their explicitly attributed evidence remains unchanged.
+
+
+## Final local checkpoint after CI follow-up
+
+The six earlier standalone proofs retain source `e0abc9b0f1`. Their compiled
+inputs and harness are unchanged: the only runtime change is Bybit's numeric
+decoder, and these six feature selections exclude the optional Bybit crate.
+Independent dependency/source review confirms this boundary. Bybit-family and
+combined/native verification instead use exact source `2f5433ff7b`.
+
+All **22 replay gates PASS** (the earlier 12 plus the following 10). All five
+Bybit-family public medians win main CPU, steady CPU and retained memory; all
+private audits pass. One standard Bybit web/Node artifact serves all five names:
+**957,021 bytes**, SHA256
+`43734e52829af1a6f286d97919e4ab18036633adcc0aa8a2e73ce6225d91ec98`.
+No fixture, egress, threshold, build-profile or byte-budget changes.
+
+| Venue | TS/Rust CPU ms | TS/Rust steady ms | Private frames/commands |
+| --- | ---: | ---: | ---: |
+| bybit | 252.657 / 174.396 | 138.871 / 73.203 | 18 / 4 |
+| bybitinverse | 114.294 / 30.953 | 72.259 / 12.055 | 14 / 3 |
+| bybitspot | 159.090 / 111.483 | 80.606 / 48.537 | 11 / 2 |
+| bybitdemo | 218.302 / 138.645 | 112.714 / 52.341 | 14 / 3 |
+| hyrotrader | 21.744 / 16.216 | 3.993 / 2.948 | 13 / 3 |
+
+An independent evidence audit validates all ten new gate logs, 40 raw runs,
+saved binaries, source/tape/output/hash bindings, audit counters and unchanged
+memory arithmetic. A deliberate unsafe 16-digit/17-byte parser mutation makes
+the bitwise regression fail on `.9999999999999999`; restoring the exact
+committed source makes it pass. The financial rounding guard is tested.
+
+Fresh source `2f5433ff7b` passes **2,538 native workspace tests** (124 Bybit,
+143 KuCoin including 42 Spot), workspace/all-target and wasm32 Clippy, fmt,
+bans, secret scan, **415 combined SDK/WASM tests**, **74 JS host tests** and
+**9 scripted live-smoke tests**. The combined artifact is **11,394,719 bytes**,
+identical web/Node SHA256
+`bd492668238e4c0ce5f6df8fa6528c27d7974b645e631d411e6b51c505c5698c`.
+The earlier exact-source TS/harness/server checks remain explicitly attributed
+to their unchanged scopes. Detailed evidence:
+[Bybit CI follow-up](venue-ports/PARITY_BYBIT_CI_GATES.json) and refreshed
+[integration verification](venue-ports/PARITY_GATES.json).
+
+Local implementation and evidence reviews pass. Final-head PR correctness
+review and all-green CI are still required before merging; earlier failed
+checks remain documented on the PR.
