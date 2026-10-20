@@ -141,3 +141,12 @@ this lifecycle. Hyperliquid and Binance final gates remain pending.
   rejection/disposal errors. Native crate 87 tests (29 spot), strict Clippy and
   formatting pass; independent review reran 29 native spot tests and 47 SDK
   wrapper/validation tests, all passing with no open findings.
+
+- Native server-adapter landing merged cleanly at `f5d60003af`. Independent
+  merge review confirms all 46 aliases and incoming workflow are preserved;
+  562 harness, 428 SDK and 100 server-session tests pass. Full workspace strict
+  Clippy, default WASM strict Clippy, formatting, bans, SDK and root typecheck/
+  lint pass. Both touched native crates pass 209 tests (87 Hyperliquid and
+  122 Kraken). Secret-scan preflight identified only the two fixed public
+  replay-vector declarations; exact historical fingerprints document their
+  synthetic provenance, with production and future changes still scanned.
