@@ -291,6 +291,15 @@ publish an empty snapshot or dispose the previous good engine.
   and private gates PASS. The combined artifact restores exactly to `d1fdda29…8e7b88` before remaining public/private controls. No benchmark tests/builds run
   concurrently during accepted public measurements.
 
+- Final local acceptance PASS on the integrated/reviewed source: 18 public
+  CPU/memory controls and 27 private correctness controls, all measured on
+  CI Node 22.23.3. Fourteen public/23 private controls use the checksum-verified
+  combined artifact; four public/private solo profiles cover Hyperliquid Spot,
+  Kraken Spot/futures and Paradex. All three PR correctness findings and the
+  Paradex size finding are fixed, independently re-reviewed and closed. No TS
+  protocol bug normalization is added. Exact-head CI and merge into
+  `feat/rust-rewrite` remain the final landing steps.
+
 ## Final public replay metrics
 
 CI runtime: Node 22.23.3, three-run medians. Fourteen profiles use the current
