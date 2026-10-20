@@ -632,8 +632,8 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
   subscriptions made before the engine starts are lost (`rust.exchange.ts:1000,1022`).
 - Medium: ~~`fetchLeverageForSymbol` returns market max for mexc, bingx, weex
   (`rust.exchange.ts:945`) and frame mode strips `fetchedLeverage`~~; command
-  rejections don't emit the error toast (one-error rule); `privateOnly`/
-  `externalPublicData` ignored; `getAccount` missing for ~18 venues; dispose
+  rejections don't emit the error toast (one-error rule); ~~`privateOnly`/
+  `externalPublicData` ignored~~ (publicFeed policy; in-process source served, #1441); `getAccount` missing for ~18 venues; dispose
   mid-command reports a placed order as failed (`host.mjs:83`); base
   `cancelAllOrders`/`nuke` read the 250 ms-lagged TS store; fills lack
   realizedPnl/fee; `fetchOrders`/`fetchPositions`/`removeOrders` don't reach the
