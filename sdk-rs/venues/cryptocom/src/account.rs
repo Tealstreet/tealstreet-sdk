@@ -721,14 +721,25 @@ impl Cryptocom {
 }
 
 impl Cryptocom {
-    pub(crate) fn account_auth(&self, pending: &Pending, response: &safe_cex_engine::Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &safe_cex_engine::Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
         use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
-        let Pending::Account(r) = pending else { return None };
+        let Pending::Account(r) = pending else {
+            return None;
+        };
         let e: crate::wire::RestEnvelope<'_> = serde_json::from_str(response.body).ok()?;
         // account_failed still admits its historical formatted-message retry.
         // That predicate excludes an intermediate attempt; it does not classify auth.
-        if r.retries < 1 && (e.code == 40101 || e.message.contains("40101")) { return None; }
-        if matches!(e.code, 40101 | 40103) { return Some(Rejected); }
-        (e.code == 0 && (200..300).contains(&response.status) && !r.invalid && e.result.is_some()).then_some(Accepted)
+        if r.retries < 1 && (e.code == 40101 || e.message.contains("40101")) {
+            return None;
+        }
+        if matches!(e.code, 40101 | 40103) {
+            return Some(Rejected);
+        }
+        (e.code == 0 && (200..300).contains(&response.status) && !r.invalid && e.result.is_some())
+            .then_some(Accepted)
     }
 }

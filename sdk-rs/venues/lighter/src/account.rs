@@ -699,7 +699,11 @@ impl Lighter {
                 valid: true,
             }),
         );
-        cx.tag_account_read(request, safe_cex_engine::CredentialSlot::Primary, safe_cex_engine::AccountReadScope::Orders);
+        cx.tag_account_read(
+            request,
+            safe_cex_engine::CredentialSlot::Primary,
+            safe_cex_engine::AccountReadScope::Orders,
+        );
     }
     pub(crate) fn account_order_terminal(&self, id: &str) -> bool {
         self.account.suppressed.contains(id)
@@ -1922,12 +1926,24 @@ impl Lighter {
 }
 
 impl Lighter {
-    pub(crate) fn account_auth(&self, pending: &Pending, response: &Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
+    pub(crate) fn account_auth_observation(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
         use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
-        let Pending::Account(Request::Orders { valid, .. }) = pending else { return None };
+        let Pending::Account(Request::Orders { valid, .. }) = pending else {
+            return None;
+        };
         let status: Status<'_> = serde_json::from_str(response.body).ok()?;
         let code = status.code.as_ref().map(|c| c.0.as_ref());
-        if matches!(code, Some("20013" | "21109")) { return Some(Rejected); }
-        ((200..300).contains(&response.status) && status.valid() && *valid && (code == Some("200") || status.success == Some(true))).then_some(Accepted)
+        if matches!(code, Some("20013" | "21109")) {
+            return Some(Rejected);
+        }
+        ((200..300).contains(&response.status)
+            && status.valid()
+            && *valid
+            && (code == Some("200") || status.success == Some(true)))
+        .then_some(Accepted)
     }
 }

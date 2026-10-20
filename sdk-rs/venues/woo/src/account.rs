@@ -1612,20 +1612,43 @@ pub(crate) fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountRe
     }
 }
 impl Woo {
-    pub(crate) fn account_auth(&self, pending: &Pending, response: &Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
+    pub(crate) fn account_auth(
+        &self,
+        pending: &Pending,
+        response: &Response<'_>,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
         use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
         auth_scope(pending)?;
-        let Pending::Account(r) = pending else { return None };
+        let Pending::Account(r) = pending else {
+            return None;
+        };
         if let Request::Orders { generation, .. } = r
-            && self.account.orders.as_ref().is_none_or(|o| o.generation != *generation) { return None; }
+            && self
+                .account
+                .orders
+                .as_ref()
+                .is_none_or(|o| o.generation != *generation)
+        {
+            return None;
+        }
         #[derive(Deserialize)]
-        struct Evidence { success: Option<bool>, code: Option<i64> }
+        struct Evidence {
+            success: Option<bool>,
+            code: Option<i64>,
+        }
         let evidence: Evidence = serde_json::from_str(response.body).ok()?;
-        if evidence.success != Some(true) && matches!(evidence.code, Some(-1001 | -1002)) { return Some(Rejected); }
-        if !(200..300).contains(&response.status) || evidence.success != Some(true) { return None; }
+        if evidence.success != Some(true) && matches!(evidence.code, Some(-1001 | -1002)) {
+            return Some(Rejected);
+        }
+        if !(200..300).contains(&response.status) || evidence.success != Some(true) {
+            return None;
+        }
         let e: Envelope<'_> = serde_json::from_str(response.body).ok()?;
         let valid = match r {
-            Request::Info { .. } => e.payload().ok().is_some_and(|p| serde_json::from_str::<Info<'_>>(p).is_ok()),
+            Request::Info { .. } => e
+                .payload()
+                .ok()
+                .is_some_and(|p| serde_json::from_str::<Info<'_>>(p).is_ok()),
             Request::Positions { bad, .. } | Request::Orders { bad, .. } => !bad,
             Request::Leverage { .. } => e.data.is_some(),
         };

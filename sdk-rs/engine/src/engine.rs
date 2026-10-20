@@ -514,10 +514,11 @@ fn observe_account_auth<V: Venue>(
     pending: &PendingHttp<V::Pending>,
     response: &Response<'_>,
     expected_list_present: bool,
+    now: f64,
     actions: &mut Vec<Action>,
 ) {
     let Some(auth) = pending.auth else { return };
-    let Some(outcome) = venue.account_auth_outcome(&pending.value, response) else {
+    let Some(outcome) = venue.account_auth_outcome(&pending.value, response, now) else {
         return;
     };
     if outcome == AuthOutcome::Accepted && !expected_list_present {
@@ -1083,6 +1084,7 @@ pub trait Venue {
         &self,
         _pending: &Self::Pending,
         _response: &Response<'_>,
+        _now: f64,
     ) -> Option<AuthOutcome> {
         None
     }
@@ -1632,6 +1634,7 @@ impl<V: Venue> Engine<V> {
                         &pending,
                         &response,
                         false,
+                        now,
                         &mut cx.io.actions,
                     );
                     self.venue.on_stream_error(&mut cx, pending.value, response);
@@ -1661,7 +1664,14 @@ impl<V: Venue> Engine<V> {
                 headers: &incoming.headers,
                 body,
             };
-            observe_account_auth(&self.venue, &pending, &response, true, &mut cx.io.actions);
+            observe_account_auth(
+                &self.venue,
+                &pending,
+                &response,
+                true,
+                now,
+                &mut cx.io.actions,
+            );
             self.venue.on_response(&mut cx, pending.value, response);
             return;
         }
@@ -1672,7 +1682,14 @@ impl<V: Venue> Engine<V> {
                     headers: &incoming.headers,
                     body,
                 };
-                observe_account_auth(&self.venue, &pending, &response, true, &mut cx.io.actions);
+                observe_account_auth(
+                    &self.venue,
+                    &pending,
+                    &response,
+                    true,
+                    now,
+                    &mut cx.io.actions,
+                );
                 self.venue.on_response(&mut cx, pending.value, response);
             }
             Err(_) => {

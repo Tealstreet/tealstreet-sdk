@@ -3,7 +3,7 @@ use crate::{
     wire::{Id, N, checked},
 };
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response, num};
+use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 

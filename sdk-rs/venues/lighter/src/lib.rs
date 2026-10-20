@@ -626,8 +626,13 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
-    fn account_auth_outcome(&self, pending: &Self::Pending, response: &Response<'_>) -> Option<safe_cex_engine::AuthOutcome> {
-        self.account_auth(pending, response)
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        _now: f64,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        self.account_auth_observation(pending, response)
     }
     type Pending = Pending;
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {

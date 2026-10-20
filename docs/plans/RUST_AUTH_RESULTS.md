@@ -303,3 +303,13 @@ venue session-age predicates share the existing admission rule. Update the
 foundation trait, its four initial WIP implementations and core/native tests,
 then re-run focused/full foundation gates and independent correctness review
 before resuming classifiers. No serialized host contract changes.
+
+
+The time-context foundation passes 207 core/native cases in nine nonempty
+suites, including the new boundary control; strict all-feature core/native/WASM
+Clippy, scoped fmt and bans pass. Independent time-hook review passes. The
+all-venue feature build also caught and fixed the initial Lighter observer name
+collision (the existing token generator is unchanged), and an incoming Orderly
+Warning log's missing LogLevel import. These are compile repairs to preserved
+WIP/integration; no completed classifier coverage is claimed by them. Logs:
+/tmp/bridge-auth-response-time-{tests,clippy-complete,fmt,bans}.log.

@@ -10,6 +10,7 @@ struct AccountReads {
     streamed: bool,
     tagged: bool,
     delegated: bool,
+    valid_before: Option<f64>,
 }
 
 impl Venue for AccountReads {
@@ -50,7 +51,15 @@ impl Venue for AccountReads {
             .unwrap();
         }
     }
-    fn account_auth_outcome(&self, _: &usize, response: &Response<'_>) -> Option<AuthOutcome> {
+    fn account_auth_outcome(
+        &self,
+        _: &usize,
+        response: &Response<'_>,
+        now: f64,
+    ) -> Option<AuthOutcome> {
+        if self.valid_before.is_some_and(|deadline| now >= deadline) {
+            return None;
+        }
         if response.status == 401 {
             return Some(AuthOutcome::Rejected);
         }
@@ -98,6 +107,7 @@ fn engine(streamed: bool, tagged: bool, delegated: bool) -> Engine<AccountReads>
         streamed,
         tagged,
         delegated,
+        valid_before: None,
     });
     engine.start(0.);
     engine.drain_actions().for_each(drop);
@@ -317,4 +327,46 @@ fn invalid_utf8_buffer_cannot_report_http_status_auth() {
             message: "failed".into()
         })]
     );
+}
+
+#[test]
+fn response_event_time_preserves_time_sensitive_classifier_admission() {
+    for (now, accepted) in [(1.999, true), (2., false), (3., false)] {
+        let mut engine = Engine::new(AccountReads {
+            streamed: false,
+            tagged: true,
+            delegated: false,
+            valid_before: Some(2.),
+        });
+        engine.start(0.);
+        engine.drain_actions().for_each(drop);
+        engine.handle(
+            now,
+            Event::HttpResponse {
+                request: RequestId(1),
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"accepted":true}"#,
+                },
+            },
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| matches!(
+                    action,
+                    Action::Notice(Notice::AccountAuth {
+                        outcome: AuthOutcome::Accepted,
+                        ..
+                    })
+                ))
+                .count(),
+            usize::from(accepted)
+        );
+        assert!(
+            matches!(actions.last(), Some(Action::Notice(Notice::Log { level: LogLevel::Info, message })) if message == "response:0")
+        );
+    }
 }
