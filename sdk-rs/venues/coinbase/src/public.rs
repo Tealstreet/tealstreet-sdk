@@ -63,7 +63,8 @@ pub(crate) struct Public {
     reconnect: Option<TimerId>,
     sequence: Option<u64>,
     poll: Option<TimerId>,
-    retry: safe_cex_engine::startup::Backoff<()>,
+    // Instruments are `None`; concurrent CFM and Spot product reads each own a key.
+    retry: safe_cex_engine::startup::Backoff<Option<ProductKind>>,
     kind: Option<ProductKind>,
     pub books: HashMap<String, Depth>,
     candles: HashMap<(String, String), (u32, Option<Candle>)>,
@@ -837,7 +838,7 @@ impl Coinbase {
                 }
                 let missing_quotes = invalid && tickers.is_empty();
                 if !missing_quotes {
-                    self.public.retry.succeeded(cx, &());
+                    self.public.retry.succeeded(cx, &None);
                 }
                 if initial {
                     cx.store.set_markets(markets);
@@ -964,7 +965,7 @@ impl Coinbase {
                     );
                     return;
                 }
-                self.public.retry.succeeded(cx, &());
+                self.public.retry.succeeded(cx, &Some(kind));
                 for ticker in &tickers {
                     self.public.products.insert(
                         ticker.symbol.clone(),
@@ -1089,12 +1090,16 @@ impl Coinbase {
                     state.retry = Some(cx.set_timer(2000.));
                 }
             }
-            _ => {
+            pending => {
+                let key = match pending {
+                    Request::Products { kind, .. } => Some(kind),
+                    _ => None,
+                };
                 cx.log(LogLevel::Warning, error);
                 if let Some(timer) = self.public.poll.take() {
                     cx.clear_timer(timer);
                 }
-                self.public.retry.failed(cx, ());
+                self.public.retry.failed(cx, key);
             }
         }
     }
