@@ -54,7 +54,7 @@ pub fn startup() -> (TestEngine, SocketId) {
         }
         for a in actions {
             match a {
-                Action::WsConnect { socket, url } => {
+                Action::WsConnect { socket, url, .. } => {
                     if url.contains("/private/") {
                         private = Some(socket);
                     }

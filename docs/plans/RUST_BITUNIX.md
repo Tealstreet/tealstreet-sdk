@@ -622,3 +622,31 @@ initial-book presence barrier yields both books and all 144 hashes identical
 to native, zero unserved/protocol errors, and 222 helper tests PASS.
 Bitrue then landed at fc18c55874 and made PR #1309 conflicting; checkpoint this
 reviewable startup fix before integrating latest landing. No stash.
+
+### Transport and Bitrue landing integration
+
+Merge fc18c55874 (including transport8af92cea0f), retaining nested workspace,
+all prior strict response/signature/body/timing/readiness controls and the MEXC
+seed correction. Thirteen optional/default venue factories remain registered.
+Bitunix sockets now declare Public/Private roles with stable futures/private/
+ticker:start/price:start identities. SocketContext owns String feed names so
+arbitrary market shards stay distinct without leaks; existing static callers
+remain supported. A 301-market regression proves six independent feeds,
+identity stability across reconnects and one-connect watchdog recovery hints.
+
+Independent integration review fixed Bitrue generated-ID normalization accepting
+non-string/empty/oversized/newline IDs. Malformed parent and child IDs now keep
+exact wire values. All 230 helpers pass; SDK routing203 and CID2 pass. Aggregate
+WASM passes32 adapter and47 host tests; root typecheck44/lint28 pass. Full Rust,
+root tests and new exact-head replay CI follow the final role adaptation.
+
+Measurement-policy audit corrected our extra component-sign restriction. The
+landing metric is net retained memory: signed heap/buffer deltas combine with
+WASM, while absolute counters and the net must remain nonnegative and exactly
+consistent. A negative component alone cannot prove an unsettled baseline;
+positive components cannot prove no setup storage was released. Restore that
+landing policy, preserve signed deltas without clamping, and retain all CPU,
+peak/net memory thresholds plus before-constructor sampling/real settling.
+For the observed TS -88/-112 cases, the signed delta reduces TS memory and makes
+Rust's comparison harder. Independent math/code review and regression cases
+cover this correction; no unsupported allocation-lifetime workaround added.

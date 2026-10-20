@@ -25,6 +25,7 @@ import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
+import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
@@ -42,6 +43,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   bitget: 'bitget',
   bitgetusdc: 'bitgetusdc',
   blofin: 'blofin',
+  bitrue: 'bitrue',
   mexc: 'mexc',
   bingx: 'bingx',
   bitunix: 'bitunix',
@@ -81,6 +83,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     isValid: (id) => id.length >= 1 && id.length <= 40 && id === id.toLowerCase(),
   },
   bitunix: patternClientOrderIdRule('Bitunix', /^\S+$/),
+  bitrue: patternClientOrderIdRule('Bitrue', /^.{1,31}$/),
   bybit: patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/),
   cryptocom: patternClientOrderIdRule('Crypto.com', /^.{1,36}$/),
   okx: okxClientOrderIdRule,
@@ -158,6 +161,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   start = async () => {
+    assertEngineAccountRouting(this.options);
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
@@ -170,7 +174,7 @@ export class RustEngineExchange extends BaseExchange {
     const { key, secret, passphrase, testnet, applicationId, vault, hyperliquidBuilder, enableSpotMarkets } =
       this.options;
     const publicDataOnly = this.isPublicDataOnly;
-    const transport = engineTransport();
+    const transport = createEngineTransport(this.name, this.options, engineTransport());
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
       JSON.stringify({
@@ -179,7 +183,7 @@ export class RustEngineExchange extends BaseExchange {
         passphrase,
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
-        ...(this.name === 'backpack' ? { recvWindow: this.options.extra?.recvWindow } : {}),
+        ...(['backpack', 'bitrue'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,
         vault,
         hyperliquidBuilder,
@@ -189,16 +193,7 @@ export class RustEngineExchange extends BaseExchange {
     );
     this.host = new EngineHost(
       engine,
-      this.name === 'backpack'
-        ? {
-            webSocketHeaders: transport.webSocketHeaders,
-            now: virtualClock.getCurrentTimeMs,
-            connect: transport.connect.bind(transport),
-            request: transport.request.bind(transport),
-            setTimeout: transport.setTimeout.bind(transport),
-            clearTimeout: transport.clearTimeout.bind(transport),
-          }
-        : transport,
+      this.name === 'backpack' ? { ...transport, now: virtualClock.getCurrentTimeMs } : transport,
       {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,
@@ -362,7 +357,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['blofin', 'hyperliquid'].includes(this.name)
+      ...(['blofin', 'bitrue', 'hyperliquid'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });
@@ -371,7 +366,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (this.name === 'blofin') leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      if (['blofin', 'bitrue'].includes(this.name)) leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
         leverage = { buyLeverage: value, sellLeverage: value };

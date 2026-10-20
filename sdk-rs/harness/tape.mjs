@@ -511,7 +511,8 @@ export class Tape {
   }
 
   respondMatched(method, url, body, headers) {
-    this.venue.validateRequest?.({ method, url, body, headers });
+    try { this.venue.validateRequest?.({ method, url, body, headers }); }
+    catch (error) { this.invalidSignatures++; throw error; }
     if (this.isPrivate && this.venue.verifyRequest) {
       try { if (!this.venue.verifyRequest({ method, url, body, headers })) throw new Error(`invalid replay signature: ${method} ${url}`); }
       catch (error) { this.invalidSignatures++; throw error; }
@@ -572,12 +573,12 @@ export class Tape {
       ...(Number.isFinite(record.t) ? { recordedAt: record.t } : {}) };
   }
 
-  connect(url, onOpen, onMessage, onClose) {
+  connect(url, onOpen, onMessage, onClose, metadata = {}) {
     const rawUrl = url;
     url = this.canonicalize(url);
     const connection = this.connectionCounts.get(url) ?? 0;
     this.connectionCounts.set(url, connection + 1);
-    const socket = { url, rawUrl, connection, onOpen, onData: onMessage, onMessage: (text) => deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame), onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set(), subscriptionArgs: new Map(), subscriptions: new Set(), generation: connection + 1, ordinal: connection, loginVerified: false };
+    const socket = { url, rawUrl, channel: metadata.channel, context: metadata.context, connection, onOpen, onData: onMessage, onMessage: (text) => deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame), onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set(), subscriptionArgs: new Map(), subscriptions: new Set(), generation: connection + 1, ordinal: connection, loginVerified: false };
     this.sockets.push(socket);
     this.byConnection.set(`${url}:${connection}`, socket);
     // A recorded open may already be waiting for this socket to be constructed.

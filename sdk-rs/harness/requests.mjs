@@ -39,6 +39,7 @@ const wireValue = (value, callerIds, options, key, query = false) => {
 };
 
 export const requestKey = (method, url, body, callerIds = new Set(), options = {}) => {
+  if (options.requestOptions) options = { ...options, ...options.requestOptions(method.toUpperCase(), new URL(url)) };
   method = method.toUpperCase();
   const parsed = new URL(options.requestUrl?.(url, method) ?? url);
   const query = [...parsed.searchParams]
@@ -221,7 +222,14 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
   catch { return `WS ${canonicalUrl(url, callerIds)} ${text}`; }
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? '').toLowerCase();
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? '').toLowerCase();
+  if (options.bitrueProtocol) {
+    if (message?.ping !== undefined || message?.pong !== undefined) return undefined;
+    if (message?.params?.cb_id !== undefined) {
+      message = { ...message, params: { ...message.params } };
+      delete message.params.cb_id;
+    }
+  }
   if (options.bingxProtocol && (message?.ping !== undefined || message?.pong !== undefined)) return undefined;
   if (options.cryptoProtocol && method === 'public/respond-heartbeat') return undefined;
   if (['ping', 'pong', 'heartbeat'].includes(method)) return undefined;
@@ -265,7 +273,7 @@ const fullSubscriptionKeys = (url, text, callerIds = new Set(), options = {}) =>
     const key = subscriptionKey(url, text, callerIds, options);
     return key === undefined ? [] : [key];
   }
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? '').toLowerCase();
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
     if (options.cryptoProtocol && Array.isArray(message.params?.channels)) {
       return message.params.channels.map((channel) => subscriptionKey(url,
@@ -283,6 +291,6 @@ export const subscriptionKeys = (url, text, callerIds = new Set(), options = {})
   if (typeof text === 'string') { try { const m = JSON.parse(text); if (m?.ping !== undefined || m?.pong !== undefined) return []; } catch {} }
   const legacy = legacySubscriptionKeys(url, typeof text === 'string' ? text : JSON.stringify(text));
   return options.cryptoProtocol || options.bingxProtocol || options.mexcProtocol || options.blofinProtocol ||
-    options.fullSocketIdentity || !legacy.length
+    options.fullSocketIdentity || options.bitrueProtocol || !legacy.length
     ? fullSubscriptionKeys(url, text, callerIds, options) : legacy;
 };

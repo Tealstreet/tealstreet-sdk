@@ -18,6 +18,14 @@ import {
 } from './tape.mjs';
 import { venueOf, VENUES } from './venues.mjs';
 const URL = 'https://example.test/order';
+test('socket channel and routing context survive the replay transport boundary', async () => {
+  const tape = new Tape([]);
+  const context = { exchange: 'bitunix', options: { publicDataOnly: false } };
+  const socket = tape.connect('wss://example.test/private', () => {}, () => {}, () => {}, { channel: 'private', context });
+  assert.equal(socket.channel, 'private');
+  assert.equal(socket.context, context);
+  await new Promise(setImmediate);
+});
 const record = (method, requestBody) => ({
   type: 'http',
   method,

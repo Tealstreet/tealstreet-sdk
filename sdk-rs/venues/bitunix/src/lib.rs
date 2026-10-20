@@ -5,7 +5,7 @@ mod sign;
 mod trading;
 mod wire;
 use safe_cex_engine::{
-    Command, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, json, num,
+    Command, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue, json, num,
 };
 use safe_cex_engine::{
     book::{Book, BookSide},
@@ -120,12 +120,19 @@ impl BitunixFutures {
         }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, feed: Feed) {
-        let url = match feed {
-            Feed::Futures => FUTURES,
-            Feed::Private => PRIVATE,
-            Feed::Public { .. } => PUBLIC,
+        self.connect_recovering(cx, feed, false);
+    }
+    fn connect_recovering(&mut self, cx: &mut Cx<'_, Pending>, feed: Feed, recover: bool) {
+        let (url, channel, identity) = match &feed {
+            Feed::Futures => (FUTURES, SocketChannel::Public, "futures".into()),
+            Feed::Private => (PRIVATE, SocketChannel::Private, "private".into()),
+            Feed::Public { channel, range } => (
+                PUBLIC,
+                SocketChannel::Public,
+                format!("{channel}:{}", range.start),
+            ),
         };
-        let id = cx.connect(url);
+        let id = cx.connect_feed(url, channel, identity, recover);
         self.sockets.push(Socket {
             id,
             feed,
@@ -136,6 +143,18 @@ impl BitunixFutures {
             queue_timer: None,
             queue: VecDeque::new(),
         });
+    }
+    fn reconnect(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, recover: bool) {
+        if let Some(i) = self.sockets.iter().position(|s| s.id == socket) {
+            let s = self.sockets.remove(i);
+            if let Some(t) = s.watchdog {
+                cx.clear_timer(t);
+            }
+            if let Some(t) = s.queue_timer {
+                cx.clear_timer(t);
+            }
+            self.connect_recovering(cx, s.feed, recover);
+        }
     }
     fn futures_topic(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Option<String> {
         let m = cx.store.market(symbol)?;
@@ -386,16 +405,7 @@ impl Venue for BitunixFutures {
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if let Some(i) = self.sockets.iter().position(|s| s.id == socket) {
-            let s = self.sockets.remove(i);
-            if let Some(t) = s.watchdog {
-                cx.clear_timer(t);
-            }
-            if let Some(t) = s.queue_timer {
-                cx.clear_timer(t);
-            }
-            self.connect(cx, s.feed);
-        }
+        self.reconnect(cx, socket, false);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
@@ -622,7 +632,7 @@ impl Venue for BitunixFutures {
             {
                 let id = s.id;
                 cx.close(id);
-                self.on_close(cx, id, 1006);
+                self.reconnect(cx, id, true);
             } else {
                 if s.opened {
                     if matches!(s.feed, Feed::Private) {

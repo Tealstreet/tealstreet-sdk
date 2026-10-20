@@ -38,7 +38,7 @@ const recording = {
     const key = canonicalUrl(url);
     const connection = connections.get(key) ?? 0;
     connections.set(key, connection + 1);
-    write({ type: 'connect', url, connection, socket: connection, initial: !closedUrls.has(key) });
+    write({ type: 'connect', url, connection, socket: connection, initial: !closedUrls.has(key), channel: handlers.channel });
     let closed = false;
     const closeRecord = (code, local = false) => {
       if (closed) return;
@@ -47,6 +47,8 @@ const recording = {
       write({ type: 'close', url, connection, socket: connection, code, local });
     };
     const socket = live.connect(url, {
+      channel: handlers.channel,
+      context: handlers.context,
       headers: handlers.headers,
       onOpen: () => {
         write({ type: 'open', url, connection, socket: connection });

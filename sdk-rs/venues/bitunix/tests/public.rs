@@ -32,7 +32,7 @@ fn ready() -> (Engine<BitunixFutures>, SocketId) {
     for a in actions {
         match a {
             Action::Http(r) => response(&mut e, r.id, TICKERS),
-            Action::WsConnect { socket, url } => {
+            Action::WsConnect { socket, url, .. } => {
                 if url.contains("ws-futures") {
                     futures = Some(socket);
                 }

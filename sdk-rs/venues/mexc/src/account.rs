@@ -170,7 +170,8 @@ impl MexcFutures {
             });
         }
         cx.store.set_hedged(true);
-        self.account.private.socket = Some(cx.connect(WS));
+        self.account.private.socket =
+            Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
         self.signed(
             cx,
             Method::Get,
@@ -1268,7 +1269,8 @@ impl MexcFutures {
         }
         if self.account.private.reconnect == Some(timer) {
             self.account.private.reconnect = None;
-            self.account.private.socket = Some(cx.connect(WS));
+            self.account.private.socket =
+                Some(cx.connect_channel(WS, safe_cex_engine::SocketChannel::Private));
         }
         if self.account.private.heartbeat == Some(timer) {
             self.account.private.heartbeat = None;

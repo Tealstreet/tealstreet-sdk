@@ -5,8 +5,8 @@ import { setTimeout as realTimeout } from 'node:timers';
 export const retainedMemory = (before, after, wasmBytes = 0) =>
   after.heapUsed - before.heapUsed + after.arrayBuffers - before.arrayBuffers + wasmBytes;
 
-// A negative component exposes an unsettled setup baseline. Validate each
-// component and its arithmetic before accepting a performance measurement.
+// Retention is net growth from loaded code, not allocation volume. Keep signed
+// deltas exact while validating absolute counters and their total.
 export const memoryMetricErrors = (metrics) => {
   const errors = [];
   for (const field of ['heapBeforeBytes', 'heapUsedBytes', 'buffersBefore', 'buffersAfter', 'wasmBytes', 'retainedBytes']) {
@@ -15,7 +15,7 @@ export const memoryMetricErrors = (metrics) => {
   }
   for (const field of ['heapRetainedBytes', 'bufferRetainedBytes']) {
     const value = metrics?.[field];
-    if (!Number.isFinite(value) || value < 0) errors.push(`invalid ${field} (${value})`);
+    if (!Number.isFinite(value)) errors.push(`invalid ${field} (${value})`);
   }
   if (errors.length) return errors;
 

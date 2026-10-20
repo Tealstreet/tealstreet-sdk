@@ -4,6 +4,7 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none.
 #[cfg(not(any(
+    feature = "bitrue",
     feature = "binance",
     feature = "bitunix",
     feature = "blofin",
@@ -18,7 +19,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: binance, bitunix, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx or weex"
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bitunix, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -33,6 +34,8 @@ use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 #[cfg(feature = "bitget")]
 use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
+#[cfg(feature = "bitrue")]
+use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
 #[cfg(feature = "bitunix")]
 use safe_cex_venue_bitunix::{BitunixFutures, Options as BitunixOptions};
 #[cfg(feature = "blofin")]
@@ -95,6 +98,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "bingx",
     feature = "mexc",
     feature = "bitget",
+    feature = "bitrue",
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
@@ -121,7 +125,7 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
-    #[cfg(feature = "backpack")]
+    #[cfg(any(feature = "backpack", feature = "bitrue"))]
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
@@ -163,6 +167,10 @@ enum ActionOut<'a> {
         socket: u32,
         url: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
+        channel: Option<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        context: Option<&'a safe_cex_engine::SocketContext>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         headers: Option<Vec<(&'static str, &'a str)>>,
     },
     WsSend {
@@ -200,6 +208,14 @@ enum ActionOut<'a> {
     },
 }
 
+fn socket_channel(channel: &safe_cex_engine::SocketChannel) -> &'static str {
+    match channel {
+        safe_cex_engine::SocketChannel::Public => "public",
+        safe_cex_engine::SocketChannel::Private => "private",
+        safe_cex_engine::SocketChannel::Business => "business",
+    }
+}
+
 fn encode(actions: &[Action]) -> String {
     if actions.is_empty() {
         return String::new();
@@ -207,18 +223,29 @@ fn encode(actions: &[Action]) -> String {
     let out: Vec<ActionOut<'_>> = actions
         .iter()
         .map(|action| match action {
-            Action::WsConnect { socket, url } => ActionOut::WsConnect {
+            Action::WsConnect {
+                socket,
+                url,
+                channel,
+                context,
+            } => ActionOut::WsConnect {
                 socket: socket.0,
                 url,
+                channel: channel.as_ref().map(socket_channel),
+                context: context.as_ref(),
                 headers: None,
             },
             Action::WsConnectWithHeaders {
                 socket,
                 url,
                 headers,
+                channel,
+                context,
             } => ActionOut::WsConnect {
                 socket: socket.0,
                 url,
+                channel: channel.as_ref().map(socket_channel),
+                context: context.as_ref(),
                 headers: Some(headers.iter().map(|(k, v)| (*k, v.as_str())).collect()),
             },
             Action::WsSend { socket, text } => ActionOut::WsSend {
@@ -551,6 +578,7 @@ impl WasmEngine {
         feature = "bingx",
         feature = "mexc",
         feature = "bitget",
+        feature = "bitrue",
         feature = "backpack",
         feature = "weex",
         feature = "hyperliquid",
@@ -580,6 +608,13 @@ impl WasmEngine {
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
+            }))),
+            #[cfg(feature = "bitrue")]
+            "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                recv_window: options.recv_window.unwrap_or(20_000.0).clamp(1.0, 60_000.0) as u32,
             }))),
             #[cfg(feature = "backpack")]
             "backpack" => Box::new(Engine::new(Backpack::new(BackpackOptions {

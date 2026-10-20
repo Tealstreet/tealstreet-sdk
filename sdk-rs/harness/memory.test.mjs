@@ -52,17 +52,17 @@ test('backing stores that never settle fail instead of choosing or clamping a sa
 // Incoming venue and protocol regressions.
 {
 const metricsFor=(before,after,wasmBytes=0)=>({heapBeforeBytes:before.heapUsed,heapUsedBytes:after.heapUsed,buffersBefore:before.arrayBuffers,buffersAfter:after.arrayBuffers,heapRetainedBytes:after.heapUsed-before.heapUsed,bufferRetainedBytes:after.arrayBuffers-before.arrayBuffers,wasmBytes,retainedBytes:retainedMemory(before,after,wasmBytes)});
-test('released setup buffers invalidate a positive net-retention baseline', () => {
+test('signed buffer retention remains in the exact positive net total', () => {
   const metrics = metricsFor(
     { heapUsed: 30_271_936, arrayBuffers: 2_324_049 },
     { heapUsed: 33_195_616, arrayBuffers: 2_323_961 },
   );
   assert.equal(metrics.bufferRetainedBytes, -88);
   assert.equal(metrics.retainedBytes, 2_923_592);
-  assert(memoryMetricErrors(metrics).some((error)=>error.startsWith('invalid ') && error.includes('RetainedBytes')));
+  assert.deepEqual(memoryMetricErrors(metrics), []);
 });
 
-test('positive buffers and WASM cannot mask an unsettled negative heap component', () => {
+test('signed heap retention combines exactly with buffers and WASM', () => {
   const metrics = metricsFor(
     { heapUsed: 1000, arrayBuffers: 200 },
     { heapUsed: 900, arrayBuffers: 500 },
@@ -70,7 +70,7 @@ test('positive buffers and WASM cannot mask an unsettled negative heap component
   );
   assert.equal(metrics.heapRetainedBytes, -100);
   assert.equal(metrics.retainedBytes, 300);
-  assert(memoryMetricErrors(metrics).some((error) => error.startsWith('invalid heapRetainedBytes (')));
+  assert.deepEqual(memoryMetricErrors(metrics), []);
 });
 
 test('invalid absolute counters and nonfinite signed deltas fail validation', () => {
