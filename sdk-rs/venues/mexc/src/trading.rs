@@ -5,9 +5,7 @@ use crate::{
     wire::*,
 };
 use safe_cex_engine::model::*;
-use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, TimerId, VenueError, num,
-};
+use safe_cex_engine::{Command, CommandId, Cx, Method, Response, TimerId, VenueError, num};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
@@ -58,6 +56,7 @@ pub struct AmendIntent {
     amount: Option<f64>,
 }
 pub struct Step {
+    receipts: Vec<OrderIdentityReceipt>,
     path: &'static str,
     body: String,
     call: Call,
@@ -194,7 +193,7 @@ impl MexcFutures {
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
         batch: bool,
-    ) -> Result<String, String> {
+    ) -> Result<(String, OrderIdentityReceipt), String> {
         let m = cx
             .store
             .market(&opts.symbol)
@@ -211,7 +210,7 @@ impl MexcFutures {
                 _ => 1,
             }
         };
-        json(&Regular {
+        let payload = Regular {
             symbol: &m.id,
             price: if opts.kind == OrderType::Market {
                 None
@@ -249,7 +248,13 @@ impl MexcFutures {
             profit_trend: opts
                 .take_profit
                 .map(|_| trend(opts.tp_trigger_type.or(opts.trigger_type))),
-        })
+        };
+        let receipt = OrderIdentityReceipt {
+            symbol: opts.symbol.clone(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity: payload.external_oid.clone(),
+        };
+        Ok((json(&payload)?, receipt))
     }
     fn placement(
         &mut self,
@@ -289,8 +294,9 @@ impl MexcFutures {
             if opts.kind == OrderType::Limit && opts.price.is_none() {
                 return Err("MEXC limit order requires a positive price".into());
             }
-            let body = self.regular_body(cx, &opts, false)?;
+            let (body, receipt) = self.regular_body(cx, &opts, false)?;
             return Ok(Step {
+                receipts: vec![receipt],
                 path: SUBMIT,
                 body,
                 call: Call::Place {
@@ -369,6 +375,7 @@ impl MexcFutures {
                 stop_loss_type: (!take).then_some(0),
             })?;
             return Ok(Step {
+                receipts: Vec::new(),
                 path: STOP,
                 body,
                 call: Call::Place {
@@ -433,6 +440,7 @@ impl MexcFutures {
             reduce_only: true,
         })?;
         Ok(Step {
+            receipts: Vec::new(),
             path: PLAN,
             body,
             call: Call::Place {
@@ -470,11 +478,14 @@ impl MexcFutures {
         {
             let mut batch = VecDeque::new();
             for orders in orders.chunks(50) {
-                let bodies: Vec<_> = orders
+                let (bodies, receipts): (Vec<_>, Vec<_>) = orders
                     .iter()
                     .map(|o| self.regular_body(cx, o, true))
-                    .collect::<Result<_, _>>()?;
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .unzip();
                 batch.push_back(Step {
+                    receipts,
                     path: BATCH,
                     body: format!("[{}]", bodies.join(",")),
                     call: Call::Batch {
@@ -548,6 +559,7 @@ impl MexcFutures {
                     _ => ("/api/v1/private/order/cancel", json(&ids)?),
                 };
                 steps.push_back(Step {
+                    receipts: Vec::new(),
                     path,
                     body,
                     call: Call::Cancel {
@@ -621,6 +633,7 @@ impl MexcFutures {
                 },
             })?;
             steps.push_back(Step {
+                receipts: Vec::new(),
                 path: "/api/v1/private/position/change_leverage",
                 body,
                 call: Call::Leverage {
@@ -727,6 +740,7 @@ impl MexcFutures {
                         symbol: &'a str,
                     }
                     let mut steps = VecDeque::from([Step {
+                        receipts: Vec::new(),
                         path: "/api/v1/private/order/cancel_all",
                         body: json(&Cancel { symbol: &m.id })?,
                         call: Call::Cancel {
@@ -753,6 +767,7 @@ impl MexcFutures {
                             .map(|o| o.id.clone())
                             .collect();
                         steps.push_back(Step {
+                            receipts: Vec::new(),
                             path,
                             body: json(&Cancel { symbol: &m.id })?,
                             call: Call::Cancel {
@@ -805,6 +820,7 @@ impl MexcFutures {
                     })
                     .map(|body| {
                         VecDeque::from([Step {
+                            receipts: Vec::new(),
                             path: "/api/v1/private/position/change_position_mode",
                             body,
                             call: Call::Mode { hedged },
@@ -816,7 +832,7 @@ impl MexcFutures {
             _ => return,
         };
         if let Err(error) = &steps {
-            cx.log(LogLevel::Error, error);
+            cx.command_error(command, error);
             cx.done(command, Err(error.clone()));
             return;
         }
@@ -826,7 +842,7 @@ impl MexcFutures {
         }
         match steps {
             Err(error) => {
-                cx.log(LogLevel::Error, &error);
+                cx.command_error(command, &error);
                 cx.done(command, Err(error));
             }
             Ok(steps) => {
@@ -906,7 +922,10 @@ impl MexcFutures {
                 }}else{Ok(())};
                 amount.and_then(|_|self.placement(cx,opts))
             }
-            Call::Batch {orders}=>orders.iter().map(|o|self.regular_body(cx,o,true)).collect::<Result<Vec<_>,_>>().map(|b|Step {path:BATCH,body:format!("[{}]",b.join(",")),call:Call::Batch{orders}}),
+            Call::Batch {orders}=>orders.iter().map(|o|self.regular_body(cx,o,true)).collect::<Result<Vec<_>,_>>().map(|rows| {
+                let (bodies, receipts): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
+                Step { receipts, path:BATCH,body:format!("[{}]",bodies.join(",")),call:Call::Batch{orders}}
+            }),
             Call::Leverage {symbol,position_type,leverage,isolated,keep_leverage,keep_margin}=>self.settings_steps(cx,&symbol,(!keep_leverage).then_some(leverage),(!keep_margin).then_some(isolated),Some(if position_type==1{PositionSide::Long}else{PositionSide::Short})).and_then(|steps|steps.into_iter().find(|s|matches!(&s.call,Call::Leverage {position_type:p,..}if *p==position_type)).ok_or_else(||"MEXC leverage rail missing".into())),
             _=>Ok(step),
         };
@@ -918,6 +937,7 @@ impl MexcFutures {
             }
         };
         self.trading.waiting = true;
+        cx.command_progress(command, step.receipts);
         self.signed(
             cx,
             Method::Post,
@@ -1443,7 +1463,7 @@ impl MexcFutures {
         match result {
             Ok(()) => self.advance_trade(cx),
             Err(error) => {
-                cx.log(LogLevel::Error, &error);
+                cx.command_error(request.command, &error);
                 self.trade_failed(cx, request.command, &error);
             }
         }
