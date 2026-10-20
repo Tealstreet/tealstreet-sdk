@@ -40,6 +40,7 @@ pub struct State {
     order_revision: u64,
     slices: [Slice; 2],
     contexts: HashMap<String, Context>,
+    confirmed_modes: HashMap<String, PositionMode>,
     order_sides: HashMap<String, String>,
     socket: Option<SocketId>,
     watchdog: Option<TimerId>,
@@ -89,6 +90,10 @@ impl State {
                 context.mode = mode;
             }
         }
+        if let Some(mode) = mode {
+            // A mode-only ACK does not establish margin or either leverage rail.
+            self.confirmed_modes.insert(symbol.to_string(), mode);
+        }
     }
     pub fn terminal(&mut self, id: &str, now: f64) {
         self.remember_terminal(id.to_string(), (now * 1e6) as u64);
@@ -101,9 +106,16 @@ impl State {
         self.contexts
             .values()
             .any(|context| context.mode == PositionMode::Hedged)
+            || self
+                .confirmed_modes
+                .values()
+                .any(|mode| *mode == PositionMode::Hedged)
     }
     pub fn mode(&self, symbol: &str) -> Option<PositionMode> {
-        self.context(symbol).map(|c| c.mode)
+        self.confirmed_modes
+            .get(symbol)
+            .copied()
+            .or_else(|| self.context(symbol).map(|c| c.mode))
     }
     pub fn orders_ready(&self) -> bool {
         self.authenticated && self.snapshot && self.socket.is_some() && !self.uncertainty_overflow
@@ -403,7 +415,7 @@ impl PhemexPerpetuals {
             positions.extend(request.positions);
             cx.store.set_positions(positions);
             for (symbol, context) in request.contexts {
-                self.account.install_context(cx, &symbol, context);
+                self.account.install_context(cx, &symbol, context, true);
             }
             let upnl = currency_upnl(cx, currency);
             self.account.slices[currency].balance = Balance {
@@ -634,6 +646,22 @@ impl PhemexPerpetuals {
                 let Some(currency) = CURRENCIES.iter().position(|c| *c == market.quote) else {
                     continue;
                 };
+                if let Some(confirmed) = self.account.confirmed_modes.get(&symbol) {
+                    let conflicting_mode = match row.pos_mode.as_ref() {
+                        "Hedged" => *confirmed != PositionMode::Hedged,
+                        "OneWay" => *confirmed != PositionMode::Oneway,
+                        _ => false,
+                    };
+                    let conflicting_side = match confirmed {
+                        PositionMode::Hedged => row.pos_side == "Merged",
+                        PositionMode::Oneway => matches!(row.pos_side.as_ref(), "Long" | "Short"),
+                    };
+                    // Delayed stream rows cannot supersede a confirmed mode write.
+                    // The next account read started after that ACK resolves authority.
+                    if conflicting_mode || conflicting_side {
+                        continue;
+                    }
+                }
                 let prior = staged_contexts
                     .get(&symbol)
                     .copied()
@@ -809,7 +837,7 @@ impl PhemexPerpetuals {
                         .insert(key, last.max(version));
                 }
                 self.account
-                    .install_context(cx, &row.symbol.to_ascii_uppercase(), context);
+                    .install_context(cx, &row.symbol.to_ascii_uppercase(), context, false);
                 if let Some(mut position) = position {
                     if version > 0 {
                         position.last_update = Some(version as f64 / 1e6);
@@ -983,7 +1011,16 @@ impl PhemexPerpetuals {
     }
 }
 impl State {
-    fn install_context(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, context: Context) {
+    fn install_context(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        context: Context,
+        authoritative: bool,
+    ) {
+        if authoritative {
+            self.confirmed_modes.remove(symbol);
+        }
         self.contexts.insert(symbol.to_string(), context);
         let leverage = if context.long_leverage > 0. {
             context.long_leverage
@@ -998,11 +1035,7 @@ impl State {
                 s.margin_type = Some(context.margin_type)
             });
         }
-        cx.store.set_hedged(
-            self.contexts
-                .values()
-                .any(|c| c.mode == PositionMode::Hedged),
-        );
+        cx.store.set_hedged(self.any_hedged());
     }
 }
 fn currency_upnl(cx: &Cx<'_, Pending>, currency: usize) -> f64 {

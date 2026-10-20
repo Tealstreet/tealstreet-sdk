@@ -929,6 +929,7 @@ impl BitgetFutures {
                     // leg. Preserve a known leg if this row omits its value.
                     s.buy_leverage = long.or(s.buy_leverage).or(common);
                     s.sell_leverage = short.or(s.sell_leverage).or(common);
+                    s.leverage = s.buy_leverage.unwrap_or(leverage);
                 } else {
                     s.buy_leverage = Some(leverage);
                     s.sell_leverage = Some(leverage);
@@ -941,16 +942,27 @@ impl BitgetFutures {
         cx.store
             .set_hedged(p.position_mode == Some(PositionMode::Hedged));
         cx.store.update_setting(&p.symbol, |s| {
-            s.leverage = p.leverage;
             s.margin_type = p.margin_type;
             if p.position_mode == Some(PositionMode::Hedged)
                 && p.margin_type == Some(MarginType::Isolated)
             {
                 match p.side {
-                    PositionSide::Long => s.buy_leverage = Some(p.leverage),
-                    PositionSide::Short => s.sell_leverage = Some(p.leverage),
+                    PositionSide::Long => {
+                        s.leverage = p.leverage;
+                        s.buy_leverage = Some(p.leverage);
+                    }
+                    PositionSide::Short => {
+                        s.sell_leverage = Some(p.leverage);
+                        // A short row must not rewrite a known long scalar.
+                        if let Some(long) = s.buy_leverage {
+                            s.leverage = long;
+                        } else if !s.leverage.is_finite() {
+                            s.leverage = p.leverage;
+                        }
+                    }
                 }
             } else {
+                s.leverage = p.leverage;
                 s.buy_leverage = Some(p.leverage);
                 s.sell_leverage = Some(p.leverage);
             }

@@ -178,3 +178,22 @@ Reference-only TS for deleted families is inspected in
   frozen lockfile before fresh merged-tree JS checks. Combined WASM, replay,
   isolated sizes, PR reviews, CI and merge are still pending.
 - Preliminary secret scan: three lane commits, 134,207 bytes, no leaks.
+
+### Final source review follow-ups
+
+- Fresh merged-tree root checks pass: typecheck 44/44, lint 28/28 and tests
+  27/27. Both SDK test runners pass 7,762 tests in 524 files.
+- Independent review found Phemex mode-only changes unnecessarily required
+  full account context on flat/newly listed markets. Removed that guard and
+  retain confirmed per-symbol mode separately until fresh authoritative REST;
+  old REST and conflicting delayed stream rows cannot undo it. No margin or
+  leverage is fabricated, and placement still requires complete context.
+  Integrated regression added; independent source re-review PASS.
+- Independent review found Bitget Long ACKs left the legacy scalar stale,
+  allowing a later UTA margin change to resend old leverage. Long ACKs now
+  update it; Short rows and scalar-only metadata preserve known Long values.
+  Regression covers Long/Short writes and subsequent UTA margin payloads,
+  with and without a settings refresh. Independent source re-review PASS.
+- Phemex/Bitget follow-up: 273 native tests, scoped all-target clippy, bans and
+  workspace formatting pass. Full native workspace checks are running;
+  WASM/replay/size gates, PR reviews and green CI remain required.

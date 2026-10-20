@@ -108,7 +108,7 @@ fn isolated_hedge_routes_requested_or_default_leg_and_preserves_other_settings()
                 if short { 25.0 } else { 11.0 }
             );
             let setting = h.engine.store().setting("BTCUSDT").unwrap();
-            assert_eq!(setting.leverage, 9.0);
+            assert_eq!(setting.leverage, if short { 9.0 } else { 25.0 });
             assert_eq!(setting.buy_leverage, Some(if short { 10.0 } else { 25.0 }));
             assert_eq!(setting.sell_leverage, Some(if short { 25.0 } else { 11.0 }));
         }
@@ -449,4 +449,45 @@ fn inverse_cross_hedge_preserves_ts_hold_side_but_updates_coupled_leverage() {
         (s.leverage, s.buy_leverage, s.sell_leverage),
         (25.0, Some(25.0), Some(25.0))
     );
+}
+
+#[test]
+fn uta_margin_change_preserves_long_leverage_after_side_writes_and_short_stream_rows() {
+    for side in [PositionSide::Long, PositionSide::Short] {
+        for refresh_metadata in [false, true] {
+            let mut h = leverage_fixture(true, true, MarginType::Isolated);
+            // Scalar callers historically use the long rail.
+            h.engine
+                .store_mut()
+                .update_setting("BTCUSDT", |setting| setting.leverage = 10.0);
+            set_leverage(&mut h, Some(side), 25.0);
+            let expected = if side == PositionSide::Long {
+                25.0
+            } else {
+                10.0
+            };
+            // A later position row for the other hedge leg cannot change the scalar.
+            h.private_message(r#"{"arg":{"topic":"position"},"data":[{"symbol":"BTCUSDT","posSide":"short","size":"1","leverage":"30","marginMode":"isolated","holdMode":"hedge_mode"}]}"#);
+            let setting = h.engine.store().setting("BTCUSDT").unwrap();
+            assert_eq!(setting.leverage, expected);
+            assert_eq!(setting.buy_leverage, Some(expected));
+            assert_eq!(setting.sell_leverage, Some(30.0));
+            if refresh_metadata {
+                h.engine.store_mut().set_positions(vec![]);
+            }
+            h.command(Command::SetMarginType {
+                command: 2,
+                symbol: "BTCUSDT".into(),
+                isolated: false,
+            });
+            if refresh_metadata {
+                h.respond("/account/settings", 200, r#"{"code":"00000","data":{"holdMode":"hedge_mode","symbolConfigList":[{"symbol":"BTCUSDT","category":"USDT-FUTURES","marginMode":"isolated","leverage":"3"}]}}"#);
+            }
+            let request = h.take("/set-leverage");
+            let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            assert_eq!(payload["leverage"], expected.to_string());
+            assert_eq!(payload["marginMode"], "crossed");
+            assert!(payload.get("posSide").is_none());
+        }
+    }
 }

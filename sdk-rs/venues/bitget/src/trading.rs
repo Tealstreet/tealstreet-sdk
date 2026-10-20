@@ -1517,6 +1517,8 @@ impl BitgetFutures {
                             if let Some(short) = row.isolated_short_lever.0 {
                                 s.sell_leverage = Some(short);
                             }
+                            // Legacy scalar settings represent the long rail.
+                            s.leverage = s.buy_leverage.unwrap_or(leverage);
                         } else {
                             s.buy_leverage = Some(leverage);
                             s.sell_leverage = Some(leverage);
@@ -1831,7 +1833,10 @@ impl BitgetFutures {
             } => {
                 self.account.config_at = Some(cx.now);
                 cx.store.update_setting(&symbol, |s| match side {
-                    Some(PositionSide::Long) => s.buy_leverage = Some(leverage),
+                    Some(PositionSide::Long) => {
+                        s.leverage = leverage;
+                        s.buy_leverage = Some(leverage);
+                    }
                     Some(PositionSide::Short) => s.sell_leverage = Some(leverage),
                     None => {
                         s.leverage = leverage;

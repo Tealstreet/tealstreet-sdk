@@ -226,6 +226,9 @@ impl PhemexPerpetuals {
             if o.client_order_id.is_some() && o.amount > m.limits.amount.max {
                 return Err("Phemex caller clientOrderId cannot span split orders".into());
             }
+            self.account
+                .context(&o.symbol)
+                .ok_or("Phemex leverage/margin context is unknown; await account reconciliation")?;
             let mode = self
                 .account
                 .mode(&o.symbol)
@@ -504,6 +507,9 @@ impl PhemexPerpetuals {
             } else if let Some(p) = self.account.order_pos_side(&base) {
                 p.to_owned()
             } else {
+                self.account
+                    .context(&o.symbol)
+                    .ok_or("Phemex cancel position mode is unknown")?;
                 let mode = self
                     .account
                     .mode(&o.symbol)
@@ -885,9 +891,6 @@ impl PhemexPerpetuals {
                     if !market.active || market.is_read_only == Some(true) {
                         return Err("Phemex position mode market is not tradable".into());
                     }
-                    self.account
-                        .context(&symbol)
-                        .ok_or("Phemex current position mode context is unknown")?;
                     Ok(VecDeque::from([Step {
                         method: Method::Put,
                         path: "/g-positions/switch-pos-mode-sync",

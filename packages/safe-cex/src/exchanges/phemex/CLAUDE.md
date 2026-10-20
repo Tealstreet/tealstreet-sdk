@@ -657,6 +657,12 @@ one-way mode uses `leverageRr` and ignores side. An unknown opposite hedge
 leverage fails before a write rather than inventing a replacement value.
 
 Rust `changePositionMode` also requires a symbol and sends one PUT for that
-symbol. It updates that symbol's confirmed context after success; missing,
-unknown or rejected symbols never trigger writes for other markets. The store's
-account hedge indicator reflects whether any known symbol remains hedged.
+symbol. A successful mode-only write for a market absent from account rows
+records its confirmed mode separately, without inventing margin or leverage.
+Orders and leverage changes still require the full reconciled context. Fresh
+authoritative account rows replace the mode-only record; reads started before
+the write cannot overwrite it. Conflicting delayed stream rows also wait for
+that authoritative read before replacing the confirmed mode. Missing, unknown
+or rejected symbols never
+trigger writes for other markets. The account hedge indicator reflects whether
+any known symbol remains hedged.

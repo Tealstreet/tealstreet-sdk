@@ -1525,3 +1525,150 @@ fn phemex_missing_unknown_and_rejected_symbol_modes_never_switch_other_markets()
     );
     assert_eq!(p(&writes(&a)[0], "leverageRr"), Some("-37".into()));
 }
+
+#[test]
+fn uncached_market_mode_ack_needs_no_invented_margin_and_fences_stale_account_reads() {
+    let (mut e, socket) = authenticated("OneWay");
+    let mut markets = e.store().markets().to_vec();
+    let mut eth = markets[0].clone();
+    eth.id = "ETHUSDT".into();
+    eth.symbol = "ETHUSDT".into();
+    eth.base = "ETH".into();
+    markets.push(eth);
+    e.store_mut().set_markets(markets);
+    assert!(e.store().setting("ETHUSDT").is_none());
+
+    let a = command(
+        &mut e,
+        Command::SetPositionMode {
+            command: 710,
+            hedged: true,
+            symbol: Some("ETHUSDT".into()),
+        },
+    );
+    assert_eq!(writes(&a).len(), 1);
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "symbol"), Some("ETHUSDT".into()));
+    assert_eq!(p(r, "targetPosMode"), Some("Hedged".into()));
+    let a = respond(&mut e, r, json!({"code":0,"data":null}));
+    assert!(done(&a).is_ok());
+    assert!(e.store().hedged());
+    assert!(
+        e.store().setting("ETHUSDT").is_none(),
+        "a mode ACK cannot invent leverage or margin"
+    );
+    let stale = requests(&a);
+    assert_eq!(stale.len(), 2);
+    // A delayed untimed OneWay row must not erase the acknowledged Hedged mode.
+    e.handle(1001., Event::WsMessage { socket, text: r#"{"type":"incremental","positions_p":[{"symbol":"ETHUSDT","currency":"USDT","posMode":"OneWay","posSide":"Merged","size":"0","leverageRr":"8"},{"symbol":"BTCUSDT","currency":"USDT","posMode":"OneWay","posSide":"Merged","size":"0","leverageRr":"-10","crossMargin":true}]}"# });
+    e.drain_actions().for_each(drop);
+    assert!(e.store().hedged());
+    assert!(e.store().setting("ETHUSDT").is_none());
+
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 711,
+            symbol: "ETHUSDT".into(),
+            leverage: 37.,
+            side: Some(PositionSide::Long),
+        },
+    );
+    assert!(writes(&a).is_empty());
+    assert!(done(&a).is_err());
+    let mut order = opts("no-unknown-margin");
+    order.symbol = "ETHUSDT".into();
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 712,
+            orders: vec![order],
+        },
+    );
+    assert!(writes(&a).is_empty());
+    assert!(done(&a).is_err());
+
+    let a = command(
+        &mut e,
+        Command::SetPositionMode {
+            command: 713,
+            hedged: false,
+            symbol: Some("ETHUSDT".into()),
+        },
+    );
+    let a = respond(&mut e, &writes(&a)[0], json!({"code":0,"data":null}));
+    assert!(done(&a).is_ok());
+    assert!(!e.store().hedged());
+    let mut completed = vec![];
+    for r in stale {
+        let currency = if r.url.contains("USDC") {
+            "USDC"
+        } else {
+            "USDT"
+        };
+        let rows = if currency == "USDT" {
+            json!([
+                {"symbol":"ETHUSDT","currency":"USDT","posMode":"Hedged","posSide":"Long","size":"0","leverageRr":"10"},
+                {"symbol":"ETHUSDT","currency":"USDT","posMode":"Hedged","posSide":"Short","size":"0","leverageRr":"20"}
+            ])
+        } else {
+            json!([])
+        };
+        completed.extend(respond(&mut e, &r, json!({"code":0,"data":{"account":{"currency":currency,"accountBalanceRv":"1000","totalUsedBalanceRv":"0"},"positions":rows}})));
+    }
+    assert!(
+        !e.store().hedged(),
+        "reads started before the last ACK cannot replace its mode"
+    );
+    assert!(e.store().setting("ETHUSDT").is_none());
+
+    let (timer, at) = completed
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms >= 3000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("the next authoritative account refresh is scheduled");
+    e.handle(at, Event::TimerFired { timer });
+    let fresh: Vec<_> = e.drain_actions().collect();
+    assert_eq!(requests(&fresh).len(), 2);
+    for r in requests(&fresh) {
+        let currency = if r.url.contains("USDC") {
+            "USDC"
+        } else {
+            "USDT"
+        };
+        let rows = if currency == "USDT" {
+            json!([
+                {"symbol":"ETHUSDT","currency":"USDT","posMode":"Hedged","posSide":"Long","size":"0","leverageRr":"10"},
+                {"symbol":"ETHUSDT","currency":"USDT","posMode":"Hedged","posSide":"Short","size":"0","leverageRr":"20"}
+            ])
+        } else {
+            json!([])
+        };
+        respond(
+            &mut e,
+            &r,
+            json!({"code":0,"data":{"account":{"currency":currency,"accountBalanceRv":"1000","totalUsedBalanceRv":"0"},"positions":rows}}),
+        );
+    }
+    assert!(
+        e.store().hedged(),
+        "a fresh authoritative row supersedes the mode-only ACK"
+    );
+    let s = e.store().setting("ETHUSDT").unwrap();
+    assert_eq!((s.buy_leverage, s.sell_leverage), (Some(10.), Some(20.)));
+    assert_eq!(s.margin_type, Some(MarginType::Isolated));
+    let a = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 714,
+            symbol: "ETHUSDT".into(),
+            leverage: 37.,
+            side: Some(PositionSide::Short),
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "longLeverageRr"), Some("10".into()));
+    assert_eq!(p(r, "shortLeverageRr"), Some("37".into()));
+}
