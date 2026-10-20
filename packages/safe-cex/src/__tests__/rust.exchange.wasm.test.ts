@@ -798,7 +798,8 @@ describe('RustEngineExchange', () => {
       isSpot: true, precision: { amount: 0.000001 }, limits: { leverage: { min: 1, max: 1 } },
     });
     expect(store.positions).toEqual([]);
-    expect(tape.requests.some(({ url }) => /position|account\/info|fee-rate|PreLaunch/.test(url))).toBe(false);
+    expect(tape.requests.filter(({ method, url }) => method === 'GET' && new URL(url).pathname === '/v5/account/info')).toHaveLength(1);
+    expect(tape.requests.some(({ url }) => /position|fee-rate|PreLaunch/.test(url))).toBe(false);
     expect(tape.requests.filter(({ url }) => url.includes('instruments-info')).every(({ url }) => !url.includes('limit='))).toBe(true);
     const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.001, price: 90000 };
     expect(await exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: 'spot-01' })).toEqual({

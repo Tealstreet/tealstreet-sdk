@@ -526,3 +526,21 @@ second Hyro position page. Independent public and account reviews pass with
 no remaining findings. The optional grace starts only after the final required
 Trading page, cancels its exact timer on completion, and ignores late optional
 results. No request audit, performance threshold or timeout assertion changed.
+
+The final combined artifact passes 45 wasm, 28 host and 8 frame/copier cases.
+Its spot wasm assertion was stale after restoring account metadata: it now
+positively requires exactly one GET account/info and still prohibits position,
+fee-rate and PreLaunch reads. Independent review passes.
+
+A serial root rerun and a two-worker rerun reproduced cold-import timeouts in
+the existing Hyro configuration test. A scoped baseline reproduced both failing
+imports. The test now preloads the real constructor graph before timed cases
+and mocks only the unused all-venue factory dependency of the pure account
+options mapper (the mock throws if called). Every env reset and assertion is
+retained; an extra two-instance test proves freshly reloaded real constructors
+capture new REST/public/private origins while the existing instance keeps its
+old configuration. All eleven scoped cases pass at the unchanged five-second
+limit; the formerly failing cases took 25/143 ms. Independent review passes;
+production code and performance measurement are unchanged. A fresh complete
+root test run is pending. The serial run was stopped after confirming its
+known import failures; its partial results are not a passing gate.
