@@ -52,6 +52,8 @@ export interface EngineRoutingPlan {
   wsHeaders: Record<string, string>;
   venueWsHeaders?: Record<string, string>;
   socketChannels: Array<{ contains: string; channel: 'public' | 'private' | 'business' }>;
+  /** Public sockets whose native URL names a product with its own route. */
+  publicWsRoutes?: Array<{ contains: string; route: EngineWsRoute }>;
 }
 
 type Request = Parameters<Transport['request']>[0];
@@ -170,6 +172,21 @@ const wsRoute = (route: ResolvedWs): EngineWsRoute => ({
   ...(route.directUrls ? { directUrls: route.directUrls } : {}),
 });
 
+// One Bybit account streams inverse and option products from their own native
+// URLs; TS routes inverse through `bybitinverse`'s hosts. No option proxy exists.
+const publicWsRoutes = (
+  exchange: ExchangeName,
+  options: ExchangeOptions,
+  provider: TransportProvider,
+): EngineRoutingPlan['publicWsRoutes'] =>
+  exchange === 'bybit'
+    ? [
+        { contains: '/v5/public/inverse', route: wsRoute(provider.wsRouting('bybitinverse', options).wsPublic) },
+        { contains: '/v5/public/spot', route: wsRoute(provider.wsRouting('bybitspot', options).wsPublic) },
+        { contains: '/v5/public/option', route: {} },
+      ]
+    : undefined;
+
 const resolved = (exchange: ExchangeName, options: ExchangeOptions, provider: TransportProvider) => {
   const routing = provider.wsRouting(exchange, options);
   const restRouting =
@@ -215,6 +232,7 @@ export const resolveEngineRoutingPlan = (
   const readPlan = options.secondary_key
     ? resolveEngineRoutingPlan(exchange, secondaryReadOptions(options, provider), baseURL)
     : undefined;
+  const productRoutes = publicWsRoutes(exchange, options, provider);
   return {
     http: http(exchange.startsWith('binance') ? { 'X-MBX-APIKEY': options.key ?? '' } : {}),
     ...(publicCorsProxy
@@ -245,6 +263,7 @@ export const resolveEngineRoutingPlan = (
     wsHeaders: provider === tealstreetTransport ? { ...TEALSTREET_WS_HEADERS } : {},
     venueWsHeaders: venueHeaders(exchange, options),
     socketChannels,
+    ...(productRoutes ? { publicWsRoutes: productRoutes } : {}),
   };
 };
 
@@ -469,6 +488,7 @@ export const createEngineTransport = (
     private: wsRoute(routing.wsPrivate),
     business: wsRoute(routing.wsBusiness),
   };
+  const productRoutes = publicWsRoutes(exchange, options, provider) ?? [];
   const requireSocketHeaders = (url: string) => {
     const connection = provider.wsConnection(url);
     // Tealstreet's identification headers are supplied by the browser itself.
@@ -551,7 +571,9 @@ export const createEngineTransport = (
     connect: (url, handlers) => {
       const channel =
         handlers.channel ?? socketChannels.find((rule) => url.includes(rule.contains))?.channel ?? 'public';
-      const declared = routes[channel];
+      const declared =
+        (channel === 'public' ? productRoutes.find((rule) => url.includes(rule.contains))?.route : undefined) ??
+        routes[channel];
       const bypass = declared.directUrls?.includes(url);
       const route: EngineWsRoute = bypass ? {} : declared;
       const key = `${channel}:${handlers.context?.feed ?? ''}:${url.split('?')[0]}`;

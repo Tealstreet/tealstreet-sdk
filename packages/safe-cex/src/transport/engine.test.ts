@@ -277,7 +277,8 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     setDefaultTransport({ ...directTransport, name: 'custom', rest, wsRouting });
     await createEngineTransport('bybit', { key: 'k', secret: 's' }, raw).request(request());
     expect(raw.request.mock.calls[0][0].url).toBe(`https://custom.invalid/${request().url}`);
-    expect(wsRouting).toHaveBeenCalledTimes(1);
+    // Bybit also resolves its inverse and spot product public routes.
+    expect(wsRouting.mock.calls.map(([name]) => name)).toEqual(['bybit', 'bybitinverse', 'bybitspot']);
     await createEngineTransport('bybit', options({ transport: directTransport }), raw).request(request());
     expect(raw.request.mock.calls[1][0]).toEqual({ ...request(), signal: expect.any(AbortSignal) });
     expect(rest).toHaveBeenCalledTimes(1);
@@ -1629,5 +1630,38 @@ describe('secondary GET identity egress', () => {
     expect(() =>
       createEngineTransport('hyperliquid', options({ secondary_key: 'read', secondary_secret: 'secret' }), makeRaw()),
     ).toThrow('unsupported');
+  });
+});
+
+describe('Bybit product public sockets', () => {
+  const brazil = options({ bybitSiteId: 'BRA_BTL', tealstreetTunnel: false });
+
+  it('routes inverse and spot public streams to their own hosts and options direct', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', brazil, raw);
+    const opened = (url: string) => {
+      routed.connect(url, handlers('public'));
+      return raw.connect.mock.lastCall?.[0];
+    };
+    expect(opened('wss://stream.bybit.com/v5/public/linear')).toBe(resolveExchangeRouting('bybit', brazil).wsPublic.host);
+    expect(opened('wss://stream.bybit.com/v5/public/inverse')).toBe(
+      resolveExchangeRouting('bybitinverse', brazil).wsPublic.host,
+    );
+    expect(opened('wss://stream.bybit.com/v5/public/spot')).toBe(resolveExchangeRouting('bybitspot', brazil).wsPublic.host);
+    // No option proxy is deployed; the native URL beats the linear host.
+    expect(opened('wss://stream.bybit.com/v5/public/option')).toBe('wss://stream.bybit.com/v5/public/option');
+    // Private streams keep the private route.
+    routed.connect('wss://stream.bybit.com/v5/private', handlers('private'));
+    expect(raw.connect.mock.lastCall?.[0]).toBe(resolveExchangeRouting('bybit', brazil).wsPrivate.host);
+  });
+
+  it('serializes the same product routes for native hosts', () => {
+    const plan = resolveEngineRoutingPlan('bybit', brazil, 'https://api.bybit.com');
+    expect(plan.publicWsRoutes).toEqual([
+      { contains: '/v5/public/inverse', route: expect.objectContaining({ host: resolveExchangeRouting('bybitinverse', brazil).wsPublic.host }) },
+      { contains: '/v5/public/spot', route: expect.objectContaining({ host: resolveExchangeRouting('bybitspot', brazil).wsPublic.host }) },
+      { contains: '/v5/public/option', route: {} },
+    ]);
+    expect(resolveEngineRoutingPlan('bybitinverse', brazil, 'https://api.bybit.com').publicWsRoutes).toBeUndefined();
   });
 });

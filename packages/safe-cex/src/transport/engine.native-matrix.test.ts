@@ -32,9 +32,14 @@ interface Case {
   how?: boolean;
   relay?: boolean;
   bitget?: 'classic' | 'uta' | 'pong' | 'ack' | 'recover' | 'direct';
+  bybitProducts?: boolean;
 }
 
 const cases: Case[] = [
+  {
+    name: 'bybit-brazil-product-public-sockets', exchange: 'bybit', baseURL: 'https://api.bybit.com',
+    options: { bybitSiteId: 'BRA_BTL', tealstreetTunnel: false }, bybitProducts: true,
+  },
   { name: 'kucoin-private-default-how', exchange: 'kucoin', baseURL: 'https://api-futures.kucoin.com', options: {}, how: true },
   { name: 'kucoin-private-explicit-false-how', exchange: 'kucoin', baseURL: 'https://api-futures.kucoin.com', options: { tealstreetTunnel: false }, how: true },
   { name: 'kucoin-public-direct', exchange: 'kucoin', baseURL: 'https://api-futures.kucoin.com', options: { publicDataOnly: true, tealstreetTunnel: true } },
@@ -373,12 +378,30 @@ const buildCase = async (input: Case) => {
           context: { feed: 'private', recover: false },
         },
       ]
-    : (['public', 'private', 'business'] as const).map((channel) => ({
-        channel,
-        url: `wss://venue.invalid/opaque-${channel}`,
-      }));
+    : input.bybitProducts
+      ? ['linear', 'inverse', 'spot', 'option'].map((product) => ({
+          channel: 'public' as const,
+          url: `wss://stream.bybit.com/v5/public/${product}`,
+        }))
+      : (['public', 'private', 'business'] as const).map((channel) => ({
+          channel,
+          url: `wss://venue.invalid/opaque-${channel}`,
+        }));
+  // Independent oracle: TS's inverse/spot public classes route by their own names; no option proxy exists.
+  const productRouting = (url: string): Partial<ResolvedWs> | undefined =>
+    !input.bybitProducts
+      ? undefined
+      : url.endsWith('/inverse')
+        ? resolveExchangeRouting('bybitinverse', options).wsPublic
+        : url.endsWith('/spot')
+          ? resolveExchangeRouting('bybitspot', options).wsPublic
+          : url.endsWith('/option')
+            ? {}
+            : undefined;
   const sockets = socketInputs.map(({ channel, url, context }) => {
-    const declared = routing[channel === 'public' ? 'wsPublic' : channel === 'private' ? 'wsPrivate' : 'wsBusiness'];
+    const declared =
+      productRouting(url) ??
+      routing[channel === 'public' ? 'wsPublic' : channel === 'private' ? 'wsPrivate' : 'wsBusiness'];
     const route: Partial<ResolvedWs> = declared.directUrls?.includes(url) ? {} : declared;
     const candidates = [
       route.host ?? url,

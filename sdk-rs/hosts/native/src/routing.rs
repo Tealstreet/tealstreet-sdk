@@ -118,6 +118,13 @@ pub struct SocketChannelRule {
     pub channel: SocketChannel,
 }
 
+/// A public socket whose native URL names a product with its own route.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct PublicWsRoute {
+    pub contains: String,
+    pub route: WsRoute,
+}
+
 /// Serializable output of TS resolution. This host has no venue routing table.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -142,6 +149,8 @@ pub struct RoutingPlan {
     #[serde(default)]
     pub venue_ws_headers: BTreeMap<String, String>,
     pub socket_channels: Vec<SocketChannelRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub public_ws_routes: Vec<PublicWsRoute>,
 }
 
 pub(crate) struct RoutingState {
@@ -244,7 +253,12 @@ impl RoutingState {
             safe_cex_engine::SocketChannel::Business => SocketChannel::Business,
         });
         let route = match channel {
-            SocketChannel::Public => &self.plan.ws.public,
+            SocketChannel::Public => self
+                .plan
+                .public_ws_routes
+                .iter()
+                .find(|rule| original.contains(&rule.contains))
+                .map_or(&self.plan.ws.public, |rule| &rule.route),
             SocketChannel::Private => &self.plan.ws.private,
             SocketChannel::Business => &self.plan.ws.business,
         };
@@ -1100,7 +1114,7 @@ mod tests {
 
         let examples: Vec<Example<'static>> =
             serde_json::from_str(include_str!("../tests/fixtures/routing-plans.json")).unwrap();
-        assert_eq!(examples.len(), 69);
+        assert_eq!(examples.len(), 70);
         for example in examples {
             let state = state(example.plan);
             for http in example.http {
