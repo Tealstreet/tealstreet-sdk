@@ -242,3 +242,9 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 
 - All7/7freshlocalreplaysPASS: Phemex/Binancepublic+private,Asterpublic/V1private/V3private;3/3AstercontractcontrolsPASS. PublicmedianCPUms/steadyms/retainedMBTS/Rust: Phemex466.4/128.8,320.8/48.0,20.0/3.0;Binance231.7/145.7,128.6/74.9,18.6/2.4;Aster197.6/107.3,72.2/56.7,23.2/2.0. Bundles760,201/793,847/1,036,120bytesbelow1,258,291. Source/boundarychecksabovePASS;allconcretefindingsindependentlyreviewedclean.
 - PublishthischeckpointandupdatedPRproof,require62replays+7controls/allcurrentfullCIgreen,normalmergePR1310intofeat/rust-rewriteandcutfreshfollowupbranch. Prior9cde01848afull59gateCIproofpreserved. No scorethresholdchangeorunchangedvalidscoreretry.
+
+### Source-buffer accounting test and Kraken plan
+
+- bc60de0326RustCIcompleted23jobswithonlyAster'ssharedharnessstepfailedBEFOREreplay: actualWASMunitexpectedJSbufferdelta0butobserved−6,869bytes, exactlythethen-currentmemory.test.mjsfilelength. ThisisloadedsourcebufferGC, separatefrompriorremoved16MiBfixtureallocation. No actualvalidperformancegatefailed/wasdiscarded.
+- Independentplan+implementationreviewsapproveunit-onlycorrection: assertnoobservedJSbufferGROWTHduringWASMallocation, retainexactsignedheap+buffer+WASMaggregate and addexactWASMparametercontribution==bytes. No tolerance/retry/GCflags; memory.mjs/productionvalidators/scoringunchanged.278harnessPASS.
+- Kraken7da56dc8a5 landedbeforepublication. Nextboundedphasepreserves19feature/build/factoryregistration+Krakenprotocol/requestoracles alongsideallPhemex/Aster/Bybit/Orderlyhooks; no incomingengine/model/crypto change. Auditwrapper/caller-ID/unit/routingautomerge,thenaffectedKraken/Phemex/WASMnative/harness/SDK/typecheck/lint/combinedboundary+mandatoryPhemex/Binance/Krakenpairs. Expected64replays(23public41private)+7controls;requireexact-headCIgreenbeforelanding.

@@ -14,8 +14,13 @@ test('linear wasm memory is counted exactly once', () => {
   const memory = new WebAssembly.Memory({ initial: 16 });
   const bytes = memory.buffer.byteLength;
   const after = process.memoryUsage();
-  assert.equal(after.arrayBuffers - before.arrayBuffers, 0);
-  assert.equal(retainedMemory(before, after, bytes), after.heapUsed - before.heapUsed + bytes);
+  // Allocation may collect unrelated buffers, including Node's loaded source.
+  assert(after.arrayBuffers <= before.arrayBuffers, 'WASM must not produce observed JS backing-buffer growth');
+  assert.equal(
+    retainedMemory(before, after, bytes),
+    after.heapUsed - before.heapUsed + after.arrayBuffers - before.arrayBuffers + bytes,
+  );
+  assert.equal(retainedMemory(before, after, bytes) - retainedMemory(before, after, 0), bytes);
 });
 
 const metricsFor = (before, after, wasmBytes = 0) => ({
