@@ -250,3 +250,21 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 - Broker attribution: BloFin drops `brokerId`; check every venue's broker/referral
   tag against TS.
 - Cancel of ids not in the store silently succeeds (Binance, BloFin).
+
+### Bitget family
+- High: hedge-mode isolated leverage always goes to the long leg — the adapter
+  drops `side` (`rust.exchange.ts:822`), `SetLeverage` has no side
+  (`engine/src/command.rs:85`), Bitget hard-codes `long` (`trading.rs:548`).
+  Affects every venue with `hasIndependentHedgedLeverageInIsolatedMargin`.
+- Medium: Classic fills/order history fail outright on liquidation/ADL/reduce
+  fills (`history.rs:984,867`); one bad market row or a transient error halts
+  startup with no retry (`lib.rs:552,684`); one unmappable row discards the
+  positions/orders snapshot (`account.rs:505,806`).
+- Low: zero-lot order rejects the whole batch; commands before the account probe
+  rejected; sized stop silently becomes full-position; WS-triggered Classic
+  refresh dropped while another is in flight; `"0"` leverage limits make `clamp`
+  panic (`trading.rs:547`); UTA strategy ids look virtual; UTA one-way fills
+  report side `both`.
+- Confirm (TS bugs Rust fixed): Classic limit move dropping attached TP/SL; UTA
+  attached TP/SL edit cancelling the parent; hedge plan side flip; close orders
+  side inversion (verify live); USDC commission asset.
