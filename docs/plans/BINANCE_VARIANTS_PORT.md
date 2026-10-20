@@ -395,3 +395,29 @@ Fresh Hyro public: TS/Rust main 33.065/25.306ms, steady 10.088/8.218ms, retained
 Fresh Hyro private: TS/Rust main 41.337/38.464ms, steady 22.201/18.152ms, retained 13.619/0.940MB. Both CPU measures favor Rust; no repeats were needed.
 
 Hyro investigation: earlier #1307 public losses and later small private losses remain recorded. Unchanged-baseline checks and repeated fresh public gates did not establish a reproducible production regression; bounded private repeats favored Rust. Profiling identified shared replay URL/scheduling work without proving a production cause. No speculative Hyro optimization or relaxed gate was added; strict machine isolation and live Hyro connectivity are not claimed. Green CI on the pushed PR head remains mandatory before merge.
+
+
+### Final Breakout integration evidence
+
+Verified source `df52a3297d`: all twelve public/private replay gates PASS for USD-M, PM, Spot, COIN-M, baseline Bybit and Hyro. Public values are three-run medians. Independent wrapper, shared-host and harness reviews pass after retaining both Binance variant CI blocks, Breakout compiled checks, native ticker coverage and protocol readiness.
+
+| Profile | Frames | TS/Rust main ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| USD-M | 873 | 291.504/152.221 | 162.388/76.321 | 16.320/2.532 |
+| PM | 873 | 213.878/109.445 | 118.551/47.160 | 16.059/2.503 |
+| Spot | 7045 | 955.184/693.218 | 468.168/311.004 | 24.147/7.676 |
+| COIN-M | 202 | 265.805/116.056 | 180.759/72.826 | 13.245/1.491 |
+
+Private frames: USD-M 14, PM 6, Spot 8, COIN-M 6, baseline Bybit 18 and Hyro 13; baseline Bybit public 8,743 and Hyro public 160. Every replay has zero unserved requests, missing writes, invalid signatures or protocol errors. Spot numeric currency fields and native contract quantities remain exact.
+
+Binance-only WASM **902,601 bytes**, budget 1,258,291; SHA-256 `3bc0dbca163a3b1499d7aaf24bd46151df9f5187d20f8c8b5b92f29b355c9345`. Bybit-only **952,361 bytes**, SHA-256 `b0469f23a1dea03d8352dfec5428cbb196051d0d1dfa9b5451a2fee64dc0c60f`.
+
+Checks PASS: 99 native Binance, 123 native Bybit, 67 engine, 436 harness helpers, 257 focused wrapper/frame/transport cases; 108 actual WASM cases across eight suites and 65 host/wire tests on the fresh combined build; root typecheck 44/lint 28 tasks, fmt/bans, strict Binance/default WASM Clippy and feature-range credential scan.
+
+Breakout polling HTTP frames/final anchors and tick-interval/auth hooks are opt-in. Ordinary Binance/Bybit frame counts, quarter warm boundary, private pacing, socket requirements, HMAC/native-ID auditing, one-shot writes and memory/CPU definitions remain intact. The generic relative-URL join and clock-budget checks are included in the measured work. The reviewed GRVT sampling policy returns the current sample, requires nonnegative JS deltas and counts all reserved WASM memory; earlier measurements keep their tested-source attribution.
+
+Fresh Hyro public: TS/Rust main 27.279/21.758ms, steady 8.078/5.415ms, retained 13.228/0.806MB. Both CPU measures favor Rust; no repeats were needed.
+
+Fresh Hyro private: TS/Rust main 44.017/29.059ms, steady 23.898/13.595ms, retained 13.644/0.942MB. Both CPU measures favor Rust; no repeats were needed.
+
+Hyro investigation: earlier #1307 public losses and later small private losses remain recorded. Unchanged-baseline checks and repeated fresh public gates did not establish a reproducible production regression; bounded private repeats favored Rust. Profiling identified shared replay URL/scheduling work without proving a production cause. The incoming exact-value Bybit integer fast path passed independent review and tests. No speculative Hyro optimization, relaxed threshold or machine-isolation claim. All current-head PR CI must be green before merge.
