@@ -263,6 +263,8 @@ export class RustEngineExchange extends BaseExchange {
   private readonly bookListeners = new Map<string, Map<number, (book: OrderBook) => void>>();
   private nextBookListenerId = 0;
   private readonly candleListeners = new Map<string, Set<(candle: Candle) => void>>();
+  private readonly feedBookListeners = new Set<(book: OrderBook) => void>();
+  private readonly feedCandleListeners = new Set<(candle: Candle) => void>();
 
   /**
    * Receives each frame after this exchange has applied it. When the worker
@@ -618,12 +620,15 @@ export class RustEngineExchange extends BaseExchange {
         rustPublicFeedIdentity(this.name, this.options),
         async (update) => {
           await this.host?.command(update);
+          const wasReady = this.sharedPublicReady;
           if (
             this.requestSharedSnapshot &&
             update.tickers?.some((ticker) => this.store.marketsBySymbol[ticker.symbol] && hasSharedTickerValues(ticker))
           )
             this.sharedPublicReady = true;
           this.host?.flush();
+          // An unchanged provider snapshot produces no frame or store notification.
+          if (!wasReady && this.sharedPublicReady) for (const wake of this.startupWaiters) wake();
         },
         (error) => {
           this.startupFailure = error;
@@ -707,13 +712,16 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     for (const fill of this.applier.fills(frame)) this.emitter.emit('fill', fill);
-    if (!this.onFrame) {
+    if (!this.onFrame || this.feedBookListeners.size) {
       for (const { symbol, orderbook } of this.applier.books(frame)) {
         const listeners = this.bookListeners.get(symbol);
-        if (this.name !== 'asterdex') listeners?.forEach((listener) => listener(orderbook));
+        if (this.name !== 'asterdex')
+          listeners?.forEach((listener) => {
+            if (!this.onFrame || this.feedBookListeners.has(listener)) listener(orderbook);
+          });
         else if (listeners)
           for (const [id, listener] of [...listeners]) {
-            if (listeners.has(id))
+            if (listeners.has(id) && (!this.onFrame || this.feedBookListeners.has(listener)))
               listener(
                 this.name === 'asterdex'
                   ? {
@@ -724,8 +732,12 @@ export class RustEngineExchange extends BaseExchange {
               );
           }
       }
+    }
+    if (!this.onFrame || this.feedCandleListeners.size) {
       for (const { symbol, interval, candle } of this.applier.candles(frame)) {
-        this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => listener(candle));
+        this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => {
+          if (!this.onFrame || this.feedCandleListeners.has(listener)) listener(candle);
+        });
       }
     }
     this.onFrame?.(buffer);
@@ -1124,6 +1136,17 @@ export class RustEngineExchange extends BaseExchange {
     };
   };
 
+  /** Provider listeners still receive data when normal callbacks are handled by the frame consumer. */
+  listenOrderBookForFeed = (symbol: string, callback: (book: OrderBook) => void) => {
+    const listener = (book: OrderBook) => callback(book);
+    this.feedBookListeners.add(listener);
+    const stop = this.listenOrderBook(symbol, listener);
+    return () => {
+      this.feedBookListeners.delete(listener);
+      stop();
+    };
+  };
+
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
     const interval = this.candleInterval(opts.interval);
     const key = `${opts.symbol}:${interval}`;
@@ -1149,11 +1172,23 @@ export class RustEngineExchange extends BaseExchange {
 
   candleIntervalForFeed = (interval: OHLCVOptions['interval']) => this.candleInterval(interval);
 
+  listenOHLCVForFeed = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
+    const listener = (candle: Candle) => callback(candle);
+    this.feedCandleListeners.add(listener);
+    const stop = this.listenOHLCV(opts, listener);
+    return () => {
+      this.feedCandleListeners.delete(listener);
+      stop();
+    };
+  };
+
   dispose() {
     this.sharedPublicFeed?.dispose();
     this.sharedPublicFeed = undefined;
     for (const observer of this.publicFeedObservers) observer.closed();
     this.publicFeedObservers.clear();
+    this.feedBookListeners.clear();
+    this.feedCandleListeners.clear();
     this.stopPollingConfig?.();
     this.stopPollingConfig = undefined;
     this.flushTimers.forEach(clearInterval);

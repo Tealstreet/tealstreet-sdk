@@ -209,9 +209,11 @@ describe('native public-feed ownership through real private workers', () => {
     expect(input.failures).toEqual([]);
   }, 15_000);
 
-  it('fans one provider out to two transferred private-worker ports with native snapshots and isolated state', async () => {
+  it('fans one frame-forwarding provider out to two transferred private-worker ports with native snapshots and isolated state', async () => {
     const publicSide = await exchange({ key: '', secret: '', publicDataOnly: true });
     await publicSide.startup;
+    const forwardedSourceFrame = vi.fn();
+    publicSide.account.onFrame = (frame) => forwardedSourceFrame(structuredClone(frame, { transfer: [frame] }));
     publicSide.account.setActiveTickerSymbols(['BTC-USD']);
     const provider = new RustPublicFeedProvider(publicSide.account);
     cleanups.push(() => provider.dispose());
@@ -304,11 +306,20 @@ describe('native public-feed ownership through real private workers', () => {
     const books: OrderBook[] = [];
     const candles: Candle[] = [];
     const firstAccount = workers[0].worker.exchange as RustEngineExchange;
+    const sourceBookSubscription = vi.spyOn(publicSide.account, 'listenOrderBook');
+    const sourceCandleSubscription = vi.spyOn(publicSide.account, 'listenOHLCV');
+    const ordinarySourceCallback = vi.fn();
+    cleanups.push(publicSide.account.listenOrderBook('BTC-USD', ordinarySourceCallback));
+    cleanups.push(
+      publicSide.account.listenOHLCV({ symbol: 'BTC-USD', interval: '5m' }, ordinarySourceCallback),
+    );
     const stopBook = firstAccount.listenOrderBook('BTC-USD', (book) => books.push(book));
     const stopCandle = firstAccount.listenOHLCV({ symbol: 'BTC-USD', interval: '5m' }, (candle) =>
       candles.push(candle),
     );
     await waitFor(() => {
+      expect(sourceBookSubscription).toHaveBeenCalledTimes(2);
+      expect(sourceCandleSubscription).toHaveBeenCalledTimes(2);
       const subscriptions = publicSide.input.sent
         .filter(({ packet }) => packet.type === 'subscribe')
         .map(({ packet }) => packet.channel);
@@ -379,6 +390,8 @@ describe('native public-feed ownership through real private workers', () => {
     stopSiblingBook();
     expect(books).toEqual([]);
     expect(candles).toEqual([]);
+    expect(forwardedSourceFrame).toHaveBeenCalled();
+    expect(ordinarySourceCallback).not.toHaveBeenCalled();
     stopBook();
     stopCandle();
     // One account leaving must not close the provider or its sibling.
@@ -464,6 +477,66 @@ describe('native public-feed ownership through real private workers', () => {
     cleanups.push(() => unloaded.dispose());
     expect(() => new RustPublicFeedProvider(unloaded)).toThrow('started, loaded');
   });
+
+  it('settles shared startup when the provider snapshot matches the native REST seed', async () => {
+    setWasmEngineLoader(loadNodeEngine);
+    const products = JSON.stringify({
+      products: [
+        {
+          product_type: 'SPOT',
+          product_id: 'BTC-USD',
+          base_currency_id: 'BTC',
+          quote_currency_id: 'USD',
+          status: 'TRADING',
+          base_increment: '0.00000001',
+          price_increment: '0.01',
+          base_min_size: '0.00000001',
+          base_max_size: '10000',
+          price: '60000',
+          volume_24h: '100',
+          price_percentage_change_24h: '9.43%',
+        },
+      ],
+      pagination: { has_next: false },
+    });
+    const transport: Transport = {
+      now: Date.now,
+      connect: () => ({ send() {}, close() {} }),
+      request: async () => ({ status: 200, body: new TextEncoder().encode(products) }),
+      // Isolate the initial snapshot: no later polling or socket event may wake startup.
+      setTimeout: () => 0,
+      clearTimeout() {},
+    };
+    setRustEngineTransport(() => transport);
+    const options: ExchangeOptions = {
+      key: '',
+      secret: '',
+      publicDataOnly: true,
+      transport: { ...directTransport, rest: ({ config }) => ({ baseURL: config?.baseURL, proxied: false }) },
+    };
+    const source = new RustEngineExchange('coinbasespot', options, new DefaultStore());
+    cleanups.push(() => source.dispose());
+    await source.start();
+    const provider = new RustPublicFeedProvider(source);
+    cleanups.push(() => provider.dispose());
+    const channel = new MessageChannel();
+    provider.attach(channel.port1 as unknown as MessagePort);
+    const receiver = new RustEngineExchange(
+      'coinbasespot',
+      { ...options, publicFeed: { mode: 'shared', port: channel.port2 as unknown as MessagePort } },
+      new DefaultStore(),
+    );
+    cleanups.push(() => receiver.dispose());
+    let ready = false;
+    const startup = receiver.start().then(() => {
+      ready = true;
+    });
+    void startup.catch(() => {});
+    await vi.waitFor(() => expect(receiver.store.loaded.tickers).toBe(true), { timeout: 5000 });
+    expect(receiver.store.tickers).toEqual(source.store.tickers);
+    await vi.waitFor(() => expect(ready).toBe(true), { timeout: 1000 });
+    await startup;
+  }, 15_000);
 
   it('rejects legacy TS providers and contradictory direct policy', async () => {
     const legacy = await exchange({

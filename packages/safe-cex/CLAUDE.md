@@ -64,6 +64,10 @@ snapshot without waiting for a new venue event. Tick data, books
 and candles enter the receiving native engine by symbol and leave through its
 normal frames; never copy them into only the JS store. Providers send no private
 sections or account metadata. A running/loaded direct source is mandatory.
+A source may forward frames: provider-owned book/candle listeners still run
+before the buffer is transferred, while ordinary worker callbacks stay silent.
+Matching shared ticker seeds wake startup even when identical REST data means
+the native engine emits no changed frame.
 Venue/network/product identity and native instrument IDs/flags/contract sizes
 must match before account readiness; account-local metadata may be a subset.
 Catalog changes require restarting provider/accounts. Heartbeats release dead

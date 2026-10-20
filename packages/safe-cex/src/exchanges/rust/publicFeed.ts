@@ -191,14 +191,14 @@ export class RustPublicFeedProvider {
                 },
               ],
             });
-          subscriptions.set(key, this.source.listenOrderBook(symbol, forward));
+          subscriptions.set(key, this.source.listenOrderBookForFeed(symbol, forward));
           const snapshot = this.source.snapshotOrderBook(symbol);
           if (snapshot) forward(snapshot);
         } else {
           const { symbol } = data;
           subscriptions.set(
             key,
-            this.source.listenOHLCV({ symbol, interval }, (candle) =>
+            this.source.listenOHLCVForFeed({ symbol, interval }, (candle) =>
               send({
                 op: 'publicFeedUpdate',
                 candles: [
