@@ -170,3 +170,7 @@ server's available horizon depends on fidelity and is not all-history coverage.
 An upper-only bound requires `from`, and `from` must be at least 1000ms because
 the endpoint treats `startTs=0` as absent. These unsupported requests reject
 before transport rather than silently omitting older requested data.
+
+## Rust socket supervision
+
+Both Rust market and user sockets use `engine::socket::Supervisor` for a 10-second connection deadline and capped exponential reconnect delay with jitter. Native raw `PING` remains every10 seconds, and only exact raw `PONG` satisfies its deadline; ordinary market/user data cannot keep an unanswered ping alive. Short open/close flaps retain the failure count. Public subscriptions remain lazy and reconnect requires a fresh book snapshot.

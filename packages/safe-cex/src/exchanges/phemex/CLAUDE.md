@@ -649,6 +649,10 @@ TS still has inert income/order-history fallbacks and a non-definitive lookup
 fallback. Its implemented fill history is a symbol-scoped latest page capped
 at 200, so this sweep does not claim unbounded Phemex TS history.
 
+## Rust socket supervision
+
+The Rust public socket uses `engine::socket::Supervisor`: a 10-second connection deadline, 20-second idle watchdog, native `server.ping` every five seconds, and capped exponential reconnect delay with jitter. Short open/close flaps retain the failure count; sustained traffic resets it. Public reconnect still invalidates book generations and restores active subscriptions.
+
 Rust `setLeverage(symbol, leverage, side)` preserves the opposite hedge leg's
 cached leverage in the required two-field request. Both values retain their
 margin sign: negative in cross, positive in isolated. Only the selected leg's
