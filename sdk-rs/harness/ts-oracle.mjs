@@ -1,7 +1,5 @@
 // TS oracle fixers have no access to candidate outputs. This module receives
 // only the reference output and the input tape; keep it isolated from gate.mjs.
-import { readFileSync } from 'node:fs';
-import { gunzipSync } from 'node:zlib';
 import { parseRequestJson } from './request-json.mjs';
 import { fixBlofinAccount, fixWeexConditionals, fixPhemexAccount, fixLighterFills, fixLighterCommands, fixKrakenOutput } from './known-ts-fixes.mjs';
 import { fixCoinbase } from './known-ts-fixes-coinbase.mjs';
@@ -9,10 +7,18 @@ import { fixOrderly } from './known-ts-fixes-orderly.mjs';
 import { fixBinanceSpotFills, fixBinanceFilledStatus } from './binance-protocol.mjs';
 import { fixPositionMargins } from './margin-expectation.mjs';
 import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
+import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
+import { expectedKucoinRequests } from './kucoin-request-contracts.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 
 export function createTsFixes(values, tapeRecords) {
-  const records = tapeRecords;
+const records = tapeRecords;
+const instrumentRows = tapeRecords
+  .filter((r) => r.type === 'http' && new URL(r.url).pathname === '/v5/market/instruments-info')
+  .flatMap((r) => JSON.parse(r.body).result?.list ?? []);
+const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
+
+
   const venue = venueOf(values.venue);
 const KNOWN_TS_FIXES = {
   // KuCoin Spot: emit each native execution once even across replay, preserve
@@ -443,12 +449,7 @@ const KNOWN_TS_FIXES = {
     if (!account) return;
     // TS reads opening STOP/TP stream rows as protective orders and displays
     // the execution price as their trigger, corrupting conditional size amends.
-    const bytes = readFileSync(values.tape);
-    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
-      .toString('utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line));
+
     fixWeexConditionals(account, records);
     // Additional deliberate fixes, covered by native regressions: failed
     // normal/algo reads retain the complete last snapshot; stale depth/private
@@ -541,12 +542,7 @@ const KNOWN_TS_FIXES = {
   // Native regressions also correct TS repair losses (post-only/TIF/reduce-only)
   // and cancellation races across concurrent writes and REST reconciliation.
   backpack: (ts) => {
-    const bytes = readFileSync(values.tape);
-    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
-      .toString()
-      .split('\n')
-      .filter(Boolean)
-      .map(JSON.parse);
+
     const orders = new Map();
     const positions = new Map();
     const fills = [];
@@ -722,5 +718,91 @@ const fixCryptocomAccount = (account) => {
   // afterTsFrame and prepareTsReady hooks in venues.mjs.
 };
 
-return { KNOWN_TS_FIXES, normalizeBingxPublic, fixCryptocomAccount };
+function applyTsCorrections(ts) {
+  const fix =
+    KNOWN_TS_FIXES[values.venue] ??
+    (['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue)
+      ? KNOWN_TS_FIXES.bybit
+      : undefined);
+  // A fixer receives only TS and input records, never the candidate answer.
+  if (typeof fix === 'function') fix(ts);
+  if (values.venue === 'kraken') KNOWN_TS_FIXES.kraken.output(ts, tapeRecords);
+  if (values.venue === 'bybitspot') {
+    for (const market of ts.markets) {
+      const lot = instruments.get(market.symbol)?.lotSizeFilter;
+      if (!lot) continue;
+      market.precision.amount = Number(lot.qtyStep ?? lot.basePrecision);
+      const maxima = [lot.maxLimitOrderQty, lot.maxMarketOrderQty, lot.maxOrderQty]
+        .map(Number)
+        .filter((n) => Number.isFinite(n) && n > 0);
+      if (maxima.length) market.limits.amount.max = Math.min(...maxima);
+    }
+  }
+  if (ts.account && values.venue === 'bybitinverse') {
+    const upnl = ts.account.positions.reduce(
+      (sum, p) => sum + (p.contracts > 0 ? (p.unrealizedPnl * p.notional) / p.contracts : 0),
+      0,
+    );
+    ts.account.balance.total = Math.round((ts.account.balance.total + ts.account.balance.upnl - upnl) * 1e8) / 1e8;
+    ts.account.balance.upnl = upnl;
+  }
+  if (['bybitinverse', 'bybitspot'].includes(values.venue)) {
+    const privateRecord = tapeRecords.find(
+      (record) => record.type === 'ws' && new URL(record.url).pathname === '/v5/private',
+    );
+    const privateUrl = privateRecord && new URL(privateRecord.url);
+    ts.subscriptions = normalizeTsBybitSubscriptions(
+      values.venue,
+      ts.subscriptions,
+      privateUrl && `${privateUrl.origin}${privateUrl.pathname}`,
+    );
+  }
+  if (ts.account) {
+    if (values.venue === 'cryptocom') {
+      fixCryptocomAccount(ts.account);
+      const feeds = new Set(ts.subscriptions);
+      const suffix = ' {"method":"subscribe","params":{"channels":["user.order"]}}';
+      for (const key of ts.subscriptions) {
+        if (!key.endsWith(suffix)) continue;
+        for (const required of subscriptionKeys(
+          key.slice(3, -suffix.length),
+          { method: 'subscribe', params: { channels: ['user.trade'] } },
+          new Set(),
+          { cryptoProtocol: true },
+        ))
+          feeds.add(required);
+      }
+      ts.subscriptions = [...feeds].sort();
+    }
+    if (['lighter', 'lighter-robinhood'].includes(values.venue)) {
+      KNOWN_TS_FIXES.lighter.fills(ts.account, tapeRecords);
+      KNOWN_TS_FIXES.lighter.commands(ts.commands, tapeRecords);
+    }
+  }
+  // KNOWN_TS_FIXES: KuCoin TS has no futures history implementations. The
+  // synthetic tape declares independent documented query expectations; never
+  // derive this reference from the Rust result.
+  if (values.venue === 'kucoin')
+    tapeRecords
+      .filter((r) => r.type === 'command')
+      .forEach((record, index) => {
+        if (record.expected !== undefined) {
+          if (!['fetchFills', 'fetchOrderHistory', 'fetchIncome', 'fetchPublicTrades'].includes(record.op))
+            throw new Error('KuCoin expected oracle is restricted to missing TS query methods');
+          ts.commands[index] = { ok: record.expected };
+        }
+      });
+  normalizeBingxPublic(ts);
+  if (values.venue === 'kucoin') {
+    ts.requests = expectedKucoinRequests(tapeRecords, ts.requests);
+  }
+  // KNOWN_TS_FIXES: unavailable Crypto.com quotes produce NaN in TS.
+  if (values.venue === 'cryptocom')
+    for (const ticker of ts.tickers) {
+      for (const field of ['bid', 'ask', 'last', 'percentage', 'volume', 'quoteVolume', 'openInterest']) {
+        if (ticker[field] === null) ticker[field] = 0;
+      }
+    }
+}
+return { KNOWN_TS_FIXES, applyTsCorrections };
 }

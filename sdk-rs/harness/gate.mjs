@@ -5,17 +5,16 @@
 //   corepack yarn rust:gate --tape sdk-rs/harness/tapes/binance.jsonl
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
-import { parseArgs } from 'node:util';
+import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
-import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { venueOf } from './venues.mjs';
 import { COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
-import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
-import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
+import { requestKey, callerIdsOf } from './requests.mjs';
 import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
+import { runAuditedFixer } from './oracle-audit.mjs';
 import { createTsFixes } from './ts-oracle.mjs';
 import { duplicateSymbols, compareCheckpoints, valueDifferences } from './snapshot-compare.mjs';
 
@@ -124,7 +123,7 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 //    zero-size placeholder (0); Rust takes the isolated wallet, or notional
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
-//    the execution's own price (`L`). Fill prices are not compared.
+//    the execution's own price (`L`). The stricter gate reports the divergence.
 //  - Bybit: TS drops the reject reason of a post-only order cancelled for taking
 //    liquidity (`EC_PostOnlyWillTakeLiquidity`); Rust reports it as PostOnly.
 //  - Bybit: TS can round split quantities away from the requested total;
@@ -171,7 +170,7 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // Binance/OKX also bypass cached client-ID hits with secondary credentials:
 // that cache may contain another account's orders. TS and Rust both query
 // the primary account; native tests retain PM's canonical client-ID identity.
-const { KNOWN_TS_FIXES, normalizeBingxPublic, fixCryptocomAccount } = createTsFixes(values, tapeRecords);
+const { KNOWN_TS_FIXES, applyTsCorrections } = createTsFixes(values, tapeRecords);
 for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
@@ -205,101 +204,24 @@ for (let run = 0; run < runs; run++) {
     if (missingWrites) differences.push(`${impl}: ${missingWrites} required taped write(s) never sent`);
     if (invalidSignatures) differences.push(`${impl}: ${invalidSignatures} invalid signatures`);
   }
-  const fix =
-    KNOWN_TS_FIXES[values.venue] ??
-    (['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue)
-      ? KNOWN_TS_FIXES.bybit
-      : undefined);
-  // A fixer receives only TS and input records, never the candidate answer.
-  if (typeof fix === 'function') fix(ts);
-  if (values.venue === 'kraken') KNOWN_TS_FIXES.kraken.output(ts, tapeRecords);
   if (JSON.stringify(ts.wsRequests) !== JSON.stringify(rust.wsRequests))
     differences.push(
       `websocket requests differ: ts=${JSON.stringify(ts.wsRequests)} rust=${JSON.stringify(rust.wsRequests)}`,
     );
-  if (values.venue === 'bybitspot') {
-    for (const market of ts.markets) {
-      const lot = instruments.get(market.symbol)?.lotSizeFilter;
-      if (!lot) continue;
-      market.precision.amount = Number(lot.qtyStep ?? lot.basePrecision);
-      const maxima = [lot.maxLimitOrderQty, lot.maxMarketOrderQty, lot.maxOrderQty]
-        .map(Number)
-        .filter((n) => Number.isFinite(n) && n > 0);
-      if (maxima.length) market.limits.amount.max = Math.min(...maxima);
-    }
-  }
-  if (isPrivate && ts.account && rust.account && values.venue === 'bybitinverse') {
-    const upnl = ts.account.positions.reduce(
-      (sum, p) => sum + (p.contracts > 0 ? (p.unrealizedPnl * p.notional) / p.contracts : 0),
-      0,
-    );
-    ts.account.balance.total = Math.round((ts.account.balance.total + ts.account.balance.upnl - upnl) * 1e8) / 1e8;
-    ts.account.balance.upnl = upnl;
-  }
-  if (['bybitinverse', 'bybitspot'].includes(values.venue)) {
-    const privateRecord = tapeRecords.find(
-      (record) => record.type === 'ws' && new URL(record.url).pathname === '/v5/private',
-    );
-    const privateUrl = privateRecord && new URL(privateRecord.url);
-    ts.subscriptions = normalizeTsBybitSubscriptions(
-      values.venue,
-      ts.subscriptions,
-      privateUrl && `${privateUrl.origin}${privateUrl.pathname}`,
-    );
-  }
+  const candidateBefore = structuredClone(rust);
+  const overwritten = runAuditedFixer(values.venue, ts, applyTsCorrections);
+  differences.push(...overwritten.errors);
+  for (const [field, count] of Object.entries(overwritten.counts))
+    console.log(`fixer ${values.venue} ${field}: ${count} overwritten field(s)`);
+  console.log(`fixer ${values.venue}: ${overwritten.total} overwritten field(s)`);
+  if (!isDeepStrictEqual(candidateBefore, rust)) differences.push('fixer modified Rust candidate output');
   if (isPrivate && ts.account && rust.account) {
-    if (values.venue === 'cryptocom') {
-      fixCryptocomAccount(ts.account);
-      const feeds = new Set(ts.subscriptions);
-      const suffix = ' {"method":"subscribe","params":{"channels":["user.order"]}}';
-      for (const key of ts.subscriptions) {
-        if (!key.endsWith(suffix)) continue;
-        for (const required of subscriptionKeys(
-          key.slice(3, -suffix.length),
-          { method: 'subscribe', params: { channels: ['user.trade'] } },
-          new Set(),
-          { cryptoProtocol: true },
-        ))
-          feeds.add(required);
-      }
-      ts.subscriptions = [...feeds].sort();
-    }
-    if (['lighter', 'lighter-robinhood'].includes(values.venue)) {
-      KNOWN_TS_FIXES.lighter.fills(ts.account, tapeRecords);
-      KNOWN_TS_FIXES.lighter.commands(ts.commands, tapeRecords);
-    }
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
       differences.push(...valueDifferences(ts.account[field], rust.account[field], `account ${field}`));
     }
   }
-  // KNOWN_TS_FIXES: KuCoin TS has no futures history implementations. The
-  // synthetic tape declares independent documented query expectations; never
-  // derive this reference from the Rust result.
-  if (values.venue === 'kucoin')
-    tapeRecords
-      .filter((r) => r.type === 'command')
-      .forEach((record, index) => {
-        if (record.expected !== undefined) {
-          if (!['fetchFills', 'fetchOrderHistory', 'fetchIncome', 'fetchPublicTrades'].includes(record.op))
-            throw new Error('KuCoin expected oracle is restricted to missing TS query methods');
-          ts.commands[index] = { ok: record.expected };
-        }
-      });
   if (!sameCommandResults(ts.commands, rust.commands))
     differences.push(`command results: ts=${JSON.stringify(ts.commands)} rust=${JSON.stringify(rust.commands)}`);
-  normalizeBingxPublic(ts);
-  if (values.venue === 'kucoin') {
-    const requests = applyKucoinRequestContracts(tapeRecords, ts.requests, rust.requests);
-    ts.requests = requests.tsRequests;
-    rust.requests = requests.rustRequests;
-  }
-  // KNOWN_TS_FIXES: unavailable Crypto.com quotes produce NaN in TS.
-  if (values.venue === 'cryptocom')
-    for (const ticker of ts.tickers) {
-      for (const field of ['bid', 'ask', 'last', 'percentage', 'volume', 'quoteVolume', 'openInterest']) {
-        if (ticker[field] === null) ticker[field] = 0;
-      }
-    }
   const selectedOnly = (impl) =>
     new Set(
       tapeRecords

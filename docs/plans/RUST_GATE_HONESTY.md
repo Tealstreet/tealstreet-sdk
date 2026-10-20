@@ -51,3 +51,13 @@ never retry an unchanged failed performance measurement to obtain a pass.
   Ordinary production fill events/frame rows lack timestamps and execution IDs:
   null/null equality is absence of evidence, not proof of those capabilities.
   Conditional execution price also stays null when the production wire lacks it.
+  Full harness suite: 602/602 PASS (`/tmp/honesty-phase2-harness.log`).
+- Phase 3: every correction is now inside the isolated TS-only boundary;
+  KuCoin native request expectations no longer rewrite candidate requests.
+  Immutable per-venue leaf contracts enforce additions/removals, exact array
+  direction/reorder, empty/type changes and newly widened fill metadata.
+  Per-write observation counts overwrites and catches temporary mutations;
+  descriptors/prototypes/extensibility fail closed, and a whole-output audit
+  provides a second check. Review found and corrected directional-array,
+  reorder and proxy-reference escapes. Current targeted tests: 31/31 PASS;
+  previous full suite before these review fixes: 625/625 PASS.

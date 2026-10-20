@@ -25,7 +25,7 @@ const exact = (url, path, params) => {
   if (url.searchParams.size !== Object.keys(params).length || keyOf(url.href) !== keyOf(expected.href)) fail('unexpected read parameters');
 };
 
-export function applyKucoinRequestContracts(records, tsRequests, rustRequests) {
+function kucoinRequestContract(records) {
   const commands = records.filter((record) => record.type === 'command');
   const markets = records.find((record) => record.type === 'http' && record.url === ORIGIN + '/api/v1/contracts/active');
   const symbolOf = (symbol) => {
@@ -110,7 +110,17 @@ export function applyKucoinRequestContracts(records, tsRequests, rustRequests) {
     }
     required.add(keyOf(record.url));
   }
-  for (const key of required) if (!rustRequests.includes(key)) fail(`required native GET was not sent: ${key}`);
   const normalize = (requests) => [...new Set(requests.map((key) => aliases.get(key) ?? key))].sort();
+  return { required, normalize };
+}
+
+export function expectedKucoinRequests(records, requests) {
+  const { required, normalize } = kucoinRequestContract(records);
+  return normalize([...requests, ...required]);
+}
+
+export function applyKucoinRequestContracts(records, tsRequests, rustRequests) {
+  const { required, normalize } = kucoinRequestContract(records);
+  for (const key of required) if (!rustRequests.includes(key)) fail(`required native GET was not sent: ${key}`);
   return { tsRequests: normalize([...tsRequests, ...required]), rustRequests: normalize(rustRequests) };
 }
