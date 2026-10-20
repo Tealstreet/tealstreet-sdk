@@ -126,10 +126,14 @@ Independent phase reviews found missing STRINGS acceptance, observer exceptions
 masking recovery, worker midpoint loss and orphan native-quantity NaNs; all fixed
 with regressions. Execution-vs-order flush cadence remains a separate finding.
 
-Phase progress: implementation and independent reviews of phases 1–3 complete.
-Local evidence: 89 all-feature/85 default engine tests, 25 decoder tests, 7
-actual-writer contract tests, 162 SDK tests plus 16 recovery cases and 22
-worker/edge cases pass. Combined WASM, acceptance gates and PR/CI follow.
+Phase progress: phases 1–3 and independent reviews complete, committed in
+`fb5537d662`. Integrated landing PR #1338 (`1b8592dbd2`) in `a35660f9f3`,
+retaining both test additions and adapting renamed helpers/revised Greek tails;
+the landed KuCoin Spot leverage path also uses the sole applier owner.
+Integrated checks pass: 95 all-feature/89 default engine tests, 25 decoder tests,
+187 scoped SDK/worker tests, typecheck/lint, native/WASM Clippy and 586 harness
+tests. The earlier Binance replay was superseded after the landing merge;
+combined-WASM rebuild and acceptance replay results follow on this exact source.
 
 ## Security
 

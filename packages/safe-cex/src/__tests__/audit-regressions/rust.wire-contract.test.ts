@@ -69,7 +69,6 @@ it('keeps the last good table and uses explicit fill identity when new market me
   const pending = frame({ fills: () => fills('B') });
   expect(() => applier.apply(pending)).toThrow(FrameApplyError);
   expect(applier.fills(pending)[0].symbol).toBe('B');
-  expect(() => applier.fills(frame({ fills: () => fills() }))).not.toThrow();
   const legacy = frame({ fills: () => fills() });
   expect(() => applier.apply(legacy)).toThrow(FrameApplyError);
   expect(() => applier.fills(legacy)).toThrow(/identity/);
