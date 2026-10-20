@@ -91,7 +91,7 @@ opt-level = 3
 opt-level = "z"
 
 [profile.release.package.safe-cex-venue-bybit]
-opt-level = "z"
+opt-level = 3
 
 # Its steady public decoder also needs throughput optimization to beat the TS oracle.
 [profile.release.package.safe-cex-venue-bingx]

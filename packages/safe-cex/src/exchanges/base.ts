@@ -1422,7 +1422,7 @@ export class BaseExchange implements Exchange {
    * object messages are emitted, so subscribers cannot tell the difference.
    */
   applyWorkerFrame(buffer: ArrayBuffer) {
-    this.workerFrameApplier ??= new FrameApplier(this.store, this.name === 'mexc', this.name === 'bitgetinverse');
+    this.workerFrameApplier ??= new FrameApplier(this.store, this.name === 'mexc' || this.name === 'blofin', this.name === 'bitgetinverse');
     const frame = new Frame(buffer);
     this.workerFrameApplier.apply(frame);
     for (const book of this.workerFrameApplier.books(frame)) this.emitter.emit('listenOrderBook', book);

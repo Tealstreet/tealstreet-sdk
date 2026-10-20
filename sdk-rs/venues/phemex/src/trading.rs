@@ -187,6 +187,9 @@ impl PhemexPerpetuals {
         }
         let mut seen = HashSet::new();
         for o in &orders {
+            if o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some() {
+                return Err("Phemex does not support Bybit execution controls".into());
+            }
             if let Some(id) = &o.client_order_id {
                 if !plain(o) || !valid_client(id) {
                     return Err(
@@ -675,6 +678,8 @@ impl PhemexPerpetuals {
             },
             client_order_id: None,
             close: parent.close,
+            bybit_bbo: None,
+            bybit_slippage_tolerance_ticks: None,
         };
         let mut replacement = self.place_plan(cx, vec![opts])?;
         if let Some(step) = replacement.front_mut() {

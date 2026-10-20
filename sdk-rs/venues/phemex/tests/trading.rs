@@ -126,6 +126,8 @@ fn opts(id: &str) -> PlaceOrderOpts {
         sl_trigger_type: None,
         client_order_id: (!id.is_empty()).then(|| id.into()),
         close: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
     }
 }
 fn params(r: &HttpRequest) -> Vec<(String, String)> {
@@ -235,6 +237,35 @@ fn whole_command_caller_preflight_before_any_write() {
         );
         assert!(writes(&a).is_empty());
         assert!(done(&a).is_err());
+    }
+}
+
+#[test]
+fn bybit_controls_reject_the_whole_batch_before_any_write() {
+    for control in 0..2 {
+        let mut e = engine();
+        let mut invalid = opts("second");
+        if control == 0 {
+            invalid.bybit_bbo = Some(safe_cex_engine::model::BybitBbo {
+                side_type: "Queue".into(),
+                level: 1.,
+            });
+        } else {
+            invalid.bybit_slippage_tolerance_ticks = Some(1.);
+        }
+        let actions = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![opts("first"), invalid],
+            },
+        );
+        assert!(writes(&actions).is_empty());
+        assert!(
+            done(&actions)
+                .unwrap_err()
+                .contains("Bybit execution controls")
+        );
     }
 }
 

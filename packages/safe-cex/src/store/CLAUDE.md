@@ -4,9 +4,11 @@ The Tealstreet exchange store. One `DefaultStore` per exchange
 account; mirrored across worker → main thread via the worker's
 throttled postMessage.
 
-Rust frames keep quantities in published base units. For MEXC, `FrameApplier`
-also derives native placement-unit order extras from `contractSize` so chaser
-arithmetic retains its native-volume contract. `SETTINGS` optionally carries
+Rust frames keep quantities in published base units. For MEXC and BloFin,
+`FrameApplier` also retains native placement-unit order extras in both worker
+and main stores. Prefer the exact native remaining column when present; legacy
+frames reconstruct placement quantities from `contractSize` so chaser arithmetic
+retains its native-volume contract. `SETTINGS` optionally carries
 separate buy/sell leverage columns; do not collapse these hedge rails to the
 single representative leverage value when applying frames. `POSITIONS` may append
 string references for venue-defined position IDs; preserve these when present
@@ -236,3 +238,20 @@ a non-final "Triggered" to Closed; Binance sends `EXPIRED` when a stop
 triggers). Only a venue whose stream event is FINAL calls it — OKX's `filled` /
 `canceled`, and BloFin's `filled` / `canceled` / `effective` / `order_failed`. `fromWorker` is skipped because the worker's store has already
 applied it. Proven by the gap-4 cases in `__tests__/faultBench/badLink.scenarios.test.ts`.
+
+## Rust frame native units
+
+`FrameApplier` preserves inverse sizing metadata across the worker bridge.
+Inverse position `notional` is the native quote-contract size, so the applier
+also publishes it as `extra.contractsNative`; `extra.unrealizedPnlNative`
+keeps the native PnL. Copier closes consume the native size rather than the
+rounded base-coin `contracts` field.
+
+An optional trailing `ORDERS.remainingNative` frame column carries the venue's
+exact native leaves quantity into `extra.remainingNative`; inverse markets also
+publish `extra.remainingNotional`. Do not infer it by multiplying rounded base remainder
+by price, or from an amount-zero Full position stop. Legacy seven-column frames
+remain readable. Bybit leaves those extras absent on legacy frames; Bitget
+inverse publishes native amount/filled, so its adapter can subtract those values
+when the exact optional tail is absent. Order rejection metadata must survive
+alongside the native sizing fields.
