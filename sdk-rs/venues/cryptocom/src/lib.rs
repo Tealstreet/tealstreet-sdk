@@ -774,7 +774,6 @@ impl Venue for Cryptocom {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, s)| s.synced)
                 .map(|(symbol, s)| (symbol.as_str(), &s.book)),
         )
     }
