@@ -37,6 +37,7 @@ const recording = {
     const socket = ordinals.get(key) ?? 0;
     ordinals.set(key, socket + 1);
     const connection = live.connect(url, {
+      binary: handlers.binary,
       headers: handlers.headers,
       onOpen: () => {
         write({ type: 'open', url, socket });
@@ -46,6 +47,11 @@ const recording = {
         frames++;
         write({ type: 'ws', t: (receivedAt ?? Date.now()) - started, url, socket, text });
         handlers.onMessage(text, receivedAt);
+      },
+      onBinary: (bytes, receivedAt) => {
+        frames++;
+        write({ type: 'ws', t: (receivedAt ?? Date.now()) - started, url, socket, binary: Buffer.from(bytes).toString('base64') });
+        handlers.onBinary?.(bytes, receivedAt);
       },
       onClose: (code, receivedAt) => {
         write({ type: 'close', t: (receivedAt ?? Date.now()) - started, url, socket, code });

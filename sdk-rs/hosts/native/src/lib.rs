@@ -29,6 +29,7 @@ use tokio::task::AbortHandle;
 pub enum HostEvent {
     WsOpened(SocketId),
     WsMessage(SocketId, String),
+    WsBinary(SocketId, Vec<u8>),
     WsClosed(SocketId, u16),
     HttpStart {
         request: RequestId,
@@ -226,7 +227,10 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 
     fn dispatch_ready(&mut self, first: QueuedEvent, max_messages: usize) -> usize {
-        if !matches!(first.event, HostEvent::WsMessage(..)) {
+        if !matches!(
+            first.event,
+            HostEvent::WsMessage(..) | HostEvent::WsBinary(..)
+        ) {
             self.dispatch(first);
             return 1;
         }
@@ -234,20 +238,30 @@ impl<V: Venue, T: Transport> Host<V, T> {
         let mut count = 0;
         let mut bytes = 0;
         loop {
-            if let HostEvent::WsMessage(_, text) = &next.event {
-                if count > 0 && bytes + text.len() > MAX_BATCH_BYTES {
-                    self.pending = Some(next);
-                    break;
-                }
-                bytes += text.len();
+            let size = match &next.event {
+                HostEvent::WsMessage(_, text) => text.len(),
+                HostEvent::WsBinary(_, data) => data.len(),
+                _ => unreachable!("only websocket messages enter this burst"),
+            };
+            if count > 0 && bytes + size > MAX_BATCH_BYTES {
+                self.pending = Some(next);
+                break;
             }
+            bytes += size;
             self.dispatch(next);
             count += 1;
             if count >= max_messages || bytes >= MAX_BATCH_BYTES {
                 break;
             }
             match self.inbox.try_recv() {
-                Ok(event) if matches!(event.event, HostEvent::WsMessage(..)) => next = event,
+                Ok(event)
+                    if matches!(
+                        event.event,
+                        HostEvent::WsMessage(..) | HostEvent::WsBinary(..)
+                    ) =>
+                {
+                    next = event;
+                }
                 Ok(event) => {
                     self.pending = Some(event);
                     break;
@@ -263,6 +277,13 @@ impl<V: Venue, T: Transport> Host<V, T> {
         let engine = &mut self.engine;
         match queued.event {
             HostEvent::WsOpened(socket) => engine.handle(now, Event::WsOpened { socket }),
+            HostEvent::WsBinary(socket, data) => engine.handle(
+                now,
+                Event::WsBinary {
+                    socket,
+                    data: &data,
+                },
+            ),
             HostEvent::WsMessage(socket, text) => engine.handle(
                 now,
                 Event::WsMessage {
@@ -314,12 +335,14 @@ impl<V: Venue, T: Transport> Host<V, T> {
         for action in actions.drain(..) {
             match action {
                 Action::WsConnect {
+                    binary,
                     socket,
                     url,
                     channel,
                     context,
                 } => {
-                    let outgoing = self.transport.connect_context(
+                    let outgoing = self.transport.connect_encoding(
+                        binary,
                         socket,
                         url,
                         vec![],

@@ -31,8 +31,12 @@ export class EngineHost {
     this.batchMessages = batchMessages;
     this.messages = [];
     this.messageBytes = 0;
+    this.hasBinaryMessages = false;
     this.batchBuffer = new Uint8Array(0);
     this.batchTimer = undefined;
+    this.wsEncoder = undefined;
+    this.wsScratch = undefined;
+    this.wsScratchBusy = false;
     this.socketFallbacks = new Set();
     this.disposed = false;
   }
@@ -104,7 +108,9 @@ export class EngineHost {
     this.batchTimer = undefined;
     this.messages.length = 0;
     this.messageBytes = 0;
+    this.hasBinaryMessages = false;
     this.batchBuffer = new Uint8Array(0);
+    this.wsScratch = undefined;
     for (const handle of this.socketFallbacks) this.transport.clearTimeout(handle);
     this.socketFallbacks.clear();
     for (const socket of this.sockets.values()) socket.close();
@@ -155,17 +161,43 @@ export class EngineHost {
     this.run(engine.httpEnd(id, transport.now()));
   }
 
-  message(socket, text, receivedAt) {
+  singleMessage(socket, text, now, preferBytes = false) {
+    const { engine } = this;
+    if (preferBytes && typeof engine.wsMessageBytes === 'function') {
+      const scratch = text.length <= 1365 && !this.wsScratchBusy;
+      if (scratch) this.wsScratchBusy = true;
+      try {
+        const utf8 = this.wsEncoder ??= new TextEncoder();
+        let bytes;
+        if (scratch && typeof utf8.encodeInto === 'function') {
+          const buffer = this.wsScratch ??= new Uint8Array(4096);
+          const { read, written } = utf8.encodeInto(text, buffer);
+          bytes = read === text.length ? buffer.subarray(0, written) : utf8.encode(text);
+        } else bytes = utf8.encode(text);
+        return engine.wsMessageBytes(socket, bytes, now);
+      } finally {
+        if (scratch) this.wsScratchBusy = false;
+      }
+    }
+    return (engine.wsMessageActions ?? engine.wsMessage).call(engine, socket, text, now);
+  }
+
+  message(socket, data, receivedAt) {
     if (this.disposed) return;
     const now = receivedAt ?? this.transport.now();
     if (!this.batchMessages) {
-      this.run(this.engine.wsMessage(socket, text, now));
+      this.run(typeof data === 'string' ? this.singleMessage(socket, data, now, true)
+        : this.engine.wsBinary(socket, data, now));
       return;
     }
     // UTF-8 needs at most three bytes per JS code unit. Bound pending memory
     // even when a busy socket prevents the scheduled task from running.
-    const bytes = 16 + text.length * 3;
-    this.messages.push(socket, now, text);
+    const binary = data instanceof Uint8Array;
+    const bytes = 20 + (binary ? data.byteLength : data.length * 3);
+    // The callback may reuse its mutable buffer after returning. Retain an
+    // arrival snapshot; the Rust batch decoder still borrows its packed slice.
+    this.messages.push(socket, now, binary ? Uint8Array.from(data) : data);
+    if (binary) this.hasBinaryMessages = true;
     this.messageBytes += bytes;
     if (this.messages.length >= BATCH_MESSAGES * 3 || this.messageBytes >= BATCH_BYTES) {
       this.drainMessages();
@@ -183,21 +215,45 @@ export class EngineHost {
     if (this.batchTimer !== undefined) this.transport.clearTimeout(this.batchTimer);
     this.batchTimer = undefined;
     const messages = this.messages;
+    const mixed = this.hasBinaryMessages;
     this.messages = [];
     this.messageBytes = 0;
+    this.hasBinaryMessages = false;
     // A singleton still waits for this scheduled drain or event barrier. Avoid
     // packing it when the single-message entry point has identical input types;
     // unusual clocks/payloads retain the batch encoder's validation/coercion.
     if (messages.length === 3 && typeof messages[2] === 'string' && Number.isFinite(messages[1])) {
-      this.run(this.engine.wsMessage(messages[0], messages[2], messages[1]));
+      this.run(this.singleMessage(messages[0], messages[2], messages[1]));
       return;
     }
+    if (messages.length === 3 && messages[2] instanceof Uint8Array && Number.isFinite(messages[1])) {
+      this.run(this.engine.wsBinary(messages[0], messages[2], messages[1]));
+      return;
+    }
+    const header = mixed ? 20 : 16;
     const pendingActions = [];
+    // Older binary-capable engines lack the mixed batch ABI. Preserve their
+    // ordered delivery and deferred actions without pretending they batch.
+    if (mixed && typeof this.engine.wsEvents !== 'function') {
+      for (let i = 0; i < messages.length; i += 3) {
+        messages[i + 1] = +messages[i + 1];
+        if (!Number.isFinite(messages[i + 1])) throw new Error('invalid websocket batch arrival time');
+      }
+      for (let i = 0; i < messages.length && !this.disposed; i += 3) {
+        const data = messages[i + 2];
+        const actions = data instanceof Uint8Array ? this.engine.wsBinary(messages[i], data, messages[i + 1])
+          : this.singleMessage(messages[i], data, messages[i + 1]);
+        if (actions) pendingActions.push(actions);
+      }
+      for (const actions of pendingActions) this.run(actions);
+      return;
+    }
     for (let start = 0; start < messages.length && !this.disposed;) {
       let end = start;
       let capacity = 0;
       while (end < messages.length) {
-        const bytes = 16 + messages[end + 2].length * 3;
+        const data = messages[end + 2];
+        const bytes = header + (data instanceof Uint8Array ? data.byteLength : data.length * 3);
         if (end > start && capacity + bytes > BATCH_BYTES) break;
         capacity += bytes;
         end += 3;
@@ -207,13 +263,19 @@ export class EngineHost {
       const view = new DataView(buffer.buffer);
       let at = 0;
       for (let i = start; i < end; i += 3) {
-        const { written } = encoder.encodeInto(messages[i + 2], buffer.subarray(at + 16));
+        const data = messages[i + 2];
+        const binary = data instanceof Uint8Array;
+        let written;
+        if (binary) { buffer.set(data, at + header); written = data.byteLength; }
+        else ({ written } = encoder.encodeInto(data, buffer.subarray(at + header)));
         view.setUint32(at, messages[i], true);
         view.setUint32(at + 4, written, true);
         view.setFloat64(at + 8, messages[i + 1], true);
-        at += 16 + written;
+        if (mixed) view.setUint32(at + 16, Number(binary), true);
+        at += header + written;
       }
-      const actions = this.engine.wsMessages(buffer.subarray(0, at));
+      const actions = mixed ? this.engine.wsEvents(buffer.subarray(0, at))
+        : this.engine.wsMessages(buffer.subarray(0, at));
       if (actions) pendingActions.push(actions);
       // Bursts and large individual messages must not grow retained scratch.
       if (buffer.length > RETAINED_SCRATCH_BYTES) this.batchBuffer = new Uint8Array(0);
@@ -281,6 +343,7 @@ export class EngineHost {
           break;
         }
         const socket = transport.connect(action.url, {
+          binary: action.binary === true,
           channel: action.channel,
           context: action.context,
           headers: action.headers && Object.fromEntries(action.headers),
@@ -291,8 +354,20 @@ export class EngineHost {
             this.run(engine.wsOpen(id, transport.now()));
           },
           onMessage: (text, receivedAt) => this.message(id, text, receivedAt),
+          onBinary: (data, receivedAt) => {
+            if (this.disposed || !this.sockets.has(id)) return;
+            if (typeof engine.wsBinary === 'function') this.message(id, data, receivedAt);
+            else {
+              this.drainMessages();
+              if (this.disposed || !this.sockets.has(id)) return;
+              const active = this.sockets.get(id);
+              this.sockets.delete(id);
+              active?.close();
+              this.run(engine.wsClose(id, 1003, receivedAt ?? transport.now()));
+            }
+          },
           onClose: (code, receivedAt) => {
-            if (this.disposed) return;
+            if (this.disposed || !this.sockets.has(id)) return;
             this.drainMessages();
             if (this.disposed) return;
             this.sockets.delete(id);
@@ -389,7 +464,9 @@ async function* chunks(stream) {
 }
 
 /** Decode binary feeds in arrival order while leaving text feeds synchronous. */
-export const socketMessages = (onMessage, onError, onClose = () => {}) => {
+export const socketMessages = (onMessage, onError, onClose = () => {}, binary = false) => {
+  // Retain the incoming three-argument binary form as well as FIFO close hooks.
+  if (typeof onClose === 'boolean') { binary = onClose; onClose = () => {}; }
   let pending;
   let accepting = true;
   let failed = false;
@@ -407,6 +484,7 @@ export const socketMessages = (onMessage, onError, onClose = () => {}) => {
     const bytes = data instanceof Blob ? new Uint8Array(await data.arrayBuffer())
       : data instanceof ArrayBuffer ? new Uint8Array(data)
       : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    if (binary) return bytes;
     const format = bytes[0] === 0x1f && bytes[1] === 0x8b ? 'gzip'
       : bytes[0] === 0x78 ? 'deflate' : undefined;
     if (!format) return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -456,7 +534,7 @@ export const nativeTransport = () => {
   WebSocket: webSocketHeaders ? Socket : undefined,
   webSocketHeaders,
   now: () => Date.now(),
-  connect(url, { headers = {}, onOpen, onMessage, onClose }) {
+  connect(url, { headers = {}, binary = false, onOpen, onMessage, onBinary, onClose }) {
     if (Object.keys(headers).length && !webSocketHeaders) throw new Error('WebSocket upgrade headers unavailable');
     const ws = webSocketHeaders ? new Socket(url, { headers: { 'User-Agent': 'Tealstreet', ...headers } }) : new Socket(url);
     let reported = false;
@@ -465,11 +543,14 @@ export const nativeTransport = () => {
     const reportClose = (code, receivedAt) => {
       if (!reported) { reported = true; onClose(code, receivedAt); }
     };
-    const receive = socketMessages(onMessage, (_error, receivedAt) => {
+    const receive = socketMessages((data, receivedAt) => {
+      if (typeof data === 'string') onMessage(data, receivedAt);
+      else onBinary?.(data, receivedAt);
+    }, (_error, receivedAt) => {
       closing = true;
       receive.close(1007, receivedAt);
       ws.close();
-    }, reportClose);
+    }, reportClose, binary);
     const close = (code, receivedAt) => {
       closing = true;
       if (localClose) reportClose(code, receivedAt);

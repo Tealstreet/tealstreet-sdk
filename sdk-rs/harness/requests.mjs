@@ -100,7 +100,7 @@ const normalize = (value, callerIds, root = true, options = {}, path = []) => {
 
 const canonicalParams = (params, callerIds, options = {}) => new URLSearchParams([...params]
   .filter(([key, value]) => callerIds.has(value) || (!URL_VOLATILE.has(key) && !options.volatileQueryFields?.includes(key)
-    && !options.generatedId?.(key, value) && (!CLIENT_IDS.has(key) || options.generatedId)))
+    && !options.generatedId?.(key, value) && !options.generatedQueryId?.(key, value) && (!CLIENT_IDS.has(key) || options.generatedId)))
   .filter(([, value]) => !(value === '' && options.cacheBust))
   .map(([key, value]) => {
     if (CLIENT_IDS.has(key)) return [key, value];
@@ -162,6 +162,10 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
   catch { return `WS ${canonicalUrl(url, callerIds, options)} ${text}`; }
+  if (options.socketMessage) {
+    message = options.socketMessage(message);
+    if (message === undefined) return undefined;
+  }
   message = options.subscriptionMessage?.(message) ?? message;
   const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '').toLowerCase();
   if (options.bitrueProtocol) {
@@ -173,11 +177,17 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   }
   if (options.bingxProtocol && (message?.ping !== undefined || message?.pong !== undefined)) return undefined;
   if (options.cryptoProtocol && method === 'public/respond-heartbeat') return undefined;
+  if (options.phemexProtocol && ['server.ping', 'server.pong'].includes(method)) return undefined;
   if (['ping', 'pong', 'heartbeat'].includes(method)) return undefined;
   if (message && typeof message === 'object') {
     message = { ...message };
     delete message.id;
     delete message.req_id;
+    // Phemex's independent socket audit validates these clocks and HMAC bytes.
+    // Keep the API kind/key exact while comparing fresh connection signatures.
+    if (options.phemexProtocol && method === 'user.auth' && Array.isArray(message.params) && message.params.length === 4) {
+      message.params = [message.params[0], message.params[1], '<signature>', '<expiry>'];
+    }
     // KuCoin TS disables public acknowledgements while Rust requests them.
     // The audit independently checks token identity and privateChannel.
     if (options.rust === 'kucoin') delete message.response;

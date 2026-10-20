@@ -34,7 +34,11 @@ vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
       };
       wsOpen = () => '';
       wsMessage = () => '';
+      wsMessageActions = () => undefined;
+      wsMessageBytes = () => undefined;
+      wsBinary = () => '';
       wsMessages = () => '';
+      wsEvents = () => '';
       wsClose = () => '';
       httpStart = () => '';
       httpChunk = () => '';

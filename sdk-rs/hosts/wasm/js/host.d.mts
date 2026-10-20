@@ -22,7 +22,7 @@ export interface Transport {
   now(): number;
   connect(
     url: string,
-    handlers: { context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string, receivedAt?: number): void; onClose(code?: number, receivedAt?: number): void },
+    handlers: { binary?: boolean; onBinary?(data: Uint8Array, receivedAt?: number): void; context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string, receivedAt?: number): void; onClose(code?: number, receivedAt?: number): void },
   ): Socket;
   request(request: {
     method: string;
@@ -54,8 +54,13 @@ export interface WasmEngineLike {
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
-  wsMessage(socket: number, text: string, now: number): string | undefined;
+  wsMessage(socket: number, text: string, now: number): string;
+  wsMessageActions?(socket: number, text: string, now: number): string | undefined;
+  wsMessageBytes?(socket: number, bytes: Uint8Array, now: number): string | undefined;
+  wsBinary?(socket: number, data: Uint8Array, now: number): string;
   wsMessages(batch: Uint8Array): string;
+  /** Mixed 20-byte records: socket u32, length u32, arrival f64, kind u32, payload. */
+  wsEvents?(batch: Uint8Array): string;
   wsClose(socket: number, code: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;
   httpChunk(request: number, data: Uint8Array, now: number): string;
@@ -85,3 +90,5 @@ export interface SocketMessages {
   cancel(): void;
 }
 export function socketMessages(onMessage: (text: string, receivedAt?: number) => void, onError: (error: unknown, receivedAt?: number) => void, onClose?: (code?: number, receivedAt?: number) => void): SocketMessages;
+export function socketMessages(onMessage: (data: string | Uint8Array, receivedAt?: number) => void, onError: (error: unknown, receivedAt?: number) => void, onClose: ((code?: number, receivedAt?: number) => void) | undefined, binary: boolean | undefined): SocketMessages;
+export function socketMessages(onMessage: (data: string | Uint8Array, receivedAt?: number) => void, onError: (error: unknown, receivedAt?: number) => void, binary: boolean): SocketMessages;

@@ -8,7 +8,7 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, LogLevel, Method, Response, SocketId, TimerId,
+    Command, CommandId, Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
 };
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -1184,7 +1184,7 @@ impl Bitrue {
                     self.account.listen_attempt = 0;
                     self.account.socket = Some(cx.connect_channel(
                         format!("{PRIVATE_URL}?listenKey={key}"),
-                        safe_cex_engine::SocketChannel::Private,
+                        SocketChannel::Private,
                     ));
                     self.account.keepalive = Some(cx.set_timer(REFRESH_MS));
                     self.account.health = Some(cx.set_timer(HEALTH_MS));

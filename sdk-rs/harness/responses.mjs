@@ -1,5 +1,11 @@
 import { isWriteRequest, selectResponse } from './requests.mjs';
-import { parseRequestJson } from './request-json.mjs';
+
+const parseEcho = (text) => JSON.parse(text, (_key, value, context) =>
+  typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)
+    ? JSON.rawJSON(context.source) : value);
+
+const stringify = (value) => JSON.stringify(value, (_key, item) =>
+  typeof item === 'bigint' ? JSON.rawJSON(String(item)) : item);
 
 // Reads may reuse their last snapshot; a mutation response is consumed once.
 export class Responses {
@@ -48,14 +54,18 @@ export class Responses {
     }
     // WEEX acknowledges generated IDs from the actual request, never a fixed ID.
     let responseBody = record.body;
-    if (/"\$(clientAlgoId|newClientOrderId)"/.test(responseBody)) {
+    if (/"\$(clientAlgoId|newClientOrderId|client_id)"/.test(responseBody)) {
       const wireBody = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
-      const sent = typeof wireBody === 'string' ? parseRequestJson(wireBody) : wireBody;
-      responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId)"/g, (_, field) =>
-        JSON.stringify(sent?.[field] ?? null, (_key, value) =>
-          typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value,
-        ),
+      const sent = typeof wireBody === 'string' ? parseEcho(wireBody) : wireBody;
+      responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId|client_id)"/g, (_, field) =>
+        stringify(sent?.[field] ?? null),
       );
+    }
+    if (responseBody.includes('"$request:')) {
+      const wireBody = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
+      const sent = typeof wireBody === 'string' ? parseEcho(wireBody) : wireBody;
+      responseBody = responseBody.replace(/"\$request:([\w.]+)"/g, (_, path) =>
+        stringify(path.split('.').reduce((value, key) => value?.[key], sent) ?? null));
     }
     if (onMatch && candidates.length !== queue.length) queue.splice(queue.indexOf(record), 1);
     return { status: record.status, headers: record.headers ?? '', body: responseBody };

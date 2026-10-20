@@ -6,6 +6,50 @@ Work is full auto under VENUE_PORT_BRIEF Process: phase reviews, commits,
 public/private replay gates, PR to feat/rust-rewrite, adversarial reviews,
 green CI, merge and fresh follow-up branch. No stash/rebase/force push.
 
+## Current integration phase
+
+Checkpoint `66bb553a33` preserves the complete19-family build/control evidence.
+Its final repository check passes44 typecheck,28 lint and27 test tasks, including
+both safe-cex runs with483 test files each. No23-profile measurements started.
+
+Integrate exact landing `45d7a3fb988` before final gates. Phemex and Paradex bring
+the build roster to21 families and public fixtures to25 profiles. Preserve all
+landing behavior, scoped request/signature oracles and the replay wait horizon.
+Keep feature-isolated loaders and original per-family caps; derive new caps
+from release artifacts. Preserve original negative performance observations.
+
+This phase also batches negotiated binary feeds. Keep the existing16-byte
+text record ABI; add20-byte typed records for mixed text/binary batches, with
+complete validation before dispatch and borrowed Rust payloads. Snapshot a
+custom transport's mutable binary input when queued; retain raw receive time,
+FIFO decoding, non-socket barriers and captured-partition action ordering.
+Keep legacy `wsMessage` and landing optional-action APIs compatible. Native
+bursts group text/binary events under the same bounds. Verify malformed-tail
+atomicity, mixed ordering, per-message time, binary mutation and state parity.
+
+Independent phase reviews pass for the mixed Rust ABI, native/JS hosts and
+root harness/loaders. All400 harness tests,95 host tests,210 SDK transport tests,
+15 repaired test-double checks,78 engine and17 WASM tests pass. Strict native
+all-target clippy, fmt and bans pass. Full workspace tests/wasm clippy and final
+44/28/27 repository checks remain in progress. Failed runner, process-resource,
+stale test-double and test API attempts remain in `RUST_PERF_INTEGRATION21.json.gz`;
+serial harness verification preserves every assertion and timeout.
+
+Four concrete replay-review findings are fixed: preserve Paradex raw numeric
+leaves; serialize unsafe numeric response echoes; preserve decimal/exponent
+integer syntax without changing the shared nanocursor parser; permit startup
+ordinal remapping only on subscription-routed venues. Each has a retained RED
+counterexample and passing independent re-review. The legacy unsupported-binary
+path also avoids emitting a duplicate close after its queued text closes the socket.
+
+The exact original21-family aggregate from45d7 builds independently at9,075,944
+bytes;24 archive crate traces,319 Rust/config files,31 protected host/build files,
+all4334 original filenames and9 physical bindings are verified. Preflight cleanup
+and tool evidence are retained. Candidate release21, derived caps, realWASM/SDK
+checks,43 private gates and25 public gates/comparisons remain pending. Freeze
+source versions and shared runtime inventories after those checks; retain every
+negative measurement. Older23-profile protocol/tapes were prepared but never run.
+
 ## Current verification checkpoint
 
 The last measured production source is `ecca589fb3`, integrated through landing

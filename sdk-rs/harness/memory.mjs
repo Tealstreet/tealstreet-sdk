@@ -54,8 +54,11 @@ export const settledMemory = async ({
   let sampleCount = 0;
   let transitionCount = 0;
   let lastArrayBuffers;
+  let longestCollectionMs = 0;
   while (now() <= deadline) {
+    const collectStarted = now();
     collect();
+    longestCollectionMs = Math.max(longestCollectionMs, now() - collectStarted);
     await pause();
     const memory = sample();
     const time = now();
@@ -74,8 +77,8 @@ export const settledMemory = async ({
   const elapsedMs = now() - started;
   throw Object.assign(
     new Error(
-      `Backing-buffer memory did not settle (samples=${sampleCount}, transitions=${transitionCount}, lastArrayBuffers=${lastArrayBuffers}, elapsedMs=${elapsedMs})`,
+      `Backing-buffer memory did not settle (samples=${sampleCount}, transitions=${transitionCount}, lastArrayBuffers=${lastArrayBuffers}, elapsedMs=${elapsedMs}, longestGC=${longestCollectionMs.toFixed(1)}ms)`,
     ),
-    { sampleCount, transitionCount, lastArrayBuffers, elapsedMs },
+    { sampleCount, transitionCount, lastArrayBuffers, elapsedMs, longestCollectionMs },
   );
 };

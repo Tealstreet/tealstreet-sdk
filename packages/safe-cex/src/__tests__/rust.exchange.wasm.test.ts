@@ -774,18 +774,31 @@ describe('RustEngineExchange', () => {
     }
   });
 
-  it.each(['single', 'batch'] as const)(
+  it.each(['single', 'batch', 'legacy'] as const)(
     'returns no outbound action payload for ticker updates and preserves socket errors (%s)',
     async (delivery) => {
       const tape = bybitTransport();
       const { WasmEngine } = await loadNodeEngine('bybit');
       const outputs: Array<string | undefined> = [];
-      const crossings: Array<'single' | 'batch'> = [];
+      const crossings: Array<'single' | 'batch' | 'legacy'> = [];
       setWasmEngineLoader(async () => ({
         WasmEngine: class extends WasmEngine {
+          constructor(venue: string, options: string) {
+            super(venue, options);
+            if (delivery === 'legacy') {
+              Object.defineProperty(this, 'wsMessageActions', { value: undefined });
+              Object.defineProperty(this, 'wsMessageBytes', { value: undefined });
+            }
+          }
+          wsMessageActions(socket: number, text: string, now: number) {
+            const output = super.wsMessageActions!(socket, text, now);
+            crossings.push('single');
+            outputs.push(output);
+            return output;
+          }
           wsMessage(socket: number, text: string, now: number) {
             const output = super.wsMessage(socket, text, now);
-            crossings.push('single');
+            crossings.push('legacy');
             outputs.push(output);
             return output;
           }

@@ -2,9 +2,10 @@
 //!
 //! JavaScript owns sockets, fetch and timers; it forwards each event here and
 //! executes the returned actions. Every call returns the pending actions as a
-//! JSON array string, or an empty string when there are none. `wsMessage`
-//! returns `undefined` instead, avoiding empty-string decoding on the hot path.
+//! JSON array string, or an empty string when there are none. `wsMessageActions`
+//! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
 #[cfg(not(any(
+    feature = "venue-paradex",
     feature = "venue-bitrue",
     feature = "venue-binance",
     feature = "venue-apexomni",
@@ -18,6 +19,7 @@
     feature = "venue-mexc",
     feature = "venue-bitget",
     feature = "venue-backpack",
+    feature = "venue-phemex",
     feature = "venue-weex",
     feature = "venue-hyperliquid",
     feature = "venue-kraken",
@@ -26,10 +28,12 @@
     feature = "venue-okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kraken, lighter, orderly, okx, phemex, woo or weex"
 );
 
-use safe_cex_engine::model::{CancelOrderRef, PlaceOrderOpts, StpMode};
+use safe_cex_engine::model::PlaceOrderOpts;
+#[cfg(feature = "venue-asterdex")]
+use safe_cex_engine::model::{CancelOrderRef, StpMode};
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
@@ -69,6 +73,10 @@ use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 #[cfg(feature = "venue-orderly")]
 use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions, Orderly};
+#[cfg(feature = "venue-paradex")]
+use safe_cex_venue_paradex::{Options as ParadexOptions, Paradex};
+#[cfg(feature = "venue-phemex")]
+use safe_cex_venue_phemex::{Options as PhemexOptions, PhemexPerpetuals};
 #[cfg(feature = "venue-weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 #[cfg(feature = "venue-woo")]
@@ -77,7 +85,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 mod batch;
-use batch::MessageBatch;
+use batch::{MessageBatch, Payload, dispatch_events};
 
 #[cfg(feature = "profiling")]
 mod profile;
@@ -125,6 +133,7 @@ struct KucoinExtra {
 }
 
 #[cfg(any(
+    feature = "venue-paradex",
     feature = "venue-binance",
     feature = "venue-apexomni",
     feature = "venue-asterdex",
@@ -138,6 +147,7 @@ struct KucoinExtra {
     feature = "venue-bitget",
     feature = "venue-bitrue",
     feature = "venue-backpack",
+    feature = "venue-phemex",
     feature = "venue-weex",
     feature = "venue-hyperliquid",
     feature = "venue-kraken",
@@ -159,6 +169,7 @@ struct EngineOptions {
     #[serde(default)]
     lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
+        feature = "venue-paradex",
         feature = "venue-binance",
         feature = "venue-apexomni",
         feature = "venue-asterdex",
@@ -169,6 +180,7 @@ struct EngineOptions {
         feature = "venue-cryptocom",
         feature = "venue-hyperliquid",
         feature = "venue-kraken",
+        feature = "venue-phemex",
         feature = "venue-orderly",
         feature = "venue-lighter",
         feature = "venue-bitget",
@@ -180,8 +192,36 @@ struct EngineOptions {
     public_data_only: bool,
     #[serde(default)]
     key: Option<String>,
+    #[cfg(any(
+        feature = "venue-binance",
+        feature = "venue-apexomni",
+        feature = "venue-asterdex",
+        feature = "venue-kucoin",
+        feature = "venue-blofin",
+        feature = "venue-bybit",
+        feature = "venue-cryptocom",
+        feature = "venue-bingx",
+        feature = "venue-mexc",
+        feature = "venue-bitget",
+        feature = "venue-bitrue",
+        feature = "venue-backpack",
+        feature = "venue-phemex",
+        feature = "venue-weex",
+        feature = "venue-hyperliquid",
+        feature = "venue-kraken",
+        feature = "venue-lighter",
+        feature = "venue-woo",
+        feature = "venue-orderly",
+        feature = "venue-okx"
+    ))]
     #[serde(default)]
     secret: Option<String>,
+    #[cfg(feature = "venue-paradex")]
+    #[serde(default)]
+    paradex_address: Option<String>,
+    #[cfg(feature = "venue-paradex")]
+    #[serde(default)]
+    subkey_address: Option<String>,
     #[cfg(any(feature = "venue-backpack", feature = "venue-bitrue"))]
     #[serde(default)]
     recv_window: Option<f64>,
@@ -285,6 +325,8 @@ fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Opti
 enum ActionOut<'a> {
     Deactivate,
     WsConnect {
+        #[serde(skip_serializing_if = "is_false")]
+        binary: bool,
         socket: u32,
         url: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -408,11 +450,13 @@ fn encode(actions: &[Action]) -> String {
         .iter()
         .map(|action| match action {
             Action::WsConnect {
+                binary,
                 socket,
                 url,
                 channel,
                 context,
             } => ActionOut::WsConnect {
+                binary: *binary,
                 socket: socket.0,
                 url,
                 channel: channel.as_ref().map(socket_channel),
@@ -426,6 +470,7 @@ fn encode(actions: &[Action]) -> String {
                 channel,
                 context,
             } => ActionOut::WsConnect {
+                binary: false,
                 socket: socket.0,
                 url,
                 channel: channel.as_ref().map(socket_channel),
@@ -483,6 +528,7 @@ fn encode(actions: &[Action]) -> String {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
+    #[cfg(feature = "venue-apexomni")]
     GetAccount {
         command: u32,
     },
@@ -511,6 +557,7 @@ enum CommandIn {
         command: u32,
         ids: Vec<String>,
     },
+    #[cfg(feature = "venue-asterdex")]
     CancelOrdersWithSymbols {
         command: u32,
         orders: Vec<CancelOrderRef>,
@@ -542,18 +589,22 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
+    #[cfg(feature = "venue-asterdex")]
     FetchStpMode {
         command: u32,
     },
+    #[cfg(feature = "venue-asterdex")]
     FetchAccount {
         command: u32,
     },
+    #[cfg(feature = "venue-asterdex")]
     FetchOrderBook {
         command: u32,
         symbol: String,
         #[serde(default)]
         limit: Option<u32>,
     },
+    #[cfg(feature = "venue-asterdex")]
     SetStpMode {
         command: u32,
         mode: StpMode,
@@ -630,6 +681,7 @@ enum CommandIn {
 impl From<CommandIn> for Command {
     fn from(command: CommandIn) -> Self {
         match command {
+            #[cfg(feature = "venue-apexomni")]
             CommandIn::GetAccount { command } => Self::FetchAccount { command },
             CommandIn::FindOrderByClientOrderId {
                 command,
@@ -653,6 +705,7 @@ impl From<CommandIn> for Command {
             }
             CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
             CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
+            #[cfg(feature = "venue-asterdex")]
             CommandIn::CancelOrdersWithSymbols { command, orders } => {
                 Self::CancelOrdersWithSymbols { command, orders }
             }
@@ -679,8 +732,11 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
+            #[cfg(feature = "venue-asterdex")]
             CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
+            #[cfg(feature = "venue-asterdex")]
             CommandIn::FetchAccount { command } => Self::FetchAccount { command },
+            #[cfg(feature = "venue-asterdex")]
             CommandIn::FetchOrderBook {
                 command,
                 symbol,
@@ -690,6 +746,7 @@ impl From<CommandIn> for Command {
                 symbol,
                 limit,
             },
+            #[cfg(feature = "venue-asterdex")]
             CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
@@ -801,6 +858,7 @@ pub struct WasmEngine {
 #[wasm_bindgen]
 impl WasmEngine {
     #[cfg(any(
+        feature = "venue-paradex",
         feature = "venue-binance",
         feature = "venue-apexomni",
         feature = "venue-asterdex",
@@ -814,6 +872,7 @@ impl WasmEngine {
         feature = "venue-bitget",
         feature = "venue-bitrue",
         feature = "venue-backpack",
+        feature = "venue-phemex",
         feature = "venue-weex",
         feature = "venue-hyperliquid",
         feature = "venue-kraken",
@@ -841,6 +900,14 @@ impl WasmEngine {
                 .map_err(|error| JsError::new(&error))?;
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "venue-paradex")]
+            "paradex" => Box::new(Engine::new(Paradex::new(ParadexOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                paradex_address: options.paradex_address,
+                subkey_address: options.subkey_address,
+            }))),
             #[cfg(feature = "venue-apexomni")]
             "apexomni" => Box::new(Engine::new(ApexOmni::new(ApexOmniOptions {
                 testnet: options.testnet,
@@ -929,6 +996,13 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "venue-mexc")]
             "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
+            #[cfg(feature = "venue-phemex")]
+            "phemex" => Box::new(Engine::new(PhemexPerpetuals::new(PhemexOptions {
+                testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
@@ -1086,11 +1160,37 @@ impl WasmEngine {
     }
 
     #[wasm_bindgen(js_name = wsMessage)]
-    pub fn ws_message(&mut self, socket: u32, text: &str, now: f64) -> Option<String> {
+    pub fn ws_message(&mut self, socket: u32, text: &str, now: f64) -> String {
         let socket = SocketId(socket);
         self.inner.handle(now, Event::WsMessage { socket, text });
-        let actions = self.inner.drain();
-        (!actions.is_empty()).then(|| encode(&actions))
+        self.flush()
+    }
+
+    /// Like `wsMessage`, returning `undefined` when there are no host actions.
+    /// Hosts can avoid decoding an empty UTF-8 string on market-data messages.
+    #[wasm_bindgen(js_name = wsMessageActions)]
+    pub fn ws_message_actions(&mut self, socket: u32, text: &str, now: f64) -> Option<String> {
+        let actions = self.ws_message(socket, text, now);
+        (!actions.is_empty()).then_some(actions)
+    }
+
+    /// A byte-input alternative that rejects invalid UTF-8 before handling any event.
+    #[wasm_bindgen(js_name = wsMessageBytes)]
+    pub fn ws_message_bytes(&mut self, socket: u32, bytes: &[u8], now: f64) -> Option<String> {
+        let text = std::str::from_utf8(bytes).ok()?;
+        self.ws_message_actions(socket, text, now)
+    }
+
+    #[wasm_bindgen(js_name = wsBinary)]
+    pub fn ws_binary(&mut self, socket: u32, data: &[u8], now: f64) -> String {
+        self.inner.handle(
+            now,
+            Event::WsBinary {
+                socket: SocketId(socket),
+                data,
+            },
+        );
+        self.flush()
     }
 
     /// Records are socket u32, UTF-8 byte length u32, arrival time f64, text.
@@ -1105,6 +1205,23 @@ impl WasmEngine {
             let (socket, now, text) = record.map_err(JsError::new)?;
             self.inner.handle(now, Event::WsMessage { socket, text });
         }
+        Ok(self.flush())
+    }
+
+    /// Mixed records: socket u32, byte length u32, arrival time f64, kind u32,
+    /// then payload. Kind zero is UTF-8 text; kind one is binary.
+    #[wasm_bindgen(js_name = wsEvents)]
+    pub fn ws_events(&mut self, data: &[u8]) -> Result<String, JsError> {
+        dispatch_events(data, |socket, now, payload| {
+            self.inner.handle(
+                now,
+                match payload {
+                    Payload::Text(text) => Event::WsMessage { socket, text },
+                    Payload::Binary(data) => Event::WsBinary { socket, data },
+                },
+            );
+        })
+        .map_err(JsError::new)?;
         Ok(self.flush())
     }
 
@@ -1185,6 +1302,10 @@ impl WasmEngine {
     }
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[cfg(test)]
 mod action_tests {
     use super::*;
@@ -1212,13 +1333,23 @@ mod action_tests {
     }
     #[test]
     fn account_command_aliases_share_the_engine_read() {
-        for op in ["getAccount", "fetchAccount"] {
-            let wire: CommandIn =
-                serde_json::from_str(&format!(r#"{{"op":"{op}","command":77}}"#)).unwrap();
-            assert!(matches!(
-                Command::from(wire),
-                Command::FetchAccount { command: 77 }
-            ));
+        for (op, enabled) in [
+            ("getAccount", cfg!(feature = "venue-apexomni")),
+            ("fetchAccount", cfg!(feature = "venue-asterdex")),
+        ] {
+            let parsed =
+                serde_json::from_str::<CommandIn>(&format!(r#"{{"op":"{op}","command":77}}"#));
+            if enabled {
+                assert!(matches!(
+                    Command::from(parsed.unwrap()),
+                    Command::FetchAccount { command: 77 }
+                ));
+            } else {
+                assert!(
+                    parsed.is_err(),
+                    "{op} must reject without its venue feature"
+                );
+            }
         }
     }
 
@@ -1288,6 +1419,142 @@ mod action_tests {
         }
     }
 
+    #[derive(Default)]
+    struct Messages {
+        actions: Vec<Action>,
+    }
+
+    impl AnyEngine for Messages {
+        fn start(&mut self, _now: f64) {}
+        fn handle(&mut self, now: f64, event: Event<'_>) {
+            if let Event::WsBinary { socket, data } = event {
+                self.actions.push(Action::WsSend {
+                    socket,
+                    text: format!("binary:{now}:{data:?}"),
+                });
+            }
+            if let Event::WsMessage { socket, text } = event
+                && text != "quiet"
+            {
+                for prefix in ["first", "second"] {
+                    self.actions.push(Action::WsSend {
+                        socket,
+                        text: format!("{prefix}:{text}"),
+                    });
+                }
+            }
+        }
+        fn drain(&mut self) -> Vec<Action> {
+            std::mem::take(&mut self.actions)
+        }
+        fn frame(&mut self, _now: f64, _market_only: bool) -> Option<&[u8]> {
+            None
+        }
+        fn snapshot(&mut self, _now: f64) -> &[u8] {
+            &[]
+        }
+    }
+
+    #[test]
+    fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
+        let engine = || WasmEngine {
+            inner: Box::<Messages>::default(),
+        };
+        let mut legacy = engine();
+        let mut optional = engine();
+        assert_eq!(legacy.ws_message(7, "quiet", 1.), "");
+        assert_eq!(optional.ws_message_actions(7, "quiet", 1.), None);
+        let expected = legacy.ws_message(7, "payload", 2.);
+        assert_eq!(
+            expected,
+            r#"[{"op":"wsSend","socket":7,"text":"first:payload"},{"op":"wsSend","socket":7,"text":"second:payload"}]"#
+        );
+        assert_eq!(
+            optional.ws_message_actions(7, "payload", 2.),
+            Some(expected)
+        );
+        assert_eq!(legacy.ws_message(7, "quiet", 3.), "");
+        assert_eq!(optional.ws_message_actions(7, "quiet", 3.), None);
+    }
+
+    #[test]
+    fn byte_websocket_actions_validate_utf8_before_handling_or_draining() {
+        let mut legacy = WasmEngine {
+            inner: Box::<Messages>::default(),
+        };
+        let mut bytes = WasmEngine {
+            inner: Box::<Messages>::default(),
+        };
+        // A rejected byte message must neither handle an event nor drain existing actions.
+        bytes.inner.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(7),
+                text: "pending",
+            },
+        );
+        for invalid in [
+            &[0xff][..],
+            &[0xc0, 0xaf],
+            &[0xed, 0xa0, 0x80],
+            &[0xf0, 0x9f],
+        ] {
+            assert_eq!(bytes.ws_message_bytes(7, invalid, 2.), None);
+        }
+        assert_eq!(
+            bytes.ws_message_bytes(7, b"quiet", 3.),
+            Some(legacy.ws_message(7, "pending", 1.))
+        );
+        for text in ["", "ASCII", "é漢🦀\u{fffd}", "a\0b"] {
+            assert_eq!(
+                bytes.ws_message_bytes(7, text.as_bytes(), 4.),
+                Some(legacy.ws_message(7, text, 4.))
+            );
+            assert_eq!(bytes.ws_message_bytes(7, b"quiet", 5.), None);
+        }
+    }
+
+    #[test]
+    fn mixed_websocket_api_matches_single_events_past_host_batch_limit() {
+        let mut single = WasmEngine {
+            inner: Box::<Messages>::default(),
+        };
+        let mut batched = WasmEngine {
+            inner: Box::<Messages>::default(),
+        };
+        let mut data = Vec::new();
+        let mut expected = Vec::<serde_json::Value>::new();
+        // Raw callers may submit more than the host's 256-message limit.
+        for index in 0..257_u32 {
+            let socket = index % 3;
+            let now = 300.5 - f64::from(index);
+            let kind = index % 2;
+            let payload = if kind == 0 {
+                "雪😀".as_bytes()
+            } else {
+                &[0, 255]
+            };
+            data.extend(socket.to_le_bytes());
+            data.extend((payload.len() as u32).to_le_bytes());
+            data.extend(now.to_le_bytes());
+            data.extend(kind.to_le_bytes());
+            data.extend(payload);
+            let actions = if kind == 0 {
+                single.ws_message(socket, std::str::from_utf8(payload).unwrap(), now)
+            } else {
+                single.ws_binary(socket, payload, now)
+            };
+            expected.extend(serde_json::from_str::<Vec<serde_json::Value>>(&actions).unwrap());
+        }
+        let actual = batched.ws_events(&data).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<serde_json::Value>>(&actual).unwrap(),
+            expected
+        );
+        assert_eq!(batched.ws_events(&[]).unwrap(), "");
+    }
+
+    #[cfg(feature = "venue-asterdex")]
     #[test]
     fn cancellation_with_symbols_preserves_caller_identity() {
         let wire: CommandIn = serde_json::from_str(
@@ -1297,6 +1564,66 @@ mod action_tests {
             matches!(Command::from(wire), Command::CancelOrdersWithSymbols { command: 19, orders }
             if orders == vec![CancelOrderRef { id: "22542179".into(), symbol: "BTCUSDT".into() }])
         );
+    }
+
+    // These methods are exposed by the SDK only for Aster. Keep their wire
+    // parsers out of other single-venue builds while retaining the shared
+    // engine command types for native hosts.
+    #[test]
+    fn aster_commands_follow_the_compiled_venue_feature() {
+        let commands = [
+            r#"{"op":"cancelOrdersWithSymbols","command":19,"orders":[{"id":"7","symbol":"BTCUSDT"}]}"#,
+            r#"{"op":"fetchStpMode","command":19}"#,
+            r#"{"op":"fetchAccount","command":19}"#,
+            r#"{"op":"fetchOrderBook","command":19,"symbol":"BTCUSDT","limit":50}"#,
+            r#"{"op":"setStpMode","command":19,"mode":"EXPIRE_MAKER"}"#,
+        ];
+        for (index, json) in commands.into_iter().enumerate() {
+            let parsed = serde_json::from_str::<CommandIn>(json);
+            #[cfg(feature = "venue-asterdex")]
+            match (index, Command::from(parsed.unwrap())) {
+                (
+                    0,
+                    Command::CancelOrdersWithSymbols {
+                        command: 19,
+                        orders,
+                    },
+                ) => {
+                    assert_eq!(
+                        orders,
+                        vec![CancelOrderRef {
+                            id: "7".into(),
+                            symbol: "BTCUSDT".into()
+                        }]
+                    );
+                }
+                (1, Command::FetchStpMode { command: 19 })
+                | (2, Command::FetchAccount { command: 19 })
+                | (
+                    4,
+                    Command::SetStpMode {
+                        command: 19,
+                        mode: StpMode::ExpireMaker,
+                    },
+                ) => {}
+                (
+                    3,
+                    Command::FetchOrderBook {
+                        command: 19,
+                        symbol,
+                        limit: Some(50),
+                    },
+                ) => {
+                    assert_eq!(symbol, "BTCUSDT");
+                }
+                _ => panic!("Aster command {index} changed its wire mapping"),
+            }
+            #[cfg(not(feature = "venue-asterdex"))]
+            assert!(
+                parsed.is_err(),
+                "unsupported Aster command {index} must reject"
+            );
+        }
     }
 
     #[test]
@@ -1312,6 +1639,7 @@ mod action_tests {
     fn preserves_socket_routing_identity_and_omits_absent_metadata() {
         let encoded = encode(&[
             Action::WsConnect {
+                binary: false,
                 socket: SocketId(1),
                 url: "wss://example.test".into(),
                 channel: Some(safe_cex_engine::SocketChannel::Business),

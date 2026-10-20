@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const init = vi.hoisted(() => ({
+  phemex: vi.fn(async () => undefined),
+  paradex: vi.fn(async () => undefined),
   apexomni: vi.fn(async () => undefined),
   kraken: vi.fn(async () => undefined),
   asterdex: vi.fn(async () => undefined),
@@ -22,6 +24,8 @@ const init = vi.hoisted(() => ({
   weex: vi.fn(async () => undefined),
 }));
 
+vi.mock('@tealstreet/safe-cex-wasm/web/phemex', () => ({ default: init.phemex, WasmEngine: class {} }));
+vi.mock('@tealstreet/safe-cex-wasm/web/paradex', () => ({ default: init.paradex, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/apexomni', () => ({ default: init.apexomni, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/kraken', () => ({ default: init.kraken, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/asterdex', () => ({ default: init.asterdex, WasmEngine: class {} }));
@@ -71,11 +75,15 @@ describe.runIf(process.env.SAFE_CEX_WASM_TESTS)('browser Rust engine selection',
     expect(init.kucoin).not.toHaveBeenCalled();
     expect(init.kraken).not.toHaveBeenCalled();
     expect(init.apexomni).not.toHaveBeenCalled();
+    expect(init.phemex).not.toHaveBeenCalled();
+    expect(init.paradex).not.toHaveBeenCalled();
   });
 
   it('initializes each requested family separately', async () => {
     const { loadWebEngine } = await import('../exchanges/rust/loadWebEngine');
     const families = {
+      phemex: ['phemex'],
+      paradex: ['paradex'],
       apexomni: ['apexomni'],
       kraken: ['kraken'],
       asterdex: ['asterdex'],
@@ -101,7 +109,7 @@ describe.runIf(process.env.SAFE_CEX_WASM_TESTS)('browser Rust engine selection',
       expect(engines.every((engine) => engine === engines[0])).toBe(true);
       return engines[0];
     }));
-    expect(new Set(modules).size).toBe(19);
+    expect(new Set(modules).size).toBe(21);
     for (const initialize of Object.values(init)) expect(initialize).toHaveBeenCalledTimes(1);
   });
 

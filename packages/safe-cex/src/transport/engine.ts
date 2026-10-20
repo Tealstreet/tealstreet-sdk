@@ -171,7 +171,7 @@ const publicBinanceRequest = (exchange: ExchangeName, request: Request): boolean
 
 // Factory adapter gates are distinct from saved-account metadata defaults.
 const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
-  exchange === 'hyperliquid' || exchange === 'hyperliquidspot'
+  exchange === 'hyperliquid' || exchange === 'hyperliquidspot' || exchange === 'paradex'
     ? !options.publicDataOnly
     : exchange === 'bingx'
       ? !options.publicDataOnly && options.tealstreetTunnel !== false
@@ -453,7 +453,11 @@ export const createEngineTransport = (
         if (receivedAt === undefined) handlers.onMessage(text);
         else handlers.onMessage(text, receivedAt);
       };
-      if (connection?.kind !== 'relay') return transport.connect(target, { ...handlers, headers, onMessage: receive });
+      const receiveBinary = (data: Uint8Array, receivedAt?: number) => {
+        fallback?.onMessage();
+        handlers.onBinary?.(data, receivedAt);
+      };
+      if (connection?.kind !== 'relay') return transport.connect(target, { ...handlers, headers, onMessage: receive, onBinary: receiveBinary });
       let socket: { send(text: string): void; close(): void } | undefined;
       let closed = false;
       let closing = false;
@@ -486,8 +490,11 @@ export const createEngineTransport = (
             handlers.onClose(code, receivedAt);
           };
           decode = socketMessages(
-            (text, receivedAt) => {
-              if (!closed) receive(text, receivedAt);
+            (data, receivedAt) => {
+              if (!closed) {
+                if (typeof data === 'string') receive(data, receivedAt);
+                else receiveBinary(data, receivedAt);
+              }
             },
             (_error, receivedAt) => {
               if (!closed) {
@@ -499,6 +506,7 @@ export const createEngineTransport = (
               }
             },
             finish,
+            handlers.binary,
           );
           const close = (code: number) => {
             closing = true;

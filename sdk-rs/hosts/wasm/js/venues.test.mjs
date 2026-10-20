@@ -6,6 +6,8 @@ import { loadEngine } from './engine.node.mjs';
 
 const require = createRequire(import.meta.url);
 const aliases = {
+  phemex: ['phemex'],
+  paradex: ['paradex'],
   apexomni: ['apexomni'],
   kraken: ['kraken'],
   asterdex: ['asterdex'],

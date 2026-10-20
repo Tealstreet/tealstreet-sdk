@@ -9,7 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 profiling = []
-default = ["venue-apexomni", "venue-kraken", "venue-asterdex", "venue-kucoin", "venue-orderly", "venue-bitrue", "venue-lighter", "venue-woo", "venue-backpack", "venue-binance", "venue-bingx", "venue-bitget", "venue-blofin", "venue-bybit", "venue-cryptocom", "venue-hyperliquid", "venue-mexc", "venue-okx", "venue-weex"]
+default = ["venue-paradex", "venue-phemex", "venue-apexomni", "venue-kraken", "venue-asterdex", "venue-kucoin", "venue-orderly", "venue-bitrue", "venue-lighter", "venue-woo", "venue-backpack", "venue-binance", "venue-bingx", "venue-bitget", "venue-blofin", "venue-bybit", "venue-cryptocom", "venue-hyperliquid", "venue-mexc", "venue-okx", "venue-weex"]
 venue-backpack = ["dep:safe-cex-venue-backpack"]
 venue-binance = ["dep:safe-cex-venue-binance"]
 venue-bingx = ["dep:safe-cex-venue-bingx"]
@@ -35,7 +35,12 @@ venue-kraken = ["dep:safe-cex-venue-kraken"]
 
 venue-apexomni = ["dep:safe-cex-venue-apexomni"]
 
+venue-paradex = ["dep:safe-cex-venue-paradex"]
+venue-phemex = ["dep:safe-cex-venue-phemex"]
+
 [dependencies]
+safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }
+safe-cex-venue-phemex = { workspace = true, optional = true }
 safe-cex-venue-apexomni = { path = "../../venues/apexomni", optional = true }
 safe-cex-venue-kraken = { path = "../../venues/kraken", optional = true }
 safe-cex-venue-asterdex = { path = "../../venues/asterdex", optional = true }

@@ -27,7 +27,7 @@ The engine performs no I/O. It is a deterministic state machine:
 ```
 engine.handle(Event) -> appends Actions
 
-Event   = WsOpened | WsMessage(&str | &[u8]) | WsClosed
+Event   = WsOpened | WsMessage(&str) | WsBinary(&[u8]) | WsClosed
         | HttpResponse { id, status, body }
         | TimerFired(id) | Command(PlaceOrder | Cancel | Subscribe | ...)
         | Now(ms)
@@ -130,10 +130,11 @@ defined once in `sdk-rs/engine/src/wire.rs` and mirrored by the decoder in
 
 - Hosts queue websocket arrivals to a macrotask batch (bounded by 256 messages;
   JS partitions at roughly 64 KiB, with oversized messages alone, and native
-  drains at 1 MiB). One byte-buffer crossing carries length-prefixed UTF-8
+  drains at 1 MiB). One byte-buffer crossing carries length-prefixed text or binary
   payloads with socket IDs and individual arrival times; Rust borrows each text
-  slice. Commands, timers, HTTP events, closes and flushes first drain queued
-  arrivals. HTTP bodies cross once as streamed bytes.
+  slice, or borrows binary bytes. Paradex negotiates SBE schema1 version2;
+  its typed codec lives in the venue. Commands, timers, HTTP events, closes
+  and flushes first drain queued arrivals. HTTP bodies cross once as streamed bytes.
 - Browser/Node loaders select one Cargo-feature-built module per venue family;
   aliases share that family. CI enforces separate family size budgets.
 - Frames cross out once per flush. A section appears only when its data
@@ -330,10 +331,11 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | ApeX Omni perpetuals | Implemented; [PR #1324](https://github.com/Tealstreet/tealstreet-sdk/pull/1324), native zkLink/API-key signing; all local gates and independent code-correctness re-reviews pass |
 | KuCoin, Phemex, Orderly family | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
+| Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; plan: `RUST_PARADEX.md` |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
 | Kraken futures | implemented; [PR #1323](https://github.com/Tealstreet/tealstreet-sdk/pull/1323), all local gates pass; code-correctness reviews accepted (`KRAKEN_RUST_PORT.md`) |
-| Paradex, GRVT, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
+| GRVT, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 

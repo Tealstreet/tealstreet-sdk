@@ -1,5 +1,7 @@
 /** Aliases share one engine binary; unsupported names fail before loading wasm. */
 const families = Object.freeze({
+  phemex: 'phemex',
+  paradex: 'paradex',
   apexomni: 'apexomni',
   kraken: 'kraken',
   asterdex: 'asterdex',

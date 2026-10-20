@@ -386,7 +386,7 @@ describe('Orderly Rust transport boundary', () => {
     for (const [url, channel, feed] of [[publicUrl, 'public', 'market'], [publicUrl, 'public', 'funding'], [privateUrl, 'private', 'account']] as const) {
       const handlers = { channel, context: { feed, recover: false }, onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() };
       transport.connect(url, handlers);
-      expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers: {}, onMessage: expect.any(Function) });
+      expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers: {}, onMessage: expect.any(Function), onBinary: expect.any(Function) });
     }
     transport.dispose?.();
   });
@@ -428,7 +428,7 @@ describe('Orderly Rust transport boundary', () => {
     expect(base.connect).not.toHaveBeenCalled();
     const capable = createEngineTransport('mode', options(custom), base);
     capable.connect(url, handlers);
-    expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers, onMessage: expect.any(Function) });
+    expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers, onMessage: expect.any(Function), onBinary: expect.any(Function) });
     incapable.dispose?.();
     capable.dispose?.();
   });

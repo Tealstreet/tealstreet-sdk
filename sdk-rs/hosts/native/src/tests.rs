@@ -18,6 +18,11 @@ impl Venue for RecordingVenue {
             cx.deactivate();
         }
     }
+    fn on_binary(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, data: &[u8]) {
+        let text = format!("binary:{data:?}");
+        self.0.push((cx.now, socket, text.clone()));
+        cx.send(socket, text);
+    }
     fn on_close(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, _: u16) {
         self.0.push((cx.now, socket, "closed".into()));
     }
@@ -69,6 +74,87 @@ fn decoded_messages_keep_their_raw_arrival_time() {
         host.engine.venue().0,
         [(17.0, SocketId(1), "decoded".into())]
     );
+}
+
+#[test]
+fn mixed_websocket_bursts_preserve_timestamps_actions_and_close_barriers() {
+    let mut host = host();
+    for (event, at) in [
+        (HostEvent::WsMessage(SocketId(1), "first".into()), 11.0),
+        (HostEvent::WsBinary(SocketId(2), vec![0, 255]), 12.5),
+        (HostEvent::WsMessage(SocketId(1), "last".into()), 13.0),
+        (HostEvent::WsClosed(SocketId(2), 1000), 14.0),
+        (HostEvent::WsBinary(SocketId(1), vec![]), 15.0),
+    ] {
+        host.events.send_at(event, at).unwrap();
+    }
+    dispatch_next(&mut host);
+    assert_eq!(
+        host.engine.venue().0,
+        [
+            (11.0, SocketId(1), "first".into()),
+            (12.5, SocketId(2), "binary:[0, 255]".into()),
+            (13.0, SocketId(1), "last".into()),
+        ]
+    );
+    let sent: Vec<_> = host
+        .engine
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::WsSend { socket, text } => Some((socket, text)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        [
+            (SocketId(1), "first".into()),
+            (SocketId(2), "binary:[0, 255]".into()),
+            (SocketId(1), "last".into())
+        ]
+    );
+    dispatch_next(&mut host);
+    assert_eq!(
+        host.engine.venue().0.last(),
+        Some(&(14.0, SocketId(2), "closed".into()))
+    );
+    dispatch_next(&mut host);
+    assert_eq!(
+        host.engine.venue().0.last(),
+        Some(&(15.0, SocketId(1), "binary:[]".into()))
+    );
+}
+
+#[test]
+fn mixed_websocket_bursts_share_count_and_byte_limits() {
+    let mut host = host();
+    host.events
+        .send(HostEvent::WsMessage(
+            SocketId(1),
+            "x".repeat(MAX_BATCH_BYTES - 1),
+        ))
+        .unwrap();
+    host.events
+        .send(HostEvent::WsBinary(SocketId(2), vec![0, 1]))
+        .unwrap();
+    dispatch_next(&mut host);
+    assert_eq!(host.engine.venue().0.len(), 1);
+    assert!(matches!(
+        host.pending.as_ref().unwrap().event,
+        HostEvent::WsBinary(..)
+    ));
+    for index in 0..MAX_BATCH_MESSAGES {
+        let event = if index % 2 == 0 {
+            HostEvent::WsMessage(SocketId(1), "text".into())
+        } else {
+            HostEvent::WsBinary(SocketId(2), vec![255])
+        };
+        host.events.send(event).unwrap();
+    }
+    dispatch_next(&mut host);
+    assert_eq!(host.engine.venue().0.len(), 1 + MAX_BATCH_MESSAGES);
+    dispatch_next(&mut host);
+    assert_eq!(host.engine.venue().0.len(), 2 + MAX_BATCH_MESSAGES);
 }
 
 #[test]

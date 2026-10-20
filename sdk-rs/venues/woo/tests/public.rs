@@ -655,6 +655,7 @@ fn silence_closes_socket_then_reconnects_with_fresh_book_generation() {
                 url,
                 channel,
                 context,
+                ..
             } = a
             {
                 assert_eq!(channel, Some(SocketChannel::Public));

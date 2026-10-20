@@ -36,6 +36,9 @@ A crate `sdk-rs/venues/<venue>/ (crate `safe-cex-venue-<venue>`)` implementing `
 - A liveness watchdog on every socket with the venue's ping protocol.
 - Tag every socket with `Cx::connect_channel` (or
   `connect_with_headers_channel`) and `SocketChannel::{Public, Private, Business}`.
+  Binary protocols use `Cx::connect_binary_channel`; decode borrowed
+  `Event::WsBinary` payloads in the venue. Hosts preserve bytes on this explicit
+  path and keep the existing text/decompression path for other sockets.
   Keep the venue's real URL; hosts apply the TS account routing policy. Roles
   are required even when public and private feeds share a URL.
   Independent feeds sharing a role and URL use `Cx::connect_feed` with a stable

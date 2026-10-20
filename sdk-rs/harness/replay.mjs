@@ -177,9 +177,9 @@ async function runRust() {
   const transport = {
     now: () => Date.now(),
     webSocketHeaders: true,
-    connect: (url, { headers, onOpen, onMessage, onClose }) => {
+    connect: (url, { headers, onOpen, onMessage, onBinary, onClose }) => {
       tape.validateSocket(url, headers);
-      const socket = tape.connect(url, onOpen, onMessage, onClose);
+      const socket = tape.connect(url, onOpen, (data, receivedAt) => typeof data === 'string' ? onMessage(data, receivedAt) : onBinary?.(data, receivedAt), onClose);
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
     },
     request: async ({ method, url, body: requestBody, headers, signal }) => {
@@ -201,7 +201,7 @@ async function runRust() {
   const engine = new WasmEngine(venue.rust, JSON.stringify(options));
   if (process.env.RUST_MEMORY_TRACE) {
     let last = wasmMemoryBytes();
-    for (const method of ['start', 'httpStart', 'httpChunk', 'httpEnd', 'wsMessage', 'wsMessages', 'takeFrame']) {
+    for (const method of ['start', 'httpStart', 'httpChunk', 'httpEnd', 'wsMessage', 'wsMessageActions', 'wsMessageBytes', 'wsMessages', 'wsEvents', 'wsBinary', 'takeFrame']) {
       if (typeof engine[method] !== 'function') continue;
       const original = engine[method].bind(engine);
       engine[method] = (...args) => {
@@ -466,12 +466,13 @@ async function runTs() {
     }
   }
   globalThis.WebSocket = TapeWebSocket;
-  // Hyperliquid's SDK uses fetch instead of the axios adapters below.
-  if (values.venue === 'hyperliquid') globalThis.fetch = async (input, init = {}) => {
+  // These venue SDKs also use fetch beside the axios adapters below.
+  if (['hyperliquid', 'paradex'].includes(values.venue)) globalThis.fetch = async (input, init = {}) => {
     const request = input instanceof Request ? input : undefined;
     const method = init.method ?? request?.method ?? 'GET';
     const requestBody = init.body ?? (request && !['GET', 'HEAD'].includes(method.toUpperCase()) ? await request.clone().text() : undefined);
-    const { status, body, headers = '' } = tape.respond(method, request?.url ?? String(input), requestBody);
+    const requestHeaders = Object.fromEntries(new Headers(init.headers ?? request?.headers).entries());
+    const { status, body, headers = '' } = tape.respond(method, request?.url ?? String(input), requestBody, requestHeaders);
     const responseHeaders = headers.split('\n').filter(Boolean).map((line) => {
       const colon = line.indexOf(':');
       return [line.slice(0, colon).trim(), line.slice(colon + 1).trim()];
@@ -522,6 +523,7 @@ async function runTs() {
     return response;
   };
   const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
+  await venue.loadTs?.({ isPrivate });
   const store = new DefaultStore();
   const mainStore = new DefaultStore();
   // Exercise the production browser-worker packer, including its ticker
@@ -561,7 +563,7 @@ async function runTs() {
   const wallStart = performance.now();
   const started = exchange.start();
   const subscribed = (async () => {
-    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange,store))) await new Promise((r) => setTimeout(r, 1));
+    while (!store.markets.length || (venue.tsBooksReady && !venue.tsBooksReady(exchange,store))) await new Promise((r) => realTimeout(r, 1));
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
@@ -589,6 +591,7 @@ async function runTs() {
     clock,
   );
   await withTimeout(Promise.all([started, subscribed]), 'TS startup/subscriptions');
+  if (venue.tsReplaySettled) await until(() => venue.tsReplaySettled(exchange, bookSymbols.length), 'TS pending book snapshots');
   await withTimeout(venue.settleTs?.(exchange, { isPrivate, clock }) ?? Promise.resolve(), 'TS pending venue reads', 15000);
   await settle();
   tape.assertWritesConsumed();

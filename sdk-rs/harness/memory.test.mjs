@@ -2,25 +2,25 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { memoryMetricErrors, retainedMemory, settledMemory } from './memory.mjs';
 
-// Keep this allocation alive across the next global counter sample.
-const liveBuffers = [];
-
 test('retained frame backing buffers are included', () => {
-  const frame = new ArrayBuffer(16 * 1024 * 1024);
-  liveBuffers.push(frame);
+  const frameBytes = 16 * 1024 * 1024;
   // GC may free heap while a transferred frame remains retained.
   const before = { heapUsed: 100_000, arrayBuffers: 400_000 };
-  const after = { heapUsed: 90_000, arrayBuffers: 400_000 + frame.byteLength };
-  assert.equal(retainedMemory(before, after), frame.byteLength - 10_000);
+  const after = { heapUsed: 90_000, arrayBuffers: 400_000 + frameBytes };
+  assert.equal(retainedMemory(before, after), frameBytes - 10_000);
 });
 test('linear wasm memory is counted exactly once', () => {
   const before = process.memoryUsage();
   const memory = new WebAssembly.Memory({ initial: 16 });
   const bytes = memory.buffer.byteLength;
   const after = process.memoryUsage();
-  assert.equal(liveBuffers[0].byteLength, 16 * 1024 * 1024);
-  assert.equal(after.arrayBuffers - before.arrayBuffers, 0);
-  assert.equal(retainedMemory(before, after, bytes), after.heapUsed - before.heapUsed + bytes);
+  // Allocation may collect unrelated buffers, including Node's loaded source.
+  assert(after.arrayBuffers <= before.arrayBuffers, 'WASM must not produce observed JS backing-buffer growth');
+  assert.equal(
+    retainedMemory(before, after, bytes),
+    after.heapUsed - before.heapUsed + after.arrayBuffers - before.arrayBuffers + bytes,
+  );
+  assert.equal(retainedMemory(before, after, bytes) - retainedMemory(before, after, 0), bytes);
 });
 
 const metricsFor = (before, after, wasmBytes = 0) => ({
@@ -34,7 +34,7 @@ const metricsFor = (before, after, wasmBytes = 0) => ({
   retainedBytes: retainedMemory(before, after, wasmBytes),
 });
 
-test('released setup buffers remain a signed component of positive net retention', () => {
+test('buffer releases can accompany larger retained heap and WASM', () => {
   const metrics = metricsFor(
     { heapUsed: 30_271_936, arrayBuffers: 2_324_049 },
     { heapUsed: 33_195_616, arrayBuffers: 2_323_961 },
@@ -192,4 +192,30 @@ test('private net releases remain informational while absolute counters and arit
     .some((error) => error.startsWith('invalid heapUsedBytes (-1)')));
   assert(memoryMetricErrors({ ...released, retainedBytes: -1999 }, { allowNegativeRetained: true })
     .some((error) => error.startsWith('inconsistent retainedBytes (-1999')));
+});
+
+// A busy worker may need several full GCs to release cold loader storage.
+test('cold backing-store cleanup can exceed one second before the first quiet sample', async () => {
+  let time = 0;
+  const sampling = {
+    collect() {},
+    pause: async () => { time += 10; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: time < 1500 ? 2000 - time : 100, heapUsed: 1000 }),
+  };
+  await assert.rejects(settledMemory({ ...sampling, timeoutMs: 1000 }), /Backing-buffer memory did not settle/);
+  time = 0;
+  assert.deepEqual(await settledMemory(sampling), { arrayBuffers: 100, heapUsed: 1000 });
+  assert.equal(time, 1600);
+});
+
+test('the extended startup deadline still rejects continuously changing backing stores', async () => {
+  let time = 0;
+  await assert.rejects(settledMemory({
+    collect() {},
+    pause: async () => { time += 100; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: time, heapUsed: 1000 }),
+  }), /Backing-buffer memory did not settle/);
+  assert.equal(time, 10100);
 });

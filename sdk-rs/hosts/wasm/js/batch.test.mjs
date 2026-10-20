@@ -89,3 +89,68 @@ test('real wasm rejects malformed batches atomically and preserves single delive
     assert.equal(engine.wsMessages(new Uint8Array()), '');
   } finally { engine.free(); }
 });
+
+const packEvent = (socket, now, payload) => {
+  const binary = payload instanceof Uint8Array;
+  const bytes = binary ? payload : new TextEncoder().encode(payload);
+  const record = new Uint8Array(20 + bytes.length);
+  const view = new DataView(record.buffer);
+  view.setUint32(0, socket, true);
+  view.setUint32(4, bytes.length, true);
+  view.setFloat64(8, now, true);
+  view.setUint32(16, Number(binary), true);
+  record.set(bytes, 20);
+  return record;
+};
+const joinEvents = (...records) => {
+  const bytes = new Uint8Array(records.reduce((total, record) => total + record.length, 0));
+  let offset = 0;
+  for (const record of records) { bytes.set(record, offset); offset += record.length; }
+  return bytes;
+};
+
+test('real wasm mixed batches preserve text actions and accept non-UTF8 binary bytes', () => {
+  const single = initialized();
+  let mixed;
+  try {
+    mixed = initialized();
+    const payloads = [
+      '{"event":"error","code":"60001","msg":"雪😀"}',
+      new Uint8Array([255, 0, 192, 175]),
+      '{"event":"error","code":"60002","msg":"tail"}',
+      new Uint8Array(),
+      '',
+    ];
+    const expected = payloads.flatMap((payload, index) => {
+      const output = payload instanceof Uint8Array
+        ? single.engine.wsBinary(single.socket, payload, 102 + index)
+        : single.engine.wsMessage(single.socket, payload, 102 + index);
+      return output ? JSON.parse(output) : [];
+    });
+    const records = payloads.map((payload, index) => packEvent(mixed.socket, 102 + index, payload));
+    assert.deepEqual(JSON.parse(mixed.engine.wsEvents(joinEvents(...records))), expected);
+    assert.deepEqual(mixed.engine.snapshotFrame(107), single.engine.snapshotFrame(107));
+  } finally {
+    single.engine.free();
+    mixed?.engine.free();
+  }
+});
+
+test('real wasm mixed batches reject malformed tails without committing prefix actions', () => {
+  const { engine, socket } = initialized();
+  try {
+    const good = packEvent(socket, 102, '{"event":"error","code":"60001","msg":"must not commit"}');
+    const badKind = packEvent(socket, 103, new Uint8Array([255]));
+    new DataView(badKind.buffer).setUint32(16, 2, true);
+    const invalidText = packEvent(socket, 103, 'x');
+    invalidText[20] = 255;
+    for (const tail of [new Uint8Array([0]), badKind, invalidText,
+      packEvent(socket, Infinity, ''), packEvent(socket, 103, new Uint8Array([1])).subarray(0, 20)]) {
+      const before = engine.snapshotFrame(104);
+      assert.throws(() => engine.wsEvents(joinEvents(good, tail)), /event|arrival/);
+      assert.equal(engine.wsMessage(socket, '{}', 104), '', 'prefix did not queue a log action');
+      assert.deepEqual(engine.snapshotFrame(104), before);
+    }
+    assert.equal(engine.wsEvents(new Uint8Array()), '');
+  } finally { engine.free(); }
+});

@@ -19,7 +19,7 @@ export function profileHost(host, engineProfile, { cpuSource = process, wallNow 
   let active = false;
   host.drainMessages = function (...args) {
     if (active || this.disposed || !this.messages.length) return Reflect.apply(original, this, args);
-    // A host queue stores socket, arrival time and text in each three slots.
+    // A host queue stores socket, arrival time and payload in each three slots.
     // Queue counts describe timed outermost drains. Synchronous reentrant drains
     // contribute to their inclusive time without being counted/timed twice.
     const count = this.messages.length / 3;

@@ -16,6 +16,20 @@ const decode = (bytes) => {
   }
   return rows;
 };
+const decodeEvents = (bytes) => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const rows = [];
+  for (let at = 0; at < bytes.length;) {
+    const size = view.getUint32(at + 4, true);
+    const payload = bytes.subarray(at + 20, at + 20 + size);
+    const kind = view.getUint32(at + 16, true);
+    assert.ok(kind === 0 || kind === 1);
+    rows.push([view.getUint32(at, true), view.getFloat64(at + 8, true),
+      kind ? Array.from(payload) : new TextDecoder().decode(payload)]);
+    at += 20 + size;
+  }
+  return rows;
+};
 const fixture = (options) => {
   const calls = [];
   const arrivals = new Map();
@@ -25,7 +39,9 @@ const fixture = (options) => {
   const engine = Object.fromEntries(['start', 'command', 'wsOpen', 'wsClose', 'httpStart', 'httpChunk', 'httpEnd', 'httpFailed', 'timer'].map((name) =>
     [name, (...args) => { calls.push([name, ...args]); return ''; }]));
   engine.wsMessage = (socket, text, now) => { calls.push(['single', [[socket, now, text]]]); return ''; };
+  engine.wsBinary = (socket, data, now) => { calls.push(['binary', [[socket, now, Array.from(data)]]]); return ''; };
   engine.wsMessages = (data) => { calls.push(['batch', decode(data)]); return ''; };
+  engine.wsEvents = (data) => { calls.push(['events', decodeEvents(data)]); return ''; };
   engine.takeFrame = () => { calls.push(['frame']); };
   engine.snapshotFrame = () => { calls.push(['snapshot']); return new Uint8Array(); };
   const transport = {
@@ -50,6 +66,114 @@ test('one task batches mixed sockets, empty text, newlines and Unicode with arri
   assert.equal(f.tasks.size, 1);
   f.tick();
   assert.deepEqual(f.calls, [['batch', [[2, 1, '雪😀\n\u001e'], [1, 2, ''], [2, 3, 'pong']]]]);
+  f.host.dispose();
+});
+
+test('one task batches text and owned binary snapshots in arrival order', () => {
+  const f = fixture();
+  f.host.execute({ op: 'wsConnect', socket: 7, url: 'binary', binary: true });
+  const binary = f.arrivals.get('binary');
+  assert.equal(binary.binary, true);
+  const storage = new Uint8Array([9, 0, 255, 9]);
+  f.arrivals.get('1').onMessage('first', 10);
+  binary.onBinary(storage.subarray(1, 3), 11.5);
+  storage.fill(42);
+  f.arrivals.get('2').onMessage('雪😀', 12);
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.tasks.size, 1);
+  f.tick();
+  assert.deepEqual(f.calls, [['events', [[1, 10, 'first'], [7, 11.5, [0, 255]], [2, 12, '雪😀']]]]);
+  f.host.dispose();
+});
+
+test('binary singleton stays deferred and crosses directly before later event barriers', async () => {
+  const f = fixture();
+  const binary = f.arrivals.get('1');
+  const payload = new Uint8Array([255, 0]);
+  binary.onBinary(payload, 17);
+  payload.fill(1);
+  assert.equal(f.calls.length, 0);
+  await f.host.command({ op: 'subscribeOrderBook', symbol: 'BTCUSDT' });
+  assert.deepEqual(f.calls.slice(0, 2), [['binary', [[1, 17, [255, 0]]]], ['command', '{"op":"subscribeOrderBook","symbol":"BTCUSDT"}', 1]]);
+  binary.onBinary(new Uint8Array(), 18);
+  f.host.receive(2, { status: 200, body: new Uint8Array() });
+  assert.deepEqual(f.calls.slice(-3).map(([name]) => name), ['binary', 'httpStart', 'httpEnd']);
+  binary.onBinary(new Uint8Array([7]), 19);
+  binary.onClose(1000, 20);
+  assert.deepEqual(f.calls.slice(-2), [['binary', [[1, 19, [7]]]], ['wsClose', 1, 1000, 20]]);
+  f.host.dispose();
+});
+
+test('mixed partitions deliver all captured messages before reentrant transport actions', () => {
+  const f = fixture();
+  const crossings = [];
+  const events = [];
+  f.engine.wsEvents = (data) => {
+    crossings.push({ bytes: data.length, rows: decodeEvents(data) });
+    events.push(`batch:${crossings.length}`);
+    return JSON.stringify([{ op: 'log', level: 'info', message: String(crossings.length) }]);
+  };
+  f.host.handlers.onLog = (_, message) => {
+    events.push(`log:${message}`);
+    if (message === '1') f.arrivals.get('2').onBinary(new Uint8Array([3]), 30);
+  };
+  f.arrivals.get('1').onMessage('before', 10);
+  const payload = new Uint8Array(70_000).fill(255);
+  f.arrivals.get('1').onBinary(payload, 20);
+  assert.deepEqual(events, ['batch:1', 'batch:2', 'log:1', 'log:2']);
+  assert.deepEqual(crossings.map(({ bytes }) => bytes), [26, 70_020]);
+  f.arrivals.get('2').onMessage('after', 40);
+  f.tick();
+  assert.deepEqual(crossings[0].rows, [[1, 10, 'before']]);
+  assert.equal(crossings[1].rows[0][2].length, payload.length);
+  assert.deepEqual(crossings[2].rows, [[2, 30, [3]], [2, 40, 'after']]);
+  assert.ok(f.host.batchBuffer.length <= 16 * 1024);
+  f.host.dispose();
+});
+
+test('mixed bursts share the count bound and disposal releases queued binary arrivals', () => {
+  const f = fixture();
+  for (let index = 0; index < 257; index++) {
+    if (index % 2) f.arrivals.get('1').onBinary(new Uint8Array([index % 256]), index);
+    else f.arrivals.get('2').onMessage(String(index), index);
+  }
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0][0], 'events');
+  assert.equal(f.calls[0][1].length, 256);
+  f.tick();
+  assert.deepEqual(f.calls[1], ['single', [[2, 256, '256']]]);
+  f.arrivals.get('1').onBinary(new Uint8Array([9]), 300);
+  f.host.dispose();
+  f.tick();
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.host.messages.length, 0);
+  assert.equal(f.host.messageBytes, 0);
+});
+
+test('disposal during mixed actions stops later resources and enclosing flush', () => {
+  const f = fixture();
+  f.engine.wsEvents = () => JSON.stringify([{ op: 'log', level: 'info', message: 'stop' },
+    { op: 'wsConnect', socket: 7, url: 'leak' }]);
+  f.host.handlers.onLog = () => f.host.dispose();
+  f.send(1, 'text');
+  f.arrivals.get('2').onBinary(new Uint8Array([255]), 17);
+  f.host.flush();
+  assert.equal(f.arrivals.has('leak'), false);
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.tasks.size, 0);
+});
+
+test('older binary engines retain ordered deferred actions without a mixed ABI', () => {
+  const f = fixture();
+  f.engine.wsEvents = undefined;
+  const seen = [];
+  f.engine.wsMessageActions = (_socket, text) => { seen.push(text); return JSON.stringify([{ op: 'log', level: 'info', message: text }]); };
+  f.engine.wsBinary = (_socket, bytes) => { seen.push([...bytes]); return ''; };
+  f.host.handlers.onLog = () => assert.deepEqual(seen, ['first', [255], 'last']);
+  f.send(1, 'first');
+  f.arrivals.get('2').onBinary(new Uint8Array([255]), 2);
+  f.send(1, 'last');
+  f.tick();
   f.host.dispose();
 });
 
@@ -382,6 +506,126 @@ test('disposal while draining a batch prevents its enclosing flush or command', 
     assert.equal(f.host.commands.size, 0);
     assert.throws(() => f.host.snapshot(), /engine disposed/);
   }
+});
+
+for (const entry of ['legacy', 'actions', 'bytes']) {
+  test(`WebSocket actions preserve ordering and empty results with ${entry}`, () => {
+    const calls = [];
+    const effects = [];
+    const engine = {
+      wsMessage(socket, text, now) {
+        assert.equal(this, engine);
+        calls.push(['legacy', socket, text, now]);
+        return text === 'quiet' ? '' : actions;
+      },
+    };
+    const actions = JSON.stringify([
+      { op: 'wsSend', socket: 7, text: 'first' },
+      { op: 'log', level: 'info', message: 'between' },
+      { op: 'wsSend', socket: 7, text: 'second' },
+    ]);
+    if (entry !== 'legacy') engine.wsMessageActions = function (socket, text, now) {
+      assert.equal(this, engine);
+      calls.push(['actions', socket, text, now]);
+      return text === 'quiet' ? undefined : actions;
+    };
+    if (entry === 'bytes') engine.wsMessageBytes = function (socket, bytes, now) {
+      assert.equal(this, engine);
+      assert.ok(bytes instanceof Uint8Array);
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      calls.push(['bytes', socket, text, now]);
+      return text === 'quiet' ? undefined : actions;
+    };
+    let receive;
+    const host = new EngineHost(engine, {
+      now: () => 123,
+      connect: (_url, handlers) => {
+        receive = handlers.onMessage;
+        return { send: (text) => effects.push(text), close() {} };
+      },
+    }, { onLog: (_level, message) => effects.push(message) }, { batchMessages: false });
+    host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
+    receive('quiet');
+    assert.deepEqual(effects, []);
+    receive('payload');
+    assert.deepEqual(effects, ['first', 'between', 'second']);
+    assert.deepEqual(calls, [
+      [entry, 7, 'quiet', 123],
+      [entry, 7, 'payload', 123],
+    ]);
+    host.dispose();
+    receive('late');
+    assert.equal(calls.length, 2);
+  });
+}
+
+test('byte entry encodes complete Unicode messages with bounded reusable scratch and reentrant ownership', () => {
+  const encoder = new TextEncoder();
+  const received = [];
+  let receive;
+  const engine = {
+    wsMessage() { assert.fail('byte entry must take precedence'); },
+    wsMessageBytes(socket, bytes, now) {
+      assert.equal(this, engine);
+      assert.equal(socket, 7);
+      assert.equal(now, 123);
+      const before = Uint8Array.from(bytes);
+      received.push({ bytes: before, buffer: bytes.buffer });
+      if (new TextDecoder().decode(bytes) === 'outer') {
+        receive('nested é🦀');
+        assert.deepEqual(bytes, before, 'nested message must not overwrite borrowed outer bytes');
+      }
+      return undefined;
+    },
+  };
+  const host = new EngineHost(engine, {
+    now: () => 123,
+    connect: (_url, handlers) => { receive = handlers.onMessage; return { close() {} }; },
+  }, {}, { batchMessages: false });
+  host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
+  // Exact 1365-unit boundary, lone surrogates, paired surrogates, and large frames.
+  const messages = ['', 'ASCII', 'é漢🦀', '\ud800', '\udc00', '\ud800x\udc00', '漢'.repeat(1365), '\ud800'.repeat(1365), 'a'.repeat(1364) + '\ud800', '🦀'.repeat(683), '漢'.repeat(1366), 'small again'];
+  for (const text of messages) {
+    receive(text);
+    assert.deepEqual(received.at(-1).bytes, encoder.encode(text));
+  }
+  const scratch = received[0].buffer;
+  assert.equal(scratch.byteLength, 4096);
+  for (let i = 1; i < 9; i++) assert.equal(received[i].buffer, scratch);
+  assert.notEqual(received[9].buffer, scratch);
+  assert.notEqual(received[10].buffer, scratch);
+  assert.equal(received[11].buffer, scratch);
+  receive('outer');
+  assert.notEqual(received.at(-1).buffer, scratch);
+  assert.equal(host.wsScratchBusy, false);
+  // Minimal TextEncoder implementations may expose only encode().
+  host.wsEncoder = { encode: (text) => encoder.encode(text) };
+  receive('encode-only \ud800🦀');
+  assert.deepEqual(received.at(-1).bytes, encoder.encode('encode-only \ud800🦀'));
+  host.wsEncoder = { encode: (text) => encoder.encode(text), encodeInto: () => ({ read: 0, written: 0 }) };
+  receive('complete fallback 漢');
+  assert.deepEqual(received.at(-1).bytes, encoder.encode('complete fallback 漢'));
+  host.dispose();
+  const count = received.length;
+  receive('late');
+  assert.equal(received.length, count);
+});
+
+test('byte scratch is released when a custom synchronous engine throws', () => {
+  let receive;
+  let calls = 0;
+  const host = new EngineHost({
+    wsMessageBytes() { if (calls++ === 0) throw new Error('test engine failure'); },
+  }, {
+    now: () => 123,
+    connect: (_url, handlers) => { receive = handlers.onMessage; return { close() {} }; },
+  }, {}, { batchMessages: false });
+  host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
+  assert.throws(() => receive('first'), /test engine failure/);
+  assert.equal(host.wsScratchBusy, false);
+  receive('second');
+  assert.equal(calls, 2);
+  host.dispose();
 });
 
 test('the ESM native raw constructor carries HOW and relay upgrade headers', { timeout: 3000 }, async () => {

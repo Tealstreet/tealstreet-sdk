@@ -212,3 +212,29 @@ test('effectiveAt aliases availableAfter and never serves a future-only snapshot
   assert.equal(responses.respond('GET', url, undefined, 0, 100).body, 'future');
   assert.equal(responses.respond('GET', url, undefined, 0, 100).body, 'future');
 });
+
+test('request-path echoes preserve unsafe numeric leaves and nested request values', () => {
+  const url = 'https://example.test/orders';
+  const body = '[{"id":9007199254740993,"nested":{"id":9007199254740995}}, {"id":"9007199254740993"}]';
+  const responses = new Responses([{
+    type: 'http', method: 'POST', url, status: 200,
+    body: '{"id":"$request:0.id","nested":"$request:0.nested","text":"$request:1.id","missing":"$request:2.id"}',
+  }], (method, path) => method + path);
+  assert.equal(responses.unusedWrites(), 1);
+  assert.equal(responses.respond('POST', url, body).body,
+    '{"id":9007199254740993,"nested":{"id":9007199254740995},"text":"9007199254740993","missing":null}');
+  assert.equal(responses.unusedWrites(), 0);
+  assert.equal(responses.respond('POST', url, body).status, 599);
+});
+
+test('request-path echoes preserve unsafe decimal and exponent integer syntax', () => {
+  for (const numeric of ['9007199254740993.0', '9007199254740993e0', '-9007199254740993.0']) {
+    const responses = new Responses([{
+      type: 'http', method: 'POST', url: 'https://example.test/orders', status: 200,
+      body: '{"id":"$request:0.id"}',
+    }], () => 'one');
+    assert.equal(responses.respond('POST', 'https://example.test/orders', `[{"id":${numeric}}]`).body,
+      `{"id":${numeric}}`);
+    assert.equal(responses.unusedWrites(), 0);
+  }
+});

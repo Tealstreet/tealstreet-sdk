@@ -182,6 +182,22 @@
     "./node/apexomni": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/apexomni/safe_cex_wasm.js"
+    },
+    "./web/phemex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/phemex/safe_cex_wasm.js"
+    },
+    "./node/phemex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/phemex/safe_cex_wasm.js"
+    },
+    "./web/paradex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/paradex/safe_cex_wasm.js"
+    },
+    "./node/paradex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/paradex/safe_cex_wasm.js"
     }
   },
   "scripts": {

@@ -158,3 +158,85 @@ test('whole and streamed HTTP buffers cross in bounded chunks', async () => {
     assert.ok(Math.max(...sizes)<=16*1024);
   }
 });
+
+test('explicit binary protocols preserve bytes and control-message ordering', async () => {
+  const messages = [];
+  const delivered = new Promise((resolve, reject) => {
+    const receive = socketMessages((data) => {
+      messages.push(data);
+      if (messages.length === 3) resolve();
+    }, reject, true);
+    // A binary application frame may begin with the gzip magic by coincidence.
+    receive(new Blob([new Uint8Array([0x1f, 0x8b, 0xff, 0])]));
+    receive('{"id":1,"result":{}}');
+    receive(new Uint8Array([0x78, 0xff]));
+  });
+  await delivered;
+  assert.deepEqual([...messages[0]], [0x1f, 0x8b, 0xff, 0]);
+  assert.equal(messages[1], '{"id":1,"result":{}}');
+  assert.deepEqual([...messages[2]], [0x78, 0xff]);
+});
+
+test('a binary engine socket crosses wasm once and ignores callbacks after disposal', () => {
+  const received = [];
+  let handlers;
+  const host = new EngineHost({
+    wsMessage: (...args) => { received.push(['text', ...args]); return ''; },
+    wsBinary: (...args) => { received.push(['binary', ...args]); return ''; },
+  }, {
+    now: () => 42,
+    connect: (_url, value) => { handlers = value; return { close() {} }; },
+  }, {}, { batchMessages: false });
+  host.execute({ op: 'wsConnect', socket: 9, url: 'wss://example.test', binary: true, channel: 'private' });
+  assert.equal(handlers.binary, true);
+  const bytes = new Uint8Array([1, 0, 0xff]);
+  handlers.onBinary(bytes);
+  handlers.onMessage('control');
+  host.dispose();
+  handlers.onBinary(bytes);
+  assert.deepEqual(received, [['binary', 9, bytes, 42], ['text', 9, 'control', 42]]);
+});
+
+test('an older engine without binary ingress closes and releases the physical socket once', () => {
+  let handlers;
+  let closed = 0;
+  const events = [];
+  const host = new EngineHost({ wsClose: (...args) => { events.push(args); return ''; } }, {
+    now: () => 10,
+    connect: (_url, value) => {
+      handlers = value;
+      return { close() { closed++; handlers.onClose(1000); } };
+    },
+  });
+  host.execute({ op: 'wsConnect', socket: 3, url: 'wss://example.test', binary: true });
+  handlers.onBinary(new Uint8Array([0xff]));
+  handlers.onBinary(new Uint8Array([0xff]));
+  assert.equal(closed, 1);
+  assert.equal(host.sockets.size, 0);
+  assert.deepEqual(events, [[3, 1003, 10]]);
+});
+
+test('unsupported binary does not report another close after a queued text action closed the socket', () => {
+  let handlers;
+  let closed = 0;
+  const events = [];
+  const host = new EngineHost({
+    wsMessage: () => JSON.stringify([{ op: 'wsClose', socket: 3 }]),
+    wsClose: (...args) => { events.push(args); return ''; },
+  }, {
+    now: () => 10,
+    setTimeout: () => 1,
+    clearTimeout() {},
+    connect: (_url, value) => {
+      handlers = value;
+      return { close() { closed++; handlers.onClose(1000); } };
+    },
+  });
+  host.execute({ op: 'wsConnect', socket: 3, url: 'wss://example.test', binary: true });
+  handlers.onMessage('queued close');
+  handlers.onBinary(new Uint8Array([255]));
+  assert.equal(closed, 1);
+  assert.deepEqual(events, [[3, 1000, 10]]);
+  assert.equal(host.sockets.size, 0);
+  host.dispose();
+});
