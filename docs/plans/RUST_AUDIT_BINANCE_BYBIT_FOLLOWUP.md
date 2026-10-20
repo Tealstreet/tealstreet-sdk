@@ -209,7 +209,9 @@ No new error architecture or unrelated engine helper migration belongs here.
 All 23 venue replay gates pass: 11 documented/scripted private replays and 12
 public replays (three runs each), including two fresh anonymous 20-second
 captures. No executable oracle, threshold or committed fixture changed.
-Combined SDK/host/harness verification is still pending at this checkpoint.
+Combined verification passed: 455 compiled SDK tests/17 files, host 89,
+harness 590, product semantics 16, scripted lifecycle 9 and frame-wire
+integration 7. The final fetch still points to merged landing c44f22bd8e.
 
 Public medians below are TS / Rust; CPU is ms and retained memory is MB.
 
