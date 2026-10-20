@@ -37,7 +37,7 @@ pub enum Pending {
     Markets { rows: Vec<Market>, invalid: bool },
     Tickers { rows: Vec<Ticker>, invalid: bool },
     Candles { command: u32 },
-    SymbolSettings { symbol: String },
+    SymbolSettings { symbol: String, generation: u64 },
 }
 #[derive(Clone)]
 enum Feed {
@@ -497,8 +497,8 @@ impl Venue for BitunixFutures {
                 self.trade_response(cx, request, response);
                 return;
             }
-            Pending::SymbolSettings { symbol } => {
-                self.symbol_settings_response(cx, &symbol, response);
+            Pending::SymbolSettings { symbol, generation } => {
+                self.symbol_settings_response(cx, &symbol, generation, response);
                 return;
             }
             other => other,
@@ -569,6 +569,9 @@ impl Venue for BitunixFutures {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(read) => self.history_failed(cx, read, error),
             Pending::Private(read) => {
+                if read.axis == account::Axis::Balance {
+                    self.account.balance_answered = self.account.balance_answered.max(read.serial);
+                }
                 if let Some(command) = read.after {
                     self.prepared(cx, command, false);
                 }
@@ -576,7 +579,11 @@ impl Venue for BitunixFutures {
                 self.debounce(cx, read.axis);
             }
             Pending::Candles { command } => cx.done(command, Err(error.into())),
-            Pending::SymbolSettings { .. } => cx.log(LogLevel::Warning, error),
+            Pending::SymbolSettings { symbol, .. } => {
+                // Retry on the next candle interest.
+                self.account.symbol_settings.remove(&symbol);
+                cx.log(LogLevel::Warning, error);
+            }
             _ => {
                 cx.log(LogLevel::Error, error);
                 self.retry = Some(cx.set_timer(5_000.0));

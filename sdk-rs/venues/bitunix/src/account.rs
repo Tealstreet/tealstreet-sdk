@@ -50,6 +50,10 @@ pub struct NativeOrder {
 pub struct AccountState {
     /// Symbols whose leverage/margin mode were read on first candle interest.
     pub symbol_settings: std::collections::HashSet<String>,
+    /// Serial of the last balance read that was answered (reply or failure).
+    pub balance_answered: u64,
+    /// When the tick last issued a balance read.
+    pub balance_polled_at: f64,
     pub generations: [u64; 3],
     pub serials: [u64; 4],
     pub initial_orders: [Option<Read>; 2],
@@ -69,6 +73,8 @@ pub struct AccountState {
 /// The TS Bitunix tick (exchange metadata): balance every tick, the full
 /// account every 32 ticks.
 const TICK_MS: f64 = 500.0;
+/// An unanswered balance read is abandoned after this long.
+const BALANCE_STALL_MS: f64 = 10_000.0;
 
 impl Axis {
     pub(crate) fn index(self) -> usize {
@@ -128,6 +134,8 @@ impl BitunixFutures {
             cx.store.set_orders(vec![]);
             return;
         }
+        // Settings reset to defaults below; symbol reads must run again.
+        self.account.symbol_settings.clear();
         let settings: Vec<_> = cx
             .store
             .markets()
@@ -256,6 +264,7 @@ impl BitunixFutures {
             .str("symbol", symbol);
         let pending = Pending::SymbolSettings {
             symbol: symbol.into(),
+            generation: self.account.generations[Axis::Positions.index()],
         };
         self.signed_request(cx, Method::Get, SYMBOL_SETTINGS, params, None, pending);
     }
@@ -263,8 +272,13 @@ impl BitunixFutures {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: &str,
+        generation: u64,
         response: Response<'_>,
     ) {
+        // A newer leverage/margin acknowledgement supersedes this read.
+        if generation != self.account.generations[Axis::Positions.index()] {
+            return;
+        }
         #[derive(serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Settings {
@@ -282,10 +296,12 @@ impl BitunixFutures {
                 s
             }
             Ok(_) => {
+                self.account.symbol_settings.remove(symbol);
                 cx.log(LogLevel::Warning, "Malformed Bitunix leverage/margin mode");
                 return;
             }
             Err(e) => {
+                self.account.symbol_settings.remove(symbol);
                 cx.log(
                     LogLevel::Warning,
                     format!("Bitunix leverage/margin mode read failed: {e}"),
@@ -390,7 +406,15 @@ impl BitunixFutures {
             self.account.pending_executions.retain(|id, _| {
                 self.account.terminal.contains_key(id) || cx.store.order(id).is_some()
             });
-            self.read_axis(cx, Axis::Balance);
+            // A slow reply must not be superseded every tick (stale serials are
+            // dropped), so poll again only once the last balance read finished.
+            // A read lost without any answer cannot stall polling forever.
+            if self.account.balance_answered == self.account.serials[0]
+                || cx.now - self.account.balance_polled_at >= BALANCE_STALL_MS
+            {
+                self.account.balance_polled_at = cx.now;
+                self.read_axis(cx, Axis::Balance);
+            }
             self.account.count += 1;
             if self.account.count.is_multiple_of(32) {
                 for a in [Axis::Positions, Axis::Orders, Axis::Tpsl] {
@@ -514,6 +538,9 @@ impl BitunixFutures {
         read: Read,
         response: Response<'_>,
     ) {
+        if read.axis == Axis::Balance {
+            self.account.balance_answered = self.account.balance_answered.max(read.serial);
+        }
         let body = match data(response.body) {
             Ok(b) if (200..300).contains(&response.status) && !read.invalid => b,
             _ => {

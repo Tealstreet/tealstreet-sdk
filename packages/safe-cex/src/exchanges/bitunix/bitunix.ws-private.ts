@@ -33,6 +33,8 @@ import { sha256Hex } from './bitunix.utils';
 export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
   // Bitunix order frames carry cumulative dealAmount/averagePrice only.
   private incrementalFills = createIncrementalFills();
+  // Orders whose pre-stream fill baseline has been recorded.
+  private seededFills = new Set<string>();
 
   pingLoopTimeoutId?: NodeJS.Timeout;
   handledPongEvent = false;
@@ -611,8 +613,11 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
   private emitExecution(previous: Order, data: Record<string, any>) {
     const cumulative = Number(v(data, 'dealAmount'));
     if (!Number.isFinite(cumulative)) return;
+    // REST open orders carry tradeQty without an average; like Rust, value the
+    // known fill at the order price so the next frame's value delta is right.
     const previousAverage = Number(previous.info?.averagePrice ?? previous.info?.avgPrice);
-    const previousValue = previousAverage > 0 ? previous.filled * previousAverage : undefined;
+    const previousPrice = previousAverage > 0 ? previousAverage : previous.price;
+    const previousValue = previousPrice > 0 ? previous.filled * previousPrice : undefined;
     const average = Number(data.averagePrice);
     const value =
       average > 0
@@ -620,8 +625,13 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
         : previousValue !== undefined
           ? previousValue + (cumulative - previous.filled) * Number(data.price)
           : undefined;
-    // Seed with the already-known fill so a REST snapshot is not re-emitted.
-    this.incrementalFills(previous.id, previous.filled, previousValue);
+    // Seed once with the fill known before this stream, so a REST snapshot is
+    // not re-emitted; later REST refreshes must not swallow streamed deltas.
+    if (!this.seededFills.has(previous.id)) {
+      this.seededFills.add(previous.id);
+      if (this.seededFills.size > 500) this.seededFills.delete(this.seededFills.values().next().value!);
+      this.incrementalFills(previous.id, previous.filled, previousValue);
+    }
     const execution = this.incrementalFills(previous.id, cumulative, value);
     if (!(execution.qty > 0)) return;
     const price = execution.value !== undefined ? execution.value / execution.qty : Number(data.price);

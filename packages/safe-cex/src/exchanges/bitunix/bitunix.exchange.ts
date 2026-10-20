@@ -1573,12 +1573,14 @@ export class BitunixExchange extends BaseExchange {
     }
 
     try {
-      await this.xhr.post(ENDPOINTS.SET_MARGIN_TYPE, {
+      const { data } = await this.xhr.post(ENDPOINTS.SET_MARGIN_TYPE, {
         symbol,
         marginMode: isolated ? 'ISOLATION' : 'CROSS',
         marginCoin: 'USDT', // Required parameter according to docs
       });
-      // The acknowledged mode applies to both legs, like setLeverage.
+      // HTTP 200 may still carry a business rejection; only an accepted change
+      // is applied, to both legs like setLeverage.
+      if (data?.code !== undefined && Number(data.code) !== 0) throw new Error(data?.msg || 'Bitunix rejected margin mode');
       const marginType = isolated ? MarginType.Isolated : MarginType.Cross;
       const settings = this.symbolSettings.get(symbol);
       if (settings) this.symbolSettings.set(symbol, { ...settings, marginType });

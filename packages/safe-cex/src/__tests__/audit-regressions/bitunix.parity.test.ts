@@ -111,6 +111,21 @@ const captureFills = (exchange: BitunixExchange) => {
   return fills;
 };
 
+const crossLeg = (side: PositionSide) =>
+  ({
+    id: `ETHUSDT:${side}`,
+    symbol: 'ETHUSDT',
+    side,
+    contracts: 0,
+    entryPrice: 0,
+    notional: 0,
+    leverage: 10,
+    unrealizedPnl: 0,
+    liquidationPrice: 0,
+    marginType: MarginType.Cross,
+    positionMode: PositionMode.Hedged,
+  }) as Position;
+
 describe('Bitunix TS/Rust parity regressions', () => {
   it('(1) REST orders carry clientOrderId from clientId; virtual TP/SL legs do not', async () => {
     const exchange = createExchange();
@@ -207,26 +222,57 @@ describe('Bitunix TS/Rust parity regressions', () => {
 
   it('(5) changeMarginType updates both legs in the store on success', async () => {
     const exchange = createExchange();
-    const leg = (side: PositionSide) =>
-      ({
-        id: `ETHUSDT:${side}`,
-        symbol: 'ETHUSDT',
-        side,
-        contracts: 0,
-        entryPrice: 0,
-        notional: 0,
-        leverage: 10,
-        unrealizedPnl: 0,
-        liquidationPrice: 0,
-        marginType: MarginType.Cross,
-        positionMode: PositionMode.Hedged,
-      }) as Position;
-    exchange.store.update({ positions: [leg(PositionSide.Long), leg(PositionSide.Short)] });
+    exchange.store.update({ positions: [crossLeg(PositionSide.Long), crossLeg(PositionSide.Short)] });
     exchange.xhr = { post: vi.fn().mockResolvedValue({ data: { code: 0 } }) } as any;
 
     await exchange.changeMarginType(true, 'ETHUSDT');
 
     expect(exchange.store.positions.map((p) => p.marginType)).toEqual([MarginType.Isolated, MarginType.Isolated]);
+  });
+
+  it('(2) values a REST-known fill without an average at the order price', async () => {
+    const exchange = createExchange();
+    const orders = await fetchRegularOrders(exchange, [pendingOrder({ price: '90000', tradeQty: '0.001' })]);
+    exchange.store.update({ orders });
+    const fills = captureFills(exchange);
+
+    exchange.privateWebsocket.onMessage({
+      data: wsOrderFrame('UPDATE', { price: '90000', dealAmount: '0.002', averagePrice: '90000' }),
+    } as MessageEvent);
+
+    expect(fills).toHaveLength(1);
+    expect(fills[0].amount).toBeCloseTo(0.001);
+    expect(fills[0].price).toBeCloseTo(90000);
+  });
+
+  it('(2) a REST refresh ahead of the stream does not swallow the next streamed delta', async () => {
+    const exchange = createExchange();
+    exchange.store.update({ orders: [storedOrder()] });
+    const fills = captureFills(exchange);
+
+    exchange.privateWebsocket.onMessage({
+      data: wsOrderFrame('UPDATE', { dealAmount: '0.4', averagePrice: '3000' }),
+    } as MessageEvent);
+    const refreshed = await fetchRegularOrders(exchange, [pendingOrder({ tradeQty: '0.6', avgPrice: '3000' })]);
+    exchange.store.update({ orders: refreshed });
+    expect(exchange.store.orders.find((o) => o.id === 'order-1')?.filled).toBe(0.6);
+    exchange.privateWebsocket.onMessage({
+      data: wsOrderFrame('UPDATE', { dealAmount: '0.6', averagePrice: '3000' }),
+    } as MessageEvent);
+
+    expect(fills.map((f) => f.amount)).toEqual([0.4, expect.closeTo(0.2)]);
+  });
+
+  it('(5) changeMarginType rejected inside an HTTP 200 throws and changes nothing', async () => {
+    const exchange = createExchange();
+    exchange.store.update({ positions: [crossLeg(PositionSide.Long), crossLeg(PositionSide.Short)] });
+    exchange.symbolSettings.set('ETHUSDT', { marginType: MarginType.Cross, leverage: 10 });
+    exchange.xhr = { post: vi.fn().mockResolvedValue({ data: { code: 10001, msg: 'rejected' } }) } as any;
+
+    await expect(exchange.changeMarginType(true, 'ETHUSDT')).rejects.toThrow('rejected');
+
+    expect(exchange.store.positions.map((p) => p.marginType)).toEqual([MarginType.Cross, MarginType.Cross]);
+    expect(exchange.symbolSettings.get('ETHUSDT')).toEqual({ marginType: MarginType.Cross, leverage: 10 });
   });
 
   it('(6) market limits.amount.max is a number', async () => {

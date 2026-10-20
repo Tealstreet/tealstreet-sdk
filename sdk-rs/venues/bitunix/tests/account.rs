@@ -900,33 +900,10 @@ fn plain_orders_carry_no_trigger_type_and_virtual_legs_no_client_id() {
 
 #[test]
 fn account_tick_reads_balance_every_500ms() {
-    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_bitunix::BitunixFutures::new(
-        safe_cex_venue_bitunix::Options {
-            key: Some("key".into()),
-            secret: Some("secret".into()),
-            ..Default::default()
-        },
-    ));
-    e.start(0.0);
-    let r = requests(&mut e).remove(0);
-    reply(&mut e, r.id, PAIRS);
-    let r = requests(&mut e).remove(0);
-    reply(&mut e, r.id, TICKERS);
-    let tick = |actions: &[Action], at: f64| {
-        actions.iter().rev().find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
-            _ => None,
-        })
-    };
-    let actions: Vec<_> = e.drain_actions().collect();
-    let timer = tick(&actions, 500.0).expect("first tick at 500ms");
-    e.handle(500.0, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
-    assert!(actions.iter().any(|a| matches!(
-        a,
-        Action::Http(r) if r.url.contains("/api/v1/futures/account?marginCoin=USDT")
-    )));
-    assert!(tick(&actions, 1000.0).is_some());
+    let (mut e, mut timers) = started_with_reads_answered();
+    let reads = fire_account_tick(&mut e, &mut timers, 500.0);
+    assert!(reads.iter().any(is_balance_read));
+    assert!(timers.iter().any(|(_, at)| *at == 1000.0));
 }
 
 #[test]
@@ -990,5 +967,201 @@ fn live_fill_price_and_amount_drop_binary_noise() {
     assert_eq!(
         observed_fills(&mut e),
         [(OrderSide::Sell as u32, 3250.35, 0.4)]
+    );
+}
+
+/// Starts without sockets, answering every startup read; returns the timers set.
+fn started_with_reads_answered() -> (TestEngine, Vec<(safe_cex_engine::TimerId, f64)>) {
+    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_bitunix::BitunixFutures::new(
+        safe_cex_venue_bitunix::Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            ..Default::default()
+        },
+    ));
+    e.start(0.0);
+    let r = requests(&mut e).remove(0);
+    reply(&mut e, r.id, PAIRS);
+    let r = requests(&mut e).remove(0);
+    reply(&mut e, r.id, TICKERS);
+    let mut timers = vec![];
+    loop {
+        let actions: Vec<_> = e.drain_actions().collect();
+        if actions.is_empty() {
+            return (e, timers);
+        }
+        for a in actions {
+            match a {
+                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+                Action::Http(r) => {
+                    let body = if r.url.contains("get_pending_positions") {
+                        POSITIONS
+                    } else if r.url.contains("/tpsl/") {
+                        TPSL
+                    } else if r.url.contains("get_pending_orders") {
+                        ORDERS
+                    } else {
+                        ACCOUNT
+                    };
+                    reply(&mut e, r.id, body);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn is_balance_read(r: &safe_cex_engine::HttpRequest) -> bool {
+    r.url.contains("/api/v1/futures/account?marginCoin=USDT")
+}
+
+/// Fires the account tick scheduled at `at`, returning the HTTP reads it issued.
+fn fire_account_tick(
+    e: &mut TestEngine,
+    timers: &mut Vec<(safe_cex_engine::TimerId, f64)>,
+    at: f64,
+) -> Vec<safe_cex_engine::HttpRequest> {
+    let (timer, _) = timers
+        .iter()
+        .rev()
+        .find(|(_, at_ms)| *at_ms == at)
+        .copied()
+        .expect("account tick scheduled");
+    e.handle(at, Event::TimerFired { timer });
+    e.drain_actions()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            Action::SetTimer { timer, at_ms } => {
+                timers.push((timer, at_ms));
+                None
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn unanswered_balance_read_is_not_superseded_by_later_ticks() {
+    let (mut e, mut timers) = started_with_reads_answered();
+    let pending = fire_account_tick(&mut e, &mut timers, 500.0)
+        .into_iter()
+        .find(is_balance_read)
+        .expect("first tick reads balance")
+        .id;
+    for at in [1000.0, 1500.0, 2000.0] {
+        let reads = fire_account_tick(&mut e, &mut timers, at);
+        assert!(
+            !reads.iter().any(is_balance_read),
+            "tick at {at} superseded the unanswered balance read"
+        );
+    }
+    reply(&mut e, pending, ACCOUNT);
+    let reads = fire_account_tick(&mut e, &mut timers, 2500.0);
+    assert!(
+        reads.iter().any(is_balance_read),
+        "an answered read must resume polling"
+    );
+}
+
+#[test]
+fn balance_read_lost_without_any_answer_is_abandoned_after_ten_seconds() {
+    let (mut e, mut timers) = started_with_reads_answered();
+    fire_account_tick(&mut e, &mut timers, 500.0)
+        .into_iter()
+        .find(is_balance_read)
+        .expect("first tick reads balance");
+    let mut at = 1000.0;
+    while at < 10_500.0 {
+        assert!(
+            !fire_account_tick(&mut e, &mut timers, at)
+                .iter()
+                .any(is_balance_read)
+        );
+        at += 500.0;
+    }
+    assert!(
+        fire_account_tick(&mut e, &mut timers, 10_500.0)
+            .iter()
+            .any(is_balance_read),
+        "a lost read must not stall balance polling forever"
+    );
+}
+
+fn subscribe_candles_settings_read(
+    e: &mut TestEngine,
+    interval: safe_cex_engine::model::Interval,
+) -> Option<safe_cex_engine::RequestId> {
+    e.handle(
+        1.0,
+        Event::Command(safe_cex_engine::Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval,
+        }),
+    );
+    requests(e)
+        .into_iter()
+        .find(|r| r.url.contains("get_leverage_margin_mode"))
+        .map(|r| r.id)
+}
+
+#[test]
+fn failed_or_malformed_symbol_settings_read_retries_on_next_candle_interest() {
+    use safe_cex_engine::model::Interval;
+    let (mut e, _) = startup();
+    let read = subscribe_candles_settings_read(&mut e, Interval::M1).expect("first read");
+    reply(&mut e, read, r#"{"code":0,"data":{"leverage":0}}"#);
+    let read = subscribe_candles_settings_read(&mut e, Interval::M5)
+        .expect("a malformed read must be retried");
+    e.handle(
+        1.0,
+        Event::HttpFailed {
+            request: read,
+            error: "network down",
+        },
+    );
+    let read = subscribe_candles_settings_read(&mut e, Interval::M15)
+        .expect("a failed read must be retried");
+    reply(
+        &mut e,
+        read,
+        r#"{"code":0,"data":{"leverage":50,"marginMode":"CROSS"}}"#,
+    );
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 50.0);
+    assert!(subscribe_candles_settings_read(&mut e, Interval::H1).is_none());
+}
+
+#[test]
+fn symbol_settings_reply_after_a_settings_ack_cannot_restore_old_values() {
+    use safe_cex_engine::model::Interval;
+    let (mut e, _) = startup();
+    let read = subscribe_candles_settings_read(&mut e, Interval::M1).expect("settings read");
+    e.handle(
+        1.0,
+        Event::Command(safe_cex_engine::Command::SetLeverage {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            leverage: 30.0,
+            side: None,
+        }),
+    );
+    let write = requests(&mut e).remove(0);
+    reply(&mut e, write.id, r#"{"code":0,"data":{}}"#);
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
+    reply(
+        &mut e,
+        read,
+        r#"{"code":0,"data":{"leverage":50,"marginMode":"CROSS"}}"#,
+    );
+    let setting = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!(
+        (setting.leverage, setting.margin_type),
+        (30.0, Some(MarginType::Isolated))
+    );
+    assert!(
+        e.store()
+            .positions()
+            .iter()
+            .filter(|p| p.symbol == "BTCUSDT")
+            .all(|p| p.leverage == 30.0 && p.margin_type == Some(MarginType::Isolated))
     );
 }
