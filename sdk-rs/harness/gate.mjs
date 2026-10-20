@@ -361,11 +361,16 @@ const KNOWN_TS_FIXES = {
   // both bracket siblings preserved during parent cancel/replace amendments.
   // Price-only amendments keep the observed residual quantity; invalid/no-op
   // amendments reject before cancellation and filled sources are not replaced.
-  // Rust balance UPnL uses reported private position PnL, preserving prior
-  // valuation when omitted; zero/unavailable public quotes cannot create losses.
+  // Balance UPnL uses the live last price like TS; with only a zero/invalid
+  // placeholder quote Rust uses reported position PnL (TS prices it at 0).
   // TS logs native login rejection and has no auth-completion deadline.
   // Native failure regressions verify closure/backoff without altering replay output.
-  apexomni: ['Close rejected private logins and bound missing login ACK/account-stream readiness independently of pongs; preserve immediate subscriptions.'],
+  apexomni: [
+    'Close rejected private logins and bound missing login ACK/account-stream readiness independently of pongs; preserve immediate subscriptions.',
+    // Private tape: real quote 60000 == entry 60000 and native unrealisedPnl 0,
+    // yet TS shows balance 1300 / upnl -300 at startup checkpoints 0-2.
+    'Never price positions at an all-zero placeholder ticker: TS fabricates a startup loss (balance total/upnl) until its next balance fetch.',
+  ],
   // TS only reports public/auth errors; heartbeat responses can mask missing auth.
   cryptocom: ['Close rejected private authentication and enforce an independent auth deadline while preserving server heartbeat replies.'],
   kraken: {
@@ -473,12 +478,11 @@ const KNOWN_TS_FIXES = {
   // matching REST and client-ID lookup without normalizing command results.
   // Rust rejects malformed candle timestamps instead of returning partial history.
   bitrue(ts) {
-    // Rust refuses zero/non-finite ticker-derived position losses and aggregates
-    // position UPnL instead of treating sumOpenRealizedAmount as unrealized money.
-    // fixBitrue zeroes only the exact snapshot's position-free currency UPnL TS
-    // copied from sumOpenRealizedAmount. Confirmed leverage survives flat/empty
-    // account metadata; TS clears that rail and blocks fresh-account orders.
-    // Native regression tests cover this; command results are not normalized.
+    // Rust refuses zero/non-finite ticker-derived position losses; per-currency
+    // UPnL is sumOpenRealizedAmount exactly as TS publishes it. Confirmed
+    // leverage survives flat/empty account metadata; TS clears that rail and
+    // blocks fresh-account orders. Native regression tests cover this
+    // correction; no account values or command results are normalized here.
     // Flat rows may omit leverage until explicitly set; balance still commits.
     // Cancellation continues after failures, including child fallbacks after a
     // failed parent, and reports each failed ID. TS stops subsequent chunks.

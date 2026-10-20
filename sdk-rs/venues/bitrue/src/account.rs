@@ -211,8 +211,8 @@ struct Coin<'a> {
     total_cost: Number,
     #[serde(default)]
     sum_maintenance_margin: Option<Number>,
-    #[serde(default, rename = "sumOpenRealizedAmount")]
-    _sum_open_realized_amount: Number,
+    #[serde(default)]
+    sum_open_realized_amount: Number,
     #[serde(borrow)]
     position_vos: Option<Vec<ContractPositions<'a>>>,
 }
@@ -1099,7 +1099,7 @@ impl Bitrue {
             return Ok(());
         }
         let groups = coin.position_vos.ok_or(())?;
-        let mut balance = Balance {
+        let balance = Balance {
             total: coin.total_equity.0,
             free: coin.account_normal.0,
             used: (coin.total_equity.0 - coin.account_normal.0)
@@ -1108,9 +1108,9 @@ impl Bitrue {
                 .max(coin.total_cost.0)
                 .max(coin.sum_maintenance_margin.map_or(0.0, |n| n.0))
                 .max(0.0),
-            upnl: 0.0,
+            upnl: coin.sum_open_realized_amount.0,
         };
-        let first_position = data.positions.len();
+        data.balances.insert(coin.margin_coin.to_string(), balance);
         for group in groups {
             if group.contract_name.is_empty() {
                 return Err(());
@@ -1213,13 +1213,6 @@ impl Bitrue {
                 });
             }
         }
-        balance.upnl = data.positions[first_position..]
-            .iter()
-            .try_fold(0.0, |sum, p| {
-                let value = sum + p.unrealized_pnl;
-                value.is_finite().then_some(value).ok_or(())
-            })?;
-        data.balances.insert(coin.margin_coin.to_string(), balance);
         Ok(())
     }
     fn map_rest_order(
