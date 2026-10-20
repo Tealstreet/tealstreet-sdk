@@ -919,7 +919,8 @@ fn queries_return_history_in_the_shared_shapes() {
         },
     });
     let request = h.take("/v5/market/recent-trade");
-    assert!(request.headers.is_empty(), "public reads are not signed");
+    // Public reads retain the TS factory broker header without credentials.
+    assert_eq!(request.headers, vec![("X-Referer", "Tealstreet".into())]);
     h.reply(
         request.id,
         200,

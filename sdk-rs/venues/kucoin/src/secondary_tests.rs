@@ -153,8 +153,13 @@ fn public_only_signing_helpers_do_not_reintroduce_secondary_identity() {
         .collect::<Vec<_>>();
     assert_eq!(requests.len(), 5);
     for request in requests {
-        assert!(
-            request.headers.is_empty(),
+        // Attribution remains public; no primary, secondary or partner auth leaks.
+        assert_eq!(
+            request.headers,
+            vec![
+                ("X-CHANNEL-API-CODE", "3zexp".into()),
+                ("Content-Type", "application/json".into()),
+            ],
             "public-only helper authenticated {}",
             request.url
         );
