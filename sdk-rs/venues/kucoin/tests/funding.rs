@@ -1,5 +1,6 @@
 //! Oracles: Classic Futures Get Private Funding History, including its
 //! recommendation to page by time rather than unstable offsets.
+mod support;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Query};
 use safe_cex_venue_kucoin::{Kucoin, Options};
@@ -72,6 +73,13 @@ impl Harness {
         }));
     }
     fn take(&mut self) -> HttpRequest {
+        support::wait_for_http(
+            &mut self.engine,
+            &mut self.actions,
+            &mut self.now,
+            None,
+            None,
+        );
         let i = self
             .actions
             .iter()

@@ -6,15 +6,28 @@ use safe_cex_venue_kucoin::{Kucoin, Options};
 
 const MARKET: &str = r#"{"symbol":"XBTUSDTM","baseCurrency":"XBT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"maxOrderQty":1000000,"maxLeverage":125,"multiplier":0.001,"expireDate":null,"isInverse":false}"#;
 fn requests(e: &mut Engine<Kucoin>) -> Vec<HttpRequest> {
-    e.drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .collect()
+    let mut requests = Vec::new();
+    let mut actions: Vec<_> = e.drain_actions().collect();
+    loop {
+        // The quota window is armed immediately before its first HTTP action.
+        // Settle that dispatch window before supplying scripted HTTP responses.
+        // These legacy fixtures then resume their fixed event times; http.rs
+        // separately checks the real dispatch-window and signing-clock contract.
+        let reset = actions.windows(2).find_map(|pair| match pair {
+            [Action::SetTimer { timer, at_ms }, Action::Http(_)] => Some((*timer, *at_ms)),
+            _ => None,
+        });
+        requests.extend(actions.into_iter().filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        }));
+        let Some((timer, at_ms)) = reset else {
+            break;
+        };
+        e.handle(at_ms, Event::TimerFired { timer });
+        actions = e.drain_actions().collect();
+    }
+    requests
 }
 fn answer(e: &mut Engine<Kucoin>, request: &HttpRequest, body: &str) {
     e.handle(

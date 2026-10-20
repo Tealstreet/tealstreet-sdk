@@ -1,6 +1,7 @@
 //! Fixtures follow KuCoin Classic Futures documented account and private-order examples.
 //! https://www.kucoin.com/docs-new/3470090w0 (Orders)
 //! https://www.kucoin.com/docs-new/rest/futures-trading/orders/get-order-list
+mod support;
 use safe_cex_engine::model::{MarginType, OrderSide, OrderType, PositionMode, TimeInForce};
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId,
@@ -71,10 +72,17 @@ impl Harness {
         self.collect();
     }
     fn http(&mut self, path: &str) -> HttpRequest {
+        support::wait_for_http(
+            &mut self.engine,
+            &mut self.actions,
+            &mut self.now,
+            Some(path),
+            (path == "/api/v1/orders").then_some(safe_cex_engine::Method::Post),
+        );
         let i = self
             .actions
             .iter()
-            .position(|a| matches!(a,Action::Http(r)if r.url.contains(path)))
+            .position(|a| matches!(a,Action::Http(r)if r.url.contains(path) && (path != "/api/v1/orders" || r.method == safe_cex_engine::Method::Post)))
             .unwrap_or_else(|| panic!("missing {path}: {:?}", self.actions));
         match self.actions.remove(i) {
             Action::Http(r) => r,
@@ -321,6 +329,7 @@ fn failed_positions_snapshot_never_becomes_empty() {
 fn closed_positions_reject_late_stream_rows_and_cached_rest_keeps_reopened_exposure() {
     let mut h = Harness::new();
     h.ready();
+    let poll_at = h.now + 500.0;
     h.now += 1000.0;
     let closed = POSITION
         .replace("\"currentQty\":10", "\"currentQty\":0")
@@ -340,7 +349,7 @@ fn closed_positions_reject_late_stream_rows_and_cached_rest_keeps_reopened_expos
         .iter()
         .enumerate()
         .find_map(|(i, a)| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 1610000000500.0 => Some((i, *timer)),
+            Action::SetTimer { timer, at_ms } if *at_ms == poll_at => Some((i, *timer)),
             _ => None,
         })
         .unwrap();
@@ -710,6 +719,7 @@ fn leverage_stream_fences_an_inflight_flat_symbol_leverage_read() {
 fn amend_own_bracket(reconcile: bool) {
     let mut h = Harness::new();
     h.ready();
+    let poll_at = h.now + 500.0;
     h.event(Event::Command(Command::PlaceOrders { command: 1, orders: vec![serde_json::from_str(r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":10,"price":100,"stopLoss":90,"takeProfit":110,"slTriggerType":"mark_price","tpTriggerType":"mark_price"}"#).unwrap()] }));
     h.reply(
         "/api/v1/st-orders",
@@ -718,7 +728,13 @@ fn amend_own_bracket(reconcile: bool) {
     h.ws("/contractMarket/tradeOrders", r#"{"orderId":"own-bracket","symbol":"XBTUSDTM","side":"buy","orderType":"limit","type":"open","status":"open","size":10,"filledSize":1,"remainSize":9,"price":"100","ts":1610000000001000000}"#);
     h.pace();
     if reconcile {
-        let index = h.actions.iter().position(|action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == 1610000000500.0)).unwrap();
+        let index = h
+            .actions
+            .iter()
+            .position(
+                |action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == poll_at),
+            )
+            .unwrap();
         let Action::SetTimer { timer, at_ms } = h.actions.remove(index) else {
             unreachable!()
         };

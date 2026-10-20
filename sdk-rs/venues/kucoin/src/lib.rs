@@ -2,6 +2,7 @@
 mod account;
 mod funding;
 mod history;
+mod http;
 pub mod sign;
 mod trading;
 mod wire;
@@ -120,6 +121,7 @@ pub struct Kucoin {
     account: account::Account,
     trading: trading::Trading,
     history: history::History,
+    http_budget: http::Budget,
     funding: funding::Funding,
     connections: Vec<Connection>,
     books: HashMap<String, BookState>,
@@ -217,6 +219,7 @@ impl Kucoin {
             account: Default::default(),
             trading: Default::default(),
             history: Default::default(),
+            http_budget: Default::default(),
             funding: Default::default(),
             connections: vec![],
             books: HashMap::new(),
@@ -226,26 +229,27 @@ impl Kucoin {
         }
     }
     pub(crate) fn signed(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
         body: Option<String>,
         pending: Pending,
     ) {
-        let headers = self.credentials.as_ref().map_or_else(Vec::new, |c| {
-            sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
-        });
-        cx.request(
-            method,
-            format!("{REST}{}", encoded_path(path)),
-            headers,
-            body,
-            pending,
+        self.http(
+            cx,
+            http::Request {
+                method,
+                path: path.into(),
+                body,
+                pending,
+                stream: None,
+                authenticated: true,
+            },
         );
     }
     pub(crate) fn signed_streamed(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
@@ -253,41 +257,52 @@ impl Kucoin {
         at: ArrayAt,
         pending: Pending,
     ) {
-        let headers = self.credentials.as_ref().map_or_else(Vec::new, |c| {
-            sign::headers(c, method, path, body.as_deref().unwrap_or(""), cx.now)
-        });
-        let request = cx.request(
-            method,
-            format!("{REST}{}", encoded_path(path)),
-            headers,
-            body,
-            pending,
+        self.http(
+            cx,
+            http::Request {
+                method,
+                path: path.into(),
+                body,
+                pending,
+                stream: Some(at),
+                authenticated: true,
+            },
         );
-        cx.stream_response(request, at);
     }
-    fn public(&self, cx: &mut Cx<'_, Pending>, path: &str, at: Option<ArrayAt>, pending: Pending) {
-        let request = cx.request(
-            Method::Get,
-            format!("{REST}{}", encoded_path(path)),
-            vec![],
-            None,
-            pending,
+    fn public(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        at: Option<ArrayAt>,
+        pending: Pending,
+    ) {
+        self.http(
+            cx,
+            http::Request {
+                method: Method::Get,
+                path: path.into(),
+                body: None,
+                pending,
+                stream: at,
+                authenticated: false,
+            },
         );
-        if let Some(at) = at {
-            cx.stream_response(request, at);
-        }
     }
     fn token(&mut self, cx: &mut Cx<'_, Pending>, channel: usize, attempt: u8) {
         let pending = Pending::Bullet { channel, attempt };
         if matches!(self.connections[channel].role, Role::Private) {
             self.signed(cx, Method::Post, "/api/v1/bullet-private", None, pending);
         } else {
-            cx.request(
-                Method::Post,
-                format!("{REST}/api/v1/bullet-public"),
-                vec![],
-                None,
-                pending,
+            self.http(
+                cx,
+                http::Request {
+                    method: Method::Post,
+                    path: "/api/v1/bullet-public".into(),
+                    body: None,
+                    pending,
+                    stream: None,
+                    authenticated: false,
+                },
             );
         }
     }
@@ -980,7 +995,8 @@ impl Venue for Kucoin {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.account_timer(cx, timer)
+        if self.http_timer(cx, timer)
+            || self.account_timer(cx, timer)
             || self.trading_timer(cx, timer)
             || self.history_timer(cx, timer)
             || self.funding_timer(cx, timer)

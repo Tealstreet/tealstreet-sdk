@@ -1020,3 +1020,35 @@ and implementation review, new artifact and unchanged complete gates follow.
 No arbitrary sleeps, TS limiter bypass, hash/timestamp normalization or
 sample removal. Existing340helpers and all native/source checks are green
 at checkpoint2a3ed236f6; strict public gate remains pending this correction.
+
+### Next landing: AsterDEX
+
+Origin advances to d9aa597fd3(PR1322) during the KuCoin budget implementation.
+Finish/review/checkpoint the queue before merging; no stash. Re-read changed
+RUST_REWRITE requirements: HTTP route hints remain host-only metadata; new
+optional ticker identity and per-currency balance tails preserve legacy
+offsets. Integrate Aster V1/V3 while preserving netPNL/base units and all
+strict harness controls. Bitunix must explicitly reject unsupported new STP
+controls during whole-batch preflight. Audit optional-tail preallocation,
+CancelOrderRefs backward behavior, ordinary account routing and lazy crypto
+loading independently across native, SDK/hosts and harness scopes. Run fresh
+checks/gates and all registered CI checks before landing.
+
+Fresh queued KuCoin WASM748,405bytes and raw public diagnostic PASS: all
+150timestamps/hashes exactly equal the corrected TS replay, with zero
+unserved/unused/protocol/socket errors. Exact3RPS dispatch is causal; no
+measurement or comparison adjustment. Full private gate PASS32frames/
+17commands. All102KuCoin native tests and strict Clippy PASS; final helper
+audit strengthens known-mode equality and preserves whole-batch zero-HTTP
+assertions. Independent source/FIFO/signing/stream/generation audit finds
+no issue. Final three-run public performance gate follows CPU-quiet release,
+then checkpoint before Aster integration.
+
+Final unchanged KuCoin three-run public gate PASS:16,157frames/692markets/
+2books, all150intermediate timestamps/hashes exact. TS/Rust main CPU
+1,068.5/646.3ms, steady709.2/398.5ms, retained7.2/2.9MB, sampledpeak35.7/18.1MB.
+Module748,405/1,258,291bytes. Full private32frames/17commands PASS.
+Owner102native/fmt/strictClippy/bans PASS and independent final queue/helper
+review has no findings. Whole-batch zero-HTTP guards remain, cached fixture
+mode equality is explicit. Checkpoint the causal3RPS correction before
+fetching/merging AsterDEX; no hashes, timings, thresholds or samples waived.
