@@ -2,7 +2,7 @@ use super::{Connection, KrakenSpot, Pending, wire::*};
 use crate::wire::{number, optional_number};
 use safe_cex_engine::url;
 use safe_cex_engine::{
-    Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, model::*,
+    Cx, Fill, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, model::*, socket::Tick,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -274,13 +274,15 @@ impl KrakenSpot {
             return;
         }
         self.spot_settings(cx);
-        self.account.connection.socket =
-            Some(cx.connect_channel("wss://ws-auth.kraken.com/v2", SocketChannel::Private));
-        self.account.connection.received = cx.now;
-        self.account.connection.watchdog = Some(cx.set_timer(15_000.));
+        self.private_connect(cx);
         self.balance_read(cx, None);
         self.orders_read(cx);
         self.account.poll = Some(cx.set_timer(10_000.));
+    }
+    fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.connection.supervisor.connecting(cx);
+        self.account.connection.socket =
+            Some(cx.connect_channel("wss://ws-auth.kraken.com/v2", SocketChannel::Private));
     }
     fn spot_settings(&self, cx: &mut Cx<'_, Pending>) {
         let settings: Vec<_> = cx
@@ -346,7 +348,7 @@ impl KrakenSpot {
             return false;
         }
         self.account.connection.open = true;
-        self.account.connection.received = cx.now;
+        self.account.connection.supervisor.opened(cx);
         self.request_private(
             cx,
             "/0/private/GetWebSocketsToken",
@@ -363,13 +365,7 @@ impl KrakenSpot {
         self.account.connection.open = false;
         self.account.revision += 1;
         self.account.balance_revision += 1;
-        if let Some(t) = self.account.connection.watchdog.take() {
-            cx.clear_timer(t)
-        }
-        self.account.connection.attempts = self.account.connection.attempts.saturating_add(1);
-        self.account.connection.reconnect = Some(cx.set_timer(
-            (1000. * 2f64.powi(self.account.connection.attempts.min(5) as i32 - 1)).min(30_000.),
-        ));
+        self.account.connection.supervisor.retry(cx);
         true
     }
     // Private balances can arrive before the first public quote seed. Revalue
@@ -637,7 +633,6 @@ impl KrakenSpot {
                                 .unwrap(),
                             );
                         }
-                        self.account.connection.attempts = 0;
                         Ok(())
                     }
                     _ => Err("Kraken Spot missing WS token".into()),
@@ -716,22 +711,10 @@ impl KrakenSpot {
             self.orders_read(cx);
             return true;
         }
-        if self.account.connection.reconnect == Some(timer) {
-            self.account.connection.reconnect = None;
-            self.account.connection.socket =
-                Some(cx.connect_channel("wss://ws-auth.kraken.com/v2", SocketChannel::Private));
-            self.account.connection.received = cx.now;
-            self.account.connection.watchdog = Some(cx.set_timer(15_000.));
-            return true;
-        }
-        if self.account.connection.watchdog == Some(timer) {
-            self.account.connection.watchdog = None;
-            if cx.now - self.account.connection.received >= 45_000. {
-                if let Some(s) = self.account.connection.socket {
-                    cx.close(s);
-                    self.private_close(cx, s);
-                }
-            } else {
+        match self.account.connection.supervisor.on_timer(cx, timer) {
+            Tick::Unhandled => return false,
+            Tick::Reconnect => self.private_connect(cx),
+            Tick::Ping => {
                 if let Some(s) = self
                     .account
                     .connection
@@ -740,11 +723,16 @@ impl KrakenSpot {
                 {
                     cx.send(s, "{\"method\":\"ping\"}");
                 }
-                self.account.connection.watchdog = Some(cx.set_timer(15_000.));
             }
-            return true;
+            Tick::TimedOut(_) => {
+                if let Some(s) = self.account.connection.socket {
+                    cx.close(s);
+                    self.private_close(cx, s);
+                }
+            }
+            Tick::Handled => (),
         }
-        false
+        true
     }
     pub(super) fn terminal(&mut self, id: &str) {
         if self.account.terminal.insert(id.into()) {
@@ -766,7 +754,7 @@ impl KrakenSpot {
         if self.account.connection.socket != Some(socket) {
             return false;
         }
-        self.account.connection.received = cx.now;
+        self.account.connection.supervisor.received(cx.now);
         let Ok(msg) = serde_json::from_str::<Ws<'_>>(text) else {
             return true;
         };

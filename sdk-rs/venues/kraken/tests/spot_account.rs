@@ -62,7 +62,9 @@ fn token_refreshed_per_socket_and_stale_token_never_subscribes_new_socket() {
     let reconnect = e
         .drain_plain()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if at_ms == NOW + 1000. => Some(timer),
+            Action::SetTimer { timer, at_ms } if (NOW + 750.0..=NOW + 1000.).contains(&at_ms) => {
+                Some(timer)
+            }
             _ => None,
         })
         .unwrap();
