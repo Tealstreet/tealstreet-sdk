@@ -1,4 +1,5 @@
 //! Legacy Breakout DXtrade: authenticated REST polling, with no exchange socket.
+mod account;
 mod session;
 pub(crate) mod wire;
 
@@ -38,6 +39,9 @@ impl Default for Options {
 pub struct BreakoutProp {
     pub(crate) options: Options,
     pub(crate) session: session::Session,
+    auth_failed: bool,
+    auth_error: String,
+    auth_draining: bool,
     queue: VecDeque<Pending>,
     dispatch_timer: Option<(TimerId, f64)>,
     poll_timer: Option<TimerId>,
@@ -47,6 +51,11 @@ pub struct BreakoutProp {
     instruments_pending: bool,
     details_pending: bool,
     quotes_pending: bool,
+    portfolio_pending: bool,
+    portfolio_started: bool,
+    last_portfolio_version: Option<u64>,
+    order_revision: u64,
+    terminal_orders: HashMap<String, f64>,
     books: HashMap<String, (usize, Book)>,
     candles: HashMap<(String, String), usize>,
 }
@@ -74,6 +83,12 @@ pub(crate) enum Operation {
         rows: Vec<Ticker>,
         invalid: bool,
     },
+    Portfolio {
+        revision: u64,
+        initial: bool,
+        snapshot: Option<account::Snapshot>,
+        invalid: bool,
+    },
     Candles {
         command: u32,
         symbol: String,
@@ -88,6 +103,7 @@ pub(crate) enum Operation {
 impl Operation {
     fn stream(&self) -> Option<ArrayAt> {
         match self {
+            Self::Portfolio { .. } => Some(ArrayAt::Field("portfolios")),
             Self::Instruments { .. } => Some(ArrayAt::Field("instruments")),
             Self::Details { .. } => Some(ArrayAt::Field("instrumentDetails")),
             Self::Quotes { .. } | Self::Candles { .. } => Some(ArrayAt::Field("events")),
@@ -97,6 +113,12 @@ impl Operation {
 
     fn reset(&mut self) {
         match self {
+            Self::Portfolio {
+                snapshot, invalid, ..
+            } => {
+                *snapshot = None;
+                *invalid = false;
+            }
             Self::Instruments { rows, invalid } => {
                 rows.clear();
                 *invalid = false;
@@ -152,6 +174,9 @@ impl BreakoutProp {
         Self {
             options,
             session: session::Session::default(),
+            auth_failed: false,
+            auth_error: String::new(),
+            auth_draining: false,
             queue: VecDeque::new(),
             dispatch_timer: None,
             poll_timer: None,
@@ -161,6 +186,11 @@ impl BreakoutProp {
             instruments_pending: false,
             details_pending: false,
             quotes_pending: false,
+            portfolio_pending: false,
+            portfolio_started: false,
+            last_portfolio_version: None,
+            order_revision: 0,
+            terminal_orders: HashMap::new(),
             books: HashMap::new(),
             candles: HashMap::new(),
         }
@@ -175,6 +205,10 @@ impl BreakoutProp {
     }
 
     pub(crate) fn schedule(&mut self, cx: &mut Cx<'_, Pending>, operation: Operation) {
+        if self.auth_failed || self.auth_draining {
+            self.fail_operation(cx, operation, &self.auth_error.clone());
+            return;
+        }
         if self.queue.len() >= 10_000 {
             self.fail_operation(cx, operation, "DXtrade request queue is full");
             return;
@@ -212,7 +246,7 @@ impl BreakoutProp {
     }
 
     fn drive(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.queue.is_empty() {
+        if self.auth_failed || self.auth_draining || self.queue.is_empty() {
             return;
         }
         if !self.session.valid(cx.now) {
@@ -254,6 +288,9 @@ impl BreakoutProp {
         };
         let mut pending = self.queue.remove(index).expect("queued request exists");
         pending.generation = self.session.generation;
+        if let Operation::Portfolio { revision, .. } = &mut pending.operation {
+            *revision = self.order_revision;
+        }
         let operation = &pending.operation;
         let spec = self.request_spec(cx, operation);
         let (method, path, body) = match spec {
@@ -316,6 +353,9 @@ impl BreakoutProp {
                         .map_err(|_| "Invalid DXtrade login request".to_owned())?,
                     ),
                 )
+            }
+            Operation::Portfolio { .. } => {
+                (Method::Get, format!("accounts/{encoded}/portfolio"), None)
             }
             Operation::Discover => (
                 Method::Get,
@@ -382,20 +422,46 @@ impl BreakoutProp {
     }
 
     pub(crate) fn arm_poll(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.poll_timer.is_none() {
+        if !self.auth_failed && !self.auth_draining && self.poll_timer.is_none() {
             self.poll_timer = Some(cx.set_timer(self.options.tick_interval));
         }
     }
 
     pub(crate) fn poll(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.auth_failed || self.auth_draining {
+            return;
+        }
         if !cx.store.loaded().markets {
             self.fetch_markets(cx);
-        } else if !self.quotes_pending {
+        } else if !cx.store.loaded().tickers || self.public_only() {
+            self.fetch_quotes(cx);
+        } else {
+            self.fetch_portfolio(cx, false);
+        }
+    }
+
+    fn fetch_quotes(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.quotes_pending {
             self.quotes_pending = true;
             self.schedule(
                 cx,
                 Operation::Quotes {
                     rows: Vec::new(),
+                    invalid: false,
+                },
+            );
+        }
+    }
+
+    fn fetch_portfolio(&mut self, cx: &mut Cx<'_, Pending>, initial: bool) {
+        if !self.portfolio_pending {
+            self.portfolio_pending = true;
+            self.schedule(
+                cx,
+                Operation::Portfolio {
+                    revision: self.order_revision,
+                    initial,
+                    snapshot: None,
                     invalid: false,
                 },
             );
@@ -540,24 +606,56 @@ impl BreakoutProp {
             }
         }
         cx.store.set_tickers(rows);
-        self.arm_poll(cx);
+        if !self.public_only() && !self.portfolio_started {
+            self.portfolio_started = true;
+            self.fetch_portfolio(cx, true);
+        } else {
+            self.arm_poll(cx);
+        }
     }
 
     fn fail_operation(&mut self, cx: &mut Cx<'_, Pending>, operation: Operation, error: &str) {
         match operation {
+            Operation::Portfolio { .. } => {
+                self.portfolio_pending = false;
+                cx.log(LogLevel::Error, error);
+                if !self.auth_failed && !self.auth_draining {
+                    self.fetch_quotes(cx);
+                }
+            }
             Operation::Login | Operation::Discover => {
+                self.auth_error = error.into();
+                if !cx.store.loaded().markets {
+                    self.auth_failed = true;
+                    cx.log(LogLevel::Error, format!("DXtrade startup failed: {error}"));
+                }
                 if matches!(operation, Operation::Login) {
                     self.session.login_pending = false;
                     self.session.token = None;
                 } else {
                     self.session.discovery_pending = false;
                 }
+                let was_draining = std::mem::replace(&mut self.auth_draining, true);
                 let queued = std::mem::take(&mut self.queue);
                 for pending in queued {
                     self.fail_operation(cx, pending.operation, error);
                 }
+                self.auth_draining = was_draining;
                 cx.log(LogLevel::Error, error);
-                self.arm_poll(cx);
+                if self.auth_failed {
+                    self.session.token = None;
+                    self.session.expires_at = 0.0;
+                    self.session.login_pending = false;
+                    self.session.discovery_pending = false;
+                    if let Some((timer, _)) = self.dispatch_timer.take() {
+                        cx.clear_timer(timer);
+                    }
+                    if let Some(timer) = self.poll_timer.take() {
+                        cx.clear_timer(timer);
+                    }
+                } else {
+                    self.arm_poll(cx);
+                }
             }
             Operation::Instruments { .. } => {
                 self.instruments_pending = false;
@@ -595,6 +693,17 @@ impl Venue for BreakoutProp {
         mut pending: Pending,
         response: Response<'_>,
     ) {
+        if self.auth_failed {
+            self.fail_operation(cx, pending.operation, &self.auth_error.clone());
+            return;
+        }
+        if matches!(pending.operation, Operation::Login) && matches!(response.status, 401 | 403) {
+            self.auth_failed = true;
+            self.auth_error = format!("DXtrade HTTP {}", response.status);
+            self.fail_operation(cx, pending.operation, &self.auth_error.clone());
+            cx.deactivate();
+            return;
+        }
         if response.status == 401
             && !matches!(pending.operation, Operation::Login)
             && !pending.auth_retried
@@ -620,6 +729,42 @@ impl Venue for BreakoutProp {
             return;
         }
         match pending.operation {
+            Operation::Portfolio {
+                revision,
+                initial,
+                mut snapshot,
+                invalid,
+            } => {
+                self.portfolio_pending = false;
+                if invalid || snapshot.is_none() {
+                    cx.log(
+                        LogLevel::Error,
+                        "Invalid or missing selected DXtrade portfolio",
+                    );
+                } else if revision == self.order_revision {
+                    let mut snapshot = snapshot.take().expect("validated portfolio");
+                    if self
+                        .last_portfolio_version
+                        .is_none_or(|last| snapshot.version >= last)
+                    {
+                        self.terminal_orders.retain(|_, at| cx.now - *at < 60_000.0);
+                        snapshot.orders.retain(|order| {
+                            !self.terminal_orders.contains_key(&order.id)
+                                && !order
+                                    .client_order_id
+                                    .as_ref()
+                                    .is_some_and(|id| self.terminal_orders.contains_key(id))
+                        });
+                        self.last_portfolio_version = Some(snapshot.version);
+                        snapshot.commit(cx);
+                    }
+                }
+                if initial && cx.store.loaded().balance {
+                    self.poll(cx);
+                } else {
+                    self.fetch_quotes(cx);
+                }
+            }
             Operation::Login => {
                 if let Err(error) = self.session.accept(response.body, cx.now) {
                     self.fail_operation(cx, Operation::Login, &error);
@@ -691,8 +836,24 @@ impl Venue for BreakoutProp {
         self.drive(cx);
     }
 
-    fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if self.auth_failed {
+            return;
+        }
         match &mut pending.operation {
+            Operation::Portfolio {
+                snapshot, invalid, ..
+            } => {
+                match account::parse_portfolio(
+                    item,
+                    cx.store,
+                    self.account_code().unwrap_or_default(),
+                ) {
+                    Ok(Some(row)) if snapshot.is_none() => *snapshot = Some(row),
+                    Ok(None) => {}
+                    _ => *invalid = true,
+                }
+            }
             Operation::Instruments { rows, invalid } => {
                 match serde_json::from_str::<wire::Instrument<'_>>(item) {
                     Ok(row) if row.symbol == "XBTUSD" => {}
@@ -799,6 +960,10 @@ impl Venue for BreakoutProp {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, _error: &str) {
+        if self.auth_failed {
+            self.fail_operation(cx, pending.operation, &self.auth_error.clone());
+            return;
+        }
         if pending.network_attempt < 3 {
             pending.network_attempt += 1;
             pending.ready_at = cx.now + 1_000.0 * f64::from(pending.network_attempt);

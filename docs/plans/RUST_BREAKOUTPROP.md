@@ -92,3 +92,17 @@ verification.
   leverage overflow. All fixed with regressions: 26 public/auth tests passing;
   strict all-target clippy and fmt passing. Public auth remains socket-free.
   Future-phase files are present but not part of this phase commit.
+
+- Phase 2 parser review caught a further inherited TS bug: native DXtrade lots
+  shared a symbol-derived ID and DefaultStore silently collapsed exposure.
+  Preserve native positionCode through the existing optional frame ID tail,
+  and fix the TS reference mapper. Nested account identities and order quantity
+  conservation are checked before atomic commit. Current account tests: 12
+  passing; public/auth regressions remain 26 passing.
+- Phase 2 independent re-review clear: 44 tests pass (7 parser, 8 account,
+  29 public/auth), strict clippy/fmt pass. Review fixed nested account isolation,
+  native lot identity, native pending statuses, order quantity consistency,
+  initial portfolio failure hot loops and auth-failure fanout. Definitive bad
+  credentials stop timers/deactivate; discovery/config errors explicitly settle
+  wrapper startup. Zero-size placeholders remain represented by SETTINGS per
+  the engine spec. Successful-write tombstone population is tested in phase 3.

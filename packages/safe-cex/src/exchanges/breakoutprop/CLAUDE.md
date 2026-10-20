@@ -60,7 +60,8 @@ no Bitrue-style `error sign!` response contract.
 
 `getAccountCode` fetches `/users/{username}`, retains `FULL_TRADING` accounts,
 and requires `options.subaccount` when more than one is available. Account
-codes use the `default:<account>` form and are inserted through
+selection matches the exact account code or suffix, preventing a request for
+`2` from selecting `12`. Account codes use the `default:<account>` form and are inserted through
 `replaceUrlParams`.
 
 ## Active REST surface
@@ -121,7 +122,9 @@ metrics. The adapter derives:
 - balance `free = total - used`
 
 These are explicit client-side estimates for the disabled legacy adapter.
-Position mode is always one-way and margin type is always cross. Missing
+Native `positionCode` remains the position ID so distinct lots on one symbol
+survive Store reconciliation. Position mode is always one-way and margin type is
+always cross. Missing
 symbols receive zero-sized placeholder positions.
 
 ## Order contract

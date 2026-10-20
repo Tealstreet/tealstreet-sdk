@@ -170,7 +170,7 @@ export class BreakoutpropExchange extends BaseExchange {
           throw new Error('Multiple accounts found. Please specify subaccount number ');
         }
         // account ==== default:{subaccount}
-        const subaccount = validAccounts.find((account) => account.account.includes(this.options.subaccount!));
+        const subaccount = validAccounts.find((account) => account.account === this.options.subaccount || account.account.replace(/^default:/, '') === this.options.subaccount);
         if (!subaccount) {
           throw new Error('Subaccount for number not found');
         }
@@ -418,7 +418,7 @@ export class BreakoutpropExchange extends BaseExchange {
           contracts: position.quantity,
           liquidationPrice: 0,
           marginSize: notional * position.marginRate,
-          id: createPositionId(position.symbol),
+          id: position.positionCode,
           positionMode: PositionMode.OneWay,
           marginType: MarginType.Cross,
           lastUpdate: new Date(position.lastUpdateTime).getTime(),

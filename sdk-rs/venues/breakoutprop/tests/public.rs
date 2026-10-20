@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Command, Event, Method};
+use safe_cex_engine::{Command, Event, Method, Notice};
 use safe_cex_venue_breakoutprop::{Options, parse_session_timeout_ms};
 use support::*;
 
@@ -616,4 +616,69 @@ fn reciprocal_margin_rate_must_be_finite_and_at_least_one() {
         assert!(!rig.engine.store().loaded().markets);
         assert!(rig.requests.is_empty());
     }
+}
+
+#[test]
+fn rejected_login_deactivates_clears_timers_and_fails_future_reads() {
+    for status in [401, 403] {
+        let mut rig = Rig::defaults();
+        let login = rig.next_request();
+        rig.command(Command::FetchCandles {
+            command: 8,
+            symbol: "ETHUSD".into(),
+            interval: "1h".into(),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        });
+        rig.reply(&login, status, r#"{"message":"private-server-detail"}"#);
+        assert!(rig.requests.is_empty());
+        assert!(rig.timers.is_empty());
+        assert!(rig.notices.contains(&Notice::Deactivate));
+        assert!(rig.notices.iter().any(|notice| matches!(notice, Notice::Log { message, .. } if message == &format!("DXtrade startup failed: DXtrade HTTP {status}"))));
+        assert!(rig.result(8).is_err());
+        rig.command(Command::FetchCandles {
+            command: 9,
+            symbol: "ETHUSD".into(),
+            interval: "1h".into(),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        });
+        assert!(rig.result(9).is_err());
+        assert!(rig.requests.is_empty());
+        assert!(rig.timers.is_empty());
+        assert!(!format!("{:?}", rig.notices).contains("private-server-detail"));
+    }
+}
+
+#[test]
+fn ambiguous_account_startup_reports_error_without_auth_deactivation_or_retries() {
+    let mut rig = Rig::defaults();
+    let login = rig.next_request();
+    rig.reply(&login, 200, LOGIN);
+    let user = rig.next_request();
+    rig.reply(&user, 200, r#"{"userDetails":[{"login":"example-user","domain":"default","accounts":[{"account":"default:12","accountStatus":"FULL_TRADING"},{"account":"default:2","accountStatus":"FULL_TRADING"}]}]}"#);
+    assert!(rig.requests.is_empty());
+    assert!(rig.timers.is_empty());
+    assert!(!rig.notices.contains(&Notice::Deactivate));
+    assert!(rig.notices.iter().any(|notice| matches!(notice, Notice::Log { message, .. } if message.starts_with("DXtrade startup failed: Multiple accounts"))));
+}
+
+#[test]
+fn responses_already_in_flight_cannot_restart_failed_authentication() {
+    let mut rig = Rig::defaults();
+    let login = rig.next_request();
+    rig.reply(&login, 200, LOGIN);
+    let user = rig.next_request();
+    rig.reply(&user, 200, USER);
+    let instruments = rig.next_request();
+    let details = rig.next_request();
+    rig.reply(&instruments, 401, "{}");
+    let login = rig.next_request();
+    rig.reply(&login, 401, "{}");
+    rig.reply(&details, 200, DETAILS);
+    assert!(rig.requests.is_empty());
+    assert!(rig.timers.is_empty());
+    assert!(!rig.engine.store().loaded().markets);
 }

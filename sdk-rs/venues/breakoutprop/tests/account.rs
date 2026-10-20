@@ -1,0 +1,135 @@
+mod support;
+use safe_cex_engine::Notice;
+use safe_cex_venue_breakoutprop::Options;
+use support::{QUOTES, Rig};
+const PORTFOLIO: &str = r#"{"portfolios":[{"account":"default:00002","version":86,"balances":[{"account":"default:00002","currency":"USD","value":4999.96}],"positions":[{"account":"default:00002","positionCode":"76515503","symbol":"ETHUSD","side":"BUY","quantity":0.01,"quantityNotional":0.01,"openPrice":3656.01,"marginRate":0.2,"lastUpdateTime":"2024-12-11T06:00:49.087Z"},{"account":"default:00002","positionCode":"76515542","symbol":"ETHUSD","side":"BUY","quantity":0.01,"quantityNotional":0.01,"openPrice":3660,"marginRate":0.2,"lastUpdateTime":"2024-12-11T05:56:26.400Z"}],"orders":[]}]}"#;
+fn rig() -> Rig {
+    let mut rig = Rig::new(Options {
+        key: "example-user".into(),
+        secret: "example-password".into(),
+        ..Options::default()
+    });
+    rig.boot();
+    for _ in 0..2 {
+        let request = rig.next_request();
+        assert!(request.url.ends_with("/portfolio"));
+        rig.reply(&request, 200, PORTFOLIO);
+    }
+    let quote = rig.next_request();
+    assert!(quote.url.ends_with("/marketdata"));
+    rig.reply(&quote, 200, QUOTES);
+    rig
+}
+#[test]
+fn documented_lots_keep_unique_position_codes_and_atomic_cash_estimates() {
+    let rig = rig();
+    let store = rig.engine.store();
+    assert!(store.loaded().balance && store.loaded().positions && store.loaded().orders);
+    assert_eq!(store.positions().len(), 2);
+    assert_eq!(store.positions()[0].id, "76515503");
+    assert_eq!(store.positions()[1].id, "76515542");
+    assert!((store.balance().upnl - (3656.01 - 3660.0) * 0.01).abs() < 1e-10);
+    assert_eq!(store.balance().used, 0.004);
+    assert_eq!(store.setting("ETHUSD").unwrap().leverage, 5.0);
+}
+#[test]
+fn failed_portfolio_keeps_every_section_and_quote_polling_recovers() {
+    let mut rig = rig();
+    let before = rig.engine.store().balance().clone();
+    let request = rig.next_request();
+    assert!(request.url.ends_with("/portfolio"));
+    rig.reply(&request, 500, "{}");
+    assert_eq!(*rig.engine.store().balance(), before);
+    assert_eq!(rig.engine.store().positions().len(), 2);
+    let quote = rig.next_request();
+    assert!(quote.url.ends_with("/marketdata"));
+    rig.reply(&quote, 200, QUOTES);
+}
+#[test]
+fn malformed_nested_account_rejects_all_snapshot_sections() {
+    let mut rig = rig();
+    let before = rig.engine.store().balance().clone();
+    let request = rig.next_request();
+    let bad = PORTFOLIO.replacen(
+        "\"account\":\"default:00002\",\"currency\"",
+        "\"account\":\"default:12\",\"currency\"",
+        1,
+    );
+    rig.reply(&request, 200, &bad);
+    assert_eq!(*rig.engine.store().balance(), before);
+    assert_eq!(rig.engine.store().positions().len(), 2);
+}
+#[test]
+fn lower_portfolio_version_cannot_rollback_cash() {
+    let mut rig = rig();
+    let request = rig.next_request();
+    rig.reply(
+        &request,
+        200,
+        &PORTFOLIO
+            .replace("\"version\":86", "\"version\":85")
+            .replace("4999.96", "100"),
+    );
+    assert!(rig.engine.store().balance().total > 4000.0);
+}
+#[test]
+fn missing_selected_portfolio_does_not_clear_account() {
+    let mut rig = rig();
+    let request = rig.next_request();
+    rig.reply(&request, 200, "{\"portfolios\":[]}");
+    assert_eq!(rig.engine.store().positions().len(), 2);
+}
+
+#[test]
+fn failed_startup_portfolio_waits_for_poll_interval_before_retry() {
+    let mut rig = Rig::new(Options {
+        key: "example-user".into(),
+        secret: "example-password".into(),
+        tick_interval: 10_000.0,
+        ..Options::default()
+    });
+    rig.boot();
+    let first = rig.next_request();
+    assert!(first.url.ends_with("/portfolio"));
+    rig.reply(&first, 500, "{}");
+    let quote = rig.next_request();
+    rig.reply(&quote, 200, QUOTES);
+    let quote_at = rig.now;
+    let second = rig.next_request();
+    assert!(second.url.ends_with("/portfolio"));
+    assert!(rig.now >= quote_at + 10_000.0);
+    assert!(!rig.engine.store().loaded().balance);
+}
+
+#[test]
+fn failed_refresh_login_drains_portfolio_without_starting_another_login() {
+    let mut rig = rig();
+    let before = rig.engine.store().balance().clone();
+    let portfolio = rig.next_request();
+    rig.reply(&portfolio, 401, "{}");
+    let login = rig.next_request();
+    assert!(login.url.ends_with("/login"));
+    rig.reply(&login, 500, "{}");
+    assert!(rig.requests.is_empty());
+    assert!(!rig.notices.contains(&Notice::Deactivate));
+    assert_eq!(*rig.engine.store().balance(), before);
+    let failure_at = rig.now;
+    let retry = rig.next_request();
+    assert!(retry.url.ends_with("/login"));
+    assert!(rig.now >= failure_at + 2_000.0);
+}
+
+#[test]
+fn rejected_refresh_login_stops_account_polling_without_clearing_snapshot() {
+    let mut rig = rig();
+    let before = rig.engine.store().balance().clone();
+    let portfolio = rig.next_request();
+    rig.reply(&portfolio, 401, "{}");
+    let login = rig.next_request();
+    rig.reply(&login, 403, "{}");
+    assert!(rig.requests.is_empty());
+    assert!(rig.timers.is_empty());
+    assert!(rig.notices.contains(&Notice::Deactivate));
+    assert_eq!(*rig.engine.store().balance(), before);
+    assert_eq!(rig.engine.store().positions().len(), 2);
+}
