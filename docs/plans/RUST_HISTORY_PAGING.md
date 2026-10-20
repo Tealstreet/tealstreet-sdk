@@ -39,3 +39,15 @@ hand-roll windows, cursors and pages in their `history.rs`. History reads only.
    truncation only warn), AsterDEX, Phemex.
 
 ## Progress
+
+- Batch 1 (PR into `feat/rust-rewrite`): `CursorWalk` added; Lighter, GRVT,
+  Coinbase and Paradex migrated with request-sequence pins written and
+  passing first. Recorded behaviour differences: Lighter's 1000-page budget
+  is per stage, and GRVT checks a stalled cursor only while the read still
+  wants rows. Paradex fixes, each with a regression that failed first:
+  - fills by order id stopped once raw rows reached the limit, before the
+    order-id filter, so a lookup could end on a page of other orders' fills;
+  - fills never sent `start_at`, so a sparse window paged through older fills
+    it then discarded (Rust-only tape record; TS still sends only `end_at`);
+  - a page cap with a cursor pending returned partial history with a warning;
+    it now fails as INCOMPLETE.

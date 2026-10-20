@@ -318,6 +318,7 @@ impl History {
         let (path, symbol, from, to, page_size, public) = match &request.query {
             Query::Fills {
                 symbol,
+                from_ms,
                 to_ms,
                 limit,
                 ..
@@ -328,7 +329,7 @@ impl History {
                     "/fills"
                 },
                 symbol.as_deref(),
-                None,
+                *from_ms,
                 *to_ms,
                 limit.unwrap_or(100).clamp(1, 500),
                 false,
@@ -703,9 +704,10 @@ impl History {
             self.issue(cx, account, request);
             return;
         }
-        let filled_limit = match request.query {
-            Query::Fills { limit, .. } => {
-                request.raw_rows >= limit.unwrap_or(100).clamp(1, 500) as usize
+        // Counts kept fills: order-id and time filters run after the page arrives.
+        let filled_limit = match (&request.query, &request.rows) {
+            (Query::Fills { limit, .. }, Rows::Fills(rows)) => {
+                rows.len() >= limit.unwrap_or(100).clamp(1, 500) as usize
             }
             _ => false,
         };
@@ -723,10 +725,10 @@ impl History {
                 self.issue(cx, account, request);
                 return;
             }
-            CursorStep::Stalled(Stall::PageBudget) => cx.log(
-                safe_cex_engine::LogLevel::Warning,
-                "Paradex history reached page cap",
-            ),
+            CursorStep::Stalled(Stall::PageBudget) => {
+                self.on_failed(cx, request, "INCOMPLETE: Paradex history page cap reached");
+                return;
+            }
             CursorStep::Stalled(_) => {
                 self.on_failed(cx, request, "Paradex repeated history cursor");
                 return;

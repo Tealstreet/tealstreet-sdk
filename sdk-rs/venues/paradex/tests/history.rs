@@ -459,10 +459,88 @@ fn paged_request_sequences_are_pinned() {
 }
 
 const PINNED: [&str; 6] = [
-    "/fills?market=BTC-USD-PERP&page_size=5&end_at=1681375200000",
-    "/fills?market=BTC-USD-PERP&page_size=5&end_at=1681375200000&cursor=c1",
+    "/fills?market=BTC-USD-PERP&page_size=5&start_at=1681375000000&end_at=1681375200000",
+    "/fills?market=BTC-USD-PERP&page_size=5&start_at=1681375000000&end_at=1681375200000&cursor=c1",
     "/orders-history?market=BTC-USD-PERP&page_size=100&start_at=1681375000000&end_at=1681375200000",
     "/orders-history?market=BTC-USD-PERP&page_size=100&start_at=1681375000000&end_at=1681375200000&cursor=c2",
     "/fills?page_size=500&start_at=1681375000000&end_at=1681375200000",
     "/fills?page_size=500&start_at=1681375000000&end_at=1681375200000&cursor=c3",
 ];
+
+#[test]
+fn fills_by_order_id_walk_past_pages_of_other_orders() {
+    // The limit counts fills the read keeps, not raw rows before filtering.
+    let mut h = private();
+    read(
+        &mut h,
+        1,
+        Query::Fills {
+            symbol: Some("BTC-USD-PERP".into()),
+            order_id: Some("target".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(2),
+        },
+    );
+    let other = |id: &str| {
+        FILL.replace("fill-a", id)
+            .replace(r#""order_id":"123""#, r#""order_id":"other""#)
+    };
+    h.reply(
+        "/fills?",
+        &format!(
+            r#"{{"next":"c1","results":[{},{}]}}"#,
+            other("x1"),
+            other("x2")
+        ),
+    );
+    let target = FILL
+        .replace("fill-a", "t1")
+        .replace(r#""order_id":"123""#, r#""order_id":"target""#);
+    h.reply("cursor=c1", &format!(r#"{{"results":[{target}]}}"#));
+    let rows: Vec<serde_json::Value> = serde_json::from_str(h.result(1).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], "t1");
+}
+
+#[test]
+fn fills_send_their_start_bound() {
+    let mut h = private();
+    read(
+        &mut h,
+        1,
+        Query::Fills {
+            symbol: Some("BTC-USD-PERP".into()),
+            order_id: None,
+            from_ms: Some(1_681_375_000_000.),
+            to_ms: None,
+            limit: Some(5),
+        },
+    );
+    let r = h.take("/fills?");
+    assert!(r.url.contains("start_at=1681375000000"), "{}", r.url);
+}
+
+#[test]
+fn a_page_cap_with_a_pending_cursor_is_incomplete_not_partial_success() {
+    let mut h = private();
+    read(
+        &mut h,
+        1,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    for page in 0..50 {
+        let row = ORDER.replace(r#""id":"123""#, &format!(r#""id":"o{page}""#));
+        h.reply(
+            "/orders-history?",
+            &format!(r#"{{"next":"c{page}","results":[{row}]}}"#),
+        );
+    }
+    assert!(h.result(1).unwrap_err().contains("INCOMPLETE"));
+    assert!(!h.pending.iter().any(|r| r.url.contains("/orders-history?")));
+}
