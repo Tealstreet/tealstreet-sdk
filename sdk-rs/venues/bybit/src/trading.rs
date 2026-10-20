@@ -2155,7 +2155,7 @@ struct LocalOrder {
 }
 
 impl BybitLinear {
-    fn apply_local_write(&self, cx: &mut Cx<'_, Pending>, local: &LocalWrite, response: &str) {
+    fn apply_local_write(&mut self, cx: &mut Cx<'_, Pending>, local: &LocalWrite, response: &str) {
         // A later authoritative snapshot or private session supersedes an ack.
         if local.socket != self.private.socket
             || local.snapshot != self.account.orders_snapshot_version
@@ -2234,7 +2234,7 @@ impl BybitLinear {
         }
     }
 
-    fn publish_local_create(&self, cx: &mut Cx<'_, Pending>, input: &LocalOrder, id: &str) {
+    fn publish_local_create(&mut self, cx: &mut Cx<'_, Pending>, input: &LocalOrder, id: &str) {
         if id.is_empty()
             || cx.store.order(id).is_some()
             || (input.order_type.as_deref() == Some("Market") && input.trigger_price.is_none())
@@ -2263,6 +2263,12 @@ impl BybitLinear {
         {
             for order in mapped.orders {
                 cx.store.upsert_order(order);
+            }
+            if input.reduce_only == Some(true)
+                && input.order_type.as_deref() == Some("Limit")
+                && input.trigger_price.is_none()
+            {
+                self.schedule_fill_repair(cx, id, &input.symbol);
             }
         }
     }
