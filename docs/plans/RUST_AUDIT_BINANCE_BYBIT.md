@@ -259,30 +259,30 @@ reverification has begun while this first patch completes its gates.
 
 ## Final merged-source gate evidence
 
-Source: `8b6e98201c` plus landing PR #1342 (`fc809a9d85`), merged at
-`1611908137`, and the final Spot correction `5440624e3d`. Later
-documentation-only checkpoints do not change the artifacts.
+Source: `0cdb22aae8`, including landing `ec5e2e954b` merged at
+`6854f75f3f`, strict Bybit affected-list proof and terminal cleanup.
+Documentation-only checkpoints do not change these artifacts.
 All 23 replay invocations pass: 11 documented/scripted private and 12 public.
 Public figures are medians of three runs; pairs below are **TS / Rust**.
 
 | Profile | Frames | Main-thread CPU ms | Steady CPU ms | Retained MB |
 | --- | ---: | ---: | ---: | ---: |
-| Binance USD-M | 873 | 244.2 / 126.9 | 132.9 / 60.3 | 18.2 / 4.1 |
-| Binance COIN-M | 202 | 180.4 / 69.3 | 118.4 / 38.5 | 13.9 / 1.9 |
-| Binance Spot | 7,045 | 585.5 / 441.1 | 252.8 / 134.4 | 27.6 / 10.8 |
-| Binance PM | 873 | 247.3 / 133.7 | 135.0 / 64.4 | 18.0 / 4.1 |
-| AsterDEX | 384 | 251.7 / 136.6 | 103.1 / 71.0 | 28.4 / 6.2 |
-| Bybit linear | 4,295 | 304.9 / 230.4 | 162.9 / 94.4 | 22.2 / 4.9 |
-| Bybit inverse | 708 | 171.4 / 59.7 | 114.1 / 24.7 | 14.4 / 1.6 |
-| Bybit Spot | 4,339 | 317.9 / 242.1 | 192.6 / 129.5 | 16.4 / 3.1 |
-| Bybit Demo | 5,833 | 404.0 / 285.7 | 224.0 / 130.1 | 21.9 / 5.0 |
-| HyroTrader (scripted public) | 160 | 32.3 / 23.3 | 8.6 / 4.2 | 13.5 / 0.9 |
-| Fresh Binance public capture | 285 | 427.6 / 143.4 | 272.4 / 71.8 | 18.4 / 4.1 |
-| Fresh Bybit public capture | 19,946 | 844.5 / 391.3 | 507.2 / 202.3 | 22.6 / 5.3 |
+| Binance USD-M | 873 | 261.3 / 133.6 | 147.9 / 65.0 | 18.2 / 4.0 |
+| Binance COIN-M | 202 | 248.6 / 102.9 | 161.6 / 55.5 | 14.0 / 1.9 |
+| Binance Spot | 7,045 | 935.5 / 645.7 | 470.4 / 274.6 | 27.6 / 10.8 |
+| Binance PM | 873 | 261.5 / 136.0 | 153.8 / 58.5 | 18.0 / 4.1 |
+| AsterDEX | 384 | 252.9 / 140.7 | 107.6 / 76.2 | 28.4 / 6.2 |
+| Bybit linear | 4,295 | 319.6 / 232.9 | 166.1 / 103.3 | 22.3 / 4.9 |
+| Bybit inverse | 708 | 160.0 / 45.9 | 103.2 / 18.5 | 14.4 / 1.6 |
+| Bybit Spot | 4,339 | 263.8 / 223.4 | 148.9 / 121.4 | 16.5 / 3.1 |
+| Bybit Demo | 5,833 | 242.6 / 224.6 | 125.5 / 97.6 | 21.9 / 5.1 |
+| HyroTrader (scripted public) | 160 | 31.8 / 30.4 | 13.2 / 11.3 | 13.5 / 0.9 |
+| Fresh Binance public capture | 285 | 459.8 / 161.1 | 290.0 / 86.1 | 18.5 / 4.1 |
+| Fresh Bybit public capture | 19,946 | 485.6 / 247.9 | 293.7 / 114.9 | 22.7 / 5.3 |
 
 All public outputs match under the existing documented TS corrections and
 unchanged thresholds. Process CPU is informational and does not always improve
-(e.g. Bybit linear 399.2 / 420.3 ms); no claim is made about every CPU metric or
+(e.g. Bybit Spot 386.6 / 420.0 ms); no claim is made about every CPU metric or
 peak memory. Private performance is informational, with one correctness run per
 tape. Native regressions carry the adverse ordering cases outside those tapes.
 
@@ -290,30 +290,31 @@ Selected WASM artifacts are below the unchanged 1,258,291-byte limit:
 
 | Family | Bytes | SHA-256 (Node) |
 | --- | ---: | --- |
-| Binance | 996,440 | `ccf248c7648161c8de6e763a368c4d5247fa4860b25c60f6b9d73f7e26f64183` |
+| Binance | 997,069 | `f55f6fd02fe287bfe23d8c71460fef69ba5487b51d489b15826a5654f28766b6` |
 | AsterDEX | 1,094,705 | `04d842f43383813042293c1d371e37834c3a363589b0899fc39e25fc78424f03` |
-| Bybit | 1,163,223 | `6a026d6aa72c31e0ee6899d5c920b27ca4e20af919fba633c8f1964ebc34a04a` |
+| Bybit | 1,174,110 | `780d0bc74f53e2c05b0db5d9aa749f869672d39d842ad1476a42a53ba080b89b` |
 
 - Gate 1: banned-pattern scan passes.
 - Gate 2: workspace formatting and strict all-target Clippy pass. Native tests:
-  engine 90, Binance 139, Bybit 150 and AsterDEX 99 (478 total).
+  engine 90, Binance 140, Bybit 159 and AsterDEX 99 (488 total).
 - Gate 3: strict default-feature WASM Clippy passes.
 - Gates 4–6: all selected release builds, private/public replay gates and
   Binance controls pass, including the fresh 20-second public captures.
-- Root typecheck: 44 tasks; root lint: 28 tasks. Root test initially passed its
-  other 25 tasks but hit SDK dynamic-import timeouts with the default worker
-  pool. Both complete SDK `test-ci` and `test-unit` suites subsequently pass
-  with `--maxWorkers=2`: 7,767 tests across 524 files each. No assertions,
+- Root typecheck: 44 tasks; root lint: 28 tasks. All other 25 root test tasks
+  pass. The complete SDK `test-ci` suite passes 7,777 tests across 526 files
+  with `--maxWorkers=2`, including the same unit suite as `test-unit`. The
+  preceding default-worker import timeouts are documented above; no assertions,
   timeout values or product code changed to accommodate host load.
-- Harness: 589 tests pass. The final combined default-feature release build
-  passes 443 SDK WASM tests across 16 files, 76 host tests, 16 product-semantic
+- Harness: 590 tests pass. The final combined default-feature release build
+  passes 444 SDK WASM tests across 16 files, 76 host tests, 16 product-semantic
   tests and 9 scripted live-smoke controls.
 
 Raw logs: `/tmp/audit-bb-<profile>-{public,private}.log`, selected builds/sizes
 `/tmp/audit-bb-{binance,aster,bybit}-{build,size}.log`, native/strict checks
-`/tmp/audit-bb-final-*.log`, SDK reruns
-`/tmp/audit-bb-sdk-test-{ci,unit}-limited.log` and harness
-`/tmp/audit-bb-harness.log`. Public tapes remain anonymous; private tapes are
+`/tmp/audit-bb-final-*.log`, SDK rerun
+`/tmp/audit-bb-merged-sdk-ci.log`, other root tasks
+`/tmp/audit-bb-merged-root-other-tests.log` and harness
+`/tmp/audit-bb-merged-harness.log`. Public tapes remain anonymous; private tapes are
 scripted/documented, without live credentials or funded trading. Existing
 committed public fixtures remain the CI regression oracle; the additional fresh
 captures were also trimmed and gated separately without replacing that coverage.
@@ -414,3 +415,28 @@ captures were also trimmed and gated separately without replacing that coverage.
 - Merged-source root typecheck (44 tasks), lint (28 tasks) and harness (590
   tests) pass. Selected artifacts and family replay evidence are being rebuilt
   after the landing merge and final cleanup; preceding measurements are historical.
+
+### Corrected PR final replay checkpoint
+
+- All 23 replay gates pass again on `0cdb22aae8`: 11 private and 12 public,
+  including both fresh anonymous captures. The table and selected sizes above
+  now reflect this source. No thresholds, tapes or output normalization changed
+  to accommodate the earlier Hyro CI timing miss.
+- Full merged native checks pass: engine 90, Binance 140, Bybit 159 and
+  AsterDEX 99 (488). Strict native/WASM Clippy, workspace format and bans pass.
+- Latest raw replay log: `/tmp/audit-bb-merged-final-gates.log`; native/check
+  logs: `/tmp/audit-bb-merged-{native,native-clippy,wasm-clippy,fmt,bans}.log`.
+  Combined WASM/SDK verification passes: 444 compiled SDK tests/16 files,
+  host 76, product 16, smoke 9, and all 7,777 SDK CI tests/526 files. All other
+  25 root test tasks pass. This supersedes the preceding historical counts.
+- The final-source secret scan covers 16 own commits with zero leaks. Final
+  evidence review is read-only; publish the corrected head and review closure,
+  then wait for all CI checks before merging into `feat/rust-rewrite`.
+
+- Independent final evidence audit verifies 23 PASS/zero FAIL, every public
+  median against three TS and three Rust results, artifact sizes/hashes and
+  488 native tests. No missing writes, unserved requests, invalid signatures
+  or protocol errors appear in those public results. Its requested latest
+  SDK/harness count and raw-log pointer corrections are applied above; no new
+  correctness or false-green replay finding remains. The full SDK CI command
+  includes the identical Vitest unit suite, so no duplicate unit rerun is needed.
