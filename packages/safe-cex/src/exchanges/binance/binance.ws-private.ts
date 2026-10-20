@@ -14,7 +14,15 @@ import { createPositionId } from '../../utils/createPositionId';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseWebSocket } from '../base.ws';
-import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TRIGGER_TYPE, ORDER_TYPE, POSITION_SIDE } from './binance.types';
+import {
+  BASE_WS_URL,
+  ENDPOINTS,
+  ORDER_SIDE,
+  ORDER_TRIGGER_TYPE,
+  ORDER_TYPE,
+  POSITION_SIDE,
+  TIME_IN_FORCE,
+} from './binance.types';
 
 // Binance expires a listenKey 60 minutes after the last keepalive.
 const LISTEN_KEY_REFRESH_MS = 30 * 60 * 1000;
@@ -193,6 +201,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
           status: OrderStatus.Open,
           symbol: data.s,
           type: ORDER_TYPE[data.ot],
+          timeInForce: TIME_IN_FORCE[data.f],
           side: ORDER_SIDE[data.S],
           price: parseFloat(data.p) || parseFloat(data.sp),
           amount: parseFloat(data.q),
@@ -280,7 +289,12 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         });
       }
 
-      if (algoStatus === 'CANCELED' || algoStatus === 'CANCELLED' || algoStatus === 'EXPIRED' || algoStatus === 'REJECTED') {
+      if (
+        algoStatus === 'CANCELED' ||
+        algoStatus === 'CANCELLED' ||
+        algoStatus === 'EXPIRED' ||
+        algoStatus === 'REJECTED'
+      ) {
         this.store.updateOrderStatus({ id: orderId }, OrderStatus.Canceled);
       }
 
