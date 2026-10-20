@@ -31,6 +31,8 @@ fn http_request(id: u32, url: String) -> HttpRequest {
     HttpRequest {
         id: RequestId(id),
         method: Method::Post,
+        route: None,
+        timeout_ms: None,
         url,
         headers: vec![("Content-Type", "application/json".into())],
         body: Some(r#"{"id":18446744073709551615}"#.into()),
@@ -1187,4 +1189,100 @@ async fn explicit_direct_urls_bypass_recovery_and_do_not_mutate_query_variant_co
     )
     .await;
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn explicit_public_routes_reach_direct_and_cors_without_account_authorization() {
+    let (listener, origin) = listener().await;
+    let server = tokio::spawn(async move {
+        let mut captured = Vec::new();
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            captured.push(request_text(&mut stream).await);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}")
+                .await
+                .unwrap();
+        }
+        captured
+    });
+    let tokens_used = Arc::new(AtomicUsize::new(0));
+    let used = tokens_used.clone();
+    let provider: ProxyTokenProvider = Arc::new(move || {
+        used.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Ok("must-not-be-used".into()) })
+    });
+    let transport = NetworkTransport::with_routing(
+        RoutingPlan {
+            http: HttpRoute {
+                mode: HttpRouteMode::How,
+                prefix: "https://account-proxy.invalid".into(),
+                authorize: true,
+                tunnel_url: Some("wss://account-tunnel.invalid".into()),
+                ..HttpRoute::default()
+            },
+            public_cors_http: Some(HttpRoute {
+                prefix: format!("{origin}/cors"),
+                ..HttpRoute::default()
+            }),
+            ..RoutingPlan::default()
+        },
+        provider,
+    );
+    let (send, mut events) = mpsc::unbounded_channel();
+    for (id, route, url) in [
+        (
+            1,
+            safe_cex_engine::RequestRoute::Direct,
+            format!("{origin}/fapi/v3/time?bytes=one%2Btwo"),
+        ),
+        (
+            2,
+            safe_cex_engine::RequestRoute::PublicCors,
+            "https://venue.invalid/fapi/v1/time".into(),
+        ),
+    ] {
+        transport.request(
+            HttpRequest {
+                id: RequestId(id),
+                method: Method::Get,
+                route: Some(route),
+                timeout_ms: None,
+                url,
+                headers: vec![],
+                body: None,
+            },
+            send.clone(),
+        );
+        assert_eq!(http_body(&mut events).await, b"{}");
+    }
+    let captured = server.await.unwrap();
+    assert!(captured[0].starts_with("GET /fapi/v3/time?bytes=one%2Btwo HTTP/1.1\r\n"));
+    assert!(captured[1].starts_with("GET /cors/https://venue.invalid/fapi/v1/time HTTP/1.1\r\n"));
+    assert!(captured.iter().all(
+        |request| !request.to_ascii_lowercase().contains("authorization:")
+            && !request.to_ascii_lowercase().contains("x-mbx-apikey:")
+            && !request.contains("publicCors")
+    ));
+    assert_eq!(tokens_used.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn raw_native_transport_rejects_unconfigured_public_cors_route() {
+    let (send, mut events) = mpsc::unbounded_channel();
+    NetworkTransport::default().request(
+        HttpRequest {
+            id: RequestId(200),
+            method: Method::Get,
+            route: Some(safe_cex_engine::RequestRoute::PublicCors),
+            timeout_ms: None,
+            url: "https://venue.invalid/time".into(),
+            headers: vec![],
+            body: None,
+        },
+        send,
+    );
+    assert!(
+        matches!(next(&mut events).await,HostEvent::HttpFailed(RequestId(200),error) if error.contains("not configured"))
+    );
 }

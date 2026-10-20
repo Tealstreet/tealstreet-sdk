@@ -118,6 +118,17 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  asterdex: {
+    // Native payload tests exercise these corrections; ordinary tapes compare
+    // unchanged, including exact execution prices and economic request fields.
+    notes: [
+      'A zero-size hedge WS update closes only its reported leg; TS removes every position for the symbol.',
+      'Nonce uniqueness is scoped to the agent address as documented; TS scopes it to owner plus agent and can collide across owners.',
+      'Failed or malformed history reads propagate errors instead of silently returning an authoritative empty result.',
+      'Historical candle timestamps use engine seconds consistently; TS returns raw milliseconds on this REST path.',
+      'Do not submit an amendment replacement after the old order fills during cancellation, including fills reported by the cancel response.',
+    ],
+  },
   // Paired TS fixes: contract-sized public volumes; private cumulative z/native
   // units, execution L prices, monotonic terminal state and ping timestamp echo.
   // Cancel native identities and protective defaults now match metadata. Rust
@@ -500,8 +511,8 @@ for (let run = 0; run < runs; run++) {
     if (values.venue === 'weex') KNOWN_TS_FIXES.weex(ts.account);
     if (values.venue === 'bingx') KNOWN_TS_FIXES.bingx(ts.account, rust.account);
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-      const left = JSON.stringify(ts.account[field]);
-      const right = JSON.stringify(rust.account[field]);
+      const left = JSON.stringify(stable(ts.account[field]));
+      const right = JSON.stringify(stable(rust.account[field]));
       if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
     }
   }

@@ -202,6 +202,10 @@ enum ActionOut<'a> {
     Http {
         request: u32,
         method: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        route: Option<&'static str>,
+        #[serde(rename = "timeoutMs", skip_serializing_if = "Option::is_none")]
+        timeout_ms: Option<u32>,
         url: &'a str,
         headers: Vec<(&'static str, &'a str)>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -275,6 +279,8 @@ fn encode(actions: &[Action]) -> String {
             Action::Http(request) => ActionOut::Http {
                 request: request.id.0,
                 method: request.method.as_str(),
+                route: request.route.map(safe_cex_engine::RequestRoute::as_str),
+                timeout_ms: request.timeout_ms,
                 url: &request.url,
                 headers: request
                     .headers
@@ -892,6 +898,40 @@ impl WasmEngine {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn http_route_metadata_is_optional_and_has_stable_host_names() {
+        let actions = [
+            None,
+            Some(safe_cex_engine::RequestRoute::Direct),
+            Some(safe_cex_engine::RequestRoute::PublicCors),
+        ]
+        .into_iter()
+        .map(|route| {
+            Action::Http(safe_cex_engine::HttpRequest {
+                id: safe_cex_engine::RequestId(1),
+                method: safe_cex_engine::Method::Get,
+                route,
+                timeout_ms: route.map(|_| 5_000),
+                url: "https://venue.test/time".into(),
+                headers: vec![],
+                body: None,
+            })
+        })
+        .collect::<Vec<_>>();
+        let encoded = encode(&actions);
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&encoded).unwrap();
+        assert!(rows[0].get("route").is_none());
+        assert_eq!(rows[1]["route"], "direct");
+        assert_eq!(rows[2]["route"], "publicCors");
+        assert!(rows[0].get("timeoutMs").is_none());
+        assert_eq!(rows[1]["timeoutMs"], 5_000);
+        assert_eq!(rows[2]["timeoutMs"], 5_000);
+        assert!(
+            rows.iter()
+                .all(|row| row["headers"] == serde_json::json!([]))
+        );
+    }
+
     use super::*;
 
     #[test]

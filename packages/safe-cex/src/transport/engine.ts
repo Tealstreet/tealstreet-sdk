@@ -42,6 +42,7 @@ export interface EngineRoutingPlan {
   http: EngineHttpRoute;
   publicHttp?: EngineHttpRoute;
   readHttp?: EngineHttpRoute;
+  publicCorsHttp?: EngineHttpRoute;
   publicHeader?: string;
   ws: { public: EngineWsRoute; private: EngineWsRoute; business: EngineWsRoute };
   wsHeaders: Record<string, string>;
@@ -109,6 +110,7 @@ export const resolveEngineRoutingPlan = (
     throw new Error('Custom transports must supply their own native host routing plan');
   }
   const { routing, restRouting } = resolved(exchange, options, provider);
+  const publicCorsProxy = exchange === 'asterdex' ? provider.publicCorsProxy() : undefined;
   const http = (headers: Record<string, string>): EngineHttpRoute => {
     const route = restRoute(provider, exchange, options, restRouting, { method: 'GET', url: baseURL, headers });
     const target = route.baseURL ?? baseURL;
@@ -129,6 +131,17 @@ export const resolveEngineRoutingPlan = (
   };
   return {
     http: http(exchange.startsWith('binance') ? { 'X-MBX-APIKEY': options.key ?? '' } : {}),
+    ...(publicCorsProxy
+      ? {
+          publicCorsHttp: {
+            mode: 'direct' as const,
+            prefix: publicCorsProxy,
+            authorize: false,
+            authorizationHeader: proxyAuthorizationHeader(exchange),
+            headers: {},
+          },
+        }
+      : {}),
     ...(exchange === 'asterdex' && options.secondary_key
       ? {
           publicHeader: 'X-MBX-APIKEY',
@@ -220,8 +233,9 @@ const httpTransport = (
   transport: Transport,
   provider: TransportProvider,
   routing: ResolvedRouting,
+  publicPrefix?: string,
 ): { request: Transport['request']; dispose(): void } => {
-  const tunnel = usesTunnel(exchange, options);
+  const tunnel = publicPrefix === undefined && usesTunnel(exchange, options);
   const adapter = tunnel
     ? provider.restAdapter({
         exchange,
@@ -237,6 +251,8 @@ const httpTransport = (
     pending.add(controller);
     const signal = request.signal ? AbortSignal.any([request.signal, controller.signal]) : controller.signal;
     const started = Date.now();
+    const { timeoutMs, ...networkRequest } = request;
+    const deadlineMs = Math.max(1, timeoutMs ?? 20_000);
     const cleanup = () => {
       clearTimeout(timer);
       pending.delete(controller);
@@ -245,23 +261,26 @@ const httpTransport = (
     const timer = setTimeout(() => {
       controller.abort(new Error('Engine transport request timed out'));
       pending.delete(controller);
-    }, 20_000);
+    }, deadlineMs);
     signal.addEventListener('abort', cleanup, { once: true });
     try {
       signal.throwIfAborted();
-      const route = restRoute(provider, exchange, options, routing, request, transport.serverHeaders);
+      const route =
+        publicPrefix === undefined
+          ? restRoute(provider, exchange, options, routing, request, transport.serverHeaders)
+          : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
       const config = {
         method: request.method,
         url: route.baseURL ?? request.url,
         baseURL: request.url,
         headers: AxiosHeaders.from({ ...request.headers, ...venueHeaders(exchange, options) }),
         data: request.body,
-        timeout: 20_000,
+        timeout: deadlineMs,
         signal,
       } as InternalAxiosRequestConfig;
       if (route.proxied && route.authorize) await untilAborted(route.authorize(config), signal);
       signal.throwIfAborted();
-      config.timeout = Math.max(1, 20_000 - (Date.now() - started));
+      config.timeout = Math.max(1, deadlineMs - (Date.now() - started));
       if (adapter) {
         const response = await untilAborted(adapter(config), signal);
         // A raw tunnel response keeps native IDs and signed decimal lexemes intact.
@@ -275,7 +294,7 @@ const httpTransport = (
       }
       const response = await untilAborted(
         transport.request({
-          ...request,
+          ...networkRequest,
           url: config.url!,
           headers: config.headers.toJSON() as Record<string, string>,
           signal,
@@ -335,6 +354,13 @@ export const createEngineTransport = (
   };
   const fallbacks = new Map<string, WsDirectFallback>();
   const http = httpTransport(exchange, options, transport, provider, restRouting);
+  // Explicit public requests bypass account proxy/tunnel policy. URLs stay in
+  // the host; venues choose only the typed route name.
+  const directHttp = httpTransport(exchange, options, transport, provider, restRouting, '');
+  const publicCorsProxy = provider.publicCorsProxy();
+  const publicCorsHttp = publicCorsProxy
+    ? httpTransport(exchange, options, transport, provider, restRouting, publicCorsProxy)
+    : undefined;
   const readOptions =
     exchange === 'asterdex' && options.secondary_key ? asterReadOptions(options, provider) : undefined;
   const readHttp = readOptions
@@ -345,13 +371,22 @@ export const createEngineTransport = (
     now: () => transport.now(),
     setTimeout: (fn, ms) => transport.setTimeout(fn, ms),
     clearTimeout: (handle) => transport.clearTimeout(handle),
-    request: (request) =>
-      readHttp && request.method.toUpperCase() === 'GET' && hasHeader(request.headers, 'X-MBX-APIKEY')
-        ? readHttp.request(request)
-        : http.request(request),
+    request: (request) => {
+      const { route, ...nativeRequest } = request;
+      if (route === 'direct') return directHttp.request(nativeRequest);
+      if (route === 'publicCors')
+        return publicCorsHttp
+          ? publicCorsHttp.request(nativeRequest)
+          : Promise.reject(new Error('Public CORS request routing is not configured'));
+      return readHttp && request.method.toUpperCase() === 'GET' && hasHeader(request.headers, 'X-MBX-APIKEY')
+        ? readHttp.request(nativeRequest)
+        : http.request(nativeRequest);
+    },
     dispose: () => {
       http.dispose();
       readHttp?.dispose();
+      directHttp.dispose();
+      publicCorsHttp?.dispose();
       transport.dispose?.();
     },
     connect: (url, handlers) => {

@@ -41,6 +41,10 @@ Action  = WsConnect | WsSend | WsClose
   Hosts run the event loop: a thin layer per target, a few hundred lines each.
 - Time comes in as an event. Replaying recorded traffic is exact and needs no
   fake clock.
+- HTTP effects may carry optional `direct` / `publicCors` route hints. Hosts
+  consume them as routing metadata and never send them to the venue. Public
+  CORS endpoints come from host/provider policy; unconfigured native fallback
+  fails explicitly. Ordinary requests retain account routing.
 - Signing is a plain function call inside the core (`safe-cex-crypto`). The key
   stays wherever the engine runs. A host that delegates signing returns the
   signature as an event.

@@ -118,3 +118,24 @@ for green CI, merge, and cut a fresh follow-up branch.
   cancel; nonce state is per agent (official V3 contract), not per owner+agent.
 - Remaining phase5: public read retry and exact direct/CORS clock fallback
   review findings, final rebuilt replay/host/Binance gates, CI and PR reviews.
+
+### Harness and transport review checkpoint
+
+- Registered Aster in WASM, wrapper, recorder, replay, private generators and CI.
+  Independent V1/V3 validators bind exact native signatures, declared signer,
+  nonce uniqueness, V1 recvWindow and strict future skew. Harness161 tests and
+  wrapper11 tests pass; no economic/result normalization was added.
+- Public-read retries now match TS: bounded read-only1/2/3second retries,
+  including native429/503 bodies, with streamed accumulator resets. The clock
+  tries preferred/alternate direct then preferred/alternate public CORS, each
+  with a5000ms deadline. Native URLs stay in the venue; typed route/deadline
+  effects are consumed by hosts and absent from wire/tunnel requests.
+- Independent request/host reviews found and closed negative-code retry ordering
+  and20-second clock deadline regressions. All84 native Aster tests pass;
+  final clock/retry18/18 and strict clippy pass. Host route/disposal tests pass.
+- Root test attempt failed only timeout cases under shared Mac load~175:
+  HyroTrader configuration imports, capability branding imports, and registry
+  construction.464files/6853tests passed in the reported safe-cex task. Preserve
+  this failed evidence; it is not a passing gate. No timeout/assertion was weakened.
+- Next: commit checkpoint, merge latest landing (WOO/Lighter), run final artifact
+  gates and complete CI/PR code-correctness review loop.

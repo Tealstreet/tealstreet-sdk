@@ -257,8 +257,16 @@ impl Transport for NetworkTransport {
         let routing = self.routing.clone();
         tokio::spawn(async move {
             let id = request.id;
+            let timeout =
+                Duration::from_millis(u64::from(request.timeout_ms.unwrap_or(20_000).max(1)));
             let operation = async {
-                let route = routing.as_ref().map(|state| state.http(&request));
+                let route = match routing.as_ref() {
+                    Some(state) => Some(state.http(&request)?),
+                    None if request.route == Some(safe_cex_engine::RequestRoute::PublicCors) => {
+                        return Err("Public CORS request routing is not configured".into());
+                    }
+                    None => None,
+                };
                 let mut headers: Vec<_> = request
                     .headers
                     .iter()
@@ -320,7 +328,7 @@ impl Transport for NetworkTransport {
                     Method::Patch => reqwest::Method::PATCH,
                     Method::Delete => reqwest::Method::DELETE,
                 };
-                let mut builder = http.request(method, &request.url);
+                let mut builder = http.request(method, &request.url).timeout(timeout);
                 for (name, value) in headers {
                     builder = builder.header(name, value);
                 }
@@ -352,7 +360,7 @@ impl Transport for NetworkTransport {
             let result = tokio::select! {
                 biased;
                 _ = events.closed() => return,
-                result = tokio::time::timeout(Duration::from_secs(20), operation) => result,
+                result = tokio::time::timeout(timeout, operation) => result,
             };
             let failure = match result {
                 Ok(Ok(())) => None,

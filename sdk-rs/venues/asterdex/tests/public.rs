@@ -326,6 +326,23 @@ fn single_and_wrapped_interest_payloads_and_failure_retain_values() {
         77.5
     );
     h.advance(15_000.0);
+    for delay in [1000.0, 2000.0, 3000.0] {
+        h.reply(
+            "/openInterest",
+            500,
+            r#"[{"symbol":"BTCUSDT","openInterest":"0"}]"#,
+        );
+        assert_eq!(
+            h.engine.store().ticker("BTCUSDT").unwrap().open_interest,
+            77.5
+        );
+        assert!(
+            !h.requests
+                .iter()
+                .any(|request| request.url.ends_with("openInterest?symbol=BTCUSDT"))
+        );
+        h.advance(delay);
+    }
     h.reply(
         "/openInterest",
         500,

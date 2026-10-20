@@ -10,8 +10,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId, Venue,
-    json, num,
+    Command, CommandId, Cx, LogLevel, Response, SocketChannel, SocketId, TimerId, Venue, json, num,
 };
 use serde_json::value::RawValue;
 use sign::{Credentials, Version};
@@ -228,27 +227,21 @@ impl AsterDex {
         )
     }
 
-    fn get(&self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
-        cx.request(
-            Method::Get,
-            format!("{}{path}", self.urls.rest),
-            Vec::new(),
-            None,
-            pending,
-        );
+    fn get(&mut self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
+        self.public_read(cx, path, pending, None);
     }
 
-    fn get_streamed(&self, cx: &mut Cx<'_, Pending>, path: &str, at: ArrayAt, pending: Pending) {
-        cx.request_streamed(
-            Method::Get,
-            format!("{}{path}", self.urls.rest),
-            Vec::new(),
-            at,
-            pending,
-        );
+    fn get_streamed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        at: ArrayAt,
+        pending: Pending,
+    ) {
+        self.public_read(cx, path, pending, Some(at));
     }
 
-    fn bootstrap(&self, cx: &mut Cx<'_, Pending>) {
+    fn bootstrap(&mut self, cx: &mut Cx<'_, Pending>) {
         self.get_streamed(
             cx,
             &self.path("exchangeInfo"),
@@ -260,7 +253,7 @@ impl AsterDex {
         );
     }
 
-    fn seed_daily(&self, cx: &mut Cx<'_, Pending>) {
+    fn seed_daily(&mut self, cx: &mut Cx<'_, Pending>) {
         self.get_streamed(
             cx,
             &self.path("ticker/24hr"),
@@ -321,7 +314,7 @@ impl AsterDex {
         );
     }
 
-    fn request_interest(&self, cx: &mut Cx<'_, Pending>, initial: bool, symbol: Option<&str>) {
+    fn request_interest(&mut self, cx: &mut Cx<'_, Pending>, initial: bool, symbol: Option<&str>) {
         let mut path = self.path("openInterest");
         if let Some(symbol) = symbol {
             path.push_str(&format!("?symbol={symbol}"));
@@ -1107,6 +1100,21 @@ fn reset_pending(pending: &mut Pending) {
         }
         Pending::History(req) => req.reset(),
         Pending::MarketBrackets { rows } => rows.clear(),
+        Pending::ExchangeInfo { rows, malformed } => {
+            rows.clear();
+            *malformed = false;
+        }
+        Pending::Daily { rows, malformed } => {
+            rows.clear();
+            *malformed = false;
+        }
+        Pending::Klines {
+            rows, malformed, ..
+        } => {
+            rows.clear();
+            *malformed = false;
+        }
+        Pending::OpenInterest { rows, .. } => rows.clear(),
         _ => {}
     }
 }

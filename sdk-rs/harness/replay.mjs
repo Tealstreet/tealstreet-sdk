@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
-import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
+import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
 import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
@@ -283,7 +283,7 @@ async function runRust() {
   }
   const tickerRows = [];
   for (let i = 0; i < tickers.count; i++) {
-    const row = { symbol: markets.symbol(tickers.market[i]) };
+    const row = { symbol: tickers.market[i] === NONE ? tickers.identity?.(i).symbol : markets.symbol(tickers.market[i]) };
     for (const [field, column] of Object.entries(tickers.columns)) row[field] = column[i];
     tickerRows.push(row);
   }
@@ -331,10 +331,19 @@ async function tsCommand(exchange, store, record) {
     case 'setPositionMode':
       await exchange.changePositionMode(args.hedged);
       return [];
+    case 'fetchStpMode':
+      return exchange.fetchStpMode();
+    case 'setStpMode':
+      await exchange.changeStpMode(args.mode);
+      return [];
     case 'findOrderByClientOrderId':
       return exchange.findOrderByClientOrderId(args.symbol, args.clientOrderId);
     case 'fetchLeverage':
       return exchange.fetchLeverageForSymbol(args.symbol);
+    case 'fetchAccount':
+      return exchange.getAccount();
+    case 'fetchOrderBook':
+      return exchange.fetchOrderBook(args.symbol, args.limit);
     case 'fetchFills':
       return exchange.fetchHistoricalFills(args);
     case 'fetchOrderHistory':
@@ -387,7 +396,14 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   }
   return {
     hedged: status?.hedged ?? false,
-    balance,
+    balance: {
+      used: balance.used,
+      free: balance.free,
+      total: balance.total,
+      upnl: balance.upnl,
+      ...(venue.inverseNativeAmounts ? { coins: balance.coins ?? {} } : {}),
+      ...(venue.compareBalanceCurrencies ? { currencies: balance.currencies ?? {} } : {}),
+    },
     orders: orderRows,
     positions: positionRows,
     settings: settingRows,
@@ -536,6 +552,7 @@ async function runTs() {
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
+  await venue.prepareTsTransport?.(exchange, adapter);
   const finalBooks = {};
   const heapBefore = await baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
@@ -598,6 +615,7 @@ async function runTs() {
           total: store.balance.total,
           upnl: store.balance.upnl,
           ...(venue.inverseNativeAmounts ? { coins: store.balance.coins ?? {} } : {}),
+          ...(venue.compareBalanceCurrencies ? { currencies: store.balance.currencies ?? {} } : {}),
         },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.

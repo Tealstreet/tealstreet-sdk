@@ -1,9 +1,9 @@
-//! Signed request lifecycle. Retries rebuild unsigned parameters; ambiguous
+//! Public and signed request lifecycle. Retries rebuild unsigned parameters; ambiguous
 //! trading writes are never repeated after network or upstream failure.
 use std::collections::{HashMap, VecDeque};
 
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::{Cx, LogLevel, Method, Response, TimerId, Venue};
+use safe_cex_engine::{Cx, LogLevel, Method, RequestRoute, Response, TimerId, Venue};
 use serde::Deserialize;
 
 use crate::sign::{Query, Version};
@@ -32,11 +32,12 @@ pub struct SignedRequest {
     timestamp_retried: bool,
     signature_retried: bool,
     version: Version,
+    public: bool,
 }
 
 #[derive(Clone, Copy)]
 pub struct ClockRequest {
-    alternate: bool,
+    attempt: u8,
 }
 
 #[derive(Deserialize)]
@@ -120,6 +121,28 @@ impl AsterDex {
         self.queue_signed(cx, Method::Get, path, query, pending, Some(ArrayAt::Root))
     }
 
+    pub(crate) fn public_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        pending: Pending,
+        stream: Option<ArrayAt>,
+    ) {
+        let request = Box::new(SignedRequest {
+            method: Method::Get,
+            path: path.into(),
+            query: Query::new(),
+            pending,
+            stream,
+            network_retries: 0,
+            timestamp_retried: false,
+            signature_retried: false,
+            version: self.version,
+            public: true,
+        });
+        self.dispatch_signed(cx, request);
+    }
+
     fn queue_signed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -139,6 +162,7 @@ impl AsterDex {
             timestamp_retried: false,
             signature_retried: false,
             version: self.version,
+            public: false,
         });
         let stale = self
             .requests
@@ -158,6 +182,18 @@ impl AsterDex {
         cx: &mut Cx<'_, Pending>,
         mut request: Box<SignedRequest>,
     ) -> bool {
+        if request.public {
+            let url = format!("{}{}", self.urls.rest, request.path);
+            match request.stream {
+                Some(at) => {
+                    cx.request_streamed(Method::Get, url, Vec::new(), at, Pending::Signed(request));
+                }
+                None => {
+                    cx.request(Method::Get, url, Vec::new(), None, Pending::Signed(request));
+                }
+            }
+            return true;
+        }
         let credentials = if request.method == Method::Get {
             self.read_credentials.as_ref().or(self.credentials.as_ref())
         } else {
@@ -221,13 +257,20 @@ impl AsterDex {
                 || message
                     .to_ascii_lowercase()
                     .contains("signature for this request is not valid");
-            if request.version == Version::V1 && signature_rejected && !request.signature_retried {
+            if !request.public
+                && request.version == Version::V1
+                && signature_rejected
+                && !request.signature_retried
+            {
                 request.signature_retried = true;
                 request.reset();
                 self.dispatch_signed(cx, request);
                 return;
             }
-            if code == Some(-1021.0) && message.contains("Timestamp") && !request.timestamp_retried
+            if !request.public
+                && code == Some(-1021.0)
+                && message.contains("Timestamp")
+                && !request.timestamp_retried
             {
                 request.timestamp_retried = true;
                 request.reset();
@@ -240,6 +283,14 @@ impl AsterDex {
                 && request.network_retries < 3
             {
                 self.schedule_retry(cx, request);
+                return;
+            }
+            if request.public && code.is_some_and(|code| code < 0.0) {
+                self.on_request_failed(
+                    cx,
+                    request.pending,
+                    &format!("Aster public API error: {message}"),
+                );
                 return;
             }
             self.on_response(cx, request.pending, response);
@@ -265,6 +316,8 @@ impl AsterDex {
             .is_some_and(|code| code < 0.0);
         if business_error || !(200..300).contains(&response.status) {
             self.on_signed_response(cx, request, Ok(response));
+        } else if request.public {
+            self.on_stream_error(cx, request.pending, response);
         } else {
             self.on_request_failed(cx, request.pending, "missing expected Aster response list");
         }
@@ -285,11 +338,11 @@ impl AsterDex {
         if let Some(timer) = self.requests.clock_timer.take() {
             cx.clear_timer(timer);
         }
-        self.issue_clock(cx, ClockRequest { alternate: false });
+        self.issue_clock(cx, ClockRequest { attempt: 0 });
     }
 
     fn issue_clock(&self, cx: &mut Cx<'_, Pending>, request: ClockRequest) {
-        let version = if request.alternate {
+        let version = if request.attempt % 2 == 1 {
             match self.version {
                 Version::V1 => Version::V3,
                 Version::V3 => Version::V1,
@@ -297,13 +350,23 @@ impl AsterDex {
         } else {
             self.version
         };
-        cx.request(
+        let attempt = request.attempt;
+        let id = cx.request(
             Method::Get,
             format!("{}{}/time", self.urls.rest, version.prefix()),
             Vec::new(),
             None,
             Pending::Clock(request),
         );
+        cx.route_request(
+            id,
+            if attempt < 2 {
+                RequestRoute::Direct
+            } else {
+                RequestRoute::PublicCors
+            },
+        );
+        cx.request_timeout(id, 5_000);
     }
 
     pub(crate) fn on_clock_response(
@@ -321,8 +384,13 @@ impl AsterDex {
         if let Some(time) = time {
             self.requests.offset_ms = time - cx.now;
             self.requests.last_sync_success = Some(cx.now);
-        } else if !request.alternate {
-            self.issue_clock(cx, ClockRequest { alternate: true });
+        } else if request.attempt < 3 {
+            self.issue_clock(
+                cx,
+                ClockRequest {
+                    attempt: request.attempt + 1,
+                },
+            );
             return;
         } else {
             cx.log(
@@ -643,6 +711,7 @@ mod tests {
             };
             assert_eq!(request.headers, vec![("X-MBX-APIKEY", expected.into())]);
             assert!(request.body.is_none());
+            assert_eq!(request.timeout_ms, None);
         }
     }
 
@@ -662,11 +731,206 @@ mod tests {
             timestamp_retried: false,
             signature_retried: false,
             version: Version::V1,
+            public: false,
         };
         for method in [Method::Post, Method::Put, Method::Delete] {
             assert!(request(method, "/fapi/v3/listenKey").is_read());
         }
         assert!(!request(Method::Delete, "/fapi/v3/order").is_read());
         assert!(!request(Method::Post, "/fapi/v3/order").is_read());
+    }
+
+    #[test]
+    fn clock_exhausts_direct_versions_before_public_cors_and_only_then_releases_writes() {
+        for v3 in [false, true] {
+            let mut h = Harness::new(Method::Post, v3);
+            let request = h.requests.remove(0);
+            h.reply(request, 400, r#"{"code":-1021,"msg":"Timestamp rejected"}"#);
+            for attempt in 0..4 {
+                assert_eq!(
+                    h.requests.len(),
+                    1,
+                    "only the clock may run during recovery"
+                );
+                let clock = h.requests.remove(0);
+                let expected_version = if (attempt % 2 == 0) == v3 { "v3" } else { "v1" };
+                assert!(
+                    clock
+                        .url
+                        .ends_with(&format!("/fapi/{expected_version}/time"))
+                );
+                assert_eq!(
+                    clock.route,
+                    Some(if attempt < 2 {
+                        RequestRoute::Direct
+                    } else {
+                        RequestRoute::PublicCors
+                    })
+                );
+                assert!(clock.headers.is_empty());
+                assert_eq!(clock.timeout_ms, Some(5_000));
+                if attempt < 3 {
+                    h.fail(clock);
+                } else {
+                    h.reply(clock, 200, r#"{"serverTime":1700000015000}"#);
+                }
+            }
+            assert_eq!(h.requests.len(), 1);
+            assert!(h.requests[0].url.contains("timestamp=1700000015000"));
+        }
+    }
+
+    #[test]
+    fn failed_periodic_clock_sync_retains_the_last_successful_offset() {
+        let mut h = Harness::new(Method::Post, false);
+        let request = h.requests.remove(0);
+        h.reply(request, 400, r#"{"code":-1021,"msg":"Timestamp rejected"}"#);
+        let clock = h.requests.remove(0);
+        h.reply(clock, 200, r#"{"serverTime":1700000015000}"#);
+        let request = h.requests.remove(0);
+        h.reply(request, 200, "{}");
+        let saved = h.engine.venue().inner.requests.offset_ms;
+        assert_ne!(saved, 0.0);
+        let (timer, delay) = h.timers.remove(0);
+        assert_eq!(delay, CLOCK_INTERVAL_MS);
+        h.now += delay;
+        h.engine.handle(h.now, Event::TimerFired { timer });
+        h.collect();
+        for _ in 0..4 {
+            let clock = h.requests.remove(0);
+            h.reply(clock, 200, r#"{"serverTime":"not-a-time"}"#);
+        }
+        assert!(h.requests.is_empty());
+        assert_eq!(h.engine.venue().inner.requests.offset_ms, saved);
+    }
+
+    struct PublicHarness {
+        engine: Engine<AsterDex>,
+        now: f64,
+        requests: Vec<HttpRequest>,
+        timers: Vec<(TimerId, f64)>,
+    }
+    impl PublicHarness {
+        fn new() -> Self {
+            let mut h = Self {
+                engine: Engine::new(AsterDex::new(Options {
+                    public_data_only: true,
+                    ..Options::default()
+                })),
+                now: 1700000000000.0,
+                requests: Vec::new(),
+                timers: Vec::new(),
+            };
+            h.engine.start(h.now);
+            h.collect();
+            let clock = h.take("/time");
+            h.reply(clock, 200, r#"{"serverTime":1700000000000}"#);
+            h
+        }
+        fn collect(&mut self) {
+            for action in self.engine.drain_actions() {
+                match action {
+                    Action::Http(request) => self.requests.push(request),
+                    Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
+                    Action::ClearTimer { timer } => self.timers.retain(|(id, _)| *id != timer),
+                    _ => {}
+                }
+            }
+        }
+        fn take(&mut self, suffix: &str) -> HttpRequest {
+            let index = self
+                .requests
+                .iter()
+                .position(|request| request.url.ends_with(suffix))
+                .expect("expected public request");
+            self.requests.remove(index)
+        }
+        fn event(&mut self, event: Event<'_>) {
+            self.engine.handle(self.now, event);
+            self.collect();
+        }
+        fn reply(&mut self, request: HttpRequest, status: u16, body: &str) {
+            self.event(Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            });
+        }
+        fn retry(&mut self, delay: f64) {
+            let index = self
+                .timers
+                .iter()
+                .position(|(_, at)| *at == self.now + delay)
+                .expect("retry timer");
+            let (timer, at) = self.timers.remove(index);
+            self.now = at;
+            self.event(Event::TimerFired { timer });
+        }
+    }
+
+    #[test]
+    fn public_bootstrap_network_retry_discards_partial_rows_before_committing() {
+        let mut h = PublicHarness::new();
+        let request = h.take("/exchangeInfo");
+        assert!(request.headers.is_empty());
+        assert_eq!(request.timeout_ms, None);
+        h.event(Event::HttpStart {
+            request: request.id,
+            status: 200,
+            headers: "",
+        });
+        h.event(Event::HttpChunk { request: request.id, data: br#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3},"# });
+        h.event(Event::HttpFailed {
+            request: request.id,
+            error: "connection reset",
+        });
+        assert!(h.engine.store().markets().is_empty());
+        assert!(h.requests.is_empty());
+        h.retry(1000.0);
+        let request = h.take("/exchangeInfo");
+        assert!(request.headers.is_empty());
+        assert!(!request.url.contains("signature"));
+        h.reply(request, 200, r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3}]}"#);
+        assert_eq!(
+            h.engine.store().markets().len(),
+            1,
+            "failed attempt's row cannot leak into the replacement"
+        );
+        assert!(h.engine.store().loaded().markets);
+    }
+
+    #[test]
+    fn public_bootstrap_has_exactly_three_bounded_status_retries() {
+        for (status, body) in [
+            (503, "upstream timeout"),
+            (503, r#"{"code":-1000,"msg":"Internal error"}"#),
+            (429, r#"{"code":-1003,"msg":"Too many requests"}"#),
+        ] {
+            let mut h = PublicHarness::new();
+            for attempt in 1..=3 {
+                let request = h.take("/exchangeInfo");
+                h.reply(request, status, body);
+                assert!(h.requests.is_empty());
+                h.retry(f64::from(attempt) * 1000.0);
+            }
+            let request = h.take("/exchangeInfo");
+            h.reply(request, status, body);
+            assert!(h.requests.is_empty());
+            assert!(h.engine.store().markets().is_empty());
+            assert!(!h.engine.store().loaded().markets);
+        }
+    }
+
+    #[test]
+    fn public_business_error_never_commits_a_successful_empty_bootstrap() {
+        let mut h = PublicHarness::new();
+        let request = h.take("/exchangeInfo");
+        h.reply(request, 200, r#"{"code":-1121,"msg":"Invalid symbol"}"#);
+        assert!(h.requests.is_empty());
+        assert!(h.engine.store().markets().is_empty());
+        assert!(!h.engine.store().loaded().markets);
     }
 }

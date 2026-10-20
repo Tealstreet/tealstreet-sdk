@@ -3,7 +3,7 @@ use crate::{AsterDex, Pending, account, sign::Query};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
-use safe_cex_engine::{CommandId, Cx, Method, Query as Read, Response, TimerId};
+use safe_cex_engine::{CommandId, Cx, Query as Read, Response, TimerId};
 use safe_cex_venue_binance::wire::{HistoricalOrderRow, UserTrade};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -436,10 +436,9 @@ impl AsterDex {
         if private {
             self.signed_streamed(cx, &path, query, Pending::History(pending));
         } else {
-            cx.request_streamed(
-                Method::Get,
-                format!("{}{path}?{}", self.urls.rest, query.as_str()),
-                Vec::new(),
+            self.get_streamed(
+                cx,
+                &format!("{path}?{}", query.as_str()),
                 ArrayAt::Root,
                 Pending::History(pending),
             );

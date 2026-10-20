@@ -1,8 +1,10 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
 import { subscriptionKeys } from './requests.mjs';
+import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator } from './asterdex-requests.mjs';
 
 const root = '../../packages/safe-cex/src/exchanges';
 
@@ -143,6 +145,28 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  asterdex: {
+    rust: 'asterdex',
+    ts: { module: `${root}/asterdex/asterdex.exchange.ts`, className: 'AsterDEXExchange', name: 'asterdex' },
+    privateSocket: '/ws/',
+    compareFillPrices: true,
+    compareBalanceCurrencies: true,
+    compareWriteOrder: true,
+    requestUrl: asterRequestUrl,
+    createRequestValidator: createAsterRequestValidator,
+    createSocketAudit: asterSocketAudit,
+    isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
+    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.topics).filter((topic) => topic.endsWith('@depth20@100ms')).length >= count,
+    startupSubscriptions: (records, books) => {
+      const url = records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/stream')?.url ?? 'wss://fstream.asterdex.com/stream';
+      return subscriptionKeys(url, { method: 'SUBSCRIBE', params: ['!ticker@arr', '!markPrice@arr@1s', ...books.map((symbol) => `${symbol.toLowerCase()}@depth20@100ms`)] });
+    },
+    prepareTsTransport: async (_exchange, adapter) => {
+      const { default: axios } = await import('axios');
+      axios.defaults.adapter = adapter;
+      createRequire(import.meta.url)('axios').defaults.adapter = adapter;
+    },
+  },
   bitrue: {
     rust: 'bitrue',
     bitrueProtocol: true,

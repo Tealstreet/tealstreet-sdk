@@ -104,6 +104,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - venue: asterdex
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-asterdex
           - venue: binance
             books: BTCUSDT,ETHUSDT,SOLUSDT
             private_script: rust:private-tape
@@ -194,6 +197,12 @@ jobs:
         run: |
           yarn ${{ matrix.private_script }}
           yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs 1 --books ''
+      - name: Aster V3 wallet auth, builder, STP and native query contracts
+        if: matrix.venue == 'asterdex'
+        run: |
+          yarn rust:private-tape-asterdex-v3
+          yarn rust:gate --venue asterdex --tape sdk-rs/harness/tapes/asterdex-v3-private.jsonl --runs 1 --books ''
+          yarn rust:test-asterdex-parity
       - name: Bitget inverse account and native contract sizing
         if: matrix.venue == 'bitget'
         run: |

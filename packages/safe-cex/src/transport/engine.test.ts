@@ -1030,3 +1030,152 @@ describe('Aster secondary signer HTTP routing', () => {
     routed.dispose!();
   });
 });
+
+describe('typed public HTTP route hints', () => {
+  it('keeps clock direct and CORS attempts out of account HOW routing and auth', async () => {
+    const raw = makeRaw();
+    const opts = options({
+      tealstreetProxy: true,
+      tealstreetTunnel: true,
+      overrideProxyUrl: 'https://account.example/proxy',
+      secondary_key: 'read-key',
+      secondary_secret: 'read-secret',
+    });
+    const routed = createEngineTransport('asterdex', opts, raw);
+    const url = 'https://fapi.asterdex.com/fapi/v3/time?exact=one%2Btwo';
+    for (const [route, expected] of [
+      ['direct', url],
+      ['publicCors', `${AWS_PUBLIC_CORS_PROXY}/${url}`],
+    ] as const) {
+      await routed.request({ method: 'GET', route, url, headers: {} });
+      const sent = raw.request.mock.lastCall![0];
+      expect(sent.url).toBe(expected);
+      expect(sent.headers).toEqual({});
+      expect(sent).not.toHaveProperty('route');
+    }
+    expect(mocks.adapter).not.toHaveBeenCalled();
+    expect(mocks.token).not.toHaveBeenCalled();
+    await routed.request({ method: 'GET', url, headers: {} });
+    expect(mocks.adapter).toHaveBeenCalledOnce();
+    const plan = resolveEngineRoutingPlan('asterdex', opts, 'https://fapi.asterdex.com');
+    expect(plan.publicCorsHttp).toEqual({
+      mode: 'direct',
+      prefix: AWS_PUBLIC_CORS_PROXY,
+      authorize: false,
+      authorizationHeader: 'Authorization',
+      headers: {},
+    });
+    expect(JSON.stringify(plan)).not.toMatch(/read-key|read-secret|venue-key|venue-secret|proxy-jwt/);
+    routed.dispose!();
+  });
+
+  it.each(['binance', 'hyperliquid'] as const)(
+    'explicit public CORS is direct even for %s special account policies',
+    async (exchange) => {
+      const raw = makeRaw();
+      const routed = createEngineTransport(exchange, options({ tealstreetTunnel: true }), raw);
+      const url = 'https://venue.test/time';
+      await routed.request({ method: 'GET', route: 'publicCors', url, headers: {} });
+      expect(raw.request.mock.lastCall![0].url).toBe(`${AWS_PUBLIC_CORS_PROXY}/${url}`);
+      expect(mocks.adapter).not.toHaveBeenCalled();
+      expect(mocks.token).not.toHaveBeenCalled();
+      routed.dispose!();
+    },
+  );
+
+  it('fails unconfigured CORS before network and preserves ordinary direct requests', async () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('asterdex', options({ transport: directTransport }), raw);
+    const input = { method: 'GET', url: 'https://fapi.asterdex.com/fapi/v1/time', headers: {} };
+    await expect(routed.request({ ...input, route: 'publicCors' })).rejects.toThrow('not configured');
+    expect(raw.request).not.toHaveBeenCalled();
+    await routed.request(input);
+    expect(raw.request.mock.lastCall![0].url).toBe(input.url);
+    expect(
+      resolveEngineRoutingPlan('asterdex', options({ transport: directTransport }), 'https://fapi.asterdex.com'),
+    ).not.toHaveProperty('publicCorsHttp');
+    routed.dispose!();
+  });
+
+  it('disposal aborts direct and CORS route streams using the shared deadline', async () => {
+    vi.useFakeTimers();
+    const raw = makeRaw();
+    raw.request.mockResolvedValue({
+      status: 200,
+      body: (async function* () {
+        yield new Uint8Array([1]);
+      })(),
+    });
+    const routed = createEngineTransport('asterdex', options({ tealstreetTunnel: true }), raw);
+    for (const route of ['direct', 'publicCors'] as const)
+      await routed.request({ method: 'GET', route, url: 'https://venue.test/time', headers: {} });
+    expect(vi.getTimerCount()).toBe(2);
+    routed.dispose!();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(raw.request.mock.calls.every(([request]) => request.signal?.aborted)).toBe(true);
+  });
+});
+
+describe('typed HTTP operation deadlines', () => {
+  it.each([
+    [undefined, 20_000],
+    [5_000, 5_000],
+  ] as const)('bounds the whole request at %s with default 20 seconds', async (timeoutMs, deadline) => {
+    vi.useFakeTimers();
+    const raw = makeRaw();
+    raw.request.mockImplementation(() => new Promise(() => {}));
+    const routed = createEngineTransport('asterdex', options({ transport: directTransport }), raw);
+    const pending = routed.request({
+      method: 'GET',
+      route: 'direct',
+      timeoutMs,
+      url: 'https://venue.test/time',
+      headers: {},
+    });
+    const rejected = expect(pending).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(deadline - 1);
+    expect(raw.request.mock.lastCall![0].signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    expect(raw.request.mock.lastCall![0]).not.toHaveProperty('timeoutMs');
+    expect(raw.request.mock.lastCall![0]).not.toHaveProperty('route');
+    routed.dispose!();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps the 5-second clock budget active through a stalled CORS response body', async () => {
+    vi.useFakeTimers();
+    const raw = makeRaw();
+    raw.request.mockResolvedValue({
+      status: 200,
+      body: { [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }) },
+    });
+    const routed = createEngineTransport('asterdex', options({ tealstreetTunnel: true }), raw);
+    const response = await routed.request({
+      method: 'GET',
+      route: 'publicCors',
+      timeoutMs: 5_000,
+      url: 'https://venue.test/time',
+      headers: {},
+    });
+    const body = response.body as AsyncIterable<Uint8Array>;
+    const rejected = expect(body[Symbol.asyncIterator]().next()).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(raw.request.mock.lastCall![0].signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    expect(raw.request.mock.lastCall![0].signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    routed.dispose!();
+  });
+
+  it('passes only the remaining budget to HOW without serializing timeout metadata', async () => {
+    const routed = createEngineTransport('asterdex', options({ tealstreetTunnel: true }), makeRaw());
+    await routed.request({ method: 'GET', timeoutMs: 5_000, url: 'https://venue.test/time', headers: {} });
+    const config = mocks.adapter.mock.lastCall![0];
+    expect(config.timeout).toBeGreaterThan(0);
+    expect(config.timeout).toBeLessThanOrEqual(5_000);
+    expect(config).not.toHaveProperty('timeoutMs');
+    routed.dispose!();
+  });
+});
