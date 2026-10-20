@@ -189,3 +189,44 @@ verification.
   TS 12.0/Rust 10.4 ms (1.15x), retained TS 14.1/Rust 0.8 MB (17.14x),
   Rust linear memory 0.3 MB. This is the explicitly scripted fixture, not the
   required live capture. Root typecheck 44/44 and lint 28/28 pass after merge.
+
+## Final local gate ledger (2026-10-20)
+
+Implementation and independent phase/merge correctness reviews are complete.
+The task is **not landed or fully accepted**: required live public capture is
+blocked by missing legacy DXtrade credentials. The recorder exits 1 before
+creating `breakoutprop-smoke.jsonl`; `oneshot-secret ls` previously reported no
+store. The committed public fixture remains `source: documented-scripted`.
+Per the brief's Process step 3, push/PR/posted PR reviews/green-CI merge/fresh
+follow-up branch remain pending the missing live gate. No push or PR was made.
+
+| Brief gate | Result |
+| --- | --- |
+| 1. Bans | PASS, `./scripts/check-bans.sh` |
+| 2. Rust format/clippy/tests | PASS, workspace fmt and all-target strict clippy; 1,976 workspace tests, including 100 Breakout tests |
+| 3. WASM clippy | PASS, default combined features and selected Breakout feature, strict wasm32 clippy |
+| 4. Default build + documented private replay | PASS; combined 22-venue WASM builds, generated 26-record private tape, 24 timeline records, 5 markets/tickers; exact output/requests |
+| 5. Public | Documented 20-second fixture PASS (three runs, numbers above); required live record/trim/replay BLOCKED by credentials |
+| 6. Binance regressions | PASS, public three-run and generated private one-run gates |
+
+Additional checks: 357 harness tests; 41 cross-venue wrapper tests; 77 compiled
+WASM adapter tests; 60 JS/native/Workers host tests; four compiled Breakout
+host/frame/control tests on both selected and combined artifacts. Root typecheck
+44 tasks and lint 28 tasks pass. Full safe-cex CI before the landing merge passed
+7,020 tests; the original broad root invocation hit two existing dynamic-import
+5-second timeouts, resolved by the full two-worker rerun with unchanged timeouts.
+
+Final default-build private gate: PASS; TS/Rust main CPU 97.5/38.5 ms, retained
+15.2/1.7 MB, Rust linear memory 0.8 MB (private performance informational).
+Binance public: PASS, 873 frames, 917 markets, 783 tickers, three books; median
+main CPU TS/Rust 297.3/159.8 ms (1.86x), steady 173.0/79.2 ms (2.18x), retained
+19.2/2.6 MB (7.49x). Binance private: PASS, 14 frames and two markets/tickers.
+The combined artifact is 9,320,943 bytes, SHA-256
+`a95da8753ae06586ac1f23ad9fce736729d367cef39bb48e6521941f54a729c1`;
+the per-venue size gate applies to the 640,088-byte selected artifact above.
+
+Actual TS reference fixes are public-only quote polling, duplicate synthetic
+book levels, native lot IDs, SDK string-array placement ACKs and the standard
+If-Match cancellation precondition. Additional deliberately safer Rust behavior
+is documented in `KNOWN_TS_FIXES.breakoutprop` and native regressions. No
+provably unused crypto helpers were found by the independent caller audit.

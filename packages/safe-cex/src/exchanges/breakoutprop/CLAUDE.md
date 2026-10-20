@@ -192,6 +192,11 @@ history before creating its replacement. Failed or ambiguous proof sends no
 replacement. Unrepresentable attached protections, trigger sources, close flags
 and slippage controls fail before any batch write.
 
+Explicit zero-quantity CLOSE orders retain their native quantity through
+reconciliation and price amendments; filled and remaining must also be exactly
+zero. Empty optional client IDs are treated as absent so native order codes
+remain distinct during cancellation, locking and history confirmation.
+
 Polling intervals honor initial and live slowdown multipliers. An explicit
 infinite interval pauses polling; native queries still work. Repeated unchanged
 configuration updates preserve the existing poll deadline. History axes without
