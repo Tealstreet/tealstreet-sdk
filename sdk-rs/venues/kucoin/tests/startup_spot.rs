@@ -212,3 +212,70 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
         }
     }
 }
+
+fn reply(engine: &mut Engine<KucoinSpot>, request: safe_cex_engine::HttpRequest, body: &str) {
+    engine.handle(
+        0.0,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body,
+            },
+        },
+    );
+}
+
+#[test]
+fn funded_wallet_usd_balance_waits_for_its_quote() {
+    let mut engine = Engine::new(KucoinSpot::new(Options {
+        key: Some("scripted-key".into()),
+        secret: Some("scripted-secret".into()),
+        passphrase: Some("scripted-passphrase".into()),
+        ..Default::default()
+    }));
+    engine.start(0.0);
+    let catalogue = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("/api/v2/symbols") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut engine, catalogue, CATALOGUE);
+    let mut reads = engine
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let take = |reads: &mut Vec<safe_cex_engine::HttpRequest>, part: &str| {
+        let index = reads.iter().position(|r| r.url.contains(part)).unwrap();
+        reads.remove(index)
+    };
+    let tickers = take(&mut reads, "/market/allTickers");
+    let wallet = r###"{"code":"200000","data":[{"currency":"BTC","available":"1","holds":"0","balance":"1"},{"currency":"USDT","available":"5","holds":"0","balance":"5"}]}"###;
+    reply(&mut engine, take(&mut reads, "/api/v1/accounts"), wallet);
+    assert!(
+        !engine.store().loaded().balance,
+        "BTC is unpriced; no USD balance may be published"
+    );
+    assert_eq!(engine.store().currency_balances().unwrap().len(), 2);
+    reply(
+        &mut engine,
+        tickers,
+        r###"{"code":"200000","data":{"ticker":[{"symbol":"BTC-USDT","last":"100"}]}}"###,
+    );
+    let balance = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("/api/v1/accounts") => Some(request),
+            _ => None,
+        })
+        .expect("wallet revalued once its quote arrives");
+    reply(&mut engine, balance, wallet);
+    assert!(engine.store().loaded().balance);
+    assert_eq!(engine.store().balance().total, 105.0);
+}

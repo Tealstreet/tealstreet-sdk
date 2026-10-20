@@ -76,6 +76,7 @@ pub struct KucoinSpot {
     balance_revision: u64,
     orders_loading: bool,
     balance_loading: bool,
+    wallet_valuation_pending: bool,
     poll: Option<TimerId>,
     heal_orders: Option<TimerId>,
     heal_balance: Option<TimerId>,
@@ -114,6 +115,7 @@ impl KucoinSpot {
             balance_revision: 0,
             orders_loading: false,
             balance_loading: false,
+            wallet_valuation_pending: false,
             poll: None,
             heal_orders: None,
             heal_balance: None,
@@ -380,11 +382,12 @@ impl KucoinSpot {
             *timer = Some(cx.set_timer(250.0));
         }
     }
-    fn account_balance(&self, cx: &mut Cx<'_, Pending>, data: &RawValue) -> Result<(), String> {
+    fn account_balance(&mut self, cx: &mut Cx<'_, Pending>, data: &RawValue) -> Result<(), String> {
         let rows: Vec<Account> = serde_json::from_str(data.get()).map_err(|e| e.to_string())?;
         let mut sum = Balance::default();
         let mut currencies = vec![];
         let mut coins = vec![];
+        let mut unpriced = false;
         for r in rows {
             if r.currency.is_empty() || r.available.0 < 0.0 || r.holds.0 < 0.0 || r.balance.0 < 0.0
             {
@@ -393,10 +396,22 @@ impl KucoinSpot {
             let p = if matches!(r.currency, "USD" | "USDT" | "USDC") {
                 1.0
             } else {
-                ["USDT", "USDC", "USD"]
-                    .into_iter()
-                    .find_map(|q| cx.store.ticker(&format!("{}-{q}", r.currency)))
-                    .map_or(0.0, |t| t.last)
+                let symbols = ["USDT", "USDC", "USD"].map(|q| format!("{}-{q}", r.currency));
+                let price = symbols
+                    .iter()
+                    .filter_map(|symbol| cx.store.ticker(symbol))
+                    .map(|t| t.last)
+                    .find(|last| last.is_finite() && *last > 0.0);
+                // A listed USD route without a quote yet is not evidence of zero value.
+                if price.is_none()
+                    && r.balance.0 > 0.0
+                    && symbols
+                        .iter()
+                        .any(|symbol| cx.store.market(symbol).is_some())
+                {
+                    unpriced = true;
+                }
+                price.unwrap_or(0.0)
             };
             currencies.push(CurrencyBalance {
                 currency: r.currency.into(),
@@ -417,6 +432,17 @@ impl KucoinSpot {
             sum.total += r.balance.0 * p;
         }
         cx.store.set_currency_balances(currencies);
+        let newly_unpriced = unpriced && !self.wallet_valuation_pending;
+        self.wallet_valuation_pending = unpriced;
+        if unpriced {
+            if newly_unpriced {
+                cx.log(
+                    LogLevel::Warning,
+                    "KuCoin Spot USD wallet valuation awaits a valid quote; retaining prior USD balance",
+                );
+            }
+            return Ok(());
+        }
         cx.store.set_coin_balances(coins);
         cx.store.set_balance(sum);
         Ok(())
@@ -814,6 +840,9 @@ impl Venue for KucoinSpot {
                 }
                 self.discovery.succeeded(cx, &true);
                 cx.store.set_tickers(rows);
+                if self.wallet_valuation_pending {
+                    self.balance(cx);
+                }
                 self.bullet(cx, 0);
                 if self.credentials.is_some() {
                     self.bullet(cx, 1);
