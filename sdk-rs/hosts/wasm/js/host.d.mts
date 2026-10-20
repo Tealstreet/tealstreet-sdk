@@ -12,6 +12,8 @@ export interface HttpResponse {
 }
 
 export interface Transport {
+  /** Host-derived protocol options; apply after caller options when constructing the engine. */
+  engineOptions?: Readonly<Record<string, unknown>>;
   /** Header-capable raw socket constructor for HOW and relay protocol clients. */
   WebSocket?: typeof globalThis.WebSocket;
   /** Server fetch does not add browser Origin/Referer headers automatically. */

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { memoryMetricErrors, retainedMemory, settledMemory } from './memory.mjs';
+import { baselineBeforeSetup, memoryMetricErrors, retainedMemory, settledMemory } from './memory.mjs';
 
 test('retained frame backing buffers are included', () => {
   const frameBytes = 16 * 1024 * 1024;
@@ -32,6 +32,85 @@ const metricsFor = (before, after, wasmBytes = 0) => ({
   bufferRetainedBytes: after.arrayBuffers - before.arrayBuffers,
   wasmBytes,
   retainedBytes: retainedMemory(before, after, wasmBytes),
+});
+
+test('both replay implementations include setup allocations and their later release after the baseline', async () => {
+  for (const impl of ['ts', 'rust']) {
+    const initial = { heapUsed: 1000, arrayBuffers: 200 };
+    const temporary = { heapUsed: 9000, arrayBuffers: 2200 };
+    let memory = initial;
+    const calls = [];
+    const options = { applicationId: '42' };
+    const venue = {
+      async initializeReplay(selected, supplied) {
+        assert.equal(this, venue);
+        assert.equal(selected, impl);
+        assert.equal(supplied, options);
+        calls.push('initialize');
+        memory = temporary;
+        await Promise.resolve();
+        calls.push('initialized');
+      },
+    };
+    const before = await baselineBeforeSetup({
+      baseline: async () => {
+        calls.push('baseline');
+        return { ...memory };
+      },
+      initialize: () => venue.initializeReplay(impl, options),
+    });
+    calls.push('load');
+    assert.deepEqual(calls, ['baseline', 'initialize', 'initialized', 'load']);
+    assert.deepEqual(before, initial);
+    memory = { heapUsed: 2000, arrayBuffers: 400 };
+    const retained = metricsFor(before, memory);
+    assert.equal(retained.retainedBytes, 1200);
+    assert.deepEqual(memoryMetricErrors(retained), []);
+    assert(memoryMetricErrors(metricsFor(temporary, memory)).some((error) => error.startsWith('invalid heapRetainedBytes')));
+  }
+});
+
+test('setup waits for the baseline and completes before implementation loading', async () => {
+  let finishBaseline;
+  let finishSetup;
+  let initialized = false;
+  let loaded = false;
+  const baselineSample = { heapUsed: 1000, arrayBuffers: 200 };
+  const pending = baselineBeforeSetup({
+    baseline: () => new Promise((resolve) => { finishBaseline = resolve; }),
+    initialize: () => {
+      initialized = true;
+      return new Promise((resolve) => { finishSetup = resolve; });
+    },
+  }).then((before) => { loaded = true; return before; });
+  assert.equal(initialized, false);
+  finishBaseline(baselineSample);
+  await Promise.resolve();
+  assert.equal(initialized, true);
+  assert.equal(loaded, false);
+  finishSetup();
+  assert.equal(await pending, baselineSample);
+  assert.equal(loaded, true);
+});
+
+test('baseline and setup failures propagate before implementation loading', async () => {
+  for (const failure of ['baseline', 'initialize']) {
+    const error = new Error(failure);
+    let initialized = 0;
+    let loaded = false;
+    await assert.rejects(async () => {
+      await baselineBeforeSetup({
+        baseline: async () => {
+          if (failure === 'baseline') throw error;
+          return { heapUsed: 1000, arrayBuffers: 200 };
+        },
+        initialize: async () => { initialized++; throw error; },
+      });
+      loaded = true;
+    }, (received) => received === error);
+    assert.equal(initialized, failure === 'baseline' ? 0 : 1);
+    assert.equal(loaded, false);
+  }
 });
 
 test('negative buffer retention invalidates the before-import baseline', () => {
@@ -129,7 +208,7 @@ test('backing stores that never settle fail instead of choosing or clamping a sa
       timeoutMs: 200,
     }),
     (error) => {
-      assert.match(error.message, /Backing-buffer memory did not settle/);
+      assert.match(error.message, /Heap\/backing-buffer memory did not settle/);
       assert.equal(error.sampleCount, 21);
       assert.equal(error.transitionCount, 20);
       assert.equal(error.lastArrayBuffers, 210);
@@ -138,6 +217,55 @@ test('backing stores that never settle fail instead of choosing or clamping a sa
       return true;
     },
   );
+});
+
+test('a delayed heap release restarts quiet time and returns the current sample rather than the minimum', async () => {
+  let time = 0;
+  const baseline = await settledMemory({
+    collect() {},
+    pause: async () => { time += 10; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: 100, heapUsed: time < 80 ? 1000 : time === 80 ? 500 : 520 }),
+  });
+  assert.equal(time, 180);
+  assert.deepEqual(baseline, { arrayBuffers: 100, heapUsed: 520 });
+});
+
+test('a heap that keeps reaching new lows fails within the original deadline', async () => {
+  let time = 0;
+  await assert.rejects(settledMemory({
+    collect() {},
+    pause: async () => { time += 10; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: 100, heapUsed: 1000 - time }),
+    timeoutMs: 200,
+  }), (error) => {
+    assert.equal(error.sampleCount, 21);
+    assert.equal(error.transitionCount, 0);
+    assert.equal(error.heapTransitionCount, 19);
+    assert.equal(error.lastHeapUsed, 790);
+    assert.equal(error.elapsedMs, 210);
+    assert.match(error.message, /heapTransitions=19, lastHeapUsed=790/);
+    return true;
+  });
+});
+
+test('memory sampling awaits collection and propagates collection failure', async () => {
+  let finishCollection;
+  let paused = false;
+  let sampled = false;
+  const failure = new Error('collection failed');
+  const pending = settledMemory({
+    collect: () => new Promise((resolve, reject) => { finishCollection = () => reject(failure); }),
+    pause: async () => { paused = true; },
+    sample: () => { sampled = true; return { heapUsed: 1000, arrayBuffers: 100 }; },
+  });
+  assert.equal(paused, false);
+  assert.equal(sampled, false);
+  finishCollection();
+  await assert.rejects(pending, (error) => error === failure);
+  assert.equal(paused, false);
+  assert.equal(sampled, false);
 });
 
 test('settled samples use real time when replay replaces global timers', async () => {
@@ -168,7 +296,7 @@ test('cold backing-store cleanup can exceed one second before the first quiet sa
     now: () => time,
     sample: () => ({ arrayBuffers: time < 1500 ? 2000 - time : 100, heapUsed: 1000 }),
   };
-  await assert.rejects(settledMemory({ ...sampling, timeoutMs: 1000 }), /Backing-buffer memory did not settle/);
+  await assert.rejects(settledMemory({ ...sampling, timeoutMs: 1000 }), /memory did not settle/);
   time = 0;
   assert.deepEqual(await settledMemory(sampling), { arrayBuffers: 100, heapUsed: 1000 });
   assert.equal(time, 1600);
@@ -181,6 +309,24 @@ test('the extended startup deadline still rejects continuously changing backing 
     pause: async () => { time += 100; },
     now: () => time,
     sample: () => ({ arrayBuffers: time, heapUsed: 1000 }),
-  }), /Backing-buffer memory did not settle/);
+  }), /memory did not settle/);
   assert.equal(time, 5100);
+});
+
+// Collection diagnostics include the entire awaited collector lifecycle.
+test('timeout reports the longest asynchronous collection without changing its deadline', async () => {
+  let time = 0;
+  await assert.rejects(settledMemory({
+    collect: async () => { await Promise.resolve(); time += 25; },
+    pause: async () => { time += 5; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: time, heapUsed: 1000 }),
+    timeoutMs: 200,
+  }), (error) => {
+    assert.equal(error.longestCollectionMs, 25);
+    assert.equal(error.elapsedMs, 210);
+    assert.equal(error.sampleCount, 7);
+    assert.match(error.message, /longestGC=25\.0ms/);
+    return true;
+  });
 });
