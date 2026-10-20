@@ -30,12 +30,14 @@ pub enum Request {
     Positions {
         generation: u64,
         version: u64,
+        product: usize,
         rows: Vec<(Position, RiskValues)>,
         invalid: bool,
     },
     Orders {
         generation: u64,
         version: u64,
+        product: usize,
         kind: usize,
         rows: Vec<Order>,
         margins: HashMap<String, f64>,
@@ -134,11 +136,7 @@ impl Okx {
             });
             self.list(
                 cx,
-                if self.options.eea {
-                    "/api/v5/account/account-position-risk"
-                } else {
-                    "/api/v5/account/account-position-risk?instType=SWAP"
-                },
+                "/api/v5/account/account-position-risk?instType=SWAP",
                 true,
                 Pending::Account(Request::Balance {
                     generation,
@@ -150,15 +148,12 @@ impl Okx {
             );
             self.list(
                 cx,
-                if self.options.eea {
-                    "/api/v5/account/positions"
-                } else {
-                    "/api/v5/account/positions?instType=SWAP"
-                },
+                "/api/v5/account/positions?instType=SWAP",
                 true,
                 Pending::Account(Request::Positions {
                     generation,
                     version,
+                    product: 0,
                     rows: Vec::new(),
                     invalid: false,
                 }),
@@ -173,6 +168,7 @@ impl Okx {
                 Request::Orders {
                     generation,
                     version: self.account.revision,
+                    product: 0,
                     kind: 0,
                     rows: Vec::new(),
                     margins: HashMap::new(),
@@ -186,25 +182,24 @@ impl Okx {
     }
 
     fn orders_page(&self, cx: &mut Cx<'_, Pending>, request: Request) {
-        let Request::Orders { kind, cursor, .. } = &request else {
+        let Request::Orders {
+            product,
+            kind,
+            cursor,
+            ..
+        } = &request
+        else {
             return;
         };
+        let inst_type = if *product == 0 { "SWAP" } else { "FUTURES" };
         let mut path = if *kind == 0 {
-            "/api/v5/trade/orders-pending?instType=SWAP".into()
+            format!("/api/v5/trade/orders-pending?instType={inst_type}")
         } else {
             format!(
-                "/api/v5/trade/orders-algo-pending?instType=SWAP&ordType={}",
+                "/api/v5/trade/orders-algo-pending?instType={inst_type}&ordType={}",
                 ORDER_KINDS[*kind]
             )
         };
-        if self.options.eea {
-            path = path
-                .replace("?instType=SWAP&", "?")
-                .replace("?instType=SWAP", "?");
-            if path.ends_with('?') {
-                path.pop();
-            }
-        }
         if !cursor.is_empty() {
             path.push_str(&format!(
                 "{}after={cursor}",
@@ -306,6 +301,15 @@ impl Okx {
         }
     }
 
+    fn account_scope(&self, product: usize, inst_id: &str, supplied_type: &str) -> bool {
+        let expected = if product == 0 { "SWAP" } else { "FUTURES" };
+        (supplied_type.is_empty() || supplied_type == expected)
+            && self
+                .instruments
+                .get(inst_id)
+                .is_none_or(|instrument| instrument.inst_type == expected)
+    }
+
     pub(crate) fn account_item(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -341,20 +345,27 @@ impl Okx {
                 }
                 Err(_) => *invalid = true,
             },
-            Request::Positions { rows, invalid, .. } => {
-                match serde_json::from_str::<PositionRow<'_>>(item) {
-                    Ok(p) => {
-                        if let Some(row) = self.position(cx, &p) {
-                            rows.push(row);
-                        } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some()
-                        {
-                            *invalid = true;
-                        }
+            Request::Positions {
+                product,
+                rows,
+                invalid,
+                ..
+            } => match serde_json::from_str::<PositionRow<'_>>(item) {
+                Ok(p) => {
+                    if !self.account_scope(*product, p.inst_id, p.inst_type) {
+                        *invalid = true;
+                        return;
                     }
-                    Err(_) => *invalid = true,
+                    if let Some(row) = self.position(cx, &p) {
+                        rows.push(row);
+                    } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some() {
+                        *invalid = true;
+                    }
                 }
-            }
+                Err(_) => *invalid = true,
+            },
             Request::Orders {
+                product,
                 rows,
                 margins,
                 page_count,
@@ -369,7 +380,8 @@ impl Okx {
                     } else {
                         o.algo_id.into()
                     };
-                    if o.inst_id.is_empty()
+                    if !self.account_scope(*product, o.inst_id, o.inst_type)
+                        || o.inst_id.is_empty()
                         || (cx.store.market_by_id(o.inst_id).is_some() && !valid_order(&o))
                     {
                         *invalid = true;
@@ -441,9 +453,25 @@ impl Okx {
             Request::Positions {
                 generation,
                 version,
+                product,
                 rows,
                 invalid: false,
             } => {
+                if self.options.eea && product == 0 {
+                    self.list(
+                        cx,
+                        "/api/v5/account/positions?instType=FUTURES",
+                        true,
+                        Pending::Account(Request::Positions {
+                            generation,
+                            version,
+                            product: 1,
+                            rows,
+                            invalid: false,
+                        }),
+                    );
+                    return;
+                }
                 if let Some(join) = &mut self.account.join
                     && join.generation == generation
                 {
@@ -455,6 +483,7 @@ impl Okx {
             Request::Orders {
                 generation,
                 version,
+                product,
                 mut kind,
                 rows,
                 margins,
@@ -479,6 +508,7 @@ impl Okx {
                         Request::Orders {
                             generation,
                             version,
+                            product,
                             kind,
                             rows,
                             margins,
@@ -497,7 +527,26 @@ impl Okx {
                         Request::Orders {
                             generation,
                             version,
+                            product,
                             kind,
+                            rows,
+                            margins,
+                            page_count: 0,
+                            cursor: String::new(),
+                            cursors: HashSet::new(),
+                            invalid: false,
+                        },
+                    );
+                    return;
+                }
+                if self.options.eea && product == 0 {
+                    self.orders_page(
+                        cx,
+                        Request::Orders {
+                            generation,
+                            version,
+                            product: 1,
+                            kind: 0,
                             rows,
                             margins,
                             page_count: 0,

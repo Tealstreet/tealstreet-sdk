@@ -37,16 +37,18 @@ const http = (method, path, response, requestBody, metadata = {}) => {
   });
   if (eea && method === 'GET' && /^\/api\/v5\/(account\/(account-position-risk|positions)|trade\/(orders-pending|orders-algo-pending))\?/.test(path)) {
     const native = new URL(REST + path);
-    native.searchParams.delete('instType');
-    record(native.pathname + native.search, response);
-    // Both calls are native API contracts: Rust omits the optional product
-    // filter, while the real TS reader requests each product independently.
+    // Collateral is account currency scope; both readers use the SWAP risk read.
+    if (native.pathname.endsWith('/account-position-risk')) {
+      if (native.searchParams.get('instType') !== 'SWAP') throw new Error(`Unexpected OKX collateral scope ${path}`);
+      record(path, response);
+      return;
+    }
+    // Retain each native product request exactly; unfiltered requests must fail.
+    if (response.some((row) => !['SWAP', 'FUTURES'].includes(row.instType)))
+      throw new Error(`Missing native OKX product in ${path}`);
     for (const instType of ['SWAP', 'FUTURES']) {
       native.searchParams.set('instType', instType);
-      const balance = native.pathname.endsWith('/account-position-risk');
-      if (!balance && response.some((row) => !['SWAP', 'FUTURES'].includes(row.instType)))
-        throw new Error(`Missing native OKX product in ${path}`);
-      record(native.pathname + native.search, balance ? response : response.filter((row) => row.instType === instType));
+      record(native.pathname + native.search, response.filter((row) => row.instType === instType));
     }
     return;
   }

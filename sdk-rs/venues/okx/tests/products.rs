@@ -265,16 +265,16 @@ fn eea_private_reads_subscriptions_and_inverse_risk_keep_usd_units() {
     let private = socket(&initial, "/private");
     let positions = initial
         .iter()
-        .find(|a| is_get(a, "/api/v5/account/positions"))
+        .find(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
         .unwrap();
     let risk = initial
         .iter()
-        .find(|a| is_get(a, "/api/v5/account/account-position-risk"))
+        .find(|a| is_get(a, "/api/v5/account/account-position-risk?instType=SWAP"))
         .unwrap();
     assert!(
         initial
             .iter()
-            .any(|a| is_get(a, "/api/v5/trade/orders-pending"))
+            .any(|a| is_get(a, "/api/v5/trade/orders-pending?instType=SWAP"))
     );
     reply(
         &mut e,
@@ -290,6 +290,12 @@ fn eea_private_reads_subscriptions_and_inverse_risk_keep_usd_units() {
         ),
         5.0,
     );
+    assert!(!e.store().loaded().positions);
+    let future = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/positions?instType=FUTURES"))
+        .unwrap();
+    reply(&mut e, &future, &envelope(""), 5.5);
     let p = &e.store().positions()[0];
     assert_eq!(p.contracts, 0.0125);
     assert_eq!(p.notional, 500.0);
@@ -882,4 +888,431 @@ fn isolated_reported_margin_supplies_risk_when_native_imr_is_unavailable() {
     assert_eq!(e.store().balance().used, 0.0);
     assert_eq!(e.store().balance().upnl, 0.0);
     assert_eq!(e.store().balance().free, 1000.0);
+}
+
+const JOIN_SWAP_POSITION: &str = r#"{"instType":"SWAP","instId":"BTC-USDT-SWAP","pos":"5","posSide":"net","avgPx":"39000","lever":"10","upl":"50","mgnMode":"cross","imr":"200"}"#;
+const JOIN_FUTURE_POSITION: &str = r#"{"instType":"FUTURES","instId":"BTC-USD-UM","pos":"7","posSide":"net","avgPx":"39000","lever":"10","upl":"7","mgnMode":"cross","imr":"28"}"#;
+const JOIN_SWAP_ORDER: &str = r#"{"instType":"SWAP","instId":"BTC-USDT-SWAP","ordId":"301","ordType":"limit","state":"live","side":"buy","sz":"1","accFillSz":"0","px":"40000","lever":"10"}"#;
+const JOIN_FUTURE_ORDER: &str = r#"{"instType":"FUTURES","instId":"BTC-USD-UM","ordId":"302","ordType":"limit","state":"live","side":"buy","sz":"7","accFillSz":"0","px":"40000","lever":"10"}"#;
+
+fn eea_account() -> (Engine<Okx>, SocketId, Vec<Action>) {
+    let (mut e, initial) = startup(true, true);
+    let config = initial
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(&mut e, config, &envelope(r#"{"posMode":"net_mode"}"#), 3.0);
+    let pending = actions(&mut e);
+    let private = socket(&pending, "/private");
+    e.handle(3.5, Event::WsOpened { socket: private });
+    actions(&mut e);
+    ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
+    actions(&mut e);
+    (
+        e,
+        private,
+        pending
+            .into_iter()
+            .filter(|a| matches!(a, Action::Http(_)))
+            .collect(),
+    )
+}
+
+#[test]
+fn eea_account_sources_are_explicit_and_commit_each_join_only_after_both_products() {
+    let (mut e, _, pending) = eea_account();
+    let risk = pending
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/account-position-risk?instType=SWAP"))
+        .unwrap();
+    reply(
+        &mut e,
+        risk,
+        &envelope(r#"{"balData":[{"ccy":"USD","eq":"5000"}]}"#),
+        4.0,
+    );
+    let positions = pending
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
+        .unwrap();
+    reply(&mut e, positions, &envelope(JOIN_SWAP_POSITION), 4.1);
+    assert!(!e.store().loaded().positions && !e.store().loaded().balance);
+    let future = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/positions?instType=FUTURES"))
+        .unwrap();
+    reply(&mut e, &future, &envelope(JOIN_FUTURE_POSITION), 4.2);
+    assert_eq!(e.store().positions().len(), 2);
+    assert_eq!(e.store().balance().used, 228.0);
+    let first = pending
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/trade/orders-pending?instType=SWAP"))
+        .unwrap();
+    let mut next = vec![first];
+    let mut paths = Vec::new();
+    while let Some(request) = next.pop() {
+        let Action::Http(http) = &request else {
+            panic!("request")
+        };
+        paths.push(
+            http.url
+                .strip_prefix("https://eea.okx.com")
+                .unwrap()
+                .to_owned(),
+        );
+        let row = if http.url.ends_with("orders-pending?instType=SWAP") {
+            JOIN_SWAP_ORDER
+        } else if http.url.ends_with("orders-pending?instType=FUTURES") {
+            JOIN_FUTURE_ORDER
+        } else {
+            ""
+        };
+        assert!(
+            e.store().orders().is_empty(),
+            "no product or order-kind subset is publishable"
+        );
+        reply(&mut e, &request, &envelope(row), 5.0);
+        next.extend(
+            actions(&mut e)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+    }
+    let expected: Vec<_> = ["SWAP", "FUTURES"]
+        .into_iter()
+        .flat_map(|product| {
+            std::iter::once(format!("/api/v5/trade/orders-pending?instType={product}")).chain(
+                ["oco", "conditional", "trigger", "move_order_stop"].map(move |kind| {
+                    format!("/api/v5/trade/orders-algo-pending?instType={product}&ordType={kind}")
+                }),
+            )
+        })
+        .collect();
+    assert_eq!(paths, expected);
+    assert_eq!(e.store().orders().len(), 2);
+    assert!(e.store().orders().iter().any(|o| o.id == "301"));
+    assert!(e.store().orders().iter().any(|o| o.id == "302"));
+}
+
+#[test]
+fn eea_failed_later_product_preserves_proven_positions_equity_and_orders() {
+    let (mut e, private, pending) = eea_account();
+    ws(
+        &mut e,
+        private,
+        &format!(
+            r#"{{"arg":{{"channel":"positions"}},"data":[{JOIN_SWAP_POSITION},{JOIN_FUTURE_POSITION}]}}"#
+        ),
+    );
+    ws(
+        &mut e,
+        private,
+        &format!(
+            r#"{{"arg":{{"channel":"orders"}},"data":[{}]}}"#,
+            JOIN_SWAP_ORDER.replace("301", "900")
+        ),
+    );
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"account"},"data":[{"totalEq":"6000"}]}"#,
+    );
+    let positions_before = e.store().positions().to_vec();
+    let orders_before = e.store().orders().to_vec();
+    let balance_before = e.store().balance().clone();
+    let mut next = pending;
+    while let Some(request) = next.pop() {
+        let Action::Http(http) = &request else {
+            continue;
+        };
+        let body = if http.url.contains("instType=FUTURES") {
+            r#"{"code":"50000","msg":"later product failed","data":[]}"#.into()
+        } else if http.url.contains("account-position-risk") {
+            envelope(r#"{"balData":[{"ccy":"USD","eq":"1234"}]}"#)
+        } else if http.url.contains("/positions?") {
+            envelope(&JOIN_SWAP_POSITION.replace("\"pos\":\"5\"", "\"pos\":\"1\""))
+        } else if http.url.contains("/orders-pending?") {
+            envelope(JOIN_SWAP_ORDER)
+        } else {
+            envelope("")
+        };
+        reply(&mut e, &request, &body, 5.0);
+        next.extend(
+            actions(&mut e)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+        assert_eq!(e.store().positions(), positions_before);
+        assert_eq!(e.store().orders(), orders_before);
+        assert_eq!(e.store().balance(), &balance_before);
+    }
+}
+
+#[test]
+fn eea_late_futures_snapshot_keeps_newer_pushes_from_both_products_and_equity() {
+    let (mut e, private, pending) = eea_account();
+    let risk = pending
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/account-position-risk?instType=SWAP"))
+        .unwrap();
+    reply(
+        &mut e,
+        risk,
+        &envelope(r#"{"balData":[{"ccy":"USD","eq":"5000"}]}"#),
+        4.0,
+    );
+    let positions = pending
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
+        .unwrap();
+    reply(&mut e, positions, &envelope(JOIN_SWAP_POSITION), 4.1);
+    let future = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/positions?instType=FUTURES"))
+        .unwrap();
+    let pushed_swap = JOIN_SWAP_POSITION
+        .replace("\"pos\":\"5\"", "\"pos\":\"6\"")
+        .replace("\"imr\":\"200\"", "\"imr\":\"240\"");
+    let pushed_future = JOIN_FUTURE_POSITION
+        .replace("\"pos\":\"7\"", "\"pos\":\"8\"")
+        .replace("\"imr\":\"28\"", "\"imr\":\"32\"");
+    ws(
+        &mut e,
+        private,
+        &format!(r#"{{"arg":{{"channel":"positions"}},"data":[{pushed_swap},{pushed_future}]}}"#),
+    );
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"account"},"data":[{"totalEq":"6000"}]}"#,
+    );
+    let proven = e.store().positions().to_vec();
+    reply(&mut e, &future, &envelope(JOIN_FUTURE_POSITION), 6.0);
+    assert_eq!(e.store().positions(), proven);
+    assert_eq!(e.store().balance().used, 272.0);
+    assert_eq!(e.store().balance().total, 5943.0);
+}
+
+#[test]
+fn eea_wrong_product_or_contradictory_native_type_rejects_joined_snapshots() {
+    for row in [
+        JOIN_SWAP_POSITION.to_owned(),
+        JOIN_FUTURE_POSITION.replace("\"instType\":\"FUTURES\"", "\"instType\":\"SWAP\""),
+    ] {
+        let (mut e, _, pending) = eea_account();
+        let risk = pending
+            .iter()
+            .find(|a| is_get(a, "/api/v5/account/account-position-risk?instType=SWAP"))
+            .unwrap();
+        reply(
+            &mut e,
+            risk,
+            &envelope(r#"{"balData":[{"ccy":"USD","eq":"5000"}]}"#),
+            4.0,
+        );
+        let positions = pending
+            .iter()
+            .find(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
+            .unwrap();
+        reply(&mut e, positions, &envelope(JOIN_SWAP_POSITION), 4.1);
+        let future = actions(&mut e)
+            .into_iter()
+            .find(|a| is_get(a, "/api/v5/account/positions?instType=FUTURES"))
+            .unwrap();
+        reply(&mut e, &future, &envelope(&row), 4.2);
+        assert!(!e.store().loaded().positions && !e.store().loaded().balance);
+        assert!(e.store().positions().is_empty());
+    }
+    for row in [
+        JOIN_SWAP_ORDER.to_owned(),
+        JOIN_FUTURE_ORDER.replace("\"instType\":\"FUTURES\"", "\"instType\":\"SWAP\""),
+    ] {
+        let (mut e, _, pending) = eea_account();
+        let mut next: Vec<_> = pending
+            .into_iter()
+            .filter(|a| is_get(a, "/api/v5/trade/orders-pending?instType=SWAP"))
+            .collect();
+        while let Some(request) = next.pop() {
+            let Action::Http(http) = &request else {
+                continue;
+            };
+            let data = if http.url.ends_with("orders-pending?instType=SWAP") {
+                JOIN_SWAP_ORDER
+            } else if http.url.ends_with("orders-pending?instType=FUTURES") {
+                &row
+            } else {
+                ""
+            };
+            reply(&mut e, &request, &envelope(data), 5.0);
+            next.extend(
+                actions(&mut e)
+                    .into_iter()
+                    .filter(|a| matches!(a, Action::Http(_))),
+            );
+        }
+        assert!(!e.store().loaded().orders);
+        assert!(e.store().orders().is_empty());
+    }
+}
+
+#[test]
+fn eea_delayed_futures_order_walk_keeps_newer_pushes_from_both_products() {
+    let (mut e, private, pending) = eea_account();
+    let mut next: Vec<_> = pending
+        .into_iter()
+        .filter(|a| is_get(a, "/api/v5/trade/orders-pending?instType=SWAP"))
+        .collect();
+    while let Some(request) = next.pop() {
+        let Action::Http(http) = &request else {
+            continue;
+        };
+        if http.url.ends_with("orders-pending?instType=FUTURES") {
+            ws(
+                &mut e,
+                private,
+                &format!(
+                    r#"{{"arg":{{"channel":"orders"}},"data":[{JOIN_SWAP_ORDER},{JOIN_FUTURE_ORDER}]}}"#
+                ),
+            );
+            ws(
+                &mut e,
+                private,
+                &format!(
+                    r#"{{"arg":{{"channel":"orders"}},"data":[{}]}}"#,
+                    JOIN_SWAP_ORDER.replace("\"state\":\"live\"", "\"state\":\"canceled\"")
+                ),
+            );
+            ws(
+                &mut e,
+                private,
+                &format!(
+                    r#"{{"arg":{{"channel":"orders"}},"data":[{}]}}"#,
+                    JOIN_FUTURE_ORDER.replace("\"sz\":\"7\"", "\"sz\":\"8\"")
+                ),
+            );
+        }
+        let row = if http.url.ends_with("orders-pending?instType=SWAP") {
+            JOIN_SWAP_ORDER
+        } else if http.url.ends_with("orders-pending?instType=FUTURES") {
+            JOIN_FUTURE_ORDER
+        } else {
+            ""
+        };
+        reply(&mut e, &request, &envelope(row), 6.0);
+        next.extend(
+            actions(&mut e)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+    }
+    assert_eq!(e.store().orders().len(), 2);
+    assert_eq!(
+        e.store()
+            .orders()
+            .iter()
+            .find(|o| o.id == "301")
+            .unwrap()
+            .status,
+        safe_cex_engine::model::OrderStatus::Canceled
+    );
+    assert_eq!(
+        e.store()
+            .orders()
+            .iter()
+            .find(|o| o.id == "302")
+            .unwrap()
+            .amount,
+        8.0
+    );
+}
+
+#[test]
+fn eea_reconnect_retires_pending_second_product_for_positions_and_orders() {
+    let (mut e, private, pending) = eea_account();
+    let mut next = pending;
+    let mut stale = Vec::new();
+    while let Some(request) = next.pop() {
+        let Action::Http(http) = &request else {
+            continue;
+        };
+        if http.url.contains("instType=FUTURES") {
+            stale.push(request);
+            continue;
+        }
+        let row = if http.url.contains("account-position-risk") {
+            r#"{"balData":[{"ccy":"USD","eq":"5000"}]}"#
+        } else if http.url.contains("/positions?") {
+            JOIN_SWAP_POSITION
+        } else if http.url.contains("/orders-pending?") {
+            JOIN_SWAP_ORDER
+        } else {
+            ""
+        };
+        reply(&mut e, &request, &envelope(row), 5.0);
+        next.extend(
+            actions(&mut e)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+    }
+    assert_eq!(stale.len(), 2);
+    assert!(!e.store().loaded().positions && !e.store().loaded().orders);
+    e.handle(
+        100.0,
+        Event::WsClosed {
+            socket: private,
+            code: 1006,
+        },
+    );
+    let timer = actions(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(2000.0, Event::TimerFired { timer });
+    let socket = socket(&actions(&mut e), "/private");
+    e.handle(2001.0, Event::WsOpened { socket });
+    actions(&mut e);
+    ws(&mut e, socket, r#"{"event":"login","code":"0"}"#);
+    let mut fresh: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    while let Some(request) = fresh.pop() {
+        let Action::Http(http) = &request else {
+            continue;
+        };
+        let row = if http.url.contains("account-position-risk") {
+            r#"{"balData":[{"ccy":"USD","eq":"6000"}]}"#
+        } else {
+            ""
+        };
+        reply(&mut e, &request, &envelope(row), 2002.0);
+        fresh.extend(
+            actions(&mut e)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+    }
+    assert!(e.store().loaded().positions && e.store().loaded().orders);
+    assert_eq!(e.store().balance().total, 6000.0);
+    for request in stale {
+        let Action::Http(http) = &request else {
+            continue;
+        };
+        let row = if http.url.contains("/positions?") {
+            JOIN_FUTURE_POSITION
+        } else {
+            JOIN_FUTURE_ORDER
+        };
+        reply(&mut e, &request, &envelope(row), 2003.0);
+    }
+    assert!(e.store().positions().is_empty() && e.store().orders().is_empty());
+    assert_eq!(e.store().balance().total, 6000.0);
+    assert!(
+        !actions(&mut e).iter().any(|a| matches!(a, Action::Http(_))),
+        "retired FUTURES completion must not advance old order kinds"
+    );
 }

@@ -125,6 +125,7 @@ pub struct Config<'a> {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PositionRow<'a> {
+    pub inst_type: &'a str,
     pub mark_px: &'a str,
     pub ccy: &'a str,
     pub inst_id: &'a str,
@@ -142,6 +143,7 @@ pub struct PositionRow<'a> {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct OrderRow<'a> {
+    pub inst_type: &'a str,
     pub avg_px: &'a str,
     pub inst_id: &'a str,
     pub ord_id: &'a str,

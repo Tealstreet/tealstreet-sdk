@@ -225,17 +225,19 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
   };
 
   handleTickerEvents = ({ data: [update] }: Data) => {
-    const open = parseFloat(update.open24h);
-    const last = parseFloat(update.last);
-    const percentage = roundUSD(((last - open) / open) * 100);
+    // Untraded X-Perps publish empty quotes; retain the last known trade.
+    const open = update.open24h === '' ? undefined : parseFloat(update.open24h);
+    const last = update.last === '' ? undefined : parseFloat(update.last);
+    const percentage =
+      last === undefined || open === undefined ? undefined : open === 0 ? 0 : roundUSD(((last - open) / open) * 100);
 
     this.store.updateTicker(
       { id: update.instId },
       {
         bid: parseFloat(update.bidPx),
         ask: parseFloat(update.askPx),
-        last,
-        percentage,
+        ...(last !== undefined && { last }),
+        ...(percentage !== undefined && { percentage }),
         volume: parseFloat(update.volCcy24h),
         quoteVolume: parseFloat(update.vol24h),
       },

@@ -579,7 +579,7 @@ const KNOWN_TS_FIXES = {
     'partial position pushes and account equity updates retain full native IMR, converted PnL and open-order reserve through the next tick',
     // TS finite coercion hides malformed risk; isolated native IMR may be absent.
     'malformed or overflowing native risk cannot become zero; isolated position pushes use reported margin when IMR is unavailable',
-    'untraded EEA X-Perp empty last/open quotes initialize shared ticker scalars to zero rather than NaN',
+    'untraded EEA X-Perp empty last/open seeds initialize to zero and stream updates retain proven trade/percentage instead of NaN',
     // Phase-9: inverse contracts convert at native mark/execution reference;
     // EEA history scopes by native product rather than hardcoded SWAP.
     'EEA historical orders and income query retained FUTURES X-Perps as well as SWAP',

@@ -60,24 +60,33 @@ test('private tape generators retain OKX inverse/EEA native startup surface', ()
       if (name.startsWith('okxeu')) {
         assert(catalogs.every((r) => r.url.includes('/account/instruments?')));
         assert(rows.some((r) => r.instId === 'BTC-USD-UM' && r.instType === 'FUTURES' && r.ruleType === 'xperp'));
-        assert(records.some((r) => r.url?.endsWith('/account/positions')));
+        assert(records.some((r) => r.url?.endsWith('/account/positions?instType=FUTURES')));
         assert(records.some((r) => r.type === 'command' && r.op === 'fetchOrderHistory' && r.symbol === 'BTCUSDUM'));
         const startup = records.filter((record) => record.type === 'http' && /^\/api\/v5\/(account\/(account-position-risk|positions)|trade\/(orders-pending|orders-algo-pending))$/.test(new URL(record.url).pathname));
-        for (const all of startup.filter((record) => !new URL(record.url).searchParams.has('instType'))) {
-          const url = new URL(all.url), allRows = JSON.parse(all.body).data;
-          for (const instType of ['SWAP', 'FUTURES']) {
+        assert(startup.length > 0);
+        for (const scoped of startup) {
+          const url = new URL(scoped.url), scope = url.searchParams.get('instType'), nativeRows = JSON.parse(scoped.body).data;
+          assert(['SWAP', 'FUTURES'].includes(scope), 'startup reads always retain their exact native product');
+          const balance = url.pathname.endsWith('/account-position-risk');
+          if (balance) assert.equal(scope, 'SWAP', 'account collateral uses the same single risk scope as TS');
+          else assert(nativeRows.every((row) => row.instType === scope), 'product reply contains only its declared native rows');
+          for (const instType of balance ? ['SWAP'] : ['SWAP', 'FUTURES']) {
             url.searchParams.set('instType', instType);
             const key = requestKey('GET', url.href, undefined, new Set(), venueOf(name));
-            const filtered = startup.find((record) => record.afterCommand === all.afterCommand
+            const filtered = startup.find((record) => record.afterCommand === scoped.afterCommand
               && requestKey('GET', record.url, undefined, new Set(), venueOf(name)) === key);
             assert(filtered, `real TS ${instType} read must have its exact native reply: ${url}`);
-            assert.deepEqual(JSON.parse(filtered.body).data, url.pathname.endsWith('/account-position-risk')
-              ? allRows : allRows.filter((row) => row.instType === instType));
-            assert.notEqual(key, requestKey('GET', all.url, undefined, new Set(), venueOf(name)), 'optional filter stays part of exact matching');
           }
-          url.searchParams.set('instType', 'OPTION');
-          assert(!startup.some((record) => requestKey('GET', record.url, undefined, new Set(), venueOf(name))
-            === requestKey('GET', url.href, undefined, new Set(), venueOf(name))), 'unrecorded product cannot reuse an unfiltered response');
+          for (const missing of [undefined, 'OPTION', ...(balance ? ['FUTURES'] : [])]) {
+            if (missing === undefined) url.searchParams.delete('instType'); else url.searchParams.set('instType', missing);
+            assert(!startup.some((record) => requestKey('GET', record.url, undefined, new Set(), venueOf(name))
+              === requestKey('GET', url.href, undefined, new Set(), venueOf(name))), 'missing or unrecorded product cannot borrow a scoped reply');
+          }
+        }
+        for (const endpoint of ['/account/positions', '/trade/orders-pending']) {
+          const sources = startup.filter((record) => new URL(record.url).pathname.endsWith(endpoint));
+          assert(sources.some((record) => JSON.parse(record.body).data.some((row) => row.instId === 'BTC-USD-SWAP' && row.instType === 'SWAP')));
+          assert(sources.some((record) => JSON.parse(record.body).data.some((row) => row.instId === 'BTC-USD-UM' && row.instType === 'FUTURES')));
         }
       }
       const tape = new Tape([], venueOf(name));

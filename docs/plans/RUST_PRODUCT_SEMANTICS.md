@@ -140,6 +140,10 @@ request/write/signature/protocol contracts.
 | `bybitspot` | 4339 / 527 / 2 | 144.4 / 106.3 | 79.1 / 45.0 | 16.2 / 3.1 | PASS / PASS |
 | `bybitdemo` | 5833 / 912 / 2 | 222.3 / 162.5 | 112.9 / 63.6 | 21.8 / 5.0 | PASS / PASS |
 | `hyrotrader` | 160 / 2 / 2 | 19.6 / 18.9 | 3.8 / 3.4 | 13.3 / 0.8 | PASS / PASS |
+| `binance` | 873 / 917 / 3 | 199.0 / 91.4 | 109.8 / 36.3 | 18.0 / 4.0 | PASS / PASS |
+| `binancespot` | 7045 / 3729 / 2 | 939.4 / 598.7 | 471.9 / 238.9 | 27.4 / 10.8 | PASS / PASS |
+| `binanceinverse` | 202 / 20 / 2 | 238.4 / 95.1 | 166.1 / 51.6 | 13.7 / 1.9 | PASS / PASS |
+| `binancepm` | 873 / 917 / 3 | 254.3 / 127.6 | 152.0 / 57.6 | 17.7 / 4.0 | PASS / PASS |
 
 ### Final matrix findings retained
 
@@ -154,3 +158,29 @@ request/write/signature/protocol contracts.
   3,675 index updates; each scans 514 markets and performs a hash lookup,
   about 1.89 million catalog lookups. A native index-to-market fanout cache
   is being added before remeasurement. No threshold or fixture is changed.
+
+Binance single-venue control artifact: 928,783 bytes (budget 1,258,291),
+SHA256 `c7e62e853aefc0d7220121889079180a145699429b81f91df979b59a4b65368f`.
+All eight USD-M/PM/Spot/COIN-M public/private gates PASS.
+
+### Explicit EU account and live quote closure
+
+The final EU contract uses exact SWAP and FUTURES account requests on both
+implementations. Native position/order reads join both scopes atomically under
+one generation/version; failed, malformed, stale or retired later-product reads
+cannot commit a partial replacement. Balance reads retain SWAP account currency
+`balData`. Unfiltered scripted replies were removed, and missing/unknown filters
+fail exact matching. Native tests reached 90 with strict Clippy PASS.
+
+The index fanout diagnostic improved the public gate without changing either
+public fixture or threshold. Its EU replay then caught explicit blank live
+last/open quotes overwriting the real TS seed with NaN. The production TS socket
+handler now preserves proven last/change for those unavailable fields; malformed
+nonempty values remain visible. Actual-class blank/partial/malformed regressions
+pass. A first full product-script attempt used the single-venue OKX artifact and
+correctly failed the six Bybit artifact-dependent cases; it is not product or
+final verification evidence. The rebuilt combined artifact is required below.
+
+The earlier performance commit's phrase “no fixture changes” refers to the
+public benchmark fixtures. The scripted private tape was deliberately repaired;
+its changes and the two failed EU attempts are recorded above.

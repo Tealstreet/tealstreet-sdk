@@ -1147,3 +1147,11 @@ Rust oracle audit: historical fill windows compare native millisecond timestamps
 before truncating public execution timestamps to seconds. Positive protective
 dust must not become close-all; ambiguous standalone protective limit amends
 fail before cancellation in Rust, preserving the existing execution price.
+
+EU Rust account reconciliation reads explicit SWAP and FUTURES scopes and commits
+positions/orders only after both products finish successfully. Failed, malformed
+or stale later-product reads retain the proven whole-account snapshot. Public
+index prices use a catalog-owned fanout table for shared inverse/X-Perp indexes.
+An explicitly empty live last/open quote retains the last proven trade/change;
+unavailable REST seeds start at zero, while malformed nonempty quotes remain
+visible to the reference oracle.

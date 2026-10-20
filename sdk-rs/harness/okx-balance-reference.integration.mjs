@@ -44,9 +44,23 @@ test('real OKX untraded native empty last/open seed clears unavailable scalars w
     assert.deepEqual({ last: ticker.last, mark: ticker.mark, index: ticker.index, percentage: ticker.percentage }, { last: 0, mark: 0, index: 0, percentage: 0 });
     assert.deepEqual({ bid: ticker.bid, ask: ticker.ask, volume: ticker.volume, quoteVolume: ticker.quoteVolume }, { bid: 9, ask: 11, volume: 2, quoteVolume: 20 });
     assert.equal(raw.last, '', 'native metadata not mutated');
+    store.update({ tickers: [ticker] });
+    exchange.publicWebsocket.handleTickerEvents({ data: [raw] });
+    assert.equal(store.tickersBySymbol[linear.symbol].last, 0, 'empty native stream quote stays unavailable after initial seed');
+    exchange.publicWebsocket.handleTickerEvents({ data: [{ ...raw, last: '12', open24h: '10' }] });
+    assert.equal(store.tickersBySymbol[linear.symbol].last, 12);
+    assert.equal(store.tickersBySymbol[linear.symbol].percentage, 20);
+    exchange.publicWebsocket.handleTickerEvents({ data: [raw] });
+    assert.equal(store.tickersBySymbol[linear.symbol].last, 12, 'partial empty stream retains a proven last trade');
+    assert.equal(store.tickersBySymbol[linear.symbol].percentage, 20);
+    exchange.publicWebsocket.handleTickerEvents({ data: [{ ...raw, last: '13', open24h: '' }] });
+    assert.equal(store.tickersBySymbol[linear.symbol].last, 13);
+    assert.equal(store.tickersBySymbol[linear.symbol].percentage, 20, 'missing open cannot erase proven percentage');
     for (const last of ['bad', 'NaN', 'Infinity']) {
       const [bad] = exchange.parseTickers([{ ...raw, last }]);
       assert(!Number.isFinite(bad.last), 'malformed supplied quote remains a visible failure');
+      exchange.publicWebsocket.handleTickerEvents({ data: [{ ...raw, last }] });
+      assert(!Number.isFinite(store.tickersBySymbol[linear.symbol].last), 'malformed nonempty stream quote remains a visible failure');
     }
   } finally { exchange.dispose(); }
 });
