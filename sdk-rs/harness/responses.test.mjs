@@ -3,6 +3,41 @@ import assert from 'node:assert/strict';
 import { Responses } from './responses.mjs';
 import { venueOf } from './venues.mjs';
 
+test('concurrent replies replay in request order while legacy tapes retain completion order', () => {
+  const reply = (body, ordinal) => ({ type: 'http', method: 'GET', url: '/token', status: 200, body,
+    ...(ordinal === undefined ? {} : { requestOrdinal: ordinal }) });
+  const key = (method, url) => method + url;
+  const ordered = new Responses([reply('second', 7), reply('first', 3)], key);
+  assert.equal(ordered.respond('GET', '/token').body, 'first');
+  assert.equal(ordered.respond('GET', '/token').body, 'second');
+  assert.equal(ordered.respond('GET', '/token').body, 'second');
+  const legacy = new Responses([reply('second'), reply('first')], key);
+  assert.equal(legacy.respond('GET', '/token').body, 'second');
+  assert.equal(legacy.respond('GET', '/token').body, 'first');
+  for (const ordinals of [[1, 1], [1, undefined], [-1, 0], [0.5, 1], [0, Infinity]]) {
+    assert.throws(() => new Responses(ordinals.map((ordinal) => reply('bad', ordinal)), key), /request ordinals/);
+  }
+});
+
+test('request ordering preserves write stages and does not reorder timed snapshots', () => {
+  const key = (method, url) => method + url;
+  const write = (body, requestOrdinal, afterCommand = 0) => ({
+    type: 'http', method: 'POST', url: 'https://example.test/order', status: 200, body, requestOrdinal, afterCommand,
+  });
+  const responses = new Responses([write('second', 9), write('first', 2, 1)], key);
+  assert.equal(responses.respond('POST', 'https://example.test/order').status, 599);
+  assert.equal(responses.unusedWrites(), 2);
+  assert.equal(responses.respond('POST', 'https://example.test/order', undefined, 1).body, 'first');
+  assert.equal(responses.respond('POST', 'https://example.test/order', undefined, 1).body, 'second');
+  assert.equal(responses.unusedWrites(), 0);
+  const timed = new Responses([
+    { ...write('new', 1), method: 'GET', effectiveAt: 50 },
+    { ...write('old', 2), method: 'GET', effectiveAt: 0 },
+  ], key);
+  assert.equal(timed.respond('GET', 'https://example.test/order', undefined, 0, 49).body, 'old');
+  assert.equal(timed.respond('GET', 'https://example.test/order', undefined, 0, 50).body, 'new');
+});
+
 test('Bybit duplicate writes fail, unused writes count, and reads remain reusable', () => {
   const make = (method, url) => ({ type: 'http', method, url, status: 200, body: 'ok' });
   const write = 'https://api.bybit.com/v5/order/create-batch';

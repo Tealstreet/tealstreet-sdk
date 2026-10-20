@@ -353,6 +353,27 @@ describe('Rust frame recovery callers', () => {
     main.dispose();
   });
 
+  it('routes KuCoin Spot leverage acknowledgements through the applier and keeps SETTINGS authoritative', async () => {
+    const store = new DefaultStore();
+    const exchange = new RustEngineExchange('kucoinspot', { key: 'key', secret: 'secret' }, store);
+    receive(exchange, fixture({ fills: 0 }));
+    const command = vi.fn().mockResolvedValue(undefined);
+    (exchange as unknown as { command: unknown }).command = command;
+    const applier = (exchange as unknown as { applier: FrameApplier }).applier;
+    const writer = vi.spyOn(applier, 'applyLeverage');
+    await exchange.setLeverage('BTCUSDT', 20);
+    expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'setLeverage', symbol: 'BTCUSDT', leverage: 20 });
+    expect(writer).toHaveBeenCalledExactlyOnceWith('BTCUSDT', { buyLeverage: 1, sellLeverage: 1 });
+    expect(store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 1, sellLeverage: 1 });
+    receive(exchange, fixture({ fills: 0 }));
+    expect(store.fetchedLeverage.BTCUSDT.buyLeverage).toBe(5);
+    command.mockRejectedValueOnce(new Error('command failed'));
+    await expect(exchange.setLeverage('BTCUSDT', 20)).rejects.toThrow('command failed');
+    expect(writer).toHaveBeenCalledTimes(1);
+    expect(store.fetchedLeverage.BTCUSDT.buyLeverage).toBe(5);
+    exchange.dispose();
+  });
+
   it.each(['polymarket', 'mexc', 'binance'] as const)(
     'routes %s leverage refresh through the applier and keeps SETTINGS authoritative',
     async (venue) => {

@@ -19,11 +19,12 @@ pub struct SystemConfig {
 }
 
 pub struct Credentials {
-    key: Felt,
+    key: Option<Felt>,
+    public_key: Option<String>,
     address_felt: Felt,
     address: String,
     subkey: String,
-    chain_id: String,
+    chain_id: Felt,
 }
 
 #[derive(Debug, Serialize)]
@@ -91,7 +92,7 @@ fn secret(input: &str) -> Result<Felt, String> {
     Ok(Felt::from_bytes_be(&value.to_be_bytes()))
 }
 
-fn chain_id(input: &str) -> Result<String, String> {
+fn chain_id(input: &str) -> Result<Felt, String> {
     let value = if input.starts_with("0x")
         || input.starts_with("0X")
         || input.bytes().all(|b| b.is_ascii_digit())
@@ -103,7 +104,7 @@ fn chain_id(input: &str) -> Result<String, String> {
     if value == Felt::ZERO {
         return Err("Invalid Paradex chain ID".into());
     }
-    Ok(format!("{value:#x}"))
+    Ok(value)
 }
 
 impl Credentials {
@@ -126,7 +127,8 @@ impl Credentials {
             derive_ethereum(key, config)?
         };
         Ok(Self {
-            key,
+            key: Some(key),
+            public_key: None,
             address_felt,
             address,
             subkey: subkey.into(),
@@ -137,25 +139,51 @@ impl Credentials {
     pub fn address(&self) -> &str {
         &self.address
     }
+    pub fn delegated(
+        key: &str,
+        address: &str,
+        subkey: &str,
+        config: &SystemConfig,
+    ) -> Result<Self, String> {
+        let address_felt = felt(address).map_err(|_| "Invalid Paradex account address")?;
+        if key.is_empty()
+            || address_felt == Felt::ZERO
+            || felt(subkey).map_err(|_| "Invalid Paradex subkey address")? == Felt::ZERO
+        {
+            return Err("Invalid Paradex account or subkey address".into());
+        }
+        Ok(Self {
+            key: None,
+            public_key: Some(key.into()),
+            address_felt,
+            address: address.to_lowercase(),
+            subkey: subkey.into(),
+            chain_id: chain_id(&config.starknet_chain_id)?,
+        })
+    }
+    pub fn payload_request(&self, hash: &str) -> Option<safe_cex_engine::PayloadSignRequest> {
+        Some(safe_cex_engine::PayloadSignRequest {
+            exchange_name: "paradex",
+            key: self.public_key.as_ref()?.clone(),
+            payload: hash.into(),
+            scheme: "stark",
+            encoding: "felt-pair",
+        })
+    }
+    pub fn is_delegated(&self) -> bool {
+        self.public_key.is_some()
+    }
     pub fn subkey(&self) -> &str {
         &self.subkey
     }
 
-    fn signature(&self, primary: &str, names: &[&str], values: &[Felt]) -> Result<String, String> {
-        let definition = format!(
-            "{primary}({})",
-            names
-                .iter()
-                .map(|name| format!("{name}:felt"))
-                .collect::<Vec<_>>()
-                .join(",")
-        );
-        let mut fields = vec![selector(&definition).map_err(|_| "Invalid Paradex signing type")?];
+    fn signature(&self, definition: &str, values: &[Felt]) -> Result<String, String> {
+        let mut fields = vec![selector(definition).map_err(|_| "Invalid Paradex signing type")?];
         fields.extend_from_slice(values);
         let domain = hash_elements(&[
             selector("StarkNetDomain(name:felt,chainId:felt,version:felt)").expect("ASCII type"),
             short_string("Paradex").expect("short string"),
-            felt(&self.chain_id)?,
+            self.chain_id,
             Felt::ONE,
         ]);
         let hash = hash_elements(&[
@@ -164,7 +192,10 @@ impl Credentials {
             self.address_felt,
             hash_elements(&fields),
         ]);
-        let (r, s) = starknet::sign(&hash, &self.key).map_err(|_| "Paradex signing failed")?;
+        let Some(key) = self.key.as_ref() else {
+            return Ok(format!("{hash:#x}"));
+        };
+        let (r, s) = starknet::sign(&hash, key).map_err(|_| "Paradex signing failed")?;
         Ok(format!(
             "[\"{}\",\"{}\"]",
             U256::from_be_bytes(r.to_bytes_be()),
@@ -178,8 +209,7 @@ impl Credentials {
             .checked_add(86400)
             .ok_or("Invalid Paradex auth timestamp")?;
         let signature = self.signature(
-            "Request",
-            &["method", "path", "body", "timestamp", "expiration"],
+            "Request(method:felt,path:felt,body:felt,timestamp:felt,expiration:felt)",
             &[
                 short_string("POST").expect("short string"),
                 short_string("/v1/auth").expect("short string"),
@@ -255,23 +285,25 @@ impl Credentials {
         } else {
             quantum(price.expect("price is present"))?
         };
-        let mut names = vec!["timestamp", "market", "side", "orderType", "size", "price"];
-        let mut values = vec![
+        let mut values = [
             Felt::from(now_ms),
             word(market)?,
             side,
             word(order_type)?,
             felt(&size)?,
             felt(&price)?,
+            Felt::ZERO,
         ];
         if let Some(id) = id {
-            names.push("id");
-            values.push(word(id)?);
+            values[6] = word(id)?;
         }
         let signature = self.signature(
-            if id.is_some() { "ModifyOrder" } else { "Order" },
-            &names,
-            &values,
+            if id.is_some() {
+                "ModifyOrder(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt,id:felt)"
+            } else {
+                "Order(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt)"
+            },
+            &values[..if id.is_some() { 7 } else { 6 }],
         )?;
         Ok(OrderSignature {
             signature,

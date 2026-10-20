@@ -60,6 +60,7 @@ import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
+import { paradexSigningTransport } from './paradex.signing';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
@@ -95,6 +96,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   hyrotrader: 'hyrotrader',
   cryptocom: 'cryptocom',
   kucoin: 'kucoin',
+  kucoinspot: 'kucoinspot',
   polymarket: 'polymarket',
   hyperliquid: 'hyperliquid',
   hyperliquidspot: 'hyperliquidspot',
@@ -176,6 +178,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     isValid: (id) => /^[1-9]\d{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n,
   },
   kucoin: patternClientOrderIdRule('KuCoin', /^[A-Za-z0-9_-]{1,40}$/),
+  kucoinspot: patternClientOrderIdRule('KuCoin Spot', /^[A-Za-z0-9_-]{1,40}$/),
   cryptocom: patternClientOrderIdRule('Crypto.com', /^.{1,36}$/),
   weex: patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/, {
     mint: () => `ts${uuid()}`.slice(0, 36),
@@ -254,7 +257,7 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
-    this.isSpot = ['bybitspot', 'binancespot', 'coinbasespot', 'hyperliquidspot', 'krakenspot'].includes(exchangeName);
+    this.isSpot = ['bybitspot', 'binancespot', 'kucoinspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot'].includes(exchangeName);
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     if (exchangeName === 'polymarket') {
@@ -266,18 +269,20 @@ export class RustEngineExchange extends BaseExchange {
         return Math.max(rails.buyLeverage, rails.sellLeverage);
       };
     }
-    if (exchangeName === 'apexomni') {
+    if (exchangeName === 'apexomni' || exchangeName === 'kucoinspot') {
       this.getAccount = async () => {
         await this.ensureHost();
         return this.command<ExchangeAccount>({ op: 'getAccount' });
       };
+    }
+    if (['hyperliquid', 'grvt', 'paradex', 'bitrue', 'kucoinspot', 'phemex', 'binance', 'binancepm', 'okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(exchangeName)) {
+      this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
+        this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
+    }
+    if (['apexomni', 'bitrue', 'kucoinspot'].includes(exchangeName)) {
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
-    }
-    if (['hyperliquid', 'grvt', 'paradex', 'phemex', 'binance', 'binancepm', 'okx', 'okxeu', 'okxdemo', 'okxeudemo'].includes(exchangeName)) {
-      this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
-        this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
     }
     if (exchangeName === 'grvt') {
       this.fetchFillsForOrderIds = async (ids) => {
@@ -320,7 +325,7 @@ export class RustEngineExchange extends BaseExchange {
       this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
       this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
     }
-    if (this.name === 'woo' || this.name === 'grvt') {
+    if (['woo', 'grvt', 'kucoinspot'].includes(this.name)) {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       };
@@ -393,11 +398,8 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('BreakoutProp market data requires a legacy DXtrade username and password');
     }
     if (this.name === 'paradex') {
-      if (this.options.payloadSigner || this.options.remoteSigner) {
-        throw new Error('Rust Paradex remote signing is unsupported');
-      }
       if (this.options.publicDataOnly === false && this.isPublicDataOnly) {
-        throw new Error('Rust Paradex private accounts require a local subkey, Paradex address and subkey address');
+        throw new Error('Rust Paradex private accounts require a key, Paradex address and subkey address');
       }
     }
     if (this.name === 'asterdex' && !this.options.publicDataOnly) {
@@ -481,7 +483,11 @@ export class RustEngineExchange extends BaseExchange {
     } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
     const endpoints = this.name === 'hyrotrader' ? this.hyroEndpoints() : undefined;
-    const transport = createEngineTransport(this.name, this.options, engineTransport());
+    let transport = createEngineTransport(this.name, this.options, engineTransport());
+    if (this.name === 'paradex') {
+      transport = paradexSigningTransport(this.options, transport);
+      if (this.options.payloadSigner) transport = { ...transport, signPayload: (request) => this.options.payloadSigner!(request) };
+    }
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
       JSON.stringify({
@@ -499,7 +505,7 @@ export class RustEngineExchange extends BaseExchange {
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
         ...(['coinbase', 'coinbasespot'].includes(this.name) ? { spotOnly: this.name === 'coinbasespot' } : {}),
-        extra: this.name === 'kucoin' ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
+        extra: ['kucoin', 'kucoinspot'].includes(this.name) ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
         endpoints,
         ...(['backpack', 'bitrue', 'breakoutprop'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,
@@ -526,7 +532,7 @@ export class RustEngineExchange extends BaseExchange {
           grvtSignerAddress: this.options.grvtSignerAddress,
         } : {}),
         ...(this.name === 'polymarket' ? { polymarket: this.options.polymarket } : {}),
-        ...(this.name === 'paradex' ? { paradexAddress, subkeyAddress } : {}),
+        ...(this.name === 'paradex' ? { paradexAddress, subkeyAddress, payloadSigner: Boolean(this.options.payloadSigner) } : {}),
         ...(this.name === 'asterdex'
           ? {
               asterdex: {
@@ -826,8 +832,9 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Order amendment price and amount must be finite numbers');
     }
     const result = await this.command<string[] | { orderIds: string[]; clientOrderId: string }>({
-      op: 'amendOrder',
+      op: this.name === 'kucoinspot' ? 'amendOrderWithSymbol' : 'amendOrder',
       id: order.id,
+      ...(this.name === 'kucoinspot' ? { symbol: order.symbol } : {}),
       ...('price' in update ? { price: update.price } : {}),
       ...('amount' in update ? { amount: update.amount } : {}),
     });
@@ -835,7 +842,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   cancelOrders = async (orders: Order[]) => {
-    if (this.name === 'asterdex') {
+    if (this.name === 'asterdex' || this.name === 'kucoinspot') {
       await this.command({ op: 'cancelOrdersWithSymbols', orders: orders.map(({ id, symbol }) => ({ id, symbol })) });
     } else await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id) });
   };
@@ -872,10 +879,13 @@ export class RustEngineExchange extends BaseExchange {
 
   setLeverage = async (symbol: string, leverage: number) => {
     await this.command({ op: 'setLeverage', symbol, leverage });
+    if (this.name === 'kucoinspot') {
+      this.applier.applyLeverage(symbol, { buyLeverage: 1, sellLeverage: 1 });
+    }
   };
 
   changeMarginType = async (isolated: boolean, symbol?: string) => {
-    if (!symbol && this.name !== 'blofin') throw new Error('Symbol is required');
+    if (!symbol && this.name !== 'blofin' && this.name !== 'kucoinspot') throw new Error('Symbol is required');
     await this.command({ op: 'setMarginType', symbol: symbol ?? '', isolated });
   };
 

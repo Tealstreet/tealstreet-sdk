@@ -11,6 +11,7 @@ import { axiosClients, venueOf } from './venues.mjs';
 import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { baselineBeforeSetup, retainedMemory, settledMemory } from './memory.mjs';
+import { currencyBalances, lookupResult } from './account-shapes.mjs';
 import { finalizeReplay } from './replay-finalize.mjs';
 import { deterministicReplay, replayTransportReady } from './polling.mjs';
 
@@ -521,7 +522,7 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
       upnl: balance.upnl,
       ...((venue.inverseNativeAmounts || venue.coinNativeAmounts || venue.compareCoins || venue.compareBalanceCoins) ? { coins: balance.coins ?? {} } : {}),
       ...(venue.currencyBalances && balance.currencies !== undefined ? { currencies: balance.currencies } : {}),
-      ...(venue.compareBalanceCurrencies ? { currencies: balance.currencies ?? {} } : {}),
+      ...(venue.compareBalanceCurrencies ? { currencies: currencyBalances(balance.currencies) } : {}),
     },
     orders: orderRows,
     positions: positionRows,
@@ -755,7 +756,7 @@ async function runTs() {
               ? { currencies: store.balance.currencies }
               : {}),
             ...(venue.compareBalanceCurrencies ? {
-              currencies: venue.tsBalanceCurrencies?.(store.balance.currencies ?? {}) ?? store.balance.currencies ?? {},
+              currencies: currencyBalances(venue.tsBalanceCurrencies?.(store.balance.currencies ?? {}) ?? store.balance.currencies),
             } : {}),
           },
           orders: store.orders.map((o) => ({ ...o })),
@@ -839,8 +840,8 @@ function normalizeAccount(account) {
     hedged: account.hedged,
     balance: account.balance,
     orders: account.orders.map(order).sort(bySymbol),
-    // Zero-size rows are compared through the settings table, as in the TS view.
-    positions: account.positions.filter((p) => p.contracts > 0).map(position).sort(bySymbol),
+    // Binance zero-size rows are compared through settings, as in its TS view.
+    positions: (venue.rust.startsWith('binance') ? account.positions.filter((p) => p.contracts > 0) : account.positions).map(position).sort(bySymbol),
     settings: account.settings
       .map((s) => ({
         symbol: s.symbol,
@@ -883,11 +884,10 @@ writeFileSync(
       ),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
-    commands: result.commands.map(
-      (result, index) =>
-        venue.commandResult?.(result, records.filter((record) => record.type === 'command')[index], index + 1) ??
-        result,
-    ),
+    commands: result.commands.map((result, index) => {
+      const command = records.filter((record) => record.type === 'command')[index];
+      return lookupResult(venue.commandResult?.(result, command, index + 1) ?? result, command);
+    }),
   }),
 );
 realClearTimeout(replayDeadline);

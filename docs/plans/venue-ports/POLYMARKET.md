@@ -29,6 +29,9 @@ used by the pinned TS integration, never legacy V1 orders.
   merge flags). No opaque JSON info blobs, derivatives enums, leverage model,
   extra signing events, or token-as-f64 identities. Legacy frame layouts stay
   byte-compatible when optional metadata is absent.
+  The Polymarket crate enables the engine's opt-in `prediction` feature for
+  these transfer sections; other standalone venue builds omit their storage
+  and serialization. Feature-enabled and combined builds retain the same layout.
 * REST midpoints seed tickers in batches100. Lazy market socket consumes
   book snapshots and every absolute-size price_change, sorting sides and
   deleting zero sizes; initial arrays and direct objects both decode.
