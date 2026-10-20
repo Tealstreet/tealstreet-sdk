@@ -56,7 +56,7 @@ export interface VenueErrorDetail {
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
-  partial?: { orderIds: string[]; total: number; failedIndex: number };
+  partial?: { orderIds: string[]; total?: number; failedIndex?: number };
 }
 
 export interface EngineHandlers {

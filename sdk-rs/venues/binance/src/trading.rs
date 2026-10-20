@@ -74,8 +74,6 @@ struct Job {
     ids: Vec<String>,
     error: Option<VenueError>,
     amendment: Option<Amendment>,
-    /// Orders the command placed, for partial-batch detail.
-    total: usize,
 }
 
 struct Amendment {
@@ -249,12 +247,8 @@ impl BinanceFutures {
                 return;
             }
         }
-        let mut total = 0;
         let (id, plan) = match command {
-            Command::PlaceOrders { command, orders } => {
-                total = orders.len();
-                (command, self.plan_place(cx, &orders))
-            }
+            Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
             Command::CancelOrders { command, ids } => {
                 let orders = ids
                     .iter()
@@ -397,7 +391,7 @@ impl BinanceFutures {
         }
         match plan {
             Ok(job) => {
-                self.trading.jobs.insert(id, Job { total, ..job });
+                self.trading.jobs.insert(id, job);
                 self.advance(cx, id);
             }
             Err(message) => {
@@ -454,9 +448,8 @@ impl BinanceFutures {
             let job = self.trading.jobs.remove(&command).expect("present");
             match job.error {
                 // An inverse batch stops at its first failure; earlier legs stand.
-                Some(error) if self.is_inverse() => {
-                    cx.fail(command, error.partial(&job.ids, job.total, job.ids.len()))
-                }
+                // Its requests (splits, brackets) do not map back to the caller's orders.
+                Some(error) if self.is_inverse() => cx.fail(command, error.partial_ids(&job.ids)),
                 Some(error) => cx.fail(command, error),
                 None => cx.done(
                     command,
@@ -487,6 +480,10 @@ impl BinanceFutures {
         response: Result<Response<'_>, &str>,
     ) {
         let Request { command, call } = request;
+        // A gateway failure is unproven whatever body it carries.
+        let mut unproven = response
+            .as_ref()
+            .is_ok_and(|r| r.status == 408 || r.status >= 500);
         let outcome = match response {
             Ok(response) => match venue_error(&response) {
                 None => Ok(response.body),
@@ -555,6 +552,8 @@ impl BinanceFutures {
                             (Some(id), None) => ids.push(id.to_string()),
                             (_, code) => {
                                 let code = code.unwrap_or(0);
+                                unproven |=
+                                    failure(code, String::new()).outcome == Some(Outcome::Unknown);
                                 if strict {
                                     rejection.get_or_insert((
                                         code,
@@ -657,7 +656,15 @@ impl BinanceFutures {
                 cx.log(LogLevel::Error, message.clone());
             }
             if let Some(job) = self.trading.jobs.get_mut(&command) {
-                job.error.get_or_insert_with(|| failure(code, message));
+                let mut failed = failure(code, message);
+                if unproven {
+                    failed.outcome = Some(Outcome::Unknown);
+                }
+                // The first failure names the error; any unproven one makes it unknown.
+                let error = job.error.get_or_insert_with(|| failed.clone());
+                if failed.outcome == Some(Outcome::Unknown) {
+                    error.outcome = Some(Outcome::Unknown);
+                }
             }
         }
         let Some(job) = self.trading.jobs.get_mut(&command) else {
@@ -1505,7 +1512,7 @@ impl BinanceFutures {
 /// failure, a non-JSON HTTP error or an unproven acknowledgement.
 fn failure(code: i64, message: String) -> VenueError {
     let (kind, outcome) = match code {
-        0 => (None, Outcome::Unknown),
+        0 | -1000 => (None, Outcome::Unknown),
         -1007 => (Some(ErrorKind::Timeout), Outcome::Unknown),
         -1001 | -1006 => (Some(ErrorKind::VenueUnavailable), Outcome::Unknown),
         -1008 => (Some(ErrorKind::VenueUnavailable), Outcome::Rejected),
