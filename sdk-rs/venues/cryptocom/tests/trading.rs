@@ -20,6 +20,66 @@ fn pace(h: &mut Harness) {
     h.now = at_ms;
     h.event(Event::TimerFired { timer });
 }
+
+#[test]
+fn caller_receipt_precedes_write_and_missing_id_stays_missing() {
+    for supplied in [false, true] {
+        let mut h = Harness::new();
+        h.load();
+        h.actions.clear();
+        let mut o = order();
+        if !supplied {
+            o.client_order_id = None;
+        }
+        command(
+            &mut h,
+            Command::PlaceOrders {
+                command: 71,
+                orders: vec![o],
+            },
+        );
+        let http = h
+            .actions
+            .iter()
+            .position(|a| matches!(a, Action::Http(_)))
+            .unwrap();
+        let receipts: Vec<_> = h
+            .actions
+            .iter()
+            .enumerate()
+            .filter_map(|(i, action)| {
+                if let Action::Notice(Notice::CommandProgress {
+                    command: 71,
+                    receipts,
+                }) = action
+                {
+                    assert!(i < http);
+                    Some(receipts)
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect();
+        let Action::Http(request) = &h.actions[http] else {
+            unreachable!()
+        };
+        let payload: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        if supplied {
+            assert_eq!(receipts.len(), 1);
+            assert_eq!(receipts[0].symbol, "BTCUSD-PERP");
+            assert_eq!(
+                receipts[0].kind,
+                safe_cex_engine::OrderIdentityKind::ClientOrderId
+            );
+            assert_eq!(payload["params"]["client_oid"], receipts[0].identity);
+        } else {
+            assert!(receipts.is_empty());
+            assert!(payload["params"].get("client_oid").is_none());
+        }
+    }
+}
 #[test]
 fn caller_id_and_precision_are_sent_verbatim() {
     let mut h = Harness::new();
