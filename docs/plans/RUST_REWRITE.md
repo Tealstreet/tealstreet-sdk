@@ -498,9 +498,9 @@ ported. The linked inventory records exact callers and product constraints.
 | `binance`, `binancepm` | Opt-in USD-M/PM; preserve their account/query/routing behavior and regression gates while the shared crate now also supplies Spot/COIN-M. Shared TS/oracle removal still requires all callers/defaults to migrate. |
 | `binancespot` | Opt-in Spot; signed user-data WebSocket API ACK/liveness, native currency balances, no derivative positions/settings, native client-ID order identity and final-fill-aware cancel/replace. Preserve supported regular/protective/order-list preflight; private history/fills/income retain TS empty results, public-trades/client-lookup unsupported. Live public and documented private evidence: [variant plan](BINANCE_VARIANTS_PORT.md). |
 | `binanceinverse` | Opt-in COIN-M; native contract quantities, USD-per-contract multiplier, base position quantities and coin-denominated PnL/margin; worker/main native-count/quote-notional bridge retained. Regular/stops/trailing, identity/final-fill-safe replacement, caller client IDs rejected. Public trades implemented; private histories retain TS empty-result contract. Keep USD-M/PM controls and [exact scope/evidence](BINANCE_VARIANTS_PORT.md). |
-| `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader` | Opt-in; combined inverse/options toggles and semantic instrument classification remain blockers. Hyro live connectivity unverified. Preserve region/Hyro policy helpers. |
+| `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader` | Opt-in; typed native classification now survives worker/main frames and the real CLI TradFi preflight. The `bybit` linear account supports all four inverse/options flag combinations in its existing crate, with category-specific feeds, reconciliation, native quantities, option terms, chain/expiries and account/position Greeks. Plain option limit/market and limit-IV orders retain sizing/caller IDs; unsupported option controls and queries fail explicitly. Standalone inverse/spot/demo/Hyro retain their own profile boundaries; they do not inherit combined options merely from registration. Actual TS/native and documented private fixtures do not prove live combined/private connectivity; Hyro live connectivity remains unverified. Preserve region/Hyro policy helpers and remaining consumer/default blockers; [scope/evidence](RUST_PRODUCT_SEMANTICS.md). |
 | `bitget`, `bitgetusdc`, `bitgetinverse` | Opt-in; keep inverse/native sizing, UTA ledger/trailing and account-mode evidence; extract shared transport constants. |
-| `okx`, `okxeu`, `okxdemo`, `okxeudemo` | Opt-in; native chaser bridge repaired. Rust filters linear USDT/USDC markets; TS inverse and EU product coverage need explicit resolution before deletion. Extract broker constants. |
+| `okx`, `okxeu`, `okxdemo`, `okxeudemo` | Opt-in; global linear/inverse swaps and EU `FUTURES` with `ruleType=xperp` share the existing crate. Preserve native placement counts, inverse base quantities at reference price, USD-valued position PnL/margin, native ledger currency, worker/main chaser sizing and account-scoped EU discovery. Private subscriptions/reconciliation and product-scoped/joined histories retain host/demo boundaries; documented fixtures and live public captures do not prove live private units or connectivity. Defaults, external-public/account overlays, broker extraction and other consumer gates remain prerequisites; [scope/evidence](RUST_PRODUCT_SEMANTICS.md). |
 | `apexomni` | Opt-in; preserve native zkLink/API-key and consumer/protocol evidence. |
 | `asterdex` | Opt-in; retain V1/V3, builder/STP, public wallet/approval exports and secondary-read-key policy. |
 | `backpack` | Opt-in; perpetuals and uint32 decimal IDs, no spot claim. |
@@ -518,7 +518,7 @@ ported. The linked inventory records exact callers and product constraints.
 | `weex` | Opt-in; preserve host/header/routing evidence. |
 | `woo` | Opt-in WOO X; separate from Orderly WOOFi; keep position-history adapter. |
 | `polymarket` | Opt-in, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage. Prediction CLOB V2 with typed outcome/holding metadata; local-wallet signature types 0/1/2/3, supplied/derived L2 credentials, limit/GTC and final-fill-safe cancel-replace. No caller client IDs, market/conditional/bracket/reduce-only orders or generic history/fills/income/public-trades query coverage; price history is bounded sampled data. Preserve [exact port scope and fixture/live boundaries](venue-ports/POLYMARKET.md) and default-factory migration evidence. |
-| `grvt` | Opt-in perpetuals; local exact EIP-712 chains 325/326, session/API-key/private routing, subaccount discovery, mandatory builder authorization and decimal caller IDs 1..2^63-1. Preserve one-way/account leverage, protective/bracket and safe cancel-replace, bounded query/client-lookup and chaser fill-verification contracts. Margin-mode changes unsupported. TS non-perpetual catalog rows remain an explicit deletion blocker; do not infer Future/Call/Put support. Keep public builder-wallet exports; [GRVT scope/evidence](GRVT_RUST_PORT.md). |
+| `grvt` | Opt-in perpetuals; local exact EIP-712 chains 325/326, session/API-key/private routing, subaccount discovery, mandatory builder authorization and decimal caller IDs 1..2^63-1. Preserve one-way/account leverage, protective/bracket and safe cancel-replace, bounded query/client-lookup and chaser fill-verification contracts. Margin-mode changes unsupported. TS non-perpetual catalog rows remain an explicit deletion blocker assigned to `feat/rust-grvt-products`; this change makes no Future/Call/Put or retirement claim. Keep public builder-wallet exports; [GRVT scope/evidence](GRVT_RUST_PORT.md). |
 | `breakoutprop` | Opt-in, legacy DXtrade and development-only; authenticated REST polling with username/password and exact selected FULL_TRADING account even for public-data reads. LIMIT/MARKET/last-price STOP, GTC and proven zero-fill cancel-replace; one-way/cross and estimated margin/PnL. Caller IDs, brackets/close-all/settings writes unsupported; generic history/fills/income queries retain branded inert behavior, public trades unsupported. Quote books/live candles are synthetic. Documented public fixture waiver is explicit; live credential capture/connectivity remains unverified, and new Breakout Terminal accounts are outside scope. Preserve [scope/evidence](RUST_BREAKOUTPROP.md). |
 | `bitunix`, `hyperliquidspot`, `krakenspot`, `kucoinspot`, `lighter-robinhood` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
 
@@ -530,12 +530,15 @@ cutover or deletion:
 - `privateOnly` does not currently suppress Rust public sockets, and Rust does
   not initialize/use the TS `externalPublicData` provider. Replace these with
   explicit shared-public-feed policy and test private-worker/provider fan-out.
-- Rust frames carry typed Polymarket prediction/holding metadata, reconstructed
-  into its specific `info` fields; they do not carry arbitrary native `info`.
-  Bybit's instrument classifier still lacks `info.symbolType`, so CLI TradFi
-  preflight returns unknown and no longer enforces the existing refusal. Carry
-  typed semantic classification
-  through frames and test the real preflight before changing those defaults.
+- Rust frames carry typed Polymarket prediction/holding metadata and typed
+  instrument/product metadata; they do not carry arbitrary native `info`.
+  Bybit's native `symbolType`, `marketRegion` and `underlyingTicker` now survive
+  real discovery, worker application, buffer transfer and main application.
+  The real CLI preflight refuses classified stock/ETF/commodity/FX instruments;
+  empty and innovation crypto labels pass, while absent/new labels remain
+  unknown. This closes that metadata gap within the documented fixture scope;
+  it does not change defaults or certify live private connectivity. See
+  [product semantics evidence](RUST_PRODUCT_SEMANTICS.md).
 - `safe-cex-server`'s `PublicExchangeFactory` creates without starting an
   exchange, then calls `fetchMarkets`; Rust currently returns its store. Cold
   starts are empty and forced refresh does not refresh native metadata. Define
@@ -543,7 +546,8 @@ cutover or deletion:
 - GRVT's Rust discovery retains `PERPETUAL` only, while the TS catalog mapper
   also accepts non-perpetual instrument kinds. Resolve retained Future/Call/Put
   product and semantic metadata coverage explicitly before deleting that TS
-  path; perpetual fixtures and registration do not prove those products.
+  path in the separate `feat/rust-grvt-products` lane; perpetual fixtures and
+  registration do not prove those products, and this change retires none.
 
 Deletion proceeds in separate, reviewable PRs:
 

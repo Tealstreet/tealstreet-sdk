@@ -193,6 +193,14 @@ impl Store {
         if self.position_greeks.as_ref() != Some(&greeks) {
             self.position_greeks = Some(greeks);
             self.prune_position_greeks();
+            // Greeks reference exact venue IDs, including positions without a mode.
+            if self
+                .position_greeks
+                .as_ref()
+                .is_some_and(|rows| !rows.is_empty())
+            {
+                self.retain_position_ids();
+            }
             self.changes.positions = true;
         }
     }

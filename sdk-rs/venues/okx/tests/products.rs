@@ -706,7 +706,7 @@ fn partial_position_push_uses_all_native_initial_margin_and_remains_stable_at_ne
         &mut e,
         orders,
         &envelope(
-            r#"{"instId":"BTC-USDT-SWAP","ordId":"77","ordType":"limit","state":"live","side":"buy","sz":"1","accFillSz":"0","px":"40000","lever":"10"}"#,
+            r#"{"instId":"BTC-USDT-SWAP","ordId":"77","ordType":"limit","state":"live","side":"buy","sz":"1","accFillSz":"0","px":"40000","lever":"inf"}"#,
         ),
         6.0,
     );
@@ -717,10 +717,20 @@ fn partial_position_push_uses_all_native_initial_margin_and_remains_stable_at_ne
             reads.extend(actions(&mut e));
         }
     }
+    assert_eq!(
+        e.store().balance().free,
+        8960.0,
+        "unproven REST leverage reserves the full440USD instead of zero"
+    );
     e.handle(7.0, Event::WsOpened { socket: private });
     actions(&mut e);
     ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
     actions(&mut e);
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT-SWAP","ordId":"77","ordType":"limit","state":"live","side":"buy","sz":"1","accFillSz":"0","px":"40000","lever":"10"}]}"#,
+    );
     ws(
         &mut e,
         private,
@@ -747,6 +757,105 @@ fn partial_position_push_uses_all_native_initial_margin_and_remains_stable_at_ne
         "fresh equity retains the same44USD order reserve"
     );
     assert_eq!(fresh.total, 11870.0);
+    let positions_before = e.store().positions().to_vec();
+    let setting_before = e.store().setting("BTCUSD");
+    for field in ["imr", "upl"] {
+        for value in ["bad", "NaN", "inf", "", "1e308"] {
+            let mut row = serde_json::json!({"instId":"BTC-USD-SWAP","pos":"5","posSide":"net","avgPx":"39000","ccy":"BTC","lever":"99","upl":"0.002","mgnMode":"cross","imr":"0.012"});
+            row[field] = value.into();
+            ws(
+                &mut e,
+                private,
+                &format!(r#"{{"arg":{{"channel":"positions"}},"data":[{row}]}}"#),
+            );
+            assert_eq!(e.store().balance(), &fresh, "{field}={value}");
+            assert_eq!(e.store().positions(), positions_before);
+            assert_eq!(e.store().setting("BTCUSD"), setting_before);
+        }
+    }
+    for leverage in ["inf", "NaN", "bad"] {
+        ws(
+            &mut e,
+            private,
+            &format!(
+                r#"{{"arg":{{"channel":"orders"}},"data":[{{"instId":"BTC-USDT-SWAP","ordId":"77","ordType":"limit","state":"live","side":"buy","sz":"1","accFillSz":"0","px":"40000","lever":"{leverage}"}}]}}"#
+            ),
+        );
+        ws(
+            &mut e,
+            private,
+            r#"{"arg":{"channel":"account"},"data":[{"totalEq":"12000"}]}"#,
+        );
+        assert_eq!(
+            e.store().balance().free,
+            10880.0,
+            "{leverage} keeps440USD reserve"
+        );
+    }
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT-SWAP","ordId":"77","ordType":"limit","state":"live","side":"buy","sz":"1","accFillSz":"0","px":"40000","lever":"10"}]}"#,
+    );
     e.handle(2003.0, Event::TimerFired { timer: tick });
     assert_eq!(e.store().balance(), &fresh);
+}
+
+#[test]
+fn isolated_reported_margin_supplies_risk_when_native_imr_is_unavailable() {
+    let (mut e, initial) = startup(false, true);
+    let config = initial
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(&mut e, config, &envelope(r#"{"posMode":"net_mode"}"#), 3.0);
+    let pending = actions(&mut e);
+    let private = socket(&pending, "/private");
+    let positions = pending
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("/positions?")))
+        .unwrap();
+    let risk = pending
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("account-position-risk")))
+        .unwrap();
+    reply(
+        &mut e,
+        risk,
+        &envelope(r#"{"balData":[{"ccy":"USD","eq":"1000"}]}"#),
+        4.0,
+    );
+    reply(
+        &mut e,
+        positions,
+        &envelope(
+            r#"{"instId":"BTC-USD-SWAP","pos":"5","posSide":"net","avgPx":"39000","ccy":"BTC","lever":"10","upl":"0.001","mgnMode":"isolated","imr":"","margin":"0.01"}"#,
+        ),
+        5.0,
+    );
+    assert_eq!(e.store().positions().len(), 1);
+    assert_eq!(e.store().balance().used, 400.0);
+    assert_eq!(e.store().balance().upnl, 40.0);
+    assert_eq!(e.store().balance().free, 600.0);
+    e.handle(6.0, Event::WsOpened { socket: private });
+    actions(&mut e);
+    ws(&mut e, private, r#"{"event":"login","code":"0"}"#);
+    actions(&mut e);
+    let before = e.store().balance().clone();
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"positions"},"data":[{"instId":"BTC-USD-SWAP","pos":"5","posSide":"net","avgPx":"39000","ccy":"BTC","upl":"0.001","mgnMode":"isolated","imr":"","margin":""}]}"#,
+    );
+    assert_eq!(e.store().balance(), &before);
+    assert_eq!(e.store().positions().len(), 1);
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"positions"},"data":[{"instId":"BTC-USD-SWAP","pos":"0","posSide":"net","ccy":"BTC","upl":"","mgnMode":"isolated","imr":"","margin":""}]}"#,
+    );
+    assert!(e.store().positions().is_empty());
+    assert_eq!(e.store().balance().used, 0.0);
+    assert_eq!(e.store().balance().upnl, 0.0);
+    assert_eq!(e.store().balance().free, 1000.0);
 }

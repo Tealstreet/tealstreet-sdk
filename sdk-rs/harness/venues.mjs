@@ -543,29 +543,58 @@ const okx = (name) => ({
       // initial margin, coin valuation and live order reserve across push/tick paths.
       const round = (value) => Math.round(value * 100) / 100;
       const finite = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+      const nativeRisk = (raw) => {
+        const absent = (value) => value === undefined || value === '';
+        const read = (field) => {
+          const value = raw[field];
+          if (typeof value !== 'string' || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)
+            || !Number.isFinite(Number(value)) || (field !== 'upl' && Number(value) < 0))
+            throw new Error(`Invalid OKX reference native risk ${raw.instId}.${field}`);
+          return Number(value);
+        };
+        // The production converter coerces nonfinite amounts to zero. Refuse
+        // unproven raw risk before it or any real handler can hide that failure.
+        if (!absent(raw.imr)) read('imr');
+        if (!absent(raw.upl)) read('upl');
+        if (Number(raw.pos) === 0) return { imr: 0, upl: 0 };
+        return { imr: read(absent(raw.imr) && raw.mgnMode === 'isolated' ? 'margin' : 'imr'), upl: read('upl') };
+      };
+      const usdRisk = (raw) => {
+        const risk = nativeRisk(raw), market = exchange.store.marketsById[raw.instId];
+        const ticker = exchange.store.tickersBySymbol[market?.symbol];
+        const reference = finite(ticker?.mark) || finite(raw.markPx) || finite(raw.avgPx);
+        const imr = exchange.convertMarginValueToUsd(risk.imr, raw.ccy || market?.info?.settleCcy, market, reference);
+        const upl = exchange.convertMarginValueToUsd(risk.upl, raw.ccy || market?.info?.settleCcy, market, reference);
+        if (!Number.isFinite(imr) || !Number.isFinite(upl)) throw new Error(`Invalid OKX reference converted risk ${raw.instId}`);
+        return { imr, upl };
+      };
+      const validatePositions = (positions) => {
+        for (const position of positions ?? []) if (position.info) usdRisk(position.info);
+      };
       let authoritativeEquity, cachedInfo;
       const reserve = () => round(exchange.store.orders.filter((order) => order.info && order.status === 'open' && order.type === 'limit' && !order.reduceOnly)
         .reduce((sum, order) => sum + order.remaining * order.price / Math.max(finite(order.info.lever || '1'), 1), 0) * 1.1);
       const balanceFromRows = (equity) => {
         let used = 0, upnl = 0;
         for (const position of exchange.store.positions.filter((row) => row.contracts > 0 && row.info)) {
-          const raw = position.info, market = exchange.store.marketsById[raw.instId];
-          const ticker = exchange.store.tickersBySymbol[position.symbol];
-          const reference = finite(ticker?.mark) || finite(raw.markPx) || finite(raw.avgPx);
-          used += exchange.convertMarginValueToUsd(finite(raw.imr), raw.ccy || market?.info?.settleCcy, market, reference);
-          upnl += exchange.convertMarginValueToUsd(finite(raw.upl), raw.ccy || market?.info?.settleCcy, market, reference);
+          const risk = usdRisk(position.info);
+          used += risk.imr;
+          upnl += risk.upl;
         }
         used = round(used); upnl = round(upnl);
         return { used, upnl, free: round(equity - used - reserve()), total: round(equity - upnl) };
       };
       const positionTopic = exchange.privateWebsocket.handlePositionTopic.bind(exchange.privateWebsocket);
       exchange.privateWebsocket.handlePositionTopic = (message) => {
+        for (const row of message.data ?? []) usdRisk(row);
+        validatePositions(exchange.store.positions);
         const equity = authoritativeEquity ?? exchange.store.balance.total + exchange.store.balance.upnl;
         positionTopic(message);
         exchange.store.update({ balance: { ...exchange.store.balance, ...balanceFromRows(equity) } });
       };
       const accountTopic = exchange.privateWebsocket.handleAccountTopic.bind(exchange.privateWebsocket);
       exchange.privateWebsocket.handleAccountTopic = (message) => {
+        validatePositions(exchange.store.positions);
         accountTopic(message);
         const values = (message.data ?? []).map((row) => Number.parseFloat(String(row.totalEq ?? ''))).filter(Number.isFinite);
         if (!values.length) return;
@@ -575,6 +604,7 @@ const okx = (name) => ({
       };
       const formatter = exchange.formatBalanceUsedAvail.bind(exchange);
       exchange.formatBalanceUsedAvail = async (...args) => {
+        validatePositions(args[1]);
         const balance = await formatter(...args);
         if (authoritativeEquity === undefined) return balance;
         // Only the cached raw snapshot superseded by that push is stale. A new

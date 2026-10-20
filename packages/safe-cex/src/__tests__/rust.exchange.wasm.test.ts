@@ -156,8 +156,14 @@ const recordedOkxTransport = () => {
     },
     request: async (request) => {
       requests.push(request);
-      const name = new URL(request.url).pathname.split('/').pop()!;
-      const data = responses[name];
+      const url = new URL(request.url);
+      const name = url.pathname.split('/').pop()!;
+      // This scripted account owns one SWAP and no EU X-Perps. Answer the
+      // additional native catalog/seed scope without replaying a SWAP as FUTURES.
+      const data =
+        ['instruments', 'tickers'].includes(name) && url.searchParams.get('instType') === 'FUTURES'
+          ? []
+          : responses[name];
       return {
         status: data ? 200 : 404,
         headers: '',

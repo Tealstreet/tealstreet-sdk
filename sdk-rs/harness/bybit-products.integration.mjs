@@ -266,3 +266,26 @@ for (const inverse of [false, true]) for (const options of [false, true]) {
     } finally { native.free(); reference.exchange.dispose(); }
   });
 }
+
+test('native option position identity and Greeks survive frames without positionIdx and retire on close', () => {
+  const native = new Native({ enableOptionMarkets: true });
+  try {
+    const socket = native.sockets.find((row) => row.url.endsWith('/private'));
+    assert(socket);
+    const row = { category: 'option', symbol: CALL, side: 'Buy', size: '0.2', avgPrice: '1000', positionValue: '200',
+      unrealisedPnl: '3', delta: '0.4', gamma: '0.01', vega: '12', theta: '-8' };
+    const push = (position) => {
+      native.collect(native.engine.wsMessage(socket.socket, JSON.stringify({ topic: 'position', data: [position] }), native.now));
+      native.run();
+    };
+    push(row);
+    const position = native.store().positions.find((position) => position.symbol === CALL);
+    assert(position);
+    assert.equal(position.id, `${CALL}:long`);
+    assert.deepEqual(position.option?.greeks, { delta: 0.4, gamma: 0.01, vega: 12, theta: -8, units: 'Black-Scholes per 1 unit of the underlying, in the premium asset: vega per 1 vol point, theta per calendar day' });
+    push({ ...row, size: '0' });
+    assert.equal(native.store().positions.length, 0);
+    const bytes = native.engine.snapshotFrame(native.now).slice();
+    assert.equal(new Frame(bytes.buffer).positionGreeks()?.count ?? 0, 0);
+  } finally { native.free(); }
+});

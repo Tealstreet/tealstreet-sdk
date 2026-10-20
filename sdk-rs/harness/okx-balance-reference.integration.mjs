@@ -50,3 +50,46 @@ test('real OKX untraded native empty last/open seed clears unavailable scalars w
     }
   } finally { exchange.dispose(); }
 });
+
+test('real OKX reference refuses malformed supplied IMR/PnL before handlers or formatter can coerce it to zero', async () => {
+  const store = new DefaultStore();
+  const exchange = new OKXExchange('okx', { key: 'fixture-key', secret: 'fixture-secret', passphrase: 'fixture-passphrase' }, store);
+  exchange._accountPositionMode = 'oneway'; exchange._accountLevel = 2;
+  store.update({ markets: [linear, inverse], tickers: [linear, inverse].map((market) => ({ id: market.id, symbol: market.symbol, mark: 40000, last: 40000 })) });
+  const proven = exchange.mapPositions([raw(linear.id)]);
+  const balance = { used: 200, upnl: 50, total: 9950, free: 9800, info: [{ ccy: 'USD', eq: '10000' }] };
+  store.update({ positions: proven, balance });
+  venueOf('okx').prepareTs(exchange);
+  try {
+    for (const field of ['imr', 'upl']) {
+      for (const value of ['bad', 'NaN', 'Infinity', '-Infinity', '1bad', '0x1', ' ']) {
+        const malformed = raw(linear.id, { [field]: value });
+        const error = new RegExp(`Invalid OKX reference native risk ${linear.id}\\.${field}`);
+        assert.throws(() => exchange.privateWebsocket.handlePositionTopic({ data: [malformed] }), error);
+        assert.deepEqual(store.positions, proven, `${field}=${value} must not mutate proven positions`);
+        assert.deepEqual(store.balance, balance, `${field}=${value} must not alter proven equity or risk`);
+        const mapped = exchange.mapPositions([malformed]);
+        await assert.rejects(exchange.formatBalanceUsedAvail(balance.info, mapped, []), error);
+        assert.deepEqual(store.balance, balance);
+        store.update({ positions: mapped });
+        assert.throws(() => exchange.privateWebsocket.handleAccountTopic({ data: [{ totalEq: '12000' }] }), error);
+        assert.deepEqual(store.balance, balance, 'an account push cannot conceal malformed retained position risk');
+        store.update({ positions: proven });
+      }
+    }
+    for (const field of ['imr', 'upl']) {
+      const overflow = raw(inverse.id, { ccy: 'BTC', imr: '0.01', upl: '0.001', [field]: '1e308' });
+      assert.throws(() => exchange.privateWebsocket.handlePositionTopic({ data: [overflow] }), /Invalid OKX reference converted risk/);
+      assert.deepEqual(store.positions, proven, 'finite coin risk that overflows USD cannot replace proven state');
+      assert.deepEqual(store.balance, balance);
+    }
+    assert.throws(() => exchange.privateWebsocket.handlePositionTopic({ data: [raw(linear.id, { imr: '-1' })] }), /Invalid OKX reference native risk/);
+    assert.throws(() => exchange.privateWebsocket.handlePositionTopic({ data: [raw(linear.id, { imr: '', upl: '' })] }), /Invalid OKX reference native risk/);
+    exchange.privateWebsocket.handlePositionTopic({ data: [raw(linear.id, { imr: '220', upl: '-10' })] });
+    assert.deepEqual(amounts(store.balance), { used: 220, upnl: -10, total: 10010, free: 9780 }, 'a valid row still updates after rejected malformed risk');
+    exchange.privateWebsocket.handlePositionTopic({ data: [raw(linear.id, { mgnMode: 'isolated', imr: '', margin: '230', upl: '0' })] });
+    assert.deepEqual(amounts(store.balance), { used: 230, upnl: 0, total: 10000, free: 9770 }, 'isolated unavailable IMR uses only native reported locked margin');
+    exchange.privateWebsocket.handlePositionTopic({ data: [raw(linear.id, { pos: '0', imr: '', upl: '' })] });
+    assert.deepEqual(amounts(store.balance), { used: 0, upnl: 0, total: 10000, free: 10000 }, 'flat empty risk retires exposure without inventing an open-row value');
+  } finally { exchange.dispose(); }
+});

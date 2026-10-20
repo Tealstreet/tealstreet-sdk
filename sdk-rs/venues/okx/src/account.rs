@@ -8,6 +8,16 @@ use std::collections::{HashMap, HashSet};
 pub const PRIVATE: usize = 1;
 const ORDER_KINDS: [&str; 5] = ["", "oco", "conditional", "trigger", "move_order_stop"];
 
+fn reserve_leverage(value: &str) -> f64 {
+    // Unproven leverage must reserve the full notional; infinity would erase it.
+    value
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .unwrap_or(1.0)
+        .max(1.0)
+}
+
 pub enum Request {
     Config,
     Balance {
@@ -366,7 +376,7 @@ impl Okx {
                         return;
                     }
                     for order in self.orders(cx, &o) {
-                        margins.insert(order.id.clone(), num::parse(o.lever).max(1.0));
+                        margins.insert(order.id.clone(), reserve_leverage(o.lever));
                         rows.push(order);
                     }
                 }
@@ -839,7 +849,7 @@ impl Okx {
                         } else if matches!(row.state, "live" | "partially_filled" | "pause") {
                             self.account
                                 .order_leverage
-                                .insert(order.id.clone(), num::parse(row.lever).max(1.0));
+                                .insert(order.id.clone(), reserve_leverage(row.lever));
                             cx.store.upsert_order(order);
                         }
                     }
@@ -898,6 +908,24 @@ impl Okx {
     ) -> Option<(Position, RiskValues)> {
         let m = cx.store.market_by_id(p.inst_id)?;
         let pos = p.pos.parse::<f64>().ok().filter(|v| v.is_finite())?;
+        let finite = |value: &str| value.parse::<f64>().ok().filter(|value| value.is_finite());
+        if (!p.imr.is_empty() && finite(p.imr).is_none_or(|value| value < 0.0))
+            || (!p.upl.is_empty() && finite(p.upl).is_none())
+        {
+            return None;
+        }
+        let (initial_margin, unrealized) = if pos == 0.0 {
+            (0.0, 0.0)
+        } else {
+            // Isolated positions omit IMR and report their locked margin instead.
+            // An open row with unavailable risk cannot replace proven account data.
+            let initial = if p.imr.is_empty() && p.mgn_mode == "isolated" {
+                finite(p.margin).filter(|value| *value >= 0.0)?
+            } else {
+                finite(p.imr)?
+            };
+            (initial, finite(p.upl)?)
+        };
         let side = if p.pos_side == "short" || (p.pos_side == "net" && pos < 0.0) {
             PositionSide::Short
         } else {
@@ -941,6 +969,19 @@ impl Okx {
             } else {
                 1.0
             };
+        let initial_margin = if pos == 0.0 {
+            0.0
+        } else {
+            initial_margin * margin_factor
+        };
+        let unrealized = if pos == 0.0 {
+            0.0
+        } else {
+            unrealized * margin_factor
+        };
+        if !initial_margin.is_finite() || !unrealized.is_finite() {
+            return None;
+        }
         let leverage = if p.lever.is_empty() {
             cx.store.setting(&m.symbol).map_or(0.0, |s| s.leverage)
         } else {
@@ -975,7 +1016,7 @@ impl Okx {
                 unrealized_pnl: if pos == 0.0 {
                     0.0
                 } else {
-                    num::adjust(num::parse(p.upl) * margin_factor, m.precision.price)
+                    num::adjust(unrealized, m.precision.price)
                 },
                 realized_pnl: None,
                 contracts,
@@ -984,8 +1025,8 @@ impl Okx {
                 last_update: None,
             },
             RiskValues {
-                imr: num::parse(p.imr) * margin_factor,
-                upl: num::parse(p.upl) * margin_factor,
+                imr: initial_margin,
+                upl: unrealized,
             },
         ))
     }

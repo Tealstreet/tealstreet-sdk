@@ -80,3 +80,33 @@ fixtures and product tests were removed from this branch. GRVT retains only
 mechanical absent-IV initializers and unsupported command arms required by the shared order boundary. Its
 non-perpetual readiness blocker remains assigned to the separate lane; this PR
 implements items 1–3 only and makes no GRVT retirement decision.
+
+### Final capture and review checkpoint
+
+- Landing advanced with the TxFlow and native server lanes; merged
+  `c10f7e190a` without rebasing in `760a8a53ab`. Native server command-ID
+  remapping now includes all three option queries.
+- Fresh live public captures ran for 20 seconds: Bybit 17,591 WS frames,
+  OKX global 96,223, OKX EU 141,371. Before any public CPU comparison, each
+  was trimmed to the brief's standard first six seconds: 4,299 / 22,666 /
+  37,822 retained records respectively, including HTTP/catalog anchors.
+  EU books are actual `BTCUSD_UM_XPERP310404` and
+  `ETHUSD_UM_XPERP310404` products. Hyro retains documented fixture evidence;
+  no live endpoint has been configured.
+- Actual native live catalogs exposed two TS edge cases: optional empty
+  specialized order caps on a CRML preopen instrument and empty last/open
+  prices on an untraded TEST002 X-Perp. Typed native guards and actual TS
+  class reference regressions distinguish unavailable empty values from
+  malformed nonempty values.
+- A private replay mismatch exposed inconsistent OKX balance calculation:
+  position pushes used slice maintenance margin, while formatter ticks used
+  full initial margin. Native cached risk now preserves all positions,
+  converts coin risk at the instrument reference, and retains open-order
+  reserves. Independent peer review additionally caught a reference freshness
+  overreach: only the same cached raw balance object may be superseded by an
+  account push; a distinct newer REST object remains authoritative.
+- Focused product/CLI/reference integration: 14 PASS before the final
+  malformed-risk regression. Final workspace, artifacts and replay evidence
+  below supersede intermediate counts. Private tapes are documented protocol
+  evidence, not live credentialed connectivity or empirical verification of
+  ambiguous OKX private margin-unit documentation.
