@@ -9,14 +9,17 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
+    #[cfg(feature = "command-options")]
     FetchOptionChain {
         command: u32,
         query: crate::model::OptionChainQuery,
     },
+    #[cfg(feature = "command-options")]
     FetchOptionExpiries {
         command: u32,
         underlying: String,
     },
+    #[cfg(feature = "command-options")]
     FetchAccountGreeks {
         command: u32,
     },
@@ -174,9 +177,11 @@ impl From<CommandIn> for Command {
     #[inline(always)]
     fn from(command: CommandIn) -> Self {
         match command {
+            #[cfg(feature = "command-options")]
             CommandIn::FetchOptionChain { command, query } => {
                 Self::FetchOptionChain { command, query }
             }
+            #[cfg(feature = "command-options")]
             CommandIn::FetchOptionExpiries {
                 command,
                 underlying,
@@ -184,6 +189,7 @@ impl From<CommandIn> for Command {
                 command,
                 underlying,
             },
+            #[cfg(feature = "command-options")]
             CommandIn::FetchAccountGreeks { command } => Self::FetchAccountGreeks { command },
             #[cfg(feature = "command-apexomni")]
             CommandIn::GetAccount { command } => Self::FetchAccount { command },
@@ -395,6 +401,53 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn iv_survives_the_command_boundary_with_or_without_option_queries() {
+        let command = decode_command(r#"{"op":"placeOrders","command":41,"orders":[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":100},{"symbol":"BTC-option","type":"limit","side":"buy","amount":1,"impliedVolatility":0.5}]}"#).unwrap();
+        let Command::PlaceOrders { command, orders } = command else {
+            panic!("place orders")
+        };
+        assert_eq!(command, 41);
+        assert_eq!(orders[0].implied_volatility, None);
+        assert_eq!(orders[1].implied_volatility, Some(0.5));
+    }
+
+    #[test]
+    #[cfg(not(feature = "command-options"))]
+    fn option_json_queries_are_absent_from_unrelated_venue_parsers() {
+        for json in [
+            r#"{"op":"fetchOptionChain","command":1,"query":{"underlying":"BTC"}}"#,
+            r#"{"op":"fetchOptionExpiries","command":2,"underlying":"BTC"}"#,
+            r#"{"op":"fetchAccountGreeks","command":3}"#,
+        ] {
+            assert!(
+                decode_command(json).is_err(),
+                "option parser must be explicitly enabled: {json}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "command-options")]
+    fn option_json_queries_preserve_ids_and_all_native_filters_when_enabled() {
+        assert_eq!(decode_command(r#"{"op":"fetchOptionChain","command":1,"query":{"underlying":"BTC","expiry":1800000000000,"right":"put","strikeMin":90000,"strikeMax":110000}}"#).unwrap(),
+            Command::FetchOptionChain { command: 1, query: crate::model::OptionChainQuery {
+                underlying: "BTC".into(), expiry: Some(1_800_000_000_000.0), right: Some(crate::model::OptionRight::Put), strike_min: Some(90_000.0), strike_max: Some(110_000.0)
+            }});
+        assert_eq!(
+            decode_command(r#"{"op":"fetchOptionExpiries","command":2,"underlying":"ETH"}"#)
+                .unwrap(),
+            Command::FetchOptionExpiries {
+                command: 2,
+                underlying: "ETH".into()
+            }
+        );
+        assert_eq!(
+            decode_command(r#"{"op":"fetchAccountGreeks","command":3}"#).unwrap(),
+            Command::FetchAccountGreeks { command: 3 }
+        );
+    }
 
     #[test]
     fn host_configuration_accepts_positive_milliseconds_and_explicit_pause() {

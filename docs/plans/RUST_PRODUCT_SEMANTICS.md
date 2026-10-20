@@ -202,3 +202,34 @@ correctness gates. No public fixture or performance threshold was changed after
 measurement. Native OKX final count is 90; final strict workspace/WASM Clippy,
 format, bans and gitleaks PASS. PR review, exact-head green CI and merge remain
 the final process steps.
+
+### PR review and CI repair
+
+PR [#1341](https://github.com/Tealstreet/tealstreet-sdk/pull/1341) targets only
+`feat/rust-rewrite`. Final phase findings/closures were posted on the PR. The
+landing advanced with Lighter variants and the separate GRVT product decision;
+merged `02e9db0e8b` in `89e6af1c94`, resolving only documentation conflicts while
+retaining both this lane's Bybit/OKX evidence and the landing GRVT decision.
+Merged local checks pass: 16 semantic integrations, 406 SDK tests, 566 harness
+tests, 194 GRVT/Lighter native controls and strict workspace/WASM Clippy.
+
+The final adversarial PR review found malformed nonempty option position Greeks
+on Bybit WS rows being coerced to zero. A shared native validator now runs before
+any mutation; all four fields retain proven positions/Greeks for bad/NaN/infinite
+updates. Old-source regression RED is retained; repaired Bybit native 138 and
+strict Clippy PASS, independently reviewed. A stale GRVT support comment was
+removed; this lane implements no GRVT products or retirement policy.
+
+The first merged-head CI exposed two additional controls: Paradex WASM was
+1,277,426 bytes against the unchanged 1,258,291 budget; Breakout main CPU was
+29.3 ms vs TS 27.8 (steady 9.5 vs 10.3 and retained 0.8 vs 11.6 MB passed). The new
+option JSON parser and typed semantic frame state/writers are now Cargo features
+requested by Bybit, preserving combined/native Bybit support while excluding
+unsupported code from unrelated single-venue binaries. Native generic hosts
+explicitly retain option-command parsing; unconditional IV/runtime guards remain.
+Engine feature-off and feature-on suites both pass 76, strict Clippy/fmt/bans PASS.
+
+Paradex local WASM shrank from 1,277,137 to 1,253,328 bytes with identical budget
+and build settings. Its unchanged public and private gates both PASS: public
+main CPU 760.7 vs TS 917.9 ms, steady 368.3 vs 492.2 ms, retained 2.1 vs 18.9 MB. No benchmark
+fixture, metric boundary, timeout or performance threshold was relaxed.

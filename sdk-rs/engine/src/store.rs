@@ -2,18 +2,22 @@
 //! the changes with [`Store::take_pending`] and writes them into the flush
 //! frame with [`Store::write`].
 use crate::model::{
-    Balance, CoinBalance, CurrencyBalance, DerivativeProduct, InstrumentClassification, Loaded,
-    MarginType, Market, Order, OrderStatus, Position, PositionGreeks, PredictionHolding,
-    PredictionMarket, ProductKind, Ticker,
+    Balance, CoinBalance, CurrencyBalance, Loaded, MarginType, Market, Order, OrderStatus,
+    Position, PredictionHolding, PredictionMarket, Ticker,
 };
+#[cfg(any(test, feature = "product-semantics"))]
+use crate::model::{DerivativeProduct, InstrumentClassification, PositionGreeks, ProductKind};
 use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
 use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct Store {
     markets: Vec<Market>,
+    #[cfg(any(test, feature = "product-semantics"))]
     instrument_classifications: Option<Vec<InstrumentClassification>>,
+    #[cfg(any(test, feature = "product-semantics"))]
     derivative_products: Option<Vec<DerivativeProduct>>,
+    #[cfg(any(test, feature = "product-semantics"))]
     position_greeks: Option<Vec<PositionGreeks>>,
     prediction_markets: Option<Vec<PredictionMarket>>,
     prediction_holdings: Option<Vec<PredictionHolding>>,
@@ -149,8 +153,11 @@ impl Store {
             .map(|(index, market)| (market.id.clone().into_boxed_str(), index as u32))
             .collect();
         self.markets = markets;
-        self.instrument_classifications = None;
-        self.derivative_products = None;
+        #[cfg(any(test, feature = "product-semantics"))]
+        {
+            self.instrument_classifications = None;
+            self.derivative_products = None;
+        }
         let had_prediction_markets = self.prediction_markets.take().is_some();
         if self.prediction_holdings.take().is_some() || had_prediction_markets {
             self.changes.positions = true;
@@ -159,11 +166,13 @@ impl Store {
         self.set_loaded(|loaded| loaded.markets = true);
     }
 
+    #[cfg(any(test, feature = "product-semantics"))]
     pub fn instrument_classifications(&self) -> Option<&[InstrumentClassification]> {
         self.instrument_classifications.as_deref()
     }
 
     /// Replace labels after `set_markets`; indices belong to that snapshot.
+    #[cfg(any(test, feature = "product-semantics"))]
     pub fn set_instrument_classifications(
         &mut self,
         classifications: Vec<InstrumentClassification>,
@@ -174,10 +183,12 @@ impl Store {
         }
     }
 
+    #[cfg(any(test, feature = "product-semantics"))]
     pub fn derivative_products(&self) -> Option<&[DerivativeProduct]> {
         self.derivative_products.as_deref()
     }
 
+    #[cfg(any(test, feature = "product-semantics"))]
     pub fn set_derivative_products(&mut self, products: Vec<DerivativeProduct>) {
         if self.derivative_products.as_ref() != Some(&products) {
             self.derivative_products = Some(products);
@@ -185,10 +196,12 @@ impl Store {
         }
     }
 
+    #[cfg(any(test, feature = "product-semantics"))]
     pub fn position_greeks(&self) -> Option<&[PositionGreeks]> {
         self.position_greeks.as_deref()
     }
 
+    #[cfg(any(test, feature = "product-semantics"))]
     pub fn set_position_greeks(&mut self, greeks: Vec<PositionGreeks>) {
         if self.position_greeks.as_ref() != Some(&greeks) {
             self.position_greeks = Some(greeks);
@@ -205,6 +218,7 @@ impl Store {
         }
     }
 
+    #[cfg(any(test, feature = "product-semantics"))]
     fn prune_position_greeks(&mut self) {
         if let Some(rows) = &mut self.position_greeks {
             rows.retain(|row| {
@@ -379,6 +393,7 @@ impl Store {
     }
 
     fn prune_prediction_holdings(&mut self) {
+        #[cfg(any(test, feature = "product-semantics"))]
         self.prune_position_greeks();
         if let Some(holdings) = &mut self.prediction_holdings {
             holdings.retain(|holding| {
@@ -598,8 +613,11 @@ impl Store {
         }
         if changes.markets {
             self.write_markets(w);
-            self.write_instrument_classifications(w);
-            self.write_derivative_products(w);
+            #[cfg(any(test, feature = "product-semantics"))]
+            {
+                self.write_instrument_classifications(w);
+                self.write_derivative_products(w);
+            }
             self.write_prediction_markets(w);
         }
         if changes.tickers_replaced {
@@ -622,6 +640,7 @@ impl Store {
         }
         if changes.positions {
             self.write_positions(w);
+            #[cfg(any(test, feature = "product-semantics"))]
             self.write_position_greeks(w);
             self.write_prediction_holdings(w);
         }
@@ -686,6 +705,7 @@ impl Store {
         self.market_index(symbol).unwrap_or(wire::NONE)
     }
 
+    #[cfg(any(test, feature = "product-semantics"))]
     fn write_instrument_classifications<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let Some(rows) = &self.instrument_classifications else {
             return;
@@ -713,6 +733,7 @@ impl Store {
         w.end();
     }
 
+    #[cfg(any(test, feature = "product-semantics"))]
     fn write_derivative_products<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let Some(rows) = &self.derivative_products else {
             return;
@@ -741,6 +762,7 @@ impl Store {
         w.end();
     }
 
+    #[cfg(any(test, feature = "product-semantics"))]
     fn write_position_greeks<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let Some(rows) = &self.position_greeks else {
             return;

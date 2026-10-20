@@ -215,8 +215,6 @@ const KNOWN_TS_FIXES = {
   // The private server ping receives pong rather than being ignored.
   // Rust also refuses replacement after observed execution/lifecycle progress
   // or stale cancellation proof, rechecking deferred/resigned dispatches.
-  // Dated discovery now retains Future/Call/Put; TS catalog already did but
-  // omitted their isExpiring flag. Corrected reference adds only that native flag.
   grvt() {},
   polymarket() {
     // Reference repairs (not output normalization): preserve initial array books,
@@ -599,7 +597,8 @@ const KNOWN_TS_FIXES = {
   // Phase-9 native regressions additionally correct TS: account-wide history
   // limits before joining newer inverse/options sources; ignored IV on ordinary
   // derivatives; generic option tickers omitted and option books routed through
-  // the linear feed. Dedicated actual-TS/native API tests compare retained
+  // the linear feed; malformed supplied option WS Greeks coerced to zero
+  // instead of retaining proven position/Greek state. Dedicated API tests compare
   // options terms/queries/signing, and assert native option depth25 separately.
   bybit: (ts, rust) => {
     if (!ts.account) return;

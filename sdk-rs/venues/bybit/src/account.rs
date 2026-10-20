@@ -165,6 +165,12 @@ fn optional_numeric(value: &Option<Str<'_>>) -> bool {
     present(value).is_none_or(|value| float(value).is_finite())
 }
 
+fn valid_position_greeks(row: &PositionRow<'_>) -> bool {
+    [&row.delta, &row.gamma, &row.vega, &row.theta]
+        .into_iter()
+        .all(optional_numeric)
+}
+
 pub(crate) fn valid_hyro_order(row: &OrderRow<'_>) -> bool {
     row.symbol.ends_with("USDT")
         && present(&row.category).is_none_or(|category| category == "linear")
@@ -1482,6 +1488,11 @@ impl BybitLinear {
             .filter(|r| self.trades_row(&r.category, &r.symbol))
             .collect();
         for row in rows {
+            // A malformed supplied Greek is not an authoritative zero. Validate
+            // before changing either the position or its exact-ID metadata.
+            if self.category == Category::Option && !valid_position_greeks(row) {
+                continue;
+            }
             let mapped = self.map_account_position(row, cx.store, cx.now);
             let position = mapped.position;
             let mut greek_rows = cx.store.position_greeks().unwrap_or_default().to_vec();
@@ -1598,6 +1609,7 @@ impl BybitLinear {
                     || !size.is_finite()
                     || size < 0.0
                     || (size > 0.0 && order_side(row.side.as_deref()).is_none())
+                    || !valid_position_greeks(&row)
                     || [
                         &row.avg_price,
                         &row.entry_price,
@@ -1608,10 +1620,6 @@ impl BybitLinear {
                         &row.position_im,
                         &row.cur_realised_pnl,
                         &row.liq_price,
-                        &row.delta,
-                        &row.gamma,
-                        &row.vega,
-                        &row.theta,
                     ]
                     .into_iter()
                     .any(|value| !optional_numeric(value))

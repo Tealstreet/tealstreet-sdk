@@ -238,6 +238,65 @@ fn native_options_chain_expiries_greeks_and_iv_order_keep_their_wire_contract() 
 }
 
 #[test]
+fn malformed_option_stream_greeks_preserve_proven_position_and_frame_values() {
+    let mut h = ready(true);
+    let row = r#"{"category":"option","symbol":"BTC-25DEC26-100000-C-USDT","side":"Buy","size":"0.2","avgPrice":"1000","positionValue":"200","unrealisedPnl":"3","delta":"0.4","gamma":"0.01","vega":"12","theta":"-8"}"#;
+    let message = |row: &str| format!(r#"{{"topic":"position","data":[{row}]}}"#);
+    h.message("/private", &message(row));
+    let positions = h.engine.store().positions().to_vec();
+    let greeks = h.engine.store().position_greeks().unwrap().to_vec();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(greeks.len(), 1);
+    for (field, original) in [
+        ("delta", "0.4"),
+        ("gamma", "0.01"),
+        ("vega", "12"),
+        ("theta", "-8"),
+    ] {
+        for invalid in ["bad", "NaN", "inf"] {
+            let malformed = row
+                .replace(
+                    &format!(r#""{field}":"{original}""#),
+                    &format!(r#""{field}":"{invalid}""#),
+                )
+                .replace(r#""size":"0.2""#, r#""size":"0.3""#);
+            h.message("/private", &message(&malformed));
+            assert_eq!(h.engine.store().positions(), positions, "{field}={invalid}");
+            assert_eq!(h.engine.store().position_greeks().unwrap(), greeks);
+            let frame = h.engine.snapshot_frame(h.now);
+            let section = safe_cex_engine::wire::sections(frame)
+                .find(|(kind, _)| *kind == safe_cex_engine::wire::section::POSITION_GREEKS)
+                .unwrap()
+                .1;
+            assert_eq!(u32::from_le_bytes(section[..4].try_into().unwrap()), 1);
+            let positions = safe_cex_engine::wire::sections(frame)
+                .find(|(kind, _)| *kind == safe_cex_engine::wire::section::POSITIONS)
+                .unwrap()
+                .1;
+            // One position: count/market/enums/padding + nine f64 columns,
+            // followed by its exact ID, matching the Greek metadata reference.
+            assert_eq!(&positions[88..92], &section[4..8]);
+            let values: [f64; 4] = std::array::from_fn(|index| {
+                let at = 16 + index * 8;
+                f64::from_le_bytes(section[at..at + 8].try_into().unwrap())
+            });
+            assert_eq!(values, [0.4, 0.01, 12.0, -8.0]);
+        }
+    }
+    // Empty optional values follow REST policy: absent gamma is represented as 0.
+    h.message(
+        "/private",
+        &message(&row.replace(r#""gamma":"0.01""#, r#""gamma":"""#)),
+    );
+    assert_eq!(
+        h.engine.store().position_greeks().unwrap()[0].greeks.gamma,
+        0.0
+    );
+    h.message("/private", &message(row));
+    assert_eq!(h.engine.store().position_greeks().unwrap(), greeks);
+}
+
+#[test]
 fn category_snapshots_and_private_rows_preserve_siblings_and_native_inverse_sizing() {
     let mut h = ready(true);
     for category in ["option", "inverse", "linear"] {
