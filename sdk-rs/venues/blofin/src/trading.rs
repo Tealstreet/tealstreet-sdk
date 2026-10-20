@@ -17,6 +17,8 @@ struct Joined {
     job: Job,
     remaining: u8,
     error: Option<VenueError>,
+    /// A leg took effect, so the other leg's refusal cannot mean nothing happened.
+    succeeded: bool,
 }
 pub struct Request {
     job: Job,
@@ -1207,6 +1209,7 @@ impl Blofin {
                 job,
                 remaining: 2,
                 error: None,
+                succeeded: false,
             });
             for (step, headers) in prepared {
                 cx.request(
@@ -1359,8 +1362,10 @@ impl Blofin {
             self.finish_join(cx, Some(error));
             return;
         }
-        // A later rejection after a step took effect cannot mean nothing happened.
-        if request.job.effective && error.outcome == Some(Outcome::Rejected) {
+        // A later refusal after a step took effect cannot mean nothing happened.
+        if request.job.effective
+            && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+        {
             error.outcome = None;
         }
         self.cleanup_job(cx, &request.job);
@@ -1420,9 +1425,8 @@ impl Blofin {
         };
         let rows = reply.data.map(ResultRows::rows).unwrap_or_default();
         let mut error = None;
-        // Unproven acknowledgements are unknown; any accepted order means something happened.
+        // Unproven acknowledgements are unknown.
         let mut unproven = false;
-        let mut accepted = false;
         match &request.step.effect {
             Effect::Place {
                 family,
@@ -1441,13 +1445,13 @@ impl Blofin {
                         _ => row.algo_id,
                     };
                     let message = row.msg.trim().to_ascii_lowercase();
-                    let refused = (!row.code.is_empty() && row.code != "0")
-                        || !matches!(message.as_str(), "" | "success" | "order placed");
-                    if id.is_empty() || !seen.insert(id.to_string()) || refused {
+                    // Only a non-zero row code refuses; an unexpected success message is unproven.
+                    let refused = !row.code.is_empty() && row.code != "0";
+                    let odd = !matches!(message.as_str(), "" | "success" | "order placed");
+                    if id.is_empty() || !seen.insert(id.to_string()) || refused || odd {
                         unproven |= !refused;
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
                     } else {
-                        accepted = true;
                         let id = id.into_owned();
                         if cx.store.order(&id).is_none() {
                             self.trading.acknowledged.insert(
@@ -1493,11 +1497,9 @@ impl Blofin {
                             .msg
                             .contains("filled, triggered, canceled or does not exist");
                     if gone && !request.job.replacement_targets.is_empty() {
-                        accepted = true;
                         error = Some("BloFin replacement requires a confirmed cancellation".into());
                     }
                     if gone || (reply.code == "0" && (row.code.is_empty() || row.code == "0")) {
-                        accepted = true;
                         self.trading.acknowledged.remove(&target.id);
                         self.account.orders_revision += 1;
                         if target.family != 1 {
@@ -1540,13 +1542,9 @@ impl Blofin {
             }
         }
         if let Some(e) = error {
-            let outcome = if unproven {
-                Some(Outcome::Unknown)
-            } else if accepted {
-                None
-            } else {
-                Some(Outcome::Rejected)
-            };
+            // BloFin row and setting codes are undocumented, so explicit refusals stay
+            // unclassified; unproven acknowledgements are unknown.
+            let outcome = unproven.then_some(Outcome::Unknown);
             let mut error = VenueError::new(e);
             error.outcome = outcome;
             self.trade_failed(cx, request, error);
@@ -1577,13 +1575,18 @@ impl Blofin {
                 error.outcome = Some(Outcome::Unknown);
             }
             joined.error = Some(error);
+        } else {
+            joined.succeeded = true;
         }
         joined.remaining -= 1;
         if joined.remaining != 0 {
             return;
         }
         let joined = self.trading.joined.take().unwrap();
-        if let Some(error) = joined.error {
+        if let Some(mut error) = joined.error {
+            if joined.succeeded && error.outcome == Some(Outcome::Rejected) {
+                error.outcome = None;
+            }
             self.cleanup_job(cx, &joined.job);
             cx.fail(joined.job.command, error);
             self.trading.busy = false;
