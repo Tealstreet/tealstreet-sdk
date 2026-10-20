@@ -374,3 +374,19 @@ never retry an unchanged failed performance measurement to obtain a pass.
   27/27 tasks, safe-cex test-ci and test-unit each 7,791 tests. No timeout or
   gate threshold changed. Rebuild Binance and run correctness-only private
   controls before publishing; full CI still supplies quantitative measurements.
+- Rebuilt standalone Binance from committed merged source `389ede07e5`:
+  web/Node each 1,000,570 bytes under 1,258,291, SHA256
+  `d6bb7df17bda8befe2a899dd6a72c2f0c0736f338b79efc25885a83124d1eb2a`.
+  Correctness-only canonical pair: fourteen events, three commands all OK,
+  zero unmatched/missing/unused/signature/protocol errors; exactly the prior
+  seventy-eight diagnostic paths under new tape SHA
+  `8066c3b4de3742be5345977c9f66d270898b1b8ebbf220f1cffc384f433f6ba8`.
+  Frozen pair: unchanged input, thirteen events, six commands all OK, all
+  integrity counters zero, exactly its twenty-two existing paths. Both strict
+  results remain FAIL. No local quantitative performance claim.
+- Exact new-hash manifest clone independently reviewed PASS: groups byte-equal
+  to the prior canonical declaration, all historical entries retained, six
+  adjacent/hash/protected-error probes reject. Independent generation verifies
+  precisely three input record changes; no fixture or comparator workaround.
+  Policy/verifier tests 9/9 PASS. Publish this reviewed merge and hash binding;
+  full CI rebuilds combined artifacts and runs seven interleaved public pairs.

@@ -34,6 +34,16 @@
       "ciHead": "8ae409915bbd8e274a7a757f7f8a55dc479d4057",
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39429258321",
       "note": "Four independently reviewed same-order client-ID paths after merging leverage-side landing. All prior observations preserved; no comparison, threshold or integrity protection changed."
+    },
+    "binanceAuditFixtureRefresh": {
+      "head": "389ede07e5",
+      "tapeSha256": "8066c3b4de3742be5345977c9f66d270898b1b8ebbf220f1cffc384f433f6ba8",
+      "wasmSha256": "d6bb7df17bda8befe2a899dd6a72c2f0c0736f338b79efc25885a83124d1eb2a",
+      "localReports": [
+        "/tmp/gate-honesty-audit-binance-private-report.json",
+        "/tmp/gate-honesty-audit-binance-frozen-report.json"
+      ],
+      "note": "Freshly rebuilt standalone Binance at the merged trading-audit source. New canonical tape changes only two trade IDs and complete cancellation ACK economics; its 78 diagnostic keys exactly match the prior declaration. Frozen fixture unchanged, all six commands succeed, same 22 known paths. Both pairs have zero protocol/integrity errors. Correctness only; final CI must rebuild combined size and run seven public pairs."
     }
   },
   "failures": [
@@ -976,6 +986,111 @@
             "checkpoint 6 account.orders[1].clientOrderId",
             "checkpoint 7 account.orders[0].clientOrderId",
             "checkpoint 7 account.orders[1].clientOrderId"
+          ]
+        }
+      ]
+    },
+    {
+      "venue": "binance",
+      "tapeSha256": "8066c3b4de3742be5345977c9f66d270898b1b8ebbf220f1cffc384f433f6ba8",
+      "tape": "sdk-rs/harness/tapes/binance-private.jsonl",
+      "diagnostics": [
+        {
+          "divergence": "Execution count/order/size/price differs, including duplicate or average-price TS fills previously repaired only at the end.",
+          "keys": [
+            "account fills[1].price",
+            "checkpoint 2 account.fills[1].price",
+            "checkpoint 3 account.fills[1].price",
+            "checkpoint 4 account.fills[1].price",
+            "checkpoint 5 account.fills[1].price",
+            "checkpoint 6 account.fills[1].price",
+            "checkpoint 7 account.fills[1].price"
+          ]
+        },
+        {
+          "divergence": "Native time-in-force is absent or differs in the TS/Rust order views.",
+          "keys": [
+            "account orders[0].timeInForce",
+            "account orders[2].timeInForce",
+            "account orders[3].timeInForce",
+            "account orders[4].timeInForce",
+            "account orders[5].timeInForce",
+            "checkpoint 0 account.orders[1].timeInForce",
+            "checkpoint 1 account.orders[1].timeInForce",
+            "checkpoint 1 account.orders[2].timeInForce",
+            "checkpoint 2 account.orders[1].timeInForce",
+            "checkpoint 2 account.orders[2].timeInForce",
+            "checkpoint 2 account.orders[3].timeInForce",
+            "checkpoint 3 account.orders[1].timeInForce",
+            "checkpoint 3 account.orders[2].timeInForce",
+            "checkpoint 3 account.orders[3].timeInForce",
+            "checkpoint 3 account.orders[4].timeInForce",
+            "checkpoint 4 account.orders[0].timeInForce",
+            "checkpoint 4 account.orders[2].timeInForce",
+            "checkpoint 4 account.orders[3].timeInForce",
+            "checkpoint 4 account.orders[4].timeInForce",
+            "checkpoint 4 account.orders[5].timeInForce",
+            "checkpoint 5 account.orders[0].timeInForce",
+            "checkpoint 5 account.orders[2].timeInForce",
+            "checkpoint 5 account.orders[3].timeInForce",
+            "checkpoint 5 account.orders[4].timeInForce",
+            "checkpoint 5 account.orders[5].timeInForce",
+            "checkpoint 6 account.orders[0].timeInForce",
+            "checkpoint 6 account.orders[2].timeInForce",
+            "checkpoint 6 account.orders[3].timeInForce",
+            "checkpoint 6 account.orders[4].timeInForce",
+            "checkpoint 6 account.orders[5].timeInForce",
+            "checkpoint 7 account.orders[0].timeInForce",
+            "checkpoint 7 account.orders[2].timeInForce",
+            "checkpoint 7 account.orders[3].timeInForce",
+            "checkpoint 7 account.orders[4].timeInForce",
+            "checkpoint 7 account.orders[5].timeInForce"
+          ]
+        },
+        {
+          "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
+          "keys": [
+            "account orders[0].clientOrderId",
+            "account orders[2].clientOrderId",
+            "account orders[3].clientOrderId",
+            "account orders[4].clientOrderId",
+            "account orders[5].clientOrderId",
+            "checkpoint 0 account.orders[1].clientOrderId",
+            "checkpoint 1 account.orders[1].clientOrderId",
+            "checkpoint 1 account.orders[2].clientOrderId",
+            "checkpoint 2 account.orders[1].clientOrderId",
+            "checkpoint 2 account.orders[2].clientOrderId",
+            "checkpoint 2 account.orders[3].clientOrderId",
+            "checkpoint 3 account.orders[1].clientOrderId",
+            "checkpoint 3 account.orders[2].clientOrderId",
+            "checkpoint 3 account.orders[3].clientOrderId",
+            "checkpoint 3 account.orders[4].clientOrderId",
+            "checkpoint 4 account.orders[0].clientOrderId",
+            "checkpoint 4 account.orders[2].clientOrderId",
+            "checkpoint 4 account.orders[3].clientOrderId",
+            "checkpoint 4 account.orders[4].clientOrderId",
+            "checkpoint 4 account.orders[5].clientOrderId",
+            "checkpoint 5 account.orders[0].clientOrderId",
+            "checkpoint 5 account.orders[2].clientOrderId",
+            "checkpoint 5 account.orders[3].clientOrderId",
+            "checkpoint 5 account.orders[4].clientOrderId",
+            "checkpoint 5 account.orders[5].clientOrderId",
+            "checkpoint 6 account.orders[0].clientOrderId",
+            "checkpoint 6 account.orders[2].clientOrderId",
+            "checkpoint 6 account.orders[3].clientOrderId",
+            "checkpoint 6 account.orders[4].clientOrderId",
+            "checkpoint 6 account.orders[5].clientOrderId",
+            "checkpoint 7 account.orders[0].clientOrderId",
+            "checkpoint 7 account.orders[2].clientOrderId",
+            "checkpoint 7 account.orders[3].clientOrderId",
+            "checkpoint 7 account.orders[4].clientOrderId",
+            "checkpoint 7 account.orders[5].clientOrderId"
+          ]
+        },
+        {
+          "divergence": "Position size/PnL/margin/leverage or position lifecycle differs in the actual receiver views.",
+          "keys": [
+            "checkpoint 7 account.positions[1].marginSize"
           ]
         }
       ]
