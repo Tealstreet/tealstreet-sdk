@@ -423,6 +423,50 @@ fn native_fill_delivered_after_local_cancel_ack_is_not_lost() {
     );
     assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
 }
+
+#[test]
+fn unknown_cancel_fences_snapshots_and_open_events_without_hiding_late_fills() {
+    let mut h = H::new();
+    let _ = fill_rows(&mut h);
+    h.fire_after(75_000.0);
+    let stale_orders = h.take("/openOrders");
+    assert!(h.engine.store().order("9001").is_none());
+    h.event(Event::Command(
+        safe_cex_engine::Command::CancelOrdersWithSymbols {
+            command: 30,
+            orders: vec![safe_cex_engine::model::CancelOrderRef {
+                id: "9001".into(),
+                symbol: "BTCUSDT".into(),
+            }],
+        },
+    ));
+    h.reply("/order", r#"{"orderId":9001,"status":"CANCELED"}"#);
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 30 && result.is_ok())
+    );
+    assert!(h.engine.store().order("9001").is_none());
+    let snapshot = r#"[{"symbol":"BTCUSDT","orderId":9001,"price":"100","origQty":"2","executedQty":"0","status":"NEW","side":"BUY","type":"LIMIT","time":10}]"#;
+    h.respond(stale_orders, snapshot);
+    assert!(h.engine.store().order("9001").is_none());
+    let mut delayed_new = order(10.0, "NEW", "0", 0);
+    delayed_new["o"]["i"] = json!(9001);
+    h.ws(delayed_new);
+    assert!(h.engine.store().order("9001").is_none());
+    h.fire_after(1_000.0);
+    h.reply("/openOrders", snapshot);
+    assert!(h.engine.store().order("9001").is_none());
+    let mut delayed_fill = order(11.0, "FILLED", "2", 501);
+    delayed_fill["o"]["i"] = json!(9001);
+    h.ws(delayed_fill.clone());
+    h.ws(delayed_fill);
+    assert_eq!(fill_rows(&mut h), vec![(102.0, 0.5)]);
+    let final_order = h.engine.store().order("9001").unwrap();
+    assert_eq!(final_order.status, OrderStatus::Closed);
+    assert_eq!(final_order.filled, 2.0);
+}
+
 #[test]
 fn negative_used_balance_is_rejected_before_advancing_event_time() {
     let mut h = H::new();

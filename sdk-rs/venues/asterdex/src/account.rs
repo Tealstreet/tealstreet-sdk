@@ -37,6 +37,7 @@ pub struct AccountState {
     executions: HashSet<(String, u64)>,
     execution_order: VecDeque<(String, u64)>,
     pub terminal: HashMap<String, (f64, Order)>,
+    canceled_ids: HashMap<String, f64>,
     native_order_times: HashMap<String, f64>,
     balances: HashMap<String, (f64, f64)>,
     known_assets: HashSet<String>,
@@ -373,6 +374,8 @@ impl AsterDex {
         );
     }
     pub(crate) fn mark_order_canceled(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
+        self.account.order_revision += 1;
+        self.account.canceled_ids.insert(id.into(), cx.now);
         if cx
             .store
             .order(id)
@@ -381,7 +384,6 @@ impl AsterDex {
             return;
         }
         if let Some(mut order) = cx.store.order(id).cloned() {
-            self.account.order_revision += 1;
             order.status = OrderStatus::Canceled;
             order.last_update = cx.now;
             self.account
@@ -652,6 +654,13 @@ impl AsterDex {
                         self.account
                             .terminal
                             .retain(|_, (at, _)| cx.now - *at < 60_000.0);
+                        self.account
+                            .canceled_ids
+                            .retain(|_, at| cx.now - *at < 60_000.0);
+                        rows.retain(|order| {
+                            order.status != OrderStatus::Open
+                                || !self.account.canceled_ids.contains_key(&order.id)
+                        });
                         for (_, terminal) in self.account.terminal.values() {
                             rows.retain(|o| o.id != terminal.id);
                             rows.push(terminal.clone());
@@ -859,7 +868,10 @@ impl AsterDex {
                 });
             }
         }
-        if self.account.terminal.contains_key(&id) && status == OrderStatus::Open {
+        if status == OrderStatus::Open
+            && (self.account.terminal.contains_key(&id)
+                || self.account.canceled_ids.contains_key(&id))
+        {
             return;
         }
         #[derive(Deserialize)]

@@ -312,3 +312,9 @@ remain available at capacity. Native32trading/19unit/3WASMlib and wrapper13 test
 typecheck/lint/clippy/fmt pass. Configured leverage now uses its native command;
 this inherited TS maximum-leverage fallback bug and conservative unknown-cancel
 amendment behavior are documented in known-fix notes and this commit.
+
+Cancellation integration follow-up is independently re-reviewed clear:
+unknown-ID success always fences older REST and records a timestamp-only
+cancellation tombstone. Delayed NEW/fresh Open snapshots cannot reopen it;
+late FILLED still emits once and creates a real terminal row. Account20/20
+and strict clippy pass; no synthetic Store order is introduced.
