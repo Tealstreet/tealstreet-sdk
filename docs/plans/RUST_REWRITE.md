@@ -512,7 +512,8 @@ The source audit found additional gates that must stay visible before default
 cutover or deletion:
 
 - **Consumer-blockers implementation:** `privateOnly` and the pre-start
-  suppression hook now select native Public-role suppression. Explicit
+  suppression hook now select native Public-role suppression, with explicit
+  topic guards for multiplexed account sockets. Explicit
   direct/disabled/shared feed policy and transferred-port `RustPublicFeedProvider`
   fan-out retain private metadata/settings, ingest public data natively, and
   keep shared fields authoritative across local polling. Tests cover real
@@ -530,7 +531,8 @@ cutover or deletion:
   refresh starts a replacement engine to re-fetch native metadata and swaps
   `handle.exchange` after successful persistence. Failed refresh retains the
   previous good engine/catalog. Callers re-read `handle.exchange` after refresh;
-  cold/concurrent/hour-rollover/disposal paths have native/unit coverage.
+  bounded cold startup, lazy recovery from failed starts, delayed cache reads,
+  concurrent/hour-rollover/disposal paths have native/unit coverage.
 - GRVT's Rust discovery retains `PERPETUAL` only, while the TS catalog mapper
   also accepts non-perpetual instrument kinds. Resolve retained Future/Call/Put
   product and semantic metadata coverage explicitly before deleting that TS
@@ -538,6 +540,7 @@ cutover or deletion:
 
 The consumer-blockers phase also proves saved CFM account CLI reads through the
 real factory, MCP catalog/balance/positions/orders over its actual protocol,
+plus store-only ticker freshness through native Binance public frames,
 isolated compiled Bun CLI loading, and isolated packaged Node MCP loading with
 Rust artifacts and dependency notices. `EXCHANGE_ENGINE=rust` explicitly selects
 the MCP engine. Mobile has an explicit cached host-loader registration tested

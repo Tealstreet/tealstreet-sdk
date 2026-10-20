@@ -110,3 +110,25 @@ publish an empty snapshot or dispose the previous good engine.
 - Landing advanced to TxFlow PR #1329 during verification; commit checkpoints
   precede integration, then mixed-socket ownership and combined artifact gates
   are repeated against the integrated tree.
+
+- Integrated TxFlow landing `bf1cf3c99a` in `042d4e4e9f`, preserving new Rust
+  registry/query contracts and the repaired factory readiness row. Runtime
+  inventory is now 49 registered names / 44 Rust aliases / 9 defaults, as
+  established by the landing lane; this work changes no additional defaults.
+- Final cache-race regression passes both outer lookup and locked refresh lookup
+  recovery after failed cold startup (11 native WASM cases). SDK/shared, native,
+  factory and consumer checkpoints committed separately before landing sync.
+
+- Integrated SDK verification PASS: 7,411 unit tests in 512 files; root
+  typecheck 44/44 tasks and lint 28/28 tasks. A new candle fixture now explicitly
+  models a JavaScript caller passing an unsupported interval into the existing
+  Aster fallback, without broadening the TypeScript interval contract.
+- Additional code-correctness review of native price consumers found direct
+  quote handlers revaluing private PnL in GRVT, Lighter and ApeX Omni. Shared
+  ingress must invoke those same native formulas through the venue hook, as
+  Hyperliquid already does. Dedicated native regressions and all three venue
+  replay controls are added before the final artifact/gates. Binance Spot/COIN-M
+  have no separate public-price cache: their existing private/REST reconciliation
+  cadence uses Store prices in both modes. The targeted quote-side-effect audit
+  found no further concrete bypasses; this is code audit evidence, not all-venue
+  live connectivity proof.
