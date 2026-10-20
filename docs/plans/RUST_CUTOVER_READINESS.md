@@ -82,3 +82,17 @@ consumer adoption remain explicit blockers.
 - Polymarket landed during acceptance. Integrate its landing commit, extend
   the automatically enumerated matrix and caller readiness, rebuild combined
   WASM and repeat affected gates before the PR is ready to merge.
+- Integrated Polymarket landing `a0c11afd87` without conflicts. The native
+  matrix now passes 39/39 aliases, including its scoped Gamma input, lazy
+  subscriptions through the real worker, both captured books and exact outcome/
+  holding metadata. Registry inventory is now 49 names / 39 Rust / eight Rust
+  defaults / 31 opt-in / ten absent names. Generic algorithm fixtures do not
+  enable product features disabled by metadata. Independent integration review
+  is clear.
+- Post-integration acceptance: 7,240 SDK unit tests across 497 files pass with
+  four workers, as do the other 25 workspace test tasks. Harness 368, JS host 64,
+  root typecheck 44 tasks, lint 28 tasks, Rust bans/format/WASM Clippy and the
+  combined WASM build pass. Combined WASM is 9,897,015 bytes. Binance controls
+  pass again: main CPU TS/Rust 276.6/157.9 ms, steady 145.3/75.9 ms, retained
+  memory 19.7/3.6 MB including 2.0 MB Rust linear memory. Full native and SDK/WASM
+  aggregate reruns are finishing before the PR checkpoint.

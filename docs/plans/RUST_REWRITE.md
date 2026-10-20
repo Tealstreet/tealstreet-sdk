@@ -353,9 +353,9 @@ work with its frames. The implementation/checkpoints are in
 each direct `BaseExchange`/venue/registry importer across `packages/` and
 `apps/`, including type-only callers, tests and dynamic reference loaders.
 
-The SDK has 49 registered names: 38 in `RUST_VENUES`, eight already defaulting
-to Rust (Coinbase's two and Orderly's six), 30 with opt-in Rust adapters but
-TS defaults, and 11 without a Rust registration. `createExchange` now honors
+The SDK has 49 registered names: 39 in `RUST_VENUES`, eight already defaulting
+to Rust (Coinbase's two and Orderly's six), 31 with opt-in Rust adapters but
+TS defaults, and 10 without a Rust registration. `createExchange` now honors
 explicit `engine: 'rust'`, as `ExchangeWorker` does; changing the default
 registries remains a separate cutover decision.
 
@@ -418,7 +418,8 @@ ported. The linked inventory records exact callers and product constraints.
 | `phemex` | Opt-in; retain account identity/native protocol and broker helper. |
 | `weex` | Opt-in; preserve host/header/routing evidence. |
 | `woo` | Opt-in WOO X; separate from Orderly WOOFi; keep position-history adapter. |
-| `binanceinverse`, `binancespot`, `bitunix`, `breakoutprop`, `grvt`, `hyperliquidspot`, `krakenspot`, `kucoinspot`, `lighter-robinhood`, `polymarket`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
+| `polymarket` | Opt-in prediction CLOB V2 with typed outcome/holding metadata; local-wallet signature types 0/1/2/3, supplied/derived L2 credentials, limit/GTC and final-fill-safe cancel-replace. No caller client IDs, market/conditional/bracket/reduce-only orders or generic history/fills/income/public-trades query coverage; price history is bounded sampled data. Preserve [exact port scope and fixture/live boundaries](venue-ports/POLYMARKET.md) and default-factory migration evidence. |
+| `binanceinverse`, `binancespot`, `bitunix`, `breakoutprop`, `grvt`, `hyperliquidspot`, `krakenspot`, `kucoinspot`, `lighter-robinhood`, `txflow` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
 
 #### Known consumer blockers and replacement order
 
@@ -428,9 +429,11 @@ cutover or deletion:
 - `privateOnly` does not currently suppress Rust public sockets, and Rust does
   not initialize/use the TS `externalPublicData` provider. Replace these with
   explicit shared-public-feed policy and test private-worker/provider fan-out.
-- Rust market frames omit native `info`. Bybit's instrument classifier reads
-  `info.symbolType`; missing metadata makes CLI TradFi preflight classify it
-  unknown and lose the existing refusal. Carry typed semantic classification
+- Rust frames carry typed Polymarket prediction/holding metadata, reconstructed
+  into its specific `info` fields; they do not carry arbitrary native `info`.
+  Bybit's instrument classifier still lacks `info.symbolType`, so CLI TradFi
+  preflight returns unknown and no longer enforces the existing refusal. Carry
+  typed semantic classification
   through frames and test the real preflight before changing those defaults.
 - `safe-cex-server`'s `PublicExchangeFactory` creates without starting an
   exchange, then calls `fetchMarkets`; Rust currently returns its store. Cold

@@ -76,6 +76,15 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
         'cutover-session',
       );
       const startup = worker.start();
+      if (name === 'polymarket') {
+        // Polymarket deliberately opens its market channel only when a real
+        // consumer subscribes to a book; startup itself is a REST-only read.
+        expect(await startup).toBe(true);
+        expect(input.connectedSocketUrls).toEqual([]);
+        expect(input.publicBookSymbols.length).toBeGreaterThan(0);
+        for (const symbol of input.publicBookSymbols)
+          worker.handlePayload({ op: 'subscribeOrderBook', data: { symbol, subId: `cutover-${symbol}` } });
+      }
       const framesBeforeReplay = frames.length;
       const delivered = await input.replayPublicFrames();
       expect(delivered, `${name}: no fixture input reached a matching native socket`).toBeGreaterThan(0);
@@ -115,11 +124,14 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       // A late HTTP reply may update native state just after the periodic
       // flush. Wait for the real store mirror to catch up with the snapshot;
       // this is bounded eventual consistency, not an artificial local flush.
-      await vi.waitFor(() => {
-        expect(lateStore.tickers.map((row) => [row.id, row.last, row.bid, row.ask])).toEqual(
-          worker!.store.tickers.map((row) => [row.id, row.last, row.bid, row.ask]),
-        );
-      }, { timeout: 3000, interval: 25 });
+      await vi.waitFor(
+        () => {
+          expect(lateStore.tickers.map((row) => [row.id, row.last, row.bid, row.ask])).toEqual(
+            worker!.store.tickers.map((row) => [row.id, row.last, row.bid, row.ask]),
+          );
+        },
+        { timeout: 3000, interval: 25 },
+      );
       expect(lateStore.markets.map((row) => row.id)).toEqual(worker.store.markets.map((row) => row.id));
       expect(lateStore.tickers.some((row) => row.last > 0 || row.bid > 0 || row.ask > 0)).toBe(true);
       expect(lateStore.loaded.markets).toBe(true);
@@ -136,6 +148,26 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       if (name === 'bitgetinverse' || name === 'bybitinverse')
         expect(lateStore.markets.every((row) => row.isInverse)).toBe(true);
       if (name === 'bitgetusdc') expect(lateStore.markets.every((row) => row.quote === 'USDC')).toBe(true);
+      if (name === 'polymarket') {
+        expect(input.predictionMarkets).toHaveLength(4);
+        expect(new Set(input.predictionMarkets.map((row) => row.info.negRisk))).toEqual(new Set([false, true]));
+        for (const store of [worker.store, lateStore]) {
+          expect(store.markets.map(({ id, symbol, info }) => ({ id, symbol, info }))).toEqual(input.predictionMarkets);
+          expect(
+            store.markets.every(
+              (row) => row.quote === 'pUSD' && row.limits.leverage.min === 1 && row.limits.leverage.max === 1,
+            ),
+          ).toBe(true);
+        }
+        const books = frames.slice(framesBeforeReplay).flatMap((buffer) => [...new Frame(buffer).books()]);
+        for (const symbol of input.publicBookSymbols)
+          expect(
+            books.some(
+              (book) =>
+                lateStore.markets[book.market]?.symbol === symbol && book.bids.length > 0 && book.asks.length > 0,
+            ),
+          ).toBe(true);
+      }
     },
     20_000,
   );

@@ -22,6 +22,18 @@ type RecordRow = {
   [key: string]: unknown;
 };
 
+type PredictionInput = {
+  conditionId: string;
+  slug: string;
+  question: string;
+  description: string;
+  endDate: string;
+  clobTokenIds: string;
+  outcomes: string;
+  orderPriceMinTickSize: number;
+  negRisk: boolean;
+};
+
 const orderlyAliases = new Set(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 
 /** Test input only: no network, no SDK store writes and no fabricated empty replies. */
@@ -84,6 +96,7 @@ export const realVenue = (name: ExchangeName) => {
     publicDataOnly: true,
     engine: 'rust',
     ...(orderlyAliases.has(name) ? { applicationId: venue.publicOptions.applicationId } : {}),
+    ...(name === 'polymarket' ? { polymarket: venue.publicOptions.polymarket } : {}),
     ...(name === 'hyrotrader' ? { extra: { hyrotraderMode: 'demo' } } : {}),
   };
   const restore: (() => void)[] = [];
@@ -129,6 +142,47 @@ export const realVenue = (name: ExchangeName) => {
         : {}),
     }));
   const tape = new Tape(records, venue, false, 2000, 'rust', [], options);
+  // Derive the prediction oracle from raw recorded Gamma fields, independently
+  // of the Rust model, frame writer and SDK FrameApplier.
+  const predictionMarkets =
+    name === 'polymarket'
+      ? records
+          .filter((row) => row.type === 'http' && new URL(row.url!).hostname === 'gamma-api.polymarket.com')
+          .flatMap((row) =>
+            (JSON.parse(row.body!).markets as PredictionInput[]).flatMap((market) => {
+              const tokens = JSON.parse(market.clobTokenIds) as string[];
+              return (JSON.parse(market.outcomes) as string[]).map((outcome, index) => ({
+                id: tokens[index],
+                symbol: `${market.slug}-${outcome}`,
+                info: {
+                  conditionId: market.conditionId,
+                  tokenId: tokens[index],
+                  outcome,
+                  tickSize: market.orderPriceMinTickSize,
+                  negRisk: market.negRisk,
+                  question: market.question,
+                  description: market.description,
+                  endDate: market.endDate,
+                  slug: market.slug,
+                },
+              }));
+            }),
+          )
+      : [];
+  const bookTokens = new Set<string>();
+  if (name === 'polymarket')
+    for (const record of records.filter((row) => row.type === 'ws')) {
+      try {
+        const decoded = JSON.parse(record.text!);
+        for (const event of Array.isArray(decoded) ? decoded : [decoded])
+          if (event.event_type === 'book') bookTokens.add(event.asset_id);
+      } catch {
+        /* The fixture also contains plain PONG heartbeats. */
+      }
+    }
+  const publicBookSymbols = predictionMarkets
+    .filter((market) => bookTokens.has(market.id))
+    .map((market) => market.symbol);
   const requests: string[] = [];
   const errors: string[] = [];
   const connectedSocketUrls: string[] = [];
@@ -173,6 +227,8 @@ export const realVenue = (name: ExchangeName) => {
     requests,
     errors,
     source,
+    predictionMarkets,
+    publicBookSymbols,
     connectedSocketUrls,
     canonicalConnectedSocketUrls,
     fixtureSocketUrls,
