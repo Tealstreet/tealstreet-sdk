@@ -599,7 +599,7 @@ impl Hyperliquid {
             }
         }
         for m in &markets {
-            if !m.id.contains(':') {
+            if m.active && !m.id.contains(':') {
                 send(cx, "activeAssetData", None, Some(&m.id), None);
             }
         }
