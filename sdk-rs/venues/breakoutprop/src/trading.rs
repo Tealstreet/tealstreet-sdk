@@ -1,10 +1,12 @@
 //! DXtrade writes have no transport retry. A placement batch is sequential;
 //! cancellation waits for every result in each bounded group of ten.
-use crate::{BreakoutProp, Operation, Pending, wire};
+use crate::{BreakoutProp, Operation, Pending};
 use safe_cex_engine::model::{
     Market, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, StopTriggerType,
 };
-use safe_cex_engine::{Command, CommandId, Cx, Method, Store, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, Method, OrderIdentityKind, OrderIdentityReceipt, Store, num,
+};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -196,6 +198,21 @@ pub(crate) struct Request {
     pub path: String,
     pub body: Option<String>,
     step: Step,
+}
+
+impl Request {
+    pub(crate) fn report_progress(&self, cx: &mut Cx<'_, Pending>) {
+        if let Step::Place { order, code } = &self.step {
+            cx.command_progress(
+                self.command,
+                vec![OrderIdentityReceipt {
+                    symbol: order.instrument.clone(),
+                    kind: OrderIdentityKind::OrderCode,
+                    identity: code.clone(),
+                }],
+            );
+        }
+    }
 }
 
 #[derive(Default)]
@@ -637,7 +654,7 @@ impl BreakoutProp {
                 self.on_trade_failed_step(cx, id, "DXtrade account is not initialized".into());
                 continue;
             };
-            let base = format!("/accounts/{}/orders", wire::path_segment(account));
+            let base = format!("/accounts/{}/orders", safe_cex_engine::url::encode(account));
             let request = match &step {
                 Step::Place { order, code } => match order.body(code) {
                     Ok(body) => Request {
@@ -655,7 +672,7 @@ impl BreakoutProp {
                 Step::Cancel { code, .. } => Request {
                     command: id,
                     method: Method::Delete,
-                    path: format!("{base}/{}", wire::path_segment(code)),
+                    path: format!("{base}/{}", safe_cex_engine::url::encode(code)),
                     body: None,
                     step,
                 },
@@ -664,7 +681,7 @@ impl BreakoutProp {
                     method: Method::Get,
                     path: format!(
                         "{base}/history?with-order-id={}&limit=2",
-                        wire::path_segment(native_id)
+                        safe_cex_engine::url::encode(native_id)
                     ),
                     body: None,
                     step,

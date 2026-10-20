@@ -15,6 +15,7 @@ pub mod public_feed;
 pub mod socket;
 pub mod store;
 pub mod time;
+pub mod url;
 pub mod wire;
 
 pub use credentials::ReadCredentials;
@@ -24,6 +25,7 @@ pub use engine::{
     SocketContext, SocketId, TimerId, Venue, VenueAction, unsupported_venue_action,
 };
 pub use error::{ErrorKind, Outcome, Partial, VenueError};
+pub use model::{OrderIdentityKind, OrderIdentityReceipt};
 pub use store::Store;
 
 pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};

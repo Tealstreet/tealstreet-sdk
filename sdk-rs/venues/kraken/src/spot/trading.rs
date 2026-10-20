@@ -10,6 +10,7 @@ use std::collections::VecDeque;
 pub enum Step {
     Place {
         params: Vec<(&'static str, String)>,
+        receipt: OrderIdentityReceipt,
     },
     Amend {
         id: String,
@@ -86,7 +87,7 @@ impl KrakenSpot {
             ),
             ("ordertype", kind.into()),
             ("volume", num::format(amount)),
-            ("cl_ord_id", client_id),
+            ("cl_ord_id", client_id.clone()),
         ];
         if o.kind != OrderType::Market {
             let input_price = o.price.ok_or("Kraken Spot order requires price")?;
@@ -122,7 +123,14 @@ impl KrakenSpot {
         if o.time_in_force == Some(TimeInForce::ImmediateOrCancel) {
             params.push(("timeinforce", "IOC".into()));
         }
-        Ok(Step::Place { params })
+        Ok(Step::Place {
+            params,
+            receipt: OrderIdentityReceipt {
+                symbol: o.symbol.clone(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: client_id,
+            },
+        })
     }
     fn prepare_batch(
         &self,
@@ -135,14 +143,21 @@ impl KrakenSpot {
         let mut steps = VecDeque::new();
         for o in orders {
             steps.push_back(self.prepare(cx, o)?);
-            if o.kind == OrderType::Limit {
+            // A zero leg means "none", matching the TS truthiness check.
+            let stop_loss = o.stop_loss.filter(|p| *p != 0.);
+            let take_profit = o.take_profit.filter(|p| *p != 0.);
+            if stop_loss.is_some() || take_profit.is_some() {
+                if o.kind != OrderType::Limit {
+                    return Err(
+                        "Kraken Spot does not support take-profit/stop-loss legs on a market entry; use a limit entry or place TP/SL separately"
+                            .into(),
+                    );
+                }
                 for (kind, price) in [
-                    (OrderType::StopLoss, o.stop_loss),
-                    (OrderType::TakeProfit, o.take_profit),
+                    (OrderType::StopLoss, stop_loss),
+                    (OrderType::TakeProfit, take_profit),
                 ] {
-                    if let Some(price) = price
-                        && price != 0.
-                    {
+                    if let Some(price) = price {
                         let mut child = o.clone();
                         child.kind = kind;
                         child.side = o.side.opposite();
@@ -272,11 +287,14 @@ impl KrakenSpot {
             return;
         }
         let (path, params) = match &step {
-            Step::Place { params } => ("/0/private/AddOrder", params.clone()),
+            Step::Place { params, .. } => ("/0/private/AddOrder", params.clone()),
             Step::Amend { params, .. } => ("/0/private/AmendOrder", params.clone()),
             Step::Cancel { id } => ("/0/private/CancelOrder", vec![("txid", id.clone())]),
         };
         self.trading.waiting = true;
+        if let Step::Place { receipt, .. } = &step {
+            cx.command_progress(job.command, vec![receipt.clone()]);
+        }
         self.request_private(cx, path, params, Kind::Trade(step));
     }
     pub(super) fn trade_response(&mut self, cx: &mut Cx<'_, Pending>, step: Step, text: &str) {

@@ -1,7 +1,7 @@
 //! Rare request/response reads. Results go back as JSON in the command's
 //! completion and never enter the flush frame.
 use crate::account::{order_side, order_type, venue_error};
-use crate::sign::Query;
+use crate::sign::{Query, Signed};
 use crate::wire::{HistoricalOrderRow, IncomeRow, PublicTrade, UserTrade};
 use crate::{BinanceFutures, Pending};
 use safe_cex_engine::model::{Order, OrderStatus};
@@ -665,10 +665,7 @@ impl BinanceFutures {
                     self.next_fills_window(cx, command);
                 }
                 Err(message) => {
-                    cx.log(
-                        LogLevel::Error,
-                        format!("Error fetching executions: {message}"),
-                    );
+                    cx.command_error(command, format!("Error fetching executions: {message}"));
                     self.history.reads.remove(&command);
                     cx.done(command, Ok("[]".into()));
                 }
@@ -718,7 +715,7 @@ impl BinanceFutures {
                         );
                     }
                     Err(message) => {
-                        cx.log(LogLevel::Error, message);
+                        cx.command_error(command, message);
                         cx.done(command, Ok("[]".into()));
                     }
                 }
@@ -745,8 +742,8 @@ impl BinanceFutures {
                         let result = match parsed {
                             Ok(()) => serde_json::to_string(&page).unwrap_or_default(),
                             Err(message) => {
-                                cx.log(
-                                    LogLevel::Error,
+                                cx.command_error(
+                                    command,
                                     format!("Error fetching income history: {message}"),
                                 );
                                 "[]".into()

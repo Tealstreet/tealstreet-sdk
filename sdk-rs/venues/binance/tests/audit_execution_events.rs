@@ -131,7 +131,7 @@ fn derivative_fills_require_trade_and_dedupe_by_execution_identity() {
             "77"
         };
         h.message(path, &event(v, "NEW", "NEW", "0", 0));
-        for execution in ["AMENDMENT", "CALCULATED", "CANCELED"] {
+        for execution in ["AMENDMENT", "CANCELED"] {
             h.message(path, &event(v, "PARTIALLY_FILLED", execution, "1", 10));
         }
         let missing =
@@ -164,6 +164,22 @@ fn derivative_fills_require_trade_and_dedupe_by_execution_identity() {
             h.message(path, &invalid);
         }
         assert!(fills(&mut h).is_empty());
+    }
+}
+
+#[test]
+fn liquidation_calculated_execution_emits_one_fill() {
+    for v in [Variant::UsdM, Variant::PortfolioMargin, Variant::CoinM] {
+        let mut h = ready(v);
+        let path = private_path(v);
+        let liquidation = event(v, "FILLED", "CALCULATED", "1", 30)
+            .replace(r#""c":"audit-client""#, r#""c":"autoclose-1""#)
+            .replace(r#""ot":"STOP_MARKET""#, r#""ot":"LIQUIDATION""#)
+            .replace(r#""q":"3""#, r#""q":"1""#);
+        h.message(path, &liquidation);
+        assert_eq!(fills(&mut h), [(9200.0, 1.0)], "{v:?}");
+        h.message(path, &liquidation);
+        assert!(fills(&mut h).is_empty(), "{v:?}");
     }
 }
 

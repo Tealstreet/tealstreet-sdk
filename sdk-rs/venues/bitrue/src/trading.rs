@@ -2,6 +2,7 @@
 use crate::wire::{Number, Str, Text, check};
 use crate::{Bitrue, Job, Pending};
 use safe_cex_engine::model::*;
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{Command, CommandId, Cx, Method, Response};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -47,6 +48,7 @@ struct Step {
     path: String,
     body: Option<String>,
     effect: Effect,
+    receipts: Vec<OrderIdentityReceipt>,
 }
 enum Effect {
     Place {
@@ -212,21 +214,10 @@ fn caller_id(value: &str) -> bool {
             .chars()
             .any(|c| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
 }
-fn encode(value: &str) -> String {
-    let mut out = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(byte as char);
-        } else {
-            use std::fmt::Write;
-            write!(&mut out, "%{byte:02X}").expect("String write");
-        }
-    }
-    out
-}
 impl Target {
     fn lookup(&self, effect: Effect) -> Step {
         Step {
+            receipts: Vec::new(),
             method: Method::Get,
             path: format!(
                 "/fapi/v2/order?contractName={}&orderId={}&conditionOrder={}",
@@ -240,6 +231,7 @@ impl Target {
     }
     fn cancel(&self) -> Step {
         Step {
+            receipts: Vec::new(),
             method: Method::Post,
             path: "/fapi/v2/cancel".into(),
             body: Some(
@@ -306,6 +298,18 @@ impl Plan {
             self.refresh_result |= payload.condition_order.unwrap_or(false)
                 || !payload.trigger_order_create_params.is_empty();
             self.symbol(&order.symbol);
+            let mut receipts = vec![OrderIdentityReceipt {
+                symbol: order.symbol.clone(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: payload.client_order_id.clone(),
+            }];
+            receipts.extend(payload.trigger_order_create_params.iter().map(|child| {
+                OrderIdentityReceipt {
+                    symbol: order.symbol.clone(),
+                    kind: OrderIdentityKind::ClientOrderId,
+                    identity: child.client_order_id.clone(),
+                }
+            }));
             if (payload.condition_order == Some(true)
                 || !payload.trigger_order_create_params.is_empty())
                 && !self.protections.contains(&order.symbol)
@@ -322,6 +326,7 @@ impl Plan {
             };
             self.creating.push(order);
             self.steps.push_back(Step {
+                receipts,
                 method: Method::Post,
                 path: "/fapi/v2/order".into(),
                 body: Some(serde_json::to_string(&payload).expect("placement")),
@@ -782,6 +787,7 @@ impl Bitrue {
                 }
                 plan.symbol(&symbol);
                 plan.steps.push_back(Step {
+                    receipts: Vec::new(),
                     method: Method::Post,
                     path: "/fapi/v2/level_edit".into(),
                     body: Some(
@@ -927,6 +933,7 @@ impl Bitrue {
             );
             return;
         }
+        cx.command_progress(plan.command, step.receipts.clone());
         // An amend is not an engine placement scope. Fence its replacement before
         // dispatch, since a lost create ACK may still leave native protection live.
         let protection = if let Effect::Place {
@@ -1033,6 +1040,13 @@ impl Bitrue {
             self.refresh_account(cx);
         }
         self.trade_next(cx);
+    }
+    /// The command whose protective placement this order read would certify.
+    pub(crate) fn census_owner(&self, symbol: &str, revision: u64) -> Option<CommandId> {
+        self.trading.census.as_ref().and_then(|(plan, minimum)| {
+            (revision >= *minimum && plan.protections.iter().any(|s| s == symbol))
+                .then_some(plan.command)
+        })
     }
     pub(crate) fn trade_census(
         &mut self,

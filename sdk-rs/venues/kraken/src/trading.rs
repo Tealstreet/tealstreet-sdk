@@ -586,6 +586,7 @@ impl Kraken {
                 self.trading_finish(cx,Err("Kraken protective order executed while cancellation was in flight; replacement suppressed".into()));
                 continue;
             }
+            let command = job.command;
             if let Step::Setting {
                 symbol,
                 leverage,
@@ -622,7 +623,9 @@ impl Kraken {
                         "/derivatives/api/v3/batchorder",
                         format!(
                             "json={}",
-                            sign::encode_uri(&serde_json::to_string(&body).unwrap())
+                            safe_cex_engine::url::encode_component(
+                                &serde_json::to_string(&body).unwrap()
+                            )
                         ),
                     )
                 }
@@ -659,6 +662,21 @@ impl Kraken {
                 }
             };
             self.trading.waiting = true;
+            if let Step::Place(prepared) = &step {
+                cx.command_progress(
+                    command,
+                    prepared
+                        .order
+                        .client_order_id
+                        .iter()
+                        .map(|identity| OrderIdentityReceipt {
+                            symbol: prepared.order.symbol.clone(),
+                            kind: OrderIdentityKind::ClientOrderId,
+                            identity: identity.clone(),
+                        })
+                        .collect(),
+                );
+            }
             if let Err(error) = self.signed_request(
                 cx,
                 method,

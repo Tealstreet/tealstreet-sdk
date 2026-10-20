@@ -1,7 +1,7 @@
 //! Commands are preflighted once, then executed as ordered, non-retried writes.
 use crate::{Okx, Pending, wire};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
+use safe_cex_engine::{Command, CommandId, Cx, Method, Response, num};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -11,6 +11,7 @@ pub struct Request {
     command: CommandId,
 }
 struct Step {
+    receipts: Vec<OrderIdentityReceipt>,
     path: &'static str,
     body: String,
     expected: usize,
@@ -45,6 +46,8 @@ enum Finish {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct OrderPayload {
+    #[serde(skip)]
+    symbol: String,
     inst_id: String,
     td_mode: &'static str,
     tag: &'static str,
@@ -328,7 +331,12 @@ impl Okx {
                 count += 1;
                 if bracket {
                     // Protect each accepted lot before another entry can fail.
-                    brackets.push(step("/api/v5/trade/batch-orders", &[payload], 1, true)?);
+                    brackets.push(placement_step(
+                        "/api/v5/trade/batch-orders",
+                        &[payload],
+                        1,
+                        true,
+                    )?);
                     for (kind, price) in [
                         (OrderType::StopLoss, o.stop_loss),
                         (OrderType::TakeProfit, o.take_profit),
@@ -344,7 +352,12 @@ impl Okx {
                             leg.take_profit = None;
                             leg.reduce_only = Some(true);
                             let payload = self.order_payload(cx, &leg, size)?;
-                            brackets.push(step("/api/v5/trade/order-algo", &payload, 1, true)?);
+                            brackets.push(placement_step(
+                                "/api/v5/trade/order-algo",
+                                &payload,
+                                1,
+                                true,
+                            )?);
                         }
                     }
                 } else {
@@ -371,7 +384,7 @@ impl Okx {
             .collect::<Result<Vec<_>, _>>()?;
         let mut steps = Vec::new();
         for batch in regular.chunks(20) {
-            steps.push(step(
+            steps.push(placement_step(
                 "/api/v5/trade/batch-orders",
                 batch,
                 batch.len(),
@@ -380,7 +393,12 @@ impl Okx {
         }
         steps.extend(brackets);
         for payload in algos {
-            steps.push(step("/api/v5/trade/order-algo", &payload, 1, true)?);
+            steps.push(placement_step(
+                "/api/v5/trade/order-algo",
+                &payload,
+                1,
+                true,
+            )?);
         }
         Ok(job(steps, Finish::Ids))
     }
@@ -417,6 +435,7 @@ impl Okx {
             None
         };
         let mut p = OrderPayload {
+            symbol: o.symbol.clone(),
             inst_id: m.id.clone(),
             td_mode: "cross",
             tag: BROKER,
@@ -766,6 +785,7 @@ impl Okx {
         };
         if let Some(step) = job.steps.front() {
             let headers = self.headers(cx.now, Method::Post, step.path, &step.body, true);
+            cx.command_progress(command, step.receipts.clone());
             cx.request(
                 Method::Post,
                 format!("{}{}", self.rest(), step.path),
@@ -973,7 +993,7 @@ impl Okx {
                 return;
             }
             for error in errors {
-                cx.log(LogLevel::Error, error);
+                cx.command_error(request.command, error);
             }
         }
         if step.expected > 0 && acks.len() != step.expected {
@@ -1017,6 +1037,7 @@ impl Okx {
 
 fn empty_payload() -> OrderPayload {
     OrderPayload {
+        symbol: String::new(),
         inst_id: String::new(),
         td_mode: "cross",
         tag: BROKER,
@@ -1050,6 +1071,7 @@ fn step<T: Serialize + ?Sized>(
     collect_ids: bool,
 ) -> Result<Step, String> {
     Ok(Step {
+        receipts: Vec::new(),
         path,
         body: serde_json::to_string(body).map_err(|e| e.to_string())?,
         expected,
@@ -1108,4 +1130,43 @@ fn lot_floor(max: f64, step: f64) -> Result<f64, String> {
         .filter(|n| *n > 0)
         .ok_or("invalid market lot size")?;
     Ok(num::adjust((max_units / step_units) as f64 * step, step))
+}
+
+fn placement_step<T: Serialize + ?Sized + PlacementIdentities>(
+    path: &'static str,
+    body: &T,
+    expected: usize,
+    collect_ids: bool,
+) -> Result<Step, String> {
+    let mut write = step(path, body, expected, collect_ids)?;
+    write.receipts = body.identities();
+    Ok(write)
+}
+trait PlacementIdentities {
+    fn identities(&self) -> Vec<OrderIdentityReceipt>;
+}
+impl PlacementIdentities for OrderPayload {
+    fn identities(&self) -> Vec<OrderIdentityReceipt> {
+        self.cl_ord_id
+            .iter()
+            .chain(self.algo_cl_ord_id.iter())
+            .map(|identity| OrderIdentityReceipt {
+                symbol: self.symbol.clone(),
+                kind: OrderIdentityKind::ClientOrderId,
+                identity: identity.clone(),
+            })
+            .collect()
+    }
+}
+impl<const N: usize> PlacementIdentities for [OrderPayload; N] {
+    fn identities(&self) -> Vec<OrderIdentityReceipt> {
+        self.as_slice().identities()
+    }
+}
+impl PlacementIdentities for [OrderPayload] {
+    fn identities(&self) -> Vec<OrderIdentityReceipt> {
+        self.iter()
+            .flat_map(PlacementIdentities::identities)
+            .collect()
+    }
 }
