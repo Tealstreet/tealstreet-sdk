@@ -6,12 +6,15 @@ use crate::sign::Query;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Pending, Rest, Then, venue_error};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::paging::{self, WindowOrder};
 use safe_cex_engine::{CommandId, Cx, LogLevel, Query as Read, Response};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Bybit treats both window bounds as inclusive and refuses wider ones.
 const MAX_WINDOW_MS: f64 = 7.0 * 24.0 * 3_600_000.0 - 1.0;
+/// Windows a range may span; a larger range keeps one window for Bybit to reject.
+const MAX_WINDOWS: usize = 10_000;
 const FILLS_PAGE_LIMIT: u32 = 100;
 const ORDERS_PAGE_LIMIT: u32 = 50;
 const INCOME_PAGE_LIMIT: u32 = 50;
@@ -190,17 +193,21 @@ fn windows(from: Option<f64>, to: Option<f64>) -> VecDeque<(Option<f64>, Option<
     let (Some(from), Some(to)) = (from, to) else {
         return VecDeque::from([(from, to)]);
     };
-    let mut windows = VecDeque::new();
-    let mut end = to;
-    loop {
-        let start = from.max(end - MAX_WINDOW_MS);
-        windows.push_back((Some(start), Some(end)));
-        if start <= from {
-            break;
-        }
-        end = start - 1.0;
-    }
-    windows
+    paging::windows(
+        from,
+        to,
+        MAX_WINDOW_MS,
+        WindowOrder::NewestFirst,
+        MAX_WINDOWS,
+    )
+    .map(|windows| {
+        windows
+            .into_iter()
+            .map(|(a, b)| (Some(a), Some(b)))
+            .collect()
+    })
+    // An inverted or too-large range keeps one window for Bybit to reject.
+    .unwrap_or_else(|| VecDeque::from([(Some(from), Some(to))]))
 }
 
 fn nontrade_execution(kind: &str) -> bool {
