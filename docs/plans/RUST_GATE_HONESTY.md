@@ -424,3 +424,23 @@ never retry an unchanged failed performance measurement to obtain a pass.
   PASS. All 49 table aliases and combined artifact bytes/hash independently
   match the cited run. Publish this stable declarations-only checkpoint, then
   wait for fresh full exact-head green CI; no venue FAIL is relabeled PASS.
+- Published head `4434823df0` certified green in Rust run `39436814801`
+  (all 36 jobs) and both repository CI runs `39436802157`/`39436814696`.
+  Independent certification verifies all 31 suites / 107 cases: 27 strict PASS,
+  80 strict FAIL, zero invalid/unknown; all 41 public cases have seven samples
+  per runner (574 total), the 10% contract intact. Combined bytes/hash remain
+  12,258,087 / `27d6c1b92cda35313d566996cf83c9ca156ee02a82506e4266912dfa047e2bc8`.
+- Landing advanced to `f895a98f26` (Paradex/emitter PR #1352) just before merge,
+  creating a conflict. Authorized integration preserves the gate byte-for-byte
+  and moves the exact four incoming Paradex audit-comment lines to the isolated
+  oracle. Independent staged-resolution review PASS. Earlier c44 wire changes
+  were already tested in the certified virtual merge; thirteen newly incoming
+  files change Paradex rejection/SBE behavior and TS listener isolation.
+  Require integration review, local checks and fresh green CI before merge.
+  Wind-down instruction: finish this PR, write handoff, start no queued work.
+- Scoped incoming integration review PASS: TS emitter preserves listener order,
+  once/off/context and original event objects; fill capture/worker callbacks
+  keep their existing semantics. Paradex successful canonical batches, integer
+  leverage and valid SBE inputs retain the same input/hash contract. Partial
+  rejection/SBE repairs require no new fixer. Local verification is running;
+  publish the reviewed integration so independent CI can run concurrently.

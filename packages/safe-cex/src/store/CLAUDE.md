@@ -21,6 +21,27 @@ string references for venue-defined position IDs; preserve these when present
 so simultaneous Cross and Isolated rows for a symbol remain distinct. Older
 frames still derive identity from symbol and position mode.
 
+Revised SCXF sections carry explicit revisions with fixed tails. Preserve venue
+`prettySymbol`, bracket trigger types, conditional prices, remaining notionals,
+and ticker `midPrice`, including clearing midpoint on packed and object worker
+updates. Shared public ticker updates also preserve midpoint: omitted keeps the
+cached value, a number replaces it, and null clears it across native polling. Orders, positions, fills and settings retain explicit symbols for rows
+missing from MARKETS. `FrameApplier` owns fetched-leverage writes, including rare
+query results; a SETTINGS replacement remains authoritative. Frame forwarding
+also sends changed query-derived leverage and includes it in late snapshots,
+since such reads need not cause an engine SETTINGS frame. Recovery snapshots
+carry a copied leverage map after flushing pending SETTINGS. Cached rails with
+missing, nonfinite or nonpositive sides are unknown, not market maxima.
+
+A failed book or account section must not suppress independent valid sections.
+Rejecting a book batch invalidates its baselines until fresh full books arrive;
+rejecting an envelope invalidates indexed identities until fresh MARKETS arrive.
+Stage identities before adopting a new table, retain the old table when market
+metadata fails, and use explicit fill identities until a snapshot repairs it.
+Apply failures request a bounded local engine snapshot or worker snapshot RPC;
+snapshots contain no executions, so deliver valid original FILLS once. Listener
+failures are distinct from protocol failures and do not trigger snapshot loops.
+
 Aggregate venue ticker streams may still contain delisted symbols absent from
 the current market table. `TICKERS` then carries optional symbol/ID references;
 `FrameApplier` uses those identities for orphan rows and preserves packed delta
@@ -229,7 +250,6 @@ than skipped so the chaser can still move closer to the touch.
 - Live packed-ticker production:
   `ExchangeWorker._packTickerDeltasSinceBaseline`; the store's apply/consume
   methods are compatibility and test scaffolding, not an active producer path.
-
 
 ## `markOrdersTerminal` — a stale snapshot cannot reopen a closed order
 
