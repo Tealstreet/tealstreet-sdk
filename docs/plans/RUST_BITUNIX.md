@@ -1742,3 +1742,22 @@ quarter-step conservation, invalid later batch and count boundaries covered.
 TS defects documented in KNOWN_TS_FIXES Bitunix branch; net realizedPNL
 unchanged verbatim. Exact final independent reviewer approved latest source.
 Resume paused outer batch after checkpoint; rebuild Bitunix only when reached.
+
+Resumed batch: all Coinbase8private + public PASS, Poly/GRVT public/private
+PASS. Coinbase public TS/Rust main934.8/443.9ms, steady573.1/187.4ms,
+retained18.0/14.0MB, peak109.5/45.4MB; Poly51.9/46.6ms,
+retained0.9/0.8MB, peak2.9/2.7MB; GRVT450.5/355.1ms,
+retained1.8/1.5MB, peak6.8/4.0MB. Modules CB991403, Poly839576,
+GRVT949615, Breakout638817 all below unchanged1258291byte budget.
+
+Batch then stopped at Breakout public functionalFAIL in all3 runs. Private
+PASS24records; public finalstate/books/requests and CPU/memory PASS, but
+intermediatebooks TS18 first4000ms vsRust22 first0ms. TS4000hash equals
+Rust2000hash, TS6000equalsRust4000, so initial snapshot omission and ongoing
+one-anchor callback delay must be diagnosed separately. Rawout
+sdk-rs/harness/out/breakoutprop-breakoutprop-public-jsonl-gz-66084 retained,
+failedlog /tmp/bitunix-reviewed-006-breakoutprop-public.log. No hash/event/
+timestamp waivers, retries, record changes or retiming. Harness owner tracing
+actual TS request-selection/completion/callback/onTick; independent owner
+inspecting TS initial listener semantics vs native. Bitunix and Binance gates
+not reached; no final gate/PR push/merge claim.
