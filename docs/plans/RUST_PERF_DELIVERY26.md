@@ -243,3 +243,33 @@ pass 44 typecheck, 28 lint and 27 test tasks; serialized harness passes 644.
 Independent merge review passes against both parents. The retained check and
 control/diagnostic evidence is `RUST_PERF_DELIVERY26_SPOT_INTEGRATION.json.gz`.
 The main Cargo target is free for the declared release pass.
+
+
+## Spot release checkpoint
+
+All 26 fresh family releases and isolated strict WASM Clippy pass; 234 exact
+bindings have matching browser/Node WASM hashes. The prior 234 bindings and nine
+aggregate bindings are archived physically (243 files); 415 Rust/config/build
+input hashes stayed fixed. Native BOOK_DELTA wire and session adapter checks pass.
+Actual WASM SDK checks pass 423 tests/13 files and host checks pass 154 tests.
+The existing supplementary/lifecycle suites pass 20 tests.
+
+Eight new Spot parity tests initially imported the historical aggregate package
+through `spot-host-rig.mjs`, so they rejected the new venue names. Select the
+family with the shared registry inside the synchronous rig constructor. All eight
+actual Spot tests then pass; no assertion, timeout or runtime engine behavior was
+changed. Preserve the failed run and refresh only this shared helper in the
+control under a new proof before freezing comparisons.
+
+Kraken exceeds its old 949,248-byte cap: the previous 905,892-byte futures engine
+is now 1,084,647 bytes with a separate Spot state machine and 2,273 added runtime
+lines. Two independent reviews support an explicit functional-scope cap of
+1,118,208 bytes (actual plus 3%, rounded up KiB). Keep the breach proof and all
+other 25 caps fixed; no exact attribution of binary growth is claimed.
+Hyperliquid is 1,080,671 bytes, within its existing 1,090,560-byte cap. All 52 size
+checks now pass. TxFlow's WASM hash changed at the same size; current hashes stay
+in the new release proof, without claiming byte identity to the prior release.
+
+`RUST_PERF_DELIVERY26_SPOT_RELEASE.json.gz` records release, original-control,
+roster, size and real-WASM check evidence, including failures. The final 63-private
+and 36-profile before/after performance collection is still unexecuted.
