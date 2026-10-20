@@ -128,6 +128,24 @@ impl Harness {
         self.e.handle(at, Event::TimerFired { timer });
         self.collect();
     }
+    fn private_retry(&mut self, nominal: f64) {
+        // Follow the supervisor's actual jittered retry rather than the retired
+        // fixed listen-key retry schedule. Account polling timers stay separate.
+        let at = self
+            .actions
+            .iter()
+            .rev()
+            .find_map(|action| match action {
+                Action::SetTimer { at_ms, .. }
+                    if (nominal * 0.75..=nominal).contains(&(*at_ms - self.now)) =>
+                {
+                    Some(*at_ms)
+                }
+                _ => None,
+            })
+            .expect("private supervisor scheduled its bounded retry");
+        self.fire_at(at);
+    }
     fn fills(&mut self) -> Vec<(f64, f64)> {
         let Some(frame) = self.e.take_frame(self.now) else {
             return vec![];
@@ -442,6 +460,84 @@ fn rest_progress_reseeds_the_quote_basis_before_an_average_only_execution() {
     assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 10.0)]);
 }
 
+const LOG_SECRET: &str = "audit-private-stream-secret";
+const SIGNED_STREAM_URL: &str =
+    "wss://fapiws.bitrue.com/stream?listenKey=futures-key&signature=audit-private-stream-signature";
+fn assert_stream_notices_are_safe(h: &Harness) {
+    for action in &h.actions {
+        if let Action::Notice(notice) = action {
+            // Debug covers every notice field, including structured venue errors.
+            let text = format!("{notice:?}");
+            for secret in [
+                LOG_SECRET,
+                SIGNED_STREAM_URL,
+                "futures-key",
+                "audit-private-stream-signature",
+            ] {
+                assert!(!text.contains(secret), "private data escaped in {notice:?}");
+            }
+        }
+    }
+}
+#[test]
+fn private_subscription_rejection_and_followup_failures_never_log_echoed_credentials() {
+    for event in [
+        "user_account_update",
+        "user_order_update",
+        "user_balance_update",
+    ] {
+        let mut h = Harness::new();
+        h.seed();
+        h.e.handle(h.now, Event::WsOpened { socket: h.private });
+        h.collect();
+        let rejected = serde_json::json!({"event":event,"status":"error","code":401,"apiKey":LOG_SECRET,"listenKey":"futures-key","url":SIGNED_STREAM_URL}).to_string();
+        h.ws(&rejected);
+        assert_stream_notices_are_safe(&h);
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("private subscription failed") && message.contains(event) && message.contains("code 401"))));
+        h.private_retry(1_000.0);
+        let request = h.take("listenKey");
+        h.respond(
+            request,
+            &serde_json::json!({"code":401,"msg":format!("{LOG_SECRET} {SIGNED_STREAM_URL}")})
+                .to_string(),
+        );
+        assert_stream_notices_are_safe(&h);
+        h.private_retry(2_000.0);
+        let request = h.take("listenKey");
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: request.id,
+                error: SIGNED_STREAM_URL,
+            },
+        );
+        h.collect();
+        assert_stream_notices_are_safe(&h);
+        assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("private stream") && message.contains("code 401"))));
+    }
+}
+#[test]
+fn an_untrusted_subscription_code_and_rejected_private_reads_are_not_echoed() {
+    let mut h = Harness::new();
+    let snapshot = h.take("/account");
+    h.respond(
+        snapshot,
+        &serde_json::json!({"code":401,"msg":format!("{LOG_SECRET} {SIGNED_STREAM_URL}")})
+            .to_string(),
+    );
+    let orders = h.take("/openOrders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: orders.id,
+            error: SIGNED_STREAM_URL,
+        },
+    );
+    h.collect();
+    h.ws(&serde_json::json!({"event":"user_account_update","status":"error","code":SIGNED_STREAM_URL,"apiKey":LOG_SECRET}).to_string());
+    assert_stream_notices_are_safe(&h);
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("account read failed") && message.contains("code 401"))));
+}
 #[test]
 fn rest_ahead_of_delayed_stream_execution_does_not_consume_the_fill() {
     let mut h = Harness::new();
@@ -837,6 +933,100 @@ fn failed_bracket_transport_reports_error_and_retains_market_bound() {
 }
 
 #[test]
+fn leverage_bracket_failures_never_echo_private_transport_or_response_diagnostics() {
+    for transport_failure in [true, false] {
+        let mut h = Harness::new();
+        h.seed();
+        let before =
+            h.e.store()
+                .market("E-BTC-USDT")
+                .unwrap()
+                .limits
+                .leverage
+                .max;
+        h.e.handle(
+            h.now,
+            Event::Command(Command::FetchMaxLeverage {
+                command: 62,
+                symbol: "E-BTC-USDT".into(),
+            }),
+        );
+        h.collect();
+        if transport_failure {
+            let error = format!("provider rejected {LOG_SECRET} at {SIGNED_STREAM_URL}");
+            // The safe GET retries three times before the terminal account error.
+            for _ in 0..4 {
+                let request = h.take("/leverageBracket?contractName=E-BTC-USDT");
+                h.e.handle(
+                    h.now,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: &error,
+                    },
+                );
+                h.collect();
+                assert_stream_notices_are_safe(&h);
+            }
+        } else {
+            let request = h.take("/leverageBracket?contractName=E-BTC-USDT");
+            let body = serde_json::json!({
+                "code": 401,
+                "msg": format!("{LOG_SECRET} {SIGNED_STREAM_URL}"),
+                "apiKey": LOG_SECRET,
+            })
+            .to_string();
+            h.e.handle(
+                h.now,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status: 403,
+                        headers: "",
+                        body: &body,
+                    },
+                },
+            );
+            h.collect();
+        }
+        assert_stream_notices_are_safe(&h);
+        let completions = h
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandDone {
+                    command: 62,
+                    result,
+                }) => Some(result),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(
+            completions[0].as_ref().unwrap_err(),
+            if transport_failure {
+                "Bitrue leverage bracket read failed"
+            } else {
+                "Bitrue leverage bracket read failed (code 401)"
+            }
+        );
+        assert!(
+            !h.pending
+                .iter()
+                .any(|request| request.url.contains("/leverageBracket"))
+        );
+        assert_eq!(
+            h.e.store()
+                .market("E-BTC-USDT")
+                .unwrap()
+                .limits
+                .leverage
+                .max,
+            before
+        );
+    }
+}
+
+#[test]
 fn shared_leverage_snapshot_failures_report_each_owner_before_done_without_broadcast_log() {
     for malformed in [false, true] {
         let mut h = Harness::new();
@@ -861,7 +1051,7 @@ fn shared_leverage_snapshot_failures_report_each_owner_before_done_without_broad
         let expected = if malformed {
             "Malformed Bitrue account snapshot; retaining previous state"
         } else {
-            "Bitrue account read failed: snapshot transport failed"
+            "Bitrue account read failed"
         };
         let errors: Vec<_> = h
             .actions
@@ -906,7 +1096,7 @@ fn background_snapshot_failures_keep_ordinary_diagnostics_without_command_owners
         let expected = if malformed {
             "Malformed Bitrue account snapshot; retaining previous state"
         } else {
-            "Bitrue account read failed: snapshot transport failed"
+            "Bitrue account read failed"
         };
         assert_eq!(h.actions.iter().filter(|a| matches!(a,Action::Notice(Notice::Log{level:safe_cex_engine::LogLevel::Error,message}) if message==expected)).count(),1);
     }

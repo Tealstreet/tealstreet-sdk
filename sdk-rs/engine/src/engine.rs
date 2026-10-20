@@ -60,7 +60,7 @@ impl RequestRoute {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct HttpRequest {
     pub id: RequestId,
     pub method: Method,
@@ -73,7 +73,22 @@ pub struct HttpRequest {
     pub body: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+impl std::fmt::Debug for HttpRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpRequest")
+            .field("id", &self.id)
+            .field("method", &self.method)
+            .field("route", &self.route)
+            .field("timeout_ms", &self.timeout_ms)
+            .field("url", &"<redacted>")
+            .field("headers", &"<redacted>")
+            .field("signer_headers", &"<redacted>")
+            .field("body", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadSignRequest {
     pub exchange_name: &'static str,
@@ -81,6 +96,18 @@ pub struct PayloadSignRequest {
     pub payload: String,
     pub scheme: &'static str,
     pub encoding: &'static str,
+}
+
+impl std::fmt::Debug for PayloadSignRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PayloadSignRequest")
+            .field("exchange_name", &self.exchange_name)
+            .field("key", &"<redacted>")
+            .field("payload", &"<redacted>")
+            .field("scheme", &self.scheme)
+            .field("encoding", &self.encoding)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -210,6 +237,16 @@ pub enum VenueAction {
     FetchAccountTier,
     /// Lighter: switch the account tier (`standard`, `premium` or `plus`).
     SetAccountTier { tier: String },
+    /// Venue-reported closed positions as the venue's own JSON rows, newest
+    /// window first, for hosts that map them with the venue's TS mappers.
+    FetchClosedPositions {
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+    },
+    /// The venue's raw account balance payload as JSON, or `null` before one
+    /// is read, for hosts that expose it as `balance.info`.
+    FetchBalanceInfo,
 }
 
 /// The shared rejection for a venue action the venue does not implement.
@@ -427,7 +464,6 @@ impl<'a> Response<'a> {
     }
 }
 
-#[derive(Debug)]
 pub enum Event<'a> {
     /// Host configuration update; infinity pauses optional venue polling.
     TickIntervalChanged {
@@ -483,6 +519,15 @@ pub enum Event<'a> {
         timer: TimerId,
     },
     Command(Command),
+}
+
+impl std::fmt::Debug for Event<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Events include authenticated payloads, headers and delegated signatures.
+        f.debug_struct("Event")
+            .field("kind", &std::mem::discriminant(self))
+            .finish_non_exhaustive()
+    }
 }
 
 /// What a venue may do while handling an event.
@@ -1444,7 +1489,11 @@ impl<V: Venue> Engine<V> {
         }
         match event {
             Event::TickIntervalChanged { interval_ms } => {
-                self.venue.on_tick_interval(&mut cx, interval_ms)
+                // Invalid typed inputs retain the last policy, just as rejected JSON does.
+                if interval_ms > 0.0 {
+                    self.venue
+                        .on_tick_interval(&mut cx, bounded_tick_interval(interval_ms));
+                }
             }
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
@@ -1949,6 +1998,15 @@ impl<V: Venue> Engine<V> {
     }
 }
 
+/// Bound account polling pressure; positive infinity explicitly pauses polling.
+pub fn bounded_tick_interval(interval_ms: f64) -> f64 {
+    if interval_ms.is_finite() {
+        interval_ms.clamp(1_000.0, 120_000.0)
+    } else {
+        f64::INFINITY
+    }
+}
+
 fn apply_signature(
     http: &mut HttpRequest,
     target: &SignatureTarget,
@@ -2067,6 +2125,7 @@ mod streaming_tests {
     }
 
     struct StreamVenue {
+        interval: f64,
         at: ArrayAt,
         rows: Vec<String>,
         body: Option<String>,
@@ -2171,6 +2230,9 @@ mod streaming_tests {
         ) {
             self.failure = Some(error.to_owned());
         }
+        fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, interval_ms: f64) {
+            self.interval = interval_ms;
+        }
         fn on_timer(&mut self, _cx: &mut Cx<'_, Self::Pending>, _timer: TimerId) {}
         fn capabilities(&self) -> Capabilities {
             Capabilities {
@@ -2199,6 +2261,28 @@ mod streaming_tests {
                     .into_iter()
                     .map(|book| ("A", book)),
             )
+        }
+    }
+
+    #[test]
+    fn typed_native_tick_events_obey_the_same_bounds_as_host_commands() {
+        let mut engine = frame_engine();
+        for (input, expected) in [
+            (0.00001, 1_000.0),
+            (1e300, 120_000.0),
+            (f64::INFINITY, f64::INFINITY),
+        ] {
+            engine.handle(0.0, Event::TickIntervalChanged { interval_ms: input });
+            assert_eq!(engine.venue.interval, expected);
+        }
+        for invalid in [0.0, -1.0, f64::NEG_INFINITY, f64::NAN] {
+            engine.handle(
+                0.0,
+                Event::TickIntervalChanged {
+                    interval_ms: invalid,
+                },
+            );
+            assert_eq!(engine.venue.interval, f64::INFINITY);
         }
     }
 
@@ -2719,6 +2803,7 @@ mod streaming_tests {
 
     fn stream(at: ArrayAt, body: &[u8]) -> StreamVenue {
         let mut engine = Engine::new(StreamVenue {
+            interval: 0.0,
             at,
             rows: Vec::new(),
             body: None,
@@ -2755,6 +2840,7 @@ mod streaming_tests {
 
     fn frame_engine() -> Engine<StreamVenue> {
         Engine::new(StreamVenue {
+            interval: 0.0,
             at: ArrayAt::Root,
             rows: Vec::new(),
             body: None,
@@ -3831,6 +3917,49 @@ mod signing_tests {
                 .is_err()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod security_debug {
+    use super::*;
+
+    #[test]
+    fn transport_and_signing_debug_never_render_authentication_material() {
+        let sentinel = "credential-sentinel-never-log";
+        let http = HttpRequest {
+            id: RequestId(17),
+            method: Method::Post,
+            route: None,
+            timeout_ms: Some(5_000),
+            url: format!("https://venue.test/private?signature={sentinel}"),
+            headers: vec![("Authorization", sentinel.into())],
+            signer_headers: vec![("X-Proof".into(), sentinel.into())],
+            body: Some(sentinel.into()),
+        };
+        let signing = PayloadSignRequest {
+            exchange_name: "test-venue",
+            key: sentinel.into(),
+            payload: sentinel.into(),
+            scheme: "test",
+            encoding: "test",
+        };
+        let event = Event::PayloadSigned {
+            request: RequestId(17),
+            signature: sentinel,
+            headers: vec![("X-Proof".into(), sentinel.into())],
+        };
+        for debug in [
+            format!("{http:?}"),
+            format!("{signing:?}"),
+            format!("{event:?}"),
+        ] {
+            assert!(!debug.contains(sentinel));
+            assert!(!debug.contains("https://venue.test"));
+        }
+        assert!(format!("{http:?}").contains("RequestId(17)"));
+        assert!(format!("{signing:?}").contains("test-venue"));
+        assert!(format!("{event:?}").contains("kind"));
     }
 }
 

@@ -1103,6 +1103,32 @@ fn delayed_source_fill_after_replacement_dispatch_preserves_confirmed_replacemen
 }
 
 #[test]
+fn same_signer_engines_and_vaults_share_one_action_nonce_sequence() {
+    let (mut a, _) = ready("disabled");
+    let (mut b, _) = ready_identity(
+        "disabled",
+        false,
+        None,
+        "30",
+        Some("0x2222222222222222222222222222222222222222".into()),
+    );
+    for e in [&mut a, &mut b] {
+        e.handle(
+            2000.0,
+            Event::Command(Command::PlaceOrders {
+                command: 901,
+                orders: vec![opts(
+                    r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","amount":1,"price":100}"#,
+                )],
+            }),
+        );
+    }
+    let first = body(&write(&mut a))["nonce"].as_u64().unwrap();
+    let second = body(&write(&mut b))["nonce"].as_u64().unwrap();
+    assert!(second > first);
+}
+
+#[test]
 fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
     use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
     use safe_cex_engine::{Action, Notice};

@@ -1,5 +1,6 @@
 //! Bybit V5 products and compatible HyroTrader accounts on the sans-I/O engine.
 mod account;
+mod closed;
 mod history;
 mod hyro;
 mod options;
@@ -48,8 +49,10 @@ const MARKETS_PAGE_LIMIT: u32 = 1000;
 const PRELAUNCH_STARTUP_GRACE_MS: f64 = 1_500.0;
 const MARKETS_PATH: &[&str] = &["result", "list"];
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
+    /// Optional tighter signing receive window in milliseconds.
+    pub recv_window: Option<u32>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub variant: Variant,
     pub endpoints: Option<Endpoints>,
@@ -60,6 +63,16 @@ pub struct Options {
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 /// One REST request as sent, kept so a rejected signature can be resent.
@@ -130,6 +143,7 @@ pub enum Then {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
+    Closed(closed::Request),
 }
 
 pub struct Pending {
@@ -213,6 +227,7 @@ struct ProductState {
 }
 
 pub struct BybitLinear {
+    recv_window: Option<u32>,
     category: Category,
     primary_category: Category,
     products: Vec<ProductState>,
@@ -251,6 +266,8 @@ pub struct BybitLinear {
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
+    /// The raw first account of the last good REST wallet read: TS `balance.info`.
+    balance_info: Option<String>,
 }
 
 /// Bybit kline interval codes.
@@ -312,13 +329,25 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
                 .and_then(|s| s.ret_msg.map(|m| m.into_owned()))
                 .filter(|m| !m.is_empty())
                 .unwrap_or_else(|| format!("retCode {code}"));
-            Some((code, message))
+            // Signature diagnostics can contain the complete signed origin string.
+            Some((code, signing_rejection(code, &message).unwrap_or(message)))
         }
         None => Some((
             i64::from(response.status),
-            format!("HTTP {}: {}", response.status, response.body),
+            format!("HTTP {}", response.status),
         )),
     }
+}
+
+fn signing_rejection(code: i64, message: &str) -> Option<String> {
+    let reason = if code == 10004 || message.to_ascii_lowercase().contains("error sign") {
+        "request signature rejected"
+    } else if code == 10002 || message.to_ascii_lowercase().contains("recv_window") {
+        "request timestamp outside receive window"
+    } else {
+        return None;
+    };
+    Some(format!("Bybit {reason} (retCode {code})"))
 }
 
 /// A rejection that is safe to resend once, re-signed: a bad signature
@@ -342,6 +371,7 @@ fn resendable(text: &str) -> Option<Option<f64>> {
 
 impl BybitLinear {
     pub fn new(options: Options) -> Self {
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         let category = match options.variant {
             Variant::Inverse => Category::Inverse,
             Variant::Spot => Category::Spot,
@@ -397,8 +427,9 @@ impl BybitLinear {
             variant: options.variant,
             paths,
             config_error,
+            recv_window: options.recv_window,
             credentials,
-            read_credentials: options.read_credentials,
+            read_credentials: options.read_credentials.take(),
             credentials_rejected: false,
             public: Connection::new(),
             private: Connection::new(),
@@ -416,6 +447,7 @@ impl BybitLinear {
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
+            balance_info: None,
         }
     }
 
@@ -548,9 +580,11 @@ impl BybitLinear {
             });
         let credentials = read_credentials.as_ref().or(self.credentials.as_ref());
         let headers = match (credentials, rest.signed) {
-            (Some(credentials), true) => {
-                credentials.headers(cx.now + self.clock_offset_ms, &rest.payload)
-            }
+            (Some(credentials), true) => credentials.headers_window(
+                cx.now + self.clock_offset_ms,
+                &rest.payload,
+                self.recv_window,
+            ),
             (None, true) => return,
             _ => vec![("X-Referer", sign::BROKER_ID.into())],
         };
@@ -587,7 +621,7 @@ impl BybitLinear {
         }
         cx.log(
             LogLevel::Warning,
-            format!("Bybit rejected a signed request; resending it once: {text}"),
+            "Bybit rejected a signed request; resending it once",
         );
         taken.rest.resent = true;
         self.send(cx, taken.rest, taken.then);
@@ -1619,6 +1653,7 @@ impl BybitLinear {
             Then::Account(request) => self.on_account_response(cx, request, response),
             Then::Trade(request) => self.on_trade_response(cx, request, response),
             Then::History(request) => self.on_history_response(cx, request, response),
+            Then::Closed(request) => self.on_closed_response(cx, request, response),
         }
     }
 }
@@ -1869,6 +1904,8 @@ impl Venue for BybitLinear {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             options: self.category_enabled(Category::Option),
+            closed_positions: !self.variant.is_spot(),
+            balance_info: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -2046,16 +2083,39 @@ impl Venue for BybitLinear {
         if self.resend(cx, &mut pending, error) {
             return;
         }
-        let Some(Pending { then, .. }) = pending else {
+        let Some(Pending { rest, then, .. }) = pending else {
             return;
         };
-        self.on_public_response(cx, then, Err(error));
+        // A rejected retry may arrive as a host error containing the signed origin URL.
+        let safe_error = (rest.signed && rest.resent)
+            .then_some("Bybit signed request failed after its signature retry");
+        self.on_public_response(cx, then, Err(safe_error.unwrap_or(error)));
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         for category in self.categories() {
             self.select_category(category);
             self.on_category_timer(cx, timer);
+        }
+    }
+
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            safe_cex_engine::VenueAction::FetchBalanceInfo => {
+                let info = self.balance_info.clone().unwrap_or_else(|| "null".into());
+                cx.done(command, Ok(info));
+            }
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
 
@@ -2298,6 +2358,14 @@ mod public_decoder_tests {
 
 #[cfg(test)]
 mod secondary_tests;
+
+impl Drop for BybitLinear {
+    fn drop(&mut self) {
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
+}
 
 #[cfg(test)]
 mod candle_start_tests {
