@@ -96,10 +96,11 @@ tealstreet-next: `exchangeAccountController.ts:180-383`,
 ## Shared engine helpers
 
 Low risk, do first:
-1. `engine::de` numeric decoders: 77 hand-written helpers, copies already
+1. ~~`engine::de` numeric decoders: 77 hand-written helpers, copies already
    diverge (Binance malformed to 0, Hyperliquid trims, Kraken/WEEX/Coinbase
    reject blanks). Named strict and lenient variants; pin current behaviour
-   per venue, then migrate in batches.
+   per venue, then migrate in batches.~~ Done: `engine::de` and
+   `num::parse_decimal`; every venue migrated.
 2. `engine::url`: one RFC 3986 encoder copied in 7+ venues, plus
    `encodeURIComponent` and axios dialects; 5 `Query` types. Signing vectors
    settle it.
