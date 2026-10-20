@@ -65,6 +65,25 @@ test('independent verification detects an omitted process CPU failure', () => {
   assert.match(assessGateReport(value, manifest()).errors.join('\n'), /omitted performance process CPU/);
 });
 
+test('own-audit performance snapshot and duplicate diagnostics cannot be exempted', () => {
+  for (const failure of [
+    'rust performance run 7 tickers[0].last: ts=100 rust=0',
+    'ts performance run 1 markets[0].symbol: ts="BTC" rust="ETH"',
+    'rust performance run 2 books.BTC.asks[0][0]: ts=100 rust=101',
+    'ts performance run 3 account.balance.total: ts=10 rust=0',
+    'rust performance run 4 rust tickers: duplicate symbol BTC at 0 and 1',
+    'rust performance run 5 ts: duplicate symbol BTC',
+  ]) {
+    const value = report();
+    value.private = false; value.runs = 7; value.requiredImprovement = 0.10;
+    value.samples = { ts: Array.from({ length: 7 }, () => metric('performance', 20)), rust: Array.from({ length: 7 }, () => metric('performance', 10)) };
+    value.failures = [failure];
+    const declared = manifest();
+    declared.failures[0].diagnostics = [{ key: diagnosticKey(failure), divergence: 'Cannot exempt an implementation failing its own audit.' }];
+    assert.match(assessGateReport(value, declared).errors.join('\n'), /unexpected/);
+  }
+});
+
 test('declared command timeout remains an incomplete FAIL with no performance evidence', () => {
   const value = report();
   value.failures = ['rust replay: command getAccount did not complete'];

@@ -78,7 +78,10 @@ export function assessGateReport(report, manifest) {
   for (const failure of report.failures) {
     const key = diagnosticKey(failure);
     observed.add(key);
-    if (protectedFailure.test(failure) || !declarations.has(key)) errors.push(`${report.venue}: unexpected ${failure}`);
+    // Every implementation must reproduce its own audited replay. Snapshot
+    // leaf and duplicate-row diagnostics have no common "workload" suffix.
+    const ownReplayFailure = /^(?:ts|rust) performance run \d+(?:[ :]|$)/.test(failure);
+    if (ownReplayFailure || protectedFailure.test(failure) || !declarations.has(key)) errors.push(`${report.venue}: unexpected ${failure}`);
     else known.push({ key, divergence: declarations.get(key).divergence });
   }
   return { errors, known, resolved: [...declarations.keys()].filter((key) => !observed.has(key)) };

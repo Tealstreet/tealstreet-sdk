@@ -3,6 +3,9 @@ import test from 'node:test';
 import { Tape } from './tape.mjs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const forbidden = () => { throw new Error('audit observer ran in performance mode'); };
 
@@ -136,12 +139,16 @@ test('transport receipt detects repeated reads and changed subscription targets'
 });
 
 
-test('replay CLI refuses to disable private-tape correctness auditing', () => {
+test('replay CLI refuses to disable private-tape correctness auditing', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'private-performance-'));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const tape = join(directory, 'private.jsonl');
+  writeFileSync(tape, JSON.stringify({ type: 'config', private: true }) + '\n');
   const result = spawnSync(process.execPath, [
     fileURLToPath(new URL('./replay.mjs', import.meta.url)),
     '--impl', 'rust', '--venue', 'binance',
-    '--tape', fileURLToPath(new URL('./tapes/binance-private.jsonl', import.meta.url)),
-    '--out', '/tmp/unused-private-performance-output.json', '--performance',
+    '--tape', tape,
+    '--out', join(directory, 'output.json'), '--performance',
   ], { encoding: 'utf8', timeout: 10000 });
   assert.ifError(result.error);
   assert.notEqual(result.status, 0);

@@ -108,3 +108,15 @@ never retry an unchanged failed performance measurement to obtain a pass.
   Current focused results: 114/114 adapter/contracts, 14/14 real gate CLI tests,
   23/23 policy/budget/coverage/USDC tests. Full matrix evidence and final PR
   reviews remain required; known-failure declarations are not populated yet.
+- Final post-merge local checks: harness 727/727 PASS; repository typecheck
+  44/44 and lint 28/28 tasks PASS. Combined standard web/Node artifacts are
+  12,172,135 bytes each (ceiling 12,582,912), SHA256
+  `51e335bd0acd407f75b51b26bf780d083ea49bd720b9533c2fc2cc9906c2d3c3`.
+  PR #1346 opened as a draft to collect the isolated 106-case matrix.
+- Adversarial PR round 1 found an own-audit exception-policy hole: performance
+  snapshot leaf/duplicate diagnostics could be declared venue exceptions.
+  Protect every per-implementation performance-run diagnostic, verified 6/6.
+  CI also exposed a CLI test's dependency on an untracked generated tape;
+  replaced it with a self-created temporary fixture, 8/8 controls PASS.
+  The blocked first matrix attempt reached no quantitative replay cases and
+  was cancelled. Execution-ID projection correction is still in progress.
