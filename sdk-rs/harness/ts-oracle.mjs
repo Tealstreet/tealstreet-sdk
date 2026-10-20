@@ -11,7 +11,7 @@ import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { withMexcMiniTickerSubscription } from './mexc-mini-subscription.mjs';
 import { expectedKucoinRequests } from './kucoin-request-contracts.mjs';
-import { requestKey, subscriptionKeys } from './requests.mjs';
+import { requestKey, subscriptionKeys, callerIdsOf } from './requests.mjs';
 import { applyLegacyFillOracle } from './legacy-fill-oracle.mjs';
 
 export function createTsFixes(values, tapeRecords) {
@@ -33,26 +33,36 @@ const KNOWN_TS_FIXES = {
   // Native regressions cover these cases;
   // standard replay compares both outputs without rewriting either result.
   kucoinspot() {},
-  hyperliquidspot: {
+  hyperliquidspot: (ts) => {
     // Paired reference fixes retain native spot IDs for coinless contexts and
     // return string IDs for both resting and filled placement ACKs. Native
     // tests additionally pin spot-only safety paths without rewriting economics.
-    notes: [
-      'Join coinless spot contexts positionally only when the entire context array is coinless and exactly matches universe length.',
-      'Resolve both metadata token indices so native pairs with a shared base retain distinct quote symbols and action/book identities.',
-      'Convert non-USD quote prices before wallet valuation, prefer direct USDC and reject canonical-token cycles while retaining unpriced raw holdings.',
-      'Use the spot native websocket endpoint and supported book precision subscriptions (null and 2 through 5).',
-      'Return the SDK string-array contract for resting and immediately filled orders.',
-      'Keep execution tid as the TS fill id and expose native oid as orderId for chaser tracking and native fill parity.',
-      'Subscribe to documented spotState balance updates and remove ignored feeds and perpetual-only activeAssetData subscriptions.',
-      'Keep absent spot oracle/funding fields finite instead of emitting NaN.',
-      'Use spot asset indices and 8-minus-size-decimals price precision with no perp builder or reduce-only flags.',
-      'Keep accepted orders available for immediate cancel/amend despite the TS spot fetchOrders stub.',
-      'Apply live full/partial executions before a delayed resting acknowledgement without resurrecting the filled native order.',
-      'Reject unsupported spot leverage, margin transitions and standalone trigger placement before a write.',
-      'Deduplicate native live executions and suppress historical fill snapshots.',
-      'Retry failed bootstrap reads without replacing a valid market table with an empty snapshot.',
-    ],
+    // Notes:
+    // Join coinless spot contexts positionally only when the entire context array is coinless and exactly matches universe length.
+    // Resolve both metadata token indices so native pairs with a shared base retain distinct quote symbols and action/book identities.
+    // Convert non-USD quote prices before wallet valuation, prefer direct USDC and reject canonical-token cycles while retaining unpriced raw holdings.
+    // Use the spot native websocket endpoint and supported book precision subscriptions (null and 2 through 5).
+    // Return the SDK string-array contract for resting and immediately filled orders.
+    // Keep execution tid as the TS fill id and expose native oid as orderId for chaser tracking and native fill parity.
+    // Subscribe to documented spotState balance updates and remove ignored feeds and perpetual-only activeAssetData subscriptions.
+    // Keep absent spot oracle/funding fields finite instead of emitting NaN.
+    // Use spot asset indices and 8-minus-size-decimals price precision with no perp builder or reduce-only flags.
+    // Keep accepted orders available for immediate cancel/amend despite the TS spot fetchOrders stub.
+    // Apply live full/partial executions before a delayed resting acknowledgement without resurrecting the filled native order.
+    // Reject unsupported spot leverage, margin transitions and standalone trigger placement before a write.
+    // Deduplicate native live executions and suppress historical fill snapshots.
+    // Retry failed bootstrap reads without replacing a valid market table with an empty snapshot.
+    // The TS spot fetchOrders stub never reads open orders, so external cancels
+    // and pre-existing orders never reconcile; Rust reads frontendOpenOrders.
+    // Expect exactly the reads the tape declares; Rust requests are never read.
+    const callerIds = callerIdsOf(tapeRecords);
+    const expected = new Set(ts.requests);
+    for (const record of tapeRecords) {
+      if (record.type !== 'http' || record.method !== 'POST' || new URL(record.url).pathname !== '/info') continue;
+      if (parseRequestJson(record.requestBody)?.type !== 'frontendOpenOrders') continue;
+      expected.add(requestKey(record.method, record.url, record.requestBody, callerIds, venue));
+    }
+    ts.requests = [...expected].sort();
   },
   krakenspot: {
     // Public fixes are paired in TS; independent native tests cover stricter

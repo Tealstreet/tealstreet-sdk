@@ -1,28 +1,7 @@
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::borrow::Cow;
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Number(pub f64);
-impl<'de> Deserialize<'de> for Number {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Input<'a> {
-            N(f64),
-            S(#[serde(borrow)] Cow<'a, str>),
-            Null,
-        }
-        let n = match Input::deserialize(d)? {
-            Input::N(v) => v,
-            Input::S(s) => s.parse().map_err(serde::de::Error::custom)?,
-            Input::Null => return Err(serde::de::Error::custom("missing number")),
-        };
-        if !n.is_finite() {
-            return Err(serde::de::Error::custom("nonfinite number"));
-        }
-        Ok(Self(n))
-    }
-}
+pub use safe_cex_engine::de::Number;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Gamma<'a> {
@@ -31,19 +10,17 @@ pub struct Gamma<'a> {
     #[serde(borrow)]
     pub slug: Cow<'a, str>,
     #[serde(default, borrow)]
-    pub question: Cow<'a, str>,
+    pub question: Option<Cow<'a, str>>,
     #[serde(default, borrow)]
-    pub description: Cow<'a, str>,
+    pub description: Option<Cow<'a, str>>,
     #[serde(default, borrow)]
-    pub end_date: Cow<'a, str>,
+    pub end_date: Option<Cow<'a, str>>,
     #[serde(borrow)]
     pub clob_token_ids: Option<Cow<'a, str>>,
     #[serde(borrow)]
     pub outcomes: Option<Cow<'a, str>>,
-    #[serde(default)]
-    pub active: bool,
-    #[serde(default)]
-    pub closed: bool,
+    pub active: Option<bool>,
+    pub closed: Option<bool>,
     pub enable_order_book: Option<bool>,
     pub accepting_orders: Option<bool>,
     pub order_price_min_tick_size: Option<Number>,

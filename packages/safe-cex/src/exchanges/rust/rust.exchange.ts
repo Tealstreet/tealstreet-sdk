@@ -1,3 +1,4 @@
+import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type { EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
@@ -204,23 +205,17 @@ export type WasmEngineModule = {
 };
 
 /**
- * How this realm loads the wasm engine: the web build in browsers and
- * Workers, the Node build on servers and in tests. Registered once by the
- * host, like the transport.
+ * How this realm loads the wasm engine for a Rust venue: that venue's family
+ * build in browsers and Workers, the combined build on servers and in tests.
+ * Registered once by the host, like the transport. Loaders share pending and
+ * completed initialization: wasm-bindgen init replaces module-wide memory.
  */
-let defaultWasmInitialization: Promise<WasmEngineModule> | undefined;
-const defaultWasmLoader = (): Promise<WasmEngineModule> =>
-  (defaultWasmInitialization ??= (async () => {
-    // wasm-bindgen initialization replaces module-wide memory, including the
-    // pointers held by existing accounts. Share pending and completed startup.
-    const { loadEngine } = await import('@tealstreet/safe-cex-wasm/engine');
-    return loadEngine();
-  })().catch((error) => {
-    defaultWasmInitialization = undefined;
-    throw error;
-  }));
-let loadWasmEngine: () => Promise<WasmEngineModule> = defaultWasmLoader;
-export const setWasmEngineLoader = (loader: () => Promise<WasmEngineModule>) => {
+const defaultWasmLoader = async (venue: string): Promise<WasmEngineModule> => {
+  const { loadEngine } = await import('@tealstreet/safe-cex-wasm/engine');
+  return loadEngine(venue);
+};
+let loadWasmEngine: (venue: string) => Promise<WasmEngineModule> = defaultWasmLoader;
+export const setWasmEngineLoader = (loader: (venue: string) => Promise<WasmEngineModule>) => {
   loadWasmEngine = loader;
 };
 
@@ -291,6 +286,10 @@ export class RustEngineExchange extends BaseExchange {
   onFrame?: (frame: ArrayBuffer) => void;
   private stopPollingConfig?: () => void;
   fetchFillsForOrderIds?: (ids: string[]) => Promise<Map<string, number>>;
+  /** Lighter: switch the account tier; the engine re-reads limits afterwards. */
+  changeAccountTier?: (tier: LighterAccountTier) => Promise<void>;
+  /** Lighter: the engine's cached account tier, when known. */
+  fetchAccountTier?: () => Promise<LighterAccountTier | undefined>;
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
@@ -375,6 +374,10 @@ export class RustEngineExchange extends BaseExchange {
     if (this.name === 'kraken') {
       this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: false });
     }
+    if (this.name === 'binance') {
+      // As TS: USD-M has no reported closed axis; round trips fold from per-symbol fills.
+      this.fetchHistoricalPositions = (opts) => this.foldClosedPositionRecords(opts, { symbolScoped: true });
+    }
     if (['hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse'].includes(this.name)) {
       this.fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async () => []);
       this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
@@ -385,6 +388,13 @@ export class RustEngineExchange extends BaseExchange {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       };
+    }
+    if (['lighter', 'lighter-robinhood'].includes(this.name)) {
+      this.changeAccountTier = async (tier: LighterAccountTier) => {
+        await this.command<null>({ op: 'setAccountTier', tier });
+      };
+      this.fetchAccountTier = async () =>
+        (await this.command<LighterAccountTier | null>({ op: 'fetchAccountTier' })) ?? undefined;
     }
     if (this.name === 'woo') {
       this.fetchHistoricalPositions = async (opts) => {
@@ -541,7 +551,7 @@ export class RustEngineExchange extends BaseExchange {
       };
       this.startupWaiters.add(disposed);
       try {
-        void loadWasmEngine()
+        void loadWasmEngine(RUST_VENUES[this.name]!)
           .then(resolve, reject)
           .finally(() => this.startupWaiters.delete(disposed));
       } catch (error) {
@@ -660,9 +670,13 @@ export class RustEngineExchange extends BaseExchange {
         onFrame: this.receiveFrame,
         onLog: this.receiveLog,
         onDeactivate: () => {
-          this.startupFailure = new Error(`${this.name} credentials were rejected`);
+          this.startupFailure ??= new Error(`${this.name} credentials were rejected`);
           for (const wake of this.startupWaiters) wake();
           this.emitter.emit('deactivate');
+        },
+        onStartupFailed: (detail) => {
+          this.startupFailure ??= new Error(detail.message);
+          for (const wake of this.startupWaiters) wake();
         },
       },
     );
@@ -880,10 +894,6 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private receiveLog = (level: 'info' | 'warning' | 'error', message: string) => {
-    if (this.name === 'breakoutprop' && level === 'error' && message.startsWith('DXtrade startup failed:')) {
-      this.startupFailure = new Error(message);
-      for (const wake of this.startupWaiters) wake();
-    }
     if (level === 'error') this.emitAndLogError(message);
     else this.log(message, level === 'warning' ? LogSeverity.Warning : LogSeverity.Info);
   };

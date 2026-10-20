@@ -4,7 +4,7 @@ use crate::{Pending, Woo, compact, native};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, num};
+use safe_cex_engine::{CommandId, Cx, LogLevel, Method, Query, Response, TimerId, num};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -24,6 +24,16 @@ enum Route {
     Orders,
     Income,
     Trades,
+}
+impl Route {
+    fn label(self) -> &'static str {
+        match self {
+            Route::Fills | Route::LegacyFills => "fills history",
+            Route::Orders => "order history",
+            Route::Income => "income history",
+            Route::Trades => "public trades",
+        }
+    }
 }
 pub type Request = Box<Read>;
 pub struct Read {
@@ -47,7 +57,7 @@ pub struct Read {
     rows: Vec<Entry>,
     current: Vec<Entry>,
     count: usize,
-    bad: bool,
+    skipped: usize,
 }
 struct Entry {
     id: String,
@@ -585,7 +595,7 @@ impl Woo {
             rows: vec![],
             current: vec![],
             count: 0,
-            bad: false,
+            skipped: 0,
         });
         if r.walk.is_some() {
             self.history_next_window(cx, r);
@@ -613,7 +623,7 @@ impl Woo {
         r.pages += 1;
         r.current.clear();
         r.count = 0;
-        r.bad = false;
+        r.skipped = 0;
         let mut params = vec![];
         if let Some(s) = &r.symbol
             && r.route != Route::Income
@@ -752,7 +762,7 @@ impl Woo {
         match history_entry(r, item) {
             Ok(Some(row)) => r.current.push(row),
             Ok(None) => (),
-            Err(_) => r.bad = true,
+            Err(_) => r.skipped += 1,
         }
     }
     pub(crate) fn history_response(
@@ -765,9 +775,19 @@ impl Woo {
             self.history_failed(cx, r, "WOO history request rejected");
             return;
         }
-        if r.bad {
-            cx.done(r.command, Err("Malformed WOO history row".into()));
-            return;
+        if r.skipped > 0 {
+            if r.skipped == r.count {
+                cx.done(r.command, Err("Malformed WOO history page".into()));
+                return;
+            }
+            cx.log(
+                LogLevel::Warning,
+                format!(
+                    "WOO {}: skipped {} unmappable row(s)",
+                    r.route.label(),
+                    r.skipped
+                ),
+            );
         }
         if r.count == 0
             && (r.route == Route::Fills || (r.route == Route::LegacyFills && r.page == 1))
@@ -801,6 +821,11 @@ impl Woo {
                     identity: e.id.clone(),
                     timestamp: e.time,
                 })
+                // Skipped rows still fill the page; the walk ignores non-finite times.
+                .chain((0..r.skipped).map(|i| PageRow {
+                    identity: format!("skipped:{i}"),
+                    timestamp: f64::NAN,
+                }))
                 .collect::<Vec<_>>();
             let indexes = walk
                 .page(r.window.0.unwrap(), r.window.1.unwrap(), &identities)

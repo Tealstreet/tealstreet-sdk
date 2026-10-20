@@ -3,6 +3,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
+use safe_cex_engine::time;
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketChannel, SocketId, TimerId,
 };
@@ -166,31 +167,14 @@ fn candle(row: CandleRow) -> Option<Candle> {
 }
 pub(crate) fn timestamp(text: &str) -> Option<f64> {
     let part = |a, b| text.get(a..b)?.parse::<i64>().ok();
-    let (mut year, month, day, hour, min) = (
+    let (year, month, day, hour, min) = (
         part(0, 4)?,
         part(5, 7)?,
         part(8, 10)?,
         part(11, 13)?,
         part(14, 16)?,
     );
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    if !(1..=12).contains(&month)
-        || day < 1
-        || day > days[(month - 1) as usize]
+    if !time::days_in_month(year, month).is_some_and(|last| (1..=last).contains(&day))
         || !(0..=23).contains(&hour)
         || !(0..=59).contains(&min)
     {
@@ -208,11 +192,7 @@ pub(crate) fn timestamp(text: &str) -> Option<f64> {
     if !(0. ..60.).contains(&sec) {
         return None;
     }
-    year -= i64::from(month <= 2);
-    let era = year.div_euclid(400);
-    let y = year - era * 400;
-    let m = month + if month > 2 { -3 } else { 9 };
-    let days = era * 146097 + y * 365 + y / 4 - y / 100 + (153 * m + 2) / 5 + day - 1 - 719468;
+    let days = time::days_from_civil(year, month, day);
     Some((days * 86400 + hour * 3600 + min * 60) as f64 + sec)
 }
 impl Coinbase {

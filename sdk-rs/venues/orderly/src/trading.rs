@@ -3,7 +3,7 @@ use crate::{
     wire::{Id, N, Rest, checked},
 };
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
+use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, VenueError, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
@@ -1095,35 +1095,25 @@ impl Orderly {
         };
         let Some(mut step) = job.steps.pop_front() else {
             let job = self.trading.active.take().unwrap();
-            let result = if let Some(message) = job.error {
+            if let Some(message) = job.error {
+                // Whole failures still use the plain path until Orderly migrates to `fail`.
                 if job.ids.is_empty() {
-                    Err(message)
+                    cx.done(job.command, Err(message));
                 } else {
-                    #[derive(Serialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct Partial<'a> {
-                        message: &'a str,
-                        partial_order_ids: &'a Vec<String>,
-                        partial_order_count: usize,
-                        total_order_count: usize,
-                        failed_order_index: usize,
-                    }
-                    Err(json(&Partial {
-                        message: &message,
-                        partial_order_ids: &job.ids,
-                        partial_order_count: job.ids.len(),
-                        total_order_count: job.total,
-                        failed_order_index: job.ids.len(),
-                    }))
+                    let error =
+                        VenueError::new(message).partial(&job.ids, job.total, job.ids.len());
+                    cx.fail(job.command, error);
                 }
             } else {
-                Ok(if job.collect {
-                    json(&job.ids)
-                } else {
-                    "[]".into()
-                })
-            };
-            cx.done(job.command, result);
+                cx.done(
+                    job.command,
+                    Ok(if job.collect {
+                        json(&job.ids)
+                    } else {
+                        "[]".into()
+                    }),
+                );
+            }
             self.trade_queued(cx);
             return;
         };
