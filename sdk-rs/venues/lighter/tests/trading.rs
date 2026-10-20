@@ -832,6 +832,18 @@ fn write_failures_are_classified_without_changing_their_text() {
             Some("21120")
         )
     );
+    // The sequencer may still accept individual transactions of a refused batch.
+    let (mut e, _) = ready_unattributed();
+    let r = begin(&mut e, vec![limit(), limit()]);
+    assert!(r.url.contains("sendTxBatch"));
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"code":21120,"message":"invalid order"}"#,
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
     // A server error does not prove anything.
     let (mut e, _) = ready_unattributed();
     let r = begin(&mut e, vec![limit()]);

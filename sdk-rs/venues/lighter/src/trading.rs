@@ -722,7 +722,11 @@ impl Lighter {
                 };
                 if response.status >= 300 || code != Some(200) || hash_count != submission.count {
                     self.trading.next_nonce = None;
-                    let unknown = response.status >= 500 || code.is_none() || code == Some(200);
+                    // The sequencer may still accept individual transactions of a refused batch.
+                    let unknown = response.status >= 500
+                        || code.is_none()
+                        || code == Some(200)
+                        || submission.count > 1;
                     if unknown {
                         self.submission_uncertain(cx, &submission.effect);
                     } else if matches!(submission.effect, Effect::Setting { .. }) {
@@ -736,9 +740,12 @@ impl Lighter {
                         _ => UNCERTAIN_RESULT.into(),
                     };
                     self.refresh_orders(cx);
+                    let explained = message != UNCERTAIN_RESULT;
                     let error = VenueError::new(message);
                     let error = match code {
                         _ if unknown => error.outcome(Outcome::Unknown),
+                        // A bare code with no reason keeps the uncertain text; claim nothing.
+                        Some(code) if !explained => error.venue_code(code.to_string()),
                         // Lighter's numeric codes on a sub-500 answer are explicit refusals.
                         Some(code) => error
                             .venue_code(code.to_string())
@@ -849,10 +856,13 @@ impl Lighter {
                 self.trading.active.as_mut().unwrap().builder_stage = 2;
                 self.trade_kick(cx);
             }
-            Request::Nonce => self.trade_finish(cx, not_sent(error)),
+            Request::Nonce => self.trade_finish(cx, not_sent(error).kind(ErrorKind::Network)),
             Request::Submit(s) => {
                 self.submission_uncertain(cx, &s.effect);
-                self.trade_finish(cx, uncertain(format!("Uncertain Lighter transaction result: {error}; check open orders before retrying")));
+                let error = uncertain(format!(
+                    "Uncertain Lighter transaction result: {error}; check open orders before retrying"
+                ));
+                self.trade_finish(cx, error.kind(ErrorKind::Network));
             }
         }
     }
@@ -1245,11 +1255,11 @@ fn protective_kind(cx: &Cx<'_, Pending>, order: &Order, price: f64) -> OrderType
 const UNCERTAIN_RESULT: &str =
     "Uncertain Lighter transaction result; check open orders before retrying";
 
-/// The submission may have executed; callers must reconcile before resending.
 /// Refused before any transaction was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
 }
+/// The submission may have executed; callers must reconcile before resending.
 fn uncertain(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
