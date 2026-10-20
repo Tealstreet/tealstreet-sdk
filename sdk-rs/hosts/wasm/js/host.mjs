@@ -403,7 +403,17 @@ export class EngineHost {
         const binary = data instanceof Uint8Array;
         let written;
         if (binary) { buffer.set(data, at + header); written = data.byteLength; }
-        else ({ written } = (this.wsEncoder ??= new TextEncoder()).encodeInto(data, buffer.subarray(at + header)));
+        else {
+          const utf8 = this.wsEncoder ??= new TextEncoder();
+          const target = buffer.subarray(at + header);
+          const encoded = typeof utf8.encodeInto === 'function' ? utf8.encodeInto(data, target) : undefined;
+          if (encoded?.read === data.length) written = encoded.written;
+          else {
+            const bytes = utf8.encode(data);
+            target.set(bytes);
+            written = bytes.byteLength;
+          }
+        }
         view.setUint32(at, messages[i], true);
         view.setUint32(at + 4, written, true);
         view.setFloat64(at + 8, messages[i + 1], true);

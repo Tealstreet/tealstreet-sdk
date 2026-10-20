@@ -848,3 +848,33 @@ only `RUST_AUDITS.md` and `RUST_QUALITY.md`. Shared-helper refresh and configura
 remain drafts, with no final gate children or frozen collection. Rebuild current
 families and complete actual integrations, final size review and source checks
 before freezing the existing Node22 no-retry collection protocol.
+
+Full source29 verification now passes:2,857 Rust tests across222groups, no
+failures or ignored tests, formatting, banned-pattern checks, native all-target
+Clippy and full WASM Clippy. All451 Rust/build inputs remain unchanged at
+`7bc9e30d32`. The shared control refresh is applied and independently audited:
+181 shared files match the candidate, while446 original Rust/config inputs,
+35 protected inputs,9 aggregate bindings and1,804 original package-backup files
+remain intact. Only the expected packages/node_modules aliases are present.
+
+The final-source27-family rebuild and27 isolated Clippy checks pass. Independent
+physical review verifies1,008 source inputs,243 fresh artifacts,252 archived
+artifacts, all31 command receipts and identical Node/web WASM per family.
+Release proof SHA `725379d643a2852301e35a6deb1c2ae1598953e3dbf838b5f4f9745b322bf014`;
+independent audit SHA `c0aef86eb03fe06316ce1290e150e99f75f4ab39d6efd344b177e3c5917d5a2e`.
+Sizes range758,842–1,237,634bytes;26 old caps fail and Paradex fits. Preserve the
+official failing size-check log before separately reviewed cap rebaselining.
+
+A new adversarial review finds a P2 in multi-message packing: encode-only
+TextEncoder implementations throw, and incomplete encodeInto results truncate
+text. The singleton path already handles both cases. Add full encode() fallback
+to packing when encodeInto is missing or does not consume the complete string.
+Four queued two-text/mixed regressions fail before the fix and pass afterward,
+with zero skips, preserving Unicode, binary bytes, ordering and arrival clocks.
+The finding is posted on PR1344. Only host.mjs and host.test.mjs change; all Rust
+and build inputs and243 generated bindings remain byte-identical. Keep the
+immutable physical build proof at7bc and record the committed JavaScript input
+overlay explicitly rather than relabeling old build command receipts.
+
+Actual WASM integration, final size review and the fixed40/64 measurement
+collection remain next. No current-cohort performance result is available yet.

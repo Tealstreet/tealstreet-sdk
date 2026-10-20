@@ -68,6 +68,43 @@ const fixture = (options) => {
   return { host, send, tick, calls, tasks, arrivals, engine };
 };
 
+for (const codec of ['encode-only', 'partial-encodeInto']) for (const mixed of [false, true]) {
+  test(`real ${mixed ? 'mixed' : 'two-text'} batches retain complete Unicode with ${codec} codecs`, () => {
+    const f = fixture();
+    const encoder = new TextEncoder(), decoder = new TextDecoder();
+    const calls = { encode: 0, encodeInto: 0 };
+    f.host.wsEncoder = {
+      encode: (text) => { calls.encode++; return encoder.encode(text); },
+      ...(codec === 'partial-encodeInto' ? {
+        encodeInto: (_text, target) => {
+          calls.encodeInto++;
+          target[0] = 0x3f;
+          return { read: 1, written: 1 };
+        },
+      } : {}),
+    };
+    f.engine.wsMessage = () => assert.fail('two text arrivals must use the batch ABI');
+    f.engine.wsMessageBytes = () => assert.fail('two text arrivals must use the batch ABI');
+    const first = 'ASCII é漢🦀\ud800', last = '\udc00last\n雪😀';
+    const normalized = (text) => decoder.decode(encoder.encode(text));
+    f.arrivals.get('1').onMessage(first, 17.25);
+    if (mixed) f.arrivals.get('2').onBinary(new Uint8Array([0, 255, 0x1f]), 18);
+    f.arrivals.get('2').onMessage(last, 19.5);
+    assert.deepEqual(f.calls, [], 'both text frames remain queued until the same scheduled drain');
+    assert.equal(f.host.messages.length, mixed ? 9 : 6);
+    assert.equal(f.tasks.size, 1);
+    f.tick();
+    const rows = [[1, 17.25, normalized(first)]];
+    if (mixed) rows.push([2, 18, [0, 255, 0x1f]]);
+    rows.push([2, 19.5, normalized(last)]);
+    assert.deepEqual(f.calls, [[mixed ? 'events' : 'batch', rows]], 'one crossing preserves complete text, binary bytes, order and clocks');
+    assert.equal(calls.encode, 2, 'each unavailable or partial encodeInto result uses complete encode() output');
+    assert.equal(calls.encodeInto, codec === 'partial-encodeInto' ? 2 : 0);
+    f.host.dispose();
+  });
+}
+
+
 test('one task batches mixed sockets, empty text, newlines and Unicode with arrival clocks', () => {
   const f = fixture();
   f.send(2, '雪😀\n\u001e');
