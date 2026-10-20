@@ -101,6 +101,12 @@
       ],
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39463152700",
       "note": "Same tape f117e75e and identical Coinbase code; TS output and final account identical across runs. Rust checkpoints 6-10 differ only by when the in-flight census at record 86 resolves. The union of both observed path sets is declared (overseer option a); follow-up (b) routed to claude-ftr6h9. CFM ES256 checkpoint 12 shows the TS-side twin (run 39469014934 vs 39463152700); its 11 extra paths are declared the same way. Both sets are tracked for removal by claude-ftr6h9 item 9."
+    },
+    "paradexRehash20261021": {
+      "ciRun": 39471227996,
+      "ciHead": "665b7e35da",
+      "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39471227996",
+      "note": "Landing e5e527b156 (#1405) added a Rust-only fills read with start_at to the Paradex private tape generator. The new hash declares 87 of the 98 prior paths with their original rationale; all 87 failure lines, values included, are identical to run 39469014934 on the prior hash. Prior entry retained."
     }
   },
   "failures": [
@@ -52839,6 +52845,125 @@
             "checkpoint 11 account.fills[2].amount",
             "checkpoint 11 account.fills[2].price",
             "checkpoint 11 account.fills[3]"
+          ]
+        }
+      ]
+    },
+    {
+      "venue": "paradex",
+      "tapeSha256": "b706fac7123d50587e2d520b3382accba02e4c4916c4e04edf7dc19e89b9d581",
+      "tape": "sdk-rs/harness/tapes/paradex-private.jsonl",
+      "diagnostics": [
+        {
+          "divergence": "Native/caller client ID is missing or differs between the actual TS receiver and Rust frame.",
+          "keys": [
+            "checkpoint 5 account.orders[1].clientOrderId",
+            "checkpoint 5 account.orders[2].clientOrderId",
+            "checkpoint 6 account.orders[1].clientOrderId",
+            "checkpoint 6 account.orders[2].clientOrderId",
+            "checkpoint 7 account.orders[1].clientOrderId",
+            "checkpoint 7 account.orders[2].clientOrderId"
+          ]
+        },
+        {
+          "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
+          "keys": [
+            "checkpoint 10 account.orders.length",
+            "checkpoint 11 account.orders.length",
+            "checkpoint 12 account.orders.length",
+            "checkpoint 13 account.orders.length",
+            "checkpoint 5 account.orders.length",
+            "checkpoint 5 account.orders[1].amount",
+            "checkpoint 5 account.orders[1].id",
+            "checkpoint 5 account.orders[1].price",
+            "checkpoint 5 account.orders[1].remaining",
+            "checkpoint 5 account.orders[1].status",
+            "checkpoint 5 account.orders[2].amount",
+            "checkpoint 5 account.orders[2].id",
+            "checkpoint 5 account.orders[2].price",
+            "checkpoint 5 account.orders[2].remaining",
+            "checkpoint 5 account.orders[2].side",
+            "checkpoint 5 account.orders[2].symbol",
+            "checkpoint 5 account.orders[3]",
+            "checkpoint 6 account.orders.length",
+            "checkpoint 6 account.orders[1].amount",
+            "checkpoint 6 account.orders[1].id",
+            "checkpoint 6 account.orders[1].price",
+            "checkpoint 6 account.orders[1].remaining",
+            "checkpoint 6 account.orders[2].amount",
+            "checkpoint 6 account.orders[2].id",
+            "checkpoint 6 account.orders[2].price",
+            "checkpoint 6 account.orders[2].remaining",
+            "checkpoint 6 account.orders[2].side",
+            "checkpoint 6 account.orders[2].symbol",
+            "checkpoint 6 account.orders[3]",
+            "checkpoint 7 account.orders.length",
+            "checkpoint 7 account.orders[1].amount",
+            "checkpoint 7 account.orders[1].id",
+            "checkpoint 7 account.orders[1].price",
+            "checkpoint 7 account.orders[1].remaining",
+            "checkpoint 7 account.orders[2].amount",
+            "checkpoint 7 account.orders[2].id",
+            "checkpoint 7 account.orders[2].price",
+            "checkpoint 7 account.orders[2].remaining",
+            "checkpoint 7 account.orders[2].side",
+            "checkpoint 7 account.orders[2].symbol",
+            "checkpoint 7 account.orders[3]",
+            "checkpoint 8 account.orders.length",
+            "checkpoint 8 account.orders[3]",
+            "checkpoint 9 account.orders.length",
+            "checkpoint 9 account.orders[3]"
+          ]
+        },
+        {
+          "divergence": "TS retains canceled caller and batch orders 1001/2001/2002 at checkpoints 10\u201313 while native reconciliation omits them; commands, taped boundaries and write sequences agree.",
+          "keys": [
+            "checkpoint 10 account.orders[1]",
+            "checkpoint 10 account.orders[2]",
+            "checkpoint 10 account.orders[3]",
+            "checkpoint 11 account.orders[1]",
+            "checkpoint 11 account.orders[2]",
+            "checkpoint 11 account.orders[3]",
+            "checkpoint 12 account.orders[1]",
+            "checkpoint 12 account.orders[2]",
+            "checkpoint 12 account.orders[3]",
+            "checkpoint 13 account.orders[1]",
+            "checkpoint 13 account.orders[2]",
+            "checkpoint 13 account.orders[3]"
+          ]
+        },
+        {
+          "divergence": "Paradex terminal reconciliation is timing-sensitive: checkpoint 8 retains batch orders 2001/2002 natively for one more boundary, shifting rows against TS retained 1001; checkpoint 14 differs on retained canceled order 1000. These are different-ID row alignment/terminal-retention paths, not independent same-order economic differences.",
+          "keys": [
+            "checkpoint 8 account.orders[1].amount",
+            "checkpoint 8 account.orders[1].clientOrderId",
+            "checkpoint 8 account.orders[1].id",
+            "checkpoint 8 account.orders[1].price",
+            "checkpoint 8 account.orders[1].remaining",
+            "checkpoint 8 account.orders[2].amount",
+            "checkpoint 8 account.orders[2].clientOrderId",
+            "checkpoint 8 account.orders[2].id",
+            "checkpoint 8 account.orders[2].price",
+            "checkpoint 8 account.orders[2].remaining",
+            "checkpoint 8 account.orders[2].side",
+            "checkpoint 8 account.orders[2].symbol"
+          ]
+        },
+        {
+          "divergence": "At checkpoint 9, TS retains canceled caller order 1001 while native retains only the batch terminal rows 2001/2002 beside existing 1000. Sorted rows therefore compare different IDs and their associated client IDs/geometry. This repeats the independently observed checkpoint-8 reconciliation timing family; tape, commands, boundaries and per-engine receipts match run 39436814801.",
+          "keys": [
+            "checkpoint 9 account.orders[1].amount",
+            "checkpoint 9 account.orders[1].clientOrderId",
+            "checkpoint 9 account.orders[1].id",
+            "checkpoint 9 account.orders[1].price",
+            "checkpoint 9 account.orders[1].remaining",
+            "checkpoint 9 account.orders[2].amount",
+            "checkpoint 9 account.orders[2].clientOrderId",
+            "checkpoint 9 account.orders[2].id",
+            "checkpoint 9 account.orders[2].price",
+            "checkpoint 9 account.orders[2].remaining",
+            "checkpoint 9 account.orders[2].side",
+            "checkpoint 9 account.orders[2].symbol"
           ]
         }
       ]
