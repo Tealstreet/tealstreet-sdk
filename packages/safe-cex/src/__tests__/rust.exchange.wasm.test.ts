@@ -161,7 +161,8 @@ const recordedOkxTransport = () => {
       // This scripted account owns one SWAP and no EU X-Perps. Answer the
       // additional native catalog/seed scope without replaying a SWAP as FUTURES.
       const data =
-        ['instruments', 'tickers'].includes(name) && url.searchParams.get('instType') === 'FUTURES'
+        ['instruments', 'tickers', 'positions', 'orders-pending', 'orders-algo-pending'].includes(name) &&
+        url.searchParams.get('instType') === 'FUTURES'
           ? []
           : responses[name];
       return {
