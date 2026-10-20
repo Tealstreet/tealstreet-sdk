@@ -133,7 +133,7 @@ fn leverage_signs_canonical_fields_and_sends_real_multipart() {
 #[test]
 fn legacy_resend_preserves_original_cancel_and_leverage_payloads() {
     // TS fix: retain original fields across the response-interceptor resend,
-    // rather than signing Axios-transformed String or random FormData internals.
+    // rather than signing transformed text or random multipart internals.
     let cancel = sign::Request::form("/v3/delete-order", fields(&[("id", "cancel-id")]));
     let primary = sign::request(&options(), 1700000000123.0, &cancel, false).unwrap();
     let legacy = sign::request(&options(), 1700000000123.0, &cancel, true).unwrap();

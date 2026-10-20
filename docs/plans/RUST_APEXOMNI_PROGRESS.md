@@ -178,3 +178,17 @@ generated ID and preserves both virtual siblings when editing one leg.
   the landing version. Merged harness: 222 tests passing.
 - Final gate run starts from this merged state. No thresholds, output
   normalization or memory accounting were weakened.
+
+### Acceptance checkpoint before Bybit variants landing
+
+- Combined SDK WASM tests: 52 passing; host tests: 42 passing. Workspace
+  all-target clippy, bans and fmt pass. Strict private gate passes: 42 frames,
+  18 commands, 21 requests, 12 write attempts and 9 subscriptions in each
+  implementation; zero invalid signatures/protocol errors/missing writes.
+- Root lint passes 28 tasks. Full repository tests pass 26/27 tasks; only
+  two unchanged HyroTrader cold-import tests exceed their five-second timeout.
+  Isolated HyroTrader suite passes 10/10. A bounded-worker full SDK run is
+  underway without changing assertions or timeouts.
+- Landing advanced to `922b5fdc89` (Bybit variants), which includes the
+  configuration-test cold-import repair. Commit this checkpoint, integrate
+  landing, then repeat affected acceptance gates on the merged state.
