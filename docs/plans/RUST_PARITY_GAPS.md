@@ -197,13 +197,13 @@ match their earlier builds byte for byte. Exact commands, tape hashes, raw runs
 and artifact provenance are in `/tmp/parity-paradex-proof.json` and
 `/tmp/parity-binance-proof.json`; final numbers will be retained here and in PR.
 
-Repository verification passes: **2,228 native workspace tests**, fmt,
+Repository verification passes: **2,334 native workspace tests**, fmt,
 workspace/all-target Clippy, wasm32 Clippy and bans; root typecheck **44 tasks**,
-lint **28 tasks**, harness **391 tests**, repository tests **27 tasks** with
-safe-cex **7,333 tests in each test-ci/test-unit invocation**. The final repository
+lint **28 tasks**, harness **425 tests**, repository tests **27 tasks** with
+safe-cex **7,355 tests in each test-ci/test-unit invocation**. The final repository
 run uses serial Turbo tasks and four Vitest workers after import/constructor
 wall-clock timeouts under parallel load; assertions and timeouts are unchanged.
-Spot's final ACK adjustment also passes its full 135-test crate and Clippy.
+Spot's final ticker/ACK adjustments pass its full 137-test crate and Clippy.
 
 Remaining: post-Breakout integration checks and artifact provenance; KuCoin
 futures fresh capture/public gate; combined build/host/SDK tests; PR correctness
@@ -217,7 +217,9 @@ controls use default-off engine `polling-control`, enabled by BreakoutProp and
 the native host; the WASM polling parser is enabled only with BreakoutProp.
 Independent review passes: non-polling replay readiness/timing/financial semantics
 remain unchanged, and combined/native controls remain available. Full checks
-are being refreshed on the merged source.
+pass on the merged source: fmt, workspace/all-target Clippy, 2,334 native tests,
+wasm32 Clippy, bans, 44 typecheck tasks, 28 lint tasks, 425 harness tests and
+27 repository test tasks (safe-cex 7,355 tests in each invocation).
 
 Fresh KuCoin Spot traffic exposed a main-thread steady-CPU bottleneck. The
 ready public ticker fast path now decodes envelope and quote in one typed pass;
