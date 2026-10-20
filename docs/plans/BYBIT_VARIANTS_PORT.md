@@ -544,3 +544,20 @@ limit; the formerly failing cases took 25/143 ms. Independent review passes;
 production code and performance measurement are unchanged. A fresh complete
 root test run is pending. The serial run was stopped after confirming its
 known import failures; its partial results are not a passing gate.
+
+### Landing advanced during final gates
+
+On `0b30b016fc`, all ten Bybit profile gates and Binance public/private pass;
+Hyperliquid public also passes. Per-venue bundles observed: Bybit 920,675,
+Binance 757,632, Hyperliquid 994,423 bytes. Final workspace 820 native tests,
+Clippy/bans/fmt/wasm Clippy, typecheck44/lint28 pass. Both full safe-cex suites
+pass all eleven repaired configuration cases; the unit suite passes all6,636.
+The concurrent CI-shaped suite hit one unrelated capability-branding cold
+registry-import timeout. A bounded-worker rerun was interrupted for integration,
+so that partial run is not claimed passing. No capability assertion was altered.
+
+The landing then advanced through transport PR#1313 and Bitrue PR#1314 to
+`fc18c55874`. Integrate the new host routing roles, transport boundary/golden
+matrix tests and twelfth venue without removing the profile guards or gates.
+Completed eleven-venue runs are historical; final validation must include the
+new landing and Bitrue. Preserve the fixed per-venue size budget.
