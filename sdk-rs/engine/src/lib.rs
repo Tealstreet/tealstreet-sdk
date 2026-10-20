@@ -2,6 +2,7 @@
 pub mod book;
 pub mod command;
 pub mod credentials;
+pub mod de;
 pub mod engine;
 pub mod error;
 pub mod json;
@@ -14,6 +15,7 @@ pub mod public_feed;
 pub mod socket;
 pub mod store;
 pub mod time;
+pub mod url;
 pub mod wire;
 
 pub use credentials::ReadCredentials;

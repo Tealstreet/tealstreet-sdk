@@ -19,6 +19,7 @@ use safe_cex_engine::model::{
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
 };
+use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
@@ -222,6 +223,10 @@ pub struct BybitLinear {
     ticker_seeds: HashMap<Category, Vec<Ticker>>,
     catalog_ready: bool,
     tickers_ready: bool,
+    /// The optional option product failed to load; the others publish without it.
+    option_degraded: bool,
+    published_catalogs: usize,
+    published_seeds: usize,
     classification: HashMap<String, InstrumentClassification>,
     derivatives: HashMap<String, DerivativeProduct>,
     wallet: Option<account::Wallet>,
@@ -232,12 +237,17 @@ pub struct BybitLinear {
     config_error: Option<String>,
     credentials: Option<Credentials>,
     read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    /// Set once a startup read proved the key unusable; startup never retries it.
+    credentials_rejected: bool,
     public: Connection,
     private: Connection,
     books: HashMap<String, BookState>,
     book_levels: BookLevels,
     /// Kline subscriptions by (symbol, interval), counted.
     candles: HashMap<(String, String), u32>,
+    /// Live bar per subscription, extended by trades between native klines.
+    live_candles: HashMap<(String, String), Candle>,
+    trade_subscribers: HashMap<String, u32>,
     startup: Startup,
     /// Server clock minus ours, learned from a `recv_window` rejection.
     clock_offset_ms: f64,
@@ -265,6 +275,61 @@ fn interval_code(interval: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+/// Seconds intervals have no native kline; they are built from trades alone.
+fn seconds_interval(interval: &str) -> Option<f64> {
+    let seconds = interval.strip_suffix('s')?.parse::<f64>().ok()?;
+    (seconds > 0.0 && 60.0 % seconds == 0.0).then_some(seconds)
+}
+
+/// The bar start (seconds) holding `time`: Monday weeks and UTC calendar months
+/// for `1w`/`1M`, matching the native `W`/`M` klines; epoch floors otherwise.
+fn candle_start(interval: &str, time: f64) -> Option<f64> {
+    const DAY: f64 = 86_400.0;
+    let step = match interval {
+        "1w" => return Some(((time - 4.0 * DAY) / (7.0 * DAY)).floor() * 7.0 * DAY + 4.0 * DAY),
+        "1M" => {
+            // Civil date from days since the epoch (Hinnant's algorithm).
+            let days = (time / DAY).floor() as i64 + 719_468;
+            let era = days.div_euclid(146_097);
+            let doe = days.rem_euclid(146_097);
+            let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+            let mp = (5 * doy + 2) / 153;
+            let month = if mp < 10 { mp + 3 } else { mp - 9 };
+            let year = yoe + era * 400 + i64::from(month <= 2);
+            // Days back to the first of that month.
+            let (y, m) = if month <= 2 {
+                (year - 1, month + 9)
+            } else {
+                (year, month - 3)
+            };
+            let era = y.div_euclid(400);
+            let yoe = y - era * 400;
+            let doy = (153 * m + 2) / 5;
+            let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+            return Some((era * 146_097 + doe - 719_468) as f64 * DAY);
+        }
+        _ => seconds_interval(interval).or_else(|| {
+            let (n, unit) = interval.split_at(interval.len().checked_sub(1)?);
+            let n = n.parse::<f64>().ok()?;
+            Some(
+                n * match unit {
+                    "m" => 60.0,
+                    "h" => 3_600.0,
+                    "d" => DAY,
+                    _ => return None,
+                },
+            )
+        })?,
+    };
+    Some((time / step).floor() * step)
+}
+
+/// Definitive key rejections: invalid key, bad signature after the re-signed
+/// resend, IP not allowed, expired key. 10005 (permission) is left out: a key
+/// lacking only this read's scope may still trade.
+const CREDENTIAL_REJECTIONS: [i64; 4] = [10003, 10004, 10010, 33004];
 
 /// Bybit's message for a rejected request, from any envelope or body.
 pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
@@ -351,6 +416,9 @@ impl BybitLinear {
             ticker_seeds: HashMap::new(),
             catalog_ready: false,
             tickers_ready: false,
+            option_degraded: false,
+            published_catalogs: 0,
+            published_seeds: 0,
             classification: HashMap::new(),
             derivatives: HashMap::new(),
             wallet: None,
@@ -361,11 +429,14 @@ impl BybitLinear {
             config_error,
             credentials,
             read_credentials: options.read_credentials,
+            credentials_rejected: false,
             public: Connection::new(),
             private: Connection::new(),
             books: HashMap::new(),
             book_levels: BookLevels::default(),
             candles: HashMap::new(),
+            live_candles: HashMap::new(),
+            trade_subscribers: HashMap::new(),
             startup: Startup {
                 retry_ms: STARTUP_RETRY_MIN_MS,
                 prelaunch: options.variant.is_spot().then(Vec::new),
@@ -717,6 +788,7 @@ impl BybitLinear {
         }
         if !self.startup.markets_loaded
             && self.credentials.is_some()
+            && !self.credentials_rejected
             && self.startup.fees.is_none()
             && !self.startup.fees_in_flight
         {
@@ -730,12 +802,58 @@ impl BybitLinear {
         }
     }
 
+    /// The signed startup fee read proved the key unusable; retrying cannot
+    /// fix it, so startup fails instead of waiting for an account that never loads.
+    /// Only the trading key's own invalid, bad-signature or expired verdicts
+    /// deactivate: an IP mismatch or a rejected read-only key leaves it usable.
+    fn reject_credentials(&mut self, cx: &mut Cx<'_, Pending>, code: i64, message: &str) {
+        if std::mem::replace(&mut self.credentials_rejected, true) {
+            return;
+        }
+        let kind = match code {
+            33004 => ErrorKind::AuthExpired,
+            10010 => ErrorKind::AuthPermission,
+            _ => ErrorKind::AuthInvalid,
+        };
+        // Signed GETs use the read-only key when one is configured.
+        let read_key = self.read_credentials.is_some();
+        let which = if read_key {
+            "read-only API key"
+        } else {
+            "API key"
+        };
+        let text = format!("Bybit rejected the {which} ({code}): {message}");
+        cx.log(LogLevel::Error, &text);
+        cx.startup_failed(
+            VenueError::new(text)
+                .kind(kind)
+                .venue_code(code.to_string())
+                .venue_message(message),
+        );
+        if !read_key && code != 10010 {
+            cx.deactivate();
+        }
+    }
+
     /// A required startup list failed: try the missing ones again, backing off.
     fn retry_startup(&mut self, cx: &mut Cx<'_, Pending>, what: &str, error: &str) {
         cx.log(
             LogLevel::Error,
             format!("Failed to fetch Bybit {what}: {error}"),
         );
+        if self.category == Category::Option && !self.option_degraded {
+            self.option_degraded = true;
+            // Publish the working products now; options join when they load.
+            let category = self.category;
+            for other in self.categories() {
+                self.select_category(other);
+                self.try_publish_catalogs(cx);
+                self.try_load_tickers(cx);
+            }
+            self.select_category(category);
+            // Seeds already loaded elsewhere skip try_load_tickers; publish them too.
+            self.try_publish_tickers(cx);
+        }
         if self.startup.retry.is_some() {
             return;
         }
@@ -859,7 +977,34 @@ impl BybitLinear {
         if self.category == Category::Option {
             self.request_option_seeds(cx);
         }
-        if self.catalogs.len() == self.products.len() + 1 {
+        self.try_publish_catalogs(cx);
+    }
+
+    /// Categories whose public data must be in before publishing: every enabled
+    /// one, except a failed option product, which joins later.
+    pub(crate) fn required_categories(&self) -> Vec<Category> {
+        self.categories()
+            .into_iter()
+            .filter(|c| !(self.option_degraded && *c == Category::Option))
+            .collect()
+    }
+
+    fn try_publish_catalogs(&mut self, cx: &mut Cx<'_, Pending>) {
+        let complete = self.catalogs.len() == self.products.len() + 1;
+        let usable = self
+            .required_categories()
+            .iter()
+            .all(|c| self.catalogs.contains_key(c));
+        // Option sorts last, so a late option catalog only appends market indexes.
+        let late_option = self.catalog_ready && complete;
+        if !usable
+            || (self.catalog_ready && !late_option)
+            || self.published_catalogs == self.catalogs.len()
+        {
+            return;
+        }
+        self.published_catalogs = self.catalogs.len();
+        {
             let mut markets = Vec::new();
             for category in self.categories() {
                 markets.extend(self.catalogs.get(&category).into_iter().flatten().cloned());
@@ -960,11 +1105,38 @@ impl BybitLinear {
             })
             .collect();
         self.ticker_seeds.insert(self.category, tickers);
-        if self.ticker_seeds.len() != self.products.len() + 1 {
+        self.try_publish_tickers(cx);
+    }
+
+    fn try_publish_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
+        let usable = self
+            .required_categories()
+            .iter()
+            .all(|c| self.ticker_seeds.contains_key(c));
+        let late_option = self.tickers_ready
+            && self.ticker_seeds.len() == self.products.len() + 1
+            && self.published_seeds < self.ticker_seeds.len();
+        if !usable
+            || (self.tickers_ready && !late_option)
+            || self.published_seeds == self.ticker_seeds.len()
+        {
             return;
         }
-        let mut tickers = Vec::new();
+        self.published_seeds = self.ticker_seeds.len();
+        if self.option_degraded && self.ticker_seeds.contains_key(&Category::Option) {
+            self.option_degraded = false;
+            cx.log(LogLevel::Info, "Bybit option markets recovered");
+        }
+        // Published categories keep their live rows; a late option only appends.
+        let mut tickers = if late_option {
+            cx.store.tickers().to_vec()
+        } else {
+            Vec::new()
+        };
         for category in self.categories() {
+            if late_option && category != Category::Option {
+                continue;
+            }
             tickers.extend(
                 self.ticker_seeds
                     .get(&category)
@@ -977,6 +1149,11 @@ impl BybitLinear {
         self.tickers_ready = true;
         let category = self.category;
         for other in self.categories() {
+            // A category without seeded data waits; a connected one is already live.
+            if !self.ticker_seeds.contains_key(&other) || (late_option && other != Category::Option)
+            {
+                continue;
+            }
             self.select_category(other);
             self.connect(cx, Channel::Public);
             if self.credentials.is_some() {
@@ -1021,6 +1198,10 @@ impl BybitLinear {
             && let Ok(event) = serde_json::from_str::<KlineEvent>(text)
         {
             self.on_kline(cx, &event);
+        } else if topic.starts_with("publicTrade.")
+            && let Ok(event) = serde_json::from_str::<TradeEvent>(text)
+        {
+            self.on_trades(cx, &event);
         }
     }
 
@@ -1088,19 +1269,96 @@ impl BybitLinear {
         else {
             return;
         };
+        let key = (symbol.to_owned(), interval);
         for k in &event.data {
-            cx.candle(
-                symbol,
-                &interval,
-                Candle {
-                    timestamp: k.start / 1000.0,
-                    open: float(&k.open),
-                    high: float(&k.high),
-                    low: float(&k.low),
-                    close: float(&k.close),
-                    volume: float(&k.volume),
+            let native = Candle {
+                timestamp: k.start / 1000.0,
+                open: float(&k.open),
+                high: float(&k.high),
+                low: float(&k.low),
+                close: float(&k.close),
+                volume: float(&k.volume),
+            };
+            let candle = match self.live_candles.get(&key) {
+                // Never move a live bar backwards.
+                Some(live) if live.timestamp > native.timestamp => continue,
+                // Keep trade extremes the kline has not caught up with; its volume is cumulative.
+                Some(live) if live.timestamp == native.timestamp => Candle {
+                    high: live.high.max(native.high),
+                    low: live.low.min(native.low),
+                    ..native
                 },
-            );
+                _ => native,
+            };
+            self.live_candles.insert(key.clone(), candle);
+            cx.candle(symbol, &key.1, candle);
+        }
+    }
+
+    /// Extend each live bar of this symbol with every trade in the packet, in order.
+    fn on_trades(&mut self, cx: &mut Cx<'_, Pending>, event: &TradeEvent<'_>) {
+        let Some(symbol) = event.topic.strip_prefix("publicTrade.") else {
+            return;
+        };
+        let trades: Vec<(f64, f64, f64)> = event
+            .data
+            .iter()
+            .map(|t| (t.time / 1000.0, float(&t.price), float(&t.size)))
+            .collect();
+        if trades.iter().any(|(time, price, size)| {
+            !(time.is_finite() && price.is_finite() && *price > 0.0 && size.is_finite())
+        }) {
+            return;
+        }
+        let intervals: Vec<String> = self
+            .candles
+            .keys()
+            .filter(|(s, _)| s == symbol)
+            .map(|(_, interval)| interval.clone())
+            .collect();
+        for interval in intervals {
+            let key = (symbol.to_owned(), interval);
+            let seconds = seconds_interval(&key.1).is_some();
+            let mut live = self.live_candles.get(&key).copied();
+            let before = live;
+            for &(time, price, size) in &trades {
+                let Some(start) = candle_start(&key.1, time) else {
+                    break;
+                };
+                let bar = match live {
+                    // Minute and longer bars start from a native kline.
+                    None if !seconds => continue,
+                    None => Candle {
+                        timestamp: start,
+                        open: price,
+                        high: price,
+                        low: price,
+                        close: price,
+                        volume: 0.0,
+                    },
+                    Some(bar) if bar.timestamp > start => continue,
+                    Some(bar) if bar.timestamp < start => Candle {
+                        timestamp: start,
+                        open: bar.close,
+                        high: bar.close,
+                        low: bar.close,
+                        close: bar.close,
+                        volume: 0.0,
+                    },
+                    Some(bar) => bar,
+                };
+                live = Some(Candle {
+                    high: bar.high.max(price),
+                    low: bar.low.min(price),
+                    close: price,
+                    volume: bar.volume + size,
+                    ..bar
+                });
+            }
+            if let Some(candle) = live.filter(|c| Some(*c) != before) {
+                self.live_candles.insert(key.clone(), candle);
+                cx.candle(symbol, &key.1, candle);
+            }
         }
     }
 
@@ -1157,25 +1415,45 @@ impl BybitLinear {
             cx.log(LogLevel::Warning, "Bybit has no candles for this product");
             return;
         }
-        let Some(topic) = Self::kline_topic(&symbol, &interval) else {
+        let trades = !self.variant.is_hyro();
+        let kline = Self::kline_topic(&symbol, &interval);
+        // Hyro has no trade feed, so its seconds intervals stay unsupported.
+        if kline.is_none() && !(trades && seconds_interval(&interval).is_some()) {
             cx.log(
                 LogLevel::Warning,
                 format!("Bybit has no {interval} candles"),
             );
             return;
-        };
-        let key = (symbol, interval);
+        }
+        let key = (symbol.clone(), interval);
         if add {
             let count = self.candles.entry(key).or_insert(0);
             *count += 1;
             if *count == 1 {
-                self.subscribe(cx, "subscribe", &[topic]);
+                let mut topics: Vec<String> = kline.into_iter().collect();
+                if trades {
+                    let subscribers = self.trade_subscribers.entry(symbol.clone()).or_insert(0);
+                    *subscribers += 1;
+                    if *subscribers == 1 {
+                        topics.push(format!("publicTrade.{symbol}"));
+                    }
+                }
+                self.subscribe(cx, "subscribe", &topics);
             }
         } else if let Some(count) = self.candles.get_mut(&key) {
             *count -= 1;
             if *count == 0 {
                 self.candles.remove(&key);
-                self.subscribe(cx, "unsubscribe", &[topic]);
+                self.live_candles.remove(&key);
+                let mut topics: Vec<String> = kline.into_iter().collect();
+                if trades && let Some(subscribers) = self.trade_subscribers.get_mut(&symbol) {
+                    *subscribers -= 1;
+                    if *subscribers == 0 {
+                        self.trade_subscribers.remove(&symbol);
+                        topics.push(format!("publicTrade.{symbol}"));
+                    }
+                }
+                self.subscribe(cx, "unsubscribe", &topics);
             }
         }
     }
@@ -1283,6 +1561,14 @@ impl BybitLinear {
             }
             Then::Fees(fees) => {
                 self.startup.fees_in_flight = false;
+                let rejected = response
+                    .as_ref()
+                    .ok()
+                    .and_then(venue_error)
+                    .filter(|(code, _)| CREDENTIAL_REJECTIONS.contains(code));
+                if let Some((code, message)) = rejected {
+                    return self.reject_credentials(cx, code, &message);
+                }
                 if let Some(error) = failure {
                     cx.log(LogLevel::Warning, format!("Bybit fee rates: {error}"));
                 }
@@ -1351,7 +1637,7 @@ impl BybitLinear {
 }
 
 fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerDelta<'_>, variant: Variant) {
-    let percentage = d.price24h_pcnt.map(|p| p * 100.0);
+    let percentage = d.price24h_pcnt.or(d.change24h).map(|p| p * 100.0);
     let open_interest = d.open_interest;
     let funding_rate = if variant.is_spot() {
         Some(0.0)
@@ -1373,8 +1659,8 @@ fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerDelta<'_>, variant: Variant) {
                 *slot = value;
             }
         };
-        set(&mut t.bid, d.bid1_price);
-        set(&mut t.ask, d.ask1_price);
+        set(&mut t.bid, d.bid1_price.or(d.bid_price));
+        set(&mut t.ask, d.ask1_price.or(d.ask_price));
         set(&mut t.last, d.last_price);
         set(&mut t.mark, d.mark_price);
         set(&mut t.index, d.index_price);
@@ -1403,7 +1689,9 @@ fn ticker_from_rest(t: &TickerRow<'_>, inverse: bool) -> Ticker {
         mark: float_of(&t.mark_price),
         index: float_of(&t.index_price),
         mid_price: None,
-        percentage: float_of(&t.price24h_pcnt) * 100.0,
+        percentage: present(&t.price24h_pcnt)
+            .map_or_else(|| float_of(&t.change24h), |_| float_of(&t.price24h_pcnt))
+            * 100.0,
         open_interest: float_of(&t.open_interest),
         funding_rate: float_of(&t.funding_rate),
         funding_time: float_of(&t.next_funding_time),
@@ -1666,6 +1954,12 @@ impl Venue for BybitLinear {
                         .filter(|(symbol, _)| self.owns_symbol(symbol))
                         .filter_map(|(symbol, interval)| Self::kline_topic(symbol, interval)),
                 );
+                topics.extend(
+                    self.trade_subscribers
+                        .keys()
+                        .filter(|symbol| self.owns_symbol(symbol))
+                        .map(|symbol| format!("publicTrade.{symbol}")),
+                );
                 self.subscribe(cx, "subscribe", &topics);
             }
             Channel::Private => self.on_private_open(cx, socket),
@@ -1714,6 +2008,26 @@ impl Venue for BybitLinear {
             return;
         };
         self.on_public_response(cx, then, Ok(response));
+    }
+
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        // A rejected fee read carries `result: {}`; its retCode decides startup.
+        if matches!(pending.then, Then::Fees(_)) {
+            return self.on_response(cx, pending, response);
+        }
+        self.on_request_failed(
+            cx,
+            pending,
+            &format!(
+                "response did not contain the expected list: {}",
+                response.body
+            ),
+        );
     }
 
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
@@ -2004,3 +2318,22 @@ mod public_decoder_tests {
 
 #[cfg(test)]
 mod secondary_tests;
+
+#[cfg(test)]
+mod candle_start_tests {
+    use super::candle_start;
+
+    #[test]
+    fn calendar_bars_match_native_week_and_month_boundaries() {
+        // 2026-10-20 12:34:56 UTC is a Tuesday.
+        let t = 1_792_499_696.0;
+        assert_eq!(candle_start("1w", t), Some(1_792_368_000.0)); // Monday 2026-10-19
+        assert_eq!(candle_start("1M", t), Some(1_790_812_800.0)); // 2026-10-01
+        assert_eq!(candle_start("1M", 1_709_251_199.0), Some(1_706_745_600.0)); // 2024-02-29 -> 02-01
+        assert_eq!(candle_start("1M", 1_704_067_200.0), Some(1_704_067_200.0)); // 2024-01-01
+        assert_eq!(candle_start("1d", t), Some(1_792_454_400.0));
+        assert_eq!(candle_start("4h", t), Some(1_792_497_600.0));
+        assert_eq!(candle_start("15s", t), Some(1_792_499_685.0));
+        assert_eq!(candle_start("7s", t), None);
+    }
+}
