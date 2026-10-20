@@ -8,11 +8,13 @@ const POS: &str = r#"{"success":true,"data":{"positions":[{"symbol":"PERP_BTC_US
 const ORDER: &str = r#"{"symbol":"PERP_BTC_USDT","order_id":9007199254740993,"status":"NEW","side":"BUY","type":"LIMIT","quantity":0.02,"executed":0.005,"price":59000,"reduce_only":false,"client_order_id":123}"#;
 const ALGO: &str = r#"{"symbol":"PERP_BTC_USDT","rootAlgoOrderId":42,"algoType":"POSITIONAL_TP_SL","childOrders":[{"algoOrderId":43,"algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","quantity":0.01,"triggerPrice":58000,"triggerPriceType":"MARK_PRICE","totalExecutedQuantity":0,"reduceOnly":true},{"algoOrderId":44,"algoType":"TAKE_PROFIT","algoStatus":"NEW","side":"SELL","quantity":0.01,"triggerPrice":65000,"triggerPriceType":"MARKET_PRICE","totalExecutedQuantity":0,"reduceOnly":true}]}"#;
 fn page(row: &str) -> String {
-    format!(r#"{{"success":true,"meta":{{"total":1,"records_per_page":100}},"rows":[{row}]}}"#)
+    format!(
+        r#"{{"success":true,"meta":{{"total":1,"records_per_page":100,"current_page":1}},"rows":[{row}]}}"#
+    )
 }
 fn algos(row: &str) -> String {
     format!(
-        r#"{{"success":true,"data":{{"meta":{{"total":1,"records_per_page":100}},"rows":[{row}]}}}}"#
+        r#"{{"success":true,"data":{{"meta":{{"total":1,"records_per_page":100,"current_page":1}},"rows":[{row}]}}}}"#
     )
 }
 fn start() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
@@ -101,6 +103,27 @@ fn count_fills(e: &mut TestEngine) -> u32 {
         cursor += 8 + size;
     }
     0
+}
+fn fill_amounts(e: &mut TestEngine) -> Vec<f64> {
+    let Some(frame) = e.take_frame(100.0) else {
+        return vec![];
+    };
+    let Some((_, payload)) = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::FILLS)
+    else {
+        return vec![];
+    };
+    let count = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+    let rows = (4 + 12 * count + 7) & !7;
+    (0..count)
+        .map(|index| {
+            f64::from_le_bytes(
+                payload[rows + 16 * index + 8..rows + 16 * index + 16]
+                    .try_into()
+                    .unwrap(),
+            )
+        })
+        .collect()
 }
 #[test]
 fn startup_auth_snapshot_settings_and_exact_ids() {
@@ -342,7 +365,9 @@ fn regular_pages_join_only_after_both_complete() {
         &mut e,
         &second,
         40.0,
-        &first.replace("9007199254740993", "9007199254740994"),
+        &first
+            .replace("9007199254740993", "9007199254740994")
+            .replace("\"current_page\":1", "\"current_page\":2"),
     );
     let algo = take(&mut reads, "/v3/algo/orders?");
     response(&mut e, &algo, 50.0, &algos(""));
@@ -643,4 +668,176 @@ fn buy_trailing_display_is_extreme_plus_callback_and_sell_is_minus() {
         r#"{"topic":"algoexecutionreportv2","data":{"symbol":"PERP_BTC_USDT","algoOrderId":61,"algoType":"TRAILING_STOP","algoStatus":"REPLACED","side":"BUY","quantity":0.01,"extremePrice":59000,"callbackValue":1000}}"#,
     );
     assert_eq!(e.store().order("61").unwrap().price, 60000.0);
+}
+
+#[test]
+fn first_camel_case_order_and_execution_are_not_dropped() {
+    let (mut e, socket, _, _) = start();
+    ws(
+        &mut e,
+        socket,
+        25.0,
+        r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":92,"status":"NEW","side":"BUY","orderType":"LIMIT","orderQuantity":0.01,"orderPrice":59000,"totalExecutedQuantity":0}}"#,
+    );
+    assert_eq!(
+        e.store().order("92").unwrap().kind,
+        safe_cex_engine::model::OrderType::Limit
+    );
+    ws(
+        &mut e,
+        socket,
+        30.0,
+        r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":91,"status":"PARTIAL_FILLED","side":"BUY","orderType":"LIMIT","orderQuantity":0.02,"orderPrice":59000,"totalExecutedQuantity":0.001,"executedQuantity":0.001,"executedPrice":59000,"tradeId":9101}}"#,
+    );
+    let order = e.store().order("91").unwrap();
+    assert_eq!(order.kind, safe_cex_engine::model::OrderType::Limit);
+    assert_eq!(
+        (order.amount, order.filled, order.price),
+        (0.02, 0.001, 59000.0)
+    );
+    assert_eq!(e.store().positions()[0].contracts, 0.001);
+    assert_eq!(count_fills(&mut e), 1);
+}
+
+#[test]
+fn unseen_execution_already_in_rest_emits_once_without_increasing_position() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    let frame = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIAL_FILLED","side":"BUY","orderType":"LIMIT","orderQuantity":0.02,"totalExecutedQuantity":0.005,"executedQuantity":0.005,"executedPrice":59000,"tradeId":101}}"#;
+    ws(&mut e, socket, 70.0, frame);
+    ws(&mut e, socket, 71.0, frame);
+    assert_eq!(e.store().order("9007199254740993").unwrap().filled, 0.005);
+    assert_eq!(e.store().positions()[0].contracts, 0.01);
+    assert_eq!(fill_amounts(&mut e), vec![0.005]);
+}
+
+#[test]
+fn partially_reconciled_execution_applies_only_new_cumulative_position_quantity() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    ws(
+        &mut e,
+        socket,
+        70.0,
+        r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIAL_FILLED","side":"BUY","orderType":"LIMIT","orderQuantity":0.02,"totalExecutedQuantity":0.006,"executedQuantity":0.003,"executedPrice":59000,"tradeId":101}}"#,
+    );
+    assert_eq!(e.store().order("9007199254740993").unwrap().filled, 0.006);
+    assert!((e.store().positions()[0].contracts - 0.011).abs() < 1e-10);
+    assert_eq!(fill_amounts(&mut e), vec![0.003]);
+}
+
+#[test]
+fn invalid_regular_or_algo_page_metadata_preserves_complete_known_orders() {
+    for invalid in ["missing", "zero", "wrong-page", "missing-page"] {
+        for algo in [false, true] {
+            let (mut e, socket, mut reads, _) = start();
+            load(&mut e, &mut reads);
+            e.drain_actions().for_each(drop);
+            e.handle(70.0, Event::WsOpened { socket });
+            let mut reads = requests(&mut e);
+            let regular = take(&mut reads, "/v1/orders?");
+            let plan = take(&mut reads, "/v3/algo/orders?");
+            let good = if algo { page("") } else { algos("") };
+            let bad = match (algo, invalid) {
+                (false, "missing") => r#"{"success":true,"rows":[]}"#.into(),
+                (true, "missing") => r#"{"success":true,"data":{"rows":[]}}"#.into(),
+                (_, kind) => {
+                    let body = if algo { algos("") } else { page("") };
+                    match kind {
+                        "zero" => {
+                            body.replace("\"records_per_page\":100", "\"records_per_page\":0")
+                        }
+                        "wrong-page" => body.replace("\"current_page\":1", "\"current_page\":2"),
+                        "missing-page" => body.replace(",\"current_page\":1", ""),
+                        _ => unreachable!(),
+                    }
+                }
+            };
+            if algo {
+                response(&mut e, &regular, 80.0, &good);
+                response(&mut e, &plan, 90.0, &bad);
+            } else {
+                response(&mut e, &plan, 80.0, &good);
+                response(&mut e, &regular, 90.0, &bad);
+            }
+            assert_eq!(e.store().orders().len(), 3, "{invalid}, algo={algo}");
+            assert_eq!(e.store().order("9007199254740993").unwrap().filled, 0.005);
+        }
+    }
+}
+
+#[test]
+fn invalid_second_page_metadata_cannot_publish_a_successful_prefix() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    e.drain_actions().for_each(drop);
+    e.handle(70.0, Event::WsOpened { socket });
+    let mut reads = requests(&mut e);
+    let regular = take(&mut reads, "/v1/orders?");
+    let first = page(&ORDER.replace("9007199254740993", "81"))
+        .replace("\"total\":1", "\"total\":2")
+        .replace("\"records_per_page\":100", "\"records_per_page\":1");
+    response(&mut e, &regular, 80.0, &first);
+    let mut next = requests(&mut e);
+    let second = take(&mut next, "/v1/orders?");
+    response(&mut e, &second, 90.0, &page(""));
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    response(&mut e, &algo, 100.0, &algos(""));
+    assert_eq!(e.store().orders().len(), 3);
+    assert!(e.store().order("81").is_none());
+}
+
+#[test]
+fn rejected_algo_snapshot_cannot_change_later_amend_classification() {
+    for failed_second_page in [false, true] {
+        let (mut e, socket, mut reads, _) = start();
+        load(&mut e, &mut reads);
+        ws(
+            &mut e,
+            socket,
+            65.0,
+            r#"{"topic":"algoexecutionreportv2","data":{"symbol":"PERP_BTC_USDT","algoOrderId":92,"rootAlgoOrderId":92,"algoType":"STOP_LOSS","algoStatus":"NEW","side":"SELL","quantity":0.01,"triggerPrice":58000,"totalExecutedQuantity":0,"reduceOnly":true}}"#,
+        );
+        e.drain_actions().for_each(drop);
+        e.handle(70.0, Event::WsOpened { socket });
+        let mut reads = requests(&mut e);
+        let regular = take(&mut reads, "/v1/orders?");
+        response(&mut e, &regular, 80.0, &page(""));
+        let algo = take(&mut reads, "/v3/algo/orders?");
+        let reclassified = ALGO.replace("\"algoOrderId\":43", "\"algoOrderId\":92");
+        let body = if failed_second_page {
+            algos(&reclassified)
+                .replace("\"total\":1", "\"total\":2")
+                .replace("\"records_per_page\":100", "\"records_per_page\":1")
+        } else {
+            algos(&reclassified).replace("\"current_page\":1", "\"current_page\":2")
+        };
+        response(&mut e, &algo, 90.0, &body);
+        if failed_second_page {
+            let mut reads = requests(&mut e);
+            let second = take(&mut reads, "/v3/algo/orders?");
+            response(&mut e, &second, 100.0, &algos(""));
+        }
+        assert_eq!(
+            e.store().order("92").unwrap().parent_id.as_deref(),
+            Some("92")
+        );
+        e.drain_actions().for_each(drop);
+        e.handle(
+            110.0,
+            Event::Command(Command::AmendOrder {
+                command: 92,
+                id: "92".into(),
+                price: Some(58500.0),
+                amount: None,
+            }),
+        );
+        let mut writes = requests(&mut e);
+        let amend = take(&mut writes, "/v3/algo/order/92");
+        assert_eq!(
+            amend.body.as_deref(),
+            Some(r#"{"triggerPrice":"58500"}"#),
+            "failed_second_page={failed_second_page}"
+        );
+    }
 }

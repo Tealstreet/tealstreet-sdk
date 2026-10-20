@@ -27,6 +27,7 @@ pub enum Request {
         algo: bool,
         page: u32,
         rows: Vec<Order>,
+        classifications: Vec<(String, bool)>,
         bad: bool,
     },
     Leverage {
@@ -44,6 +45,7 @@ struct OrdersJoin {
     revision: u64,
     regular: Vec<Order>,
     algo: Vec<Order>,
+    classifications: Vec<(String, bool)>,
     regular_done: bool,
     algo_done: bool,
 }
@@ -125,7 +127,7 @@ struct OrderRow<'a> {
     side: Str<'a>,
     #[serde(borrow, rename = "type")]
     kind: Str<'a>,
-    #[serde(borrow)]
+    #[serde(borrow, alias = "orderType")]
     order_type: Str<'a>,
     #[serde(borrow, rename = "algoType")]
     algo_type: Str<'a>,
@@ -173,6 +175,7 @@ struct Page {
 struct Meta {
     total: u64,
     records_per_page: u64,
+    current_page: u32,
 }
 #[derive(Deserialize)]
 struct Leverage<'a> {
@@ -412,6 +415,7 @@ impl Woo {
             algo,
             page,
             rows: vec![],
+            classifications: vec![],
             bad: false,
         };
         match self.signed(
@@ -450,6 +454,7 @@ impl Woo {
             revision: self.account.revision,
             regular: vec![],
             algo: vec![],
+            classifications: vec![],
             regular_done: false,
             algo_done: false,
         });
@@ -558,8 +563,18 @@ impl Woo {
             Some(cx.set_timer((1000.0 * 2f64.powi(c.attempts.min(5) as i32 - 1)).min(30_000.0)));
         true
     }
+    fn account_classification(
+        &self,
+        id: &str,
+        row: &OrderRow<'_>,
+        parent: Option<&OrderRow<'_>>,
+    ) -> bool {
+        parent.is_some_and(|p| p.algo_type == "POSITIONAL_TP_SL")
+            || row.algo_type == "POSITIONAL_TP_SL"
+            || self.account.algos.get(id).is_some_and(|m| m.positional)
+    }
     fn account_map_order(
-        &mut self,
+        &self,
         cx: &Cx<'_, Pending>,
         r: &OrderRow<'_>,
         algo: bool,
@@ -673,16 +688,6 @@ impl Woo {
         }
         .or_else(|| old.map(|o| o.price))
         .unwrap_or(0.0);
-        if algo {
-            self.account.algos.insert(
-                id.clone(),
-                AlgoMeta {
-                    positional: parent.is_some_and(|p| p.algo_type == "POSITIONAL_TP_SL")
-                        || r.algo_type == "POSITIONAL_TP_SL"
-                        || self.account.algos.get(id).is_some_and(|m| m.positional),
-                },
-            );
-        }
         let extra = source.map(|s| OrderExtra {
             tp_trigger_type: (kind == OrderType::TakeProfit).then_some(s),
             sl_trigger_type: (kind != OrderType::TakeProfit).then_some(s),
@@ -777,7 +782,11 @@ impl Woo {
                 });
             }
             Request::Orders {
-                rows, bad, algo, ..
+                rows,
+                classifications,
+                bad,
+                algo,
+                ..
             } => {
                 let Ok(r) = serde_json::from_str::<OrderRow<'_>>(item) else {
                     *bad = true;
@@ -847,6 +856,12 @@ impl Woo {
                         continue;
                     }
                     if let Some(order) = self.account_map_order(cx, leaf, *algo, parent) {
+                        if *algo {
+                            classifications.push((
+                                order.id.clone(),
+                                self.account_classification(&order.id, leaf, parent),
+                            ));
+                        }
                         rows.push(order);
                     } else {
                         *bad = true;
@@ -1018,6 +1033,7 @@ impl Woo {
                 algo,
                 page,
                 rows,
+                classifications,
                 bad,
             } => {
                 if self
@@ -1038,10 +1054,19 @@ impl Woo {
                     cx.log(LogLevel::Error, "Invalid WOO open-order envelope");
                     return;
                 };
-                let meta = meta.meta.or_else(|| meta.data.and_then(|p| p.meta));
-                let more = meta.as_ref().is_some_and(|m| {
-                    m.records_per_page > 0 && m.total > m.records_per_page * page as u64
-                });
+                let meta = if algo {
+                    meta.data.and_then(|page| page.meta)
+                } else {
+                    meta.meta
+                };
+                let Some(meta) =
+                    meta.filter(|meta| meta.records_per_page > 0 && meta.current_page == page)
+                else {
+                    self.account.orders = None;
+                    cx.log(LogLevel::Error, "Invalid WOO open-order page metadata");
+                    return;
+                };
+                let more = meta.total > meta.records_per_page.saturating_mul(u64::from(page));
                 let join = self.account.orders.as_mut().unwrap();
                 let dest = if algo {
                     &mut join.algo
@@ -1054,8 +1079,16 @@ impl Woo {
                         dest.push(row);
                     }
                 }
+                let added = dest.len() != before;
+                join.classifications
+                    .extend(dest[before..].iter().filter_map(|row| {
+                        classifications
+                            .iter()
+                            .find(|(id, _)| id == &row.id)
+                            .cloned()
+                    }));
                 if more {
-                    if dest.len() == before || page >= 1000 {
+                    if !added || page >= 1000 {
                         self.account.orders = None;
                         cx.log(LogLevel::Error, "WOO order pagination did not advance");
                         return;
@@ -1070,6 +1103,11 @@ impl Woo {
                 }
                 if join.algo_done && join.regular_done {
                     let join = self.account.orders.take().unwrap();
+                    for (id, positional) in join.classifications {
+                        if self.account_revision(&id) <= join.revision {
+                            self.account.algos.insert(id, AlgoMeta { positional });
+                        }
+                    }
                     let mut combined = join.regular;
                     combined.extend(join.algo);
                     for old in cx.store.orders() {
@@ -1208,7 +1246,7 @@ impl Woo {
         };
         self.account.refresh = Some(cx.set_timer(delay));
     }
-    fn account_optimistic_fill(&mut self, cx: &mut Cx<'_, Pending>, fill: &Fill) {
+    fn account_optimistic_fill(&mut self, cx: &mut Cx<'_, Pending>, fill: &Fill, amount: f64) {
         self.account_stamp("$positions");
         if !cx.store.hedged() {
             let old = cx
@@ -1225,7 +1263,7 @@ impl Woo {
                         -1.0
                     }
             });
-            let signed = fill.amount
+            let signed = amount
                 * if fill.side == OrderSide::Buy {
                     1.0
                 } else {
@@ -1249,7 +1287,7 @@ impl Woo {
                 let entry = if same && next.abs() <= previous.abs() {
                     old.as_ref().unwrap().entry_price
                 } else if same {
-                    (old.as_ref().unwrap().entry_price * previous.abs() + fill.price * fill.amount)
+                    (old.as_ref().unwrap().entry_price * previous.abs() + fill.price * amount)
                         / next.abs()
                 } else {
                     fill.price
@@ -1333,6 +1371,12 @@ impl Woo {
         } else {
             r.status.as_ref()
         };
+        if algo {
+            let positional = self.account_classification(&order.id, r, parent);
+            self.account
+                .algos
+                .insert(order.id.clone(), AlgoMeta { positional });
+        }
         let baseline = self
             .account
             .cumulative
@@ -1392,7 +1436,14 @@ impl Woo {
                 price,
                 amount,
             };
-            self.account_optimistic_fill(cx, &fill);
+            // REST may already include an execution whose stream report arrived late.
+            let position_amount = delta.map_or(amount, |advance| amount.min(advance));
+            if position_amount > 0.0 {
+                self.account_optimistic_fill(cx, &fill, position_amount);
+            } else {
+                self.account.refresh_attempt = 0;
+                self.account_schedule_fill_refresh(cx);
+            }
             cx.fill(fill);
         }
     }
