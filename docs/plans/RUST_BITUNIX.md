@@ -2308,3 +2308,12 @@ then guards current Closed/Canceled status at ACK time, retaining quantities,
 both requests, family-specific failure behavior and later placements. Gate
 delta is documentation only. Native production and tapes are unchanged.
 Resume all four Binance public/private controls on the reviewed candidate.
+
+
+Fresh rebuilt Binance four-mode union passes all eight public/private gates on
+7892830da5. Selected module is 923,949 bytes. PM private now requires and emits
+both cancellation families in TS and Rust, preserves fully filled Closed
+status, and compares all account economics/commands/outbound writes exactly.
+USD-M private likewise retains the filled ETH order, with strict output/write
+comparison unchanged. No fixture retiming or normalization. Logs are under
+/tmp/bitunix-df2-usdmfix-*. Remaining GRVT and other integration gates continue.
