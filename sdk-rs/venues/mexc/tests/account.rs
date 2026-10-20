@@ -930,13 +930,54 @@ fn refused_key_fails_startup_instead_of_retrying_the_mode_read_forever() {
     let error = startup_failure(&actions).expect("startup fails");
     assert_eq!(error.kind, Some(ErrorKind::AuthInvalid));
     assert_eq!(error.venue_code.as_deref(), Some("602"));
+    // The SDK's health classifier matches this wording as a rejected key.
+    assert!(error.message.to_lowercase().contains("api key rejected"));
     assert!(error.message.contains("Signature verification failed!"));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+    );
     assert!(!mode_retried(&mut e, actions, 30_000.0));
-    let (_, actions) = mode_read("", 401);
+    let (_, actions) = mode_read(
+        r#"{"success":false,"code":402,"message":"Api_key expired"}"#,
+        401,
+    );
     assert_eq!(
         startup_failure(&actions).and_then(|e| e.kind),
-        Some(ErrorKind::AuthInvalid)
+        Some(ErrorKind::AuthExpired)
     );
+}
+
+#[test]
+fn refusal_after_a_transient_failure_stops_the_scheduled_retries() {
+    let (mut e, actions) = mode_read(r#"{"success":false,"code":510,"message":"busy"}"#, 200);
+    let (timer, at) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at, Event::TimerFired { timer });
+    let mode = support::requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("position_mode"))
+        .unwrap();
+    e.handle(
+        at + 1.0,
+        Event::HttpResponse {
+            request: mode.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"success":false,"code":602,"message":"Signature verification failed!"}"#,
+            },
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(startup_failure(&actions).is_some());
+    assert!(!mode_retried(&mut e, actions, 60_000.0));
 }
 
 #[test]
@@ -947,6 +988,8 @@ fn transient_mode_failures_keep_retrying_without_failing_startup() {
             200,
         ),
         ("", 502),
+        ("<html>403 Forbidden</html>", 403),
+        ("", 401),
     ] {
         let (mut e, actions) = mode_read(body, status);
         assert!(startup_failure(&actions).is_none(), "{status} {body}");
