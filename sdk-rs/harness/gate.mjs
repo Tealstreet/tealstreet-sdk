@@ -163,6 +163,8 @@ const KNOWN_TS_FIXES = {
   // Rust implementation both fence stale reads, deduplicate executions, reject
   // uncertain write acknowledgements and revalidate queued amendments. Compare
   // both outputs directly; no TxFlow-specific normalization is permitted.
+  // The production wrapper also rejects order-history ID/status filters that
+  // the native query cannot represent, instead of silently discarding them.
   txflow: [],
   polymarket() {
     // Reference repairs (not output normalization): preserve initial array books,

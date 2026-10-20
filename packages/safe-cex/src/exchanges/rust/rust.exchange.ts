@@ -819,6 +819,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   fetchHistoricalOrders = (opts?: OrderHistoryOptions) => {
+    if (this.name === 'txflow' && (opts?.orderId !== undefined || opts?.status !== undefined)) {
+      return Promise.reject(new Error('TxFlow order history does not support orderId or status filters'));
+    }
     if (['coinbase', 'coinbasespot'].includes(this.name) && (opts?.orderId !== undefined || opts?.status !== undefined)) {
       return Promise.reject(new Error('Coinbase order history does not support orderId or status filters'));
     }

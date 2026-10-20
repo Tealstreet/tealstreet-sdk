@@ -4,9 +4,18 @@ import { exchangeRegistry } from '../../exchanges/registry';
 import { TxFlowExchange } from '../reference/txflow/txflow.exchange';
 import { DefaultStore } from '../../store/store.base';
 import type { ExchangeOptions } from '../../types';
+import { OrderStatus } from '../../types';
 
 const options: ExchangeOptions = { key: '', secret: '0x' + 'ab'.repeat(32), applicationId: '0x0000000000000000000000000000000000000001', testnet: true };
 describe('TxFlow account identity at the worker seam', () => {
+  it.each([{ orderId: '42' }, { status: [OrderStatus.Closed] }, { orderId: '42', status: [OrderStatus.Closed] }])('rejects unsupported order-history filters before dispatch: %j', async (filters) => {
+    const exchange = new RustEngineExchange('txflow', options, new DefaultStore());
+    const command = vi.spyOn(exchange as never as { command: (args: unknown) => Promise<unknown> }, 'command');
+    try {
+      await expect(exchange.fetchHistoricalOrders(filters)).rejects.toThrow('TxFlow order history does not support orderId or status filters');
+      expect(command).not.toHaveBeenCalled();
+    } finally { exchange.dispose(); }
+  });
   it('loads Rust from the production registry', async () => {
     expect(await exchangeRegistry.txflow()).toBe(RustEngineExchange);
   });

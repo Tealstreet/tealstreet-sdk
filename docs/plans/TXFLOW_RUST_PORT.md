@@ -407,3 +407,14 @@ parents. Locked metadata, workspace formatting and isolated TxFlow constructor
 checks pass. Core TxFlow production code is unchanged. Fresh independent PR
 reviews cover public/signing/auth, private/trading, and history/harness; rerun
 merged-artifact gates, post findings/fixes, then require green exact-head CI.
+
+Fresh PR code-correctness reviews found four P2 issues, posted as separate
+public/auth, private/trading and history/harness comments: sparse contexts erased
+volumes; position snapshots overwrote configured hedge rails; the wrapper
+discarded unsupported order-history filters; delisted instrument identity was
+missing from account-wide history. All are being corrected and re-reviewed.
+The wrapper now rejects ID/status filters before command dispatch; three
+regressions pass (9/9 wrapper tests). Historical filtering after a native limit
+would be incorrect, so this unsupported option is explicit and documented.
+The PR's initial TxFlow replay CI passes. An unrelated Phemex private balance
+mismatch is under separate investigation; no merge until exact-head CI is green.
