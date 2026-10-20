@@ -52,8 +52,8 @@ export class ServerSessionFactory {
     }
     if (request.engine !== 'rust') throw new Error('Explicit server session engine selection is required');
     if (typeof request.exchange !== 'string') throw new Error('Invalid native venue');
-    const { RUST_VENUES } = await import('@tealstreet/safe-cex/src/exchanges/rust/rust.exchange');
-    if (!Object.hasOwn(RUST_VENUES, request.exchange)) throw new Error('Venue does not support native frame sessions');
+    const { isRustVenue } = await import('@tealstreet/safe-cex/src/exchanges/rust/rust.exchange');
+    if (!isRustVenue(request.exchange)) throw new Error('Venue does not support native frame sessions');
     if (typeof request.accountId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(request.accountId)) {
       throw new Error('Invalid native account identifier');
     }

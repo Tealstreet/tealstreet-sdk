@@ -132,6 +132,26 @@ describe('RelayWebSocket', () => {
     expect(events.filter((e) => e === 'close')).toHaveLength(1);
   });
 
+  it('authenticates with the token lookup bound at construction', async () => {
+    let context = 'account-a';
+    configureHOW({
+      getProxyToken: async () => context,
+      bindProxyToken: () => {
+        const bound = context;
+        return async () => bound;
+      },
+    });
+    try {
+      const ws = new RelayWebSocket(relayUrlFor(tunnel.url, 'wss://stream.bybit.com/v5/private'));
+      context = 'account-b';
+      await waitFor(() => tunnel.seen.length > 0);
+      expect(JSON.parse(tunnel.seen[0])).toMatchObject({ type: 'rpc.auth', token: 'account-a' });
+      ws.close();
+    } finally {
+      configureHOW({ bindProxyToken: undefined });
+    }
+  });
+
   it('reports error + close and never open when the tunnel refuses the upstream', async () => {
     const ws = new RelayWebSocket(relayUrlFor(tunnel.url, 'wss://stream.bybit.com/v5/public/linear'));
     const { events, messages } = collect(ws);

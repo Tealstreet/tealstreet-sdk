@@ -61,6 +61,7 @@ Must call `configureHOW()` before use:
 ```typescript
 configureHOW({
   getProxyToken: () => Promise<string>,
+  bindProxyToken?: () => () => Promise<string>, // per-context hosts; bound at request/socket start
   isTokenExpired: (token: string) => boolean,
   simulateHttpOverWebsocket?: boolean,
   syncServerTime?: (serverTime: number) => void,
