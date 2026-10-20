@@ -253,3 +253,8 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 
 -19optionalfeatures/factories/buildentriespreserved;independentharness/WASM/wrapper/configreviewsandcross-reviewCLEAN. Sharedengine/model/cryptoandall86Phemexnativefixesunchanged. Krakenwhole-resultoracleistape-derived/venue-scoped/appliedonce;book-readinesshookusesrealTimeout,preservingAsterclock+lazyvalidators,KuCoinwelcomes,Bybit/OrderlyhooksandPhemexbootstrap/auth/strictIDs. Bothnarrowgitleaksfingerprintsetsretained.
 -184affectednativePASS(86Phemex),140SDK/21filesPASS,290harnessPASS,bans/fmt/lockedmetadata/workspace+WASMclippy/typecheck44/lint28PASS. Combined19-featurebuild/host/SDKWASMcheckscontinue;thenmandatoryPhemex/Binance/Krakenpublic+privatepairsandfinal64replays+7controls/exact-headfullCIbeforelanding. Memoryunitfixremainsreviewedandproductionmemory/scoringunchanged.
+
+### Final nineteen-venue publication checkpoint
+
+- All6/6freshlocalreplaysPASSon055ab85ce0:Phemex/Binance/Krakenpublic+private. PublicmedianCPUms/steadyms/retainedMBTS/Rust:Phemex448.6/139.8,313.9/62.1,20.0/3.0;Binance252.6/147.0,144.7/70.7,18.7/2.4;Kraken979.0/165.0,718.4/89.5,18.0/2.1. Bundles760,201/793,847/892,717bytesbelow1,258,291. Allsource/boundarychecksabovePASS;independentintegrationreviewsCLEAN.
+- Publishthissource/updatedproof,require64replays+7controls/allcurrentfullCIgreen,normalmergePR1310intofeat/rust-rewriteandcutfreshfollowupbranch. No productionmemory/scoringchange;unitGCcorrectionretainsstrictobservedgrowth/exactarithmeticchecks. Priorallgreen9cde01848a59gateproofpreserved,notclaimedfornewdelta.
