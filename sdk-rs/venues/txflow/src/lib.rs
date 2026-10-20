@@ -215,15 +215,18 @@ impl TxFlow {
     fn next_ticker(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(asset) = self.ticker_queue.pop_front() {
             self.ticker_request(cx, asset);
-        } else if !self.seed_tickers.is_empty()
-            && self.ticker_seeded.len() == self.seed_tickers.len()
-        {
+            return;
+        }
+        if !self.seed_tickers.is_empty() && self.ticker_seeded.len() == self.seed_tickers.len() {
             self.ticker_seeded.clear();
             let mut rows = std::mem::take(&mut self.seed_tickers);
             self.live_tickers.finish(cx.store, &mut rows);
             cx.store.set_tickers(rows);
             self.open_sockets(cx);
-            // TS records the account execution window only after the paced ticker seed.
+        }
+        // TS records the account execution window after the paced seed; once every
+        // read has been attempted, a market still retrying must not block private data.
+        if !self.assets.is_empty() {
             self.account_start(cx);
         }
     }

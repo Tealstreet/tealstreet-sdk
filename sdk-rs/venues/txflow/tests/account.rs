@@ -607,3 +607,38 @@ fn account_execution_window_opens_after_the_paced_ticker_seed() {
     let body = serde_json::from_str::<serde_json::Value>(fills.body.as_deref().unwrap()).unwrap();
     assert_eq!(body["startTimeMs"], (NOW + 25.0) as u64);
 }
+
+#[test]
+fn a_failing_ticker_seed_read_does_not_block_account_start() {
+    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_txflow::TxFlow::new(
+        safe_cex_venue_txflow::Options {
+            testnet: true,
+            application_id: Some(WALLET.into()),
+            secret: Some(format!("0x{:064x}", 1)),
+            ..Default::default()
+        },
+    ));
+    e.start(NOW);
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, META);
+    let seed = requests(&mut e);
+    reply(
+        &mut e,
+        &seed[0],
+        r#"{"success":false,"code":1,"msg":"halted"}"#,
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::SetTimer { timer, at_ms } if at_ms == NOW + 25.0 => {
+                Some(timer)
+            }
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 25.0, Event::TimerFired { timer });
+    assert!(
+        requests(&mut e).iter().any(|r| kind(r) == "userFills"),
+        "a market still retrying its seed must not block private reads"
+    );
+}
