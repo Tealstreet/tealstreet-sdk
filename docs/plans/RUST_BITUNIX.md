@@ -2668,3 +2668,33 @@ helper, consumer and diagnostic jobs finished. Rebuild each selected module and
 check the original 1,258,291-byte limit, public three-run CPU/memory/correctness
 and private correctness, starting with the causally audited fresh KuCoin tape.
 Keep every result and diagnose any failure before a bounded correction.
+
+
+Node 22 replay batch passes KuCoin public/private and Spot private. KuCoin
+public: 10,034 frames, 692 markets/tickers, two books; TS/Rust main CPU
+743.6/455.3 ms, steady 434.6/263.4, retained 6.9/2.7 MB, sampled peak 23.5/7.4;
+module 778,411 bytes. Spot module is 680,912 bytes. Spot public stops before
+TS constructor/measurement at the baseline settlement guard; no correctness
+comparison or performance result is produced. Keep
+/tmp/bitunix-node22-kucoinspot-public.log and the stopped batch; do not claim
+Spot public passes or discard this attempt. No later batch steps ran.
+
+Same-path Node 22 diagnostic (no constructor/replay) keeps arrayBuffers exactly
+3,784,040 for three samples and settles at 840.8 ms, using only 173.4 ms process
+CPU/48.1 ms main CPU. GCs take 376.5/226.1/187.3 ms wall versus
+64.0/53.0/51.5 ms process CPU. Host aggregate CPU was 775 percent, with 32 GiB
+RAM and 2.7 GiB swap in use; own process nice is zero, and thread timeshare
+flags do not establish background QoS. No scheduling/priority change is made.
+Original failure lacks samples, so its exact cause remains unproven; current
+observations show substantial off-CPU delay, not moving backing counters.
+Evidence: /tmp/bitunix-node22-spot-baseline.json.
+
+Independent process/evidence review accepts a single new full gate only after
+a documented runner-state change: wait until aggregate CPU is below half of
+reported hardware core capacity in two readings at least fifteen seconds
+apart. Preserve all logs and diagnostics; do not construct/warm the producer
+during qualification, change baseline placement/GC/deadlines/thresholds, or
+select favorable samples. Then run one fresh full three-run Spot public gate
+under the same Node 22, artifact and tape. A completed correctness/performance
+failure must never be retried unchanged; stop on another incomplete attempt
+and diagnose it. Static review/docs may proceed while performance is paused.
