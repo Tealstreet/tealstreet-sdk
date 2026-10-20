@@ -16,7 +16,8 @@ type OrderRow = { id: string; parentId?: string; amount: number; filled: number;
 
 // Independent encoder of the documented format-1 layout. The optional native
 // tail must not change offsets in the original seven-column ORDERS table.
-const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], positions = false, markets = true, contractSize = NaN, positionPnl = 0.002 } = {}) => {
+// `units` is the market's QUANTITY_UNITS index, carried in MARKETS flag bits 8..12.
+const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], positions = false, markets = true, contractSize = NaN, positionPnl = 0.002, units = 0, orderMarket = 0 } = {}) => {
   const strings = ['BTCUSD', 'BTC', 'USD', ...orders.flatMap((row) => [row.id, ...(row.parentId ? [row.parentId] : [])])];
   const ref = (s: string | undefined) => s === undefined ? 0xffffffff : strings.indexOf(s);
   const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
@@ -31,7 +32,7 @@ const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], po
     }
     sections.push({ kind, bytes });
   };
-  if (markets) table(2, [1, 0, 0, 1, 2, inverse ? 3 : 1], [1, 0.1, 1, 100000, 1, 100, NaN, contractSize, NaN, NaN].map((n) => [n]));
+  if (markets) table(2, [1, 0, 0, 1, 2, (inverse ? 3 : 1) | (units << 8)], [1, 0.1, 1, 100000, 1, 100, NaN, contractSize, NaN, NaN].map((n) => [n]));
   const columns = [
     orders.map(() => 54321), orders.map((o) => o.amount), orders.map((o) => o.filled),
     orders.map((o) => o.remaining), orders.map(() => 1234), orders.map(() => NaN), orders.map(() => NaN),
@@ -41,7 +42,7 @@ const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], po
   table(7, [
     orders.length,
     ...orders.flatMap((o) => [ref(o.id), 0xffffffff, ref(o.parentId)]),
-    ...orders.map(() => 0), ...orders.map((o) => o.enums ?? 256),
+    ...orders.map(() => orderMarket), ...orders.map((o) => o.enums ?? 256),
   ], columns);
   if (positions) table(8, [1, 0, (2 << 8) | (2 << 16)], [49000, 1000, 10, positionPnl, 0.001, 0.02, 40000, 100, 1234].map((n) => [n]));
   const encoded = strings.map((s) => new TextEncoder().encode(s));
@@ -74,6 +75,7 @@ const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], po
 describe('Rust frames preserve inverse native units', () => {
   it('keeps exact OKX inverse fills/counts and does not label USD PnL as native coin PnL', () => {
     const value = fixture({
+      units: 3,
       contractSize: 100,
       native: true,
       positions: true,
@@ -82,7 +84,7 @@ describe('Rust frames preserve inverse native units', () => {
     });
     expect(value.orders()!.filledInPlacementUnits![0]).toBe(2);
     const worker = new DefaultStore();
-    new FrameApplier(worker, true).apply(value);
+    new FrameApplier(worker).apply(value);
     const main = new DefaultStore();
     const exchange = new BaseExchange('okx', { key: '', secret: '' }, main);
     exchange.applyWorkerFrame(value.buffer);
@@ -96,13 +98,14 @@ describe('Rust frames preserve inverse native units', () => {
 
   it('converts COIN-M USD notionals to native contract counts in worker and main stores', () => {
     const value = fixture({
+      units: 4,
       contractSize: 100,
       native: true,
       positions: true,
       orders: [{ id: 'coin-m', amount: 7, filled: 2, remaining: 5, native: 5 }],
     });
     const workerStore = new DefaultStore();
-    const applier = new FrameApplier(workerStore, false, false, false, true);
+    const applier = new FrameApplier(workerStore);
     applier.apply(value);
     applier.apply(
       fixture({
@@ -196,7 +199,7 @@ describe('Rust frames preserve inverse native units', () => {
       for (const native of [false, true]) {
         const store = new DefaultStore();
         const exchange = new BaseExchange(venue, { key: '', secret: '' }, store);
-        exchange.applyWorkerFrame(fixture({ native, positions: true, orders: [
+        exchange.applyWorkerFrame(fixture({ native, positions: true, units: venue === 'bitgetinverse' ? 2 : 0, orders: [
           { id: 'inverse', amount: 1000, filled: 100, remaining: 0.018, native: 777 },
         ] }).buffer);
         expect(store.positions[0].extra).toMatchObject({ contractsNative: 1000, unrealizedPnlNative: 0.002 });
@@ -215,7 +218,7 @@ describe('OKX native contract count bridge', () => {
     const exchange = new BaseExchange(name, { key: '', secret: '' }, store);
     const workerStore = new DefaultStore();
     const worker = new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true }, workerStore);
-    const frame = fixture({ contractSize: 100, native: true, positions: true, positionPnl: 100, orders: [
+    const frame = fixture({ units: 3, contractSize: 100, native: true, positions: true, positionPnl: 100, orders: [
       { id: 'entry', amount: 10, filled: 0.004, remaining: 0.016, native: 8 },
       { id: 'full-stop', amount: 0, filled: 0, remaining: 0.02, native: 10, filledNative: 2, enums: 3 << 8 },
     ] });
@@ -233,7 +236,7 @@ describe('OKX native contract count bridge', () => {
   });
   it('retains linear native placement counts separately from displayed base size', () => {
     const store = new DefaultStore();
-    new FrameApplier(store, false, false, true).apply(fixture({ inverse: false, contractSize: 0.001, positions: true, orders: [
+    new FrameApplier(store).apply(fixture({ units: 3, inverse: false, contractSize: 0.001, positions: true, orders: [
       { id: 'linear', amount: 10, filled: 0.002, remaining: 0.008 },
     ] }));
     expect(store.orders[0].extra).toEqual({ remainingNative: 8, filledInPlacementUnits: 2 });
@@ -241,9 +244,42 @@ describe('OKX native contract count bridge', () => {
   });
   it('cannot infer exact inverse order leaves from a legacy base-sized remainder', () => {
     const store = new DefaultStore();
-    new FrameApplier(store, false, false, true).apply(fixture({ contractSize: 100, orders: [
+    new FrameApplier(store).apply(fixture({ units: 3, contractSize: 100, orders: [
       { id: 'legacy', amount: 10, filled: 0.004, remaining: 0.016 },
     ] }));
     expect(store.orders[0].extra).toBeUndefined();
+  });
+});
+
+describe('per-market quantity units from MARKETS flags', () => {
+  const orders: OrderRow[] = [
+    { id: 'exact', amount: 7, filled: 2, remaining: 0.004, native: 5 },
+    { id: 'legacy', amount: 7, filled: 2, remaining: 0.5 },
+  ];
+  // QUANTITY_UNITS order: base, nativePlacement, inverseNative, contractCount, inverseContractSized.
+  it.each([
+    [0, { remainingNative: 5, remainingNotional: 5 }, undefined, { contractsNative: 1000, unrealizedPnlNative: 0.002 }],
+    [1, { remainingNative: 5, remainingNotional: 500 }, { remainingNative: 0.005 }, { contractsNative: 10 }],
+    [2, { remainingNative: 5, remainingNotional: 5 }, { remainingNative: 5 }, { contractsNative: 1000, unrealizedPnlNative: 0.002 }],
+    [3, { remainingNative: 5, remainingNotional: 500, filledInPlacementUnits: 2 }, undefined, { contractsNative: 10 }],
+    [4, { remainingNative: 5, remainingNotional: 500 }, undefined, { contractsNative: 10, unrealizedPnlNative: 0.002 }],
+  ])('units %i gives its documented inverse order and position extras', (units, exact, legacy, position) => {
+    const store = new DefaultStore();
+    new FrameApplier(store).apply(fixture({ units, contractSize: 100, native: true, positions: true, orders }));
+    expect(store.orders[0].extra).toEqual(exact);
+    expect(store.orders[1].extra).toEqual(legacy);
+    expect(store.positions[0].extra).toEqual(position);
+  });
+
+  it('sizes a row whose market is missing from the table with the table units', () => {
+    const orphan = (units: number) => {
+      const store = new DefaultStore();
+      new FrameApplier(store).apply(fixture({ units, contractSize: 100, native: true, orderMarket: 7, orders: [
+        { id: 'orphan', amount: 7, filled: 2, remaining: 0.004, native: 5 },
+      ] }));
+      return store.orders[0].extra;
+    };
+    expect(orphan(3)).toEqual({ remainingNative: 5, filledInPlacementUnits: 2 });
+    expect(orphan(0)).toEqual({ remainingNative: 5 });
   });
 });
