@@ -698,10 +698,12 @@ read notification; never restore counters after notifying observers. Tests
 cover repeated reads followed by the normal flush and missing-order handling.
 
 Direct consumers synchronize through the Base no-op/Rust native seam before
-CLI preprocessing, connected command execution and chaser initial position
+CLI account-dependent preprocessing, connected command execution and chaser initial position
 capture. The structural CLI interface keeps the seam optional for non-SDK
 consumers. Failure follows existing visible command error paths; disconnected
-session management must remain available.
+session management and ticker-only predicates remain independent of private
+snapshots. Lazy account token/loop/condition reads also cover alias/variable
+expansion without blocking an unrelated help/disconnect command.
 
 ## Phase 5 audited plan
 
@@ -738,3 +740,44 @@ balances, positions or configured unrelated identifiers. Native command handlers
 and route/shape/secondary-credential/failure tests precede SDK dispatch wiring
 in the later consolidated identity batch. Existing working account commands
 and venues with no TS identity API remain unchanged.
+
+## Phase 4a bulk-close plan
+
+Rust nuke/nukePositions selects a single current native position snapshot and
+submits native-unit reduce-only market closes as one existing placeOrders
+command. Reuse the established nativePositionSize policy by moving its
+implementation into safe-cex and retaining the script-api-core export; avoid a
+reverse package dependency or a divergent sizing copy. Validate all required
+market/amount inputs before dispatch. Keep the native batch's accepted IDs,
+partial failures and unknown-outcome metadata unchanged. Do not automatically
+retry a close against unchanged positions: repeated Base nuke passes can place
+duplicate writes before reconciliation. One pass with visible failure meets
+the production bar; retry-count lifecycle parity is deliberately skipped.
+
+Nuke still attempts the requested order cancellation after a failed close and
+rethrows the original close failure (each failed native command already owns
+its visible error); cancellation alone throws its own error. Preserve isNuking
+cleanup on every exit and reject a concurrent nuke visibly. Test preflush state,
+linear multipliers, inverse notional, exact native sizing extras, zero rows,
+missing/invalid input before any write, partial/unknown rejection with no retry,
+and cancel-after-close-failure. Standalone CLI and shared sizing checks must
+stay green after the implementation move.
+
+## Phase 4d second identity-query batch plan
+
+Binance USD-M uses /fapi/v3/balance and PM /papi/v1/balance (first row
+accountAlias); do not substitute USD-M's different reconciliation account route.
+Spot and COIN-M remain unsupported for identity as TS. Bybit linear/inverse/
+spot/demo uses /v5/user/query-api userID/inviterID; Hyro remains unsupported.
+Bitget products use /api/v2/spot/account/info: truthy parentId is the user,
+raw userId the subaccount, and inviterId the affiliate. KuCoin futures uses
+/api/v1/user-info userId/subUserId/referrerUserId; retain the working Spot route.
+Reuse selected-read credentials, passphrase fallbacks and native retry/routing
+machinery. Capture IDs as text/u64, including values above 2^53. Normalize
+numeric zero optional affiliate/subaccount sentinels to null, while preserving
+explicit text identities such as '0'; never turn a falsey sentinel into a truthy
+affiliate. Missing required identities reject visibly. No Store/cycle mutation.
+Extend the existing FetchAccount JSON decoder universally for standalone
+identity-enabled crates, rather than relying on combined Aster/Polymarket
+features. Verify each product's route, read-key signatures, nullable/parent
+semantics, large IDs, failures before I/O and once-only completion/error.
