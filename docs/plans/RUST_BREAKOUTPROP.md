@@ -292,3 +292,14 @@ provably unused crypto helpers were found by the independent caller audit.
   Independent merge correctness reviews and refreshed gates run on this head;
   exact-head CI must be green before merge. The documented public-fixture
   authorization and Sam's live-credential gap remain unchanged.
+- All 34 checks passed on `9b42e70f9f`, including full repository CI (7,262
+  safe-cex tests). Local refresh passed 2,185 native tests, 400 harness tests,
+  99 compiled WASM adapter tests and 64 host tests. Selected artifact 645,168
+  bytes; public TS/Rust main CPU 23.0/17.9 ms, retained 14.2/0.8 MB. Binance
+  public/private gates passed; combined 24-venue private replay passed.
+- GRVT landed as `5d7589f296` before this PR could merge. Integrated both
+  registrations and wrapper methods; preserved the incoming stricter memory
+  collection/before-verifier baseline and request audits, plus Breakout polling
+  and credential sanitization. Scoped merge reviews pass (233 wrapper/transport,
+  six combined WASM, 51 polling/memory tests). Refreshing exact-head CI before
+  merge; the public fixture waiver and live-credential gap remain in force.
