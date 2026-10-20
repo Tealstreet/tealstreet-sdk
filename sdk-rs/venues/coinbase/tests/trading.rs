@@ -1902,3 +1902,72 @@ fn cancelled_foreign_orders_are_not_cancelled_again() {
     });
     assert!(s.done(325).is_ok());
 }
+
+fn read_credentials() -> safe_cex_engine::ReadCredentials {
+    serde_json::from_str(&format!(
+        r#"{{"key":"organizations/test/apiKeys/read","secret":"{}"}}"#,
+        STANDARD.encode([9; 32])
+    ))
+    .unwrap()
+}
+
+#[test]
+fn intx_amend_cancellation_proof_is_read_with_the_trading_key() {
+    let mut s = Session::with_options(
+        "INTX",
+        Options {
+            key: "organizations/test/apiKeys/test".into(),
+            secret: STANDARD.encode([7; 32]),
+            read_credentials: Some(read_credentials()),
+            ..Default::default()
+        },
+    )
+    .ready();
+    s.seed("old", "BTC-PERP-INTX", "1", "100");
+    s.command(Command::AmendOrder {
+        command: 326,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    let r = s.write();
+    s.reply(r, 200, r#"{"results":[{"order_id":"old","success":true}]}"#);
+    let r = s.write();
+    assert!(r.url.ends_with("/historical/old"));
+    assert!(jwt_subject(&r).ends_with("/test"));
+    assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+}
+
+#[test]
+fn concurrent_read_key_rejections_never_deactivate_the_account() {
+    let mut s = read_key_session("portfolio-one");
+    let mut held = vec![];
+    for _ in 0..50 {
+        for r in s.collect() {
+            if r.method == safe_cex_engine::Method::Get
+                && r.url.contains("/brokerage/")
+                && !r.url.contains("/market/")
+                && jwt_subject(&r).ends_with("/read")
+            {
+                held.push(r);
+            } else {
+                s.answer(r);
+            }
+        }
+        if held.len() >= 2 {
+            break;
+        }
+        s.fire();
+    }
+    assert!(held.len() >= 2);
+    for r in held {
+        s.reply(r, 401, r#"{"error":"UNAUTHENTICATED"}"#);
+    }
+    let r = s.place(327, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"still-active"}}"#,
+    );
+    assert!(s.done(327).is_ok());
+}

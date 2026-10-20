@@ -908,7 +908,14 @@ impl Coinbase {
             Request::OrderDetails { .. } | Request::KeyPermissions { .. }
         )
         .then(|| req.clone());
-        if let Err(e) = self.request(cx, Method::Get, path, None, at, Pending::Account(req)) {
+        if let Err(e) = self.request(
+            cx,
+            Method::Get,
+            path,
+            None,
+            at,
+            Pending::Account(req, false),
+        ) {
             if let Some(req) = retry {
                 self.private_failed(cx, req, &e)
             } else if let Some(req) = detail {
@@ -1418,6 +1425,7 @@ impl Coinbase {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         req: Request,
+        read_signed: bool,
         response: Response<'_>,
     ) {
         if let Request::OrderDetails { id, socket } = &req
@@ -1448,6 +1456,7 @@ impl Coinbase {
                     },
                 ),
                 (Some(trading), Some(read)) if trading == read => {
+                    self.account.startup_failures = 0;
                     self.account_read(cx, Request::Portfolios)
                 }
                 (Some(_), Some(_)) => {
@@ -1474,9 +1483,11 @@ impl Coinbase {
                 self.account.backoff_until = cx.now + delay;
             }
             if response.status == 401 {
-                // Reads were signed by the read-only key; keep trading on the trading key.
-                if self.read_credentials.is_some() {
-                    self.drop_read_key(cx, "was rejected (HTTP 401)");
+                // The read-only key signed this read; keep trading on the trading key.
+                if read_signed {
+                    if self.read_credentials.is_some() {
+                        self.drop_read_key(cx, "was rejected (HTTP 401)");
+                    }
                     self.private_failed(cx, req, "Coinbase read-only key rejected");
                     return;
                 }

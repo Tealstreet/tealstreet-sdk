@@ -32,7 +32,8 @@ pub enum ProductKind {
 }
 pub enum Pending {
     Public(public::Request),
-    Account(account::Request),
+    /// The flag records whether the read-only key signed the request.
+    Account(account::Request, bool),
     Trading(trading::Request),
     History(history::Request),
 }
@@ -114,7 +115,7 @@ impl Venue for Coinbase {
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         match pending {
             Pending::Public(p) => self.public_response(cx, p, response),
-            Pending::Account(p) => self.private_on_response(cx, p, response),
+            Pending::Account(p, read) => self.private_on_response(cx, p, read, response),
             Pending::Trading(p) => self.trading_response(cx, p, response),
             Pending::History(p) => self.history_response(cx, p, response),
         }
@@ -122,7 +123,7 @@ impl Venue for Coinbase {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Public(p) => self.public_item(cx, p, item),
-            Pending::Account(p) => self.private_on_item(cx, p, item),
+            Pending::Account(p, _) => self.private_on_item(cx, p, item),
             Pending::Trading(_) => {}
             Pending::History(p) => self.history_item(cx, p, item),
         }
@@ -130,7 +131,7 @@ impl Venue for Coinbase {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Public(p) => self.public_failed(cx, p, error),
-            Pending::Account(p) => self.private_failed(cx, p, error),
+            Pending::Account(p, _) => self.private_failed(cx, p, error),
             Pending::Trading(p) => self.trading_failed(cx, p, error),
             Pending::History(p) => self.history_failed(cx, p, error),
         }

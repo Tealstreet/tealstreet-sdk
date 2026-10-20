@@ -67,15 +67,21 @@ impl Coinbase {
             || request.path.starts_with("/api/v3/brokerage/market/");
         let trading_key_check = matches!(
             request.pending,
-            Pending::Account(crate::account::Request::KeyPermissions {
-                trading_portfolio: None
-            })
+            Pending::Account(
+                crate::account::Request::KeyPermissions {
+                    trading_portfolio: None
+                },
+                _
+            )
         );
-        let read = request.method == Method::Get && !trading_key_check;
+        // Trading reads (amend cancellation proof) always use the trading key.
+        let read = request.method == Method::Get
+            && !trading_key_check
+            && !matches!(request.pending, Pending::Trading(_));
         let primary_route = request.method == Method::Get
             && !public
             && self.read_supplied
-            && (trading_key_check || self.read_credentials.is_none());
+            && (!read || self.read_credentials.is_none());
         let headers = if public {
             Ok(vec![])
         } else {
@@ -88,6 +94,10 @@ impl Coinbase {
                 .ok_or_else(|| "Coinbase credentials unavailable".to_owned())
                 .and_then(|credentials| credentials.headers(request.method, &request.path, cx.now))
         };
+        let mut request = request;
+        if let Pending::Account(_, signed) = &mut request.pending {
+            *signed = read && !public && self.read_credentials.is_some();
+        }
         let headers = match headers {
             Ok(headers) => headers,
             Err(error) => {
