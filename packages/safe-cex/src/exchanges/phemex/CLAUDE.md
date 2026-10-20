@@ -232,7 +232,7 @@ After authentication, subscribes to `aop_p.subscribe` (Account/Order/Position).
 
 **Duplicate order status handling** (`phemex.ws-private.ts:358-367`): When a single message batch contains the same `orderID` with both open and closed statuses, the code detects the closed status update and overrides the open one. This prevents transient open states from appearing in the UI.
 
-**Debounced REST reconciliation on terminal order events**: For non-snapshot `orders_p` messages containing terminal statuses (`filled`, `triggered`, `canceled`, `rejected`), the private WS schedules a 1-second debounced `fetchPositionsAndBalance()` call. This fast-follow sync reduces position-open/close lag when WS position payloads are delayed or partial.
+**Debounced REST reconciliation on terminal order events**: For non-snapshot `orders_p` messages containing terminal statuses (`filled`, `triggered`, `canceled`, `rejected`), the private WS schedules a 1-second debounced `fetchPositionsAndBalance()` call. This fast-follow sync reduces position-open/close lag when WS position payloads are delayed or partial. A scoped recovery read is skipped only when all affected native `posSide` legs have finite nonzero rows in the full snapshot (`Merged` requires a one-way row). Missing/flat legs or unknown native sides still recover. Nonzero full-snapshot IDs remain authoritative even when another leg requires recovery; a lagging scoped row cannot overwrite them.
 
 ## Order Types and Mappings
 
@@ -407,7 +407,7 @@ All values are parsed with `parseFloat()`. There are no integer scaling factors 
 - **Zero-contract guard**: Brand-new zero-contract WS positions are ignored unless they already exist in the store; full cleanup is handled by periodic/full REST sync (`addOrUpdatePositionsFull`)
 - **Filtering**: Only positions for markets present in the store are processed (both REST and WS)
 - **Full replacement on tick**: `tick()` uses `store.addOrUpdatePositionsFull(positions)` which replaces all positions
-- **Terminal-order fast follow**: Filled/canceled/rejected order WS events enqueue their symbols for the debounced sync. The sync fetches the full positions+balance snapshot, then fetches those symbols with `fetchPositions([symbol])` and merges them before the full replacement so just-filled symbols are not lost when the account sweep lags.
+- **Terminal-order fast follow**: Filled/canceled/rejected order WS events enqueue their symbols and affected native position sides for the debounced sync, retaining every affected leg across the debounce window. After the full positions+balance fetch, `fetchPositions([symbol])` runs if any queued leg is missing/flat or its native side is unknown. Long/Short require that exact side; Merged requires a one-way row. Scoped rows may add missing IDs or replace flat IDs, but cannot overwrite finite nonzero full-snapshot IDs. This retains hedge-leg and hosted startup/stale-index recovery without regressing a fresh full-snapshot row. Failed currency slices retain their prior positions through the full-fetch helper and await later polling.
 
 ### Balance
 

@@ -121,6 +121,8 @@ const KNOWN_TS_FIXES = {
   phemex(account) {
     // Independent execution/cumulative-size/flat-settings oracle from taped venue rows.
     fixPhemexAccount(account, tapeRecords);
+    // TS recovery reads missing/unknown affected sides and preserves nonzero
+    // full-snapshot rows while recovering the other hedged leg.
     // Native tests also guard exact row versions/absence fences, confirmed
     // cancellation finality, preserved trigger sources and exact split lots.
   },
