@@ -1598,3 +1598,47 @@ fn windowed_fill_request_sequence_is_pinned() {
         ]
     );
 }
+
+fn balance_info(h: &mut Harness, command: u32) -> serde_json::Value {
+    h.command(Command::Venue {
+        command,
+        action: safe_cex_engine::VenueAction::FetchBalanceInfo,
+    });
+    serde_json::from_str(h.result(command).unwrap().as_ref().unwrap()).unwrap()
+}
+
+#[test]
+fn balance_info_is_the_last_rest_wallet_account_verbatim_like_ts() {
+    let mut h = Harness::started(credentials());
+    assert_eq!(balance_info(&mut h, 90), serde_json::Value::Null);
+    respond_startup(&mut h);
+    respond_snapshot(&mut h);
+    let expected: serde_json::Value =
+        serde_json::from_str::<serde_json::Value>(WALLET).unwrap()["result"]["list"][0].clone();
+    let info = balance_info(&mut h, 91);
+    assert_eq!(info, expected);
+    assert_eq!(info["accountType"], "UNIFIED");
+    assert_eq!(info["coin"][0]["marginCollateral"], true);
+    assert_eq!(info["coin"][0]["collateralSwitch"], true);
+
+    // Stream pushes move the balance but not `info`, as TS reads it from REST only.
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "/v5/private",
+        r#"{"topic":"wallet","id":"w","creationTime":1,"data":[{"accountType":"UNIFIED","totalEquity":"2000","totalWalletBalance":"2000","totalMarginBalance":"2000","totalAvailableBalance":"2000","totalInitialMargin":"0","totalMaintenanceMargin":"0","coin":[{"coin":"USDT","equity":"2000","walletBalance":"2000","usdValue":"2000"}]}]}"#,
+    );
+    assert_eq!(balance_info(&mut h, 92), expected);
+
+    // A failed read keeps the last good payload.
+    h.advance(60_000.0);
+    assert!(h.has_request("/v5/account/wallet-balance"));
+    while h.has_request("/v5/account/wallet-balance") {
+        h.respond(
+            "/v5/account/wallet-balance",
+            200,
+            r#"{"retCode":10002,"retMsg":"invalid request","result":{}}"#,
+        );
+    }
+    assert_eq!(balance_info(&mut h, 93), expected);
+}

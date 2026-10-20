@@ -127,6 +127,9 @@ enum CommandIn {
         command: u32,
         tier: String,
     },
+    FetchBalanceInfo {
+        command: u32,
+    },
     FetchClosedPositions {
         command: u32,
         #[serde(default)]
@@ -321,6 +324,10 @@ impl From<CommandIn> for Command {
             CommandIn::SetAccountTier { command, tier } => Self::Venue {
                 command,
                 action: crate::VenueAction::SetAccountTier { tier },
+            },
+            CommandIn::FetchBalanceInfo { command } => Self::Venue {
+                command,
+                action: crate::VenueAction::FetchBalanceInfo,
             },
             CommandIn::FetchClosedPositions {
                 command,
@@ -562,6 +569,16 @@ mod tests {
             Command::Venue {
                 command: 6,
                 action: crate::VenueAction::FetchAccountTier,
+            }
+        );
+    }
+    #[test]
+    fn balance_info_op_decodes_to_a_venue_action() {
+        assert_eq!(
+            decode_command(r#"{"op":"fetchBalanceInfo","command":8}"#).unwrap(),
+            Command::Venue {
+                command: 8,
+                action: crate::VenueAction::FetchBalanceInfo,
             }
         );
     }

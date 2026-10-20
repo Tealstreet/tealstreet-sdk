@@ -135,6 +135,9 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const LIGHTER_TIER_SYNC_MS = 15_000;
+/** TS replaces `balance.info` on each REST balance tick; the engine caches the same payload. */
+const BYBIT_BALANCE_INFO_SYNC_MS = 2_000;
+const bybitNames = new Set<ExchangeName>(['bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'bybitspot']);
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 const okxNames = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
 /** Venues whose engine serves reported closed-position rows (`fetchClosedPositions`). */
@@ -829,6 +832,29 @@ export class RustEngineExchange extends BaseExchange {
     if (this.fetchAccountTier && !this.isPublicDataOnly) {
       void this.syncLighterTier();
       this.flushTimers.push(setInterval(() => void this.syncLighterTier(), LIGHTER_TIER_SYNC_MS));
+    }
+    if (bybitNames.has(this.name) && !this.isPublicDataOnly) {
+      void this.syncBybitBalanceInfo();
+      this.flushTimers.push(setInterval(() => void this.syncBybitBalanceInfo(), BYBIT_BALANCE_INFO_SYNC_MS));
+    }
+  };
+
+  private bybitBalanceInfoJson?: string;
+
+  /**
+   * Bybit's raw wallet account (`accountType`, the `coin` collateral array, …) as TS stores
+   * it in `balance.info`, read by the web margin UI. Frames keep `info`.
+   */
+  private syncBybitBalanceInfo = async () => {
+    try {
+      const info = await this.command<Record<string, unknown> | null>({ op: 'fetchBalanceInfo' }, { report: false });
+      if (!info || this.isDisposed) return;
+      const json = JSON.stringify(info);
+      if (json === this.bybitBalanceInfoJson) return;
+      this.bybitBalanceInfoJson = json;
+      this.store.update({ balance: { ...this.store.balance, info } });
+    } catch {
+      // The engine reports wallet-read failures itself; the last payload stays.
     }
   };
 

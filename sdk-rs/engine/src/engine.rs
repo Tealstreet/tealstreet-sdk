@@ -216,6 +216,9 @@ pub enum VenueAction {
         from_ms: Option<f64>,
         to_ms: Option<f64>,
     },
+    /// The venue's raw account balance payload as JSON, or `null` before one
+    /// is read, for hosts that expose it as `balance.info`.
+    FetchBalanceInfo,
 }
 
 /// The shared rejection for a venue action the venue does not implement.
