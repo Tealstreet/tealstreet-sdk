@@ -120,12 +120,22 @@ fn tick(e: &mut TestEngine, actions: &[Action]) -> Vec<Action> {
 fn result(actions: &[Action]) -> Result<String, String> {
     actions
         .iter()
-        .find_map(|a| {
-            if let Action::Notice(Notice::CommandDone { command: 1, result }) = a {
-                Some(result.clone())
-            } else {
-                None
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone { command: 1, result }) => Some(result.clone()),
+            // Failures as the plain text the host renders.
+            Action::Notice(Notice::CommandFailed { command: 1, error }) => {
+                Some(Err(error.legacy_text()))
             }
+            _ => None,
+        })
+        .unwrap()
+}
+fn failure(actions: &[Action]) -> &safe_cex_engine::VenueError {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
         })
         .unwrap()
 }
@@ -543,10 +553,10 @@ fn global_cancel_attempts_both_families_after_failures_without_retrying() {
             ),
         }
         let a: Vec<_> = e.drain_actions().collect();
-        assert!(
-            !a.iter()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
-        );
+        assert!(!a.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+        )));
         let a = tick(&mut e, &a);
         let algo = req(&a, Method::Delete, "/v3/algo/orders/pending");
         let a = reply(
@@ -900,4 +910,80 @@ fn trailing_amend_refreshes_full_position_quantity_after_cancel_ack() {
     let a = tick(&mut e, &a);
     let r = req(&a, Method::Post, "/v3/algo/order");
     assert!(r.body.as_ref().unwrap().contains(r#""quantity":"0.03""#));
+}
+
+#[test]
+fn write_failures_are_classified_without_changing_their_text() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let unknown = (None, Some(Outcome::Unknown));
+    for (status, body, classified) in [
+        (
+            503,
+            r#"{"success":false,"message":"ambiguous write"}"#,
+            unknown,
+        ),
+        (
+            400,
+            r#"{"success":false,"code":-1005,"message":"invalid params"}"#,
+            (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
+        ),
+        (
+            429,
+            r#"{"success":false,"code":-1003,"message":"too many"}"#,
+            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+        ),
+        (
+            200,
+            r#"{"success":false,"code":-1012,"message":"rpc exception"}"#,
+            unknown,
+        ),
+        (
+            200,
+            r#"{"success":false,"code":-1007,"message":"duplicate"}"#,
+            (None, None),
+        ),
+        (200, "<html>", unknown),
+        (200, r#"{"message":"ok"}"#, unknown),
+        (200, r#"{"success":true,"data":{}}"#, unknown),
+    ] {
+        let mut e = engine();
+        let a = placed(&mut e, vec![opts()]);
+        let r = req(&a, Method::Post, "/v1/order");
+        e.handle(
+            1010.0,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let a: Vec<_> = e.drain_actions().collect();
+        let error = failure(&a);
+        assert_eq!(
+            (error.kind, error.outcome),
+            classified,
+            "{status} {body}: {}",
+            error.message
+        );
+        assert_eq!(result(&a), Err(error.legacy_text()));
+    }
+    // Transport loss on a write is Unknown.
+    let mut e = engine();
+    let a = placed(&mut e, vec![opts()]);
+    let r = req(&a, Method::Post, "/v1/order");
+    e.handle(
+        1010.0,
+        Event::HttpFailed {
+            request: r.id,
+            error: "reset",
+        },
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    assert_eq!(
+        (failure(&a).kind, failure(&a).outcome),
+        (Some(ErrorKind::Network), Some(Outcome::Unknown))
+    );
 }
