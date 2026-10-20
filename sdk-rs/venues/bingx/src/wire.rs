@@ -95,6 +95,28 @@ pub struct Premium<'a> {
     pub next_funding_time: f64,
 }
 
+/// The identity of a list row that failed to map, for the skipped-row log.
+#[derive(Deserialize)]
+pub struct RowIdentity<'a> {
+    #[serde(default, borrow)]
+    pub symbol: Option<Str<'a>>,
+}
+pub fn row_symbol(item: &str) -> Option<Str<'_>> {
+    serde_json::from_str::<RowIdentity<'_>>(item)
+        .ok()
+        .and_then(|row| row.symbol)
+        .filter(|symbol| !symbol.is_empty())
+}
+
+/// A signed request refused at the signature check, before any processing.
+#[derive(Deserialize)]
+pub struct Rejection<'a> {
+    #[serde(default)]
+    pub code: Option<i64>,
+    #[serde(default, borrow)]
+    pub msg: Str<'a>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LiveTicker<'a> {
