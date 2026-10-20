@@ -38,7 +38,7 @@ export class EngineHost {
   /** Send a command; resolves with its result for commands that report one. */
   command(command) {
     if (this.disposed) return Promise.reject(new Error('engine disposed'));
-    const reply = command.op === 'setTickerSymbols' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
+    const reply = command.op === 'setTickerSymbols' || command.op === 'setTickInterval' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
