@@ -156,6 +156,10 @@ class Tape extends SharedTape {
     });
     this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records), records });
     this.commandIndex = 0;
+    // Both production ticks only flush/read state and clone consumer payloads.
+    // They produce no timers or asynchronous work, so the next frame can reuse
+    // its verified startup settlement when no protocol timer is due.
+    this.synchronousTicks = true;
     // Retain expected keys/backing storage across both memory samples: deleting
     // startup-only harness state would subtract it from workload retained memory.
     this.startupSubscriptions = new Map(Array.from(venue.startupSubscriptions?.(records, bookSymbols) ?? [], (key) => [key, false]));
@@ -184,7 +188,7 @@ class Tape extends SharedTape {
     this.audit?.sent(socket.rawUrl, text);
     if (values.venue === 'bingx' && (text === 'Ping' || text === 'Pong')) return;
     if ((venue.respondToPing || venue.blofinProtocol) && text === 'ping') {
-      if (venue.respondToPing) setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
+      if (venue.respondToPing) this.deferCallback(() => { if (!socket.closed) socket.onMessage('pong'); });
       return;
     }
     if ((venue.respondToPing || venue.blofinProtocol) && text === 'pong') return;
@@ -701,7 +705,7 @@ async function runTs() {
   const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
   // Model worker dispatch through the exchange's real local methods.
   exchange.emitter.on('callMethod', ({ method, args, requestId }) => {
-    setImmediate(async () => {
+    tape.deferCallback(async () => {
       try {
         if (!['removeOrders', 'fetchAndSetOrders'].includes(method)) throw new Error(`Unsupported taped worker method ${method}`);
         const result = await exchange[method](...args);

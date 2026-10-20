@@ -1390,3 +1390,15 @@ logicaltimeline/deadline/thresholds unchanged. No gate rerununtilchanged
 source verified. Coinbase/Polymarket/GRVTmergewaitingcontrols.
 Combinednextmatrix25venues/29public/54private+oldBitget4/Aster3; all35CIchecks
 exactheadgreen beforefinalmerge.
+
+StartupcoalescingphaseCOMPLETE/reviewed:455helpers and14independent focused
+regressionsPASS. Dense1,001recordactualHEAD uses3,001barriers; newsource
+<=1,007 withALLrecords/ticks preserved. Settlementcheckpointinvalidatedby
+allproducerwork/holds/timers/observer/delivery/command/genericontick; Tapeonly
+fastpath requiresnoholds/IOblock/duetimer, genericadvance remainsguarded.
+Queuedautoopen/ACK/pong/worker-callback SYNCinvocation explicitlyowned;
+notawaitprotocoldependentPromises. Adversarialoriginalautoopenprobe now
+openAt0/readyAt0/holds0. Node24BitunixTSfull28,694frames/150events/errors0
+passesunderconcurrenthelperload+same15sdeadline. No protocolduration,
+timeout/hash/metric/threshold edits. Source released; unchangedBitunix3run
+thenrebuiltBinanceprivate/public controlsrunningsequentiallyCPUquiet.

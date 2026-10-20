@@ -255,3 +255,114 @@ test('new subscription work reported by the observer settles before selecting a 
     assert.equal(watchdog, false);
   } finally { clock.restore(); }
 });
+
+test('dense startup frames reuse settlement without repeating an idle barrier between records', async () => {
+  const url = 'wss://example.test/dense';
+  const frames = Array.from({ length: 1001 }, (_, t) => ({ type: 'ws', t, url, text: String(t) }));
+  const tape = new Tape(frames);
+  tape.synchronousTicks = true; // This fixture's tick is an audited synchronous consumer.
+  const clock = new ReplayClock(epoch);
+  clock.install();
+  try {
+    clock.beginStartup();
+    let ready = false, drains = 0;
+    const original = clock.drainStartup.bind(clock);
+    clock.drainStartup = async (...args) => { drains++; return original(...args); };
+    tape.readiness = () => ready;
+    setTimeout(() => { ready = true; }, 999);
+    const seen = [], ticks = [];
+    tape.connect(url, () => {}, (text) => seen.push(text));
+    assert.equal(await tape.play((t) => ticks.push(t), undefined, undefined, clock), frames.length);
+    assert.deepEqual(seen, frames.map((frame) => frame.text));
+    assert.deepEqual(ticks, frames.map((frame) => frame.t));
+    assert.ok(drains <= frames.length + 6, `repeated settlement barriers: ${drains}`);
+  } finally { clock.restore(); }
+});
+
+test('startup settlement reuse is opt-in and is invalidated by work, holds, timers and failures', async () => {
+  const clock = new ReplayClock(epoch);
+  clock.install();
+  try {
+    clock.beginStartup();
+    let observations = 0;
+    clock.observeStartup = () => { observations++; return false; };
+    await clock.until(() => true, 'initial settlement', 1000);
+    const initial = observations;
+    await clock.advance(1, true);
+    assert.equal(observations, initial);
+    await clock.advance(2);
+    assert.ok(observations > initial, 'generic advance must still settle');
+    const finish = clock.beginWork();
+    assert.equal(clock.startupSettled, false);
+    finish();
+    await clock.until(() => true, 'response consumed', 1000);
+    const release = clock.hold();
+    assert.equal(clock.startupSettled, false);
+    release();
+    await clock.until(() => true, 'preparation complete', 1000);
+    setTimeout(() => { throw new Error('protocol callback failed'); }, 1);
+    assert.equal(clock.startupSettled, false);
+    await assert.rejects(clock.advance(3, true), /protocol callback failed/);
+    assert.equal(clock.startupSettled, false);
+    clock.restore();
+    assert.equal(clock.startupSettled, false);
+  } finally { clock.restore(); }
+});
+
+test('a generic tick that creates asynchronous owned work cannot lend its previous settlement to the next frame', async () => {
+  const url = 'wss://example.test/tick';
+  const tape = new Tape([{ type: 'ws', t: 0, url, text: 'first' }, { type: 'ws', t: 10, url, text: 'second' }]);
+  const clock = new ReplayClock(epoch);
+  clock.install();
+  try {
+    clock.beginStartup();
+    clock.startupBlocked = () => clock.work.size > 0;
+    let ready = false, bodyDone = false, consumedBeforeWatchdog;
+    tape.readiness = () => ready;
+    setTimeout(() => { consumedBeforeWatchdog = bodyDone; }, 5);
+    setTimeout(() => { ready = true; }, 20);
+    tape.connect(url, () => {}, () => {});
+    await tape.play((t) => {
+      if (t !== 0) return;
+      (async () => {
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+        const finish = clock.beginWork();
+        for (let i = 0; i < 10; i++) await turn();
+        bodyDone = true;
+        finish();
+      })();
+    }, undefined, undefined, clock);
+    assert.equal(consumedBeforeWatchdog, true);
+  } finally { clock.restore(); }
+});
+
+test('queued transport open is owned through invocation before subscription setup observes readiness', async () => {
+  const clock = new ReplayClock(epoch);
+  clock.install();
+  try {
+    clock.beginStartup();
+    const tape = new Tape([]);
+    tape.replayClock = clock;
+    clock.startupBlocked = () => clock.work.size > 0;
+    let socket, setup = false, observedUnopened = false, ready = false;
+    const finishResponse = clock.beginWork();
+    const response = (async () => {
+      await turn();
+      socket = tape.connect('wss://example.test/queued', () => {}, () => {});
+      finishResponse();
+    })();
+    clock.observeStartup = () => {
+      if (!socket || setup) return false;
+      setup = true;
+      observedUnopened = !socket.opened;
+      if (!socket.opened) setTimeout(() => { ready = true; }, 100);
+      else ready = true;
+      return true;
+    };
+    await clock.until(() => ready, 'queued connection', 1000);
+    await response;
+    assert.equal(observedUnopened, false);
+    assert.equal(Date.now(), epoch);
+    assert.equal(clock.holds.size, 0);
+  } finally { clock.restore(); }
+});

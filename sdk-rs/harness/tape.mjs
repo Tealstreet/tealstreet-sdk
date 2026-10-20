@@ -157,6 +157,7 @@ export class ReplayClock {
     };
   }
   schedule(fn, ms, args, repeat) {
+    this.invalidateStartup();
     const timer = {
       fn,
       args,
@@ -175,6 +176,7 @@ export class ReplayClock {
     return timer;
   }
   fire(timer) {
+    this.invalidateStartup();
     if (!this.timers.has(timer)) return;
     if (timer.repeat) {
       timer.at = Date.now() + timer.delay;
@@ -183,6 +185,7 @@ export class ReplayClock {
     timer.fn(...timer.args);
   }
   beginStartup() {
+    this.invalidateStartup();
     this.start(0);
     this.startup = true;
   }
@@ -201,15 +204,18 @@ export class ReplayClock {
   }
   work = new Set();
   holds = new Set();
+  invalidateStartup() { this.startupSettled = false; }
   hold() {
+    this.invalidateStartup();
     const token = {};
     this.holds.add(token);
-    return () => this.holds.delete(token);
+    return () => { if (this.holds.delete(token)) this.invalidateStartup(); };
   }
   beginWork() {
+    this.invalidateStartup();
     const token = {};
     this.work.add(token);
-    return () => this.work.delete(token);
+    return () => { if (this.work.delete(token)) this.invalidateStartup(); };
   }
   async drainStartup(cancelled = () => false) {
     if (!this.startup) return;
@@ -219,14 +225,11 @@ export class ReplayClock {
       await new Promise(setImmediate);
       if (!this.startup || cancelled()) return;
       if (this.holds.size || this.startupBlocked?.()) continue;
-      await new Promise(setImmediate);
-      if (!this.startup || cancelled()) return;
-      if (!this.holds.size && !this.startupBlocked?.()) {
-        // The observer reports newly started setup work. Drain that work at
-        // this time before observing readiness or selecting a future timer.
-        if (this.observeStartup?.()) continue;
-        return;
-      }
+      // A full event turn drains runnable promise continuations. External I/O
+      // remains explicitly owned; new observer work repeats this same guard.
+      if (this.observeStartup?.()) { this.invalidateStartup(); continue; }
+      this.startupSettled = true;
+      return;
     }
   }
   nextTimer(ceiling = Infinity) {
@@ -253,13 +256,18 @@ export class ReplayClock {
     };
     const remaining = this.startupDeadline === undefined ? timeoutMs
       : Math.max(1, Math.min(timeoutMs, this.startupDeadline - performance.now()));
-    try { return await withTimeout(run(), label, remaining); }
-    finally { stopped = true; this.startupOwner = false; }
+    let completed = false;
+    try { const result = await withTimeout(run(), label, remaining); completed = true; return result; }
+    finally { stopped = true; this.startupOwner = false; if (!completed) this.invalidateStartup(); }
   }
-  async advance(t) {
+  async advance(t, reuseStartupSettlement = false) {
     if (!this.active) return;
     const target = Math.max(this.time, this.epoch + t);
     if (this.startup) {
+      if (reuseStartupSettlement && this.startupSettled && !this.holds.size && !this.startupBlocked?.() && !this.nextTimer(target)) {
+        this.time = target;
+        return;
+      }
       await this.until(() => {
         if (this.nextTimer(target)) return false;
         this.time = target;
@@ -302,6 +310,7 @@ export class ReplayClock {
     }
   }
   restore() {
+    this.invalidateStartup();
     this.startup = false;
     this.active = false;
     for (const timer of this.timers.values()) this.original.clearTimeout(timer.handle);
@@ -725,8 +734,15 @@ export class Tape {
     const lifecycle = this.socketLifecycle.get(url);
     const hasLifecycle = lifecycle?.hasOpen;
     const explicit = this.explicitOpens || this.records.some((r) => r.type === 'connect' && this.canonicalize(r.url) === url);
-    if (!hasLifecycle || (!explicit && lifecycle.initial.has(connection))) setImmediate(() => this.openSocket(socket));
+    if (!hasLifecycle || (!explicit && lifecycle.initial.has(connection))) this.deferCallback(() => this.openSocket(socket));
     return socket;
+  }
+
+  deferCallback(callback) {
+    // A queued synchronous host callback is runnable work, not a reason to
+    // advance a protocol timer. Its HTTP descendants own their own lifetimes.
+    const release = this.replayClock?.startup ? this.replayClock.hold() : undefined;
+    setImmediate(() => { try { callback(); } finally { release?.(); } });
   }
 
   openSocket(socket) {
@@ -810,19 +826,19 @@ export class Tape {
       if (parsed.method === 'unsubscribe') socket.subscriptions.delete(parsed.params.channel);
     }
     for (const reply of this.venue.socketReplies?.(socket.rawUrl ?? socket.url, parsed) ?? []) {
-      setImmediate(() => { if (!socket.closed) socket.onMessage(reply); });
+      this.deferCallback(() => { if (!socket.closed) socket.onMessage(reply); });
     }
     for (const waiter of [...this.waiters]) waiter();
     const pingReply = this.venue.pingReply?.(text);
-    if (pingReply) setImmediate(() => { if (!socket.closed) socket.onMessage(pingReply); });
+    if (pingReply) this.deferCallback(() => { if (!socket.closed) socket.onMessage(pingReply); });
     if (this.venue.respondToJsonPing && parsed?.type === 'ping') {
-      setImmediate(() => {
+      this.deferCallback(() => {
         if (!socket.closed) socket.onMessage(JSON.stringify({ type: 'pong', id: parsed.id }));
       });
       return;
     }
     if (this.venue.respondToPing && text === 'ping') {
-      setImmediate(() => {
+      this.deferCallback(() => {
         if (!socket.closed) socket.onMessage('pong');
       });
       return;
@@ -1170,7 +1186,8 @@ export class Tape {
       }
       this.time = frame.t;
       if (clock && !clock.active && startupReady) clock.start(frame.t);
-      await clock?.advance(frame.t);
+      await clock?.advance(frame.t, this.synchronousTicks === true);
+      if (logicalStartup && clock.startup) clock.invalidateStartup();
       if (frame.type === 'wait') {
         this.venue.validateWait?.(frame, this);
       } else if (frame.type === 'command') {
@@ -1193,7 +1210,7 @@ export class Tape {
         } else await this.deliver(frame, true);
       }
       if (logicalStartup && clock.startup) {
-        await clock.drainStartup();
+        if (!clock.startupSettled) await clock.until(() => true, 'Startup record settlement', this.timeoutMs, frame.t);
         if (complete()) {
           startupReady = true;
           initialized = Promise.resolve();
@@ -1203,6 +1220,7 @@ export class Tape {
       delivered++;
       if (delivered % 64 === 0) this.peakBytes = Math.max(this.peakBytes, this.sampleMemory?.() ?? 0);
       onTick?.(frame.t);
+      if (logicalStartup && clock.startup && !this.synchronousTicks) clock.invalidateStartup();
       await new Promise(setImmediate);
     }
     startupCeiling = Infinity;
