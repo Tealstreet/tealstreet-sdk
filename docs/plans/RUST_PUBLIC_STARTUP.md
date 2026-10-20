@@ -188,3 +188,24 @@ Initial catalogue publication remains linear; repair retains market indices,
 settings, live quotes, books and socket ownership. A provisional combined
 Wasm SDK run after wallet fixes passed all 444 cases / 16 files. Rebuild and
 repeat against the merged landing source before final proof.
+
+## Landing integration checkpoint
+
+Merged landing `5f84b3e21d` (#1348, #1349) normally. Lighter's only textual
+conflict preserves native PnL/notional, unknown-owned metadata rejection and
+incoming leverage-bound validation. Bitget's semantic integration keeps the
+pre-row-isolation whole-snapshot protection: one unmappable owned peer cannot
+erase previous exposure or SL/TP. Incoming side leverage and config fences are
+retained. Independent integration and Binance/SDK source reviews passed; merged
+Binance/Bybit suites passed 323 cases / 24 targets, and all workspace targets
+compile. Root typecheck44/44 and lint28/28 passed.
+
+Lighter's full suite exposed two outdated shared-feed Balance assertions.
+Independent review confirmed native ACCOUNT PnL0/equity1000/free900 remains
+the wallet authority while shared quotes separately estimate displayed Position
+PnL40. Tests now pin both sources; runtime output is unchanged by this fixture
+repair. Full native/Clippy/Wasm/replay gates still run against the merged source.
+Root tests passed all 7,803 SDK unit cases, but the parallel test-ci copy timed
+out on Bybit's dynamic-import capability check (7,802/7,803). That unchanged
+32-case file passed in isolation; rerun the root test gate after heavy builds,
+without increasing timeouts. Do not count that root gate green yet.

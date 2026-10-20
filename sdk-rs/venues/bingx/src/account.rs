@@ -514,18 +514,31 @@ impl Account {
                 } else {
                     MarginType::Cross
                 };
-                // The common setting has one leverage; retain long leverage
-                // there and preserve side-specific leverage on each position.
-                if side == PositionSide::Long || !settings.iter().any(|(s, _)| s == &symbol) {
-                    settings.retain(|(s, _)| s != &symbol);
-                    settings.push((
-                        symbol.clone(),
-                        MarketSetting {
-                            leverage: row.leverage,
-                            margin_type: Some(margin),
-                            ..MarketSetting::default()
-                        },
-                    ));
+                let index = settings
+                    .iter()
+                    .position(|(s, _)| s == &symbol)
+                    .unwrap_or_else(|| {
+                        let mut setting = cx.store.setting(&symbol).unwrap_or_default();
+                        if !setting.leverage.is_finite() {
+                            setting.leverage = row.leverage;
+                        }
+                        settings.push((symbol.clone(), setting));
+                        settings.len() - 1
+                    });
+                let setting = &mut settings[index].1;
+                setting.margin_type = Some(margin);
+                if mode == PositionMode::Oneway {
+                    setting.leverage = row.leverage;
+                    setting.buy_leverage = Some(row.leverage);
+                    setting.sell_leverage = Some(row.leverage);
+                } else {
+                    match side {
+                        PositionSide::Long => {
+                            setting.leverage = row.leverage;
+                            setting.buy_leverage = Some(row.leverage);
+                        }
+                        PositionSide::Short => setting.sell_leverage = Some(row.leverage),
+                    }
                 }
                 if row.position_amt == 0.0 {
                     return;
@@ -836,21 +849,29 @@ impl Account {
                 if let Some(config) = event.ac {
                     self.bump_positions();
                     let symbol = config.s.replace('-', "");
+                    let hedged = cx.store.hedged();
                     if config.l > 0.0 {
                         cx.store.update_setting(&symbol, |s| {
                             s.leverage = config.l;
+                            s.buy_leverage = Some(config.l);
+                            if config.short > 0.0 {
+                                s.sell_leverage = Some(config.short);
+                            } else if !hedged {
+                                s.sell_leverage = Some(config.l);
+                            }
                             if let Some(m) = &config.mt {
                                 s.margin_type = Some(margin_type(m));
                             }
                         });
                         cx.store.update_positions(|p| {
                             if p.symbol == symbol {
-                                p.leverage = if p.side == PositionSide::Short && config.short > 0.0
-                                {
-                                    config.short
-                                } else {
-                                    config.l
-                                };
+                                match p.side {
+                                    PositionSide::Short if config.short > 0.0 => {
+                                        p.leverage = config.short
+                                    }
+                                    PositionSide::Short if hedged => {}
+                                    _ => p.leverage = config.l,
+                                }
                                 if let Some(m) = &config.mt {
                                     p.margin_type = Some(margin_type(m));
                                 }

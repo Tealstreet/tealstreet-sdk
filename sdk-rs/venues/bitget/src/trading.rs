@@ -2,7 +2,7 @@ use crate::account::{clean, first, is_algo, is_hedged, margin, plan_type};
 use crate::wire::{Envelope, Identifier, Number, SymbolConfig, UtaSettings};
 use crate::{BitgetFutures, Pending, paths};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Response, TimerId, num};
+use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, TimerId, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
@@ -239,8 +239,6 @@ impl BitgetFutures {
         };
         let validation = if !self.private_enabled() {
             Err("Bitget credentials are required".to_owned())
-        } else if !self.account.detected {
-            Err("Bitget account is not ready".to_owned())
         } else {
             self.preflight(cx, &command)
         };
@@ -266,10 +264,7 @@ impl BitgetFutures {
                 if o.kind == OrderType::Conditional || o.trigger_price.is_some() {
                     return Err("Bitget opening conditional orders are unsupported".into());
                 }
-                if !o.amount.is_finite()
-                    || o.amount < 0.0
-                    || (!is_algo(o.kind) && num::adjust(o.amount, market.precision.amount) <= 0.0)
-                {
+                if !o.amount.is_finite() || o.amount < 0.0 {
                     return Err("invalid Bitget order amount".into());
                 }
                 if o.kind != OrderType::Market
@@ -294,6 +289,7 @@ impl BitgetFutures {
                             .all(|b| b.is_ascii_alphanumeric() || b".:/_-".contains(&b))
                         || !ids.insert(id)
                         || is_algo(o.kind)
+                        || num::adjust(o.amount, market.precision.amount) <= 0.0
                         || o.take_profit.is_some()
                         || o.stop_loss.is_some()
                         || (market.limits.amount.max > 0.0
@@ -414,6 +410,7 @@ impl BitgetFutures {
                 self.resume_trading(cx);
                 return;
             }
+            self.warn_stop_downgrade(cx, &job);
             job.planned = true;
         }
         if let Some(call) = job.calls.pop_front() {
@@ -544,18 +541,31 @@ impl BitgetFutures {
                 self.plan_amend(cx, job, &id, price, amount)?;
             }
             Command::SetLeverage {
-                symbol, leverage, ..
+                symbol,
+                leverage,
+                side,
+                ..
             } => {
                 let m = cx.store.market(symbol).ok_or("unknown market")?;
                 if !leverage.is_finite() || *leverage <= 0.0 {
                     return Err("invalid leverage".into());
                 }
-                let leverage = leverage.clamp(m.limits.leverage.min, m.limits.leverage.max);
+                let min = leverage_limit(m.limits.leverage.min, 1.0);
+                let max = leverage_limit(m.limits.leverage.max, 20.0);
+                let leverage = num::clamp_leverage(*leverage, min, max)?;
                 let isolated_hedge = cx.store.hedged()
                     && cx
                         .store
                         .setting(symbol)
                         .is_some_and(|s| s.margin_type == Some(MarginType::Isolated));
+                let requested_side = side.unwrap_or(PositionSide::Long);
+                let side = isolated_hedge.then_some(requested_side);
+                let side_text = (isolated_hedge || (self.inverse() && cx.store.hedged()))
+                    .then_some(requested_side)
+                    .map(|side| match side {
+                        PositionSide::Long => "long",
+                        PositionSide::Short => "short",
+                    });
                 let mut p = self.classic(cx, symbol)?;
                 p.leverage = Some(Leverage::Number(leverage));
                 let path = if self.account.uta && isolated_hedge {
@@ -564,14 +574,12 @@ impl BitgetFutures {
                         symbol: Some(symbol.clone()),
                         coin: Some(self.coin().into()),
                         leverage: Some(Leverage::Text(num::format(leverage))),
-                        pos_side: Some("long"),
+                        pos_side: side_text,
                         ..Payload::default()
                     };
                     paths::UTA_SET_LEVERAGE
                 } else {
-                    if isolated_hedge {
-                        p.hold_side = Some("long");
-                    }
+                    p.hold_side = side_text;
                     paths::SET_LEVERAGE
                 };
                 job.calls.push_back(Planned {
@@ -580,7 +588,7 @@ impl BitgetFutures {
                     effect: Effect::Leverage {
                         symbol: symbol.clone(),
                         leverage,
-                        side: isolated_hedge.then_some(PositionSide::Long),
+                        side,
                     },
                 });
             }
@@ -650,6 +658,70 @@ impl BitgetFutures {
         Ok(())
     }
 
+    fn warn_stop_downgrade(&self, cx: &mut Cx<'_, Pending>, job: &Job) {
+        let orders = match &job.intent {
+            Command::PlaceOrders { orders, .. } => orders.clone(),
+            Command::AmendOrder { amount, .. } => job
+                .original
+                .as_ref()
+                .map(|order| {
+                    let mut opts = place_opts(order);
+                    opts.amount = amount.unwrap_or(order.amount);
+                    vec![opts]
+                })
+                .unwrap_or_default(),
+            _ => vec![],
+        };
+        for order in orders {
+            if order.amount <= 0.0
+                || !matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+            {
+                continue;
+            }
+            let no_sized_plan = self
+                .plan_size(cx, &order)
+                .is_ok_and(|(_, size)| size <= 0.0);
+            let uta_fallback_size = cx
+                .store
+                .positions()
+                .iter()
+                .find(|position| {
+                    position.symbol == order.symbol
+                        && (!cx.store.hedged() || position.side == protected_position(order.side))
+                        && position.contracts > 0.0
+                })
+                .map_or(0.0, |position| {
+                    cx.store.market(&order.symbol).map_or(0.0, |market| {
+                        num::adjust(position.contracts, market.precision.amount)
+                    })
+                });
+            let downgraded = no_sized_plan
+                && (!self.account.uta || uta_fallback_size <= 0.0)
+                && job.calls.iter().any(|call| {
+                    call.payload.symbol.as_deref() == Some(order.symbol.as_str())
+                        && (matches!(
+                            call.payload.plan_type.as_deref(),
+                            Some("pos_loss" | "pos_profit")
+                        ) || call.payload.tpsl_mode == Some("full"))
+                });
+            if downgraded {
+                let positions = cx
+                    .store
+                    .positions()
+                    .iter()
+                    .filter(|position| position.symbol == order.symbol)
+                    .map(|position| format!("{:?}:{}", position.side, position.contracts))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                cx.log(LogLevel::Warning, format!(
+                    "Sized {} stop became a full-position stop: no open {:?} position to size requested {} against, positions seen [{}]",
+                    order.symbol, protected_position(order.side), order.amount,
+                    if positions.is_empty() { "none" } else { &positions },
+                ));
+            }
+        }
+    }
+
     fn classic(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Result<Payload, String> {
         Ok(Payload {
             symbol: Some(symbol.into()),
@@ -669,6 +741,11 @@ impl BitgetFutures {
         for o in orders.iter().filter(|o| !is_algo(o.kind)) {
             let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
             let total = num::adjust(o.amount, m.precision.amount);
+            // TS drops an order that rounds below one lot. Explicit caller ids
+            // were rejected in preflight because dropping cannot honor them.
+            if total <= 0.0 {
+                continue;
+            }
             let max = if m.limits.amount.max > 0.0 && m.limits.amount.max.is_finite() {
                 floor_lot(m.limits.amount.max, m.precision.amount)
             } else {
@@ -1439,6 +1516,19 @@ impl BitgetFutures {
                     cx.store.update_setting(symbol, |s| {
                         s.leverage = leverage;
                         s.margin_type = Some(kind);
+                        if kind == MarginType::Isolated && is_hedged(&row.pos_mode) {
+                            if let Some(long) = row.isolated_long_lever.0 {
+                                s.buy_leverage = Some(long);
+                            }
+                            if let Some(short) = row.isolated_short_lever.0 {
+                                s.sell_leverage = Some(short);
+                            }
+                            // Legacy scalar settings represent the long rail.
+                            s.leverage = s.buy_leverage.unwrap_or(leverage);
+                        } else {
+                            s.buy_leverage = Some(leverage);
+                            s.sell_leverage = Some(leverage);
+                        }
                     });
                     self.trading.metadata_at.insert(symbol.clone(), cx.now);
                     self.trading.active = Some(job);
@@ -1748,7 +1838,18 @@ impl BitgetFutures {
                 side,
             } => {
                 self.account.config_at = Some(cx.now);
-                cx.store.update_setting(&symbol, |s| s.leverage = leverage);
+                cx.store.update_setting(&symbol, |s| match side {
+                    Some(PositionSide::Long) => {
+                        s.leverage = leverage;
+                        s.buy_leverage = Some(leverage);
+                    }
+                    Some(PositionSide::Short) => s.sell_leverage = Some(leverage),
+                    None => {
+                        s.leverage = leverage;
+                        s.buy_leverage = Some(leverage);
+                        s.sell_leverage = Some(leverage);
+                    }
+                });
                 cx.store.update_positions(|p| {
                     if p.symbol == symbol && side.is_none_or(|side| p.side == side) {
                         p.leverage = leverage;
@@ -2054,4 +2155,8 @@ fn place_opts(order: &Order) -> PlaceOrderOpts {
         bybit_slippage_tolerance_ticks: None,
         implied_volatility: None,
     }
+}
+
+fn leverage_limit(value: f64, fallback: f64) -> f64 {
+    if value == 0.0 { fallback } else { value }
 }

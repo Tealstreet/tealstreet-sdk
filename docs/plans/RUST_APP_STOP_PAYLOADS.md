@@ -59,6 +59,7 @@ Rust source references below are under `sdk-rs/venues/<venue>/src/`.
 | `bingx` | **Confirmed source regression**: `trading.rs:587` rejects all generic triggers. TS protective/trailing formatters use `opts.price`. SL, TP, Full and advertised trailing app submissions are affected. |
 | `bitrue` | **Confirmed source regression**: `trading.rs:323` rejects generic trigger before existing protective mapping from price to native triggerPrice. Requires reconciled position. Infinity remains unsupported. |
 | `kraken` | **Confirmed source regression**: `trading.rs:267` rejects generic trigger before protective stopPrice formatting. Includes advertised trailing app submissions. Owner decision: market entry with attached TP/SL remains rejected; its error must explicitly say TP/SL legs are unsupported on market entry. Pin that message and zero-write behavior. |
+| `krakenspot` | Pending native/Wasm payload coverage. Current Market entry path silently drops attached TP/SL; apply the owner decision to reject those legs explicitly before a write, matching futures. Do not infer bracket support from standalone native stop kinds. |
 | `phemex` | **Confirmed source regression**: `trading.rs:223` rejects generic trigger before supported SL/TP stopPxRp mapping. Full zero is supported. Trailing code exists but UI metadata disables it. |
 | `binancespot` | **Caller-shape mismatch**: `trading.rs:863` refuses mandatory app reduceOnly=true. TS intentionally omits that unsupported native field while producing valid explicit-size STOP_LOSS/TAKE_PROFIT. Investigate narrow protective normalization, preserving refusal of genuinely unrepresentable close controls; coordinate Binance lane. |
 | `binance`, `binancepm`, `binanceinverse` | Existing SL/TP formatter accepts redundancy. Preserve regular/algo routing, quantity units and close-position semantics. Advertised trailing paths exist. |
@@ -70,6 +71,8 @@ Rust source references below are under `sdk-rs/venues/<venue>/src/`.
 | `cryptocom` | Existing advanced formatter accepts triggerPrice.or(price), explicit-size SL/TP. Full/trailing unsupported. |
 | `kucoin` | Existing stop formatter accepts redundancy. Preserve native lots/multiplier conversion and Full-position behavior. |
 | `kucoinspot` | **Genuinely unsupported**: TS explicitly rejects non-Limit/Market and attached protection. Retain no-write rejection. |
+| `weex` | Pending exact app payload/native request coverage for SL/TP, supported Full and reference/size conversion; preserve existing protective provenance and broker tag. |
+| `paradex` | Pending exact app payload/native request coverage for native protective types, sizing and authenticated builder attribution. |
 | `mexc` | Existing protective formatter accepts trigger/price and native size. Full resolves current closing-side position. Trailing unsupported. |
 | `woo` | Existing algo paths accept app shape including Full and advertised trailing. Preserve sibling protection and position-sized trailing. |
 | `tealstreet-dex`, `woofi`, `kodiakfi`, `mode`, `salsadex`, `what` | Orderly fixes belong to `feat/rust-order-races`; do not duplicate. Include its eventual change in end-to-end matrix. |
@@ -80,7 +83,7 @@ Rust source references below are under `sdk-rs/venues/<venue>/src/`.
 | `apexomni` | Existing protective formatter accepts duplicate trigger. Explicit-size only; preserve last/index references. |
 | `breakoutprop` | Existing preparation accepts generic trigger, emits STOP with CLOSE effect. Explicit zero CLOSE is represented. Trailing unsupported. |
 | `coinbase`, `coinbasespot` | StopLoss accepts matching price/triggerPrice. TP/attached brackets unsupported: TS TP fallthrough builds an ordinary limit and must not be copied as support. |
-| `lighter`, `lighter-robinhood` | Existing protective mapper accepts redundancy and normalizes market-style protection to IOC, matching TS. Preserve slippage-derived execution price and positive amount. Metadata disables trailing; TS mapping it to Market is not protection evidence. |
+| `lighter`, `lighter-robinhood` | Existing protective mapper accepts redundancy and normalizes market-style protection to IOC, matching TS. Preserve slippage-derived execution price and positive amount. Metadata disables trailing; the current Rust TrailingStopLoss fallthrough becomes an ordinary Market order. Replace that with explicit unsupported/no-write rejection; TS mapping it to Market is not protection evidence. |
 | `polymarket` | **Genuinely unsupported**: prediction-market limit placement has no protective/bracket/trailing contract. Keep fail-closed. |
 | `txflow` | Protective/conditional/reduction semantics intentionally unmeasured and disabled. Keep explicit rejection. |
 

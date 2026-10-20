@@ -397,7 +397,60 @@ fn position_packets_insert_new_rows_and_config_updates_preserve_side_settings() 
     assert_eq!(p.margin_type, Some(MarginType::Isolated));
     h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":25,"S":15,"mt":"cross"}}"#);
     assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 25.0);
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(25.0)
+    );
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().sell_leverage,
+        Some(15.0)
+    );
     assert_eq!(h.engine.store().positions()[0].leverage, 15.0);
+    h.engine.store_mut().set_hedged(true);
+    h.message(r#"{"e":"ACCOUNT_CONFIG_UPDATE","ac":{"s":"BTC-USDT","l":30}}"#);
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(30.0)
+    );
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().sell_leverage,
+        Some(15.0)
+    );
+    assert_eq!(h.engine.store().positions()[0].leverage, 15.0);
+}
+
+#[test]
+fn hedge_position_snapshots_preserve_both_leverage_rails_in_either_order() {
+    for rows in [
+        r#"[{"symbol":"BTC-USDT","positionAmt":"-0.1","positionSide":"SHORT","avgPrice":"60000","unrealizedProfit":"0","leverage":7,"isolated":true,"liquidationPrice":0},{"symbol":"BTC-USDT","positionAmt":"0.1","positionSide":"LONG","avgPrice":"60000","unrealizedProfit":"0","leverage":5,"isolated":true,"liquidationPrice":0}]"#,
+        r#"[{"symbol":"BTC-USDT","positionAmt":"0.1","positionSide":"LONG","avgPrice":"60000","unrealizedProfit":"0","leverage":5,"isolated":true,"liquidationPrice":0},{"symbol":"BTC-USDT","positionAmt":"-0.1","positionSide":"SHORT","avgPrice":"60000","unrealizedProfit":"0","leverage":7,"isolated":true,"liquidationPrice":0}]"#,
+    ] {
+        let mut h = Harness::ready();
+        h.engine.store_mut().set_hedged(true);
+        h.fire_at(3000.0);
+        h.respond(POSITIONS, 200, &format!(r#"{{"code":0,"data":{rows}}}"#));
+        let setting = h.engine.store().setting("BTCUSDT").unwrap();
+        assert_eq!(setting.leverage, 5.0);
+        assert_eq!(setting.buy_leverage, Some(5.0));
+        assert_eq!(setting.sell_leverage, Some(7.0));
+    }
+}
+
+#[test]
+fn hedge_snapshot_does_not_erase_the_configured_flat_opposite_leg() {
+    let mut h = Harness::ready();
+    h.engine.store_mut().set_hedged(true);
+    h.fire_at(3000.0);
+    h.engine.store_mut().update_setting("BTCUSDT", |s| {
+        s.leverage = 2.0;
+        s.buy_leverage = Some(2.0);
+        s.sell_leverage = Some(7.0);
+    });
+    h.respond(POSITIONS, 200, r#"{"code":0,"data":[{"symbol":"BTC-USDT","positionAmt":"0.1","positionSide":"LONG","avgPrice":"60000","unrealizedProfit":"0","leverage":5,"isolated":true,"liquidationPrice":0}]}"#);
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.leverage, 5.0);
+    assert_eq!(setting.buy_leverage, Some(5.0));
+    assert_eq!(setting.sell_leverage, Some(7.0));
 }
 
 #[test]

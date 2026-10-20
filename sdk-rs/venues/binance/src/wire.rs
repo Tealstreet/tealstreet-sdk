@@ -428,6 +428,10 @@ pub struct OrderUpdate<'a> {
     pub o: Option<Str<'a>>,
     #[serde(rename = "X", borrow)]
     pub status: Str<'a>,
+    #[serde(borrow, default)]
+    pub x: Option<Str<'a>>,
+    #[serde(default)]
+    pub t: Option<i64>,
     #[serde(borrow)]
     pub p: Str<'a>,
     #[serde(borrow, default)]
@@ -640,6 +644,8 @@ pub struct PmBalance<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PmConditionalOrder<'a> {
+    #[serde(default)]
+    pub strategy_id: Option<Id>,
     #[serde(borrow)]
     pub new_client_strategy_id: Str<'a>,
     #[serde(borrow)]
@@ -669,6 +675,8 @@ pub struct ConditionalUpdateEvent<'a> {
 /// `CONDITIONAL_ORDER_TRADE_UPDATE.so` (portfolio margin).
 #[derive(Deserialize)]
 pub struct ConditionalUpdate<'a> {
+    #[serde(default)]
+    pub si: Option<Id>,
     #[serde(borrow)]
     pub s: Str<'a>,
     /// newClientStrategyId.

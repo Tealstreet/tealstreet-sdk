@@ -361,6 +361,7 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
             command: 9,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         }),
     );
     let out = actions(&mut e);
@@ -476,6 +477,7 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
                 command: 901,
                 symbol: "BTCUSDT".into(),
                 leverage: 12.0,
+                side: None,
             }),
         );
         let request = actions(&mut e)

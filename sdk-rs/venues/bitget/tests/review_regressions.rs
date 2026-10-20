@@ -135,7 +135,11 @@ fn older_rest_positions_preserve_side_specific_isolated_hedge_leverage() {
         };
         h.engine.store_mut().set_hedged(true);
         h.engine.store_mut().update_setting("BTCUSDT", |setting| {
+            // This fixture replaces the startup 20x one-way positions with
+            // two isolated 10x legs; seed their authoritative settings too.
             setting.leverage = 10.0;
+            setting.buy_leverage = Some(10.0);
+            setting.sell_leverage = Some(10.0);
             setting.margin_type = Some(MarginType::Isolated);
         });
         let mut long = h.engine.store().positions()[0].clone();
@@ -159,6 +163,7 @@ fn older_rest_positions_preserve_side_specific_isolated_hedge_leverage() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         });
         let write = h.take("/set-leverage");
         let body: Value = serde_json::from_str(write.body.as_deref().unwrap()).unwrap();

@@ -2,7 +2,7 @@
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::{Book, BookSide};
 use crate::json::{ArrayAt, ArraySplitter};
-use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts};
+use crate::model::{CancelOrderRef, Candle, OrderSide, PlaceOrderOpts, PositionSide};
 use crate::public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 use crate::store::Store;
 use crate::wire::{FrameWriter, section};
@@ -243,6 +243,7 @@ pub enum Command {
         command: CommandId,
         symbol: String,
         leverage: f64,
+        side: Option<PositionSide>,
     },
     SetMarginType {
         command: CommandId,
@@ -252,6 +253,7 @@ pub enum Command {
     SetPositionMode {
         command: CommandId,
         hedged: bool,
+        symbol: Option<String>,
     },
     FetchStpMode {
         command: CommandId,

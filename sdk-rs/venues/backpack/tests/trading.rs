@@ -223,6 +223,7 @@ fn no_write_retry_after_lost_response_and_leverage_is_global_patch() {
             command: 2,
             symbol: SYMBOL.into(),
             leverage: 20.0,
+            side: None,
         }),
     );
     let r = requests(&mut e).pop().unwrap();
@@ -419,6 +420,7 @@ fn delayed_account_info_cannot_restore_the_previous_leverage_after_patch() {
             command: 1,
             symbol: SYMBOL.into(),
             leverage: 20.0,
+            side: None,
         }),
     );
     let patch = requests(&mut e).pop().unwrap();

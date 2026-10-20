@@ -314,7 +314,7 @@ fn inverse_order_failures_and_stale_reads_preserve_stream_state() {
     h.advance(10_000.0);
     let read = h.take("/dapi/v1/openOrders");
     assert_eq!(read.method, Method::Get);
-    h.message("/ws/coin-key",r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":12,"s":"BTCUSD_PERP","S":"BUY","o":"LIMIT","X":"PARTIALLY_FILLED","p":"9000","q":"5","z":"3","l":"1","L":"9000"}}"#);
+    h.message("/ws/coin-key",r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":12,"s":"BTCUSD_PERP","S":"BUY","o":"LIMIT","X":"PARTIALLY_FILLED","x":"TRADE","p":"9000","q":"5","z":"3","l":"1","L":"9000"}}"#);
     h.reply(read.id,200,"",r#"[{"symbol":"BTCUSD_PERP","orderId":12,"price":"9000","origQty":"5","executedQty":"2","type":"LIMIT","side":"BUY"}]"#);
     assert_eq!(h.engine.store().order("12").unwrap().filled, 3.0);
 }
@@ -502,7 +502,7 @@ fn spot_rest_replica_cannot_resurrect_terminal_orders_even_for_a_later_read() {
 fn inverse_snapshot_baseline_and_native_execution_cache_fence_duplicate_fills() {
     let mut h = inverse();
     let _ = h.engine.take_frame(h.now);
-    let event = r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":12,"s":"BTCUSD_PERP","S":"BUY","o":"LIMIT","X":"PARTIALLY_FILLED","p":"9000","q":"5","z":"2","l":"1","L":"9100"}}"#;
+    let event = r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":12,"s":"BTCUSD_PERP","S":"BUY","o":"LIMIT","X":"PARTIALLY_FILLED","x":"TRADE","p":"9000","q":"5","z":"2","l":"1","L":"9100"}}"#;
     // The startup snapshot already included this execution.
     h.message("/ws/coin-key", event);
     if let Some(frame) = h.engine.take_frame(h.now) {
@@ -524,7 +524,7 @@ fn inverse_snapshot_baseline_and_native_execution_cache_fence_duplicate_fills() 
 #[test]
 fn inverse_unseen_partial_order_keeps_native_counts_and_terminal_replays_cannot_reopen_it() {
     let mut h = inverse();
-    let event = r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":13,"s":"BTCUSD_PERP","S":"SELL","o":"LIMIT","X":"PARTIALLY_FILLED","p":"9000","q":"5","z":"1","l":"1","L":"9200"}}"#;
+    let event = r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":13,"s":"BTCUSD_PERP","S":"SELL","o":"LIMIT","X":"PARTIALLY_FILLED","x":"TRADE","p":"9000","q":"5","z":"1","l":"1","L":"9200"}}"#;
     let _ = h.engine.take_frame(h.now);
     h.message("/ws/coin-key", event);
     let order = h.engine.store().order("13").unwrap();
@@ -552,7 +552,7 @@ fn inverse_unseen_partial_order_keeps_native_counts_and_terminal_replays_cannot_
 #[test]
 fn inverse_reconnect_and_later_replica_snapshot_cannot_replay_or_roll_back_execution() {
     let mut h = inverse();
-    let event = r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":12,"s":"BTCUSD_PERP","S":"BUY","o":"LIMIT","X":"PARTIALLY_FILLED","p":"9000","q":"5","z":"3","l":"1","L":"9100"}}"#;
+    let event = r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":12,"s":"BTCUSD_PERP","S":"BUY","o":"LIMIT","X":"PARTIALLY_FILLED","x":"TRADE","p":"9000","q":"5","z":"3","l":"1","L":"9100"}}"#;
     h.message("/ws/coin-key", event);
     let _ = h.engine.take_frame(h.now);
     let old = h.socket("/ws/coin-key").unwrap();

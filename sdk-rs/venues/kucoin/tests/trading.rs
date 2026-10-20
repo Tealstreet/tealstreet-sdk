@@ -524,6 +524,7 @@ fn leverage_requires_cross_metadata_and_clamps_to_market_limits() {
         command: 1,
         symbol: "BTCUSDT".into(),
         leverage: 150.0,
+        side: None,
     });
     h.metadata(false, "CROSS");
     let request = h.take("changeCrossUserLeverage");
@@ -542,6 +543,7 @@ fn leverage_requires_cross_metadata_and_clamps_to_market_limits() {
         command: 1,
         symbol: "BTCUSDT".into(),
         leverage: 5.0,
+        side: None,
     });
     h.metadata(false, "ISOLATED");
     assert!(!h.has("changeCrossUserLeverage"));
@@ -582,6 +584,7 @@ fn mode_switch_reads_current_positions_and_rejects_open_or_malformed_quantities(
         h.command(Command::SetPositionMode {
             command: 1,
             hedged: true,
+            symbol: None,
         });
         h.reply(
             "/api/v1/positions",
@@ -595,6 +598,7 @@ fn mode_switch_reads_current_positions_and_rejects_open_or_malformed_quantities(
     h.command(Command::SetPositionMode {
         command: 1,
         hedged: true,
+        symbol: None,
     });
     h.reply("/api/v1/positions", r#"{"code":"200000","data":[]}"#);
     h.pace();
@@ -872,6 +876,33 @@ fn explicit_active_flag_overrides_a_contradictory_canceled_status() {
     h.confirm_cancel("old", 10.0, 4.0);
     let body = h.take("/api/v1/orders").body.unwrap();
     assert!(body.contains(r#""size":"6""#), "{body}");
+}
+
+#[test]
+fn invalid_dynamic_leverage_limits_reject_without_native_write() {
+    for (min, max) in [
+        (30.0, 20.0),
+        (f64::NAN, 20.0),
+        (1.0, 0.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let mut h = Harness::new();
+        h.engine.store_mut().update_markets(|market| {
+            market.limits.leverage.min = min;
+            market.limits.leverage.max = max;
+        });
+        h.command(Command::SetLeverage {
+            command: 99,
+            symbol: "BTCUSDT".into(),
+            leverage: 5.0,
+            side: None,
+        });
+        h.metadata(false, "CROSS");
+        assert!(!h.actions.iter().any(
+            |action| matches!(action, Action::Http(request) if request.method != Method::Get)
+        ));
+        assert!(h.done(99).as_ref().unwrap_err().contains("leverage limits"));
+    }
 }
 
 #[test]

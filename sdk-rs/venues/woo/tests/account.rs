@@ -515,6 +515,7 @@ fn old_position_read_cannot_restore_preconfirmation_leverage() {
             command: 9,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         }),
     );
     let r = requests(&mut e).remove(0);
@@ -543,6 +544,7 @@ fn old_position_read_cannot_restore_preconfirmation_mode() {
         Event::Command(Command::SetPositionMode {
             command: 9,
             hedged: true,
+            symbol: None,
         }),
     );
     let r = requests(&mut e).remove(0);
