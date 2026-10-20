@@ -2237,3 +2237,61 @@ mod product_semantics {
         );
     }
 }
+
+#[test]
+fn open_position_on_a_skipped_instrument_is_reported_not_silently_hidden() {
+    let mut e = Engine::new(Okx::new(Options {
+        key: Some("k".into()),
+        secret: Some("s".into()),
+        passphrase: Some("p".into()),
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let a = actions(&mut e).remove(0);
+    let broken = r#"{"instType":"SWAP","instId":"ETH-USDT-SWAP","ctType":"linear","ctVal":"bad"}"#;
+    reply(&mut e, &a, &envelope(&format!("{MARKET},{broken}")), 1.0);
+    let a = actions(&mut e)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
+    reply(&mut e, &a, &envelope(TICKER), 2.0);
+    let a = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut e,
+        &a,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.0,
+    );
+    let mut pending: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    let mut logs = Vec::new();
+    while let Some(a) = pending.pop() {
+        let body = if matches!(&a, Action::Http(r) if r.url.contains("/account/positions")) {
+            envelope(
+                r#"{"instType":"SWAP","instId":"ETH-USDT-SWAP","pos":"3","posSide":"net","avgPx":"2000","lever":"5","mgnMode":"cross"}"#,
+            )
+        } else if matches!(&a, Action::Http(r) if r.url.contains("account-position-risk")) {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else {
+            envelope("")
+        };
+        reply(&mut e, &a, &body, 4.0);
+        for out in actions(&mut e) {
+            match out {
+                Action::Http(_) => pending.push(out),
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        logs.iter()
+            .any(|m| m.contains("ETH-USDT-SWAP") && m.contains("not shown")),
+        "{logs:?}"
+    );
+}

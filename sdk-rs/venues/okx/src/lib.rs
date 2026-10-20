@@ -116,6 +116,7 @@ pub struct Okx {
     price_tickers: HashMap<String, Option<u32>>,
     startup_retry: Option<TimerId>,
     startup_failures: u32,
+    skipped_instruments: HashSet<String>,
 }
 
 impl Okx {
@@ -151,6 +152,7 @@ impl Okx {
             price_tickers: HashMap::new(),
             startup_retry: None,
             startup_failures: 0,
+            skipped_instruments: HashSet::new(),
         }
     }
 
@@ -736,6 +738,7 @@ impl Venue for Okx {
                     }
                     if m.inst_type.is_empty() {
                         *skipped += 1;
+                        self.skipped_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let inverse = m.ct_type == "inverse";
@@ -784,6 +787,7 @@ impl Venue for Okx {
                             .any(|n| n.parse::<f64>().is_err() || num::parse(n) <= 0.0)
                     {
                         *skipped += 1;
+                        self.skipped_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let contract_size = num::parse(m.ct_val);
@@ -803,6 +807,7 @@ impl Venue for Okx {
                                 .is_none_or(|value| !value.is_finite() || value <= 0.0)
                     }) {
                         *skipped += 1;
+                        self.skipped_instruments.insert(m.inst_id.into());
                         return;
                     }
                     let max = caps
@@ -812,6 +817,7 @@ impl Venue for Okx {
                         .fold(f64::INFINITY, f64::min);
                     if max <= 0.0 || !max.is_finite() {
                         *skipped += 1;
+                        self.skipped_instruments.insert(m.inst_id.into());
                         return;
                     }
                     self.products.insert(

@@ -768,6 +768,11 @@ impl Okx {
         }
         match job.finish {
             Finish::Leverage(symbol, leverage) => {
+                *self
+                    .account
+                    .leverage_versions
+                    .entry(symbol.clone())
+                    .or_default() += 1;
                 cx.store.update_setting(&symbol, |s| {
                     s.leverage = leverage;
                     s.margin_type = Some(MarginType::Cross);
@@ -776,6 +781,7 @@ impl Okx {
                 cx.done(command, Ok("[]".into()));
             }
             Finish::Mode(hedged) => {
+                self.account.mode_version += 1;
                 cx.store.set_hedged(hedged);
                 self.account_after_settings(cx);
                 cx.done(command, Ok("[]".into()));

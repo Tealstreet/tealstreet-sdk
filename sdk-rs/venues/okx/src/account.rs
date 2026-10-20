@@ -42,12 +42,14 @@ fn reserve_leverage(value: &str) -> f64 {
 }
 
 pub enum Request {
-    Config,
+    Config {
+        mode_version: u64,
+    },
     Leverage {
         command: CommandId,
         symbol: String,
         inst_id: String,
-        revision: u64,
+        version: u64,
     },
     Balance {
         generation: u64,
@@ -99,6 +101,9 @@ pub struct AccountState {
     configured: bool,
     config_in_flight: bool,
     config_read_at: f64,
+    pub mode_version: u64,
+    pub leverage_versions: HashMap<String, u64>,
+    skipped_instruments_logged: HashSet<String>,
     account_level: u8,
     pub revision: u64,
     position_versions: HashMap<String, u64>,
@@ -136,7 +141,9 @@ impl Okx {
             cx,
             "/api/v5/account/config",
             true,
-            Pending::Account(Request::Config),
+            Pending::Account(Request::Config {
+                mode_version: self.account.mode_version,
+            }),
         );
     }
 
@@ -155,6 +162,12 @@ impl Okx {
             return;
         }
         let inst_id = m.id.clone();
+        let version = self
+            .account
+            .leverage_versions
+            .get(&symbol)
+            .copied()
+            .unwrap_or(0);
         self.get(
             cx,
             &format!("/api/v5/account/leverage-info?instId={inst_id}&mgnMode=cross"),
@@ -163,7 +176,7 @@ impl Okx {
                 command,
                 symbol,
                 inst_id,
-                revision: self.account.revision,
+                version,
             }),
         );
     }
@@ -336,7 +349,7 @@ impl Okx {
                 .as_ref()
                 .is_some_and(|join| join.generation == *generation),
             Request::Orders { generation, .. } => self.account.orders_generation == *generation,
-            Request::Config | Request::Leverage { .. } => true,
+            Request::Config { .. } | Request::Leverage { .. } => true,
         }
     }
 
@@ -370,7 +383,7 @@ impl Okx {
             return;
         }
         match request {
-            Request::Config | Request::Leverage { .. } => {}
+            Request::Config { .. } | Request::Leverage { .. } => {}
             Request::Balance {
                 equity,
                 risk_rows,
@@ -410,6 +423,8 @@ impl Okx {
                         rows.push(row);
                     } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some() {
                         *invalid = true;
+                    } else if num::parse(p.pos) != 0.0 {
+                        self.unlisted_exposure(cx, p.inst_id);
                     }
                 }
                 Err(_) => *invalid = true,
@@ -436,6 +451,9 @@ impl Okx {
                     {
                         *invalid = true;
                         return;
+                    }
+                    if cx.store.market_by_id(o.inst_id).is_none() {
+                        self.unlisted_exposure(cx, o.inst_id);
                     }
                     for order in self.orders(cx, &o) {
                         margins.insert(
@@ -471,30 +489,43 @@ impl Okx {
                 command,
                 symbol,
                 inst_id,
-                revision,
+                version,
             } => {
-                let result = self.leverage_result(cx, data, &symbol, &inst_id, revision);
+                let result = self.leverage_result(cx, data, &symbol, &inst_id, version);
                 cx.done(command, result);
             }
-            Request::Config => {
+            Request::Config { mode_version } => {
                 self.account.config_in_flight = false;
                 let configs = serde_json::from_str::<Vec<Config<'_>>>(data);
                 let Ok(configs) = configs else {
-                    self.account_failed(cx, Request::Config, "malformed OKX config");
+                    self.account_failed(
+                        cx,
+                        Request::Config { mode_version },
+                        "malformed OKX config",
+                    );
                     return;
                 };
                 let Some(config) = configs
                     .first()
                     .filter(|c| matches!(c.pos_mode, "net_mode" | "long_short_mode"))
                 else {
-                    self.account_failed(cx, Request::Config, "missing OKX position mode");
+                    self.account_failed(
+                        cx,
+                        Request::Config { mode_version },
+                        "missing OKX position mode",
+                    );
                     return;
                 };
                 self.account.config_read_at = cx.now;
                 let hedged = config.pos_mode == "long_short_mode";
-                let level = config.acct_lv.parse().unwrap_or(2);
+                let level = config.acct_lv.parse().ok();
                 if self.account.configured {
+                    // A read sent before our own mode write cannot overrule it.
+                    if mode_version != self.account.mode_version {
+                        return;
+                    }
                     // A mode changed in the OKX app makes every posSide we send wrong.
+                    let level = level.unwrap_or(self.account.account_level);
                     if hedged != cx.store.hedged() || level != self.account.account_level {
                         cx.store.set_hedged(hedged);
                         self.account.account_level = level;
@@ -502,6 +533,7 @@ impl Okx {
                     }
                     return;
                 }
+                let level = level.unwrap_or(2);
                 cx.store.set_hedged(hedged);
                 self.account.account_level = level;
                 self.account.configured = true;
@@ -735,9 +767,10 @@ impl Okx {
                 }
             }
             Request::Orders { .. } => self.account.orders_in_flight = false,
-            Request::Config => {
+            Request::Config { .. } => {
                 self.account.config_in_flight = false;
                 if self.account.configured {
+                    self.account.config_read_at = cx.now;
                     cx.log(LogLevel::Warning, error);
                     return;
                 }
@@ -784,7 +817,7 @@ impl Okx {
         data: &str,
         symbol: &str,
         inst_id: &str,
-        revision: u64,
+        version: u64,
     ) -> Result<String, String> {
         let rows = serde_json::from_str::<Vec<LeverageRow<'_>>>(data)
             .map_err(|_| "malformed OKX leverage-info".to_owned())?;
@@ -795,13 +828,23 @@ impl Okx {
             .filter_map(|r| r.lever.parse::<f64>().ok())
             .find(|v| v.is_finite() && *v > 0.0)
             .ok_or_else(|| format!("OKX returned no cross leverage for {symbol}"))?;
-        if revision != self.account.revision {
-            return Err(format!("OKX leverage read for {symbol} was superseded"));
-        }
-        cx.store.update_setting(symbol, |s| {
-            s.leverage = leverage;
-            s.margin_type = Some(MarginType::Cross);
-        });
+        // A leverage write since this read was sent owns the setting; report it.
+        let leverage = if self
+            .account
+            .leverage_versions
+            .get(symbol)
+            .copied()
+            .unwrap_or(0)
+            == version
+        {
+            cx.store.update_setting(symbol, |s| {
+                s.leverage = leverage;
+                s.margin_type = Some(MarginType::Cross);
+            });
+            leverage
+        } else {
+            cx.store.setting(symbol).map_or(leverage, |s| s.leverage)
+        };
         #[derive(serde::Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Fetched {
@@ -821,6 +864,21 @@ impl Okx {
             },
         })
         .map_err(|e| e.to_string())
+    }
+
+    // Exposure on an instrument whose catalog row was malformed cannot be shown.
+    fn unlisted_exposure(&mut self, cx: &mut Cx<'_, Pending>, inst_id: &str) {
+        if self.skipped_instruments.contains(inst_id)
+            && self
+                .account
+                .skipped_instruments_logged
+                .insert(inst_id.into())
+        {
+            cx.log(
+                LogLevel::Error,
+                format!("OKX {inst_id} has open exposure but its instrument row was malformed; it is not shown"),
+            );
+        }
     }
 
     fn setting(cx: &mut Cx<'_, Pending>, position: &Position) {

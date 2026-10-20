@@ -806,8 +806,11 @@ fn fetch_leverage_failure_answers_instead_of_hanging() {
     )));
 }
 
-#[test]
-fn account_config_is_reread_and_a_mode_change_in_the_okx_app_is_applied() {
+/// A ready account plus every action emitted after its config reply.
+fn ready_engine() -> (
+    safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
+    Vec<Action>,
+) {
     let mut e =
         safe_cex_engine::Engine::new(safe_cex_venue_okx::Okx::new(safe_cex_venue_okx::Options {
             key: Some("test-key".into()),
@@ -830,28 +833,56 @@ fn account_config_is_reread_and_a_mode_change_in_the_okx_app_is_applied() {
         &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
         3.0,
     );
-    assert!(!e.store().hedged());
-    let mut out = actions(&mut e);
-    let mut config = None;
-    let mut now = 3.0;
-    while config.is_none() && now < 40_000.0 {
-        let tick = out.iter().find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == now + 2_000.0 => Some(*timer),
-            _ => None,
-        });
-        let Some(tick) = tick else {
-            panic!("account tick not re-armed at {now}");
+    let mut seen = actions(&mut e);
+    let mut pending: Vec<_> = seen
+        .iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .cloned()
+        .collect();
+    while let Some(a) = pending.pop() {
+        let body = if matches!(&a, Action::Http(r) if r.url.contains("account-position-risk")) {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else {
+            envelope("")
         };
+        reply(&mut e, &a, &body, 3.0);
+        let out = actions(&mut e);
+        pending.extend(out.iter().filter(|a| matches!(a, Action::Http(_))).cloned());
+        seen.extend(out);
+    }
+    (e, seen)
+}
+
+/// Fires the 2s account tick until the periodic config read is sent.
+fn tick_until_config(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_okx::Okx>,
+    mut out: Vec<Action>,
+) -> (Action, f64) {
+    let mut now = 3.0;
+    loop {
+        let tick = out
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == now + 2_000.0 => Some(*timer),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("account tick not re-armed at {now}"));
         now += 2_000.0;
         e.handle(now, Event::TimerFired { timer: tick });
-        out = actions(&mut e);
-        config = out
-            .iter()
-            .find(|a| is_get(a, "/api/v5/account/config"))
-            .cloned();
+        out = actions(e);
+        if let Some(config) = out.iter().find(|a| is_get(a, "/api/v5/account/config")) {
+            assert!(now >= 30_000.0, "polled too early at {now}");
+            return (config.clone(), now);
+        }
+        assert!(now < 40_000.0, "config never re-read");
     }
-    let config = config.expect("periodic config read");
-    assert!(now >= 30_000.0, "polled too early at {now}");
+}
+
+#[test]
+fn account_config_is_reread_and_a_mode_change_in_the_okx_app_is_applied() {
+    let (mut e, out) = ready_engine();
+    assert!(!e.store().hedged());
+    let (config, now) = tick_until_config(&mut e, out);
     reply(
         &mut e,
         &config,
@@ -864,4 +895,101 @@ fn account_config_is_reread_and_a_mode_change_in_the_okx_app_is_applied() {
             .iter()
             .any(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
     );
+}
+
+#[test]
+fn config_read_sent_before_our_mode_write_cannot_revert_it() {
+    let (mut e, out) = ready_engine();
+    let (config, now) = tick_until_config(&mut e, out);
+    e.handle(
+        now,
+        Event::Command(Command::SetPositionMode {
+            command: 11,
+            hedged: true,
+            symbol: None,
+        }),
+    );
+    let write = actions(&mut e)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.ends_with("/api/v5/account/set-position-mode")))
+        .expect("mode write");
+    reply(
+        &mut e,
+        &write,
+        &envelope(r#"{"posMode":"long_short_mode"}"#),
+        now + 1.0,
+    );
+    assert!(e.store().hedged());
+    reply(
+        &mut e,
+        &config,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        now + 2.0,
+    );
+    assert!(
+        e.store().hedged(),
+        "stale poll reverted the confirmed mode write"
+    );
+}
+
+#[test]
+fn unparseable_polled_account_level_keeps_the_known_level() {
+    let (mut e, out) = ready_engine();
+    let (config, now) = tick_until_config(&mut e, out);
+    reply(
+        &mut e,
+        &config,
+        &envelope(r#"{"posMode":"net_mode","acctLv":""}"#),
+        now,
+    );
+    assert!(
+        !actions(&mut e)
+            .iter()
+            .any(|a| is_get(a, "/api/v5/account/positions?instType=SWAP")),
+        "unchanged mode and unknown level must not reconcile"
+    );
+}
+
+#[test]
+fn leverage_read_survives_unrelated_private_pushes() {
+    let mut e = trading_engine();
+    e.handle(
+        5.0,
+        Event::Command(Command::FetchLeverage {
+            command: 12,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let request = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "mgnMode=cross"))
+        .unwrap();
+    // Any account write bumps the account revision without touching leverage.
+    e.handle(
+        5.5,
+        Event::Command(Command::SetPositionMode {
+            command: 13,
+            hedged: true,
+            symbol: None,
+        }),
+    );
+    let write = actions(&mut e)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.ends_with("set-position-mode")))
+        .unwrap();
+    reply(
+        &mut e,
+        &write,
+        &envelope(r#"{"posMode":"long_short_mode"}"#),
+        5.6,
+    );
+    actions(&mut e);
+    reply(
+        &mut e,
+        &request,
+        &envelope(r#"{"instId":"BTC-USDT-SWAP","mgnMode":"cross","lever":"30"}"#),
+        6.0,
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 12, result: Ok(s) }) if s.contains("30.0"))));
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
 }
