@@ -3098,3 +3098,44 @@ capacity is a material admission change (293.9% would fail it). Predeclare exact
 ONE full3run gate after2readings<250%15sapart, sameNode/source/module/tape/limits.
 Stop on any completed failure or repeated incomplete attempt; do not keep
 adjusting runner admission/retrying to select green. No sampler repair claimed.
+
+## Publication checkpoint and remaining CI gate
+
+Required venue-brief pre-push gates COMPLETE: Bitunix crate/global native checks,
+WASM Clippy/build, Bitunix private/public, and Binance private/public all pass.
+Fourteen of fifteen final local profiles pass. The additional Bitrue public
+profile is incomplete at the unchanged memory-settlement deadline, with unknown
+phase/cause; no result is accepted. Independent process audit confirms the brief's
+Gates list requires selected venue plus Binance locally, while the other matrix
+profiles remain mandatory exact-head CI verification. No Bitrue performance gate
+is waived or declared passing.
+
+After26minutes without runner qualification, cancel ONLY our waiting shell and
+qualifier before any second Bitrue producer starts. No quarter-qualified replay
+or new samples ran. Delegate this additional profile to the required clean CI
+runner, retaining the original failure and isolated diagnostic. Publish the
+verified candidate, run actual published-head adversarial reviews, post findings,
+and require ALL41 exact-head checks SUCCESS including the full Bitrue private/
+public job before merge. Red or omitted Bitrue steps block. Do not claim complete
+from local receipts. This replaces the unadmitted local runner plan, not a gate
+threshold, fixture, output or sampling policy.
+
+All14 completed local receipts and each raw TS/Rust sample verified. Public
+results below show TS / Rust values; every public row uses3runs, private uses1.
+
+| Profile | Frames | Main CPU ms | Retained MB | Peak MB |
+| --- | ---: | ---: | ---: | ---: |
+| Bitunix | 28,694 | 505.9 / 425.5 | 3.6 / 2.4 | 11.6 / 4.8 |
+| KuCoin | 10,034 | 379.5 / 201.3 | 6.9 / 2.7 | 23.2 / 7.3 |
+| KuCoin Spot | 26,427 | 389.1 / 321.9 | 5.0 / 2.3 | 13.4 / 4.9 |
+| Binance | 873 | 253.1 / 146.2 | 4.5 / 2.5 | 21.1 / 5.1 |
+| OKX | 22,663 | 385.5 / 281.0 | 6.4 / 4.8 | 16.0 / 12.8 |
+| OKX inverse | 41,499 | 573.1 / 459.9 | 6.4 / 4.6 | 22.2 / 12.8 |
+| OKX EU XPERP | 29,268 | 1043.1 / 950.5 | 11.2 / 8.7 | 28.6 / 18.4 |
+| Paradex | 15,220 | 417.5 / 393.7 | 1.9 / 1.6 | 27.8 / 21.3 |
+
+Six private profiles pass: Bitunix, KuCoin futures/Spot, Binance, Paradex, Bitrue.
+Module byte counts: Bitunix856206, KuCoin820572, KuCoinSpot721043,
+Binance969416, OKX861779, Paradex1224575, Bitrue850131. Each under1258291.
+All source/native/compiled/consumer checks above remain current. Actual PR review
+and green CI are still required; no live private credentials were used.
