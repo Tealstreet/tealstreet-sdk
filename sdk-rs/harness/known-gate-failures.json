@@ -96,10 +96,11 @@
     "coinbaseCensusRace20261021": {
       "ciRuns": [
         39460207328,
-        39463152700
+        39463152700,
+        39469014934
       ],
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39463152700",
-      "note": "Same tape f117e75e and identical Coinbase code; TS output and final account identical across runs. Rust checkpoints 6-10 differ only by when the in-flight census at record 86 resolves. The union of both observed path sets is declared (overseer option a); follow-up (b) routed to claude-ftr6h9."
+      "note": "Same tape f117e75e and identical Coinbase code; TS output and final account identical across runs. Rust checkpoints 6-10 differ only by when the in-flight census at record 86 resolves. The union of both observed path sets is declared (overseer option a); follow-up (b) routed to claude-ftr6h9. CFM ES256 checkpoint 12 shows the TS-side twin (run 39469014934 vs 39463152700); its 11 extra paths are declared the same way."
     }
   },
   "failures": [
@@ -10124,6 +10125,22 @@
             "checkpoint 16 account.orders[2].type",
             "checkpoint 16 account.orders[3]",
             "checkpoint 16 account.orders[4]"
+          ]
+        },
+        {
+          "divergence": "Replay race (Coinbase CFM ES256, checkpoint 12 at record 136): the TS periodic order census is sometimes applied before checkpoint 12 (orders 12 removed, 30 shown open) and sometimes after it. Rust and both final states are identical across runs, and every row is tape-backed. Declared so either outcome passes; same census-timing class as the INTX EdDSA record-86 race (follow-up with the incidentals lane, claude-ftr6h9).",
+          "keys": [
+            "checkpoint 12 account.orders[1].id",
+            "checkpoint 12 account.orders[1].parentId",
+            "checkpoint 12 account.orders[2].id",
+            "checkpoint 12 account.orders[2].price",
+            "checkpoint 12 account.orders[2].parentId",
+            "checkpoint 12 account.orders[3].id",
+            "checkpoint 12 account.orders[3].type",
+            "checkpoint 12 account.orders[3].side",
+            "checkpoint 12 account.orders[3].price",
+            "checkpoint 12 account.orders[3].parentId",
+            "checkpoint 12 account.orders[3].timeInForce"
           ]
         }
       ]
