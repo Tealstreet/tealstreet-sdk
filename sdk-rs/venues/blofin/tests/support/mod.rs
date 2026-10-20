@@ -14,6 +14,13 @@ impl Harness {
         Self::with_broker_attribution(false)
     }
     pub fn with_broker_attribution(broker_attribution: bool) -> Self {
+        Self::with_instruments_and_broker(INSTRUMENT, broker_attribution)
+    }
+    #[allow(dead_code)]
+    pub fn with_instruments(instruments: &str) -> Self {
+        Self::with_instruments_and_broker(instruments, false)
+    }
+    fn with_instruments_and_broker(instruments: &str, broker_attribution: bool) -> Self {
         let mut e = Engine::new(Blofin::new(Options {
             broker_attribution,
             key: Some("key".into()),
@@ -30,7 +37,7 @@ impl Harness {
             tick: TimerId(0),
         };
         h.collect();
-        h.reply("instruments", INSTRUMENT);
+        h.reply("instruments", instruments);
         h.reply("tickers",r#"{"code":"0","data":[{"instId":"BTC-USDT","last":"60000","open24h":"59000","bidPrice":"59999","askPrice":"60001","volCurrency24h":"1","vol24h":"60000"}]}"#);
         h.private = h
             .actions

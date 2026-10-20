@@ -654,3 +654,146 @@ fn failed_leverage_read_diagnostic_precedes_completion_without_duplicate_log() {
     // Correlation does not initiate another request.
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
+
+#[test]
+fn unloaded_market_order_does_not_block_any_order_surface_or_loaded_store() {
+    for surface in ["open_orders", "planorder", "stoporder"] {
+        let (mut e, _, reads, _) = private_started();
+        let valid = ORDER.replace("739113577038255617", "\"valid\"");
+        let unknown = valid
+            .replace("valid", "unloaded")
+            .replace("BTC_USDT", "UNLOADED_USDT");
+        let mut warnings = Vec::new();
+        for request in reads {
+            let body = if request.url.contains(surface) {
+                format!(r#"{{"success":true,"code":0,"data":[{valid},{unknown}]}}"#)
+            } else {
+                r#"{"success":true,"code":0,"data":[]}"#.into()
+            };
+            response(&mut e, &request, &body);
+            warnings.extend(e.drain_actions());
+        }
+        assert!(e.store().loaded().orders, "{surface}");
+        assert!(e.store().order("valid").is_some(), "{surface}");
+        assert!(e.store().order("unloaded").is_none());
+        assert!(warnings.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log{message,..}) if message.contains("unloaded") && message.contains("UNLOADED_USDT"))));
+    }
+}
+
+#[test]
+fn unmappable_order_id_preserves_known_copy_but_empty_full_snapshot_clears_it() {
+    let (mut e, socket, reads, _) = private_started();
+    for request in reads {
+        response(&mut e, &request, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    ws(
+        &mut e,
+        socket,
+        &format!(r#"{{"channel":"push.personal.order","data":{ORDER}}}"#),
+    );
+    e.drain_actions().for_each(drop);
+    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+    let reads = requests(&mut e);
+    assert_eq!(reads.len(), 5);
+    for request in reads {
+        let body = if request.url.contains("open_orders") {
+            format!(
+                r#"{{"success":true,"code":0,"data":[{}]}}"#,
+                ORDER.replace("BTC_USDT", "UNLOADED_USDT")
+            )
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#.into()
+        };
+        response(&mut e, &request, &body);
+    }
+    assert_eq!(
+        e.store().order("739113577038255617").unwrap().symbol,
+        "BTCUSDT"
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(300.0, Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .expect("private reconnect timer");
+    e.handle(at, Event::TimerFired { timer });
+    let replacement = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .expect("replacement private socket");
+    assert_ne!(replacement, socket);
+    e.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        at + 1.0,
+        Event::WsMessage {
+            socket: replacement,
+            text: r#"{"channel":"rs.login","data":"success"}"#,
+        },
+    );
+    let reads = requests(&mut e);
+    assert_eq!(reads.len(), 5, "reconnect must request the full snapshot");
+    for request in reads {
+        e.handle(
+            at + 2.0,
+            Event::HttpResponse {
+                request: request.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"success":true,"code":0,"data":[]}"#,
+                },
+            },
+        );
+    }
+    assert!(e.store().loaded().orders);
+    assert!(e.store().orders().is_empty());
+}
+
+#[test]
+fn missing_order_identity_preserves_known_snapshot_and_cannot_finish_initial_load() {
+    for initialized in [false, true] {
+        let (mut e, socket, mut reads, _) = private_started();
+        if initialized {
+            for request in reads {
+                response(&mut e, &request, r#"{"success":true,"code":0,"data":[]}"#);
+            }
+            ws(
+                &mut e,
+                socket,
+                &format!(r#"{{"channel":"push.personal.order","data":{ORDER}}}"#),
+            );
+            e.drain_actions().for_each(drop);
+            ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+            reads = requests(&mut e);
+        }
+        let missing_id = ORDER.replace("\"orderId\":739113577038255617,", "");
+        for request in reads {
+            let body = if request.url.contains("open_orders") {
+                format!(r#"{{"success":true,"code":0,"data":[{missing_id}]}}"#)
+            } else {
+                r#"{"success":true,"code":0,"data":[]}"#.into()
+            };
+            response(&mut e, &request, &body);
+        }
+        assert_eq!(e.store().loaded().orders, initialized);
+        if initialized {
+            assert_eq!(e.store().order("739113577038255617").unwrap().amount, 0.003);
+        } else {
+            assert!(e.store().orders().is_empty());
+        }
+        assert!(e.drain_actions().any(|action| matches!(action,
+            Action::Notice(safe_cex_engine::Notice::Log {message,..}) if message.contains("Malformed MEXC snapshot row"))));
+    }
+}

@@ -448,10 +448,9 @@ fn settings_commit_only_after_success_and_unsupported_modes_never_write() {
     assert!(h.failed());
 }
 #[test]
-fn unknown_metadata_and_invalid_caller_null_fail_before_writes() {
+fn missing_leverage_and_invalid_caller_null_fail_before_writes() {
     let mut h = Harness::new();
-    h.e.store_mut()
-        .update_setting("E-BTC-USDT", |s| s.margin_type = None);
+    h.e.store_mut().set_settings([]);
     h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000}]"#);
     assert!(h.failed());
     assert_eq!(h.writes(), 0);
@@ -521,54 +520,292 @@ fn receipts_preserve_a_caller_id_without_minting_another_namespace() {
 }
 
 #[test]
-fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch() {
-    use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType};
-    use safe_cex_engine::{Action, Notice};
-    for mixed in [false, true] {
+fn missing_cancel_identity_is_reported_without_blocking_known_ids() {
+    let mut h = Harness::new();
+    h.order(0.0);
+    h.command(Command::CancelOrders {
+        command: 7,
+        ids: vec!["missing".into(), "2334151155877155281".into()],
+    });
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    assert_eq!(body(&cancel)["orderId"], "2334151155877155281");
+    h.reply(
+        cancel,
+        r#"{"code":"0","data":{"orderId":2334151155877155281}}"#,
+    );
+    let error = h
+        .notices
+        .iter()
+        .find_map(|n| match n {
+            Notice::CommandDone {
+                command: 7,
+                result: Err(error),
+            } => Some(error),
+            _ => None,
+        })
+        .expect("partial cancellation error");
+    let error: serde_json::Value = serde_json::from_str(error).unwrap();
+    assert_eq!(error["failedOrders"][0]["id"], "missing");
+    assert_eq!(error["canceledOrderIds"][0], "2334151155877155281");
+    assert_eq!(
+        h.e.store().order("2334151155877155281").unwrap().status,
+        OrderStatus::Canceled
+    );
+}
+
+#[test]
+fn cancel_batch_continues_after_native_and_transport_and_identity_failures() {
+    for (failure, by_symbol) in [
+        ("native", false),
+        ("transport", false),
+        ("identity", false),
+        ("native", true),
+    ] {
         let mut h = Harness::new();
-        h.e.store_mut().set_orders(vec![Order {
-            id: "123".into(),
-            parent_id: None,
-            status: OrderStatus::Open,
-            symbol: "E-BTC-USDT".into(),
-            kind: OrderType::Limit,
-            side: OrderSide::Buy,
-            price: 90.0,
-            amount: 1.0,
-            filled: 0.0,
-            remaining: 1.0,
-            reduce_only: false,
-            close: None,
-            client_order_id: None,
-            time_in_force: None,
-            last_update: 0.0,
-            trigger_type: None,
-            take_profit: None,
-            stop_loss: None,
-            extra: None,
-        }]);
-        h.e.drain_actions().for_each(drop);
-        h.e.handle(
-            2000.0,
-            Event::Command(Command::CancelOrders {
-                command: 991,
-                ids: if mixed {
-                    vec!["123".into(), "456".into()]
-                } else {
-                    vec!["456".into()]
-                },
-            }),
+        h.order(0.0);
+        let mut second = h.e.store().order("2334151155877155281").unwrap().clone();
+        second.id = "2334151155877155282".into();
+        h.e.store_mut().upsert_order(second);
+        h.command(if by_symbol {
+            Command::CancelSymbolOrders {
+                command: 7,
+                symbol: "E-BTC-USDT".into(),
+            }
+        } else {
+            Command::CancelOrders {
+                command: 7,
+                ids: vec!["2334151155877155281".into(), "2334151155877155282".into()],
+            }
+        });
+        let first = h.take(Method::Post, "/fapi/v2/cancel");
+        match failure {
+            "transport" => {
+                h.e.handle(
+                    101.0,
+                    Event::HttpFailed {
+                        request: first.id,
+                        error: "connection lost",
+                    },
+                );
+                h.collect();
+            }
+            "native" => h.reply(first, r#"{"code":"-1","msg":"denied"}"#),
+            _ => h.reply(first, r#"{"code":"0","data":{"orderId":"different"}}"#),
+        }
+        assert_eq!(
+            h.e.store().order("2334151155877155281").unwrap().status,
+            OrderStatus::Open
         );
-        let actions = h.e.drain_actions().collect::<Vec<_>>();
-        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(
-            actions.iter().any(|a| matches!(
-                a,
-                Action::Notice(Notice::CommandDone { command: 991, result: Err(error) })
-                    if error.contains("456") && error.contains("not found")
-            )),
-            "missing cancellation error: {actions:?}"
+        let next = h.take(Method::Post, "/fapi/v2/cancel");
+        assert_eq!(body(&next)["orderId"], "2334151155877155282");
+        h.reply(
+            next,
+            r#"{"code":"0","data":{"orderId":2334151155877155282}}"#,
         );
-        assert_eq!(h.e.store().order("123").unwrap().status, OrderStatus::Open);
+        assert!(h.failed());
+        let error = h
+            .notices
+            .iter()
+            .find_map(|n| match n {
+                Notice::CommandDone {
+                    command: 7,
+                    result: Err(error),
+                } => Some(error),
+                _ => None,
+            })
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_str(error).unwrap();
+        assert_eq!(error["failedOrders"][0]["id"], "2334151155877155281");
+        assert_eq!(error["canceledOrderIds"][0], "2334151155877155282");
+        assert_eq!(
+            h.e.store().order("2334151155877155282").unwrap().status,
+            OrderStatus::Canceled
+        );
     }
+}
+
+#[test]
+fn fresh_account_trades_only_after_explicit_leverage_ack_and_defaults_to_cross() {
+    let mut h = Harness::new();
+    h.e.store_mut().set_settings([]);
+    h.command(Command::SetLeverage {
+        command: 6,
+        symbol: "E-BTC-USDT".into(),
+        leverage: 7.0,
+        side: None,
+    });
+    let setting = h.take(Method::Post, "/fapi/v2/level_edit");
+    assert!(h.e.store().setting("E-BTC-USDT").is_none());
+    h.reply(setting, r#"{"code":"0","data":{}}"#);
+    // An old account read is retried after the acknowledgement; even a fresh
+    // authoritative empty position list must retain the explicitly set leverage.
+    let empty = r#"{"code":"0","data":{"account":[{"marginCoin":"USDT","totalEquity":100,"accountNormal":100,"positionVos":[]}]}}"#;
+    let account = h.take(Method::Get, "/fapi/v2/account");
+    h.reply(account, empty);
+    let account = h.take(Method::Get, "/fapi/v2/account");
+    h.reply(account, empty);
+    h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000}]"#);
+    let order = h.take(Method::Post, "/fapi/v2/order");
+    assert_eq!(body(&order)["leverage"], 7.0);
+    assert_eq!(body(&order)["positionType"], 1);
+}
+
+#[test]
+fn exact_leverage_is_not_silently_clamped_to_conservative_startup_limit() {
+    let mut h = Harness::new();
+    h.command(Command::SetLeverage {
+        command: 7,
+        symbol: "E-BTC-USDT".into(),
+        leverage: 125.0,
+        side: None,
+    });
+    let request = h.take(Method::Post, "/fapi/v2/level_edit");
+    assert_eq!(body(&request)["leverage"], 125.0);
+    h.reply(
+        request,
+        r#"{"code":"-1","msg":"Maximum leverage does not exceed 50"}"#,
+    );
+    assert!(h.failed());
+    assert_eq!(
+        h.e.store()
+            .market("E-BTC-USDT")
+            .unwrap()
+            .limits
+            .leverage
+            .max,
+        50.0
+    );
+    assert_eq!(h.e.store().setting("E-BTC-USDT").unwrap().leverage, 20.0);
+    h.notices.clear();
+    h.command(Command::SetLeverage {
+        command: 7,
+        symbol: "E-BTC-USDT".into(),
+        leverage: 51.0,
+        side: None,
+    });
+    assert!(h.failed());
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.ends_with("/fapi/v2/level_edit"))
+    );
+}
+
+#[test]
+fn invalid_leverage_never_writes_and_failed_ack_does_not_invent_fresh_settings() {
+    let mut h = Harness::new();
+    h.e.store_mut().set_settings([]);
+    for leverage in [0.0, -1.0, 1.5, 126.0, f64::NAN, f64::INFINITY] {
+        h.notices.clear();
+        h.command(Command::SetLeverage {
+            command: 7,
+            symbol: "E-BTC-USDT".into(),
+            leverage,
+            side: None,
+        });
+        assert!(h.failed());
+        assert!(!h.requests.iter().any(|r| r.url.ends_with("/level_edit")));
+        assert!(h.e.store().setting("E-BTC-USDT").is_none());
+    }
+    h.command(Command::SetLeverage {
+        command: 7,
+        symbol: "E-BTC-USDT".into(),
+        leverage: 10.0,
+        side: None,
+    });
+    let request = h.take(Method::Post, "/level_edit");
+    h.reply(request, r#"{"code":"-1","msg":"denied"}"#);
+    assert!(h.e.store().setting("E-BTC-USDT").is_none());
+}
+
+#[test]
+fn child_cancel_remains_a_fallback_when_parent_is_missing_or_its_cancel_fails() {
+    for (parent_state, by_symbol) in [
+        ("missing", false),
+        ("unmapped", false),
+        ("denied", false),
+        ("denied", true),
+    ] {
+        let mut h = Harness::new();
+        h.order(0.0);
+        let mut child = h.e.store().order("2334151155877155281").unwrap().clone();
+        child.id = "child".into();
+        child.parent_id = Some("2334151155877155281".into());
+        child.kind = OrderType::StopLoss;
+        h.e.store_mut().upsert_order(child);
+        if parent_state == "missing" {
+            h.e.store_mut().remove_orders(&["2334151155877155281"]);
+        } else if parent_state == "unmapped" {
+            let mut parent = h.e.store().order("2334151155877155281").unwrap().clone();
+            parent.symbol = "unloaded".into();
+            h.e.store_mut().upsert_order(parent);
+        }
+        h.command(if by_symbol {
+            Command::CancelSymbolOrders {
+                command: 7,
+                symbol: "E-BTC-USDT".into(),
+            }
+        } else {
+            Command::CancelOrders {
+                command: 7,
+                ids: vec!["2334151155877155281".into(), "child".into()],
+            }
+        });
+        if parent_state == "denied" {
+            let parent = h.take(Method::Post, "/fapi/v2/cancel");
+            assert_eq!(body(&parent)["orderId"], "2334151155877155281");
+            h.reply(
+                parent,
+                r#"{"code":"-1","msg":"parent cancellation denied"}"#,
+            );
+        }
+        let child = h.take(Method::Post, "/fapi/v2/cancel");
+        assert_eq!(body(&child)["orderId"], "child");
+        assert_eq!(body(&child)["conditionOrder"], true);
+        h.reply(child, r#"{"code":"0","data":{"orderId":"child"}}"#);
+        assert_eq!(
+            h.e.store().order("child").unwrap().status,
+            OrderStatus::Canceled
+        );
+        let error = h
+            .notices
+            .iter()
+            .find_map(|n| match n {
+                Notice::CommandDone {
+                    command: 7,
+                    result: Err(error),
+                } => Some(error),
+                _ => None,
+            })
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_str(error).unwrap();
+        assert_eq!(error["failedOrders"][0]["id"], "2334151155877155281");
+        assert_eq!(error["canceledOrderIds"][0], "child");
+    }
+}
+
+#[test]
+fn confirmed_parent_cancel_deduplicates_child_only_after_success() {
+    let mut h = Harness::new();
+    h.order(0.0);
+    let mut child = h.e.store().order("2334151155877155281").unwrap().clone();
+    child.id = "child".into();
+    child.parent_id = Some("2334151155877155281".into());
+    child.kind = OrderType::StopLoss;
+    h.e.store_mut().upsert_order(child);
+    h.command(Command::CancelOrders {
+        command: 7,
+        ids: vec!["2334151155877155281".into(), "child".into()],
+    });
+    let parent = h.take(Method::Post, "/fapi/v2/cancel");
+    h.reply(
+        parent,
+        r#"{"code":"0","data":{"orderId":2334151155877155281}}"#,
+    );
+    assert_eq!(
+        h.e.store().order("child").unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert!(!h.requests.iter().any(|r| r.url.ends_with("/cancel")));
+    assert_eq!(h.result(), Some("[]"));
 }

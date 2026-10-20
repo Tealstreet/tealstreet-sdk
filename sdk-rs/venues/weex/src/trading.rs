@@ -194,7 +194,11 @@ struct ResultRow {
     #[serde(default)]
     order_id: Option<Id>,
     #[serde(default)]
+    algo_id: Option<Id>,
+    #[serde(default)]
     client_order_id: Option<String>,
+    #[serde(default)]
+    client_algo_id: Option<String>,
     success: bool,
     #[serde(default)]
     error_code: String,
@@ -202,6 +206,15 @@ struct ResultRow {
     error_message: String,
 }
 impl ResultRow {
+    /// Algo endpoints may answer with `algoId`/`clientAlgoId` instead.
+    fn native(&self) -> Option<&Id> {
+        self.order_id.as_ref().or(self.algo_id.as_ref())
+    }
+    fn client(&self) -> Option<&str> {
+        self.client_order_id
+            .as_deref()
+            .or(self.client_algo_id.as_deref())
+    }
     fn error(&self) -> String {
         if !self.error_message.is_empty() {
             self.error_message.clone()
@@ -348,6 +361,17 @@ impl WeexFutures {
     ) -> Result<Brackets, String> {
         if let Some(types) = self.trading.brackets.get(&order.id) {
             return Ok(*types);
+        }
+        if !algo(order) {
+            // Imported regular orders have no per-leg children: use the row's
+            // reported leg types, otherwise placement defaults (as TS does).
+            let extra = order.extra.as_ref();
+            return Ok(Brackets {
+                tp: extra.and_then(|e| e.tp_trigger_type),
+                sl: extra
+                    .and_then(|e| e.sl_trigger_type)
+                    .or(order.stop_loss.and(order.trigger_type)),
+            });
         }
         let source = |kind| {
             cx.store
@@ -1407,12 +1431,11 @@ fn apply_place(
     let mut correlated = HashMap::new();
     let mut native_ids = HashSet::new();
     for (i, row) in rows.iter().enumerate() {
-        let client = if protective {
-            orders[i].client_order_id.as_deref().unwrap()
-        } else {
-            row.client_order_id
-                .as_deref()
-                .ok_or("WEEX response missing echoed clientOrderId")?
+        // A single non-batch write has exactly one possible correlation.
+        let client = match row.client() {
+            Some(client) if !protective => client,
+            _ if protective || !batch => orders[i].client_order_id.as_deref().unwrap(),
+            _ => return Err("WEEX response missing echoed clientOrderId".into()),
         };
         if !orders
             .iter()
@@ -1423,8 +1446,7 @@ fn apply_place(
         }
         if row.success {
             let id = row
-                .order_id
-                .as_ref()
+                .native()
                 .ok_or("WEEX accepted order missing orderId")?
                 .id()?;
             if !native_ids.insert(id) {
@@ -1441,7 +1463,7 @@ fn apply_place(
             .ok_or("WEEX response omitted a clientOrderId")?;
         cx.store.remove_orders(&[&order.id]);
         if row.success {
-            let id = row.order_id.as_ref().unwrap().id()?;
+            let id = row.native().unwrap().id()?;
             if cx.store.order(&id).is_some() {
                 // An execution/private update can precede this REST ack; its
                 // quantities and terminal state are authoritative.
@@ -1487,8 +1509,7 @@ fn apply_cancel(
     let mut results = Vec::new();
     for row in rows {
         let id = row
-            .order_id
-            .as_ref()
+            .native()
             .ok_or("WEEX cancellation missing orderId")?
             .id()?;
         if !seen.insert(id.clone()) || (!all && !native.contains(&id)) {

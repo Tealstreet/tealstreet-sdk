@@ -275,7 +275,7 @@ fn variants_use_entity_hosts_and_demo_header() {
 }
 
 #[test]
-fn incomplete_known_ticker_never_becomes_authoritative_zero() {
+fn blank_known_ticker_seeds_zero_and_startup_continues() {
     let mut e = Engine::new(Okx::new(Options::default()));
     e.start(0.0);
     let request = actions(&mut e).remove(0);
@@ -284,10 +284,49 @@ fn incomplete_known_ticker_never_becomes_authoritative_zero() {
     reply(
         &mut e,
         &request,
-        &envelope(r#"{"instId":"BTC-USDT-SWAP"}"#),
+        &envelope(r#"{"instId":"BTC-USDT-SWAP","bidPx":"","askPx":"","volCcy24h":"","vol24h":""}"#),
         2.0,
     );
-    assert!(!e.store().loaded().tickers);
+    assert!(e.store().loaded().tickers);
+    let t = e.store().ticker("BTCUSDT").unwrap();
+    assert_eq!((t.bid, t.ask, t.last, t.volume), (0.0, 0.0, 0.0, 0.0));
+    assert!(
+        actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+}
+
+#[test]
+fn failed_ticker_read_retries_with_backoff_keeping_the_committed_catalog() {
+    let mut e = Engine::new(Okx::new(Options::default()));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(MARKET), 1.0);
+    let mut now = 2.0;
+    for delay in [1_000.0, 2_000.0, 4_000.0] {
+        let request = actions(&mut e).remove(0);
+        assert!(is_get(&request, "/api/v5/market/tickers?instType=SWAP"));
+        reply(
+            &mut e,
+            &request,
+            r#"{"code":"50011","msg":"Too Many Requests","data":[]}"#,
+            now,
+        );
+        assert!(e.store().loaded().markets && !e.store().loaded().tickers);
+        let timer = actions(&mut e)
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == now + delay => Some(*timer),
+                _ => None,
+            })
+            .expect("backoff timer");
+        now += delay;
+        e.handle(now, Event::TimerFired { timer });
+    }
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(TICKER), now);
+    assert!(e.store().loaded().tickers);
 }
 
 #[test]

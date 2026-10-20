@@ -1113,3 +1113,67 @@ fn broker_payload_gate_covers_normal_trigger_and_protective_orders_without_rewri
         }
     }
 }
+
+#[test]
+fn closed_position_restores_account_margin_default_before_next_order() {
+    use safe_cex_engine::model::MarginType;
+    // Empty snapshots and explicit zero rows are both valid closure signals.
+    for rest in [false, true] {
+        for explicit_zero in [false, true] {
+            let mut h = Harness::new();
+            h.seed();
+            h.e.handle(
+                1.0,
+                Event::Command(Command::SetMarginType {
+                    command: 8,
+                    symbol: "BTCUSDT".into(),
+                    isolated: true,
+                }),
+            );
+            h.collect();
+            h.reply("set-margin-mode", r#"{"code":"0","data":{}}"#);
+            assert_eq!(
+                h.e.store().positions()[0].margin_type,
+                Some(MarginType::Cross)
+            );
+            let data = if explicit_zero {
+                format!(
+                    "[{}]",
+                    POSITION.replace("\"positions\":\"4\"", "\"positions\":\"0\"")
+                )
+            } else {
+                "[]".into()
+            };
+            if rest {
+                h.reply(
+                    "account/positions",
+                    &format!(r#"{{"code":"0","data":{data}}}"#),
+                );
+                h.reply(
+                    "balances",
+                    r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+                );
+            } else {
+                h.ws(&format!(
+                    r#"{{"arg":{{"channel":"positions"}},"data":{data}}}"#
+                ));
+            }
+            assert!(h.e.store().positions().is_empty());
+            let setting = h.e.store().setting("BTCUSDT").unwrap();
+            assert_eq!(
+                setting.margin_type,
+                Some(MarginType::Isolated),
+                "rest={rest}, zero={explicit_zero}"
+            );
+            assert_eq!(setting.leverage, 20.0);
+            place(
+                &mut h,
+                r#"[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":60000}]"#,
+            );
+            let request = h.take("batch-orders");
+            let payload: serde_json::Value =
+                serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+            assert_eq!(payload[0]["marginMode"], "isolated");
+        }
+    }
+}
