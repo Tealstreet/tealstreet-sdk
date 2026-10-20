@@ -1981,3 +1981,16 @@ fn concurrent_read_key_rejections_never_deactivate_the_account() {
     );
     assert!(s.done(327).is_ok());
 }
+
+#[test]
+fn transient_then_mismatched_key_check_still_discovers_the_portfolio() {
+    let mut s = read_key_session_with("other-portfolio", |s| s.key_permission_failures = 2);
+    let portfolios = s
+        .requests
+        .iter()
+        .filter(|r| r.url.ends_with("/portfolios"))
+        .count();
+    assert_eq!(portfolios, 1);
+    s.collect();
+    assert!(!s.deactivated);
+}

@@ -824,6 +824,7 @@ impl Coinbase {
     }
     fn read_key_unverified(&mut self, cx: &mut Cx<'_, Pending>, reason: &str) {
         self.drop_read_key(cx, reason);
+        self.account.startup_failures = 0;
         self.account_read(cx, Request::Portfolios);
     }
     fn drop_read_key(&mut self, cx: &mut Cx<'_, Pending>, reason: &str) {
@@ -1966,7 +1967,6 @@ impl Coinbase {
                     );
                     self.account.startup_retry = Some((t, req));
                 } else if self.account.startup_retry.is_none() {
-                    self.account.startup_failures = 0;
                     self.read_key_unverified(cx, &format!("could not be verified ({error})"));
                 }
             }
