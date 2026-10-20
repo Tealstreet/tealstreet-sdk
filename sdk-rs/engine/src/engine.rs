@@ -14,6 +14,23 @@ pub struct SocketId(pub u32);
 pub struct RequestId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TimerId(pub u32);
+/// Explicit limits on a periodic poll, separate from its fallback cadence.
+#[derive(Clone, Copy, Debug)]
+pub struct PollTimerBounds {
+    /// Recurring rate floor, including after configuration changes.
+    pub minimum_interval_ms: f64,
+    /// Absolute cooldown/backoff deadline; configuration changes never move it.
+    pub not_before_ms: f64,
+}
+
+impl Default for PollTimerBounds {
+    fn default() -> Self {
+        Self {
+            minimum_interval_ms: 0.,
+            not_before_ms: f64::NEG_INFINITY,
+        }
+    }
+}
 /// Correlates a [`Command`] with its [`Notice::CommandDone`].
 pub type CommandId = u32;
 
@@ -432,6 +449,12 @@ struct Incoming {
 /// How much of a streamed envelope is quoted to report a response without its array.
 const STREAM_PREVIEW_BYTES: usize = 512;
 
+struct PollTimer {
+    default_interval_ms: f64,
+    bounds: PollTimerBounds,
+    physical: Option<TimerId>,
+}
+
 struct Io<P> {
     actions: Vec<Action>,
     public_feed_policy: PublicFeedPolicy,
@@ -440,6 +463,9 @@ struct Io<P> {
     streams: HashMap<RequestId, ArrayAt>,
     incoming: HashMap<RequestId, Incoming>,
     timers: HashMap<TimerId, ()>,
+    poll_interval_ms: Option<f64>,
+    poll_timers: HashMap<TimerId, PollTimer>,
+    poll_physical: HashMap<TimerId, TimerId>,
     next_id: u32,
     /// Retained symbol buffers; only the active prefix belongs to the next frame.
     changed_books: Vec<String>,
@@ -460,6 +486,9 @@ impl<P> Default for Io<P> {
             streams: HashMap::new(),
             incoming: HashMap::new(),
             timers: HashMap::new(),
+            poll_interval_ms: None,
+            poll_timers: HashMap::new(),
+            poll_physical: HashMap::new(),
             next_id: 1,
             changed_books: Vec::new(),
             changed_books_active: 0,
@@ -480,6 +509,57 @@ impl<P> Io<P> {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1).max(1);
         id
+    }
+
+    fn arm_poll(&mut self, now: f64, logical: TimerId) {
+        let poll = &self.poll_timers[&logical];
+        let interval = self.poll_interval_ms.unwrap_or(poll.default_interval_ms);
+        // Never hand an infinite/invalid deadline to a host. Infinity policy
+        // retains the registration so a finite update can resume it.
+        if !interval.is_finite()
+            || interval <= 0.
+            || !poll.bounds.minimum_interval_ms.is_finite()
+            || poll.bounds.minimum_interval_ms < 0.
+            || poll.bounds.not_before_ms.is_nan()
+        {
+            return;
+        }
+        let at_ms =
+            (now + interval.max(poll.bounds.minimum_interval_ms)).max(poll.bounds.not_before_ms);
+        if !at_ms.is_finite() {
+            return;
+        }
+        let physical = TimerId(self.next());
+        self.poll_timers.get_mut(&logical).unwrap().physical = Some(physical);
+        self.poll_physical.insert(physical, logical);
+        self.timers.insert(physical, ());
+        self.actions.push(Action::SetTimer {
+            timer: physical,
+            at_ms,
+        });
+    }
+
+    fn clear_physical_timer(&mut self, timer: TimerId) {
+        if self.timers.remove(&timer).is_some() {
+            self.actions.push(Action::ClearTimer { timer });
+        }
+    }
+
+    fn set_poll_interval(&mut self, now: f64, interval_ms: f64) {
+        if self.poll_interval_ms == Some(interval_ms) {
+            return;
+        }
+        self.poll_interval_ms = Some(interval_ms);
+        // Sort logical IDs so action ordering is independent of HashMap seeds.
+        let mut logicals: Vec<_> = self.poll_timers.keys().copied().collect();
+        logicals.sort_unstable_by_key(|timer| timer.0);
+        for logical in logicals {
+            if let Some(physical) = self.poll_timers.get_mut(&logical).unwrap().physical.take() {
+                self.poll_physical.remove(&physical);
+                self.clear_physical_timer(physical);
+            }
+            self.arm_poll(now, logical);
+        }
     }
 }
 
@@ -759,9 +839,43 @@ impl<P> Cx<'_, P> {
         timer
     }
 
+    /// Register one periodic-poll wakeup. The configured positive interval
+    /// replaces this fallback cadence; Infinity pauses without losing it.
+    /// Rearm from the venue callback or read completion for the next cycle.
+    pub fn set_poll_timer(&mut self, default_interval_ms: f64) -> TimerId {
+        self.set_poll_timer_with_bounds(default_interval_ms, PollTimerBounds::default())
+    }
+
+    /// Configuration changes rearm from change-time, honoring both the recurring
+    /// minimum and the unchanged absolute deadline. Backoff should therefore be
+    /// an absolute `not_before_ms`, not the fallback cadence. Invalid bounds or
+    /// nonfinite due times stay parked rather than reaching a host timer.
+    pub fn set_poll_timer_with_bounds(
+        &mut self,
+        default_interval_ms: f64,
+        bounds: PollTimerBounds,
+    ) -> TimerId {
+        let logical = TimerId(self.io.next());
+        self.io.poll_timers.insert(
+            logical,
+            PollTimer {
+                default_interval_ms,
+                bounds,
+                physical: None,
+            },
+        );
+        self.io.arm_poll(self.now, logical);
+        logical
+    }
+
     pub fn clear_timer(&mut self, timer: TimerId) {
-        if self.io.timers.remove(&timer).is_some() {
-            self.io.actions.push(Action::ClearTimer { timer });
+        if let Some(poll) = self.io.poll_timers.remove(&timer) {
+            if let Some(physical) = poll.physical {
+                self.io.poll_physical.remove(&physical);
+                self.io.clear_physical_timer(physical);
+            }
+        } else {
+            self.io.clear_physical_timer(timer);
         }
     }
 
@@ -1205,6 +1319,10 @@ impl<V: Venue> Engine<V> {
         };
         match event {
             Event::TickIntervalChanged { interval_ms } => {
+                if interval_ms.is_nan() || interval_ms <= 0. {
+                    return;
+                }
+                cx.io.set_poll_interval(now, interval_ms);
                 self.venue.on_tick_interval(&mut cx, interval_ms)
             }
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
@@ -1268,7 +1386,13 @@ impl<V: Venue> Engine<V> {
             }
             Event::TimerFired { timer } => {
                 if cx.io.timers.remove(&timer).is_some() {
-                    self.venue.on_timer(&mut cx, timer);
+                    let logical = if let Some(logical) = cx.io.poll_physical.remove(&timer) {
+                        cx.io.poll_timers.remove(&logical);
+                        logical
+                    } else {
+                        timer
+                    };
+                    self.venue.on_timer(&mut cx, logical);
                 }
             }
             Event::Command(Command::AmendOrderWithSymbol { command, .. })

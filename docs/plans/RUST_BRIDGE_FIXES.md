@@ -551,3 +551,14 @@ credential backoff. No body/log regex or signed-header inference is planned.
   completion after policy change and unaffected ordinary timers. Run core/native
   and wasm32 strict checks, parser feature tests and independent review before
   the foundation commit. No resync/network-completion claim in this slice.
+
+Foundation implemented and independently reviewed PASS. Core all-feature run
+passes 106 cases (91 unit, eight new scheduler, seven shared-feed); default
+feature run passes 100, overlapping those cases rather than adding 100 distinct
+cases. Coinbase-only WASM parser case passes, proving polling-control is no
+longer dependent on enabling Breakout. Strict core all-target/all-feature and
+selected Coinbase/Breakout wasm32 Clippy, bans and scoped fmt pass. Logical
+registrations survive pause, obsolete physical callbacks are fenced, floors
+remain distinct from fallback cadence, and consumed registrations are removed
+before callbacks. Venue timers, SDK policy propagation, classified auth feedback
+and actual account resync are still separate implementation work.

@@ -1336,6 +1336,22 @@ mod tests {
     }
 
     #[test]
+    fn every_selected_venue_build_accepts_polling_control() {
+        use safe_cex_engine::command::{HostInput, decode_host_input};
+
+        assert_eq!(
+            decode_host_input(r#"{"op":"setTickInterval","interval":250}"#).unwrap(),
+            HostInput::TickIntervalChanged { interval_ms: 250. }
+        );
+        assert_eq!(
+            decode_host_input(r#"{"op":"setTickInterval","interval":null}"#).unwrap(),
+            HostInput::TickIntervalChanged {
+                interval_ms: f64::INFINITY
+            }
+        );
+    }
+
+    #[test]
     fn host_commands_dispatch_once_and_flush_once_with_original_clock() {
         use safe_cex_engine::command::HostInput;
         use std::cell::{Cell, RefCell};
