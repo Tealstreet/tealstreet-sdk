@@ -69,4 +69,40 @@ KuCoin and Polymarket retain explicit pong requirements even amid other data.
   fractional timeout, causing zero-delay timers. Expiry now compares the same
   absolute deadline used when scheduling. The reproducer includes
   `10731.000000000002 + 10000`, whose subtraction rounds below 10000.
-- Venue migrations and native regression verification are in progress.
+- Phase 2: `d4726feebf` migrates five private auth paths, with 519 native
+  tests passing (24 new regressions), formatting and strict Clippy. Peer review
+  found ACK-less wallet-only ApeX readiness and a Bitget write-recovery timer
+  bypassing retry; both have RED-before/GREEN-after native regressions and an
+  independent passing rereview. TS has the same rejected-login liveness holes;
+  `KNOWN_TS_FIXES` records them without replay-output normalization.
+- Phase 3: `f0927afde2` migrates AsterDEX/Bitrue/BingX/KuCoin/Crypto.com
+  (415 native tests); `9634dba18a` migrates Phemex/Coinbase public, all GRVT
+  feeds, Paradex and Polymarket (530 native tests). Both groups passed scoped
+  formatting, strict Clippy and independent correctness reviews. Focused
+  baseline runs reproduce the original flap/token/auth/stale-keepalive defects.
+- `1e5ba12c51` merges landing `1b8592dbd2` (PR #1338); the sole conflict was
+  independent tests appended to KuCoin's public suite, both retained. Landing
+  introduced KuCoin Spot with fixed reconnect; it is now included in phase 3.
+- Bundle investigation before that merge: Paradex's first shared-policy build
+  was 1,260,249 bytes against the unchanged 1,258,291 budget. Constructor
+  constant folding removes redundant validation code; exact power-of-two
+  backoff scaling uses an integer shift. Measurement/verification continues
+  against the merged landing rather than extrapolating from old builds.
+- Fresh 20-second Paradex public recording succeeded: 26,674 frames, two HTTP
+  responses and both requested books. Performance/replay gates remain pending;
+  no live private connectivity is claimed.
+
+## Remaining migration inventory
+
+These retain their current venue-owned supervision for a follow-up; this lane
+does not claim that every venue now uses the shared module:
+
+- Public ApeX Omni, Bitget, BloFin, MEXC and WOO.
+- Private Phemex and Coinbase.
+- Binance (all products), Bybit (all products), Backpack, Hyperliquid (including
+  spot), Kraken (including spot), Lighter (including Robinhood), OKX, Orderly
+  brokers, TxFlow and WEEX.
+
+BreakoutProp uses polling rather than a venue WebSocket and needs no socket
+supervisor migration. Native mandatory-pong/subscription/session state remains
+venue-owned even on migrated feeds.
