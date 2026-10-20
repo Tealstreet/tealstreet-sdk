@@ -834,6 +834,10 @@ pub trait Venue {
     #[cfg(feature = "polling-control")]
     fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, _interval_ms: f64) {}
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
+    /// Opt in only when amendments retain the caller's symbol routing context.
+    fn supports_amend_order_with_symbol(&self) -> bool {
+        false
+    }
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
     fn book(&self, symbol: &str) -> Option<&Book>;
     /// Every synchronized book, for snapshot frames.
@@ -959,6 +963,14 @@ impl<V: Venue> Engine<V> {
                 if cx.io.timers.remove(&timer).is_some() {
                     self.venue.on_timer(&mut cx, timer);
                 }
+            }
+            Event::Command(Command::AmendOrderWithSymbol { command, .. })
+                if !self.venue.supports_amend_order_with_symbol() =>
+            {
+                cx.done(
+                    command,
+                    Err("symbol-aware amendment is unsupported by this venue".into()),
+                );
             }
             Event::Command(command) => self.venue.on_command(&mut cx, command),
         }
@@ -1245,6 +1257,8 @@ mod streaming_tests {
         body: Option<String>,
         failure: Option<String>,
         book: Option<Book>,
+        symbol_amend: bool,
+        commands: Vec<Command>,
     }
 
     impl Venue for StreamVenue {
@@ -1291,7 +1305,12 @@ mod streaming_tests {
             self.failure = Some(error.to_owned());
         }
         fn on_timer(&mut self, _cx: &mut Cx<'_, Self::Pending>, _timer: TimerId) {}
-        fn on_command(&mut self, _cx: &mut Cx<'_, Self::Pending>, _command: Command) {}
+        fn supports_amend_order_with_symbol(&self) -> bool {
+            self.symbol_amend
+        }
+        fn on_command(&mut self, _cx: &mut Cx<'_, Self::Pending>, command: Command) {
+            self.commands.push(command);
+        }
         fn book(&self, _symbol: &str) -> Option<&Book> {
             self.book.as_ref()
         }
@@ -1307,6 +1326,8 @@ mod streaming_tests {
             body: None,
             failure: None,
             book: None,
+            symbol_amend: false,
+            commands: Vec::new(),
         });
         engine.start(0.0);
         let request = engine
@@ -1338,7 +1359,56 @@ mod streaming_tests {
             body: None,
             failure: None,
             book: Some(Book::default()),
+            symbol_amend: false,
+            commands: Vec::new(),
         })
+    }
+
+    #[test]
+    fn symbol_amend_defaults_to_one_unsupported_reply_without_dispatch_or_state_changes() {
+        let mut engine = frame_engine();
+        engine.store.set_markets(vec![market("BTC-USDT")]);
+        let before = engine.snapshot_frame(1.).to_vec();
+        engine.handle(
+            1.,
+            Event::Command(Command::AmendOrderWithSymbol {
+                command: 31,
+                id: "unseen".into(),
+                symbol: "BTC-USDT".into(),
+                price: Some(100.),
+                amount: Some(2.),
+            }),
+        );
+        assert!(engine.venue.commands.is_empty());
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        assert!(
+            matches!(actions.as_slice(), [Action::Notice(Notice::CommandDone {
+            command: 31, result: Err(error),
+        })] if error.contains("unsupported"))
+        );
+        assert_eq!(engine.snapshot_frame(1.), before);
+        let legacy = Command::SetTickerSymbols {
+            symbols: vec!["BTC-USDT".into()],
+        };
+        engine.handle(1., Event::Command(legacy.clone()));
+        assert_eq!(engine.venue.commands, [legacy]);
+        assert!(!engine.has_actions());
+    }
+
+    #[test]
+    fn symbol_amend_opt_in_forwards_the_complete_original_command() {
+        let mut engine = frame_engine();
+        engine.venue.symbol_amend = true;
+        let command = Command::AmendOrderWithSymbol {
+            command: 32,
+            id: "unseen".into(),
+            symbol: "BTC-USDT".into(),
+            price: Some(100.),
+            amount: Some(2.),
+        };
+        engine.handle(1., Event::Command(command.clone()));
+        assert_eq!(engine.venue.commands, [command]);
+        assert!(!engine.has_actions());
     }
 
     fn market(symbol: &str) -> crate::model::Market {

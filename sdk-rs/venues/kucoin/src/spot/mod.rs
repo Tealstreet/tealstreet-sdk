@@ -621,6 +621,9 @@ fn candle(text: &str) -> Result<Candle, String> {
 
 impl Venue for KucoinSpot {
     type Pending = Pending;
+    fn supports_amend_order_with_symbol(&self) -> bool {
+        true
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.options.testnet || (!self.options.public_data_only && self.credentials.is_none()) {
             cx.log(
