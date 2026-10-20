@@ -144,6 +144,12 @@ symbol's `fetchedLeverage.positionMode`. Treat Binance code `-4059` (`No need to
 change position side`) as idempotent success for the requested mode, and keep it
 in the REST client's silent error-code list so duplicate clicks don't emit a UI error.
 
+`setLeverage()` updates each existing position/placeholder ID for the symbol,
+including the one-way ID (the bare symbol). Updating only legacy hedge IDs leaves
+the cached leverage stale and can make restoration skip its REST write. A rejected
+leverage write propagates to the caller and preserves prior settings; the live
+smoke gate requires successful commands rather than identical swallowed errors.
+
 Futures REST snapshots that expect arrays must validate the response shape before
 calling `.find()` / `.map()` / `.reduce()`. Binance and proxy/tunnel paths can
 surface `{ code, msg }` error envelopes where an array is expected; those should

@@ -505,6 +505,9 @@ const KNOWN_TS_FIXES = {
   ],
 
   binance: (ts, rust) => {
+    // KNOWN_TS_FIXES: one-way leverage writes used hedge IDs, leaving the cache
+    // stale and skipping restoration; rejected writes were swallowed. Reference
+    // setter and deterministic regression are fixed, so no output adjustment.
     for (const position of ts.account?.positions ?? []) {
       const fixed = rust.account.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
       if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;

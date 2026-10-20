@@ -73,5 +73,19 @@ native network primitives provide its transport. No engine shapes change.
   cleanup proof. A fresh engine reads remote account state after disposal;
   namespaced verification records remain diagnostic, while the primary lifecycle
   is compared through TS/Rust. Unknown notional evidence refuses before writes.
-  The runner restores the known original leverage; an engine may correctly
-  treat setting its unchanged value as a no-op.
+  After cancellation the runner tests a lower leverage where available, then
+  restores the captured original; fixed/minimum leverage remains unchanged.
+- Audited sizing extension: `e65f363a33`, 21 source-linked venue families and
+  33 passing tests, independent review PASS. Native place/amend units override
+  display-unit min/step/max for KuCoin, BloFin, OKX and MEXC. Unknown monetary
+  rules refuse before trading; current limitations are listed in the spec.
+- Security re-review: `38ccb04020`, signed auth-header echoes and canonical form
+  encodings now redact, with reproduced failures before repair and 109 passing
+  recorder/Tape tests afterward.
+- TS bug found by the actual lower/restore gate: Binance one-way placeholders
+  use the bare symbol, while setLeverage updated only legacy hedge IDs. The
+  stale value caused restore to skip its write. Update actual matching IDs and
+  propagate rejected writes; 3 native TS regressions and independent review
+  pass. KNOWN_TS_FIXES documents the fixed reference without output rewriting.
+- Merged landing `5d7589f296` (GRVT and memory-baseline changes) as `88b5c3c805`.
+  GRVT has no reviewed capture/replay profile yet and refuses before credentials.
