@@ -9,20 +9,20 @@ use safe_cex_venue_grvt::{Grvt, Options};
 use serde::Deserialize;
 
 const NOW: f64 = 1_700_000_000_000.;
-const PRODUCTS: [(&str, &str); 7] = [
-    ("BTC_USDT_Perp", "PERPETUAL"),
-    ("BTC_USDT_StablePerp", "STABLE_PERP"),
-    ("BTC_USDT_Fut_25Dec26", "FUTURE"),
-    ("BTC_USDT_Fut_26Mar27", "FUTURE"),
-    ("BTC_USDT_Call_25Dec26_50000", "CALL"),
-    ("BTC_USDT_Call_25Dec26_60000", "CALL"),
-    ("BTC_USDT_Put_25Dec26_50000", "PUT"),
+const MARKETS: [(&str, &str); 7] = [
+    ("BTC_USDT_Perp", "BTC"),
+    ("ETH_USDT_Perp", "ETH"),
+    ("SOL_USDT_Perp", "SOL"),
+    ("XRP_USDT_Perp", "XRP"),
+    ("DOGE_USDT_Perp", "DOGE"),
+    ("ADA_USDT_Perp", "ADA"),
+    ("AVAX_USDT_Perp", "AVAX"),
 ];
 fn catalog() -> String {
-    format!(r#"{{"r":[{}]}}"#, PRODUCTS.iter().enumerate().map(|(n,(id,kind))| format!(r#"{{"i":"{id}","k":"{kind}","ih":"0x{:06x}","b":"BTC","q":"USDT","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6}}"#, if n == 1 { 0x30508 } else { 0x30501+n })).collect::<Vec<_>>().join(","))
+    format!(r#"{{"r":[{}]}}"#, MARKETS.iter().enumerate().map(|(n,(id,base))| format!(r#"{{"i":"{id}","k":"PERPETUAL","ih":"0x{:06x}","b":"{base}","q":"USDT","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6}}"#, if n == 1 { 0x30508 } else { 0x30501+n })).collect::<Vec<_>>().join(","))
 }
 fn positions() -> String {
-    format!(r#"{{"r":[{}]}}"#, PRODUCTS.iter().map(|(id,_)| format!(r#"{{"i":"{id}","s":"-0.25","ep":"100","mp":"100.5","n":"25.125","up":"-0.125","l":"10","el":"200","mt":"CROSS"}}"#)).collect::<Vec<_>>().join(","))
+    format!(r#"{{"r":[{}]}}"#, MARKETS.iter().map(|(id,_)| format!(r#"{{"i":"{id}","s":"-0.25","ep":"100","mp":"100.5","n":"-25.125","up":"-0.125","l":"10","el":"200","mt":"CROSS"}}"#)).collect::<Vec<_>>().join(","))
 }
 fn order_row(id: &str, native: &str, client: &str) -> String {
     format!(
@@ -32,7 +32,7 @@ fn order_row(id: &str, native: &str, client: &str) -> String {
 fn orders() -> String {
     format!(
         r#"{{"r":[{}]}}"#,
-        PRODUCTS
+        MARKETS
             .iter()
             .enumerate()
             .map(|(n, (id, _))| order_row(id, &format!("0x{:04x}", n + 1), &(n + 101).to_string()))
@@ -169,15 +169,16 @@ impl Harness {
 }
 
 #[test]
-fn derivative_catalog_and_private_snapshots_preserve_every_native_identity() {
+fn perpetual_catalog_and_private_snapshots_preserve_every_native_identity() {
     let h = Harness::new(true);
-    assert_eq!(h.e.store().markets().len(), PRODUCTS.len());
-    assert_eq!(h.e.store().positions().len(), PRODUCTS.len());
-    assert_eq!(h.e.store().orders().len(), PRODUCTS.len());
-    for (n, (id, kind)) in PRODUCTS.iter().enumerate() {
+    assert_eq!(h.e.store().markets().len(), MARKETS.len());
+    assert_eq!(h.e.store().positions().len(), MARKETS.len());
+    assert_eq!(h.e.store().orders().len(), MARKETS.len());
+    for (n, (id, base)) in MARKETS.iter().enumerate() {
         let m = h.e.store().market_by_id(id).unwrap();
         assert_eq!(m.symbol, id.to_ascii_uppercase());
-        assert_eq!(m.is_perpetual, Some(*kind == "PERPETUAL"));
+        assert_eq!(m.is_perpetual, Some(true));
+        assert_eq!(m.base, *base);
         let p =
             h.e.store()
                 .positions()
@@ -197,12 +198,12 @@ fn derivative_catalog_and_private_snapshots_preserve_every_native_identity() {
 }
 
 #[test]
-fn every_derivative_has_independent_tickers_books_and_candles() {
+fn every_perpetual_has_independent_tickers_books_and_candles() {
     let mut h = Harness::new(false);
     let socket = h.socket(SocketChannel::Public);
     h.e.handle(h.now, Event::WsOpened { socket });
     h.collect();
-    for (n, (id, _)) in PRODUCTS.iter().enumerate() {
+    for (n, (id, _)) in MARKETS.iter().enumerate() {
         let price = 100. + n as f64;
         h.ws(socket,&format!(r#"{{"s":"v1.ticker.d","sn":"0","f":{{"i":"{id}","lp":"{price}","op":"100","bv":"2","sv":"3"}}}}"#));
         assert_eq!(
@@ -247,9 +248,9 @@ struct Execution {
 }
 
 #[test]
-fn broad_and_exact_fill_reads_do_not_filter_derivative_families() {
+fn broad_and_exact_fill_reads_isolate_supported_markets() {
     let mut h = Harness::new(true);
-    for (n, (id, _)) in PRODUCTS.iter().enumerate() {
+    for (n, (id, _)) in MARKETS.iter().enumerate() {
         let command = 100 + n as u32;
         h.command(Command::Query {
             command,
@@ -263,7 +264,7 @@ fn broad_and_exact_fill_reads_do_not_filter_derivative_families() {
         });
         let r = h.take("fill_history");
         assert!(!r.body.as_deref().unwrap().contains(r#""k":"#));
-        let rows=PRODUCTS.iter().enumerate().map(|(j,(i,_))|format!(r#"{{"et":"1700000000000000000","sa":"777","i":"{i}","ti":"fill-{j}","co":"{}","oi":"0x{:04x}","ib":true,"s":"0.2","p":"100","f":"0.01","rp":"-0.125","fc":"USDT"}}"#,j+101,j+1)).collect::<Vec<_>>().join(",");
+        let rows=MARKETS.iter().enumerate().map(|(j,(i,_))|format!(r#"{{"et":"1700000000000000000","sa":"777","i":"{i}","ti":"fill-{j}","co":"{}","oi":"0x{:04x}","ib":true,"s":"0.2","p":"100","f":"0.01","rp":"-0.125","fc":"USDT"}}"#,j+101,j+1)).collect::<Vec<_>>().join(",");
         h.respond(r, &format!(r#"{{"r":[{rows}],"n":""}}"#), "");
         let fills: Vec<Execution> = serde_json::from_str(&h.result(command).unwrap()).unwrap();
         assert_eq!(fills.len(), 1);
@@ -289,7 +290,7 @@ fn broad_and_exact_fill_reads_do_not_filter_derivative_families() {
 }
 
 #[test]
-fn mixed_catalog_refresh_is_atomic_and_keeps_existing_product_data() {
+fn malformed_catalog_refresh_is_atomic_and_keeps_existing_market_data() {
     let mut h = Harness::new(false);
     let timer = h
         .actions
@@ -303,21 +304,20 @@ fn mixed_catalog_refresh_is_atomic_and_keeps_existing_product_data() {
     h.e.handle(h.now, Event::TimerFired { timer });
     h.collect();
     let r = h.take("all_instruments");
-    let malformed = catalog().replace(r#""k":"PUT""#, r#""k":"PUT","ts":"NaN""#);
-    h.respond(r, &malformed, "");
-    assert_eq!(h.e.store().markets().len(), PRODUCTS.len());
-    assert_eq!(
-        h.e.store()
-            .market_by_id(PRODUCTS[6].0)
-            .unwrap()
-            .precision
-            .price,
-        0.1
+    let malformed = catalog().replace(r#""ts":"0.1""#, r#""ts":"0.2""#).replace(
+        r#""b":"AVAX","q":"USDT","ts":"0.2""#,
+        r#""b":"AVAX","q":"USDT","ts":"NaN""#,
     );
+    assert!(malformed.contains(r#""ts":"NaN""#));
+    h.respond(r, &malformed, "");
+    assert_eq!(h.e.store().markets().len(), MARKETS.len());
+    for (id, _) in MARKETS {
+        assert_eq!(h.e.store().market_by_id(id).unwrap().precision.price, 0.1);
+    }
 }
 
 #[test]
-fn metadata_only_refresh_updates_derivative_rails_without_losing_private_rows() {
+fn metadata_only_refresh_updates_perpetual_rails_without_losing_private_rows() {
     let mut h = Harness::new(true);
     let timer = h
         .actions
@@ -338,23 +338,23 @@ fn metadata_only_refresh_updates_derivative_rails_without_losing_private_rows() 
             .replace("0x030505", "0x040505"),
         "",
     );
-    for (id, kind) in PRODUCTS {
+    for (id, _) in MARKETS {
         let market = h.e.store().market_by_id(id).unwrap();
         assert_eq!(market.precision.price, 0.2);
-        assert_eq!(market.is_perpetual, Some(kind == "PERPETUAL"));
+        assert_eq!(market.is_perpetual, Some(true));
     }
-    assert_eq!(h.e.store().positions().len(), PRODUCTS.len());
-    assert_eq!(h.e.store().orders().len(), PRODUCTS.len());
+    assert_eq!(h.e.store().positions().len(), MARKETS.len());
+    assert_eq!(h.e.store().orders().len(), MARKETS.len());
 }
 
 #[test]
-fn derivative_push_beats_stale_rest_without_erasing_expiry_or_strike_siblings() {
+fn perpetual_push_beats_stale_rest_without_erasing_other_markets() {
     let mut h = Harness::new(true);
     let socket = h.socket(SocketChannel::Private);
     h.e.handle(h.now, Event::WsOpened { socket });
     h.collect();
     let stale = h.take("positions");
-    let (id, _) = PRODUCTS[4];
+    let (id, _) = MARKETS[4];
     h.ws(socket, &format!(r#"{{"s":"v1.position","f":{{"i":"{id}","s":"0.5","ep":"100","mp":"97.5","n":"48.75","up":"-1.25","l":"10","el":"200","mt":"CROSS"}}}}"#));
     h.respond(stale, &positions(), "");
     let row =
@@ -364,8 +364,8 @@ fn derivative_push_beats_stale_rest_without_erasing_expiry_or_strike_siblings() 
             .find(|p| p.symbol == id.to_ascii_uppercase())
             .unwrap();
     assert_eq!((row.contracts, row.unrealized_pnl), (0.5, -1.25));
-    assert_eq!(h.e.store().positions().len(), PRODUCTS.len());
-    for (other, _) in PRODUCTS.iter().filter(|(other, _)| *other != id) {
+    assert_eq!(h.e.store().positions().len(), MARKETS.len());
+    for (other, _) in MARKETS.iter().filter(|(other, _)| *other != id) {
         let row =
             h.e.store()
                 .positions()
@@ -386,7 +386,7 @@ fn no_cancel(h: &Harness) {
 fn cancel_symbol(h: &mut Harness, n: usize, command: u32) -> HttpRequest {
     h.command(Command::CancelSymbolOrders {
         command,
-        symbol: PRODUCTS[n].0.to_ascii_uppercase(),
+        symbol: MARKETS[n].0.to_ascii_uppercase(),
     });
     let read = h.take("open_orders");
     assert_eq!(read.body.as_deref(), Some(r#"{"sa":"777"}"#));
@@ -395,8 +395,8 @@ fn cancel_symbol(h: &mut Harness, n: usize, command: u32) -> HttpRequest {
 }
 
 #[test]
-fn exact_symbol_cancellation_reads_remote_snapshot_and_preserves_expiry_strike_siblings() {
-    for (n, (id, _)) in PRODUCTS.iter().enumerate() {
+fn exact_symbol_cancellation_reads_remote_snapshot_and_preserves_other_markets() {
+    for (n, (id, _)) in MARKETS.iter().enumerate() {
         let mut h = Harness::new(true);
         let read = cancel_symbol(&mut h, n, 300);
         h.respond(read, &orders(), "");
@@ -406,7 +406,7 @@ fn exact_symbol_cancellation_reads_remote_snapshot_and_preserves_expiry_strike_s
             format!(r#"{{"sa":"777","oi":"0x{:04x}"}}"#, n + 1)
         );
         no_cancel(&h);
-        for (j, _) in PRODUCTS.iter().enumerate() {
+        for (j, _) in MARKETS.iter().enumerate() {
             assert_eq!(
                 h.e.store().order(&(j + 101).to_string()).unwrap().status,
                 if j == n {
@@ -431,7 +431,7 @@ fn exact_symbol_cancellation_reads_remote_snapshot_and_preserves_expiry_strike_s
         );
         h.collect();
         assert_eq!(h.result(300).unwrap(), "[]");
-        assert_eq!(h.e.store().orders().len(), PRODUCTS.len());
+        assert_eq!(h.e.store().orders().len(), MARKETS.len());
         no_cancel(&h);
     }
     let mut h = Harness::new(true);
@@ -470,13 +470,10 @@ fn empty_snapshot_is_complete_but_truncated_malformed_or_ambiguous_snapshots_nev
         orders().replace("0x0007", "0x1"), // aliases the first row's native ID
         orders().replace(r#""co":"107""#, r#""co":"101""#),
         orders().replace(r#""s":"2","lp":"100""#, r#""s":"NaN","lp":"100""#),
-        orders().replace(
-            r#""i":"BTC_USDT_Put_25Dec26_50000""#,
-            r#""i":"unknown-instrument""#,
-        ),
+        orders().replace(r#""i":"AVAX_USDT_Perp""#, r#""i":"unknown-instrument""#),
         format!(
-            r#"{{"r":[{},{{"sa":"777","l":[{{"i":"BTC_USDT_Perp"}},{{"i":"BTC_USDT_Fut_25Dec26"}}]}}]}}"#,
-            order_row(PRODUCTS[4].0, "0x1234", "400")
+            r#"{{"r":[{},{{"sa":"777","l":[{{"i":"BTC_USDT_Perp"}},{{"i":"SOL_USDT_Perp"}}]}}]}}"#,
+            order_row(MARKETS[4].0, "0x1234", "400")
         ),
         orders().replace(
             r#""sa":"777","oi":"0x0007""#,
@@ -519,7 +516,7 @@ fn full_uint64_client_fallback_is_exact_and_zero_is_only_an_absent_sentinel() {
         read,
         &format!(
             r#"{{"r":[{}]}}"#,
-            order_row(PRODUCTS[4].0, "0x000000", "18446744073709551615")
+            order_row(MARKETS[4].0, "0x000000", "18446744073709551615")
         ),
         "",
     );
@@ -532,8 +529,8 @@ fn full_uint64_client_fallback_is_exact_and_zero_is_only_an_absent_sentinel() {
     assert_eq!(h.result(305).unwrap(), "[]");
     let mut h = Harness::new(true);
     let read = cancel_symbol(&mut h, 4, 306);
-    let row1 = order_row(PRODUCTS[4].0, "0x100", "0");
-    let row2 = order_row(PRODUCTS[5].0, "0x101", "0");
+    let row1 = order_row(MARKETS[4].0, "0x100", "0");
+    let row2 = order_row(MARKETS[5].0, "0x101", "0");
     h.respond(read, &format!(r#"{{"r":[{row1},{row2}]}}"#), "");
     let write = h.take("cancel_order");
     assert_eq!(write.body.as_deref(), Some(r#"{"sa":"777","oi":"0x100"}"#));
@@ -543,7 +540,7 @@ fn full_uint64_client_fallback_is_exact_and_zero_is_only_an_absent_sentinel() {
     let read = cancel_symbol(&mut h, 4, 307);
     h.respond(
         read,
-        &format!(r#"{{"r":[{}]}}"#, order_row(PRODUCTS[4].0, "0x0", "0")),
+        &format!(r#"{{"r":[{}]}}"#, order_row(MARKETS[4].0, "0x0", "0")),
         "",
     );
     assert!(h.result(307).is_err());
@@ -589,13 +586,13 @@ fn cancellation_snapshot_requires_current_session_and_auth_retry_keeps_exact_rea
 fn partial_cancel_failure_preserves_acknowledged_pending_state_and_never_retries_uncertainty() {
     let mut h = Harness::new(true);
     let read = cancel_symbol(&mut h, 4, 310);
-    let first = order_row(PRODUCTS[4].0, "0x0005", "105");
-    let second = order_row(PRODUCTS[4].0, "0x1234", "800");
+    let first = order_row(MARKETS[4].0, "0x0005", "105");
+    let second = order_row(MARKETS[4].0, "0x1234", "800");
     h.respond(
         read,
         &format!(
             r#"{{"r":[{first},{second},{}]}}"#,
-            order_row(PRODUCTS[5].0, "0x0006", "106")
+            order_row(MARKETS[5].0, "0x0006", "106")
         ),
         "",
     );
@@ -627,8 +624,8 @@ fn partial_cancel_failure_preserves_acknowledged_pending_state_and_never_retries
 
 #[test]
 fn malformed_rejected_or_wrong_identity_cancel_ack_stops_the_remaining_writes() {
-    let proof = order_row(PRODUCTS[4].0, "0x999", "105");
-    let good_proof = order_row(PRODUCTS[4].0, "0x0005", "105");
+    let proof = order_row(MARKETS[4].0, "0x999", "105");
+    let good_proof = order_row(MARKETS[4].0, "0x0005", "105");
     let mut bodies = vec![
         r#"{"r":{"a":false}}"#.to_owned(),
         r#"{"r":{}}"#.into(),
@@ -673,8 +670,8 @@ fn malformed_rejected_or_wrong_identity_cancel_ack_stops_the_remaining_writes() 
             read,
             &format!(
                 r#"{{"r":[{},{}]}}"#,
-                order_row(PRODUCTS[4].0, "0x0005", "105"),
-                order_row(PRODUCTS[4].0, "0x1234", "800")
+                order_row(MARKETS[4].0, "0x0005", "105"),
+                order_row(MARKETS[4].0, "0x1234", "800")
             ),
             "",
         );
@@ -731,7 +728,7 @@ fn terminal_and_reused_client_events_during_snapshot_fail_before_any_cancel() {
         order_push(
             &mut h,
             socket,
-            PRODUCTS[4].0,
+            MARKETS[4].0,
             "0x0005",
             "105",
             "FILLED",
@@ -761,7 +758,7 @@ fn terminal_and_reused_client_events_during_snapshot_fail_before_any_cancel() {
         order_push(
             &mut h,
             socket,
-            PRODUCTS[4].0,
+            MARKETS[4].0,
             "0xbeef",
             "105",
             "OPEN",
@@ -782,14 +779,14 @@ fn later_target_terminal_or_reused_lifecycle_aborts_after_only_the_first_cancel(
         let mut h = Harness::new(true);
         let socket = private_socket(&mut h);
         let read = cancel_symbol(&mut h, 4, 322);
-        let first = order_row(PRODUCTS[4].0, "0x0005", "105");
-        let second = order_row(PRODUCTS[4].0, "0x1234", "800");
+        let first = order_row(MARKETS[4].0, "0x0005", "105");
+        let second = order_row(MARKETS[4].0, "0x1234", "800");
         h.respond(read, &format!(r#"{{"r":[{first},{second}]}}"#), "");
         let write = h.take("cancel_order");
         order_push(
             &mut h,
             socket,
-            PRODUCTS[4].0,
+            MARKETS[4].0,
             if terminal { "0x1234" } else { "0xbeef" },
             "800",
             if terminal { "FILLED" } else { "OPEN" },
@@ -818,7 +815,7 @@ fn late_partial_fills_remain_authoritative_while_cancelling_only_the_native_rema
     order_push(
         &mut h,
         socket,
-        PRODUCTS[4].0,
+        MARKETS[4].0,
         "0x0005",
         "105",
         "OPEN",
@@ -861,7 +858,7 @@ fn explicit_auth_retry_preserves_cancel_identity_and_rechecks_terminal_client_ev
             order_push(
                 &mut h,
                 socket,
-                PRODUCTS[4].0,
+                MARKETS[4].0,
                 "0x0005",
                 "105",
                 "FILLED",
@@ -933,7 +930,7 @@ struct SignedMetadata {
 }
 
 #[test]
-fn all_derivative_orders_keep_refreshed_native_asset_hash_and_exact_signing_units() {
+fn all_perpetual_orders_keep_refreshed_native_asset_hash_and_exact_signing_units() {
     let mut h = Harness::new(true);
     let timer = h
         .actions
@@ -955,7 +952,7 @@ fn all_derivative_orders_keep_refreshed_native_asset_hash_and_exact_signing_unit
         "",
     );
     let signer: PrivateKeySigner = format!("0x{}", "01".repeat(32)).parse().unwrap();
-    for (n, (id, _)) in PRODUCTS.iter().enumerate() {
+    for (n, (id, _)) in MARKETS.iter().enumerate() {
         let client = (900 + n).to_string();
         let options=serde_json::from_str(&format!(r#"{{"symbol":"{}","type":"limit","side":"buy","amount":0.125,"price":101.2,"clientOrderId":"{client}"}}"#,id.to_ascii_uppercase())).unwrap();
         h.command(Command::PlaceOrders {
@@ -1011,7 +1008,7 @@ fn all_derivative_orders_keep_refreshed_native_asset_hash_and_exact_signing_unit
 fn streamed_cancel_snapshot_stages_until_complete_and_resets_after_partial_failure() {
     let mut h = Harness::new(true);
     let read = cancel_symbol(&mut h, 4, 330);
-    let row = order_row(PRODUCTS[4].0, "0x0005", "105");
+    let row = order_row(MARKETS[4].0, "0x0005", "105");
     h.e.handle(
         h.now,
         Event::HttpStart {
@@ -1073,7 +1070,7 @@ fn streamed_cancel_snapshot_stages_until_complete_and_resets_after_partial_failu
 fn truncated_or_auth_rejected_stream_never_promotes_staged_cancel_rows() {
     let mut h = Harness::new(true);
     let read = cancel_symbol(&mut h, 4, 331);
-    let row = order_row(PRODUCTS[4].0, "0x0005", "105");
+    let row = order_row(MARKETS[4].0, "0x0005", "105");
     h.e.handle(
         h.now,
         Event::HttpStart {
@@ -1098,7 +1095,7 @@ fn truncated_or_auth_rejected_stream_never_promotes_staged_cancel_rows() {
     no_cancel(&h);
     let mut h = Harness::new(true);
     let read = cancel_symbol(&mut h, 4, 332);
-    let bad = order_row(PRODUCTS[5].0, "0x0006", "106").replace(r#""sa":"777""#, r#""sa":"888""#);
+    let bad = order_row(MARKETS[5].0, "0x0006", "106").replace(r#""sa":"777""#, r#""sa":"888""#);
     h.respond(
         read,
         &format!(r#"{{"r":[{row},{bad}],"c":1000,"m":"session expired"}}"#),

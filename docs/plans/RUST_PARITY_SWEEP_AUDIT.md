@@ -1,10 +1,16 @@
 # Independent discovery reviews
 
 These are preserved discovery snapshots: line references and merge states below
-reflect the review time. The final GRVT reassessment supersedes its earlier
-perpetual-only scope inference. Implementation and current verification receipts
-are recorded in `RUST_PARITY_SWEEP.md`; findings here are not a claim that the
-completed repairs remain open.
+reflect the review time. **Current GRVT disposition supersedes all earlier
+generic-mapper inferences below:** merged PR1337 and
+[GRVT_PRODUCTS_DECISION.md](GRVT_PRODUCTS_DECISION.md) establish the perpetual-only
+boundary. TS discovery posts `{}`; the official API defaults omitted/empty kind
+filters to `PERPETUAL`, so injected non-perpetual mapper fixtures are not exposed
+TS products. The sweep removes that unrequested synthetic expansion while
+retaining exact cancellation and session/keepalive protections for discovered
+perpetuals. No live non-perpetual capability is claimed. Implementation and
+current verification receipts are recorded in `RUST_PARITY_SWEEP.md`; historical
+findings here are not a claim that completed repairs remain open.
 
 # Parity sweep discovery: PRs #1298–#1310
 

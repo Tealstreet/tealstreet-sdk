@@ -214,26 +214,6 @@ test('GRVT session rejection invalidates HTTP-200 lite and full error aliases', 
   }
 });
 
-// Independent typed-data signing proves exact derivative hashes, not aliases
-// inferred from a shared base/quote or the venue encoder itself.
-test('GRVT signs each derivative identity independently and rejects sibling substitution', async () => {
-  const products = [
-    ['BTC_USDT_StablePerp', '0x030508'],
-    ['BTC_USDT_Fut_25Dec26', '0x030503'], ['BTC_USDT_Fut_26Mar27', '0x030504'],
-    ['BTC_USDT_Call_25Dec26_50000', '0x030505'], ['BTC_USDT_Call_25Dec26_60000', '0x030506'],
-    ['BTC_USDT_Put_25Dec26_50000', '0x030507'],
-  ];
-  for (const [instrument, hash] of products) {
-    const body = await signed(instrument, hash);
-    assert.doesNotThrow(() => validate(body));
-    const sibling = structuredClone(body);
-    sibling.o.l[0].i = products.find(([id]) => id !== instrument)[0];
-    assert.throws(() => validate(sibling), /signature/);
-    const changed = structuredClone(body); changed.o.l[0].s = '0.003';
-    assert.throws(() => validate(changed), /signature/);
-  }
-});
-
 test('GRVT indexed public subscriptions match the original prefix scan through mutations and generations', () => {
   const url = 'wss://market-data.grvt.io/ws';
   const audit = venue.createSocketAudit('rust', { isPrivate: false, books: [] });

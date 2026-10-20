@@ -10,6 +10,11 @@ The other lane owns Paradex remote signing, Bitrue history/client-ID/hedge/
 margin mode, and KuCoin spot. Do not edit those surfaces. Keep the existing
 1,258,291-byte per-venue WASM budget.
 
+Current GRVT scope follows merged PR1337 and `GRVT_PRODUCTS_DECISION.md`:
+perpetuals only. Earlier mixed-product work below is historical and superseded;
+the final implementation retains exact cancellation, session and keepalive
+repairs without exposing unrequested product kinds.
+
 ## Phases and verification
 
 1. Discovery/public data: read the brief/spec and merged PR limitations;
@@ -467,3 +472,32 @@ than treating the original port boundary as a waiver.
   (27profile builds including the Lighter alias) at unchanged1,258,291bytes.
   Incoming CI config97replays (36public/61private),32Rustjobs. Prior counts and
   measurements remain historical until this merged-source sequence passes.
+
+### Landed GRVT scope decision and final source alignment
+
+- Landing advanced again to02e9db0e8b/PR1337. Its explicit product decision
+  supersedes this sweep's generic-mapper inference: TS sends `{}` and the
+  documented API defaults omitted/empty kind to PERPETUAL only. Parent verified
+  that official contract independently. Retain the landed retirement boundary;
+  no Future/Call/Put/STABLE_PERP capability or live availability is claimed.
+- Remove unused ProductKind metadata and synthetic six-product expansion.
+  Preserve exact-symbol streamed cancellation, authentication/ACK/lifecycle
+  fences, metadata refresh and pong keepalives. All19 meaningful native safety
+  cases remain with seven supported perpetual fixtures; incoming retired-product
+  rejection controls remain. GRVT115/115, strict Clippy and formatting PASS.
+- Private GRVT tape now41records,2perpetuals,5commands. BTC exact cancellation
+  reads an authoritative snapshot and preserves ETH; an independent ETH terminal
+  event precedes the existing empty-store global cancellation. Native/perp
+  signature,401/session,ACK and raw protocol checks remain. Only the synthetic
+  six-product signature test was removed; harness564/564 PASS.
+- Earlier b88 merged root44/28/27,SDK7621cases per target,compiled409/409 plus
+  host68/68 and native2555+3doctests/Clippy passed. These are historical until
+  final affected checks on the perpetual-boundary union complete. Primaryv8
+  public scoring was held; no incomplete quality pass was used to allow it.
+- Resolve docs to the landed decision and concatenate both incoming product
+  boundary and retained pong tests. Independent final source review follows;
+  no recorded failure or prior implementation claim is silently erased.
+- Independent retirement-alignment review PASS: exact account/trading/history/
+  signing/keepalive sources are unchanged from reviewed b88. Independent lookup
+  repair re-review also PASS at b88, with cache and PM canonical-ID safeguards
+  accepted. Final merged-source quality and gates follow this source freeze.

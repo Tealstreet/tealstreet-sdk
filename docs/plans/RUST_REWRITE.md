@@ -418,7 +418,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | ApeX Omni perpetuals | Implemented; [PR #1324](https://github.com/Tealstreet/tealstreet-sdk/pull/1324), native zkLink/API-key signing; all local gates and independent code-correctness re-reviews pass |
 | KuCoin, Phemex, Orderly family | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running; [GRVT fixture profiling](GRVT_RUST_PERF.md) hands off measured replay audit overhead |
-| GRVT perpetuals | implemented; [PR #1321](https://github.com/Tealstreet/tealstreet-sdk/pull/1321), all local gates passing |
+| GRVT perpetuals | implemented; [PR #1321](https://github.com/Tealstreet/tealstreet-sdk/pull/1321), all local gates passing; [non-perpetual product decision](GRVT_PRODUCTS_DECISION.md) retires unexposed mapper-only Future/Call/Put paths |
 | Paradex perpetuals | Implemented; [PR #1320](https://github.com/Tealstreet/tealstreet-sdk/pull/1320), public/private gates PASS; plan: `RUST_PARADEX.md` |
 | AsterDEX perpetuals | implemented; [PR #1322](https://github.com/Tealstreet/tealstreet-sdk/pull/1322), all local gates passing |
 | Lighter perps | implemented; [PR #1319](https://github.com/Tealstreet/tealstreet-sdk/pull/1319), adversarial review fixes accepted; CI pending |
@@ -515,7 +515,7 @@ ported. The linked inventory records exact callers and product constraints.
 | `weex` | Opt-in; preserve host/header/routing evidence. |
 | `woo` | Opt-in WOO X; separate from Orderly WOOFi; keep position-history adapter. |
 | `polymarket` | Opt-in, development-only (`enabled: false`, `enabledInDev: true`), `supportsChaser: false`, native 1x leverage. Prediction CLOB V2 with typed outcome/holding metadata; local-wallet signature types 0/1/2/3, supplied/derived L2 credentials, limit/GTC and final-fill-safe cancel-replace. No caller client IDs, market/conditional/bracket/reduce-only orders or generic history/fills/income/public-trades query coverage; price history is bounded sampled data. Preserve [exact port scope and fixture/live boundaries](venue-ports/POLYMARKET.md) and default-factory migration evidence. |
-| `grvt` | Opt-in PERPETUAL/STABLE_PERP/FUTURE/CALL/PUT catalog paths; local exact EIP-712 chains 325/326, session/API-key/private routing, subaccount discovery, mandatory builder authorization and decimal caller IDs 1..2^63-1. Preserve one-way/account leverage, protective/bracket and safe cancel-replace, bounded query/client-lookup and chaser fill-verification contracts. Margin-mode changes unsupported. The parity sweep preserves exact product kind/hash/decimal metadata and generic signing, reads and exact-symbol cancellation with same-base expiry/strike siblings; live non-perpetual availability is unverified. Keep public builder-wallet exports; [GRVT scope/evidence](GRVT_RUST_PORT.md). |
+| `grvt` | Opt-in perpetuals; local exact EIP-712 chains 325/326, session/API-key/private routing, subaccount discovery, mandatory builder authorization and decimal caller IDs 1..2^63-1. Preserve one-way/account leverage, protective/bracket and safe cancel-replace, bounded query/client-lookup and chaser fill-verification contracts. Margin-mode changes unsupported. [Explicit product decision](GRVT_PRODUCTS_DECISION.md) retires unexposed mapper-only Future/Call/Put paths: TS discovery defaults to perpetuals, explicit non-perpetual public catalogs were empty, and generic dispatch does not establish their lifecycle support. Keep TS/reference sources and public builder-wallet exports; [GRVT scope/evidence](GRVT_RUST_PORT.md). |
 | `breakoutprop` | Opt-in, legacy DXtrade and development-only; authenticated REST polling with username/password and exact selected FULL_TRADING account even for public-data reads. LIMIT/MARKET/last-price STOP, GTC and proven zero-fill cancel-replace; one-way/cross and estimated margin/PnL. Caller IDs, brackets/close-all/settings writes unsupported; generic history/fills/income queries retain branded inert behavior, public trades unsupported. Quote books/live candles are synthetic. Documented public fixture waiver is explicit; live credential capture/connectivity remains unverified, and new Breakout Terminal accounts are outside scope. Preserve [scope/evidence](RUST_BREAKOUTPROP.md). |
 | `bitunix`, `hyperliquidspot`, `krakenspot`, `kucoinspot` | No registered Rust adapter. Port each product/broker or make an explicit supported-product retirement decision; do not silently alias it to a different product. |
 
@@ -537,10 +537,13 @@ cutover or deletion:
   exchange, then calls `fetchMarkets`; Rust currently returns its store. Cold
   starts are empty and forced refresh does not refresh native metadata. Define
   and test explicit startup/refresh semantics before adopting this factory.
-The parity sweep closes the earlier GRVT product-catalog blocker with mixed
-product signing/read/cancel fixtures and independent signature assertions; it
-does not claim live non-perpetual availability or close the separate shared
-consumer/default-cutover blockers above.
+- GRVT's apparent Future/Call/Put catalog gap has an [explicit retirement
+  decision](GRVT_PRODUCTS_DECISION.md): TS discovery sends `{}`, which defaults
+  to `PERPETUAL`; injected non-perpetual mapper rows are not currently exposed
+  products. Do not infer non-perpetual capability from those generic paths or
+  perpetual fixtures. Future enablement requires typed semantic metadata and
+  complete product lifecycle evidence. This decision does not authorize TS
+  deletion or default cutover; the other consumer/dependency gates still apply.
 
 Deletion proceeds in separate, reviewable PRs:
 
