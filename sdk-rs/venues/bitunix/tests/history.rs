@@ -197,6 +197,32 @@ fn public_trades_preserves_the_ts_unsupported_contract() {
 }
 
 #[test]
+fn client_order_lookup_rejects_without_a_request_or_panic() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::Query {
+            command: 8,
+            query: Query::OrderByClientId {
+                symbol: "BTCUSDT".into(),
+                client_order_id: "caller-id".into(),
+            },
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: 8, result: Err(error) })
+            if error == "Bitunix client order lookup is not supported by the Rust engine"
+    )));
+}
+
+#[test]
 fn fills_accept_timestamp_and_fee_aliases_and_emit_canonical_symbols() {
     let (mut e, _) = startup();
     e.handle(

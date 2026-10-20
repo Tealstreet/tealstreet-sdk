@@ -171,6 +171,13 @@ fn optional(v: f64) -> Option<f64> {
 }
 impl BitunixFutures {
     pub(crate) fn query(&mut self, cx: &mut Cx<'_, Pending>, command: u32, query: Query) {
+        if matches!(query, Query::OrderByClientId { .. }) {
+            cx.done(
+                command,
+                Err("Bitunix client order lookup is not supported by the Rust engine".into()),
+            );
+            return;
+        }
         if matches!(query, Query::PublicTrades { .. }) {
             cx.done(command, Err("Not implemented".into()));
             return;
@@ -214,7 +221,7 @@ impl BitunixFutures {
                 to_ms,
                 limit: _,
             } => (Kind::Income, symbol, None, from_ms, to_ms, usize::MAX),
-            _ => unreachable!(),
+            Query::PublicTrades { .. } | Query::OrderByClientId { .. } => unreachable!(),
         };
         if kind == Kind::Fills && symbol.as_ref().is_none_or(|s| cx.store.market(s).is_none()) {
             cx.done(command, Ok("[]".into()));

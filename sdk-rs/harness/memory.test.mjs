@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { retainedMemory, settledMemory } from './memory.mjs';
+import { memoryMetricErrors, retainedMemory, settledMemory } from './memory.mjs';
 
 test('retained frame backing buffers are included', () => {
   const before = process.memoryUsage();
   const frame = new ArrayBuffer(16 * 1024 * 1024);
   const after = process.memoryUsage();
-  assert(retainedMemory(before, after) >= frame.byteLength);
+  assert(after.arrayBuffers >= frame.byteLength);
+  assert.equal(retainedMemory(before, after) - (after.heapUsed - before.heapUsed), after.arrayBuffers - before.arrayBuffers);
 });
 test('linear wasm memory is counted exactly once', () => {
   const before = process.memoryUsage();
@@ -47,3 +48,69 @@ test('backing stores that never settle fail instead of choosing or clamping a sa
     /Backing-buffer memory did not settle/,
   );
 });
+
+// Incoming venue and protocol regressions.
+{
+const metricsFor=(before,after,wasmBytes=0)=>({heapBeforeBytes:before.heapUsed,heapUsedBytes:after.heapUsed,buffersBefore:before.arrayBuffers,buffersAfter:after.arrayBuffers,heapRetainedBytes:after.heapUsed-before.heapUsed,bufferRetainedBytes:after.arrayBuffers-before.arrayBuffers,wasmBytes,retainedBytes:retainedMemory(before,after,wasmBytes)});
+test('released setup buffers invalidate a positive net-retention baseline', () => {
+  const metrics = metricsFor(
+    { heapUsed: 30_271_936, arrayBuffers: 2_324_049 },
+    { heapUsed: 33_195_616, arrayBuffers: 2_323_961 },
+  );
+  assert.equal(metrics.bufferRetainedBytes, -88);
+  assert.equal(metrics.retainedBytes, 2_923_592);
+  assert(memoryMetricErrors(metrics).some((error)=>error.startsWith('invalid ') && error.includes('RetainedBytes')));
+});
+
+test('positive buffers and WASM cannot mask an unsettled negative heap component', () => {
+  const metrics = metricsFor(
+    { heapUsed: 1000, arrayBuffers: 200 },
+    { heapUsed: 900, arrayBuffers: 500 },
+    100,
+  );
+  assert.equal(metrics.heapRetainedBytes, -100);
+  assert.equal(metrics.retainedBytes, 300);
+  assert(memoryMetricErrors(metrics).some((error) => error.startsWith('invalid heapRetainedBytes (')));
+});
+
+test('invalid absolute counters and nonfinite signed deltas fail validation', () => {
+  const valid = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 300 }, 100);
+  for (const field of ['heapBeforeBytes', 'heapUsedBytes', 'buffersBefore', 'buffersAfter', 'wasmBytes', 'retainedBytes']) {
+    for (const value of [-1, NaN, Infinity, -Infinity, null, undefined]) {
+      assert(memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)), `${field}=${value}`);
+    }
+  }
+  for (const field of ['heapRetainedBytes', 'bufferRetainedBytes']) {
+    for (const value of [NaN, Infinity, -Infinity, null, undefined]) {
+      assert(memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)), `${field}=${value}`);
+    }
+  }
+  assert(memoryMetricErrors(undefined).length > 0);
+});
+
+test('negative aggregate retention still invalidates the baseline', () => {
+  const metrics = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 900, arrayBuffers: 250 });
+  assert.equal(metrics.retainedBytes, -50);
+  assert(memoryMetricErrors(metrics).some((error) => error.startsWith('invalid retainedBytes (')));
+});
+
+test('reported deltas and aggregate must exactly match the absolute samples', () => {
+  const valid = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 300 }, 100);
+  for (const field of ['heapRetainedBytes', 'bufferRetainedBytes', 'retainedBytes']) {
+    assert(memoryMetricErrors({ ...valid, [field]: valid[field] + 1 }).some((error) => error.startsWith(`inconsistent ${field} (`)), field);
+  }
+  assert.deepEqual(memoryMetricErrors(metricsFor({ heapUsed: 0, arrayBuffers: 0 }, { heapUsed: 0, arrayBuffers: 0 })), []);
+});
+
+test('settled samples use real time when replay replaces global timers', async () => {
+  const original = globalThis.setTimeout;
+  globalThis.setTimeout = () => { throw new Error('virtual timer must not pace memory samples'); };
+  try {
+    assert.deepEqual(await settledMemory({
+      collect() {}, sample: () => ({ arrayBuffers: 42, heapUsed: 1000 }), quietMs: 0,
+    }), { arrayBuffers: 42, heapUsed: 1000 });
+  } finally {
+    globalThis.setTimeout = original;
+  }
+});
+}

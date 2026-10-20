@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
+import { memoryMetricErrors } from './memory.mjs';
 import { fixWeexConditionals } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { venueOf } from './venues.mjs';
@@ -59,7 +60,7 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
 const venue = venueOf(values.venue);
-const isPrivate = tape.find((record) => record.type === 'meta')?.private ?? tape.some((record) =>
+const isPrivate = tape.find((record) => record.type === 'config')?.private ?? tape.find((record) => record.type === 'meta')?.private ?? tape.some((record) =>
   venue.isPrivateRecord ? venue.isPrivateRecord(record) : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
 );
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
@@ -441,6 +442,7 @@ for (let run = 0; run < runs; run++) {
     const output = result[impl];
     if (output.invalidSignatures) differences.push(`${impl}: ${output.invalidSignatures} invalid signatures`);
     if (Boolean(output.account) !== isPrivate) differences.push(`${impl}: account presence differs from tape classification`);
+    for (const error of memoryMetricErrors(output.metrics)) differences.push(`${impl}: ${error}`);
     for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
       if (!Number.isFinite(output.metrics[field]) || output.metrics[field] < 0) {
         differences.push(`${impl}: invalid ${field} (${output.metrics[field]}); baseline is invalid`);

@@ -4,7 +4,7 @@ use crate::{Connection, HEARTBEAT_MS, MexcFutures, Pending, WS, sign, wire::*};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Clone, Copy, Default)]
 pub struct Rails {
@@ -41,6 +41,7 @@ pub enum Request {
     Snapshot(Snapshot),
 }
 pub struct Snapshot {
+    pub symbol: Option<String>,
     pub scope: Scope,
     pub revision: u64,
     pub page: u32,
@@ -68,7 +69,8 @@ pub struct Account {
     pub placed: HashMap<String, f64>,
     pub poll: Option<TimerId>,
     pub asset_refresh: Option<TimerId>,
-    pub stop_refresh: Option<TimerId>,
+    pub stop_refresh: HashMap<String, TimerId>,
+    pub pending_stop_refresh: BTreeSet<String>,
     pub in_flight: HashSet<Scope>,
     pub balance_revision: u64,
     pub position_revision: u64,
@@ -179,11 +181,21 @@ impl MexcFutures {
         );
     }
     pub fn snapshot_account(&mut self, cx: &mut Cx<'_, Pending>, scope: Scope, full: bool) {
+        self.snapshot_orders(cx, scope, full, None);
+    }
+    fn snapshot_orders(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        scope: Scope,
+        full: bool,
+        symbol: Option<String>,
+    ) {
         if self.account.in_flight.contains(&scope) || cx.now < self.account.paused_until {
             return;
         }
         self.account.in_flight.insert(scope);
         let snapshot = Snapshot {
+            symbol,
             scope,
             revision: self.account.revision,
             page: 1,
@@ -198,14 +210,24 @@ impl MexcFutures {
         self.snapshot_page(cx, snapshot);
     }
     fn snapshot_page(&self, cx: &mut Cx<'_, Pending>, snapshot: Snapshot) {
-        let path = match snapshot.scope {
+        let mut path = match snapshot.scope {
             Scope::Assets => "/api/v1/private/account/assets",
             Scope::Positions => "/api/v1/private/position/open_positions",
             Scope::Regular => "/api/v1/private/order/list/open_orders",
             Scope::Plan => "/api/v1/private/planorder/list/orders",
             Scope::Stop => "/api/v1/private/stoporder/list/orders",
-        };
+        }
+        .to_owned();
         let mut params = vec![];
+        if let Some(symbol) = &snapshot.symbol {
+            let market = cx.store.market(symbol).expect("scoped snapshot market");
+            if snapshot.scope == Scope::Regular {
+                path.push('/');
+                path.push_str(&market.id);
+            } else {
+                params.push(("symbol", market.id.clone()));
+            }
+        }
         if matches!(snapshot.scope, Scope::Regular | Scope::Plan | Scope::Stop) {
             params.extend([
                 ("page_num", snapshot.page.to_string()),
@@ -229,7 +251,7 @@ impl MexcFutures {
         self.signed(
             cx,
             Method::Get,
-            path,
+            &path,
             sign::query(params),
             true,
             Pending::Account(Request::Snapshot(snapshot)),
@@ -408,6 +430,39 @@ impl MexcFutures {
             }
         }
         order
+    }
+    fn reconcile_snapshot_orders(
+        &self,
+        cx: &Cx<'_, Pending>,
+        rows: &mut Vec<Order>,
+        revision: u64,
+    ) {
+        rows.retain_mut(|order| {
+            // An open-order endpoint may lag a terminal stream update. Keep a
+            // returned regular row terminal while preserving cumulative fills;
+            // a tombstone without a current row must never resurrect an order.
+            if matches!(order.kind, OrderType::Limit | OrderType::Market)
+                && cx.store.order(&order.id).is_some_and(|current| {
+                    matches!(current.status, OrderStatus::Canceled | OrderStatus::Closed)
+                })
+            {
+                let current = cx.store.order(&order.id).unwrap();
+                let status = if order.status == OrderStatus::Closed {
+                    OrderStatus::Closed
+                } else {
+                    current.status
+                };
+                *order = Self::monotonic_order(cx, order.clone());
+                order.status = status;
+                return true;
+            }
+            !self.account.terminal.contains_key(&order.id)
+                && self
+                    .account
+                    .order_updates
+                    .get(&order.id)
+                    .is_none_or(|&updated| updated <= revision)
+        });
     }
     fn commit_order_snapshot(cx: &mut Cx<'_, Pending>, rows: Vec<Order>) {
         let rows = rows
@@ -780,7 +835,15 @@ impl MexcFutures {
             scope => match serde_json::from_str::<OrderRow<'_>>(item) {
                 Ok(r) => {
                     if let Some(o) = self.map_order(cx, &r, scope) {
-                        snapshot.orders.push(o);
+                        if snapshot
+                            .symbol
+                            .as_ref()
+                            .is_some_and(|symbol| *symbol != o.symbol)
+                        {
+                            snapshot.bad = true;
+                        } else {
+                            snapshot.orders.push(o);
+                        }
                     } else {
                         snapshot.bad = true;
                     }
@@ -1016,14 +1079,7 @@ impl MexcFutures {
                         cx.store.set_positions(rows);
                     }
                     scope => {
-                        s.orders.retain(|o| {
-                            !self.account.terminal.contains_key(&o.id)
-                                && self
-                                    .account
-                                    .order_updates
-                                    .get(&o.id)
-                                    .is_none_or(|&v| v <= s.revision)
-                        });
+                        self.reconcile_snapshot_orders(cx, &mut s.orders, s.revision);
                         for o in &s.orders {
                             if scope == Scope::Stop {
                                 self.account.stop_ids.insert(o.id.clone());
@@ -1047,23 +1103,26 @@ impl MexcFutures {
                             }
                             let mut rows = std::mem::take(&mut self.account.staged);
                             self.account.stage_mask = 0;
-                            self.account.needs_full = false;
-                            rows.retain(|o| {
-                                !self.account.terminal.contains_key(&o.id)
-                                    && self
-                                        .account
-                                        .order_updates
-                                        .get(&o.id)
-                                        .is_none_or(|&v| v <= s.revision)
-                            });
+                            if s.symbol.is_none() {
+                                self.account.needs_full = false;
+                            }
+                            self.reconcile_snapshot_orders(cx, &mut rows, s.revision);
                             for o in cx.store.orders() {
+                                // A symbol snapshot cannot retire another market's rows.
+                                if s.symbol.as_ref().is_some_and(|symbol| *symbol != o.symbol) {
+                                    rows.push(o.clone());
+                                    continue;
+                                }
                                 if o.status == OrderStatus::Open
                                     && !rows.iter().any(|r| r.id == o.id)
-                                    && (self
-                                        .account
-                                        .order_updates
-                                        .get(&o.id)
-                                        .is_some_and(|&v| v > s.revision)
+                                    && ((s.symbol.is_some()
+                                        && !self.account.plan_ids.contains(&o.id)
+                                        && !self.account.stop_ids.contains(&o.id))
+                                        || self
+                                            .account
+                                            .order_updates
+                                            .get(&o.id)
+                                            .is_some_and(|&v| v > s.revision)
                                         || self.account.placed.contains_key(&o.id))
                                 {
                                     rows.push(o.clone());
@@ -1093,6 +1152,37 @@ impl MexcFutures {
                     }
                 }
             }
+        }
+    }
+    pub fn schedule_stop_refresh(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        if let Some(timer) = self.account.stop_refresh.remove(symbol) {
+            cx.clear_timer(timer);
+        }
+        self.account.pending_stop_refresh.remove(symbol);
+        self.account
+            .stop_refresh
+            .insert(symbol.to_owned(), cx.set_timer(1500.0));
+    }
+    // Order batches share staging and revision fences. Serialize scoped batches
+    // with full-account polls so neither can commit a partial view of the other.
+    pub fn refresh_stop_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.now < self.account.paused_until
+            || !cx.store.loaded().orders
+            || self.account.needs_full
+            || [Scope::Regular, Scope::Plan, Scope::Stop]
+                .iter()
+                .any(|scope| self.account.in_flight.contains(scope))
+        {
+            return;
+        }
+        let Some(symbol) = self.account.pending_stop_refresh.pop_first() else {
+            return;
+        };
+        self.account.staged.clear();
+        self.account.stage_mask = 0;
+        self.account.full_failed = false;
+        for scope in [Scope::Regular, Scope::Plan, Scope::Stop] {
+            self.snapshot_orders(cx, scope, true, Some(symbol.clone()));
         }
     }
     pub fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>, full: bool) {
@@ -1166,9 +1256,15 @@ impl MexcFutures {
             self.account.asset_refresh = None;
             self.snapshot_account(cx, Scope::Assets, false);
         }
-        if self.account.stop_refresh == Some(timer) {
-            self.account.stop_refresh = None;
-            self.refresh_account(cx, true);
+        let symbol = self
+            .account
+            .stop_refresh
+            .iter()
+            .find_map(|(symbol, &pending)| (pending == timer).then(|| symbol.clone()));
+        if let Some(symbol) = symbol {
+            self.account.stop_refresh.remove(&symbol);
+            self.account.pending_stop_refresh.insert(symbol);
+            self.refresh_stop_orders(cx);
         }
         if self.account.private.reconnect == Some(timer) {
             self.account.private.reconnect = None;

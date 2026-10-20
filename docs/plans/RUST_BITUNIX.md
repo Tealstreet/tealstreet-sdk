@@ -564,3 +564,42 @@ throughput profiles; all eleven public CPU/memory gates verify these flags.
 Full workspace Rust/wasm checks, root typecheck/lint/full27 tasks PASS. The
 new artifact's 28 adapter tests and 38 host tests pass. Eleven public and
 fourteen private gates plus updated-head CI remain tracked on PR #1309.
+
+### Hyperliquid landing integration checkpoint
+
+All exact-head CI jobs for a94796c69f PASS, including eleven-venue replay.
+Local Crypto.com startup CPU remained close to its threshold; its package
+throughput profile passes locally (78.8 / 70.8 ms TS/Rust), while the aggregate
+module exceeded the former cap. Checkpoint 54d51cf35e committed the profile
+trial before merging; no stash. The curve25519 size trial is removed because
+the new landing changes CI to explicit per-venue feature builds and budgets.
+
+Hyperliquid landed at c5bc2c4adf and made the PR conflicting. Integrate its
+optional factory/features, typed recovery query and shared signing primitives,
+retaining all prior strict request/signature, replay clock, seed readiness and
+memory controls. Separate reviewers own engine/crypto, host/SDK and harness.
+Verify the aggregate adapter, twelve single-venue bundles under 1,258,291 bytes,
+twelve public and fifteen private variants, then exact-head CI before merging.
+
+Integration checks PASS: workspace bans/fmt/Clippy/tests/wasm Clippy, combined
+28 adapter and 38 host tests, root typecheck/lint. Bitunix's new unsupported
+client-ID recovery query explicitly rejects before credentials/HTTP, avoiding
+a panic introduced by the new query variant; independent review confirmed
+and improved the no-request regression. All 57 Bitunix tests pass.
+
+Single-venue Bitunix WASM is 696,820 bytes. Its three-run public gate passes
+28,694 frames / 697 markets and tickers / 2 books: TS/Rust main CPU
+1,072.9 / 938.6 ms, steady CPU 709.4 / 622.1 ms, retained 3.7 / 2.2 MB,
+sampled peak 31.5 / 16.0 MB. Remaining per-venue/private gates continue.
+
+Final merge review fixes preserve auth state on actual socket delivery for
+BloFin/MEXC and route actual MEXC response matching through the typed key:
+numeric economic fields cannot match strings; documented native ID aliases
+remain supported. Independent original reproductions pass. All 220 harness
+helpers PASS, including incoming signing/protocol/request regressions. Negative
+retained components still invalidate the baseline; no metric threshold lowered.
+Actual Hyperliquid TS public/private probes have zero unserved/protocol/socket/
+unused-write errors. Root full 27 tasks PASS (including 458 safe-cex files,
+6,622 tests). Bitunix/Binance/Crypto.com public and private gates PASS; Bitget
+public rerun passes after the busy full-suite run ended, its private gate PASS.
+Remaining venues and exact-head CI are required before merging PR #1309.

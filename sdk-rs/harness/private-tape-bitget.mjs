@@ -157,6 +157,9 @@ http(
     ],
   },
 );
+// TS spells Classic batch marginMode as cross; the native request stays crossed.
+const classicBatch = records.find((record) => record.type === 'http' && record.url.includes('/batch-place-order'));
+classicBatch.tsRequestBody = { ...classicBatch.requestBody, marginMode: 'cross' };
 orderEvent(1000, { ...normal, orderId: '1002', clientOid: 'caller:bitget-1', size: '0.003', price: '91' });
 command(1400, 'amendOrder', { id: '1002', price: 92 });
 http(
