@@ -183,7 +183,20 @@ const USER_TRADE = {
   time: 1592465880683,
   quoteAsset: 'USDT',
 };
-const KLINE = [1762779600000, '1300.000', '1310.000', '1290.000', '1305.000', '0.1000', 1762780499999, '130.0000000', 1, '0.1000', '130.0000000', '0'];
+const KLINE = [
+  1762779600000,
+  '1300.000',
+  '1310.000',
+  '1290.000',
+  '1305.000',
+  '0.1000',
+  1762780499999,
+  '130.0000000',
+  1,
+  '0.1000',
+  '130.0000000',
+  '0',
+];
 
 const contracts = optionContractsByUnderlying(EXCHANGE_INFO);
 const btcMarket = mapBinanceOptionMarket(BTC_ROW, contracts)!;
@@ -281,7 +294,12 @@ describe('binanceoptions mappers', () => {
     expect(position.option?.greeks?.delta).toBeCloseTo(-0.044767474, 12);
     expect(position.option?.greeks?.vega).toBeCloseTo(-13.716680603, 9);
 
-    const doge = mapBinanceOptionPosition({ ...POSITION, symbol: DOGE, side: 'LONG', quantity: '2' }, dogeMarket, DOGE_MARK, 1);
+    const doge = mapBinanceOptionPosition(
+      { ...POSITION, symbol: DOGE, side: 'LONG', quantity: '2' },
+      dogeMarket,
+      DOGE_MARK,
+      1,
+    );
     expect(doge.option?.greeks?.delta).toBeCloseTo(2 * 1000 * 0.44114908, 9);
     expect(mapBinanceOptionPosition(POSITION, btcMarket, undefined, 1).option).toEqual({});
   });
@@ -342,7 +360,15 @@ describe('binanceoptions mappers', () => {
   it('formats a post-only limit order with the flag Binance documents', () => {
     expect(
       formatBinanceOptionOrder(
-        { symbol: BTC, type: OrderType.Limit, side: OrderSide.Sell, amount: 0.123, price: 3847, timeInForce: OrderTimeInForce.PostOnly, reduceOnly: true },
+        {
+          symbol: BTC,
+          type: OrderType.Limit,
+          side: OrderSide.Sell,
+          amount: 0.123,
+          price: 3847,
+          timeInForce: OrderTimeInForce.PostOnly,
+          reduceOnly: true,
+        },
         btcMarket,
         'cid',
       ),
@@ -357,6 +383,21 @@ describe('binanceoptions mappers', () => {
       reduceOnly: true,
       clientOrderId: 'cid',
     });
+  });
+});
+
+describe('binanceoptions mapper edge cases', () => {
+  it('leaves greeks off a quote whose mark row has none', () => {
+    expect(mapBinanceOptionQuote({ ...BTC_MARK, delta: '' }, BTC_TICKER)).not.toHaveProperty('greeks');
+  });
+
+  it('reads a post-only order as PostOnly', () => {
+    expect(mapBinanceOptionOrder({ ...OPEN_ORDER, postOnly: true }, 1).timeInForce).toBe(OrderTimeInForce.PostOnly);
+  });
+
+  it('marks a MAKER fill as maker and a TAKER fill as not', () => {
+    expect(mapBinanceOptionFill({ ...USER_TRADE, liquidity: 'MAKER' }).maker).toBe(true);
+    expect(mapBinanceOptionFill(USER_TRADE).maker).toBe(false);
   });
 });
 
@@ -377,8 +418,10 @@ const create = () => {
     calls.push([method, url, body]);
     if (url === ENDPOINTS.MARK) return Promise.resolve({ data: [BTC_MARK, DOGE_MARK] });
     if (url === ENDPOINTS.TICKERS) return Promise.resolve({ data: [BTC_TICKER] });
-    if (url === ENDPOINTS.POSITIONS) return Promise.resolve({ data: [POSITION, { ...POSITION, symbol: DOGE, quantity: '0' }] });
-    if (url === ENDPOINTS.ORDER && method === 'post') return Promise.resolve({ data: { orderId: '4611875134427365001' } });
+    if (url === ENDPOINTS.POSITIONS)
+      return Promise.resolve({ data: [POSITION, { ...POSITION, symbol: DOGE, quantity: '0' }] });
+    if (url === ENDPOINTS.ORDER && method === 'post')
+      return Promise.resolve({ data: { orderId: '4611875134427365001' } });
     return Promise.resolve({ data: {} });
   };
   (exchange.xhr as any) = {
@@ -397,7 +440,19 @@ describe('BinanceOptionsExchange requests', () => {
     const { exchange, calls } = create();
     expect(await exchange.placeOrder({ ...limit, clientOrderId: 'mine-1' })).toEqual(['4611875134427365001']);
     expect(calls).toEqual([
-      ['post', ENDPOINTS.ORDER, { symbol: BTC, side: 'BUY', type: 'LIMIT', quantity: '0.5', price: '3800', timeInForce: 'GTC', clientOrderId: 'mine-1' }],
+      [
+        'post',
+        ENDPOINTS.ORDER,
+        {
+          symbol: BTC,
+          side: 'BUY',
+          type: 'LIMIT',
+          quantity: '0.5',
+          price: '3800',
+          timeInForce: 'GTC',
+          clientOrderId: 'mine-1',
+        },
+      ],
     ]);
   });
 
@@ -407,6 +462,7 @@ describe('BinanceOptionsExchange requests', () => {
     [{ stopLoss: 3000 }, /do not support stopLoss/],
     [{ price: undefined }, /needs a price/],
     [{ amount: 250 }, /above the 200 maximum/],
+    [{ amount: 0.001 }, /rounds to nothing/],
     [{ symbol: 'BTC-261225-1-C' }, /not found/],
   ])('refuses %j before any request', async (change, message) => {
     const { exchange, calls } = create();
@@ -416,7 +472,9 @@ describe('BinanceOptionsExchange requests', () => {
 
   it('refuses a whole batch before any request when one order cannot be placed', async () => {
     const { exchange, calls } = create();
-    await expect(exchange.placeOrders([limit, { ...limit, impliedVolatility: 0.4 }])).rejects.toThrow(/no implied volatility/);
+    await expect(exchange.placeOrders([limit, { ...limit, impliedVolatility: 0.4 }])).rejects.toThrow(
+      /no implied volatility/,
+    );
     expect(calls).toEqual([]);
   });
 
@@ -472,6 +530,78 @@ describe('BinanceOptionsExchange requests', () => {
       ENDPOINTS.KLINE,
       { params: { symbol: BTC, interval: '1m', startTime: to - 1000 * 60_000, endTime: to, limit: 1000 } },
     ]);
+  });
+
+  it('keeps an order open when the cancel fails for another reason', async () => {
+    const { exchange, store } = create();
+    const order = mapBinanceOptionOrder(OPEN_ORDER, 1);
+    store.update({ orders: [order] });
+    (exchange.xhr.delete as any).mockRejectedValueOnce(
+      Object.assign(new Error('Timestamp outside recvWindow'), { code: -1021 }),
+    );
+    await expect(exchange.cancelOrders([order])).rejects.toThrow(/recvWindow/);
+    expect(store.orders[0].status).not.toBe(OrderStatus.Canceled);
+  });
+
+  it("marks only the cancelled symbol's orders cancelled", async () => {
+    const { exchange, store } = create();
+    store.update({
+      orders: [
+        mapBinanceOptionOrder(OPEN_ORDER, 1),
+        mapBinanceOptionOrder({ ...OPEN_ORDER, orderId: '2', symbol: DOGE }, 1),
+      ],
+    });
+    await exchange.cancelSymbolOrders(BTC);
+    expect(store.orders.map((o) => [o.symbol, o.status])).toEqual([
+      [BTC, OrderStatus.Canceled],
+      [DOGE, OrderStatus.Open],
+    ]);
+  });
+
+  it('amends a partly filled order for what is left', async () => {
+    const { exchange, store, calls } = create();
+    const order = mapBinanceOptionOrder(OPEN_ORDER, 1);
+    store.update({ orders: [order] });
+    await exchange.updateOrder({ order, update: { price: 110 } });
+    expect(calls.at(-1)).toEqual([
+      'post',
+      ENDPOINTS.ORDER,
+      expect.objectContaining({ quantity: '0.75', price: '110' }),
+    ]);
+  });
+
+  it('leaves out tickers for symbols it has no market for', async () => {
+    const { exchange } = create();
+    (exchange.xhr.get as any).mockImplementation((url: string) =>
+      Promise.resolve({
+        data: url === ENDPOINTS.TICKERS ? [BTC_TICKER, { ...BTC_TICKER, symbol: 'ETH-261225-3000-C' }] : [BTC_MARK],
+      }),
+    );
+    expect((await exchange.fetchTickers()).map((t) => t.symbol)).toEqual([BTC]);
+  });
+
+  it('keeps the loaded markets when a refresh fails, and fails a first load', async () => {
+    const { exchange, store } = create();
+    (exchange.xhr.get as any).mockRejectedValue(new Error('down'));
+    expect(await exchange.fetchMarkets()).toBe(store.markets);
+    store.update({ markets: [] });
+    await expect(exchange.fetchMarkets()).rejects.toThrow('down');
+  });
+
+  it('filters fills by order ID and history by status', async () => {
+    const { exchange } = create();
+    (exchange.xhr.get as any).mockResolvedValueOnce({
+      data: [USER_TRADE, { ...USER_TRADE, tradeId: 240, orderId: '9' }],
+    });
+    expect((await exchange.fetchHistoricalFills({ symbol: BTC, orderId: '9' })).map((f) => f.id)).toEqual(['240']);
+    (exchange.xhr.get as any).mockResolvedValueOnce({
+      data: [
+        { ...OPEN_ORDER, status: 'FILLED' },
+        { ...OPEN_ORDER, orderId: '2', status: 'CANCELLED' },
+      ],
+    });
+    const history = await exchange.fetchHistoricalOrders({ symbol: BTC, status: [OrderStatus.Closed] });
+    expect(history.map((o) => o.id)).toEqual(['4611875134427365000']);
   });
 
   it('asks for order history and fills by symbol, and refuses without one', async () => {
@@ -535,7 +665,10 @@ describe('binanceoptions API client', () => {
 
   it('leaves public endpoints unsigned and tagged for hosted mode', async () => {
     const payloads: string[] = [];
-    const xhr = createAPI({ key: 'k', secret: '', payloadSigner: (r: any) => (payloads.push(r.payload), { signature: 'x' }) } as any, stubExchange);
+    const xhr = createAPI(
+      { key: 'k', secret: '', payloadSigner: (r: any) => (payloads.push(r.payload), { signature: 'x' }) } as any,
+      stubExchange,
+    );
     for (const url of [ENDPOINTS.MARKETS, ENDPOINTS.TICKERS, ENDPOINTS.MARK, ENDPOINTS.KLINE]) {
       const { config } = await capture(xhr, url);
       expect((config as any).safeCexSkipRemoteSigning).toBe(true);
@@ -549,8 +682,26 @@ describe('binanceoptions API client', () => {
     expect(data.orderId).toBe('4611875134427365001');
   });
 
+  it('rejects a 200 that carries a Binance error code, and reports it unless a cancel expects it', async () => {
+    const reported: string[] = [];
+    const xhr = createAPI({ key: 'k', secret: 's' } as any, {
+      ...stubExchange,
+      emitAndLogError: (m: string) => reported.push(m),
+    });
+    await expect(capture(xhr, ENDPOINTS.POSITIONS, {}, '{"code":-1121,"msg":"Invalid symbol."}')).rejects.toThrow(
+      'Invalid symbol.',
+    );
+    await expect(capture(xhr, ENDPOINTS.ORDER, {}, '{"code":-2011,"msg":"Unknown order sent."}')).rejects.toMatchObject(
+      { code: -2011 },
+    );
+    expect(reported).toEqual(['Invalid symbol.']);
+  });
+
   it('points testnet at the futures testnet host that serves /eapi', async () => {
-    const { config } = await capture(createAPI({ key: 'k', secret: 's', testnet: true } as any, stubExchange), ENDPOINTS.MARKETS);
+    const { config } = await capture(
+      createAPI({ key: 'k', secret: 's', testnet: true } as any, stubExchange),
+      ENDPOINTS.MARKETS,
+    );
     expect(config.baseURL).toBe('https://testnet.binancefuture.com');
   });
 });

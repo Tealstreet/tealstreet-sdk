@@ -5,9 +5,9 @@ import type {
   AccountGreeks,
   Balance,
   Candle,
-  Execution,
   ExchangeName,
   ExchangeOptions,
+  Execution,
   ExecutionsOptions,
   HistoricalOrder,
   Market,
@@ -199,9 +199,7 @@ export class BinanceOptionsExchange extends BaseExchange {
     const params = symbols?.length === 1 ? { symbol: symbols[0] } : {};
     const { data } = await this.xhr.get<Row[]>(ENDPOINTS.OPEN_ORDERS, { params });
     const now = virtualClock.getCurrentTimeMs();
-    return data
-      .filter((o) => !symbols?.length || symbols.includes(o.symbol))
-      .map((o) => mapBinanceOptionOrder(o, now));
+    return data.filter((o) => !symbols?.length || symbols.includes(o.symbol)).map((o) => mapBinanceOptionOrder(o, now));
   };
 
   fetchOHLCV = async (opts: OHLCVOptions): Promise<Candle[]> => {
@@ -210,7 +208,7 @@ export class BinanceOptionsExchange extends BaseExchange {
     const end = opts.to ? dayjs(opts.to) : dayjs();
     const start =
       !opts.limit && opts.from ? dayjs(opts.from) : end.subtract(parseFloat(amount) * limit, unit as ManipulateType);
-    const { data } = await this.xhr.get<Array<unknown[] | Row>>(ENDPOINTS.KLINE, {
+    const { data } = await this.xhr.get<unknown[][]>(ENDPOINTS.KLINE, {
       params: {
         symbol: opts.symbol,
         interval: opts.interval,
@@ -269,7 +267,9 @@ export class BinanceOptionsExchange extends BaseExchange {
     const amount = adjust(opts.amount, market.precision.amount);
     if (!(amount > 0)) this.rejectPreflight(`${opts.amount} rounds to nothing on ${opts.symbol}`);
     if (market.limits.amount.max > 0 && amount > market.limits.amount.max) {
-      this.rejectPreflight(`${amount} is above the ${market.limits.amount.max} maximum for one order on ${opts.symbol}`);
+      this.rejectPreflight(
+        `${amount} is above the ${market.limits.amount.max} maximum for one order on ${opts.symbol}`,
+      );
     }
   };
 

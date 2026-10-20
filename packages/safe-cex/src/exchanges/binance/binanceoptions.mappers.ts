@@ -127,10 +127,7 @@ export const mapBinanceOptionQuote = (
   };
 };
 
-export const mapBinanceOptionTicker = (
-  ticker: Record<string, any>,
-  mark: Record<string, any> | undefined,
-): Ticker => {
+export const mapBinanceOptionTicker = (ticker: Record<string, any>, mark: Record<string, any> | undefined): Ticker => {
   const last = num(ticker.lastPrice);
   return {
     id: ticker.symbol,
@@ -248,7 +245,7 @@ export const mapBinanceOptionOrder = (raw: Record<string, any>, now: number): Or
     price: num(raw.price),
     amount,
     filled,
-    remaining: Math.max(amount - filled, 0),
+    remaining: amount - filled,
     reduceOnly: raw.reduceOnly === true,
     ...(raw.clientOrderId ? { clientOrderId: raw.clientOrderId } : {}),
     timeInForce: raw.postOnly === true ? OrderTimeInForce.PostOnly : TIME_IN_FORCE[raw.timeInForce],
@@ -292,11 +289,7 @@ export const mapBinanceOptionFill = (raw: Record<string, any>): Execution => ({
   maker: raw.liquidity === 'MAKER',
 });
 
-/** Live klines come as arrays, the shape the docs show today; older docs showed objects. */
-export const mapBinanceOptionCandle = (row: unknown[] | Record<string, any>): Candle => {
-  const [openTime, open, high, low, close, volume] = Array.isArray(row)
-    ? row
-    : [row.openTime, row.open, row.high, row.low, row.close, row.volume];
+export const mapBinanceOptionCandle = ([openTime, open, high, low, close, volume]: unknown[]): Candle => {
   return {
     timestamp: num(openTime) / 1000,
     open: num(open),
