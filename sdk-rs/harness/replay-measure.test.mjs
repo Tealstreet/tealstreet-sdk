@@ -27,3 +27,77 @@ test('replay reports complete memory samples with CPU before GC and WASM after G
   assert.equal(metrics.retainedBytes, 300);
   assert.deepEqual(memoryMetricErrors(metrics), []);
 });
+
+test('optional Rust sampling starts after baseline and stops after CPU cutoff before GC', async () => {
+  const events = [];
+  const { startCpuProfile } = await import('./cpu-profile.mjs');
+  const rust = source.indexOf('async function runRust');
+  const start = source.indexOf('  const heapBefore = await baseline();', rust);
+  const end = source.indexOf('    host.start();', start);
+  const startup = source.slice(start, end).replace("(await import('./cpu-profile.mjs')).startCpuProfile", 'startCpuProfile');
+  for (const enabled of [false, true]) {
+    events.length = 0;
+    let samples = 0;
+    const context = {
+      values: { 'cpu-profile': enabled ? '/tmp/test.cpuprofile' : undefined },
+      process: {
+        cpuUsage(start) { events.push(start ? 'processCutoff' : 'processStart'); return { user: 1, system: 0 }; },
+        threadCpuUsage(start) { events.push(start ? 'threadCutoff' : 'threadStart'); return { user: 1, system: 0 }; },
+      },
+      performance: { now() { events.push('wall'); return 5; } },
+      async baseline() { events.push('baseline'); return { rss: 2000, heapUsed: 900, arrayBuffers: 500 }; },
+      async startCpuProfile(path) {
+        assert.equal(enabled, true);
+        return startCpuProfile(path, {
+          createSession: () => ({ connect() { samples++; },
+            async post(method) { if (method === 'Profiler.start' || method === 'Profiler.stop') events.push(method); return { profile: {} }; },
+            disconnect() {},
+          }),
+          writeProfile: async () => {},
+        });
+      },
+      retainedMemory,
+    };
+    const begun = await vm.runInNewContext(`(async () => { ${startup}\nreturn { cpuSampler, cpuStart, wallStart }; } finally {} })()`, context);
+    const measure = vm.runInNewContext(`${measureSource}\nmeasure`, context);
+    await measure(begun.cpuStart, begun.wallStart, { heapUsed: 1000, arrayBuffers: 200 },
+      () => { events.push('WASM'); return 100; }, undefined, begun.cpuSampler);
+    assert.equal(samples, enabled ? 1 : 0);
+    assert.deepEqual(events, ['baseline', ...(enabled ? ['Profiler.start'] : []), 'processStart', 'threadStart', 'wall',
+      'processCutoff', 'threadCutoff', 'wall', ...(enabled ? ['Profiler.stop'] : []), 'baseline', 'WASM']);
+  }
+});
+
+test('a failed Rust measurement window still stops the local sampler', async () => {
+  const events = [];
+  const error = new Error('replay failed');
+  const start = source.indexOf('  const heapBefore = await baseline();', source.indexOf('async function runRust'));
+  const end = source.indexOf('  if (profile) metrics.profile', start);
+  const window = source.slice(start, end).replace("(await import('./cpu-profile.mjs')).startCpuProfile", 'startCpuProfile');
+  await assert.rejects(vm.runInNewContext(`(async () => { ${window} })()`, {
+    values: { 'cpu-profile': '/tmp/test.cpuprofile' },
+    baseline: async () => ({}),
+    startCpuProfile: async () => ({ async stop() { events.push('stop'); } }),
+    process: { cpuUsage: () => ({}), threadCpuUsage: () => ({}) },
+    performance: { now: () => 0 },
+    host: { start() { throw error; } },
+  }), (actual) => actual === error);
+  assert.deepEqual(events, ['stop']);
+});
+
+test('sampling cleanup retains a simultaneous replay error before the write error', async () => {
+  const replayError = new Error('replay failed');
+  const cleanupError = new Error('profile write failed');
+  const start = source.indexOf('  const heapBefore = await baseline();', source.indexOf('async function runRust'));
+  const end = source.indexOf('  if (profile) metrics.profile', start);
+  const window = source.slice(start, end).replace("(await import('./cpu-profile.mjs')).startCpuProfile", 'startCpuProfile');
+  await assert.rejects(vm.runInNewContext(`(async () => { ${window} })()`, {
+    values: { 'cpu-profile': '/tmp/test.cpuprofile' },
+    baseline: async () => ({}),
+    startCpuProfile: async () => ({ async stop() { throw cleanupError; } }),
+    process: { cpuUsage: () => ({}), threadCpuUsage: () => ({}) },
+    performance: { now: () => 0 },
+    host: { start() { throw replayError; } },
+  }), (actual) => actual.name === 'AggregateError' && actual.errors.length === 2
+    && actual.errors[0] === replayError && actual.errors[1] === cleanupError);
+});

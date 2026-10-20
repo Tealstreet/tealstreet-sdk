@@ -25,9 +25,11 @@ const { values } = parseArgs({
     cadence: { type: 'string', default: 'recorded' },
     // Opt-in diagnostics; gates leave profiling disabled.
     profile: { type: 'boolean', default: false },
+    'cpu-profile': { type: 'string' },
   },
 });
 const venue = venueOf(values.venue);
+if (values['cpu-profile'] && values.impl !== 'rust') throw new Error('cpu-profile is supported only for impl rust');
 if (!['single', 'batch'].includes(values.delivery)) throw new Error('delivery must be single or batch');
 if (!['frame', 'recorded'].includes(values.cadence)) throw new Error('cadence must be frame or recorded');
 const tapeBytes = readFileSync(values.tape);
@@ -67,11 +69,12 @@ const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
 };
 
-const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
+const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark, cpuSampler) => {
   const cpu = process.cpuUsage(cpuStart.process);
   const thread = process.threadCpuUsage(cpuStart.thread);
   const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
   const wallMs = performance.now() - wallStart;
+  if (cpuSampler) await cpuSampler.stop();
   const memory = await baseline();
   const linearBytes = typeof wasmBytes === 'function' ? wasmBytes() : wasmBytes;
   return {
@@ -214,45 +217,66 @@ async function runRust() {
     },
   }, { batchMessages: values.delivery === 'batch' });
   const heapBefore = await baseline();
-  const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
-  const wallStart = performance.now();
-  host.start();
-  for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });
-  let lastFlush = -Infinity;
-  const flushTimer = isPrivate ? setInterval(() => host.flush(), 250) : undefined;
-  const frames = await tape.play(
-    (t) => {
-      if (t - lastFlush >= 250) {
-        host.flush();
-        lastFlush = t;
+  const cpuSampler = values['cpu-profile']
+    ? await (await import('./cpu-profile.mjs')).startCpuProfile(values['cpu-profile']) : undefined;
+  let frames, metrics, replayError;
+  let replayFailed = false;
+  try {
+    const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
+    const wallStart = performance.now();
+    host.start();
+    for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });
+    let lastFlush = -Infinity;
+    const flushTimer = isPrivate ? setInterval(() => host.flush(), 250) : undefined;
+    frames = await tape.play(
+      (t) => {
+        if (t - lastFlush >= 250) {
+          host.flush();
+          lastFlush = t;
+        }
+      },
+      async () => {
+        const deadline = performance.now() + 15000;
+        while (
+          !replayStoreReady(status?.loaded ?? 0, isPrivate) ||
+          (tape.audit && !tape.audit.ready()) ||
+          !tape.open.size
+        ) {
+          if (performance.now() > deadline) throw new Error('Replay timed out waiting for Rust startup');
+          host.flush();
+          await new Promise((resolve) => realTimeout(resolve, 5));
+        }
+      },
+      (record) => {
+        const { op, ...rest } = record;
+        return host.command({ op, ...commandArgs(rest) });
+      },
+      clock,
+      () => {
+        if (isPrivate) clockStart = performance.now();
+      },
+    );
+    await settle();
+    tape.assertWritesConsumed();
+    clearInterval(flushTimer);
+    host.flush();
+    metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark, cpuSampler);
+  } catch (error) {
+    replayFailed = true;
+    replayError = error;
+    throw error;
+  } finally {
+    // A failed replay must also release its local inspector session.
+    if (cpuSampler) {
+      try { await cpuSampler.stop(); }
+      catch (cleanupError) {
+        if (replayFailed && replayError !== cleanupError) {
+          throw new AggregateError([replayError, cleanupError], 'Rust replay and CPU profile cleanup failed');
+        }
+        throw cleanupError;
       }
-    },
-    async () => {
-      const deadline = performance.now() + 15000;
-      while (
-        !replayStoreReady(status?.loaded ?? 0, isPrivate) ||
-        (tape.audit && !tape.audit.ready()) ||
-        !tape.open.size
-      ) {
-        if (performance.now() > deadline) throw new Error('Replay timed out waiting for Rust startup');
-        host.flush();
-        await new Promise((resolve) => realTimeout(resolve, 5));
-      }
-    },
-    (record) => {
-      const { op, ...rest } = record;
-      return host.command({ op, ...commandArgs(rest) });
-    },
-    clock,
-    () => {
-      if (isPrivate) clockStart = performance.now();
-    },
-  );
-  await settle();
-  tape.assertWritesConsumed();
-  clearInterval(flushTimer);
-  host.flush();
-  const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark);
+    }
+  }
   if (profile) metrics.profile = profile.methods;
   host.dispose();
   clock?.restore();

@@ -617,3 +617,12 @@ cohorts. Any future performance comparison applies the same policy to both sides
 and must be predeclared independently; no favorable-result extension. The initial
 foreground regressions remain reported regardless of pilot outcome. Independent
 plan review accepts this as experiment-quality diagnosis, not a performance win.
+
+Pilot plan audit refinement, before any samples: an inherited normal launcher
+policy is opaque, so explicitly clamp both pilot contexts (`utility` and
+`background`) rather than imply the normal run is known unclamped. The same
+five pairs/alternating order and adoption rule now compare background CV to
+utility CV; this remains a variance-only experiment. Reject existing output
+destinations, persist failed attempts before aborting, and verify complete
+harness/host/WEEX binary fingerprints before and after every run. Record the
+exact launch commands and source pin. No CPU direction is used for selection.
