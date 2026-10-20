@@ -9,6 +9,9 @@ import { TXFLOW_TESTNET_REST_URL } from './txflow.types';
 
 export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
   private heartbeat?: ReturnType<typeof setTimeout>;
+  private subscriptionTimer?: ReturnType<typeof setTimeout>;
+  private readonly subscriptionQueue: string[] = [];
+  private subscriptionsSuspended = false;
   private readonly bookListeners = new Map<string, Set<(book: OrderBook) => void>>();
   private readonly candleListeners = new Map<string, Set<(candle: Candle) => void>>();
   private readonly bookTimes = new Map<string, number>();
@@ -18,11 +21,14 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
   connectAndSubscribe = () => {
     if (this.isDisposed) return;
     const url = `${TXFLOW_TESTNET_REST_URL.replace('https:', 'wss:')}/${this.api ? 'api-ws' : 'ws'}`;
-    this.ws = this.createWebsocket(url);
-    this.ws.addEventListener('open', this.opened);
-    this.ws.addEventListener('message', this.onMessage);
-    this.ws.addEventListener('close', (event: unknown) => {
+    const socket = this.createWebsocket(url);
+    this.ws = socket;
+    socket.addEventListener('open', () => { if (this.ws === socket) this.opened(); });
+    socket.addEventListener('message', (event: MessageEvent) => { if (this.ws === socket) this.onMessage(event); });
+    socket.addEventListener('close', (event: unknown) => {
+      if (this.ws !== socket) return;
       this.stopHeartbeat();
+      this.stopSubscriptions();
       if (!this.api) {
         this.bookTimes.clear();
         for (const listeners of this.bookListeners.values()) for (const listener of listeners) listener({ bids: [], asks: [] });
@@ -34,6 +40,8 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
 
   private opened = () => {
     if (this.isDisposed) return;
+    this.stopSubscriptions();
+    this.subscriptionsSuspended = false;
     this.trackLastReceived();
     if (this.api) {
       for (const market of this.store.markets) this.subscription('subscribe', { type: 'ticker', coin: market.base, instrumentId: Number(market.id) });
@@ -71,8 +79,31 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
   ping = () => { if (this.isConnected) this.ws?.send('{"method":"ping"}'); };
 
   private subscription(method: string, subscription: Record<string, unknown>) {
-    if (!this.isConnected) return;
-    this.ws?.send(JSON.stringify({ method, ...(!this.api ? { type: subscription.type } : {}), subscription }));
+    if (!this.isConnected || this.subscriptionsSuspended) return;
+    if (this.subscriptionQueue.length >= 4096) {
+      this.stopSubscriptions();
+      this.subscriptionsSuspended = true;
+      this.parent.emitAndLogError('TxFlow subscription queue exhausted');
+      void this.reconnect();
+      return;
+    }
+    this.subscriptionQueue.push(JSON.stringify({ method, ...(!this.api ? { type: subscription.type } : {}), subscription }));
+    if (!this.subscriptionTimer) this.flushSubscription();
+  }
+
+  private stopSubscriptions() {
+    if (this.subscriptionTimer) clearTimeout(this.subscriptionTimer);
+    this.subscriptionTimer = undefined;
+    this.subscriptionQueue.length = 0;
+  }
+  private flushSubscription = () => {
+    this.subscriptionTimer = undefined;
+    if (this.isDisposed || !this.isConnected) { this.stopSubscriptions(); return; }
+    const frame = this.subscriptionQueue.shift();
+    if (frame === undefined) return;
+    this.ws?.send(frame);
+    // The gateway drops subscription bursts without identifying the lost frame.
+    this.subscriptionTimer = setTimeout(this.flushSubscription, 150);
   }
 
   onMessage = (event: MessageEvent) => {
@@ -82,6 +113,13 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
     try {
       const frame = JSON.parse(text);
       const data = frame.data;
+      if ((frame.channel === 'error' || frame.type === 'error') && (frame.code ?? data?.code) === 'RISK_RATE_LIMITED') {
+        if (this.subscriptionsSuspended) return;
+        this.stopSubscriptions();
+        this.subscriptionsSuspended = true;
+        void this.reconnect();
+        return;
+      }
       if (frame.method === 'PONG' || frame.channel === 'pong') return;
       if (frame.channel === 'allAssetCtxs' || frame.channel === 'activeAssetCtx') {
         const rows = frame.channel === 'allAssetCtxs' ? data.ctxs : [data];
@@ -157,5 +195,5 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
       }
     };
   };
-  dispose() { this.stopHeartbeat(); this.bookListeners.clear(); this.candleListeners.clear(); super.dispose(); }
+  dispose() { this.stopHeartbeat(); this.stopSubscriptions(); this.bookListeners.clear(); this.candleListeners.clear(); super.dispose(); }
 }

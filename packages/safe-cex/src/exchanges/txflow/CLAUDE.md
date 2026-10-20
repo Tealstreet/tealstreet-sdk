@@ -78,6 +78,11 @@ venue code; hosts select proxy/tunnel policy.
   Recognize node `method: PONG` and API `channel: pong`. Rust uses engine
   timers/watchdogs and role-tagged sockets. Reconnect restores subscriptions
   and invalidates stale books.
+- Pace subscription frames on each socket by 150 ms, with a bounded FIFO and
+  independent heartbeat. The gateway drops burst frames without identifying
+  which subscription was lost. `RISK_RATE_LIMITED` restarts that socket through
+  its normal recovery path and rebuilds current intents; discard old queued
+  frames/timers. The live fixture confirms all 78 ticker acknowledgements.
 - Keep all supplied book levels, discard older snapshots, and retain subscription
   intents made before metadata arrives. Candles use `/api-ws`; historical
   candles use `candleSnapshot` and engine-second output timestamps.

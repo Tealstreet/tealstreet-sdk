@@ -4,6 +4,30 @@ use safe_cex_engine::{Action, Command, Engine, Event, RequestRoute, SocketChanne
 use safe_cex_venue_txflow::{Options, TxFlow};
 use support::*;
 
+fn flush_subscriptions(
+    e: &mut Engine<TxFlow>,
+    until: f64,
+) -> Vec<(safe_cex_engine::SocketId, String)> {
+    let mut frames = Vec::new();
+    loop {
+        let mut timers = Vec::new();
+        for action in e.drain_actions() {
+            match action {
+                Action::WsSend { socket, text } => frames.push((socket, text)),
+                Action::SetTimer { timer, at_ms } if at_ms <= until => timers.push((timer, at_ms)),
+                _ => {}
+            }
+        }
+        if timers.is_empty() {
+            return frames;
+        }
+        timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+        for (timer, at) in timers {
+            e.handle(at, Event::TimerFired { timer });
+        }
+    }
+}
+
 #[test]
 fn mainnet_and_invalid_agent_fail_before_io() {
     for opts in [
@@ -526,18 +550,246 @@ fn book_and_chart_intents_before_metadata_subscribe_once_when_ready() {
     for socket in sockets {
         e.handle(2000.0, Event::WsOpened { socket });
     }
-    let frames = e
+    let frames = flush_subscriptions(&mut e, 3000.0);
+    assert_eq!(
+        frames.iter().filter(|(_, f)| f.contains("l2Book")).count(),
+        1
+    );
+    assert_eq!(
+        frames.iter().filter(|(_, f)| f.contains("candle")).count(),
+        1
+    );
+}
+
+#[test]
+fn subscription_fifo_sends_one_frame_per_150ms_and_paces_unsubscribe() {
+    let (mut e, _, api) = ready();
+    for interval in ["1m", "3m", "5m"] {
+        e.handle(
+            3000.0,
+            Event::Command(Command::SubscribeCandles {
+                symbol: "BTC-USDC".into(),
+                interval: interval.into(),
+            }),
+        );
+    }
+    e.handle(
+        3000.0,
+        Event::Command(Command::UnsubscribeCandles {
+            symbol: "BTC-USDC".into(),
+            interval: "1m".into(),
+        }),
+    );
+    for (index, (method, interval)) in [
+        ("subscribe", "1m"),
+        ("subscribe", "3m"),
+        ("subscribe", "5m"),
+        ("unsubscribe", "1m"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let sent = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::WsSend { socket, text } => Some((*socket, text)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, api);
+        let frame: serde_json::Value = serde_json::from_str(sent[0].1).unwrap();
+        assert_eq!(frame["method"], method);
+        assert_eq!(frame["subscription"]["interval"], interval);
+        let at = 3150.0 + index as f64 * 150.0;
+        let timer = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(at, Event::TimerFired { timer });
+    }
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::WsSend { .. }))
+    );
+}
+
+#[test]
+fn subscription_backlog_is_bounded_and_never_holds_up_heartbeat() {
+    let (mut e, _, api) = ready();
+    e.handle(3000.0, Event::WsOpened { socket: api });
+    let ping = e
         .drain_actions()
-        .filter_map(|a| {
-            if let Action::WsSend { text, .. } = a {
-                Some(text)
-            } else {
-                None
-            }
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 13000.0,
+            } => Some(timer),
+            _ => None,
         })
-        .collect::<Vec<_>>();
-    assert_eq!(frames.iter().filter(|f| f.contains("l2Book")).count(), 1);
-    assert_eq!(frames.iter().filter(|f| f.contains("candle")).count(), 1);
+        .unwrap();
+    for _ in 0..100 {
+        for add in [true, false] {
+            let command = if add {
+                Command::SubscribeCandles {
+                    symbol: "BTC-USDC".into(),
+                    interval: "1m".into(),
+                }
+            } else {
+                Command::UnsubscribeCandles {
+                    symbol: "BTC-USDC".into(),
+                    interval: "1m".into(),
+                }
+            };
+            e.handle(3000.0, Event::Command(command));
+        }
+    }
+    e.drain_actions().for_each(drop);
+    e.handle(13000.0, Event::TimerFired { timer: ping });
+    assert!(e.drain_actions().any(|a| matches!(a, Action::WsSend { socket, text } if socket == api && text == r#"{"method":"ping"}"#)));
+    for _ in 0..2050 {
+        for add in [true, false] {
+            let command = if add {
+                Command::SubscribeCandles {
+                    symbol: "BTC-USDC".into(),
+                    interval: "1m".into(),
+                }
+            } else {
+                Command::UnsubscribeCandles {
+                    symbol: "BTC-USDC".into(),
+                    interval: "1m".into(),
+                }
+            };
+            e.handle(13000.0, Event::Command(command));
+        }
+    }
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::WsClose { socket } if *socket == api))
+            .count(),
+        1
+    );
+    assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+}
+
+#[test]
+fn socket_rate_limit_discards_old_queue_and_restores_current_intents_on_reconnect() {
+    for api in [false, true] {
+        let (mut e, node_socket, api_socket) = ready();
+        let socket = if api { api_socket } else { node_socket };
+        e.handle(
+            3000.0,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: "BTC-USDC".into(),
+            }),
+        );
+        for interval in ["1m", "3m"] {
+            e.handle(
+                3000.0,
+                Event::Command(Command::SubscribeCandles {
+                    symbol: "BTC-USDC".into(),
+                    interval: interval.into(),
+                }),
+            );
+        }
+        let old_timers = e
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let error = if api {
+            r#"{"channel":"error","data":{"code":"RISK_RATE_LIMITED","message":"rate limit exceeded"}}"#
+        } else {
+            r#"{"type":"error","code":"RISK_RATE_LIMITED","message":"rate limit exceeded"}"#
+        };
+        message(&mut e, socket, 3001.0, error);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+        );
+        let cleared = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::ClearTimer { timer } => Some(*timer),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(old_timers.iter().any(|(timer, _)| cleared.contains(timer)));
+        for (timer, at) in old_timers {
+            if cleared.contains(&timer) {
+                e.handle(at, Event::TimerFired { timer });
+            }
+        }
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::WsSend { .. }))
+        );
+        let (timer, at) = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(at, 4001.0);
+        e.handle(at, Event::TimerFired { timer });
+        let replacement = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(
+            at,
+            Event::WsOpened {
+                socket: replacement,
+            },
+        );
+        let frames = flush_subscriptions(&mut e, 5000.0);
+        assert!(frames.iter().all(|(s, _)| *s == replacement));
+        if api {
+            assert_eq!(
+                frames
+                    .iter()
+                    .filter(|(_, text)| text.contains("ticker"))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                frames
+                    .iter()
+                    .filter(|(_, text)| text.contains("candle"))
+                    .count(),
+                2
+            );
+        } else {
+            assert_eq!(
+                frames
+                    .iter()
+                    .filter(|(_, text)| text.contains("allAssetCtxs"))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                frames
+                    .iter()
+                    .filter(|(_, text)| text.contains("l2Book"))
+                    .count(),
+                1
+            );
+        }
+    }
 }
 
 #[test]

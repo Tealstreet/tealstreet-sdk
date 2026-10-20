@@ -497,3 +497,24 @@ revision advances before any accepted REST store update. Independent review
 found and closed those two additional authority gaps. Twelve deferred-read and
 lifecycle regressions, the complete 63-test Phemex suite, typecheck and lint pass.
 No fixture changes, balance normalization or performance threshold changes.
+
+The subscription fix now passes independent code-correctness re-review. Both
+implementations use bounded per-socket FIFO subscription pacing at 150 ms,
+independent pings, and rebuild current intents on gateway rate rejection.
+Review also caught TS `ReconnectingWebSocket.close()` disabling recovery;
+using shared reconnect plus an idempotent suspended state fixes it. Three TS
+proofs cover 78 paced subscriptions, stale callbacks, and duplicate rate errors
+through actual shared wrapper recovery. Native tests cover numeric decoding,
+FIFO/unsubscribe, both error forms, old-timer cancellation, queue bounds and
+independent heartbeats. No parser success/failure semantics were relaxed.
+
+A new actual live recording captures 20 seconds after market readiness plus
+startup, 607 retained records, 525 WS frames, 417 ticker updates, 78 subscription
+acknowledgements and zero rate errors. Both requested books arrive. Trim retains
+all records (32-second physical envelope includes startup); nothing is added.
+Combined public gate passes three runs: TS/Rust CPU 143.8/109.4 ms (1.31x),
+steady CPU 32.8/28.4 ms (1.16x), memory 17.1/2.2 MB (7.91x).
+The private userAssetData event now follows its paced subscription at 600 ms,
+chronologically after the 400 ms command; frame/command/write counts unchanged.
+Binance combined public/private gates passed after the GRVT lifecycle change:
+CPU 266.4/137.7 ms (1.93x), memory 17.9/4.8 MB (3.72x), three books.

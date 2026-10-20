@@ -587,6 +587,7 @@ export const VENUES = {
     options: { testnet: true },
     virtualPrivateClock: true,
     recordPublicCorsDirect: true,
+    recordAfterReady: true,
     ts: { module: `${root}/../__tests__/reference/txflow/txflow.exchange.ts`, className: 'TxFlowExchange', name: 'txflow' },
     requestKey: typedRequest,
     requestBodies: true,
@@ -597,7 +598,9 @@ export const VENUES = {
     compareSubscriptions: true,
     compareClientIds: true,
     replayCredentials: { applicationId: '0x0000000000000000000000000000000000000001', secret: '0x' + 'ab'.repeat(32), key: '' },
-    initializeReplay: initializeTxFlowCrypto,
+    initializeReplay(_impl, options) {
+      if (!options.publicDataOnly) return initializeTxFlowCrypto();
+    },
     createRequestValidator: createTxFlowRequestValidator,
     validateSocketMessage: validateTxFlowSocketMessage,
     isWrite: (_method, url) => new URL(url).pathname === '/exchange',

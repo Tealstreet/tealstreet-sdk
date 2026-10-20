@@ -42,7 +42,7 @@ pub fn ready_with_ticker(ticker: &str) -> (Engine<TxFlow>, SocketId, SocketId) {
                     };
                     reply(&mut e, &r, 200, body);
                 }
-                Action::SetTimer { timer, at_ms } if at_ms < 2000.0 => {
+                Action::SetTimer { timer, at_ms } if at_ms < 10_000.0 => {
                     e.handle(at_ms, Event::TimerFired { timer })
                 }
                 Action::WsConnect { socket, .. } => {

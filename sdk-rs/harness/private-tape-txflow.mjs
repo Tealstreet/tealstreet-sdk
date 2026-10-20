@@ -77,11 +77,12 @@ const limit = (asset, side, price, size, cloid, tif = 'Gtc') => ({
   a: asset, b: side === 'buy', p: String(price), s: String(size), r: false, t: { limit: { tif } }, c: cloid,
 });
 ws(100, 'allAssetCtxs', { ctxs: [{ coin: '1', ctx: context(100) }, { coin: '2', ctx: context(200) }] });
-ws(150, 'userAssetData', { user: USER, coins: [btcSetting, ethSetting] });
 ws(180, 'pong', null, API);
 
 command(400, 'setPositionMode', { hedged: false });
 write({ type: 'updatePositionMode', isOneway: true }, 'UpdatePositionMode'); snapshots();
+// Account channels follow the paced allAssetCtxs/order/state subscriptions.
+ws(600, 'userAssetData', { user: USER, coins: [btcSetting, ethSetting] });
 command(800, 'setLeverage', { symbol: 'BTC-USDC', leverage: 7 });
 write({ type: 'updateLeverage', asset: 1, leverage: 7 }, 'UpdateLeverage'); btcSetting = setting(1, 7); snapshots();
 ws(900, 'activeAssetData', btcSetting);

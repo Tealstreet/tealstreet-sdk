@@ -4,19 +4,33 @@ use serde::Deserialize;
 use std::borrow::Cow;
 
 pub fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Number<'a> {
-        Native(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
-        Null(()),
+    struct Number;
+    impl serde::de::Visitor<'_> for Number {
+        type Value = f64;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a number, decimal string or null")
+        }
+        fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<f64, E> {
+            Ok(value)
+        }
+        fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<f64, E> {
+            Ok(value as f64)
+        }
+        fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<f64, E> {
+            Ok(value as f64)
+        }
+        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<f64, E> {
+            if value.is_empty() {
+                Ok(0.0)
+            } else {
+                value.parse().map_err(E::custom)
+            }
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<f64, E> {
+            Ok(0.0)
+        }
     }
-    let n = match Number::deserialize(d)? {
-        Number::Native(n) => n,
-        Number::Null(()) => 0.0,
-        Number::Text(s) if s.is_empty() => 0.0,
-        Number::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
+    let n = d.deserialize_any(Number)?;
     if n.is_finite() {
         Ok(n)
     } else {
@@ -46,10 +60,10 @@ pub struct Reply<T> {
 }
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
-    #[serde(borrow)]
+    #[serde(borrow, alias = "type")]
     pub channel: Cow<'a, str>,
-    #[serde(borrow)]
-    pub data: &'a serde_json::value::RawValue,
+    #[serde(borrow, default)]
+    pub data: Option<&'a serde_json::value::RawValue>,
 }
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -217,6 +231,31 @@ impl CandleRow<'_> {
             low: self.l,
             close: self.c,
             volume: self.v,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_decimal_forms_keep_finite_and_null_contracts() {
+        #[derive(Deserialize)]
+        struct Decimal(#[serde(deserialize_with = "number")] f64);
+        for (json, expected) in [
+            ("1", 1.0),
+            ("-2", -2.0),
+            ("1.25", 1.25),
+            (r#""1.25""#, 1.25),
+            (r#""\u0031.25""#, 1.25),
+            (r#""""#, 0.0),
+            ("null", 0.0),
+        ] {
+            assert_eq!(serde_json::from_str::<Decimal>(json).unwrap().0, expected);
+        }
+        for json in [r#""NaN""#, r#""inf""#, r#""invalid""#, "true", "[]", "{}"] {
+            assert!(serde_json::from_str::<Decimal>(json).is_err(), "{json}");
         }
     }
 }

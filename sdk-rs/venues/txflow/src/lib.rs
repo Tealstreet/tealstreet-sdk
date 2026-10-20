@@ -66,6 +66,8 @@ struct Connection {
     ping: Option<TimerId>,
     reconnect: Option<TimerId>,
     attempts: u32,
+    subscriptions: VecDeque<String>,
+    subscription_timer: Option<TimerId>,
 }
 #[derive(Default)]
 struct Ladder {
@@ -136,7 +138,8 @@ impl TxFlow {
     }
     pub(crate) fn coin_symbol(&self, coin: &str) -> Option<&str> {
         self.coins
-            .get(&coin.to_ascii_lowercase())
+            .get(coin)
+            .or_else(|| self.coins.get(&coin.to_ascii_lowercase()))
             .map(String::as_str)
     }
     pub(crate) fn info(
@@ -226,7 +229,13 @@ impl TxFlow {
         }
         self.account_start(cx);
     }
-    fn subscribe(&self, cx: &mut Cx<'_, Pending>, api: bool, method: &str, subscription: Sub<'_>) {
+    fn subscribe(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        api: bool,
+        method: &str,
+        subscription: Sub<'_>,
+    ) {
         #[derive(Serialize)]
         struct Frame<'a> {
             method: &'a str,
@@ -234,22 +243,39 @@ impl TxFlow {
             r#type: Option<&'a str>,
             subscription: Sub<'a>,
         }
-        let conn = if api { &self.api } else { &self.node };
+        let conn = if api { &mut self.api } else { &mut self.node };
+        if !conn.open {
+            return;
+        }
+        if conn.subscriptions.len() >= 4096 {
+            if let Some(socket) = conn.socket {
+                cx.log(LogLevel::Warning, "TxFlow subscription backlog exhausted");
+                cx.close(socket);
+                self.on_close(cx, socket, 1006);
+            }
+            return;
+        }
+        conn.subscriptions.push_back(
+            serde_json::to_string(&Frame {
+                method,
+                r#type: if api { None } else { Some(subscription.r#type) },
+                subscription,
+            })
+            .unwrap(),
+        );
+        Self::pump_subscriptions(cx, conn);
+    }
+    fn pump_subscriptions(cx: &mut Cx<'_, Pending>, conn: &mut Connection) {
         if conn.open
+            && conn.subscription_timer.is_none()
             && let Some(socket) = conn.socket
+            && let Some(text) = conn.subscriptions.pop_front()
         {
-            cx.send(
-                socket,
-                serde_json::to_string(&Frame {
-                    method,
-                    r#type: if api { None } else { Some(subscription.r#type) },
-                    subscription,
-                })
-                .unwrap(),
-            );
+            cx.send(socket, text);
+            conn.subscription_timer = Some(cx.set_timer(150.0));
         }
     }
-    pub(crate) fn node_subscribe(&self, cx: &mut Cx<'_, Pending>, kind: &str, user: &str) {
+    pub(crate) fn node_subscribe(&mut self, cx: &mut Cx<'_, Pending>, kind: &str, user: &str) {
         self.subscribe(
             cx,
             false,
@@ -311,13 +337,28 @@ impl TxFlow {
         cx.store
             .update_ticker(symbol, |t| Self::ticker_update(t, row, seed));
     }
-    fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
+    fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
         let Ok(frame) = serde_json::from_str::<Envelope>(text) else {
-            return;
+            return false;
+        };
+        if frame.channel == "error" {
+            #[derive(serde::Deserialize)]
+            struct ErrorCode<'a> {
+                #[serde(borrow, default)]
+                code: Option<&'a str>,
+            }
+            let limited = |raw: &str| {
+                serde_json::from_str::<ErrorCode<'_>>(raw)
+                    .is_ok_and(|error| error.code == Some("RISK_RATE_LIMITED"))
+            };
+            return limited(text) || frame.data.is_some_and(|data| limited(data.get()));
+        }
+        let Some(data) = frame.data else {
+            return false;
         };
         match frame.channel.as_ref() {
             "allAssetCtxs" => {
-                if let Ok(rows) = serde_json::from_str::<Contexts>(frame.data.get()) {
+                if let Ok(rows) = serde_json::from_str::<Contexts>(data.get()) {
                     for row in rows.ctxs {
                         if let Some(symbol) = self.coin_symbol(&row.coin) {
                             Self::context(cx, symbol, row.ctx);
@@ -326,21 +367,21 @@ impl TxFlow {
                 }
             }
             "activeAssetCtx" => {
-                if let Ok(row) = serde_json::from_str::<ContextFrame>(frame.data.get())
+                if let Ok(row) = serde_json::from_str::<ContextFrame>(data.get())
                     && let Some(symbol) = self.coin_symbol(&row.coin)
                 {
                     Self::context(cx, symbol, row.ctx);
                 }
             }
             "ticker" => {
-                if let Ok(row) = serde_json::from_str::<TickerRow>(frame.data.get())
+                if let Ok(row) = serde_json::from_str::<TickerRow>(data.get())
                     && let Some(symbol) = self.symbol(row.instrument_id)
                 {
                     Self::apply_ticker(cx, symbol, row, false);
                 }
             }
             "l2Book" => {
-                if let Ok(row) = serde_json::from_str::<Depth>(frame.data.get())
+                if let Ok(row) = serde_json::from_str::<Depth>(data.get())
                     && let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned)
                     && let Some(ladder) = self.books.get_mut(&symbol)
                     && ladder.time.is_none_or(|t| row.time >= t)
@@ -351,7 +392,7 @@ impl TxFlow {
                         .flatten()
                         .any(|l| l.px <= 0.0 || l.sz < 0.0)
                     {
-                        return;
+                        return false;
                     }
                     for (index, side) in [BookSide::Bids, BookSide::Asks].into_iter().enumerate() {
                         ladder.book.load_sorted(
@@ -376,7 +417,7 @@ impl TxFlow {
                         cx.candle(symbol, &row.i, row.candle());
                     }
                 };
-                let raw = frame.data.get();
+                let raw = data.get();
                 if raw.starts_with('[') {
                     let _ = json::each(raw, &mut apply);
                 } else if let Ok(row) = serde_json::from_str(raw) {
@@ -385,6 +426,7 @@ impl TxFlow {
             }
             _ => {}
         }
+        false
     }
     fn book_sub(&mut self, cx: &mut Cx<'_, Pending>, symbol: String, add: bool) {
         if cx.store.loaded().markets && !self.assets.contains_key(&symbol) {
@@ -549,13 +591,24 @@ impl Venue for TxFlow {
         conn.attempts = 0;
         conn.last_received = cx.now;
         conn.ping = Some(cx.set_timer(10_000.0));
+        if let Some(timer) = conn.subscription_timer.take() {
+            cx.clear_timer(timer);
+        }
+        conn.subscriptions.clear();
         if api {
-            for (symbol, asset) in &self.assets {
-                let base = cx
-                    .store
-                    .market(symbol)
-                    .map(|m| m.base.clone())
-                    .unwrap_or_else(|| symbol.clone());
+            let tickers = self
+                .assets
+                .iter()
+                .map(|(symbol, asset)| {
+                    let base = cx
+                        .store
+                        .market(symbol)
+                        .map(|m| m.base.clone())
+                        .unwrap_or_else(|| symbol.clone());
+                    (base, *asset)
+                })
+                .collect::<Vec<_>>();
+            for (base, asset) in tickers {
                 self.subscribe(
                     cx,
                     true,
@@ -565,25 +618,32 @@ impl Venue for TxFlow {
                         coin: Some(&base),
                         interval: None,
                         user: None,
-                        instrument_id: Some(*asset),
+                        instrument_id: Some(asset),
                     },
                 );
             }
-            for (symbol, interval) in self.candles.keys() {
-                if let Some(asset) = self.assets.get(symbol) {
-                    self.subscribe(
-                        cx,
-                        true,
-                        "subscribe",
-                        Sub {
-                            r#type: "candle",
-                            coin: Some(&asset.to_string()),
-                            interval: Some(interval),
-                            user: None,
-                            instrument_id: None,
-                        },
-                    );
-                }
+            let candles = self
+                .candles
+                .keys()
+                .filter_map(|(symbol, interval)| {
+                    self.assets
+                        .get(symbol)
+                        .map(|asset| (*asset, interval.clone()))
+                })
+                .collect::<Vec<_>>();
+            for (asset, interval) in candles {
+                self.subscribe(
+                    cx,
+                    true,
+                    "subscribe",
+                    Sub {
+                        r#type: "candle",
+                        coin: Some(&asset.to_string()),
+                        interval: Some(&interval),
+                        user: None,
+                        instrument_id: None,
+                    },
+                );
             }
         } else {
             self.subscribe(
@@ -603,26 +663,29 @@ impl Venue for TxFlow {
                 ladder.time = None;
                 cx.book_changed(symbol);
             }
-            for symbol in self.books.keys() {
-                if let Some(asset) = self.assets.get(symbol) {
-                    self.subscribe(
-                        cx,
-                        false,
-                        "subscribe",
-                        Sub {
-                            r#type: "l2Book",
-                            coin: Some(&asset.to_string()),
-                            interval: None,
-                            user: None,
-                            instrument_id: None,
-                        },
-                    );
-                }
+            let books = self
+                .books
+                .keys()
+                .filter_map(|symbol| self.assets.get(symbol).copied())
+                .collect::<Vec<_>>();
+            for asset in books {
+                self.subscribe(
+                    cx,
+                    false,
+                    "subscribe",
+                    Sub {
+                        r#type: "l2Book",
+                        coin: Some(&asset.to_string()),
+                        interval: None,
+                        user: None,
+                        instrument_id: None,
+                    },
+                );
             }
             if !self.options.public_data_only {
-                if let Some(user) = self.user() {
+                if let Some(user) = self.user().map(str::to_owned) {
                     for kind in ["orderUpdates", "clearinghouseState", "userAssetData"] {
-                        self.node_subscribe(cx, kind, user);
+                        self.node_subscribe(cx, kind, &user);
                     }
                 }
                 self.account_refresh(cx);
@@ -630,13 +693,26 @@ impl Venue for TxFlow {
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
-        if self.node.socket == Some(socket) {
+        let node = self.node.socket == Some(socket);
+        if node {
             self.node.last_received = cx.now;
-            self.public_frame(cx, text);
-            self.account_node_frame(cx, text);
         } else if self.api.socket == Some(socket) {
             self.api.last_received = cx.now;
-            self.public_frame(cx, text);
+        } else {
+            return;
+        }
+        if self.public_frame(cx, text) {
+            cx.log(
+                LogLevel::Warning,
+                "TxFlow socket rate limited; reconnecting subscriptions",
+            );
+            cx.close(socket);
+            self.on_close(cx, socket, 1006);
+            return;
+        }
+        if node {
+            self.account_node_frame(cx, text);
+        } else {
             self.account_api_frame(cx, text);
         }
     }
@@ -651,6 +727,10 @@ impl Venue for TxFlow {
         if let Some(timer) = conn.ping.take() {
             cx.clear_timer(timer);
         }
+        if let Some(timer) = conn.subscription_timer.take() {
+            cx.clear_timer(timer);
+        }
+        conn.subscriptions.clear();
         conn.attempts = conn.attempts.saturating_add(1);
         conn.reconnect =
             Some(cx.set_timer((1000.0 * 2f64.powi(conn.attempts.min(5) as i32 - 1)).min(30_000.0)));
@@ -874,6 +954,10 @@ impl Venue for TxFlow {
         }
         for api in [false, true] {
             let conn = if api { &mut self.api } else { &mut self.node };
+            if conn.subscription_timer == Some(timer) {
+                conn.subscription_timer = None;
+                Self::pump_subscriptions(cx, conn);
+            }
             if conn.reconnect == Some(timer) {
                 conn.reconnect = None;
                 let role = if api || self.options.public_data_only {

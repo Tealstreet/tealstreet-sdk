@@ -167,6 +167,8 @@ const KNOWN_TS_FIXES = {
   // Compare both outputs directly; no TxFlow-specific normalization is permitted.
   // The production wrapper also rejects order-history ID/status filters that
   // the native query cannot represent, instead of silently discarding them.
+  // Both implementations pace subscription bursts and recover dropped gateway
+  // subscriptions; the live fixture confirms every ticker acknowledgement.
   txflow: [],
   // Paired TS fixes: retain both rolling-volume sides and open price across
   // ticker deltas; derive quote volume/change from current last; accept native
