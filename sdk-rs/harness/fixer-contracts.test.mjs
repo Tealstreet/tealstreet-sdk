@@ -133,7 +133,12 @@ test('primitive request/subscription array edits have explicit permissions', () 
 test('MEXC may add expected subscriptions but never drop an observed one', () => {
   const added = audit('mexc', { subscriptions: ['b', 'c'] }, (output) => { output.subscriptions = ['a', 'b', 'c']; });
   assert.deepEqual(added.errors, []);
-  assert.ok(audit('mexc', { subscriptions: ['a', 'b'] }, (output) => { output.subscriptions = ['a']; }).errors.length);
+  assert.equal(added.counts['subscriptions@added'], 1);
+  for (const [before, after] of [[['a'], []], [['a', 'b'], ['a', 'X']], [['a', 'b'], ['a', 'c', 'd']], [['a', 'a'], ['a', 'm']]]) {
+    const result = audit('mexc', { subscriptions: before }, (output) => { output.subscriptions = after; });
+    assert.ok(result.errors.some((error) => error.includes('@dropped')), JSON.stringify([before, after]));
+  }
+  assert.ok(audit('mexc', { subscriptions: ['a'] }, (output) => { output.subscriptions = ['a', 1]; }).errors.length);
   assert.ok(audit('mexc', { requests: ['GET a'] }, (output) => { output.requests = []; }).errors.length);
 });
 

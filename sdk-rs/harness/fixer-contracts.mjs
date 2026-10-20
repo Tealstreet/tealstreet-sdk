@@ -84,7 +84,7 @@ export const FIXER_CONTRACTS = deepFreeze({
     ...bybit, 'markets[].precision.amount', 'markets[].limits.amount.max',
   ], [...requestArrays, ...subscriptionArrays]),
   // Expected TS feed set gains only the documented all-contract mini ticker.
-  mexc: contract(['subscriptions[]'], [{ path: 'subscriptions', add: true, reorder: true }]),
+  mexc: contract([], [{ path: 'subscriptions', add: true, reorder: true, retainAll: true }]),
   blofin: contract(['account.positions[].marginSize', 'account.balance.used', 'account.balance.upnl']),
   weex: contract(['account.orders[].type', 'account.orders[].price']),
   phemex: contract([
@@ -276,6 +276,20 @@ export function auditFixerChanges(venue, before, after) {
           }
           return map;
         };
+        // Add-only string lists: every observed entry must survive, counting
+        // duplicates, so an insertion cannot hide a substituted or dropped entry.
+        const strings = (rows) => ownKeys(rows).length === rows.length
+          && rows.every((row, index) => Object.hasOwn(rows, index) && typeof row === 'string');
+        if (rule?.retainAll && strings(left) && strings(right)) {
+          const remaining = new Map();
+          for (const row of right) remaining.set(row, (remaining.get(row) ?? 0) + 1);
+          for (const row of left) {
+            if (remaining.get(row)) remaining.set(row, remaining.get(row) - 1);
+            else record(path, false, '@dropped');
+          }
+          for (const count of remaining.values()) for (let added = 0; added < count; added++) record(path, true, '@added');
+          return;
+        }
         const leftMap = keyed(left), rightMap = keyed(right);
         if (leftMap && rightMap) {
           const oldCommon = [...leftMap.keys()].filter((key) => rightMap.has(key));
