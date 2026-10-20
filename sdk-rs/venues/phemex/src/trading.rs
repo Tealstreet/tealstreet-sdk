@@ -17,6 +17,13 @@ pub(crate) struct State {
     sides: HashMap<String, String>,
     brackets: HashMap<String, Brackets>,
 }
+impl State {
+    pub(crate) fn placing(&self, symbol: &str) -> bool {
+        self.jobs
+            .values()
+            .any(|job| job.placing.iter().any(|s| s == symbol))
+    }
+}
 #[derive(Clone, Copy)]
 struct Brackets {
     tp: Option<StopTriggerType>,
@@ -26,6 +33,8 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     settings: bool,
+    /// Symbols a `PlaceOrders` job may leave with an unknown outcome.
+    placing: Vec<String>,
 }
 pub struct Request {
     command: CommandId,
@@ -818,6 +827,7 @@ impl PhemexPerpetuals {
             command,
             Command::PlaceOrders { .. } | Command::AmendOrder { .. }
         );
+        let placement = matches!(command, Command::PlaceOrders { .. });
         let (id, planned) = match command {
             Command::CancelOrdersWithSymbols { command, .. }
             | Command::FetchStpMode { command }
@@ -966,12 +976,21 @@ impl PhemexPerpetuals {
         match planned {
             Err(error) => reject(cx, id, error),
             Ok(steps) => {
+                let mut placing = Vec::new();
+                for step in steps.iter().filter(|_| placement) {
+                    if let Call::Place { order, .. } = &step.call
+                        && !placing.contains(&order.symbol)
+                    {
+                        placing.push(order.symbol.clone());
+                    }
+                }
                 self.trading.jobs.insert(
                     id,
                     Job {
                         steps,
                         ids: Vec::new(),
                         settings: is_settings,
+                        placing,
                     },
                 );
                 self.trade_next(cx, id);
@@ -987,15 +1006,18 @@ impl PhemexPerpetuals {
         let Some(step) = job.steps.pop_front() else {
             let job = self.trading.jobs.remove(&id).unwrap();
             cx.done(id, Ok(serde_json::to_string(&job.ids).unwrap()));
+            self.orders_reconcile(cx);
             return;
         };
         if cx.now < self.paused_until {
-            self.trading.jobs.remove(&id);
+            let job = self.trading.jobs.remove(&id).unwrap();
             reject(
                 cx,
                 id,
                 "Phemex requests are rate limited; mutation was not sent".into(),
             );
+            // Earlier steps of this batch were sent, so the batch outcome is open.
+            self.orders_uncertain(cx, job.placing);
             return;
         }
         if let Some(g) = &step.replacement
@@ -1353,8 +1375,10 @@ impl PhemexPerpetuals {
             }
             _ => {}
         }
-        self.trading.jobs.remove(&request.command);
+        let job = self.trading.jobs.remove(&request.command);
         self.account_refresh(cx);
         reject(cx, request.command, error.into());
+        // Read only after `reject` raises the fence, so the read postdates the failure.
+        self.orders_uncertain(cx, job.map(|job| job.placing).unwrap_or_default());
     }
 }

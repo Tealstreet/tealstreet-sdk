@@ -31,6 +31,28 @@ pub struct Request {
     unattributed: bool,
     invalid: bool,
 }
+/// A per-symbol open-order read issued after a placement outcome went unknown.
+/// Only an HTTP read started after the failure can lift the engine's cancel-all fence.
+pub struct OrdersRead {
+    symbol: String,
+    generation: u64,
+}
+#[derive(Default)]
+struct Reconcile {
+    generation: u64,
+    reading: bool,
+}
+#[derive(Deserialize)]
+struct OrdersEnvelope<'a> {
+    code: i64,
+    #[serde(default, borrow)]
+    data: Option<&'a RawValue>,
+}
+#[derive(Deserialize)]
+struct OrdersPage<'a> {
+    #[serde(borrow)]
+    rows: Vec<&'a RawValue>,
+}
 #[derive(Default)]
 pub struct State {
     started: bool,
@@ -68,6 +90,9 @@ pub struct State {
     fill_floor: u64,
     uncertain_fills: HashMap<String, u64>,
     uncertainty_overflow: bool,
+    reconcile: HashMap<String, Reconcile>,
+    reconcile_retry: Option<TimerId>,
+    reconcile_failures: u32,
 }
 impl State {
     pub fn apply_settings(
@@ -945,6 +970,167 @@ impl PhemexPerpetuals {
         }
         true
     }
+    /// Placements on `symbols` ended with an unknown outcome; read their open orders.
+    pub(crate) fn orders_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Vec<String>) {
+        for symbol in symbols {
+            self.account.reconcile.entry(symbol).or_default().generation += 1;
+        }
+        self.orders_reconcile(cx);
+    }
+    /// Starts each owed read once no placement on that symbol is in flight.
+    pub(crate) fn orders_reconcile(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.reconcile_retry.is_some() || self.credentials.is_none() {
+            return;
+        }
+        if cx.now < self.paused_until {
+            self.account.reconcile_retry = Some(cx.set_timer(self.paused_until - cx.now));
+            return;
+        }
+        let due: Vec<_> = self
+            .account
+            .reconcile
+            .iter()
+            .filter(|(symbol, read)| !read.reading && !self.trading.placing(symbol))
+            .map(|(symbol, read)| (symbol.clone(), read.generation))
+            .collect();
+        for (symbol, generation) in due {
+            if let Some(read) = self.account.reconcile.get_mut(&symbol) {
+                read.reading = true;
+            }
+            let query = format!(
+                "symbol={}",
+                crate::trading::encode(self.native_symbol(&symbol))
+            );
+            self.request(
+                cx,
+                Method::Get,
+                "/g-orders/activeList",
+                &query,
+                None,
+                Pending::Orders(OrdersRead { symbol, generation }),
+                None,
+            );
+        }
+    }
+    pub(crate) fn orders_read_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: OrdersRead,
+        body: &str,
+    ) {
+        let Ok(envelope) = serde_json::from_str::<OrdersEnvelope<'_>>(body) else {
+            self.orders_read_failed(cx, read, "malformed open-order envelope");
+            return;
+        };
+        let data = envelope
+            .data
+            .map(RawValue::get)
+            .unwrap_or("null")
+            .trim_start();
+        // Phemex answers an empty open-order list with 10002 OM_ORDER_NOT_FOUND.
+        let rows = match envelope.code {
+            10002 if data == "null" => Some(vec![]),
+            0 if data.starts_with('[') => serde_json::from_str::<Vec<&RawValue>>(data).ok(),
+            0 => serde_json::from_str::<OrdersPage<'_>>(data)
+                .ok()
+                .map(|page| page.rows),
+            _ => None,
+        };
+        let Some(rows) = rows else {
+            let error = format!("open-order read failed with code {}", envelope.code);
+            self.orders_read_failed(cx, read, &error);
+            return;
+        };
+        let mut complete = true;
+        for raw in rows {
+            let Ok(row) = serde_json::from_str::<OrderRow<'_>>(raw.get()) else {
+                cx.log(
+                    LogLevel::Warning,
+                    format!(
+                        "Phemex skipped an unreadable {} open-order row",
+                        read.symbol
+                    ),
+                );
+                complete = false;
+                continue;
+            };
+            if row.symbol.to_ascii_uppercase() != read.symbol || row.terminal() {
+                continue;
+            }
+            if row.unrecognized() {
+                cx.log(
+                    LogLevel::Warning,
+                    format!(
+                        "Phemex skipped open order {} with unsupported status {} or type {}",
+                        row.order_id, row.status, row.kind
+                    ),
+                );
+                continue;
+            }
+            if row.orders(cx.now).is_none() {
+                cx.log(
+                    LogLevel::Warning,
+                    format!("Phemex skipped unmappable open order {}", row.order_id),
+                );
+                complete = false;
+                continue;
+            }
+            // The private stream stays authoritative for every order it already reported.
+            let floor = self.account.terminal_floor;
+            if cx.store.order(&row.order_id).is_some()
+                || self.account.terminals.contains_key(row.order_id.as_ref())
+                || floor > 0 && row.version() <= floor
+            {
+                continue;
+            }
+            self.accept_write_order(cx, &row);
+        }
+        let symbol = read.symbol.clone();
+        if !complete {
+            self.orders_read_failed(cx, read, "incomplete open-order read");
+            return;
+        }
+        self.account.reconcile_failures = 0;
+        if let Some(entry) = self.account.reconcile.get_mut(&symbol) {
+            entry.reading = false;
+        }
+        if !self.trading.placing(&symbol) {
+            cx.orders_reconciled(Some(&symbol));
+            if self
+                .account
+                .reconcile
+                .get(&symbol)
+                .is_some_and(|entry| entry.generation == read.generation)
+            {
+                self.account.reconcile.remove(&symbol);
+            }
+        }
+        self.orders_reconcile(cx);
+    }
+    pub(crate) fn orders_read_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: OrdersRead,
+        error: &str,
+    ) {
+        if let Some(entry) = self.account.reconcile.get_mut(&read.symbol) {
+            entry.reading = false;
+        }
+        self.account.reconcile_failures = self.account.reconcile_failures.saturating_add(1);
+        // Keep the cause, never the response body.
+        let cause = error.split_once(": ").map_or(error, |(cause, _)| cause);
+        cx.log(
+            LogLevel::Warning,
+            format!(
+                "Phemex {} open-order reconciliation failed: {cause}; cancel-all stays fenced",
+                read.symbol
+            ),
+        );
+        if self.account.reconcile_retry.is_none() {
+            let wait = 2_000. * 2f64.powi(self.account.reconcile_failures.min(5) as i32 - 1);
+            self.account.reconcile_retry = Some(cx.set_timer(wait.max(self.paused_until - cx.now)));
+        }
+    }
     fn account_fill(&mut self, cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>, version: u64) {
         let id = row.execution_id.as_ref();
         if id.is_empty()
@@ -1023,6 +1209,11 @@ impl PhemexPerpetuals {
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.account.reconcile_retry == Some(timer) {
+            self.account.reconcile_retry = None;
+            self.orders_reconcile(cx);
+            return true;
+        }
         if self.account.refresh == Some(timer) {
             self.account.refresh = None;
             self.account_cycle(cx);
