@@ -4,15 +4,32 @@ This directory contains the GRVT exchange integration for Tealstreet.
 
 ## Exchange Information
 
-GRVT (Gravity) is a hybrid cryptocurrency derivatives exchange built on ZK Stack (zkSync Hyperchain), offering:
+GRVT (Gravity) is a hybrid cryptocurrency derivatives exchange built on ZK Stack (zkSync Hyperchain). This adapter exposes perpetuals:
 
-- Perpetual futures and options trading
+- Perpetual futures trading
 - On-chain settlement with off-chain orderbook
 - Session-based authentication with API keys
 - EIP-712 signed orders for trustless verification
-- Multi-instrument support (Perpetual, Future, Call, Put)
+- The upstream protocol enumerates Perpetual, Future, Call and Put; current SDK discovery requests perpetuals only
 - Builder fee program (Tealstreet integration)
 - Full and Lite API formats (compact field names for performance)
+
+### Supported product boundary
+
+`fetchMarkets()` posts `{}` to `all_instruments`. The official API defaults
+omitted/empty `k` to `PERPETUAL`; it does not mean all kinds. The generic mapper
+will accept injected Future/Call/Put rows, and native-ID ticker/book/order
+plumbing has no additional kind guard. These latent paths are not supported
+non-perpetual product lifecycles: signing metadata drops kind/expiry/strike and
+symbol cancellation explicitly filters perpetuals. Read-only production and
+testnet probes on 2026-10-20 returned only perpetuals for `{}` and no rows for
+explicit `FUTURE/CALL/PUT` filters.
+
+The Rust cutover decision retires this unexposed mapper-only surface, retaining
+perpetuals and all TS sources. It does not declare GRVT incapable of offering
+those products. See [the product decision and evidence](../../../../../docs/plans/GRVT_PRODUCTS_DECISION.md).
+Future enablement needs real listings, typed expiry/strike/kind/settlement
+metadata through consumers and product-specific lifecycle verification.
 
 ## API Documentation
 

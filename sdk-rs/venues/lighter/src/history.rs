@@ -360,8 +360,13 @@ impl Lighter {
                 Some(a) if self.account.signer.is_some() => Some(a),
                 _ => {
                     if self.options.public_data_only
-                        || self.options.secret.is_none()
-                        || self.options.api_key_index.is_none()
+                        || self.options.secret.as_deref().is_none_or(str::is_empty)
+                        || self
+                            .options
+                            .api_key_index
+                            .as_deref()
+                            .is_none_or(str::is_empty)
+                        || self.account.account_index.is_some()
                     {
                         cx.done(command, Ok("[]".into()));
                     } else {

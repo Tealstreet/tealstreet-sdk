@@ -43,9 +43,43 @@ import {
   krakenCommandResult,
 } from './kraken-protocol.mjs';
 let krakenRequestAudit;
-let lighterVerifier;
 
 const root = '../../packages/safe-cex/src/exchanges';
+
+const lighter = (name) => {
+  let verifier;
+  return {
+    rust: name,
+    ts: { module: `${root}/lighter/lighter.exchange.ts`, className: 'LighterExchange', name },
+    replayCredentials: { applicationId: '42', apiKeyIndex: '3', secret: '01' + '00'.repeat(39), key: '' },
+    recordOptions: { publicDataOnly: true, key: '' },
+    async initializeReplay(impl, options) {
+      if (options.publicDataOnly) return;
+      const oracle = await initializeLighterCrypto(impl);
+      verifier = createLighterVerifier(options, oracle, name);
+    },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('order_book:')).length >=
+      count,
+    isPrivateRecord: (record) => record.type === 'ws' && /account_all/.test(record.text ?? ''),
+    isWrite: (method) => method !== 'GET',
+    requestBody: lighterRequestBody,
+    requestUrl(url) {
+      const parsed = new URL(url);
+      parsed.searchParams.delete('auth');
+      return parsed.href;
+    },
+    subscriptionMessage(message) {
+      return message.auth === undefined ? message : { ...message, auth: '<verified-auth>' };
+    },
+    verifyRequest: (request) => verifier?.request(request) ?? false,
+    verifySubscribe: (message) => verifier?.subscribe(message) ?? false,
+    validateMatchedRequest: (record, request) => verifier?.matched(record, request),
+    commandResult: (result, command, index) => verifier?.commandResult(result, command, index) ?? result,
+    compareFillPrices: true,
+    compareWriteOrder: true,
+  };
+};
 
 // Existing venues retain typed request matching after Tape extraction.
 // Backpack separately checks its documented numeric wire equivalences and write order.
@@ -1139,37 +1173,7 @@ export const VENUES = {
     },
   },
   ...Object.fromEntries([...Object.keys(ORDERLY_BROKERS), 'orderly'].map((name) => [name, orderly(name)])),
-  lighter: {
-    rust: 'lighter',
-    ts: { module: `${root}/lighter/lighter.exchange.ts`, className: 'LighterExchange', name: 'lighter' },
-    replayCredentials: { applicationId: '42', apiKeyIndex: '3', secret: '01' + '00'.repeat(39), key: '' },
-    recordOptions: { publicDataOnly: true, key: '' },
-    async initializeReplay(impl, options) {
-      if (options.publicDataOnly) return;
-      const oracle = await initializeLighterCrypto(impl);
-      lighterVerifier = createLighterVerifier(options, oracle);
-    },
-    tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('order_book:')).length >=
-      count,
-    isPrivateRecord: (record) => record.type === 'ws' && /account_all/.test(record.text ?? ''),
-    isWrite: (method) => method !== 'GET',
-    requestBody: lighterRequestBody,
-    requestUrl(url) {
-      const parsed = new URL(url);
-      parsed.searchParams.delete('auth');
-      return parsed.href;
-    },
-    subscriptionMessage(message) {
-      return message.auth === undefined ? message : { ...message, auth: '<verified-auth>' };
-    },
-    verifyRequest: (request) => lighterVerifier?.request(request) ?? false,
-    verifySubscribe: (message) => lighterVerifier?.subscribe(message) ?? false,
-    validateMatchedRequest: (record, request) => lighterVerifier?.matched(record, request),
-    commandResult: (result, command, index) => lighterVerifier?.commandResult(result, command, index) ?? result,
-    compareFillPrices: true,
-    compareWriteOrder: true,
-  },
+  ...Object.fromEntries(['lighter', 'lighter-robinhood'].map((name) => [name, lighter(name)])),
   woo: {
     rust: 'woo',
     wooProtocol: true,

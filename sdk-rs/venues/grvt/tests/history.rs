@@ -12,6 +12,9 @@ struct Harness {
 }
 impl Harness {
     fn new(private: bool) -> Self {
+        Self::with_catalog(private, CATALOG)
+    }
+    fn with_catalog(private: bool, catalog: &str) -> Self {
         let mut e = Engine::new(Grvt::new(Options {
             public_data_only: !private,
             key: Some("fixture-key".into()),
@@ -25,7 +28,7 @@ impl Harness {
             now: NOW,
         };
         h.collect();
-        h.reply("all_instruments", CATALOG, "");
+        h.reply("all_instruments", catalog, "");
         if private {
             h.reply(
                 "login",
@@ -320,6 +323,147 @@ fn unsupported_income_and_invalid_bounds_fail_before_http() {
         h.query(query);
         assert!(h.result().is_err());
         assert_eq!(h.requests.len(), count);
+    }
+}
+
+#[test]
+fn retired_product_queries_never_fall_back_to_the_same_base_quote_perpetual() {
+    for (kind, instrument) in [
+        ("FUTURE", "BTC_USDT_30DEC26_Future"),
+        ("CALL", "BTC_USDT_30DEC26_100000_Call"),
+        ("PUT", "BTC_USDT_30DEC26_100000_Put"),
+    ] {
+        let catalog = format!(
+            r#"{},{{"i":"{instrument}","ih":"0x030502","b":"BTC","q":"USDT","k":"{kind}","ts":"0.1","ms":"0.001","bd":9,"qd":6}}]}}"#,
+            CATALOG.strip_suffix("]}").unwrap()
+        );
+        for symbol in [instrument.to_owned(), instrument.to_ascii_uppercase()] {
+            for query in [
+                Query::Fills {
+                    symbol: Some(symbol.clone()),
+                    order_id: None,
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+                Query::Income {
+                    symbol: Some(symbol.clone()),
+                    kind: None,
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+                Query::OrderHistory {
+                    symbol: Some(symbol.clone()),
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+                Query::OrderByClientId {
+                    symbol: symbol.clone(),
+                    client_order_id: "9223372036854775807".into(),
+                },
+                Query::PublicTrades {
+                    symbol: symbol.clone(),
+                    limit: None,
+                },
+            ] {
+                let mut h = Harness::with_catalog(true, &catalog);
+                let pending = h.requests.len();
+                h.query(query);
+                assert!(
+                    h.result()
+                        .unwrap_err()
+                        .contains("Unknown GRVT query market")
+                );
+                assert_eq!(h.requests.len(), pending);
+            }
+        }
+    }
+}
+
+#[test]
+fn retired_product_history_rows_cannot_be_credited_to_perpetual_queries() {
+    for instrument in [
+        "BTC_USDT_30DEC26_Future",
+        "BTC_USDT_30DEC26_100000_Call",
+        "BTC_USDT_30DEC26_100000_Put",
+    ] {
+        let mut h = Harness::new(true);
+        h.query(fills(None, None));
+        let unsupported = FILL
+            .replace("BTC_USDT_Perp", instrument)
+            .replace("9007199254740993-1", "9007199254740993-2");
+        h.reply(
+            "fill_history",
+            &format!(r#"{{"r":[{FILL},{unsupported}],"n":""}}"#),
+            "",
+        );
+        let rows: Vec<Execution> = serde_json::from_str(&h.result().unwrap()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "9007199254740993-1");
+
+        let mut h = Harness::new(true);
+        h.query(Query::Income {
+            symbol: Some("BTC_USDT_PERP".into()),
+            kind: Some("FUNDING_FEE".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        });
+        let funding = r#"{"et":"1700000000000000000","sa":"777","i":"BTC_USDT_Perp","ti":"0x000123","c":"USDT","a":"25"}"#;
+        let unsupported = funding
+            .replace("BTC_USDT_Perp", instrument)
+            .replace("0x000123", "0x000124");
+        h.reply(
+            "funding_payment_history",
+            &format!(r#"{{"r":[{funding},{unsupported}],"n":""}}"#),
+            "",
+        );
+        let rows: Vec<Ledger> = serde_json::from_str(&h.result().unwrap()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].income, -25.);
+
+        let mut h = Harness::new(true);
+        h.query(Query::OrderHistory {
+            symbol: Some("BTC_USDT_PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        });
+        let unsupported = ORDER.replace("BTC_USDT_Perp", instrument);
+        h.reply(
+            "order_history",
+            &format!(r#"{{"r":[{ORDER},{unsupported}],"n":""}}"#),
+            "",
+        );
+        assert!(h.result().is_err());
+
+        let mut h = Harness::new(true);
+        h.query(Query::OrderByClientId {
+            symbol: "BTC_USDT_PERP".into(),
+            client_order_id: "9223372036854775807".into(),
+        });
+        h.reply(
+            "/order",
+            &format!(r#"{{"r":{}}}"#, ORDER.replace("BTC_USDT_Perp", instrument)),
+            "",
+        );
+        assert!(h.result().is_err());
+
+        let mut h = Harness::new(false);
+        h.query(Query::PublicTrades {
+            symbol: "BTC_USDT_PERP".into(),
+            limit: None,
+        });
+        h.reply(
+            "trade_history",
+            &format!(
+                r#"{{"r":[{{"et":"1700000000000000000","i":"{instrument}","ti":"0x000123","it":false,"s":"2","p":"100"}}],"n":""}}"#
+            ),
+            "",
+        );
+        assert!(h.result().is_err());
     }
 }
 const ORDER: &str = r#"{"oi":"0x000abcd","sa":"777","im":false,"ro":true,"po":false,"ti":"GOOD_TILL_TIME","l":[{"i":"BTC_USDT_Perp","s":"2","lp":"100","ib":true}],"m":{"co":"9223372036854775807","ct":"1699999999999000000"},"s1":{"s":"FILLED","ts":["2"],"af":["101"],"ut":"1700000000000000000"}}"#;

@@ -16,6 +16,9 @@ pub struct Lookup {
     address: bool,
 }
 pub enum Request {
+    Limits {
+        started_at: f64,
+    },
     Lookup {
         candidates: VecDeque<Lookup>,
         index: Option<u64>,
@@ -471,7 +474,8 @@ impl Lighter {
             });
         }
         if self.options.public_data_only
-            || self.options.secret.as_deref().is_none_or(str::is_empty)
+            || (self.options.secret.as_deref().is_none_or(str::is_empty)
+                && !self.options.remote_signer)
             || self
                 .options
                 .api_key_index
@@ -483,16 +487,11 @@ impl Lighter {
             cx.store.set_balance(Balance::default());
             return;
         }
-        let Some(key) = self
+        self.account.api_key_index = self
             .options
             .api_key_index
             .as_deref()
-            .and_then(|s| s.parse::<u8>().ok())
-        else {
-            cx.log(LogLevel::Error, "Invalid API key index; expected 0..255");
-            return;
-        };
-        self.account.api_key_index = Some(key);
+            .and_then(|s| s.parse::<u8>().ok());
         let mut candidates = VecDeque::new();
         let app = self
             .options
@@ -525,11 +524,13 @@ impl Lighter {
                 address: false,
             });
         }
-        candidates.push_back(Lookup {
-            by: "index",
-            value: key.to_string(),
-            address: false,
-        });
+        if let Some(key) = self.options.api_key_index.as_deref().and_then(index) {
+            candidates.push_back(Lookup {
+                by: "index",
+                value: key.to_string(),
+                address: false,
+            });
+        }
         for a in addresses {
             candidates.push_back(Lookup {
                 by: "l1_address",
@@ -570,25 +571,40 @@ impl Lighter {
     }
     fn identity_ready(&mut self, cx: &mut Cx<'_, Pending>, account: u64) {
         self.account.account_index = Some(account);
-        match sign::Signer::new(
-            self.options.secret.as_deref().unwrap_or_default(),
-            self.chain_id(),
-            account,
-            self.account.api_key_index.unwrap_or_default(),
-        ) {
+        let signer = if self.options.secret.as_deref().is_none_or(str::is_empty) {
+            Err("Lighter private key is missing".into())
+        } else if self.account.api_key_index.is_none() {
+            Err("Invalid API key index. Expected an integer from 0 to 255.".into())
+        } else if let Some(provider) = self.options.signer_provider.as_deref()
+            && !provider.is_empty()
+            && provider != "tealstreet-sdk"
+        {
+            Err(format!(
+                "Unsupported Lighter signer provider \"{provider}\". Legacy third-party signer providers are removed; use tealstreet-sdk."
+            ))
+        } else {
+            sign::Signer::new(
+                self.options.secret.as_deref().unwrap_or_default(),
+                self.chain_id(),
+                account,
+                self.account.api_key_index.unwrap_or_default(),
+            )
+        };
+        match signer {
             Ok(signer) => {
                 self.account.signer = Some(signer);
                 self.connect_private(cx);
-                self.refresh_account(cx);
-                self.refresh_orders(cx);
-                self.account.sync = Some(cx.set_timer(2_000.0));
             }
-            Err(e) => cx.log(
-                LogLevel::Error,
-                format!("Lighter signer initialization failed: {e}"),
+            Err(error) => cx.log(
+                LogLevel::Warning,
+                format!("Lighter signer unavailable at startup: {error}"),
             ),
         }
+        self.refresh_account(cx);
+        self.refresh_orders(cx);
+        self.account.sync = Some(cx.set_timer(2_000.0));
     }
+
     pub(crate) fn account_auth(&self, now: f64) -> Result<String, String> {
         self.account
             .signer
@@ -617,7 +633,7 @@ impl Lighter {
         );
     }
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.orders_inflight {
+        if self.account.orders_inflight || self.account.signer.is_none() {
             return;
         }
         if self.account.account_index.is_none() {
@@ -815,6 +831,7 @@ impl Lighter {
             self.account.sync = Some(cx.set_timer(2_000.0));
             self.refresh_account(cx);
             self.refresh_orders(cx);
+            self.refresh_limits(cx);
             return true;
         }
         if self.account.heal == Some(timer) {
@@ -1236,6 +1253,7 @@ impl Lighter {
         item: &str,
     ) {
         match request {
+            Request::Limits { .. } => {}
             Request::Lookup { index: found, .. } => {
                 if found.is_none()
                     && let Ok(wire) = serde_json::from_str::<AccountWire<'_>>(item)
@@ -1422,6 +1440,7 @@ impl Lighter {
             && (status.as_ref().is_some_and(Status::valid)
                 || response.body.trim_start().starts_with('['));
         match request {
+            Request::Limits { started_at } => self.limits_response(cx, started_at, response),
             Request::Lookup {
                 candidates,
                 index: found,
@@ -1468,6 +1487,9 @@ impl Lighter {
                     && let Some(account) = account
                 {
                     self.commit_snapshot(cx, revision, account);
+                    if self.account.signer.is_none() && !cx.store.loaded().orders {
+                        cx.store.set_orders(vec![]);
+                    }
                     self.trade_kick(cx);
                 } else {
                     cx.log(
@@ -1573,6 +1595,7 @@ impl Lighter {
         error: &str,
     ) {
         match request {
+            Request::Limits { started_at } => self.limits_failed(cx, started_at),
             Request::Lookup { candidates, .. } => self.next_lookup(cx, candidates),
             Request::Snapshot { .. } => {
                 self.account.snapshot_inflight = false;

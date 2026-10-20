@@ -391,3 +391,12 @@ its exact derivation is not asserted. The current value is now `placeholder`,
 and only the exact historical fingerprint is excluded, following existing scan
 policy. All 47 PR commits scan clean locally; independent narrow-exclusion
 review and 562 harness tests pass. No scanner rule or broad allowlist changed.
+
+After the fixes, all 2,515 native workspace tests, all-target and wasm32 Clippy,
+formatting and bans pass. The target advanced again to `02e9db0e8b` with GRVT
+and Lighter follow-ups. Resolved the three conflicts with both registrations,
+standalone build overrides and live-smoke refusal lists retained; independent
+merge review passes. The nearby census is now 46 Rust names (nine defaults,
+37 opt-in) and three unregistered products. Formatting and all 568 harness
+tests pass on this merge. Refreshing the six artifacts and final verification
+will use this merged source; prior exact-source evidence remains historical.
