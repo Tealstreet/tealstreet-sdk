@@ -807,14 +807,32 @@ export class BinancePMExchange extends BaseExchange {
 
   cancelSymbolOrders = async (symbol: string) => {
     try {
-      await this.papiXhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, {
-        params: { symbol },
-      });
-
-      this.store.updateOrdersStatus(
-        this.store.orders.filter((o) => o.symbol === symbol),
-        OrderStatus.Canceled,
+      const conditionalTypes = [OrderType.StopLoss, OrderType.TakeProfit, OrderType.TrailingStopLoss];
+      const symbolOrders = this.store.orders.filter((order) => order.symbol === symbol);
+      const regularIds = new Set(
+        symbolOrders.filter((order) => !conditionalTypes.includes(order.type)).map((order) => order.id),
       );
+      const conditionalIds = new Set(
+        symbolOrders.filter((order) => conditionalTypes.includes(order.type)).map((order) => order.id),
+      );
+      const [regularResult, conditionalResult] = await Promise.allSettled([
+        this.papiXhr.delete(ENDPOINTS.CANCEL_SYMBOL_ORDERS, { params: { symbol } }),
+        this.papiXhr.delete(ENDPOINTS.CANCEL_SYMBOL_CONDITIONAL_ORDERS, { params: { symbol } }),
+      ]);
+
+      // A cancel-all ACK cannot overwrite a racing fill or cancel a later placement locally.
+      const markCanceled = (ids: Set<string>) => {
+        this.store.updateOrdersStatus(
+          this.store.orders.filter(
+            (order) => ids.has(order.id) && order.status !== OrderStatus.Closed && order.status !== OrderStatus.Canceled,
+          ),
+          OrderStatus.Canceled,
+        );
+      };
+      if (regularResult.status === 'fulfilled') markCanceled(regularIds);
+      if (conditionalResult.status === 'fulfilled') markCanceled(conditionalIds);
+      if (regularResult.status === 'rejected') throw regularResult.reason;
+      if (conditionalResult.status === 'rejected') throw conditionalResult.reason;
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;

@@ -4,10 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
 import { ENDPOINTS } from '../../exchanges/binance/binance.types';
+import { BinancePMExchange } from '../../exchanges/binance/binancepm.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
 
-const createSubject = () => {
+const createStore = () => {
   const store = new DefaultStore();
   store.update({
     orders: [
@@ -34,6 +35,11 @@ const createSubject = () => {
       },
     ] as any,
   });
+  return store;
+};
+
+const createSubject = () => {
+  const store = createStore();
   const exchange = new BinanceExchange('binance', { key: 'key', secret: 'secret' }, store);
   return { exchange, store };
 };
@@ -82,4 +88,81 @@ describe('Binance USD-M symbol cancellation', () => {
       expect(emitAndLogError).toHaveBeenCalledWith(`${_family} cancel failed`);
     },
   );
+});
+
+describe('Binance PM symbol cancellation', () => {
+  const regularPath = '/papi/v1/um/allOpenOrders';
+  const conditionalPath = '/papi/v1/um/conditional/allOpenOrders';
+  const createPMSubject = () => {
+    const store = createStore();
+    const exchange = new BinancePMExchange('binancepm', { key: 'key', secret: 'secret' }, store);
+    return { exchange, store };
+  };
+
+  it('cancels both native families even when the local symbol has no orders', async () => {
+    const { exchange, store } = createPMSubject();
+    const deleteRequest = vi.fn().mockResolvedValue({ data: { code: 200 } });
+    exchange.papiXhr = { delete: deleteRequest } as unknown as Axios;
+
+    await exchange.cancelSymbolOrders('BTCUSDT');
+
+    expect(deleteRequest.mock.calls).toEqual([
+      [regularPath, { params: { symbol: 'BTCUSDT' } }],
+      [conditionalPath, { params: { symbol: 'BTCUSDT' } }],
+    ]);
+    expect(store.orders.find((order) => order.id === 'regular-order')?.status).toBe(OrderStatus.Canceled);
+    expect(store.orders.find((order) => order.id === 'algo-order')?.status).toBe(OrderStatus.Canceled);
+    expect(store.orders.find((order) => order.id === 'other-symbol-order')?.status).toBe(OrderStatus.Open);
+
+    deleteRequest.mockClear();
+    await exchange.cancelSymbolOrders('SOLUSDT');
+    expect(deleteRequest.mock.calls).toEqual([
+      [regularPath, { params: { symbol: 'SOLUSDT' } }],
+      [conditionalPath, { params: { symbol: 'SOLUSDT' } }],
+    ]);
+  });
+
+  it.each(['regular', 'conditional'])(
+    'preserves the failed %s family and still cancels its sibling',
+    async (failedFamily) => {
+      const { exchange, store } = createPMSubject();
+      const failure = new Error(`${failedFamily} cancel failed`);
+      const deleteRequest = vi.fn().mockImplementation((path: string) =>
+        path === (failedFamily === 'regular' ? regularPath : conditionalPath)
+          ? Promise.reject(failure)
+          : Promise.resolve({ data: { code: 200 } }),
+      );
+      const emit = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+      exchange.papiXhr = { delete: deleteRequest } as unknown as Axios;
+
+      await expect(exchange.cancelSymbolOrders('BTCUSDT')).rejects.toBe(failure);
+
+      expect(deleteRequest).toHaveBeenCalledTimes(2);
+      expect(store.orders.find((order) => order.id === 'regular-order')?.status).toBe(
+        failedFamily === 'regular' ? OrderStatus.Open : OrderStatus.Canceled,
+      );
+      expect(store.orders.find((order) => order.id === 'algo-order')?.status).toBe(
+        failedFamily === 'conditional' ? OrderStatus.Open : OrderStatus.Canceled,
+      );
+      expect(store.orders.find((order) => order.id === 'other-symbol-order')?.status).toBe(OrderStatus.Open);
+      expect(emit).toHaveBeenCalledWith(failure.message);
+    },
+  );
+
+  it('preserves a racing fill and orders added after cancellation began', async () => {
+    const { exchange, store } = createPMSubject();
+    const releases: Array<() => void> = [];
+    exchange.papiXhr = {
+      delete: vi.fn(() => new Promise((resolve) => releases.push(() => resolve({ data: { code: 200 } })))),
+    } as unknown as Axios;
+    const pending = exchange.cancelSymbolOrders('BTCUSDT');
+    store.updateOrdersStatus([{ id: 'regular-order' }], OrderStatus.Closed);
+    store.addOrUpdateOrders([{ ...store.orders[0], id: 'new-order', status: OrderStatus.Open }]);
+    for (const release of releases) release();
+    await pending;
+
+    expect(store.orders.find((order) => order.id === 'regular-order')?.status).toBe(OrderStatus.Closed);
+    expect(store.orders.find((order) => order.id === 'algo-order')?.status).toBe(OrderStatus.Canceled);
+    expect(store.orders.find((order) => order.id === 'new-order')?.status).toBe(OrderStatus.Open);
+  });
 });

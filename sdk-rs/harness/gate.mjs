@@ -117,6 +117,8 @@ const isPrivate = tape.find((record) => record.type === 'config')?.private ?? ta
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
 // Paired production fixes compare outputs without answer normalization:
+// Binance PM symbol cancellation attempts both regular and conditional families;
+// partial failures preserve the failed family and racing fills stay closed.
 // Binance EXPIRED_IN_MATCH is canceled, like EXPIRED. Binance/OKX client-ID
 // lookups bypass secondary-account caches and query the primary account;
 // a secondary account's absence cannot prove the primary order was not placed.

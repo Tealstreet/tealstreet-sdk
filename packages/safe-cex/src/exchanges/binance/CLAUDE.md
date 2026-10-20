@@ -639,6 +639,13 @@ re-thrown so the caller cannot mistake a partial cancel for full success.
 - Regular orders: `DELETE /papi/v1/um/order` with `origClientOrderId`.
 - No `-2011` silent error handling.
 
+PM symbol-wide cancellation attempts both `/papi/v1/um/allOpenOrders` and
+`/papi/v1/um/conditional/allOpenOrders`, even if one family fails. Each successful
+request marks only its own captured family canceled; failed families remain live
+and the method rejects. A racing fill stays closed, and orders added after the
+operation began are not marked canceled from an earlier request's acknowledgement.
+The inherited `cancelAllOrders` calls this complete pair for each known symbol.
+
 **Spot** (`binancespot.exchange.ts:380-406`):
 
 - Individual cancel via `DELETE /api/v3/order` with `origClientOrderId`.

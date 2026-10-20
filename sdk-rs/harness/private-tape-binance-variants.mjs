@@ -96,7 +96,7 @@ command('cancelOrders',{ids:[inverse?'1001':'resting']});
 http('DELETE',`${prefix}/order`,{symbol:symbols[0],...(inverse?{orderId:'1001'}:{origClientOrderId:'resting'})},order({status:'CANCELED',...(spot?{origClientOrderId:'resting',clientOrderId:'cancel-resting'}:{})}));
 command('cancelSymbolOrders',{symbol:symbols[1]});
 http('DELETE',spot?`${prefix}/openOrders`:`${prefix}/allOpenOrders`,{symbol:symbols[1]},spot?[]:{code:200,msg:'success'});
-if (!spot && !inverse) http('DELETE',`${prefix}/conditional/allOpenOrders`,{symbol:symbols[1]},{code:200,msg:'success'},{impl:'rust'});
+if (!spot && !inverse) http('DELETE',`${prefix}/conditional/allOpenOrders`,{symbol:symbols[1]},{code:200,msg:'success'});
 const out=values.out??`sdk-rs/harness/tapes/${name}-private.jsonl`;
 mkdirSync(dirname(out),{recursive:true});records.sort((a,b)=>a.t-b.t);
 writeFileSync(out,records.map((record)=>JSON.stringify(record)).join('\n')+'\n');

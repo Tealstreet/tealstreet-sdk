@@ -47,6 +47,7 @@ export const ENDPOINTS = {
   OPEN_ORDERS: '/papi/v1/um/openOrders',
   OPEN_CONDITIONAL_ORDERS: '/papi/v1/um/conditional/openOrders',
   CANCEL_SYMBOL_ORDERS: '/papi/v1/um/allOpenOrders',
+  CANCEL_SYMBOL_CONDITIONAL_ORDERS: '/papi/v1/um/conditional/allOpenOrders',
   ORDER: '/papi/v1/um/order',
   CONDITIONAL_ORDER: '/papi/v1/um/conditional/order',
   KLINE: '/fapi/v1/klines',

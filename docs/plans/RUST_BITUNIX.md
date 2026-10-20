@@ -2238,3 +2238,17 @@ for both implementations. Record this genuine paired TS bug correction in the
 gate and commit. No output normalization, gate change or removal of native
 cancellation. Independent review and fresh PM private/public controls precede
 resuming the remaining batch; other unaffected Binance modes retain passes.
+
+
+PM correction source freeze and independent final review PASS. Four new controls
+fail before the TS correction, and all seven cancellation controls pass after
+(existing three USD-M controls retained). Package typecheck, production and
+explicit regression-test lint, harness syntax and diff checks pass. TS now
+attempts both DELETE families, marks only successful captured IDs, preserves
+closed/canceled racing rows and later IDs, and propagates errors. The common
+conditional ACK is required for both implementations. Native production and
+strict output/write checks are unchanged. Earlier PM diagnostics confirm the
+latent omission escaped because both outbound arrays were empty; the stricter
+current arrays expose the three-versus-four write difference. This is a genuine
+paired TS bug fix, documented in the gate. Fresh PM controls and remaining
+integration gates resume on this reviewed source.
