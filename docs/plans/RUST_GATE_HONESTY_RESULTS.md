@@ -1,7 +1,7 @@
 # Strict replay results
 
-A complete reviewed **107-case** collection at `67cf7d9b2b` in
-[run 39424799340](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39424799340)
+A complete reviewed **107-case** collection at `8ae409915b` in
+[run 39429258321](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39429258321)
 reported **27 strict PASS / 80 strict FAIL**. Its newly observed literal paths
 were independently classified and added to the manifest afterward; that run's
 verifier correctly rejected them until declared. The table records the reviewed
@@ -85,9 +85,9 @@ does not assign every mismatch to Rust. Exact paths and raw reports carry the de
 - CI performance uses standalone venue artifacts. The combined shipping artifact
   is separately size-budgeted; standalone CPU results do not prove combined-load
   or browser performance. Private metrics are informational only.
-- Collection `39424799340` combined web and Node artifacts are each 12,174,800 bytes
+- Collection `39429258321` combined web and Node artifacts are each 12,199,435 bytes
   (ceiling 12,582,912), SHA256
-  `637e35fe2648c20d8e3783ab430f68b0691eee56406de80525b2e10d2b750195`.
+  `085ac4da04b16f6a5faa5e1d3097f332656b6682ebf2f9d5ba02776031862435`.
   The standalone ceiling remains 1,258,291 bytes.
 - Fixer output reports every overwritten leaf count; raw checkpoints precede
   fixers. Per-venue permissions do not authorize rewrites to Rust output.

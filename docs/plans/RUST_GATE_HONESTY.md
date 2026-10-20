@@ -347,3 +347,16 @@ never retry an unchanged failed performance measurement to obtain a pass.
   venue descriptor's independent-leverage contract. Fresh CI must expose any
   changed venue diagnostics and remeasure combined size; upstream three-run
   performance claims do not satisfy this branch's stricter measurements.
+- Merged-head run `39429258321` completed 107 cases: 27 PASS / 80 FAIL.
+  All native/repository checks and 35 Rust jobs passed. The only unknowns were
+  four Spot EdDSA client-ID paths at checkpoints 7–10: both rows are stop ID 50
+  with identical geometry; TS omits the client ID while native retains it.
+  Independent source/raw and adversarial reviews PASS (seven protected/neighbor
+  probes). Private transports are unchanged except one additional native public
+  metadata refresh (24 to 25); no private performance claim/exemption is made.
+  All 107 reports assess clean against the four-path refresh; policy 9/9 PASS.
+  Both rebuilt shipping artifacts are 12,199,435 bytes, SHA256
+  `085ac4da04b16f6a5faa5e1d3097f332656b6682ebf2f9d5ba02776031862435`,
+  within the unchanged 12,582,912 ceiling. All 49 result rows match this collection.
+  Landing advanced again (`5f84b3e21d`), producing a PR conflict; commit this
+  evidence before the next authorized integration merge, without stashing.

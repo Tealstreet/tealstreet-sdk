@@ -28,6 +28,12 @@
       "ciHead": "ef0669b8e6c52b709d1b488750733fea655be919",
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39426820375",
       "note": "Fourteen independently reviewed literal Paradex reconciliation/terminal-retention paths; all prior observations preserved. No comparator, performance threshold or integrity protection changed."
+    },
+    "spotEdDsaRefresh": {
+      "ciRun": 39429258321,
+      "ciHead": "8ae409915bbd8e274a7a757f7f8a55dc479d4057",
+      "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39429258321",
+      "note": "Four independently reviewed same-order client-ID paths after merging leverage-side landing. All prior observations preserved; no comparison, threshold or integrity protection changed."
     }
   },
   "failures": [
@@ -17165,6 +17171,15 @@
             "checkpoint 8 account.balance.currencies.USD.total",
             "checkpoint 9 account.balance.currencies.BTC.total",
             "checkpoint 9 account.balance.currencies.USD.total"
+          ]
+        },
+        {
+          "divergence": "TS omits client_order_id from the live mapper while native preserves it. Both checkpoint rows are the same stop order 50 with identical geometry; native retention of closed order 40 temporarily moves that stop to index 5, exposing the omission here.",
+          "keys": [
+            "checkpoint 10 account.orders[5].clientOrderId",
+            "checkpoint 7 account.orders[5].clientOrderId",
+            "checkpoint 8 account.orders[5].clientOrderId",
+            "checkpoint 9 account.orders[5].clientOrderId"
           ]
         }
       ]
