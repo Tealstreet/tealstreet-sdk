@@ -138,7 +138,7 @@ pub struct WeexFutures {
     seed: Seed,
     paused_until: f64,
     next_generation: u32,
-    startup_retry: Option<TimerId>,
+    discovery: safe_cex_engine::startup::Backoff<bool>,
     seed_generation: u32,
 }
 impl WeexFutures {
@@ -184,7 +184,7 @@ impl WeexFutures {
             seed: Seed::default(),
             paused_until: 0.0,
             next_generation: 0,
-            startup_retry: None,
+            discovery: Default::default(),
             seed_generation: 0,
         }
     }
@@ -444,12 +444,7 @@ impl WeexFutures {
         match task {
             Task::Daily | Task::BookTickers => {
                 self.seed.failed = true;
-                if self.startup_retry.is_none() {
-                    self.startup_retry =
-                        Some(cx.set_timer((self.paused_until - cx.now).max(2000.0)));
-                }
-                // Markets are loaded; account state does not depend on tickers.
-                self.start_account(cx);
+                self.discovery.failed(cx, true);
             }
             Task::Depth { symbol, generation } => {
                 if self
@@ -465,10 +460,7 @@ impl WeexFutures {
             Task::Trade(r) => self.trade_failed(cx, r, error),
             Task::History(r) => self.history_failed(cx, r, error),
             Task::Markets(_) => {
-                if self.startup_retry.is_none() {
-                    self.startup_retry =
-                        Some(cx.set_timer((self.paused_until - cx.now).max(2000.0)));
-                }
+                self.discovery.failed(cx, false);
             }
         }
     }
@@ -658,7 +650,10 @@ impl Venue for WeexFutures {
             Task::Markets(rows) => {
                 match serde_json::from_str::<Symbol<'_>>(item) {
                     Ok(r) => rows.extend(r.market()),
-                    Err(_) => p.skipped.push(row_symbol(item)),
+                    Err(_) => {
+                        p.skipped.push(row_symbol(item));
+                        safe_cex_engine::startup::skipped_row(cx);
+                    }
                 }
                 true
             }
@@ -668,15 +663,21 @@ impl Venue for WeexFutures {
                     Some((r, mut t)) => {
                         if let Some(i) = cx.store.market_index(&r.symbol) {
                             let i = i as usize;
-                            if self.seed.reported[i] & 2 != 0 {
-                                t.bid = self.seed.rows[i].bid;
-                                t.ask = self.seed.rows[i].ask;
+                            let old = &self.seed.rows[i];
+                            if self.seed.reported[i] & 4 != 0 {
+                                t.bid = old.bid;
+                            }
+                            if self.seed.reported[i] & 8 != 0 {
+                                t.ask = old.ask;
                             }
                             self.seed.rows[i] = t;
                             self.seed.reported[i] |= 1;
                         }
                     }
-                    None => p.skipped.push(row_symbol(item)),
+                    None => {
+                        p.skipped.push(row_symbol(item));
+                        safe_cex_engine::startup::skipped_row(cx);
+                    }
                 }
                 true
             }
@@ -685,12 +686,25 @@ impl Venue for WeexFutures {
                     Ok(r) => {
                         if let Some(i) = cx.store.market_index(&r.symbol) {
                             let i = i as usize;
-                            self.seed.rows[i].bid = r.bid_price;
-                            self.seed.rows[i].ask = r.ask_price;
+                            if let Some(bid) = r.bid_price {
+                                self.seed.rows[i].bid = bid;
+                                self.seed.reported[i] |= 4;
+                            } else if self.seed.reported[i] & 1 != 0 {
+                                self.seed.rows[i].bid = self.seed.rows[i].last;
+                            }
+                            if let Some(ask) = r.ask_price {
+                                self.seed.rows[i].ask = ask;
+                                self.seed.reported[i] |= 8;
+                            } else if self.seed.reported[i] & 1 != 0 {
+                                self.seed.rows[i].ask = self.seed.rows[i].last;
+                            }
                             self.seed.reported[i] |= 2;
                         }
                     }
-                    Err(_) => p.skipped.push(row_symbol(item)),
+                    Err(_) => {
+                        p.skipped.push(row_symbol(item));
+                        safe_cex_engine::startup::skipped_row(cx);
+                    }
                 }
                 true
             }
@@ -746,11 +760,18 @@ impl Venue for WeexFutures {
             Task::Trade(r) => self.trade_response(cx, r, response),
             Task::History(r) => self.history_response(cx, r, response),
             Task::Markets(markets) => {
-                if markets.is_empty() && !p.skipped.is_empty() {
-                    self.fail(cx, Task::Markets(markets), "no well-formed market rows");
+                if markets.is_empty() {
+                    let error = if p.skipped.is_empty() {
+                        "empty market catalogue"
+                    } else {
+                        "no well-formed market rows"
+                    };
+                    self.fail(cx, Task::Markets(markets), error);
                     return;
                 }
+                self.discovery.succeeded(cx, &false);
                 cx.store.set_markets(markets);
+                self.start_account(cx);
                 self.seed = Seed {
                     rows: cx
                         .store
@@ -777,6 +798,10 @@ impl Venue for WeexFutures {
             task @ (Task::Daily | Task::BookTickers) => {
                 self.seed.finished |= if matches!(task, Task::Daily) { 1 } else { 2 };
                 if self.seed.finished == 3 && !self.seed.failed {
+                    if !self.seed.reported.iter().any(|mask| mask & 1 != 0) {
+                        self.discovery.failed(cx, true);
+                        return;
+                    }
                     let rows = std::mem::take(&mut self.seed.rows)
                         .into_iter()
                         .zip(&self.seed.reported)
@@ -784,8 +809,8 @@ impl Venue for WeexFutures {
                         .filter_map(|(t, &mask)| (mask & 1 != 0).then_some(t))
                         .collect();
                     cx.store.set_tickers(rows);
+                    self.discovery.succeeded(cx, &true);
                     self.connect_public(cx);
-                    self.start_account(cx);
                 }
             }
             Task::Depth { symbol, generation } => {
@@ -847,9 +872,8 @@ impl Venue for WeexFutures {
         if self.account_timer(cx, timer) || self.history_timer(cx, timer) {
             return;
         }
-        if self.startup_retry == Some(timer) {
-            self.startup_retry = None;
-            if !cx.store.loaded().markets {
+        if let Some(tickers) = self.discovery.on_timer(timer) {
+            if !tickers {
                 self.start(cx);
             } else {
                 self.seed_generation += 1;

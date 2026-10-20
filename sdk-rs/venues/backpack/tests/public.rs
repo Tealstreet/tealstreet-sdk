@@ -36,8 +36,16 @@ fn seed() -> (Driver, SocketId) {
         &r,
         r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","visible":true,"quantityIncrement":"0.01","priceIncrement":"0.01","minQuantity":"0.01","imfFunction":{"base":"0.02"}},{"symbol":"SOL_USDC","marketType":"SPOT","quantityIncrement":"0.01","priceIncrement":"0.01"}]"#,
     );
-    let requests: Vec<_> = e
-        .drain_actions()
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let socket = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let requests: Vec<_> = actions
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -61,16 +69,6 @@ fn seed() -> (Driver, SocketId) {
             );
         }
     }
-    let socket = e
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::WsConnect { socket, .. } = a {
-                Some(socket)
-            } else {
-                None
-            }
-        })
-        .unwrap();
     e.handle(0.0, Event::WsOpened { socket });
     e.drain_actions().for_each(drop);
     (e, socket)
@@ -371,7 +369,7 @@ fn documented_ticker_uses_open_price_and_uppercase_quote_volume_and_empty_quotes
 }
 
 #[test]
-fn failed_seed_reads_retry_independently_and_start_the_socket_after_recovery() {
+fn failed_seed_reads_retry_independently_without_reopening_the_early_socket() {
     let mut e = Engine::new(Backpack::new(Options {
         public_data_only: true,
         ..Default::default()
@@ -425,9 +423,10 @@ fn failed_seed_reads_retry_independently_and_start_the_socket_after_recovery() {
     }
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(
-        actions
+        !actions
             .iter()
-            .any(|a| matches!(a, Action::WsConnect { .. }))
+            .any(|a| matches!(a, Action::WsConnect { .. })),
+        "the public socket opened with the catalogue"
     );
     let ticker = &e.store().tickers()[0];
     assert_eq!(
@@ -475,19 +474,18 @@ fn malformed_market_ticker_and_mark_rows_are_skipped_without_blocking_startup() 
         &markets,
         r#"[{"symbol":"BAD_USDC_PERP","marketType":null},{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"},{"symbol":"ETH_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"}]"#,
     );
-    let requests: Vec<_> = e
-        .drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .collect();
-    assert_eq!(e.store().markets().len(), 2);
     let mut logs = vec![];
     let mut socket = None;
+    let mut requests = vec![];
+    for a in e.drain_actions() {
+        match a {
+            Action::Http(r) => requests.push(r),
+            Action::WsConnect { socket: s, .. } => socket = Some(s),
+            Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => logs.push(message),
+            _ => {}
+        }
+    }
+    assert_eq!(e.store().markets().len(), 2);
     for r in requests {
         if r.url.contains("tickers") {
             reply(

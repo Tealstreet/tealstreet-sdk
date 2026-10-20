@@ -60,7 +60,7 @@ pub struct Public {
     socket: Option<SocketId>,
     open: bool,
     ping_at: f64,
-    seed_retry: Option<TimerId>,
+    seed_retry: safe_cex_engine::startup::Backoff<()>,
     unlisted: HashSet<String>,
     unlisted_reported: HashSet<String>,
     supervisor: Supervisor,
@@ -73,7 +73,7 @@ impl Default for Public {
             socket: None,
             open: false,
             ping_at: 0.0,
-            seed_retry: None,
+            seed_retry: safe_cex_engine::startup::Backoff::default(),
             unlisted: HashSet::new(),
             unlisted_reported: HashSet::new(),
             supervisor: Supervisor::new(Config {
@@ -128,6 +128,9 @@ fn valid_candle(c: &Candle) -> bool {
 }
 impl ApexOmni {
     fn revalue_positions(cx: &mut Cx<'_, Pending>, symbol: &str, reference: f64) {
+        if !reference.is_finite() || reference <= 0.0 {
+            return;
+        }
         if !cx
             .store
             .positions()
@@ -138,13 +141,16 @@ impl ApexOmni {
         }
         cx.store.update_positions(|p| {
             if p.symbol == symbol && p.contracts != 0.0 {
-                p.unrealized_pnl = (reference - p.entry_price)
+                let pnl = (reference - p.entry_price)
                     * p.contracts
                     * if p.side == PositionSide::Long {
                         1.0
                     } else {
                         -1.0
                     };
+                if pnl.is_finite() {
+                    p.unrealized_pnl = pnl;
+                }
             }
         });
     }
@@ -163,7 +169,7 @@ impl ApexOmni {
                 // An explicit zero mark falls back to last, even with a live index.
                 [ticker.mark, ticker.last]
                     .into_iter()
-                    .find(|price| *price != 0.0)
+                    .find(|price| price.is_finite() && *price > 0.0)
                     .map(|price| (ticker.symbol.clone(), price))
             })
             .collect();
@@ -202,13 +208,13 @@ impl ApexOmni {
                 "perpetualContract",
             ])),
         ) {
-            cx.log(LogLevel::Error, error);
-            self.public.seed_retry = Some(cx.set_timer(1000.0));
+            cx.log(LogLevel::Warning, error);
+            self.public.seed_retry.failed(cx, ());
         }
     }
     pub(crate) fn public_item(
         &mut self,
-        _cx: &mut Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         request: &mut Request,
         item: &str,
     ) {
@@ -219,6 +225,7 @@ impl ApexOmni {
         } = request
         {
             let Ok(raw) = serde_json::from_str::<wire::Contract<'_>>(item) else {
+                safe_cex_engine::startup::skipped_row(cx);
                 let key = serde_json::from_str::<wire::ContractKey<'_>>(item).unwrap_or_default();
                 skipped.push((key.symbol.into_owned(), key.cross_symbol_name.into_owned()));
                 return;
@@ -239,7 +246,9 @@ impl ApexOmni {
                 || raw.l2_pair_id < 0.0
                 || raw.l2_pair_id > u16::MAX as f64
                 || raw.l2_pair_id.fract() != 0.0
+                || raw.default_initial_margin_rate <= 0.0
             {
+                safe_cex_engine::startup::skipped_row(cx);
                 skipped.push((raw.symbol.into_owned(), raw.cross_symbol_name.into_owned()));
                 return;
             }
@@ -341,6 +350,7 @@ impl ApexOmni {
                         ..Default::default()
                     })
                     .collect();
+                self.public.seed_retry.succeeded(cx, &());
                 self.contracts = contracts;
                 cx.store.set_markets(rows);
                 cx.store.set_tickers(tickers);
@@ -393,10 +403,8 @@ impl ApexOmni {
     ) {
         match request {
             Request::Markets { .. } => {
-                cx.log(LogLevel::Error, format!("ApeX markets: {error}"));
-                if self.public.seed_retry.is_none() {
-                    self.public.seed_retry = Some(cx.set_timer(1000.0));
-                }
+                cx.log(LogLevel::Warning, format!("ApeX markets: {error}"));
+                self.public.seed_retry.failed(cx, ());
             }
             Request::Candles { command, .. } => cx.done(command, Err(error.to_owned())),
         }
@@ -482,8 +490,7 @@ impl ApexOmni {
         true
     }
     pub(crate) fn public_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self.public.seed_retry == Some(timer) {
-            self.public.seed_retry = None;
+        if self.public.seed_retry.on_timer(timer).is_some() {
             self.start_public(cx);
             return true;
         }

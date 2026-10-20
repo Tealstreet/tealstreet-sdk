@@ -397,7 +397,15 @@ fn null_ticker_row_is_reported_without_hiding_other_symbols_or_halting_private_s
     engine.start(0.0);
     let id = request(&mut engine);
     reply(&mut engine, id, INSTRUMENT);
-    let id = request(&mut engine);
+    // Private startup begins at markets, before the ticker response.
+    let mut actions: Vec<_> = engine.drain_actions().collect();
+    let id = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains("tickers") => Some(r.id),
+            _ => None,
+        })
+        .unwrap();
     reply(
         &mut engine,
         id,
@@ -405,7 +413,7 @@ fn null_ticker_row_is_reported_without_hiding_other_symbols_or_halting_private_s
     );
     assert_eq!(engine.store().ticker("BTCUSDT").unwrap().last, 60000.0);
     assert!(engine.store().loaded().tickers);
-    let actions: Vec<_> = engine.drain_actions().collect();
+    actions.extend(engine.drain_actions());
     assert!(
         actions.iter().any(
             |action| matches!(action, Action::WsConnect{url, ..} if url.ends_with("/private"))

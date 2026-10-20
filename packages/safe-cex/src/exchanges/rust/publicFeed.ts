@@ -80,11 +80,6 @@ const tickerFields = [
   'quoteVolume',
 ] as const;
 
-export const hasSharedTickerValues = (ticker: NonNullable<FeedUpdate['tickers']>[number]): boolean =>
-  tickerFields.some((field) => Number.isFinite(ticker[field])) ||
-  ticker.midPrice === null ||
-  Number.isFinite(ticker.midPrice);
-
 /** Excludes credentials/account settings; includes all public-product selectors. */
 export const rustPublicFeedIdentity = (name: ExchangeName, options: ExchangeOptions) =>
   JSON.stringify([
