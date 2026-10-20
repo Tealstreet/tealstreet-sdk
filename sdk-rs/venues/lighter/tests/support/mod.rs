@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
+use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId, TimerId};
 use safe_cex_venue_lighter::{Lighter, Options};
 pub const NOW: f64 = 1_700_000_000_000.0;
 pub const META: &str = r#"{"code":200,"order_book_details":[{"market_id":1,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":3,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250},{"market_id":2,"symbol":"BTC","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":1,"min_base_amount":"0.0001","min_quote_amount":"1","min_initial_margin_fraction":500,"maintenance_margin_fraction":250}]}"#;
@@ -47,6 +47,38 @@ pub fn ready() -> (Engine<Lighter>, SocketId) {
     ready_with(options())
 }
 pub fn ready_with(options: Options) -> (Engine<Lighter>, SocketId) {
+    let (e, socket, _) = ready_tracked(options);
+    (e, socket)
+}
+pub type Timers = Vec<(TimerId, f64)>;
+pub fn track(timers: &mut Timers, action: &Action) {
+    match action {
+        Action::SetTimer { timer, at_ms } => timers.push((*timer, *at_ms)),
+        Action::ClearTimer { timer } => timers.retain(|(t, _)| t != timer),
+        _ => {}
+    }
+}
+pub fn drain(e: &mut Engine<Lighter>, timers: &mut Timers) -> Vec<Action> {
+    let actions: Vec<_> = e.drain_actions().collect();
+    actions.iter().for_each(|a| track(timers, a));
+    actions
+}
+pub fn advance(e: &mut Engine<Lighter>, timers: &mut Timers, until: f64) -> Vec<Action> {
+    let mut out = drain(e, timers);
+    while let Some((timer, at)) = timers
+        .iter()
+        .copied()
+        .filter(|(_, at)| *at <= until)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+    {
+        timers.retain(|(t, _)| *t != timer);
+        e.handle(at, Event::TimerFired { timer });
+        out.extend(drain(e, timers));
+    }
+    out
+}
+pub fn ready_tracked(options: Options) -> (Engine<Lighter>, SocketId, Timers) {
+    let mut timers = Timers::new();
     let mut e = Engine::new(Lighter::new(options));
     e.start(NOW);
     let mut private = None;
@@ -57,6 +89,7 @@ pub fn ready_with(options: Options) -> (Engine<Lighter>, SocketId) {
             break;
         }
         for action in actions {
+            track(&mut timers, &action);
             match action {
                 Action::Http(r) => {
                     let body = if r.url.contains("orderBookDetails") || r.url.contains("orderBooks")
@@ -81,7 +114,7 @@ pub fn ready_with(options: Options) -> (Engine<Lighter>, SocketId) {
             }
         }
     }
-    (e, private.expect("private socket"))
+    (e, private.expect("private socket"), timers)
 }
 pub fn fill_count(frame: &[u8]) -> u32 {
     let mut at = 16;

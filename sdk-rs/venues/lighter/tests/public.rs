@@ -1,6 +1,8 @@
 // Payloads follow https://apidocs.lighter.xyz/docs/websocket-reference.
+mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
 use safe_cex_venue_lighter::{Lighter, Options};
+use support::{Timers, advance, drain};
 const MARKETS: &str = r#"{"code":200,"order_book_details":[{"market_id":0,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"10","min_initial_margin_fraction":"200"},{"market_id":1,"symbol":"BTC","status":"active","supported_size_decimals":5,"supported_price_decimals":1,"min_initial_margin_fraction":"100"},{"market_id":2048,"symbol":"ETH/USDC","status":"active","market_type":"spot"}]}"#;
 fn reply(e: &mut Engine<Lighter>, id: RequestId, body: &str) {
     e.handle(
@@ -233,8 +235,8 @@ fn watchdog_reconnects_silent_socket_and_rejects_old_socket() {
         })
         .unwrap();
     reply(&mut e, id, MARKETS);
-    let actions: Vec<_> = e.drain_actions().collect();
-    let socket = actions
+    let mut timers = Timers::new();
+    let socket = drain(&mut e, &mut timers)
         .iter()
         .find_map(|a| {
             if let Action::WsConnect { socket, .. } = a {
@@ -244,25 +246,14 @@ fn watchdog_reconnects_silent_socket_and_rejects_old_socket() {
             }
         })
         .unwrap();
-    let timer = actions
-        .iter()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, at_ms } = a {
-                (*at_ms == 11_000.0).then_some(*timer)
-            } else {
-                None
-            }
-        })
-        .unwrap();
     e.handle(1_000.0, Event::WsOpened { socket });
-    e.drain_actions().for_each(drop);
-    e.handle(122_000.0, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
-    assert!(
+    let closed = |actions: &[Action]| {
         actions
             .iter()
             .any(|a| matches!(a,Action::WsClose{socket:s}if *s==socket))
-    );
+    };
+    assert!(!closed(&advance(&mut e, &mut timers, 120_999.0)));
+    assert!(closed(&advance(&mut e, &mut timers, 121_000.0)));
     send(
         &mut e,
         socket,
