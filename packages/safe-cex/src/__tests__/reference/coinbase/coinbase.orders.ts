@@ -1,8 +1,8 @@
-import type { Market, Order } from '../../types';
+import type { Market, Order } from '../../../types';
 import type { LIST_ORDERS_RESPONSE } from './coinbase.types';
 
-import { OrderSide, OrderStatus, OrderType } from '../../types';
-import { add, divide, multiply, subtract } from '../../utils/safe-math';
+import { OrderSide, OrderStatus, OrderType } from '../../../types';
+import { add, divide, multiply, subtract } from '../../../utils/safe-math';
 import { normalizeCfmContractSize } from './coinbase.utils';
 
 type CoinbaseRestOrder = LIST_ORDERS_RESPONSE['orders'][number];
