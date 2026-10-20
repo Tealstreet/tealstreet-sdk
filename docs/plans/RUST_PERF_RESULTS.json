@@ -1,0 +1,3420 @@
+{
+  "method": {
+    "baselineSource": "eff4dcbb0f7bb5d5f19c28d6d9cf263eaf6cf0f5",
+    "afterSource": "9bb403da6dbe3b36bff6579bb22f6c1c743c97c2",
+    "node": "v26.7.0",
+    "cadence": "recorded, shared final harness",
+    "baselineDelivery": "original unbatched aggregate host",
+    "afterDelivery": "bounded macrotask batches, per-family module",
+    "median": "sorted(values)[len(values)//2], ratio of TS/Rust medians",
+    "memory": "JS heap delta + ArrayBuffer delta + whole WASM linear memory once; stable collection outside CPU window",
+    "baselineWasmBytes": 2863225,
+    "baselineWasmSha256": "58cb11561450d4544b1f1ad3f1d709048bd578981e9c6a361b070112afda2c4e",
+    "sharedHelpers": {
+      "gate.mjs": "03edb80f78040693f400718e2496402c5c1599afa63a7ef9e3732fd6ee49a3de",
+      "known-ts-fixes.mjs": "9c09da9a415fbd399cba9f980e5f65fcd850c5983a5c15792492534b46509b23",
+      "memory.mjs": "af2bf8d830e051ee453a8a45066d945298f309b9f4383dfa5e98d30241097bbe",
+      "profile-engine.mjs": "592b13ac81fc66893ee364f51b30de3af1247e7c4c4d9d042abb35af2b6ae01f",
+      "replay.mjs": "3fb87f02e30336e4d8b81e6507338f8b4f8a16b6b2a6f0924c9de325a1712af3",
+      "request-json.mjs": "953914312fdbc90719565721c44212f3070da8943613d461bc12e2b5f4cef69a",
+      "requests.mjs": "ea29175417e1e7f93509d2970b91cbf72aab327540845fb3ba6ccd82d6a182ca",
+      "responses.mjs": "4f7a7484eaebfbd1c68b09af4ddef2a81d3557345be7f340282cbd0c7b8ac320",
+      "subscriptions.mjs": "197c04a147e96c8c4d865c3580c4557fcb63a7419abc384ccb1f71ac4f3d460e",
+      "tape.mjs": "131006ae8ac9a30db8bb961720779318aaaa930eda4e7b55c4d4f33a7e0900aa",
+      "venue-requests.mjs": "793c2c8f29b81479ddd50f90efabd18be49b272e56fa45503e378e102e3ffbdd",
+      "venues.mjs": "60e13c3ac72f3a01a13f830238801d335129fdc3f3e4d9dfa9829119b8ac8dfe"
+    },
+    "limitations": "Shared macOS host; point medians, not significance claims. Process/steady CPU informational except the steady CPU gate threshold. MEXC has a small main-thread gain and a fixed larger crossover cohort because preceding samples were unstable."
+  },
+  "public": {
+    "binance": {
+      "runsPerSide": 3,
+      "before": {
+        "cpuRatio": 2.1540392467294396,
+        "steadyRatio": 2.8367193924442513,
+        "memoryRatio": 1.7666400062095242,
+        "metrics": {
+          "ts": {
+            "cpuMs": 206.805,
+            "steadyCpuMs": 117.287,
+            "processCpuMs": 279.724,
+            "wallMs": 224.101875,
+            "heapRetainedBytes": 4187880,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 4187912,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 96.008,
+            "steadyCpuMs": 41.346,
+            "processCpuMs": 162.454,
+            "wallMs": 151.258125,
+            "heapRetainedBytes": 367592,
+            "bufferRetainedBytes": 430096,
+            "retainedBytes": 2370552,
+            "wasmBytes": 1572864
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 196.908,
+              "steadyCpuMs": 112.901,
+              "processCpuMs": 260.248,
+              "wallMs": 209.01016700000002,
+              "heapRetainedBytes": 4187784,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 4187816,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 85.695,
+              "steadyCpuMs": 31.943,
+              "processCpuMs": 141.944,
+              "wallMs": 108.404417,
+              "heapRetainedBytes": 367328,
+              "bufferRetainedBytes": 430096,
+              "retainedBytes": 2370288,
+              "wasmBytes": 1572864
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 206.805,
+              "steadyCpuMs": 117.287,
+              "processCpuMs": 279.724,
+              "wallMs": 224.101875,
+              "heapRetainedBytes": 4187880,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 4187912,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 96.008,
+              "steadyCpuMs": 41.346,
+              "processCpuMs": 162.454,
+              "wallMs": 151.258125,
+              "heapRetainedBytes": 367592,
+              "bufferRetainedBytes": 430096,
+              "retainedBytes": 2370552,
+              "wasmBytes": 1572864
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 236.95,
+              "steadyCpuMs": 141.847,
+              "processCpuMs": 307.786,
+              "wallMs": 333.909166,
+              "heapRetainedBytes": 4204456,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 4204488,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 114.273,
+              "steadyCpuMs": 50.102,
+              "processCpuMs": 181.886,
+              "wallMs": 538.3535840000001,
+              "heapRetainedBytes": 376880,
+              "bufferRetainedBytes": 430096,
+              "retainedBytes": 2379840,
+              "wasmBytes": 1572864
+            }
+          }
+        ]
+      },
+      "after": {
+        "cpuRatio": 2.399878640776699,
+        "steadyRatio": 3.179215471976051,
+        "memoryRatio": 1.830163595888294,
+        "metrics": {
+          "ts": {
+            "cpuMs": 229.39,
+            "steadyCpuMs": 133.81,
+            "processCpuMs": 283.928,
+            "wallMs": 407.201708,
+            "heapRetainedBytes": 4204304,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 4204336,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 95.584,
+            "steadyCpuMs": 42.089,
+            "processCpuMs": 175.671,
+            "wallMs": 193.927708,
+            "heapRetainedBytes": 404992,
+            "bufferRetainedBytes": 442998,
+            "retainedBytes": 2297246,
+            "wasmBytes": 1441792
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 237.354,
+              "steadyCpuMs": 138.258,
+              "processCpuMs": 283.928,
+              "wallMs": 422.252708,
+              "heapRetainedBytes": 4204528,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 4204560,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 93.293,
+              "steadyCpuMs": 38.289,
+              "processCpuMs": 164.99,
+              "wallMs": 145.81050000000002,
+              "heapRetainedBytes": 385152,
+              "bufferRetainedBytes": 443500,
+              "retainedBytes": 2335980,
+              "wasmBytes": 1507328
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 216.065,
+              "steadyCpuMs": 124.182,
+              "processCpuMs": 285.639,
+              "wallMs": 234.87654199999997,
+              "heapRetainedBytes": 4188336,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 4188368,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 95.584,
+              "steadyCpuMs": 42.089,
+              "processCpuMs": 175.671,
+              "wallMs": 193.927708,
+              "heapRetainedBytes": 404992,
+              "bufferRetainedBytes": 442998,
+              "retainedBytes": 2289782,
+              "wasmBytes": 1441792
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 229.39,
+              "steadyCpuMs": 133.81,
+              "processCpuMs": 282.403,
+              "wallMs": 407.201708,
+              "heapRetainedBytes": 4204304,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 4204336,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 121.044,
+              "steadyCpuMs": 53.399,
+              "processCpuMs": 190.959,
+              "wallMs": 572.684833,
+              "heapRetainedBytes": 416464,
+              "bufferRetainedBytes": 438990,
+              "retainedBytes": 2297246,
+              "wasmBytes": 1441792
+            }
+          }
+        ]
+      }
+    },
+    "bybit": {
+      "runsPerSide": 3,
+      "before": {
+        "cpuRatio": 1.3956173898662476,
+        "steadyRatio": 1.684381060862605,
+        "memoryRatio": 2.680013615812102,
+        "metrics": {
+          "ts": {
+            "cpuMs": 337.551,
+            "steadyCpuMs": 218.855,
+            "processCpuMs": 393.53,
+            "wallMs": 2918.3873750000002,
+            "heapRetainedBytes": 5794672,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 5794704,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 241.865,
+            "steadyCpuMs": 129.932,
+            "processCpuMs": 308.063,
+            "wallMs": 2924.7755,
+            "heapRetainedBytes": 292528,
+            "bufferRetainedBytes": 296800,
+            "retainedBytes": 2162192,
+            "wasmBytes": 1572864
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 316.295,
+              "steadyCpuMs": 192.486,
+              "processCpuMs": 369.742,
+              "wallMs": 2137.371417,
+              "heapRetainedBytes": 5781528,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 5781560,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 213.136,
+              "steadyCpuMs": 102.432,
+              "processCpuMs": 285.209,
+              "wallMs": 3038.0775000000003,
+              "heapRetainedBytes": 290344,
+              "bufferRetainedBytes": 296800,
+              "retainedBytes": 2160008,
+              "wasmBytes": 1572864
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 337.551,
+              "steadyCpuMs": 219.621,
+              "processCpuMs": 419.146,
+              "wallMs": 3517.980917,
+              "heapRetainedBytes": 5794672,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 5794704,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 241.865,
+              "steadyCpuMs": 129.932,
+              "processCpuMs": 308.063,
+              "wallMs": 2924.7755,
+              "heapRetainedBytes": 304368,
+              "bufferRetainedBytes": 296800,
+              "retainedBytes": 2174032,
+              "wasmBytes": 1572864
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 339.542,
+              "steadyCpuMs": 218.855,
+              "processCpuMs": 393.53,
+              "wallMs": 2918.3873750000002,
+              "heapRetainedBytes": 5795696,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 5795728,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 258.107,
+              "steadyCpuMs": 138.047,
+              "processCpuMs": 335.792,
+              "wallMs": 2530.027209,
+              "heapRetainedBytes": 292528,
+              "bufferRetainedBytes": 296800,
+              "retainedBytes": 2162192,
+              "wasmBytes": 1572864
+            }
+          }
+        ]
+      },
+      "after": {
+        "cpuRatio": 1.5204359321596699,
+        "steadyRatio": 2.0264984502553802,
+        "memoryRatio": 3.0715918426418196,
+        "metrics": {
+          "ts": {
+            "cpuMs": 353.661,
+            "steadyCpuMs": 232.105,
+            "processCpuMs": 407.991,
+            "wallMs": 3936.3554590000003,
+            "heapRetainedBytes": 5772816,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 5772848,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 232.605,
+            "steadyCpuMs": 114.535,
+            "processCpuMs": 320.7,
+            "wallMs": 2877.1451669999997,
+            "heapRetainedBytes": 394056,
+            "bufferRetainedBytes": 305728,
+            "retainedBytes": 1879432,
+            "wasmBytes": 1179648
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 356.572,
+              "steadyCpuMs": 232.105,
+              "processCpuMs": 417.882,
+              "wallMs": 3110.961042,
+              "heapRetainedBytes": 5772816,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 5772848,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 232.605,
+              "steadyCpuMs": 114.535,
+              "processCpuMs": 322.054,
+              "wallMs": 2519.395959,
+              "heapRetainedBytes": 394056,
+              "bufferRetainedBytes": 305728,
+              "retainedBytes": 1879432,
+              "wasmBytes": 1179648
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 353.661,
+              "steadyCpuMs": 237.465,
+              "processCpuMs": 407.991,
+              "wallMs": 4111.7835000000005,
+              "heapRetainedBytes": 5783336,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 5783368,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 222.27,
+              "steadyCpuMs": 108.858,
+              "processCpuMs": 310.05,
+              "wallMs": 2877.1451669999997,
+              "heapRetainedBytes": 379464,
+              "bufferRetainedBytes": 303820,
+              "retainedBytes": 1862932,
+              "wasmBytes": 1179648
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 351.877,
+              "steadyCpuMs": 220.795,
+              "processCpuMs": 406.407,
+              "wallMs": 3936.3554590000003,
+              "heapRetainedBytes": 5772072,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 5772104,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 233.473,
+              "steadyCpuMs": 130.769,
+              "processCpuMs": 320.7,
+              "wallMs": 3500.6409580000004,
+              "heapRetainedBytes": 396744,
+              "bufferRetainedBytes": 305833,
+              "retainedBytes": 1882225,
+              "wasmBytes": 1179648
+            }
+          }
+        ]
+      }
+    },
+    "okx": {
+      "runsPerSide": 3,
+      "before": {
+        "cpuRatio": 1.4284614556862485,
+        "steadyRatio": 1.6428625708976103,
+        "memoryRatio": 1.6229873497005303,
+        "metrics": {
+          "ts": {
+            "cpuMs": 345.142,
+            "steadyCpuMs": 237.806,
+            "processCpuMs": 411.494,
+            "wallMs": 3280.0147910000005,
+            "heapRetainedBytes": 4311752,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 4311784,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 241.618,
+            "steadyCpuMs": 144.751,
+            "processCpuMs": 334.499,
+            "wallMs": 2937.052041,
+            "heapRetainedBytes": 1193216,
+            "bufferRetainedBytes": 152760,
+            "retainedBytes": 2656696,
+            "wasmBytes": 1310720
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 308.847,
+              "steadyCpuMs": 204.574,
+              "processCpuMs": 369.78,
+              "wallMs": 3092.8155000000006,
+              "heapRetainedBytes": 4296304,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 4296336,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 227.686,
+              "steadyCpuMs": 140.763,
+              "processCpuMs": 315.695,
+              "wallMs": 2854.4004170000003,
+              "heapRetainedBytes": 1181680,
+              "bufferRetainedBytes": 152760,
+              "retainedBytes": 2645160,
+              "wasmBytes": 1310720
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 345.142,
+              "steadyCpuMs": 239.665,
+              "processCpuMs": 411.494,
+              "wallMs": 3769.3960420000003,
+              "heapRetainedBytes": 4312976,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 4313008,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 241.618,
+              "steadyCpuMs": 147.693,
+              "processCpuMs": 334.499,
+              "wallMs": 2937.052041,
+              "heapRetainedBytes": 1193216,
+              "bufferRetainedBytes": 152760,
+              "retainedBytes": 2656696,
+              "wasmBytes": 1310720
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 345.402,
+              "steadyCpuMs": 237.806,
+              "processCpuMs": 416.16,
+              "wallMs": 3280.0147910000005,
+              "heapRetainedBytes": 4311752,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 4311784,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 250.822,
+              "steadyCpuMs": 144.751,
+              "processCpuMs": 341.19,
+              "wallMs": 3342.118834,
+              "heapRetainedBytes": 1196080,
+              "bufferRetainedBytes": 152760,
+              "retainedBytes": 2659560,
+              "wasmBytes": 1310720
+            }
+          }
+        ]
+      },
+      "after": {
+        "cpuRatio": 1.6246769730894612,
+        "steadyRatio": 1.9914930512952649,
+        "memoryRatio": 1.8031502591715054,
+        "metrics": {
+          "ts": {
+            "cpuMs": 355.84,
+            "steadyCpuMs": 243.466,
+            "processCpuMs": 424.256,
+            "wallMs": 4809.805417,
+            "heapRetainedBytes": 4305880,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 4305912,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 219.022,
+            "steadyCpuMs": 122.253,
+            "processCpuMs": 334.951,
+            "wallMs": 3103.488375,
+            "heapRetainedBytes": 1244864,
+            "bufferRetainedBytes": 158150,
+            "retainedBytes": 2387994,
+            "wasmBytes": 983040
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 355.84,
+              "steadyCpuMs": 243.466,
+              "processCpuMs": 421.396,
+              "wallMs": 4408.791166999999,
+              "heapRetainedBytes": 4305640,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 4305672,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 219.303,
+              "steadyCpuMs": 120.196,
+              "processCpuMs": 333.017,
+              "wallMs": 2654.335792,
+              "heapRetainedBytes": 1244864,
+              "bufferRetainedBytes": 161979,
+              "retainedBytes": 2389883,
+              "wasmBytes": 983040
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 372.868,
+              "steadyCpuMs": 265.922,
+              "processCpuMs": 445.709,
+              "wallMs": 4809.805417,
+              "heapRetainedBytes": 4323672,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 4323704,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 219.022,
+              "steadyCpuMs": 131.951,
+              "processCpuMs": 343.009,
+              "wallMs": 3192.91,
+              "heapRetainedBytes": 1244504,
+              "bufferRetainedBytes": 158150,
+              "retainedBytes": 2385694,
+              "wasmBytes": 983040
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 352.177,
+              "steadyCpuMs": 241.248,
+              "processCpuMs": 424.256,
+              "wallMs": 4927.398625,
+              "heapRetainedBytes": 4305880,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 4305912,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 216.005,
+              "steadyCpuMs": 122.253,
+              "processCpuMs": 334.951,
+              "wallMs": 3103.488375,
+              "heapRetainedBytes": 1247864,
+              "bufferRetainedBytes": 157090,
+              "retainedBytes": 2387994,
+              "wasmBytes": 983040
+            }
+          }
+        ]
+      }
+    },
+    "cryptocom": {
+      "runsPerSide": 3,
+      "before": {
+        "cpuRatio": 1.3926606729942483,
+        "steadyRatio": 1.7877995170577672,
+        "memoryRatio": 1.3043702498823984,
+        "metrics": {
+          "ts": {
+            "cpuMs": 166.831,
+            "steadyCpuMs": 115.499,
+            "processCpuMs": 200.879,
+            "wallMs": 3057.3003750000003,
+            "heapRetainedBytes": 1841144,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 1841176,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 119.793,
+            "steadyCpuMs": 64.604,
+            "processCpuMs": 168.981,
+            "wallMs": 2513.070125,
+            "heapRetainedBytes": 466648,
+            "bufferRetainedBytes": 92928,
+            "retainedBytes": 1411544,
+            "wasmBytes": 851968
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 166.831,
+              "steadyCpuMs": 115.499,
+              "processCpuMs": 200.879,
+              "wallMs": 3057.3003750000003,
+              "heapRetainedBytes": 1778432,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 1778464,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 122.516,
+              "steadyCpuMs": 64.604,
+              "processCpuMs": 168.981,
+              "wallMs": 2513.070125,
+              "heapRetainedBytes": 466648,
+              "bufferRetainedBytes": 92928,
+              "retainedBytes": 1411544,
+              "wasmBytes": 851968
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 142.56,
+              "steadyCpuMs": 91.384,
+              "processCpuMs": 172.248,
+              "wallMs": 1974.0141669999998,
+              "heapRetainedBytes": 1841144,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 1841176,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 107.338,
+              "steadyCpuMs": 58.879,
+              "processCpuMs": 155.47,
+              "wallMs": 2270.203875,
+              "heapRetainedBytes": 465928,
+              "bufferRetainedBytes": 92928,
+              "retainedBytes": 1410824,
+              "wasmBytes": 851968
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 177.455,
+              "steadyCpuMs": 125.099,
+              "processCpuMs": 214.811,
+              "wallMs": 3673.865792,
+              "heapRetainedBytes": 1869552,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 1869584,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 119.793,
+              "steadyCpuMs": 66.166,
+              "processCpuMs": 176.367,
+              "wallMs": 2565.5438329999997,
+              "heapRetainedBytes": 467256,
+              "bufferRetainedBytes": 92928,
+              "retainedBytes": 1412152,
+              "wasmBytes": 851968
+            }
+          }
+        ]
+      },
+      "after": {
+        "cpuRatio": 1.4079378243658034,
+        "steadyRatio": 1.7720238859637858,
+        "memoryRatio": 1.4271108546347038,
+        "metrics": {
+          "ts": {
+            "cpuMs": 164.671,
+            "steadyCpuMs": 110.39,
+            "processCpuMs": 197.652,
+            "wallMs": 2544.4738329999996,
+            "heapRetainedBytes": 1783016,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 1783048,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 116.959,
+            "steadyCpuMs": 62.296,
+            "processCpuMs": 184.348,
+            "wallMs": 2203.878917,
+            "heapRetainedBytes": 487824,
+            "bufferRetainedBytes": 104099,
+            "retainedBytes": 1249411,
+            "wasmBytes": 655360
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 164.671,
+              "steadyCpuMs": 111.858,
+              "processCpuMs": 198.999,
+              "wallMs": 3065.0185420000003,
+              "heapRetainedBytes": 1780872,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 1780904,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 116.959,
+              "steadyCpuMs": 62.296,
+              "processCpuMs": 184.348,
+              "wallMs": 2424.204417,
+              "heapRetainedBytes": 385160,
+              "bufferRetainedBytes": 100126,
+              "retainedBytes": 1140646,
+              "wasmBytes": 655360
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 150.606,
+              "steadyCpuMs": 101.004,
+              "processCpuMs": 183.701,
+              "wallMs": 2278.373167,
+              "heapRetainedBytes": 1849576,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 1849608,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 99.487,
+              "steadyCpuMs": 50.234,
+              "processCpuMs": 158.277,
+              "wallMs": 2203.878917,
+              "heapRetainedBytes": 487824,
+              "bufferRetainedBytes": 106227,
+              "retainedBytes": 1249411,
+              "wasmBytes": 655360
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 166.735,
+              "steadyCpuMs": 110.39,
+              "processCpuMs": 197.652,
+              "wallMs": 2544.4738329999996,
+              "heapRetainedBytes": 1783016,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 1783048,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 128.21,
+              "steadyCpuMs": 74.095,
+              "processCpuMs": 201.69,
+              "wallMs": 2158.34625,
+              "heapRetainedBytes": 503480,
+              "bufferRetainedBytes": 104099,
+              "retainedBytes": 1262939,
+              "wasmBytes": 655360
+            }
+          }
+        ]
+      }
+    },
+    "weex": {
+      "runsPerSide": 3,
+      "before": {
+        "cpuRatio": 1.4960958152019197,
+        "steadyRatio": 1.773873740367516,
+        "memoryRatio": 2.2661227151733403,
+        "metrics": {
+          "ts": {
+            "cpuMs": 220.725,
+            "steadyCpuMs": 119.701,
+            "processCpuMs": 272.901,
+            "wallMs": 2019.3797500000003,
+            "heapRetainedBytes": 5114752,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 5114784,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 147.534,
+            "steadyCpuMs": 67.48,
+            "processCpuMs": 224.549,
+            "wallMs": 1483.537458,
+            "heapRetainedBytes": 422400,
+            "bufferRetainedBytes": 261800,
+            "retainedBytes": 2257064,
+            "wasmBytes": 1572864
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 220.725,
+              "steadyCpuMs": 118.985,
+              "processCpuMs": 272.901,
+              "wallMs": 1923.4252909999998,
+              "heapRetainedBytes": 5114752,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 5114784,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 144.841,
+              "steadyCpuMs": 67.48,
+              "processCpuMs": 224.549,
+              "wallMs": 1483.537458,
+              "heapRetainedBytes": 422400,
+              "bufferRetainedBytes": 261800,
+              "retainedBytes": 2257064,
+              "wasmBytes": 1572864
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 219.71,
+              "steadyCpuMs": 119.701,
+              "processCpuMs": 255.256,
+              "wallMs": 2019.3797500000003,
+              "heapRetainedBytes": 5114704,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 5114736,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 147.534,
+              "steadyCpuMs": 65.759,
+              "processCpuMs": 223.998,
+              "wallMs": 1339.3539999999998,
+              "heapRetainedBytes": 405344,
+              "bufferRetainedBytes": 261800,
+              "retainedBytes": 2240008,
+              "wasmBytes": 1572864
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 227.31,
+              "steadyCpuMs": 128.898,
+              "processCpuMs": 279.332,
+              "wallMs": 2099.2595,
+              "heapRetainedBytes": 5122616,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 5122648,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 154.318,
+              "steadyCpuMs": 67.923,
+              "processCpuMs": 238.028,
+              "wallMs": 1516.264208,
+              "heapRetainedBytes": 423184,
+              "bufferRetainedBytes": 261800,
+              "retainedBytes": 2257848,
+              "wasmBytes": 1572864
+            }
+          }
+        ]
+      },
+      "after": {
+        "cpuRatio": 1.674821513564969,
+        "steadyRatio": 2.429815367249859,
+        "memoryRatio": 2.45192261403877,
+        "metrics": {
+          "ts": {
+            "cpuMs": 123.158,
+            "steadyCpuMs": 60.274,
+            "processCpuMs": 158.355,
+            "wallMs": 146.974375,
+            "heapRetainedBytes": 5093288,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 5093320,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 73.535,
+            "steadyCpuMs": 24.806,
+            "processCpuMs": 148.489,
+            "wallMs": 96.33266600000002,
+            "heapRetainedBytes": 434456,
+            "bufferRetainedBytes": 268961,
+            "retainedBytes": 2077276,
+            "wasmBytes": 1376256
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 233.242,
+              "steadyCpuMs": 134.736,
+              "processCpuMs": 283.243,
+              "wallMs": 2493.984542,
+              "heapRetainedBytes": 5120816,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 5120848,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 144.49,
+              "steadyCpuMs": 73.618,
+              "processCpuMs": 239.553,
+              "wallMs": 837.867875,
+              "heapRetainedBytes": 454144,
+              "bufferRetainedBytes": 277912,
+              "retainedBytes": 2108312,
+              "wasmBytes": 1376256
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 123.158,
+              "steadyCpuMs": 59.631,
+              "processCpuMs": 158.355,
+              "wallMs": 146.974375,
+              "heapRetainedBytes": 5093288,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 5093320,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 69.363,
+              "steadyCpuMs": 22.729,
+              "processCpuMs": 138.634,
+              "wallMs": 89.87254099999998,
+              "heapRetainedBytes": 434456,
+              "bufferRetainedBytes": 266564,
+              "retainedBytes": 2077276,
+              "wasmBytes": 1376256
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 118.833,
+              "steadyCpuMs": 60.274,
+              "processCpuMs": 149.851,
+              "wallMs": 138.38825000000003,
+              "heapRetainedBytes": 5068600,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 5068632,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 73.535,
+              "steadyCpuMs": 24.806,
+              "processCpuMs": 148.489,
+              "wallMs": 96.33266600000002,
+              "heapRetainedBytes": 429936,
+              "bufferRetainedBytes": 268961,
+              "retainedBytes": 2075153,
+              "wasmBytes": 1376256
+            }
+          }
+        ]
+      }
+    },
+    "bingx": {
+      "runsPerSide": 3,
+      "before": {
+        "cpuRatio": 1.369118073086951,
+        "steadyRatio": 1.3681027966742252,
+        "memoryRatio": 1.6888849197932598,
+        "metrics": {
+          "ts": {
+            "cpuMs": 99.246,
+            "steadyCpuMs": 39.82,
+            "processCpuMs": 155.175,
+            "wallMs": 211.946458,
+            "heapRetainedBytes": 3630976,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 3631008,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 72.489,
+            "steadyCpuMs": 29.106,
+            "processCpuMs": 112.848,
+            "wallMs": 90.46820800000003,
+            "heapRetainedBytes": 328072,
+            "bufferRetainedBytes": 314544,
+            "retainedBytes": 2149944,
+            "wasmBytes": 1507328
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 97.653,
+              "steadyCpuMs": 38.932,
+              "processCpuMs": 155.124,
+              "wallMs": 205.03012500000006,
+              "heapRetainedBytes": 3630976,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 3631008,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 69.35,
+              "steadyCpuMs": 25.7,
+              "processCpuMs": 108.949,
+              "wallMs": 77.398416,
+              "heapRetainedBytes": 328072,
+              "bufferRetainedBytes": 314544,
+              "retainedBytes": 2149944,
+              "wasmBytes": 1507328
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 99.246,
+              "steadyCpuMs": 39.82,
+              "processCpuMs": 155.175,
+              "wallMs": 211.946458,
+              "heapRetainedBytes": 3631640,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 3631672,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 72.489,
+              "steadyCpuMs": 29.106,
+              "processCpuMs": 112.848,
+              "wallMs": 90.46820800000003,
+              "heapRetainedBytes": 328072,
+              "bufferRetainedBytes": 314544,
+              "retainedBytes": 2149944,
+              "wasmBytes": 1507328
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 109.343,
+              "steadyCpuMs": 45.15,
+              "processCpuMs": 157.159,
+              "wallMs": 229.703417,
+              "heapRetainedBytes": 3630960,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 3630992,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 76.966,
+              "steadyCpuMs": 29.499,
+              "processCpuMs": 120.04,
+              "wallMs": 91.03416600000003,
+              "heapRetainedBytes": 328080,
+              "bufferRetainedBytes": 314544,
+              "retainedBytes": 2149952,
+              "wasmBytes": 1507328
+            }
+          }
+        ]
+      },
+      "after": {
+        "cpuRatio": 1.4682022505807464,
+        "steadyRatio": 1.5264482620854973,
+        "memoryRatio": 1.7244415073414914,
+        "metrics": {
+          "ts": {
+            "cpuMs": 97.333,
+            "steadyCpuMs": 38.207,
+            "processCpuMs": 163.034,
+            "wallMs": 204.71800000000002,
+            "heapRetainedBytes": 3632304,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 3632336,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 66.294,
+            "steadyCpuMs": 25.03,
+            "processCpuMs": 117.789,
+            "wallMs": 74.02674999999999,
+            "heapRetainedBytes": 350048,
+            "bufferRetainedBytes": 314544,
+            "retainedBytes": 2106384,
+            "wasmBytes": 1441792
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 97.333,
+              "steadyCpuMs": 38.207,
+              "processCpuMs": 163.034,
+              "wallMs": 204.71800000000002,
+              "heapRetainedBytes": 3631968,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 3632000,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 68.749,
+              "steadyCpuMs": 25.03,
+              "processCpuMs": 127.528,
+              "wallMs": 79.35541699999999,
+              "heapRetainedBytes": 350048,
+              "bufferRetainedBytes": 314544,
+              "retainedBytes": 2106384,
+              "wasmBytes": 1441792
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 90.952,
+              "steadyCpuMs": 34.512,
+              "processCpuMs": 148.491,
+              "wallMs": 195.56154199999997,
+              "heapRetainedBytes": 3647392,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 3647424,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 65.185,
+              "steadyCpuMs": 23.909,
+              "processCpuMs": 114.778,
+              "wallMs": 73.57975000000002,
+              "heapRetainedBytes": 350048,
+              "bufferRetainedBytes": 314544,
+              "retainedBytes": 2106384,
+              "wasmBytes": 1441792
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 110.245,
+              "steadyCpuMs": 47.399,
+              "processCpuMs": 169.6,
+              "wallMs": 218.52041599999995,
+              "heapRetainedBytes": 3632304,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 3632336,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 66.294,
+              "steadyCpuMs": 25.329,
+              "processCpuMs": 117.789,
+              "wallMs": 74.02674999999999,
+              "heapRetainedBytes": 350048,
+              "bufferRetainedBytes": 314544,
+              "retainedBytes": 2106384,
+              "wasmBytes": 1441792
+            }
+          }
+        ]
+      }
+    },
+    "blofin": {
+      "runsPerSide": 3,
+      "before": {
+        "cpuRatio": 1.3927564825253664,
+        "steadyRatio": 2.0292188431723313,
+        "memoryRatio": 1.7381985356396694,
+        "metrics": {
+          "ts": {
+            "cpuMs": 108.713,
+            "steadyCpuMs": 64.657,
+            "processCpuMs": 138.643,
+            "wallMs": 128.63287499999996,
+            "heapRetainedBytes": 2955128,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 2955160,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 78.056,
+            "steadyCpuMs": 31.863,
+            "processCpuMs": 137.769,
+            "wallMs": 98.614375,
+            "heapRetainedBytes": 693544,
+            "bufferRetainedBytes": 154616,
+            "retainedBytes": 1700128,
+            "wasmBytes": 851968
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 112.311,
+              "steadyCpuMs": 65.191,
+              "processCpuMs": 143.995,
+              "wallMs": 134.59916699999997,
+              "heapRetainedBytes": 2985288,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 2985320,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 84.288,
+              "steadyCpuMs": 33.304,
+              "processCpuMs": 149.14,
+              "wallMs": 111.368708,
+              "heapRetainedBytes": 700528,
+              "bufferRetainedBytes": 154616,
+              "retainedBytes": 1707112,
+              "wasmBytes": 851968
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 108.713,
+              "steadyCpuMs": 64.657,
+              "processCpuMs": 138.643,
+              "wallMs": 128.63287499999996,
+              "heapRetainedBytes": 2954680,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 2954712,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 78.056,
+              "steadyCpuMs": 31.863,
+              "processCpuMs": 137.769,
+              "wallMs": 98.614375,
+              "heapRetainedBytes": 693544,
+              "bufferRetainedBytes": 154616,
+              "retainedBytes": 1700128,
+              "wasmBytes": 851968
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 98.245,
+              "steadyCpuMs": 54.673,
+              "processCpuMs": 126.226,
+              "wallMs": 110.64824999999996,
+              "heapRetainedBytes": 2955128,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 2955160,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 73.928,
+              "steadyCpuMs": 28.157,
+              "processCpuMs": 134.316,
+              "wallMs": 91.92854099999997,
+              "heapRetainedBytes": 692880,
+              "bufferRetainedBytes": 154616,
+              "retainedBytes": 1699464,
+              "wasmBytes": 851968
+            }
+          }
+        ]
+      },
+      "after": {
+        "cpuRatio": 1.5316867960374543,
+        "steadyRatio": 2.661984036488027,
+        "memoryRatio": 1.7567653215991457,
+        "metrics": {
+          "ts": {
+            "cpuMs": 101.583,
+            "steadyCpuMs": 58.364,
+            "processCpuMs": 129.398,
+            "wallMs": 116.34329099999997,
+            "heapRetainedBytes": 2954712,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 2954744,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 66.321,
+            "steadyCpuMs": 21.925,
+            "processCpuMs": 148.858,
+            "wallMs": 87.71279100000001,
+            "heapRetainedBytes": 727640,
+            "bufferRetainedBytes": 167875,
+            "retainedBytes": 1681923,
+            "wasmBytes": 786432
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 106.376,
+              "steadyCpuMs": 61.731,
+              "processCpuMs": 134.118,
+              "wallMs": 124.04308399999996,
+              "heapRetainedBytes": 2954712,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 2954744,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 68.605,
+              "steadyCpuMs": 21.925,
+              "processCpuMs": 151.649,
+              "wallMs": 87.96391699999998,
+              "heapRetainedBytes": 735264,
+              "bufferRetainedBytes": 167875,
+              "retainedBytes": 1689571,
+              "wasmBytes": 786432
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 96.015,
+              "steadyCpuMs": 55.062,
+              "processCpuMs": 122.686,
+              "wallMs": 108.14362499999999,
+              "heapRetainedBytes": 2954576,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 2954608,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 66.321,
+              "steadyCpuMs": 22.531,
+              "processCpuMs": 148.858,
+              "wallMs": 87.71279100000001,
+              "heapRetainedBytes": 727640,
+              "bufferRetainedBytes": 166061,
+              "retainedBytes": 1680133,
+              "wasmBytes": 786432
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 101.583,
+              "steadyCpuMs": 58.364,
+              "processCpuMs": 129.398,
+              "wallMs": 116.34329099999997,
+              "heapRetainedBytes": 2954920,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 2954952,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 64.846,
+              "steadyCpuMs": 21.448,
+              "processCpuMs": 146.947,
+              "wallMs": 82.38258299999998,
+              "heapRetainedBytes": 727616,
+              "bufferRetainedBytes": 167875,
+              "retainedBytes": 1681923,
+              "wasmBytes": 786432
+            }
+          }
+        ]
+      }
+    },
+    "backpack": {
+      "runsPerSide": 3,
+      "before": {
+        "cpuRatio": 2.383431838000194,
+        "steadyRatio": 3.373778589069043,
+        "memoryRatio": 1.8499333234553268,
+        "metrics": {
+          "ts": {
+            "cpuMs": 122.997,
+            "steadyCpuMs": 62.84,
+            "processCpuMs": 147.087,
+            "wallMs": 2116.459625,
+            "heapRetainedBytes": 2996416,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 2996448,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 51.605,
+            "steadyCpuMs": 18.626,
+            "processCpuMs": 96.412,
+            "wallMs": 56.149833,
+            "heapRetainedBytes": 453328,
+            "bufferRetainedBytes": 183392,
+            "retainedBytes": 1619760,
+            "wasmBytes": 983040
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 122.997,
+              "steadyCpuMs": 64.073,
+              "processCpuMs": 147.749,
+              "wallMs": 2122.1452499999996,
+              "heapRetainedBytes": 2996416,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 2996448,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 51.605,
+              "steadyCpuMs": 18.626,
+              "processCpuMs": 96.412,
+              "wallMs": 56.149833,
+              "heapRetainedBytes": 453328,
+              "bufferRetainedBytes": 183392,
+              "retainedBytes": 1619760,
+              "wasmBytes": 983040
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 123.772,
+              "steadyCpuMs": 62.84,
+              "processCpuMs": 147.087,
+              "wallMs": 2116.459625,
+              "heapRetainedBytes": 3059888,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 3059920,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 54.807,
+              "steadyCpuMs": 19.922,
+              "processCpuMs": 99.23,
+              "wallMs": 59.397333,
+              "heapRetainedBytes": 453232,
+              "bufferRetainedBytes": 183392,
+              "retainedBytes": 1619664,
+              "wasmBytes": 983040
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 119.274,
+              "steadyCpuMs": 59.949,
+              "processCpuMs": 140.856,
+              "wallMs": 2111.025209,
+              "heapRetainedBytes": 2995752,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 2995784,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 50.548,
+              "steadyCpuMs": 18.269,
+              "processCpuMs": 93.022,
+              "wallMs": 54.67750000000001,
+              "heapRetainedBytes": 453328,
+              "bufferRetainedBytes": 183392,
+              "retainedBytes": 1619760,
+              "wasmBytes": 983040
+            }
+          }
+        ]
+      },
+      "after": {
+        "cpuRatio": 2.4593772932173183,
+        "steadyRatio": 4.253928170594837,
+        "memoryRatio": 2.1830235634897046,
+        "metrics": {
+          "ts": {
+            "cpuMs": 117.3,
+            "steadyCpuMs": 60.644,
+            "processCpuMs": 139.255,
+            "wallMs": 2114.354792,
+            "heapRetainedBytes": 2996456,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 2996488,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 47.695,
+            "steadyCpuMs": 14.256,
+            "processCpuMs": 129.067,
+            "wallMs": 53.083292,
+            "heapRetainedBytes": 468064,
+            "bufferRetainedBytes": 188705,
+            "retainedBytes": 1372632,
+            "wasmBytes": 720896
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 117.943,
+              "steadyCpuMs": 61.54,
+              "processCpuMs": 139.255,
+              "wallMs": 2116.050041,
+              "heapRetainedBytes": 2995928,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 2995960,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 47.695,
+              "steadyCpuMs": 13.924,
+              "processCpuMs": 129.067,
+              "wallMs": 55.690166000000005,
+              "heapRetainedBytes": 468344,
+              "bufferRetainedBytes": 183392,
+              "retainedBytes": 1372632,
+              "wasmBytes": 720896
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 117.3,
+              "steadyCpuMs": 60.644,
+              "processCpuMs": 140.631,
+              "wallMs": 2114.354792,
+              "heapRetainedBytes": 2996824,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 2996856,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 47.777,
+              "steadyCpuMs": 16.198,
+              "processCpuMs": 131.593,
+              "wallMs": 53.083292,
+              "heapRetainedBytes": 366224,
+              "bufferRetainedBytes": 194673,
+              "retainedBytes": 1281793,
+              "wasmBytes": 720896
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 115.631,
+              "steadyCpuMs": 57.455,
+              "processCpuMs": 135.475,
+              "wallMs": 2107.8038340000003,
+              "heapRetainedBytes": 2996456,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 2996488,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 45.653,
+              "steadyCpuMs": 14.256,
+              "processCpuMs": 125.475,
+              "wallMs": 50.24754199999998,
+              "heapRetainedBytes": 468064,
+              "bufferRetainedBytes": 188705,
+              "retainedBytes": 1377665,
+              "wasmBytes": 720896
+            }
+          }
+        ]
+      }
+    },
+    "mexc": {
+      "runsPerSide": 10,
+      "before": {
+        "cpuRatio": 3.073037140028229,
+        "steadyRatio": 4.08674737177445,
+        "memoryRatio": 3.935776535592893,
+        "metrics": {
+          "ts": {
+            "cpuMs": 437.622,
+            "steadyCpuMs": 256.566,
+            "processCpuMs": 538.848,
+            "wallMs": 475.61299999999994,
+            "heapRetainedBytes": 9772816,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 9772848,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 142.407,
+            "steadyCpuMs": 62.78,
+            "processCpuMs": 206.214,
+            "wallMs": 178.728167,
+            "heapRetainedBytes": 109640,
+            "bufferRetainedBytes": 407360,
+            "retainedBytes": 2483080,
+            "wasmBytes": 1966080
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 685.824,
+              "steadyCpuMs": 418.5,
+              "processCpuMs": 784.872,
+              "wallMs": 3810.6564169999997,
+              "heapRetainedBytes": 9750512,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9750544,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 309.457,
+              "steadyCpuMs": 170.209,
+              "processCpuMs": 411.964,
+              "wallMs": 2388.73575,
+              "heapRetainedBytes": 137088,
+              "bufferRetainedBytes": 407360,
+              "retainedBytes": 2510528,
+              "wasmBytes": 1966080
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 434.515,
+              "steadyCpuMs": 254.82,
+              "processCpuMs": 535.857,
+              "wallMs": 470.91533400000003,
+              "heapRetainedBytes": 9771304,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9771336,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 139.102,
+              "steadyCpuMs": 59.253,
+              "processCpuMs": 200.331,
+              "wallMs": 172.448125,
+              "heapRetainedBytes": 109448,
+              "bufferRetainedBytes": 407360,
+              "retainedBytes": 2482888,
+              "wasmBytes": 1966080
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 461.073,
+              "steadyCpuMs": 267.711,
+              "processCpuMs": 569.734,
+              "wallMs": 522.1819580000001,
+              "heapRetainedBytes": 9786496,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9786528,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 141.409,
+              "steadyCpuMs": 59.585,
+              "processCpuMs": 203.743,
+              "wallMs": 178.47079099999996,
+              "heapRetainedBytes": 109760,
+              "bufferRetainedBytes": 407360,
+              "retainedBytes": 2483200,
+              "wasmBytes": 1966080
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 437.622,
+              "steadyCpuMs": 256.566,
+              "processCpuMs": 538.848,
+              "wallMs": 475.61299999999994,
+              "heapRetainedBytes": 9788016,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9788048,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 139.772,
+              "steadyCpuMs": 63.71,
+              "processCpuMs": 203.465,
+              "wallMs": 174.95954100000003,
+              "heapRetainedBytes": 109592,
+              "bufferRetainedBytes": 407360,
+              "retainedBytes": 2483032,
+              "wasmBytes": 1966080
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 434.781,
+              "steadyCpuMs": 255.517,
+              "processCpuMs": 535.239,
+              "wallMs": 468.325167,
+              "heapRetainedBytes": 9772144,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9772176,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 142.407,
+              "steadyCpuMs": 58.767,
+              "processCpuMs": 207.336,
+              "wallMs": 180.0695,
+              "heapRetainedBytes": 109664,
+              "bufferRetainedBytes": 407360,
+              "retainedBytes": 2483104,
+              "wasmBytes": 1966080
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 426.733,
+              "steadyCpuMs": 251.152,
+              "processCpuMs": 528.187,
+              "wallMs": 459.01720800000004,
+              "heapRetainedBytes": 9766496,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9766528,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 139.907,
+              "steadyCpuMs": 61.416,
+              "processCpuMs": 201.778,
+              "wallMs": 176.441125,
+              "heapRetainedBytes": 110408,
+              "bufferRetainedBytes": 407360,
+              "retainedBytes": 2483848,
+              "wasmBytes": 1966080
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 432.098,
+              "steadyCpuMs": 250.645,
+              "processCpuMs": 536.336,
+              "wallMs": 469.164167,
+              "heapRetainedBytes": 9774592,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9774624,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 143.834,
+              "steadyCpuMs": 62.78,
+              "processCpuMs": 206.214,
+              "wallMs": 178.728167,
+              "heapRetainedBytes": 109496,
+              "bufferRetainedBytes": 407360,
+              "retainedBytes": 2482936,
+              "wasmBytes": 1966080
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 480.076,
+              "steadyCpuMs": 280.691,
+              "processCpuMs": 585.141,
+              "wallMs": 566.799666,
+              "heapRetainedBytes": 9781064,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9781096,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 147.498,
+              "steadyCpuMs": 66.276,
+              "processCpuMs": 212.089,
+              "wallMs": 191.97216699999998,
+              "heapRetainedBytes": 109640,
+              "bufferRetainedBytes": 407360,
+              "retainedBytes": 2483080,
+              "wasmBytes": 1966080
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 454.27,
+              "steadyCpuMs": 259.329,
+              "processCpuMs": 571.5,
+              "wallMs": 501.990375,
+              "heapRetainedBytes": 9766072,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9766104,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 156.514,
+              "steadyCpuMs": 77.232,
+              "processCpuMs": 225.202,
+              "wallMs": 206.669375,
+              "heapRetainedBytes": 109496,
+              "bufferRetainedBytes": 407360,
+              "retainedBytes": 2482936,
+              "wasmBytes": 1966080
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 420.971,
+              "steadyCpuMs": 239.891,
+              "processCpuMs": 525.157,
+              "wallMs": 452.89612500000004,
+              "heapRetainedBytes": 9772816,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9772848,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 138.269,
+              "steadyCpuMs": 60.188,
+              "processCpuMs": 198.074,
+              "wallMs": 170.856041,
+              "heapRetainedBytes": 109448,
+              "bufferRetainedBytes": 407360,
+              "retainedBytes": 2482888,
+              "wasmBytes": 1966080
+            }
+          }
+        ]
+      },
+      "after": {
+        "cpuRatio": 3.126819972593354,
+        "steadyRatio": 4.134484629871995,
+        "memoryRatio": 4.791135349130027,
+        "metrics": {
+          "ts": {
+            "cpuMs": 438.105,
+            "steadyCpuMs": 259.042,
+            "processCpuMs": 540.258,
+            "wallMs": 471.3582919999999,
+            "heapRetainedBytes": 9764000,
+            "bufferRetainedBytes": 32,
+            "retainedBytes": 9764032,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 140.112,
+            "steadyCpuMs": 62.654,
+            "processCpuMs": 236.505,
+            "wallMs": 223.922833,
+            "heapRetainedBytes": 175400,
+            "bufferRetainedBytes": 420745,
+            "retainedBytes": 2037937,
+            "wasmBytes": 1441792
+          }
+        },
+        "runs": [
+          {
+            "ts": {
+              "cpuMs": 500.71,
+              "steadyCpuMs": 277.556,
+              "processCpuMs": 585.203,
+              "wallMs": 774.7455,
+              "heapRetainedBytes": 9750456,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9750488,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 139.164,
+              "steadyCpuMs": 60.355,
+              "processCpuMs": 236.505,
+              "wallMs": 207.73825000000002,
+              "heapRetainedBytes": 175408,
+              "bufferRetainedBytes": 420745,
+              "retainedBytes": 2037945,
+              "wasmBytes": 1441792
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 459.377,
+              "steadyCpuMs": 266.072,
+              "processCpuMs": 572.03,
+              "wallMs": 515.991708,
+              "heapRetainedBytes": 9764000,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9764032,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 148.706,
+              "steadyCpuMs": 66.234,
+              "processCpuMs": 241.577,
+              "wallMs": 225.04120899999998,
+              "heapRetainedBytes": 175400,
+              "bufferRetainedBytes": 420745,
+              "retainedBytes": 2037937,
+              "wasmBytes": 1441792
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 419.495,
+              "steadyCpuMs": 242.413,
+              "processCpuMs": 529.606,
+              "wallMs": 455.493958,
+              "heapRetainedBytes": 9787528,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9787560,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 140.112,
+              "steadyCpuMs": 64.721,
+              "processCpuMs": 225.988,
+              "wallMs": 209.75087499999998,
+              "heapRetainedBytes": 175400,
+              "bufferRetainedBytes": 420745,
+              "retainedBytes": 2037937,
+              "wasmBytes": 1441792
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 424.33,
+              "steadyCpuMs": 248.998,
+              "processCpuMs": 524.854,
+              "wallMs": 455.08158299999997,
+              "heapRetainedBytes": 9751432,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9751464,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 133.168,
+              "steadyCpuMs": 60.215,
+              "processCpuMs": 219.481,
+              "wallMs": 200.828875,
+              "heapRetainedBytes": 175208,
+              "bufferRetainedBytes": 420745,
+              "retainedBytes": 2037745,
+              "wasmBytes": 1441792
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 488.601,
+              "steadyCpuMs": 270.27,
+              "processCpuMs": 603.935,
+              "wallMs": 572.808541,
+              "heapRetainedBytes": 9772240,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9772272,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 201.156,
+              "steadyCpuMs": 109.729,
+              "processCpuMs": 307.621,
+              "wallMs": 437.39416600000004,
+              "heapRetainedBytes": 175432,
+              "bufferRetainedBytes": 420745,
+              "retainedBytes": 2037969,
+              "wasmBytes": 1441792
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 435.875,
+              "steadyCpuMs": 257.006,
+              "processCpuMs": 540.258,
+              "wallMs": 471.3582919999999,
+              "heapRetainedBytes": 9750800,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9750832,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 136.6,
+              "steadyCpuMs": 57.981,
+              "processCpuMs": 227.064,
+              "wallMs": 207.6835,
+              "heapRetainedBytes": 175264,
+              "bufferRetainedBytes": 420745,
+              "retainedBytes": 2037801,
+              "wasmBytes": 1441792
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 428.265,
+              "steadyCpuMs": 253.231,
+              "processCpuMs": 531.043,
+              "wallMs": 466.942208,
+              "heapRetainedBytes": 9730288,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9730320,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 129.911,
+              "steadyCpuMs": 55.216,
+              "processCpuMs": 213.347,
+              "wallMs": 193.71375000000003,
+              "heapRetainedBytes": 175208,
+              "bufferRetainedBytes": 420745,
+              "retainedBytes": 2037745,
+              "wasmBytes": 1441792
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 496.852,
+              "steadyCpuMs": 295.005,
+              "processCpuMs": 617.863,
+              "wallMs": 612.484917,
+              "heapRetainedBytes": 9779872,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9779904,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 143.971,
+              "steadyCpuMs": 62.654,
+              "processCpuMs": 236.782,
+              "wallMs": 223.922833,
+              "heapRetainedBytes": 175264,
+              "bufferRetainedBytes": 420745,
+              "retainedBytes": 2037801,
+              "wasmBytes": 1441792
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 438.105,
+              "steadyCpuMs": 259.042,
+              "processCpuMs": 539.846,
+              "wallMs": 470.87637500000005,
+              "heapRetainedBytes": 9735368,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9735400,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 151.915,
+              "steadyCpuMs": 70.084,
+              "processCpuMs": 242.605,
+              "wallMs": 269.28000000000003,
+              "heapRetainedBytes": 175456,
+              "bufferRetainedBytes": 420745,
+              "retainedBytes": 2037993,
+              "wasmBytes": 1441792
+            }
+          },
+          {
+            "ts": {
+              "cpuMs": 426.806,
+              "steadyCpuMs": 254.59,
+              "processCpuMs": 530.637,
+              "wallMs": 460.98770899999994,
+              "heapRetainedBytes": 9772296,
+              "bufferRetainedBytes": 32,
+              "retainedBytes": 9772328,
+              "wasmBytes": 0
+            },
+            "rust": {
+              "cpuMs": 126.657,
+              "steadyCpuMs": 54.02,
+              "processCpuMs": 209.796,
+              "wallMs": 233.14683300000002,
+              "heapRetainedBytes": 175584,
+              "bufferRetainedBytes": 420745,
+              "retainedBytes": 2038121,
+              "wasmBytes": 1441792
+            }
+          }
+        ]
+      },
+      "crossover": {
+        "protocol": "10 valid crossover pairs, AB/BA alternating by valid pair, maximum15 attempts; reject entire pair only existing memory-baseline quality failures; all attempts retained; no CPU-directed stopping",
+        "attempts": 10,
+        "qualityExclusions": 0,
+        "pairs": [
+          {
+            "order": [
+              "before",
+              "after"
+            ],
+            "before": 2.2162174389333575,
+            "after": 3.5979851110919494
+          },
+          {
+            "order": [
+              "after",
+              "before"
+            ],
+            "before": 3.1237149717473507,
+            "after": 3.089162508573965
+          },
+          {
+            "order": [
+              "before",
+              "after"
+            ],
+            "before": 3.260563330481087,
+            "after": 2.993997659015645
+          },
+          {
+            "order": [
+              "after",
+              "before"
+            ],
+            "before": 3.130970437569757,
+            "after": 3.186426168448876
+          },
+          {
+            "order": [
+              "before",
+              "after"
+            ],
+            "before": 3.053087278013019,
+            "after": 2.428965578953648
+          },
+          {
+            "order": [
+              "after",
+              "before"
+            ],
+            "before": 3.0501190076264946,
+            "after": 3.19088579795022
+          },
+          {
+            "order": [
+              "before",
+              "after"
+            ],
+            "before": 3.004143665614528,
+            "after": 3.296603059017327
+          },
+          {
+            "order": [
+              "after",
+              "before"
+            ],
+            "before": 3.254796675209156,
+            "after": 3.451056115467698
+          },
+          {
+            "order": [
+              "before",
+              "after"
+            ],
+            "before": 2.902424064300957,
+            "after": 2.8838824342559986
+          },
+          {
+            "order": [
+              "after",
+              "before"
+            ],
+            "before": 3.0445797684224227,
+            "after": 3.369778219916783
+          }
+        ]
+      },
+      "earlierCohorts": {
+        "invalidMemoryBaseline": {
+          "reason": "One before heap delta -193400; whole pair discarded under existing gate rule",
+          "before": {
+            "cpuRatio": 2.8419646148175453,
+            "steadyRatio": 4.074363961228911,
+            "memoryRatio": 3.9360164453652358,
+            "metrics": {
+              "ts": {
+                "cpuMs": 431.774,
+                "steadyCpuMs": 257.675,
+                "processCpuMs": 534.305,
+                "wallMs": 469.203375,
+                "heapRetainedBytes": 9772656,
+                "bufferRetainedBytes": 32,
+                "retainedBytes": 9772688,
+                "wasmBytes": 0
+              },
+              "rust": {
+                "cpuMs": 151.928,
+                "steadyCpuMs": 63.243,
+                "processCpuMs": 216.711,
+                "wallMs": 199.525875,
+                "heapRetainedBytes": 109448,
+                "bufferRetainedBytes": 407360,
+                "retainedBytes": 2482888,
+                "wasmBytes": 1966080
+              }
+            },
+            "runs": [
+              {
+                "ts": {
+                  "cpuMs": 449.091,
+                  "steadyCpuMs": 263.869,
+                  "processCpuMs": 554,
+                  "wallMs": 495.28700000000003,
+                  "heapRetainedBytes": 9791824,
+                  "bufferRetainedBytes": 32,
+                  "retainedBytes": 9791856,
+                  "wasmBytes": 0
+                },
+                "rust": {
+                  "cpuMs": 139.256,
+                  "steadyCpuMs": 59.481,
+                  "processCpuMs": 201.14,
+                  "wallMs": 175.809375,
+                  "heapRetainedBytes": 109496,
+                  "bufferRetainedBytes": 407360,
+                  "retainedBytes": 2482936,
+                  "wasmBytes": 1966080
+                }
+              },
+              {
+                "ts": {
+                  "cpuMs": 430.159,
+                  "steadyCpuMs": 252.997,
+                  "processCpuMs": 534.305,
+                  "wallMs": 464.1705,
+                  "heapRetainedBytes": 9772656,
+                  "bufferRetainedBytes": 32,
+                  "retainedBytes": 9772688,
+                  "wasmBytes": 0
+                },
+                "rust": {
+                  "cpuMs": 152.246,
+                  "steadyCpuMs": 63.243,
+                  "processCpuMs": 221.006,
+                  "wallMs": 210.441667,
+                  "heapRetainedBytes": -193400,
+                  "bufferRetainedBytes": 407360,
+                  "retainedBytes": 2180040,
+                  "wasmBytes": 1966080
+                }
+              },
+              {
+                "ts": {
+                  "cpuMs": 431.774,
+                  "steadyCpuMs": 257.675,
+                  "processCpuMs": 533.712,
+                  "wallMs": 469.203375,
+                  "heapRetainedBytes": 9755832,
+                  "bufferRetainedBytes": 32,
+                  "retainedBytes": 9755864,
+                  "wasmBytes": 0
+                },
+                "rust": {
+                  "cpuMs": 151.928,
+                  "steadyCpuMs": 64.428,
+                  "processCpuMs": 216.711,
+                  "wallMs": 199.525875,
+                  "heapRetainedBytes": 109448,
+                  "bufferRetainedBytes": 407360,
+                  "retainedBytes": 2482888,
+                  "wasmBytes": 1966080
+                }
+              }
+            ]
+          },
+          "after": {
+            "cpuRatio": 3.1992492492492492,
+            "steadyRatio": 4.582313847374686,
+            "memoryRatio": 4.778142233086643,
+            "metrics": {
+              "ts": {
+                "cpuMs": 468.754,
+                "steadyCpuMs": 277.175,
+                "processCpuMs": 563.621,
+                "wallMs": 591.0989589999999,
+                "heapRetainedBytes": 9738056,
+                "bufferRetainedBytes": 32,
+                "retainedBytes": 9738088,
+                "wasmBytes": 0
+              },
+              "rust": {
+                "cpuMs": 146.52,
+                "steadyCpuMs": 60.488,
+                "processCpuMs": 239.79,
+                "wallMs": 230.3865,
+                "heapRetainedBytes": 175512,
+                "bufferRetainedBytes": 420745,
+                "retainedBytes": 2038049,
+                "wasmBytes": 1441792
+              }
+            },
+            "runs": [
+              {
+                "ts": {
+                  "cpuMs": 459.474,
+                  "steadyCpuMs": 277.175,
+                  "processCpuMs": 563.621,
+                  "wallMs": 520.819084,
+                  "heapRetainedBytes": 9743640,
+                  "bufferRetainedBytes": 32,
+                  "retainedBytes": 9743672,
+                  "wasmBytes": 0
+                },
+                "rust": {
+                  "cpuMs": 135.752,
+                  "steadyCpuMs": 58.093,
+                  "processCpuMs": 223.483,
+                  "wallMs": 204.07720799999998,
+                  "heapRetainedBytes": 175512,
+                  "bufferRetainedBytes": 420745,
+                  "retainedBytes": 2038049,
+                  "wasmBytes": 1441792
+                }
+              },
+              {
+                "ts": {
+                  "cpuMs": 500.319,
+                  "steadyCpuMs": 307.833,
+                  "processCpuMs": 620.932,
+                  "wallMs": 591.0989589999999,
+                  "heapRetainedBytes": 9734720,
+                  "bufferRetainedBytes": 32,
+                  "retainedBytes": 9734752,
+                  "wasmBytes": 0
+                },
+                "rust": {
+                  "cpuMs": 329.134,
+                  "steadyCpuMs": 174.647,
+                  "processCpuMs": 446.54,
+                  "wallMs": 2735.813375,
+                  "heapRetainedBytes": 183904,
+                  "bufferRetainedBytes": 420745,
+                  "retainedBytes": 2046441,
+                  "wasmBytes": 1441792
+                }
+              },
+              {
+                "ts": {
+                  "cpuMs": 468.754,
+                  "steadyCpuMs": 273.463,
+                  "processCpuMs": 544.669,
+                  "wallMs": 648.1330829999999,
+                  "heapRetainedBytes": 9738056,
+                  "bufferRetainedBytes": 32,
+                  "retainedBytes": 9738088,
+                  "wasmBytes": 0
+                },
+                "rust": {
+                  "cpuMs": 146.52,
+                  "steadyCpuMs": 60.488,
+                  "processCpuMs": 239.79,
+                  "wallMs": 230.3865,
+                  "heapRetainedBytes": 175216,
+                  "bufferRetainedBytes": 420745,
+                  "retainedBytes": 2037753,
+                  "wasmBytes": 1441792
+                }
+              }
+            ]
+          }
+        },
+        "validThreeRunRegression": {
+          "reason": "Valid observation retained; fixed crossover follows unstable timing diagnostics",
+          "before": {
+            "cpuRatio": 2.588480018331149,
+            "steadyRatio": 3.2438748287547767,
+            "memoryRatio": 3.8986449172425903,
+            "metrics": {
+              "ts": {
+                "cpuMs": 722.978,
+                "steadyCpuMs": 449.893,
+                "processCpuMs": 819.464,
+                "wallMs": 4690.242834,
+                "heapRetainedBytes": 9770440,
+                "bufferRetainedBytes": 32,
+                "retainedBytes": 9770472,
+                "wasmBytes": 0
+              },
+              "rust": {
+                "cpuMs": 279.306,
+                "steadyCpuMs": 138.69,
+                "processCpuMs": 370.658,
+                "wallMs": 2129.8348750000005,
+                "heapRetainedBytes": 132680,
+                "bufferRetainedBytes": 407360,
+                "retainedBytes": 2506120,
+                "wasmBytes": 1966080
+              }
+            },
+            "runs": [
+              {
+                "ts": {
+                  "cpuMs": 722.978,
+                  "steadyCpuMs": 453.824,
+                  "processCpuMs": 819.464,
+                  "wallMs": 7232.295582999999,
+                  "heapRetainedBytes": 9779544,
+                  "bufferRetainedBytes": 32,
+                  "retainedBytes": 9779576,
+                  "wasmBytes": 0
+                },
+                "rust": {
+                  "cpuMs": 307.773,
+                  "steadyCpuMs": 172.732,
+                  "processCpuMs": 393.099,
+                  "wallMs": 3611.757458,
+                  "heapRetainedBytes": 119200,
+                  "bufferRetainedBytes": 407360,
+                  "retainedBytes": 2492640,
+                  "wasmBytes": 1966080
+                }
+              },
+              {
+                "ts": {
+                  "cpuMs": 704.877,
+                  "steadyCpuMs": 425.711,
+                  "processCpuMs": 810.982,
+                  "wallMs": 4453.201292,
+                  "heapRetainedBytes": 9727432,
+                  "bufferRetainedBytes": 32,
+                  "retainedBytes": 9727464,
+                  "wasmBytes": 0
+                },
+                "rust": {
+                  "cpuMs": 267.5,
+                  "steadyCpuMs": 136.93,
+                  "processCpuMs": 360.556,
+                  "wallMs": 1771.382625,
+                  "heapRetainedBytes": 132680,
+                  "bufferRetainedBytes": 407360,
+                  "retainedBytes": 2506120,
+                  "wasmBytes": 1966080
+                }
+              },
+              {
+                "ts": {
+                  "cpuMs": 744.704,
+                  "steadyCpuMs": 449.893,
+                  "processCpuMs": 835.324,
+                  "wallMs": 4690.242834,
+                  "heapRetainedBytes": 9770440,
+                  "bufferRetainedBytes": 32,
+                  "retainedBytes": 9770472,
+                  "wasmBytes": 0
+                },
+                "rust": {
+                  "cpuMs": 279.306,
+                  "steadyCpuMs": 138.69,
+                  "processCpuMs": 370.658,
+                  "wallMs": 2129.8348750000005,
+                  "heapRetainedBytes": 138000,
+                  "bufferRetainedBytes": 407360,
+                  "retainedBytes": 2511440,
+                  "wasmBytes": 1966080
+                }
+              }
+            ]
+          },
+          "after": {
+            "cpuRatio": 2.3822845912050346,
+            "steadyRatio": 2.7548945220783723,
+            "memoryRatio": 4.737207660413536,
+            "metrics": {
+              "ts": {
+                "cpuMs": 744.24,
+                "steadyCpuMs": 461.117,
+                "processCpuMs": 845.128,
+                "wallMs": 5177.995916,
+                "heapRetainedBytes": 9749184,
+                "bufferRetainedBytes": 32,
+                "retainedBytes": 9749216,
+                "wasmBytes": 0
+              },
+              "rust": {
+                "cpuMs": 312.406,
+                "steadyCpuMs": 167.381,
+                "processCpuMs": 415.263,
+                "wallMs": 4817.713207999999,
+                "heapRetainedBytes": 195472,
+                "bufferRetainedBytes": 420745,
+                "retainedBytes": 2058009,
+                "wasmBytes": 1441792
+              }
+            },
+            "runs": [
+              {
+                "ts": {
+                  "cpuMs": 686.556,
+                  "steadyCpuMs": 426.532,
+                  "processCpuMs": 774.845,
+                  "wallMs": 3477.793208,
+                  "heapRetainedBytes": 9728624,
+                  "bufferRetainedBytes": 32,
+                  "retainedBytes": 9728656,
+                  "wasmBytes": 0
+                },
+                "rust": {
+                  "cpuMs": 287.788,
+                  "steadyCpuMs": 159.484,
+                  "processCpuMs": 404.06,
+                  "wallMs": 2466.041042,
+                  "heapRetainedBytes": 202888,
+                  "bufferRetainedBytes": 420745,
+                  "retainedBytes": 2065425,
+                  "wasmBytes": 1441792
+                }
+              },
+              {
+                "ts": {
+                  "cpuMs": 770.581,
+                  "steadyCpuMs": 488.449,
+                  "processCpuMs": 862.184,
+                  "wallMs": 6748.352708,
+                  "heapRetainedBytes": 9749184,
+                  "bufferRetainedBytes": 32,
+                  "retainedBytes": 9749216,
+                  "wasmBytes": 0
+                },
+                "rust": {
+                  "cpuMs": 373.058,
+                  "steadyCpuMs": 218.868,
+                  "processCpuMs": 485.341,
+                  "wallMs": 5945.5625,
+                  "heapRetainedBytes": 195472,
+                  "bufferRetainedBytes": 420745,
+                  "retainedBytes": 2058009,
+                  "wasmBytes": 1441792
+                }
+              },
+              {
+                "ts": {
+                  "cpuMs": 744.24,
+                  "steadyCpuMs": 461.117,
+                  "processCpuMs": 845.128,
+                  "wallMs": 5177.995916,
+                  "heapRetainedBytes": 9751264,
+                  "bufferRetainedBytes": 32,
+                  "retainedBytes": 9751296,
+                  "wasmBytes": 0
+                },
+                "rust": {
+                  "cpuMs": 312.406,
+                  "steadyCpuMs": 167.381,
+                  "processCpuMs": 415.263,
+                  "wallMs": 4817.713207999999,
+                  "heapRetainedBytes": 184832,
+                  "bufferRetainedBytes": 420745,
+                  "retainedBytes": 2047369,
+                  "wasmBytes": 1441792
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "private": {
+    "binance": {
+      "pass": true,
+      "frames": 14
+    },
+    "backpack": {
+      "pass": true,
+      "frames": 21
+    },
+    "blofin": {
+      "pass": true,
+      "frames": 29
+    },
+    "bybit": {
+      "pass": true,
+      "frames": 18
+    },
+    "cryptocom": {
+      "pass": true,
+      "frames": 21
+    },
+    "bingx": {
+      "pass": true,
+      "frames": 38
+    },
+    "mexc": {
+      "pass": true,
+      "frames": 25
+    },
+    "okx": {
+      "pass": true,
+      "frames": 29
+    },
+    "okxeu": {
+      "pass": true,
+      "frames": 29
+    },
+    "okxdemo": {
+      "pass": true,
+      "frames": 29
+    },
+    "okxeudemo": {
+      "pass": true,
+      "frames": 29
+    },
+    "weex": {
+      "pass": true,
+      "frames": 20
+    }
+  },
+  "wasm": {
+    "binance": {
+      "node": 707200,
+      "web": 707200,
+      "budget": 817152
+    },
+    "bybit": {
+      "node": 677935,
+      "web": 677935,
+      "budget": 796672
+    },
+    "okx": {
+      "node": 720786,
+      "web": 720786,
+      "budget": 757760
+    },
+    "cryptocom": {
+      "node": 628723,
+      "web": 628723,
+      "budget": 661504
+    },
+    "weex": {
+      "node": 735682,
+      "web": 735682,
+      "budget": 884736
+    },
+    "bingx": {
+      "node": 725181,
+      "web": 725181,
+      "budget": 856064
+    },
+    "mexc": {
+      "node": 735159,
+      "web": 735159,
+      "budget": 778240
+    },
+    "blofin": {
+      "node": 760623,
+      "web": 760623,
+      "budget": 783360
+    },
+    "backpack": {
+      "node": 740712,
+      "web": 740712,
+      "budget": 763904
+    }
+  },
+  "profiles": {
+    "okx": {
+      "single": {
+        "runs": 3,
+        "rounds": 3,
+        "messages": 8902,
+        "utf8Bytes": 2015158,
+        "batchSize": 64,
+        "preparedBatchCalls": 140,
+        "probes": {
+          "textCrossing": {
+            "medianWallMs": 3.5450000000000017,
+            "medianCpuMs": 3.5383333333333336,
+            "samples": [
+              {
+                "wallMs": 3.7817223333333296,
+                "cpuMs": 4.157333333333333
+              },
+              {
+                "wallMs": 3.5450000000000017,
+                "cpuMs": 3.5383333333333336
+              },
+              {
+                "wallMs": 3.336277999999998,
+                "cpuMs": 3.3303333333333334
+              }
+            ]
+          },
+          "textCrossingAndJsonValidation": {
+            "medianWallMs": 7.175319333333334,
+            "medianCpuMs": 7.174666666666667,
+            "samples": [
+              {
+                "wallMs": 7.500041666666671,
+                "cpuMs": 7.493333333333333
+              },
+              {
+                "wallMs": 7.175319333333334,
+                "cpuMs": 7.174666666666667
+              },
+              {
+                "wallMs": 6.975152666666664,
+                "cpuMs": 6.969666666666666
+              }
+            ]
+          },
+          "preparedBatchCrossing": {
+            "medianWallMs": 0.0964583333333356,
+            "medianCpuMs": 0.09599999999999999,
+            "samples": [
+              {
+                "wallMs": 0.09997199999999869,
+                "cpuMs": 0.10433333333333333
+              },
+              {
+                "wallMs": 0.0964583333333356,
+                "cpuMs": 0.09599999999999999
+              },
+              {
+                "wallMs": 0.08419433333333852,
+                "cpuMs": 0.085
+              }
+            ]
+          },
+          "jsonValidationDifferential": {
+            "medianCpuMs": 3.6363333333333334,
+            "interpretation": "Difference of independent probe medians; rough syntax-validation cost only, not an exact decomposition of venue parsing."
+          }
+        },
+        "instrumentationFloor": {
+          "callsPerRound": 8902,
+          "cpuClock": "threadCpuUsage",
+          "unwrappedEmptyJs": {
+            "medianWallMs": 0.13012500000000196,
+            "medianCpuMs": 0.135,
+            "samples": [
+              {
+                "wallMs": 0.1563750000000065,
+                "cpuMs": 0.158
+              },
+              {
+                "wallMs": 0.02748600000000086,
+                "cpuMs": 0.030666666666666665
+              },
+              {
+                "wallMs": 0.13012500000000196,
+                "cpuMs": 0.135
+              }
+            ]
+          },
+          "wrappedEmptyJs": {
+            "medianWallMs": 20.643277666666677,
+            "medianCpuMs": 20.604333333333333,
+            "samples": [
+              {
+                "wallMs": 21.335194333333334,
+                "cpuMs": 21.323666666666664
+              },
+              {
+                "wallMs": 20.643277666666677,
+                "cpuMs": 20.604333333333333
+              },
+              {
+                "wallMs": 20.244777666666664,
+                "cpuMs": 20.230666666666668
+              }
+            ]
+          },
+          "grossClockedCpuMsPerCall": 0.0011000449337231636,
+          "totalWrappedCpuMsPerCall": 0.0023145735040814796,
+          "extraWrapperCpuMsPerCall": 0.0022994083726503405,
+          "interpretation": "Repeated empty JS calls through the identical proxy and clocks. Count-scaled observer-cost estimates only; no exact subtraction from gross engine CPU. Total wrapped CPU includes both clock reads, proxy dispatch, counters and loop; gross clocked CPU includes only the timed interval."
+        },
+        "interpretation": "Gross per-method CPU includes timing-clock overhead. wsMessage/wsMessages includes crossing, typed venue parsing/state and returned-action serialization. takeFrame includes binary frame writing and wasm-bindgen return copy. Count-scaled empty-wrapper costs estimate observer overhead without exact subtraction. JSON validation is a syntax floor, not typed venue parsing. Prepared batch probes exclude host packing. Instrumented timings are diagnostics, not gate CPU metrics.",
+        "methods": {
+          "start": {
+            "calls": 1,
+            "medianWallMs": 1.2315410000000213,
+            "medianGrossCpuMs": 1.219,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.0011000449337231636,
+            "countScaledEmptyWrapperCpuMs": 0.0023145735040814796,
+            "countScaledExtraWrapperCpuMs": 0.0022994083726503405
+          },
+          "command": {
+            "calls": 2,
+            "medianWallMs": 1.2621670000000051,
+            "medianGrossCpuMs": 1.2449999999999999,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.002200089867446327,
+            "countScaledEmptyWrapperCpuMs": 0.004629147008162959,
+            "countScaledExtraWrapperCpuMs": 0.004598816745300681
+          },
+          "httpStart": {
+            "calls": 2,
+            "medianWallMs": 0.3777499999999918,
+            "medianGrossCpuMs": 0.366,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.002200089867446327,
+            "countScaledEmptyWrapperCpuMs": 0.004629147008162959,
+            "countScaledExtraWrapperCpuMs": 0.004598816745300681
+          },
+          "httpChunk": {
+            "calls": 44,
+            "medianWallMs": 9.795709999999872,
+            "medianGrossCpuMs": 9.676000000000002,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.0484019770838192,
+            "countScaledEmptyWrapperCpuMs": 0.1018412341795851,
+            "countScaledExtraWrapperCpuMs": 0.10117396839661498
+          },
+          "httpEnd": {
+            "calls": 2,
+            "medianWallMs": 2.050376,
+            "medianGrossCpuMs": 2.028,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.002200089867446327,
+            "countScaledEmptyWrapperCpuMs": 0.004629147008162959,
+            "countScaledExtraWrapperCpuMs": 0.004598816745300681
+          },
+          "wsOpen": {
+            "calls": 2,
+            "medianWallMs": 2.2099580000000003,
+            "medianGrossCpuMs": 2.182,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.002200089867446327,
+            "countScaledEmptyWrapperCpuMs": 0.004629147008162959,
+            "countScaledExtraWrapperCpuMs": 0.004598816745300681
+          },
+          "takeFrame": {
+            "calls": 66,
+            "medianWallMs": 2.9826230000002454,
+            "medianGrossCpuMs": 2.8729999999999984,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.0726029656257288,
+            "countScaledEmptyWrapperCpuMs": 0.15276185126937766,
+            "countScaledExtraWrapperCpuMs": 0.15176095259492248
+          },
+          "wsMessage": {
+            "calls": 8904,
+            "medianWallMs": 64.28632700000182,
+            "medianGrossCpuMs": 48.8740000000013,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 9.794800089871048,
+            "countScaledEmptyWrapperCpuMs": 20.608962480341493,
+            "countScaledExtraWrapperCpuMs": 20.47393215007863
+          }
+        }
+      },
+      "batch": {
+        "runs": 3,
+        "rounds": 3,
+        "messages": 8902,
+        "utf8Bytes": 2015158,
+        "batchSize": 64,
+        "preparedBatchCalls": 140,
+        "probes": {
+          "textCrossing": {
+            "medianWallMs": 3.6470693333333344,
+            "medianCpuMs": 3.6473333333333335,
+            "samples": [
+              {
+                "wallMs": 3.817291666666667,
+                "cpuMs": 4.209333333333333
+              },
+              {
+                "wallMs": 3.6470693333333344,
+                "cpuMs": 3.6473333333333335
+              },
+              {
+                "wallMs": 3.363277666666671,
+                "cpuMs": 3.359666666666667
+              }
+            ]
+          },
+          "textCrossingAndJsonValidation": {
+            "medianWallMs": 7.213902666666665,
+            "medianCpuMs": 7.207,
+            "samples": [
+              {
+                "wallMs": 7.556986000000005,
+                "cpuMs": 7.552666666666667
+              },
+              {
+                "wallMs": 7.213902666666665,
+                "cpuMs": 7.207
+              },
+              {
+                "wallMs": 7.11790266666667,
+                "cpuMs": 7.109666666666667
+              }
+            ]
+          },
+          "preparedBatchCrossing": {
+            "medianWallMs": 0.09670833333332969,
+            "medianCpuMs": 0.09766666666666667,
+            "samples": [
+              {
+                "wallMs": 0.09329166666666804,
+                "cpuMs": 0.09766666666666667
+              },
+              {
+                "wallMs": 0.09670833333332969,
+                "cpuMs": 0.09599999999999999
+              },
+              {
+                "wallMs": 0.13747233333333497,
+                "cpuMs": 0.10033333333333333
+              }
+            ]
+          },
+          "jsonValidationDifferential": {
+            "medianCpuMs": 3.5596666666666663,
+            "interpretation": "Difference of independent probe medians; rough syntax-validation cost only, not an exact decomposition of venue parsing."
+          }
+        },
+        "instrumentationFloor": {
+          "callsPerRound": 8902,
+          "cpuClock": "threadCpuUsage",
+          "unwrappedEmptyJs": {
+            "medianWallMs": 0.1298473333333258,
+            "medianCpuMs": 0.132,
+            "samples": [
+              {
+                "wallMs": 0.1670696666666629,
+                "cpuMs": 0.167
+              },
+              {
+                "wallMs": 0.03729166666666591,
+                "cpuMs": 0.041
+              },
+              {
+                "wallMs": 0.1298473333333258,
+                "cpuMs": 0.132
+              }
+            ]
+          },
+          "wrappedEmptyJs": {
+            "medianWallMs": 20.94343066666666,
+            "medianCpuMs": 20.907333333333334,
+            "samples": [
+              {
+                "wallMs": 21.329319666666652,
+                "cpuMs": 21.297666666666668
+              },
+              {
+                "wallMs": 20.94343066666666,
+                "cpuMs": 20.907333333333334
+              },
+              {
+                "wallMs": 20.762180666666666,
+                "cpuMs": 20.69633333333333
+              }
+            ]
+          },
+          "grossClockedCpuMsPerCall": 0.001106403055493575,
+          "totalWrappedCpuMsPerCall": 0.00234861079907137,
+          "extraWrapperCpuMsPerCall": 0.0023337826705609227,
+          "interpretation": "Repeated empty JS calls through the identical proxy and clocks. Count-scaled observer-cost estimates only; no exact subtraction from gross engine CPU. Total wrapped CPU includes both clock reads, proxy dispatch, counters and loop; gross clocked CPU includes only the timed interval."
+        },
+        "interpretation": "Gross per-method CPU includes timing-clock overhead. wsMessage/wsMessages includes crossing, typed venue parsing/state and returned-action serialization. takeFrame includes binary frame writing and wasm-bindgen return copy. Count-scaled empty-wrapper costs estimate observer overhead without exact subtraction. JSON validation is a syntax floor, not typed venue parsing. Prepared batch probes exclude host packing. Instrumented timings are diagnostics, not gate CPU metrics.",
+        "methods": {
+          "start": {
+            "calls": 1,
+            "medianWallMs": 1.2882079999999974,
+            "medianGrossCpuMs": 1.28,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.001106403055493575,
+            "countScaledEmptyWrapperCpuMs": 0.00234861079907137,
+            "countScaledExtraWrapperCpuMs": 0.0023337826705609227
+          },
+          "command": {
+            "calls": 2,
+            "medianWallMs": 1.178541999999993,
+            "medianGrossCpuMs": 1.1689999999999998,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.00221280611098715,
+            "countScaledEmptyWrapperCpuMs": 0.00469722159814274,
+            "countScaledExtraWrapperCpuMs": 0.0046675653411218454
+          },
+          "httpStart": {
+            "calls": 2,
+            "medianWallMs": 0.33054100000001085,
+            "medianGrossCpuMs": 0.31,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.00221280611098715,
+            "countScaledEmptyWrapperCpuMs": 0.00469722159814274,
+            "countScaledExtraWrapperCpuMs": 0.0046675653411218454
+          },
+          "httpChunk": {
+            "calls": 44,
+            "medianWallMs": 9.494166000000035,
+            "medianGrossCpuMs": 9.391,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.0486817344417173,
+            "countScaledEmptyWrapperCpuMs": 0.10333887515914028,
+            "countScaledExtraWrapperCpuMs": 0.1026864375046806
+          },
+          "httpEnd": {
+            "calls": 2,
+            "medianWallMs": 2.03287499999999,
+            "medianGrossCpuMs": 2.023,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.00221280611098715,
+            "countScaledEmptyWrapperCpuMs": 0.00469722159814274,
+            "countScaledExtraWrapperCpuMs": 0.0046675653411218454
+          },
+          "wsOpen": {
+            "calls": 2,
+            "medianWallMs": 2.1941669999999647,
+            "medianGrossCpuMs": 2.1630000000000003,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.00221280611098715,
+            "countScaledEmptyWrapperCpuMs": 0.00469722159814274,
+            "countScaledExtraWrapperCpuMs": 0.0046675653411218454
+          },
+          "takeFrame": {
+            "calls": 66,
+            "medianWallMs": 2.8123790000001634,
+            "medianGrossCpuMs": 2.6929999999999965,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.07302260166257594,
+            "countScaledEmptyWrapperCpuMs": 0.1550083127387104,
+            "countScaledExtraWrapperCpuMs": 0.1540296562570209
+          },
+          "wsMessages": {
+            "calls": 229,
+            "medianWallMs": 19.534376000000293,
+            "medianGrossCpuMs": 18.736000000000008,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.25336629970802865,
+            "countScaledEmptyWrapperCpuMs": 0.5378318729873437,
+            "countScaledExtraWrapperCpuMs": 0.5344362315584513
+          }
+        }
+      }
+    },
+    "bybit": {
+      "single": {
+        "runs": 3,
+        "rounds": 3,
+        "messages": 8742,
+        "utf8Bytes": 2317122,
+        "batchSize": 64,
+        "preparedBatchCalls": 137,
+        "probes": {
+          "textCrossing": {
+            "medianWallMs": 4.071402999999999,
+            "medianCpuMs": 4.065,
+            "samples": [
+              {
+                "wallMs": 4.415027999999997,
+                "cpuMs": 4.826333333333333
+              },
+              {
+                "wallMs": 4.071402999999999,
+                "cpuMs": 4.065
+              },
+              {
+                "wallMs": 3.7706806666666686,
+                "cpuMs": 3.7746666666666666
+              }
+            ]
+          },
+          "textCrossingAndJsonValidation": {
+            "medianWallMs": 7.981208333333332,
+            "medianCpuMs": 7.964333333333333,
+            "samples": [
+              {
+                "wallMs": 8.412972333333334,
+                "cpuMs": 8.407333333333334
+              },
+              {
+                "wallMs": 7.981208333333332,
+                "cpuMs": 7.964333333333333
+              },
+              {
+                "wallMs": 7.911360999999999,
+                "cpuMs": 7.898333333333333
+              }
+            ]
+          },
+          "preparedBatchCrossing": {
+            "medianWallMs": 0.10352766666666942,
+            "medianCpuMs": 0.10233333333333333,
+            "samples": [
+              {
+                "wallMs": 0.11324999999999363,
+                "cpuMs": 0.11733333333333333
+              },
+              {
+                "wallMs": 0.10352766666666942,
+                "cpuMs": 0.10233333333333333
+              },
+              {
+                "wallMs": 0.08858333333333235,
+                "cpuMs": 0.09066666666666667
+              }
+            ]
+          },
+          "jsonValidationDifferential": {
+            "medianCpuMs": 3.899333333333333,
+            "interpretation": "Difference of independent probe medians; rough syntax-validation cost only, not an exact decomposition of venue parsing."
+          }
+        },
+        "instrumentationFloor": {
+          "callsPerRound": 8742,
+          "cpuClock": "threadCpuUsage",
+          "unwrappedEmptyJs": {
+            "medianWallMs": 0.12275000000000584,
+            "medianCpuMs": 0.12733333333333333,
+            "samples": [
+              {
+                "wallMs": 0.03970833333333227,
+                "cpuMs": 0.041
+              },
+              {
+                "wallMs": 0.12275000000000584,
+                "cpuMs": 0.12733333333333333
+              },
+              {
+                "wallMs": 0.16533333333332698,
+                "cpuMs": 0.16666666666666666
+              }
+            ]
+          },
+          "wrappedEmptyJs": {
+            "medianWallMs": 20.767111333333332,
+            "medianCpuMs": 20.756666666666668,
+            "samples": [
+              {
+                "wallMs": 21.19977799999999,
+                "cpuMs": 21.192666666666668
+              },
+              {
+                "wallMs": 20.767111333333332,
+                "cpuMs": 20.756666666666668
+              },
+              {
+                "wallMs": 20.130541666666677,
+                "cpuMs": 20.106666666666666
+              }
+            ]
+          },
+          "grossClockedCpuMsPerCall": 0.0011122740791585253,
+          "totalWrappedCpuMsPerCall": 0.0023743613208266606,
+          "extraWrapperCpuMsPerCall": 0.0023597956226645315,
+          "interpretation": "Repeated empty JS calls through the identical proxy and clocks. Count-scaled observer-cost estimates only; no exact subtraction from gross engine CPU. Total wrapped CPU includes both clock reads, proxy dispatch, counters and loop; gross clocked CPU includes only the timed interval."
+        },
+        "interpretation": "Gross per-method CPU includes timing-clock overhead. wsMessage/wsMessages includes crossing, typed venue parsing/state and returned-action serialization. takeFrame includes binary frame writing and wasm-bindgen return copy. Count-scaled empty-wrapper costs estimate observer overhead without exact subtraction. JSON validation is a syntax floor, not typed venue parsing. Prepared batch probes exclude host packing. Instrumented timings are diagnostics, not gate CPU metrics.",
+        "methods": {
+          "start": {
+            "calls": 1,
+            "medianWallMs": 1.6850839999999891,
+            "medianGrossCpuMs": 1.671,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.0011122740791585253,
+            "countScaledEmptyWrapperCpuMs": 0.0023743613208266606,
+            "countScaledExtraWrapperCpuMs": 0.0023597956226645315
+          },
+          "command": {
+            "calls": 2,
+            "medianWallMs": 0.8398339999999962,
+            "medianGrossCpuMs": 0.8250000000000001,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.0022245481583170507,
+            "countScaledEmptyWrapperCpuMs": 0.004748722641653321,
+            "countScaledExtraWrapperCpuMs": 0.004719591245329063
+          },
+          "httpStart": {
+            "calls": 3,
+            "medianWallMs": 0.3326669999999865,
+            "medianGrossCpuMs": 0.30300000000000005,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.0033368222374755762,
+            "countScaledEmptyWrapperCpuMs": 0.007123083962479982,
+            "countScaledExtraWrapperCpuMs": 0.0070793868679935945
+          },
+          "httpChunk": {
+            "calls": 95,
+            "medianWallMs": 17.78471099999996,
+            "medianGrossCpuMs": 17.570999999999998,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.1056660375200599,
+            "countScaledEmptyWrapperCpuMs": 0.22556432547853275,
+            "countScaledExtraWrapperCpuMs": 0.2241805841531305
+          },
+          "httpEnd": {
+            "calls": 3,
+            "medianWallMs": 2.376166000000012,
+            "medianGrossCpuMs": 2.362,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.0033368222374755762,
+            "countScaledEmptyWrapperCpuMs": 0.007123083962479982,
+            "countScaledExtraWrapperCpuMs": 0.0070793868679935945
+          },
+          "wsOpen": {
+            "calls": 1,
+            "medianWallMs": 0.8036670000000186,
+            "medianGrossCpuMs": 0.798,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.0011122740791585253,
+            "countScaledEmptyWrapperCpuMs": 0.0023743613208266606,
+            "countScaledExtraWrapperCpuMs": 0.0023597956226645315
+          },
+          "takeFrame": {
+            "calls": 25,
+            "medianWallMs": 3.801290000000421,
+            "medianGrossCpuMs": 3.737999999999999,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.027806851978963133,
+            "countScaledEmptyWrapperCpuMs": 0.059359033020666516,
+            "countScaledExtraWrapperCpuMs": 0.058994890566613285
+          },
+          "timer": {
+            "calls": 91,
+            "medianWallMs": 4.801040999999316,
+            "medianGrossCpuMs": 3.913999999999999,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.10121694120342581,
+            "countScaledEmptyWrapperCpuMs": 0.2160668801952261,
+            "countScaledExtraWrapperCpuMs": 0.21474140166247238
+          },
+          "wsMessage": {
+            "calls": 8742,
+            "medianWallMs": 69.24575300000743,
+            "medianGrossCpuMs": 54.534999999999364,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 9.723500000003828,
+            "countScaledEmptyWrapperCpuMs": 20.756666666666668,
+            "countScaledExtraWrapperCpuMs": 20.629333333333335
+          }
+        }
+      },
+      "batch": {
+        "runs": 3,
+        "rounds": 3,
+        "messages": 8742,
+        "utf8Bytes": 2317122,
+        "batchSize": 64,
+        "preparedBatchCalls": 137,
+        "probes": {
+          "textCrossing": {
+            "medianWallMs": 4.085458333333335,
+            "medianCpuMs": 4.083,
+            "samples": [
+              {
+                "wallMs": 4.363944333333332,
+                "cpuMs": 4.761333333333334
+              },
+              {
+                "wallMs": 4.085458333333335,
+                "cpuMs": 4.083
+              },
+              {
+                "wallMs": 3.790096999999998,
+                "cpuMs": 3.7899999999999996
+              }
+            ]
+          },
+          "textCrossingAndJsonValidation": {
+            "medianWallMs": 8.046805666666662,
+            "medianCpuMs": 8.032,
+            "samples": [
+              {
+                "wallMs": 8.382235999999997,
+                "cpuMs": 8.379333333333333
+              },
+              {
+                "wallMs": 8.026125000000008,
+                "cpuMs": 8.022666666666668
+              },
+              {
+                "wallMs": 8.046805666666662,
+                "cpuMs": 8.032
+              }
+            ]
+          },
+          "preparedBatchCrossing": {
+            "medianWallMs": 0.10927766666666609,
+            "medianCpuMs": 0.107,
+            "samples": [
+              {
+                "wallMs": 0.11402766666666746,
+                "cpuMs": 0.11733333333333333
+              },
+              {
+                "wallMs": 0.10927766666666609,
+                "cpuMs": 0.107
+              },
+              {
+                "wallMs": 0.08780533333333551,
+                "cpuMs": 0.08466666666666667
+              }
+            ]
+          },
+          "jsonValidationDifferential": {
+            "medianCpuMs": 3.949,
+            "interpretation": "Difference of independent probe medians; rough syntax-validation cost only, not an exact decomposition of venue parsing."
+          }
+        },
+        "instrumentationFloor": {
+          "callsPerRound": 8742,
+          "cpuClock": "threadCpuUsage",
+          "unwrappedEmptyJs": {
+            "medianWallMs": 0.15986133333333896,
+            "medianCpuMs": 0.158,
+            "samples": [
+              {
+                "wallMs": 0.15986133333333896,
+                "cpuMs": 0.158
+              },
+              {
+                "wallMs": 0.16686099999999252,
+                "cpuMs": 0.16666666666666666
+              },
+              {
+                "wallMs": 0.13784733333333557,
+                "cpuMs": 0.142
+              }
+            ]
+          },
+          "wrappedEmptyJs": {
+            "medianWallMs": 21.278944333333328,
+            "medianCpuMs": 21.11733333333333,
+            "samples": [
+              {
+                "wallMs": 21.278944333333328,
+                "cpuMs": 21.227999999999998
+              },
+              {
+                "wallMs": 21.348139000000003,
+                "cpuMs": 21.11733333333333
+              },
+              {
+                "wallMs": 20.192513666666667,
+                "cpuMs": 20.182
+              }
+            ]
+          },
+          "grossClockedCpuMsPerCall": 0.0011281743308171944,
+          "totalWrappedCpuMsPerCall": 0.0024156180889193927,
+          "extraWrapperCpuMsPerCall": 0.002397544421566384,
+          "interpretation": "Repeated empty JS calls through the identical proxy and clocks. Count-scaled observer-cost estimates only; no exact subtraction from gross engine CPU. Total wrapped CPU includes both clock reads, proxy dispatch, counters and loop; gross clocked CPU includes only the timed interval."
+        },
+        "interpretation": "Gross per-method CPU includes timing-clock overhead. wsMessage/wsMessages includes crossing, typed venue parsing/state and returned-action serialization. takeFrame includes binary frame writing and wasm-bindgen return copy. Count-scaled empty-wrapper costs estimate observer overhead without exact subtraction. JSON validation is a syntax floor, not typed venue parsing. Prepared batch probes exclude host packing. Instrumented timings are diagnostics, not gate CPU metrics.",
+        "methods": {
+          "start": {
+            "calls": 1,
+            "medianWallMs": 1.5967090000000042,
+            "medianGrossCpuMs": 1.589,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.0011281743308171944,
+            "countScaledEmptyWrapperCpuMs": 0.0024156180889193927,
+            "countScaledExtraWrapperCpuMs": 0.002397544421566384
+          },
+          "command": {
+            "calls": 2,
+            "medianWallMs": 0.8184590000000185,
+            "medianGrossCpuMs": 0.802,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.002256348661634389,
+            "countScaledEmptyWrapperCpuMs": 0.004831236177838785,
+            "countScaledExtraWrapperCpuMs": 0.004795088843132768
+          },
+          "httpStart": {
+            "calls": 3,
+            "medianWallMs": 0.3008329999999546,
+            "medianGrossCpuMs": 0.28200000000000003,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.003384522992451583,
+            "countScaledEmptyWrapperCpuMs": 0.0072468542667581785,
+            "countScaledExtraWrapperCpuMs": 0.007192633264699152
+          },
+          "httpChunk": {
+            "calls": 95,
+            "medianWallMs": 18.22475300000005,
+            "medianGrossCpuMs": 17.914000000000005,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.10717656142763347,
+            "countScaledEmptyWrapperCpuMs": 0.2294837184473423,
+            "countScaledExtraWrapperCpuMs": 0.22776672004880646
+          },
+          "httpEnd": {
+            "calls": 3,
+            "medianWallMs": 2.419458999999989,
+            "medianGrossCpuMs": 2.402,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.003384522992451583,
+            "countScaledEmptyWrapperCpuMs": 0.0072468542667581785,
+            "countScaledExtraWrapperCpuMs": 0.007192633264699152
+          },
+          "wsOpen": {
+            "calls": 1,
+            "medianWallMs": 0.8847500000000252,
+            "medianGrossCpuMs": 0.87,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.0011281743308171944,
+            "countScaledEmptyWrapperCpuMs": 0.0024156180889193927,
+            "countScaledExtraWrapperCpuMs": 0.002397544421566384
+          },
+          "takeFrame": {
+            "calls": 25,
+            "medianWallMs": 3.669580999999738,
+            "medianGrossCpuMs": 3.606999999999998,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.02820435827042986,
+            "countScaledEmptyWrapperCpuMs": 0.060390452222984815,
+            "countScaledExtraWrapperCpuMs": 0.059938610539159595
+          },
+          "timer": {
+            "calls": 91,
+            "medianWallMs": 5.45866400000051,
+            "medianGrossCpuMs": 4.532,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.10266386410436469,
+            "countScaledEmptyWrapperCpuMs": 0.21982124609166473,
+            "countScaledExtraWrapperCpuMs": 0.21817654236254094
+          },
+          "wsMessages": {
+            "calls": 218,
+            "medianWallMs": 25.694537000000082,
+            "medianGrossCpuMs": 24.877999999999993,
+            "cpuClock": "threadCpuUsage",
+            "countScaledGrossClockFloorCpuMs": 0.24594200411814837,
+            "countScaledEmptyWrapperCpuMs": 0.5266047433844276,
+            "countScaledExtraWrapperCpuMs": 0.5226646839014717
+          }
+        }
+      }
+    }
+  }
+}

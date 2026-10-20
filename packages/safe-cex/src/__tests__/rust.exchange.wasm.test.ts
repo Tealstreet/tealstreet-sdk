@@ -576,7 +576,7 @@ describe('RustEngineExchange', () => {
   });
 
   it.each(['bitget', 'bitgetusdc'] as const)('rejects private %s without a nonempty passphrase', async (venue) => {
-    const { WasmEngine } = await loadNodeEngine();
+    const { WasmEngine } = await loadNodeEngine(venue);
     for (const passphrase of [undefined, '']) {
       expect(() => new WasmEngine(venue, JSON.stringify({ key: 'k', secret: 's', passphrase }))).toThrow(
         'Bitget requires a passphrase',
@@ -587,7 +587,7 @@ describe('RustEngineExchange', () => {
   it.each(['bitget', 'bitgetusdc'] as const)(
     'accepts %s with its passphrase or public-only credentials',
     async (venue) => {
-      const { WasmEngine } = await loadNodeEngine();
+      const { WasmEngine } = await loadNodeEngine(venue);
       const options: Partial<ExchangeOptions>[] = [
         { key: 'k', secret: 's', passphrase: 'p' },
         { key: 'k', secret: 's', publicDataOnly: true },
@@ -774,29 +774,37 @@ describe('RustEngineExchange', () => {
     }
   });
 
-  it.each(['bytes', 'legacy'] as const)(
+  it.each(['single', 'batch', 'legacy'] as const)(
     'returns no outbound action payload for ticker updates and preserves socket errors (%s)',
-    async (entry) => {
+    async (delivery) => {
       const tape = bybitTransport();
-      const { WasmEngine } = await loadNodeEngine();
+      const { WasmEngine } = await loadNodeEngine('bybit');
       const outputs: Array<string | undefined> = [];
+      const crossings: Array<'single' | 'batch' | 'legacy'> = [];
       setWasmEngineLoader(async () => ({
         WasmEngine: class extends WasmEngine {
           constructor(venue: string, options: string) {
             super(venue, options);
-            if (entry === 'legacy') {
-              // An older engine exposes only the original string entry point.
-              Object.defineProperty(this, 'wsMessageBytes', { value: undefined });
+            if (delivery === 'legacy') {
               Object.defineProperty(this, 'wsMessageActions', { value: undefined });
+              Object.defineProperty(this, 'wsMessageBytes', { value: undefined });
             }
           }
-          wsMessage(socket: number, text: string, now: number) {
-            const output = super.wsMessage(socket, text, now);
+          wsMessageActions(socket: number, text: string, now: number) {
+            const output = super.wsMessageActions!(socket, text, now);
+            crossings.push('single');
             outputs.push(output);
             return output;
           }
-          wsMessageBytes(socket: number, bytes: Uint8Array, now: number) {
-            const output = super.wsMessageBytes!(socket, bytes, now);
+          wsMessage(socket: number, text: string, now: number) {
+            const output = super.wsMessage(socket, text, now);
+            crossings.push('legacy');
+            outputs.push(output);
+            return output;
+          }
+          wsMessages(batch: Uint8Array) {
+            const output = super.wsMessages(batch);
+            crossings.push('batch');
             outputs.push(output);
             return output;
           }
@@ -813,11 +821,17 @@ describe('RustEngineExchange', () => {
       socket(
         JSON.stringify({ topic: 'tickers.BTCUSDT', type: 'delta', data: { symbol: 'BTCUSDT', lastPrice: '90001' } }),
       );
-      expect(outputs).toEqual([entry === 'bytes' ? undefined : '']);
+      if (delivery === 'batch') socket('{}');
+      await until(() => outputs.length === 1);
+      expect(outputs).toEqual([delivery === 'single' ? undefined : '']);
+      expect(crossings).toEqual([delivery]);
       await until(() => store.tickersBySymbol.BTCUSDT.last === 90001);
       socket(JSON.stringify({ success: false, op: 'subscribe', ret_msg: 'topic rejected' }));
+      if (delivery === 'batch') socket('{}');
+      await until(() => outputs.length === 2);
       expect(JSON.parse(outputs[1]!)).toEqual([{ op: 'log', level: 'error', message: '[WS]subscribe:topic rejected' }]);
       expect(errors).toEqual([expect.stringContaining('[WS]subscribe:topic rejected')]);
+      expect(crossings).toEqual([delivery, delivery]);
     },
   );
 
@@ -1416,8 +1430,6 @@ describe('RustEngineExchange', () => {
 });
 
 it('WEEX private engines require the passphrase before starting I/O', async () => {
-  const { WasmEngine } = await loadNodeEngine();
-  expect(() => new WasmEngine('weex', JSON.stringify({ key: 'replay-key', secret: 'replay-secret' }))).toThrow(
-    'WEEX requires a passphrase',
-  );
+  const { WasmEngine } = await loadNodeEngine('weex');
+  expect(() => new WasmEngine('weex', JSON.stringify({ key: 'replay-key', secret: 'replay-secret' }))).toThrow('WEEX requires a passphrase');
 });

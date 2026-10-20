@@ -49,8 +49,12 @@ export function validateKrakenSocketFrame(socket,text){
  if(['fills','open_orders','open_positions'].includes(feed)&&!m.event&&!socket.krakenFeeds?.has(feed))throw Error('Kraken data arrived before authenticated subscription');
 }
 export function krakenRequestBody(body,{callerIds=new Set()}={}){
- const row=body?.json?JSON.parse(body.json):body;
- const walk=v=>Array.isArray(v)?v.map(walk):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,k==='cliOrdId'&&typeof x==='string'&&x.startsWith('ts_')&&!callerIds.has(x)?'<generated>':walk(x)])):v;
+ // Preserve the sent spelling of unsafe integer-valued JSON numbers, including
+ // decimal/exponent forms, rather than letting Number round native identities.
+ const row=body?.json?JSON.parse(body.json, (_key,value,context)=>
+  typeof value==='number'&&Number.isInteger(value)&&!Number.isSafeInteger(value)
+   ?JSON.rawJSON(context.source):value):body;
+ const walk=v=>JSON.isRawJSON(v)?v:Array.isArray(v)?v.map(walk):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,k==='cliOrdId'&&typeof x==='string'&&x.startsWith('ts_')&&!callerIds.has(x)?'<generated>':walk(x)])):v;
  return walk(row);
 }
 export function krakenCommandResult(result,command){

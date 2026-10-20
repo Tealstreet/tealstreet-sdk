@@ -688,9 +688,9 @@ describe('engine socket routing at the raw transport boundary', () => {
     expect(handler.onOpen).toHaveBeenCalledOnce();
     expect(relay.send.mock.calls).toEqual([['{"op":"auth"}'], ['queued-after-construction'], ['on-open-write']]);
     listeners.get('message')!({ data: 'pong' });
-    expect(handler.onMessage).toHaveBeenCalledExactlyOnceWith('pong');
+    expect(handler.onMessage).toHaveBeenCalledExactlyOnceWith('pong', 42);
     listeners.get('close')!({ code: 1001 });
-    expect(handler.onClose).toHaveBeenCalledExactlyOnceWith(1001);
+    expect(handler.onClose).toHaveBeenCalledExactlyOnceWith(1001, 42);
     socket.send('after-close');
     expect(relay.send).toHaveBeenCalledTimes(3);
     routed.connect(url, handlers('private'));
@@ -698,6 +698,25 @@ describe('engine socket routing at the raw transport boundary', () => {
     routed.connect(url, handlers('private'));
     expect(raw.connect.mock.lastCall?.[0]).toBe('wss://bybit-proxy-ja.tealstreet.io/v5/private');
   });
+});
+
+it('direct routing forwards raw arrival timestamps without replacing them', () => {
+  const raw = makeRaw();
+  const handler = handlers();
+  createEngineTransport('okx', options(), raw).connect('wss://ws.okx.com:8443/ws/v5/public', handler);
+  raw.connect.mock.lastCall![1].onMessage('payload', 123);
+  expect(handler.onMessage).toHaveBeenCalledExactlyOnceWith('payload', 123);
+});
+
+it('direct binary routing preserves bytes, binary opt-in and raw arrival timestamp', () => {
+  const raw = makeRaw();
+  const handler = { ...handlers(), binary: true, onBinary: vi.fn() };
+  createEngineTransport('okx', options(), raw).connect('wss://ws.okx.com:8443/ws/v5/public', handler);
+  const bytes = new Uint8Array([0x1f, 0x8b, 255]);
+  expect(raw.connect.mock.lastCall![1].binary).toBe(true);
+  raw.connect.mock.lastCall![1].onBinary!(bytes, 17.5);
+  expect(handler.onBinary).toHaveBeenCalledExactlyOnceWith(bytes, 17.5);
+  expect(handler.onMessage).not.toHaveBeenCalled();
 });
 
 describe('native host policy uses the same resolved routes', () => {
@@ -798,7 +817,7 @@ describe('Bybit Brazil routing carries the site identity on every transport', ()
   });
 });
 
-const connectedRelay = async () => {
+const connectedRelay = async (binary = false) => {
   setWsRelayEnabled(true);
   const listeners = new Map<string, (event?: unknown) => void>();
   const relay = {
@@ -809,17 +828,43 @@ const connectedRelay = async () => {
   mocks.relay.mockImplementation(function () {
     return relay;
   });
-  const routed = createEngineTransport('bybit', options(), makeRaw());
+  const raw = makeRaw();
+  const routed = createEngineTransport('bybit', options(), raw);
   const url = 'wss://stream.bybit.com/v5/private';
   routed.connect(url, handlers('private'));
   routed.connect(url, handlers('private'));
-  const handler = handlers('private');
+  const handler = { ...handlers('private'), binary, onBinary: vi.fn() };
   const socket = routed.connect(url, handler);
   await vi.waitFor(() => expect(listeners.has('message')).toBe(true));
-  return { relay, handler, socket, emit: (data: unknown) => listeners.get('message')!({ data }), listeners };
+  return { relay, handler, socket, emit: (data: unknown) => listeners.get('message')!({ data }), listeners, raw };
 };
 
 describe('relay binary frames obey the native transport text contract', () => {
+  it('preserves SBE bytes and raw timestamps before control text and remote close', async () => {
+    vi.stubGlobal('Blob', NodeBlob);
+    let release!: (bytes: ArrayBuffer) => void;
+    const decoded = new Promise<ArrayBuffer>((resolve) => { release = resolve; });
+    class DelayedBlob extends NodeBlob {
+      override arrayBuffer(): Promise<ArrayBuffer> { return decoded; }
+    }
+    const { emit, handler, listeners, raw } = await connectedRelay(true);
+    const order: unknown[] = [];
+    handler.onBinary.mockImplementation((bytes, now) => order.push(['binary', Array.from(bytes), now]));
+    handler.onMessage.mockImplementation((text, now) => order.push(['text', text, now]));
+    handler.onClose.mockImplementation((code, now) => order.push(['close', code, now]));
+    raw.now.mockReturnValue(17);
+    emit(new DelayedBlob([]));
+    raw.now.mockReturnValue(18);
+    emit('control');
+    raw.now.mockReturnValue(19);
+    listeners.get('close')!({ code: 1001 });
+    listeners.get('error')!();
+    raw.now.mockReturnValue(99);
+    release(new Uint8Array([0x1f, 0x8b, 255]).buffer);
+    await vi.waitFor(() => expect(order).toEqual([
+      ['binary', [0x1f, 0x8b, 255], 17], ['text', 'control', 18], ['close', 1001, 19],
+    ]));
+  });
   it('decodes gzip Blob, zlib bytes, UTF-8 buffers and following text in arrival order', async () => {
     // happy-dom's Blob lacks the stream method used by the production decoder.
     vi.stubGlobal('Blob', NodeBlob);
@@ -830,9 +875,29 @@ describe('relay binary frames obey the native transport text contract', () => {
     emit(new TextEncoder().encode('fourth').buffer);
     emit('fifth');
     await vi.waitFor(() =>
-      expect(handler.onMessage.mock.calls).toEqual([['{"n":1}'], ['second'], ['{"n":3}'], ['fourth'], ['fifth']]),
+      expect(handler.onMessage.mock.calls).toEqual([
+        ['{"n":1}', 42],
+        ['second', 42],
+        ['{"n":3}', 42],
+        ['fourth', 42],
+        ['fifth', 42],
+      ]),
     );
     expect(handler.onClose).not.toHaveBeenCalled();
+  });
+
+  it('preserves decoded relay arrivals before a remote close', async () => {
+    vi.stubGlobal('Blob', NodeBlob);
+    const { emit, handler, listeners } = await connectedRelay();
+    const order: string[] = [];
+    handler.onMessage.mockImplementation((text, now) => order.push(`${text}:${now}`));
+    handler.onClose.mockImplementation((code, now) => order.push(`close:${code}:${now}`));
+    emit(new NodeBlob([gzipSync('first')]));
+    emit('second');
+    listeners.get('close')!({ code: 1001 });
+    listeners.get('error')!();
+    emit('late');
+    await vi.waitFor(() => expect(order).toEqual(['first:42', 'second:42', 'close:1001:42']));
   });
 
   it('malformed compression closes the relay and reports one failure despite queued frames', async () => {
@@ -843,7 +908,7 @@ describe('relay binary frames obey the native transport text contract', () => {
     emit(new Uint8Array([0x78, 0xff, 0]));
     await vi.waitFor(() => expect(relay.close).toHaveBeenCalledExactlyOnceWith());
     listeners.get('close')!({ code: 1007 });
-    expect(handler.onClose).toHaveBeenCalledExactlyOnceWith(1007);
+    expect(handler.onClose).toHaveBeenCalledExactlyOnceWith(1007, 42);
     expect(relay.close).toHaveBeenCalledOnce();
     expect(handler.onMessage).not.toHaveBeenCalled();
   });
@@ -1036,6 +1101,8 @@ describe('Workers derives GRVT protocol options from its account transport', () 
     });
     const object = new EngineObject({ storage: { setAlarm() {} } });
     const client = { send() {} };
+    // fetch() registers connected clients before forwarding their messages.
+    Object.assign(object, { clients: new Set([client]) });
     try {
       await object.receive(client, JSON.stringify({ op: 'start', venue: 'grvt', options: {
         key: 'venue-key', secret: 'venue-secret', grvtTradingAccountId: '777', grvtSessionProxy: !proxied,

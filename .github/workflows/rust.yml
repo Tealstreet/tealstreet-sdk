@@ -187,8 +187,6 @@ jobs:
             private_script: rust:private-tape-txflow
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Budget per single-venue browser bundle.
-      WASM_BUDGET_BYTES: 1258291
     defaults:
       run:
         working-directory: .
@@ -223,7 +221,7 @@ jobs:
       - name: Native frame session adapter through real WebSockets
         if: matrix.venue == 'binance'
         run: yarn rust:test-server-adapter
-      - name: Build the combined wasm engine
+      - name: Build all venue family packages for SDK and host tests
         if: matrix.venue == 'binance'
         run: yarn rust:build-wasm
       - name: The TS exchange on the wasm engine
@@ -232,14 +230,16 @@ jobs:
       - name: The Cloudflare Workers host
         if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex-wasm test
-      - name: Build the venue wasm engine
+      - name: Build the venue family wasm package
+        if: matrix.venue != 'binance'
         run: yarn rust:build-wasm --venue ${{ matrix.venue }}
-      - name: Check the wasm size budget
-        run: |
-          size=$(stat -c%s sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm)
-          echo "wasm: $size bytes (budget $WASM_BUDGET_BYTES)"
-          test "$size" -le "$WASM_BUDGET_BYTES"
-      - name: Replay request normalization
+      - name: Check the venue family wasm size budget
+        run: yarn workspace @tealstreet/safe-cex-wasm check-sizes --venue ${{ matrix.venue }}
+      - name: Lint the isolated venue family
+        working-directory: sdk-rs
+        run: cargo clippy --locked -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features venue-${{ matrix.venue }} -- -D warnings
+      - name: Harness protocol regressions
+        if: matrix.venue == 'binance'
         run: yarn rust:test-harness
       - name: Credentialed lifecycle runner (scripted transport only)
         if: matrix.venue == 'binance'

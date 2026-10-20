@@ -6,8 +6,8 @@
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::{HttpRequest, Method, RequestId, SocketId};
 use safe_cex_native::{
-    HostEvent, HttpRoute, HttpRouteMode, NetworkTransport, ProxyTokenProvider, RoutingPlan,
-    SocketChannel, SocketChannelRule, Transport,
+    EventReceiver, Events, HostEvent, HttpRoute, HttpRouteMode, NetworkTransport,
+    ProxyTokenProvider, RoutingPlan, SocketChannel, SocketChannelRule, Transport,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -39,14 +39,14 @@ fn http_request(id: u32, url: String) -> HttpRequest {
     }
 }
 
-async fn next(events: &mut mpsc::UnboundedReceiver<HostEvent>) -> HostEvent {
+async fn next(events: &mut EventReceiver) -> HostEvent {
     tokio::time::timeout(Duration::from_secs(3), events.recv())
         .await
         .expect("host event deadline")
         .expect("host event channel")
 }
 
-async fn http_body(events: &mut mpsc::UnboundedReceiver<HostEvent>) -> Vec<u8> {
+async fn http_body(events: &mut EventReceiver) -> Vec<u8> {
     let mut body = Vec::new();
     loop {
         match next(events).await {
@@ -126,7 +126,7 @@ async fn proxy_public_selection_headers_and_fresh_tokens_reach_the_wire() {
         ..RoutingPlan::default()
     };
     let transport = NetworkTransport::with_routing(plan, provider);
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     for id in 0..3 {
         let mut request = http_request(
             id,
@@ -189,7 +189,7 @@ async fn breakout_generated_proxy_plan_keeps_dxapi_and_proxy_credentials_separat
             .unwrap();
         request
     });
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     let mut request = http_request(
         1,
         "https://breakout.prosp.devexperts.com/dxsca-web/marketdata".into(),
@@ -236,7 +236,7 @@ async fn resolved_header_alias_keeps_venue_jwt_separate_from_proxy_token() {
     request
         .headers
         .push(("authorization", "Bearer venue-jwt".into()));
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     NetworkTransport::with_routing(plan, tokens()).request(request, send);
     assert_eq!(http_body(&mut events).await, b"{}");
     let captured = server.await.unwrap();
@@ -270,7 +270,7 @@ async fn direct_http_without_aliases_preserves_standard_venue_authorization() {
     request
         .headers
         .push(("Authorization", "Bearer venue-jwt".into()));
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     NetworkTransport::with_routing(RoutingPlan::default(), tokens()).request(request, send);
     assert_eq!(http_body(&mut events).await, b"{}");
     let captured = server.await.unwrap().to_ascii_lowercase();
@@ -296,7 +296,7 @@ async fn direct_without_a_plan_preserves_engine_websocket_headers() {
         ws.send(Message::text("venue-message")).await.unwrap();
         let _ = ws.next().await;
     });
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     let outgoing = NetworkTransport::new().connect_with_headers(
         SocketId(1),
         origin.replacen("http:", "ws:", 1) + "/venue/private",
@@ -344,7 +344,7 @@ async fn explicit_socket_channel_wins_and_merges_engine_and_upgrade_headers() {
         channel: SocketChannel::Public,
     });
     let transport = NetworkTransport::with_routing(plan, tokens());
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     let outgoing = transport.connect_channel(
         SocketId(2),
         "wss://venue.invalid/shared".into(),
@@ -390,7 +390,7 @@ async fn two_silent_connects_choose_passthrough_and_ignore_cosmetic_query_change
         .insert("Origin".into(), "https://preview.tealstreet.io".into());
     let transport = NetworkTransport::with_routing(plan, tokens());
     for attempt in 0..3 {
-        let (send, mut events) = mpsc::unbounded_channel();
+        let (send, mut events) = Events::channel();
         let outgoing = transport.connect(
             SocketId(attempt),
             format!("{origin}/direct?requestId={attempt}"),
@@ -502,7 +502,7 @@ async fn relay_hides_auth_and_delays_open_until_the_upstream_is_ready() {
     let transport = NetworkTransport::with_routing(plan, tokens());
     let url = "ws://127.0.0.1:1/v5/private".to_owned();
     for attempt in 0..2 {
-        let (send, mut events) = mpsc::unbounded_channel();
+        let (send, mut events) = Events::channel();
         let outgoing = transport.connect_channel(
             SocketId(attempt),
             url.clone(),
@@ -513,7 +513,7 @@ async fn relay_hides_auth_and_delays_open_until_the_upstream_is_ready() {
         assert!(matches!(next(&mut events).await, HostEvent::WsClosed(_, _)));
         drop(outgoing);
     }
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     let outgoing = transport.connect_channel(
         SocketId(3),
         url,
@@ -619,7 +619,7 @@ async fn how_preserves_signed_url_headers_and_integer_body_and_streams_raw_respo
     };
     plan.ws_headers
         .insert("Origin".into(), "https://preview.tealstreet.io".into());
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     let mut request = http_request(10, "https://venue.invalid/v1/order?signature=exact".into());
     request.headers.push(("X-Signature", "unchanged".into()));
     request
@@ -659,7 +659,7 @@ async fn how_honors_ip_auth_without_fetching_a_token_and_never_replays_a_lost_wr
     let mut plan = RoutingPlan::default();
     plan.http.mode = HttpRouteMode::How;
     plan.http.tunnel_url = Some(origin.replacen("http:", "ws:", 1) + "/tunnel");
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     NetworkTransport::with_routing(plan, provider)
         .request(http_request(11, "https://venue.invalid/order".into()), send);
     assert!(matches!(
@@ -726,7 +726,7 @@ async fn how_accepts_binary_gzip_base64_raw_and_legacy_responses() {
     plan.http.tunnel_url = Some(origin.replacen("http:", "ws:", 1) + "/tunnel");
     let transport = NetworkTransport::with_routing(plan, tokens());
     for id in 0..4 {
-        let (send, mut events) = mpsc::unbounded_channel();
+        let (send, mut events) = Events::channel();
         transport.request(
             http_request(
                 id,
@@ -751,7 +751,7 @@ async fn proxy_token_acquisition_is_inside_the_request_deadline() {
     let mut plan = RoutingPlan::default();
     plan.http.authorize = true;
     plan.http.prefix = origin;
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     NetworkTransport::with_routing(plan, provider)
         .request(http_request(20, "https://venue.invalid/order".into()), send);
     tokio::task::yield_now().await;
@@ -783,7 +783,7 @@ async fn stalled_relay_authentication_is_bounded_and_emits_no_open_or_messages()
     plan.ws.private.host = Some(
         origin.replacen("http:", "ws:", 1) + "/tunnel?ts-relay=wss%3A%2F%2Fvenue.invalid%2Fprivate",
     );
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     let outgoing = NetworkTransport::with_routing(plan, tokens()).connect_channel(
         SocketId(30),
         "wss://venue.invalid/private".into(),
@@ -824,7 +824,7 @@ async fn closing_a_connecting_relay_cancels_its_pending_token_and_socket() {
     plan.ws.private.host = Some(
         origin.replacen("http:", "ws:", 1) + "/tunnel?ts-relay=wss%3A%2F%2Fvenue.invalid%2Fprivate",
     );
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     let outgoing = NetworkTransport::with_routing(plan, provider).connect_channel(
         SocketId(40),
         "wss://venue.invalid/private".into(),
@@ -856,7 +856,7 @@ async fn how_rejects_a_parsed_response_instead_of_rounding_native_ids() {
     let mut plan = RoutingPlan::default();
     plan.http.mode = HttpRouteMode::How;
     plan.http.tunnel_url = Some(origin.replacen("http:", "ws:", 1) + "/tunnel");
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     NetworkTransport::with_routing(plan, tokens())
         .request(http_request(50, "https://venue.invalid/read".into()), send);
     assert!(
@@ -899,7 +899,7 @@ async fn dropping_the_host_cancels_proxy_authorization_before_any_write() {
             },
             ..RoutingPlan::default()
         };
-        let (send, events) = mpsc::unbounded_channel();
+        let (send, events) = Events::channel();
         NetworkTransport::with_routing(plan, provider)
             .request(http_request(60, "https://venue.invalid/order".into()), send);
         started.recv().await.unwrap();
@@ -937,7 +937,7 @@ async fn dropping_the_host_cancels_how_authentication_without_sending_a_write() 
     let mut plan = RoutingPlan::default();
     plan.http.mode = HttpRouteMode::How;
     plan.http.tunnel_url = Some(origin.replacen("http:", "ws:", 1) + "/tunnel");
-    let (send, events) = mpsc::unbounded_channel();
+    let (send, events) = Events::channel();
     NetworkTransport::with_routing(plan, provider)
         .request(http_request(61, "https://venue.invalid/order".into()), send);
     started.recv().await.unwrap();
@@ -985,7 +985,7 @@ async fn malformed_binary_connections_advance_to_fallback_without_emitting_messa
         plan.ws.private.fallback = Some(format!("{origin}/fallback"));
         let transport = NetworkTransport::with_routing(plan, tokens());
         for attempt in 0..3 {
-            let (send, mut events) = mpsc::unbounded_channel();
+            let (send, mut events) = Events::channel();
             let outgoing = transport.connect_channel(
                 SocketId(attempt),
                 format!("{origin}/direct"),
@@ -1035,7 +1035,7 @@ async fn how_response_header_values_match_js_string_coercion_on_the_wire() {
     let mut plan = RoutingPlan::default();
     plan.http.mode = HttpRouteMode::How;
     plan.http.tunnel_url = Some(origin.replacen("http:", "ws:", 1) + "/tunnel");
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     NetworkTransport::with_routing(plan, tokens()).request(
         http_request(91, "https://venue.invalid/headers".into()),
         send,
@@ -1079,7 +1079,7 @@ async fn feed_connection(
     feed: Option<&str>,
     recover: bool,
 ) -> Vec<String> {
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     let outgoing = transport.connect_context(
         SocketId(100),
         url,
@@ -1353,7 +1353,7 @@ async fn explicit_public_routes_reach_direct_and_cors_without_account_authorizat
         },
         provider,
     );
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     for (id, route, url) in [
         (
             1,
@@ -1393,7 +1393,7 @@ async fn explicit_public_routes_reach_direct_and_cors_without_account_authorizat
 
 #[tokio::test]
 async fn raw_native_transport_rejects_unconfigured_public_cors_route() {
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     NetworkTransport::default().request(
         HttpRequest {
             id: RequestId(200),
@@ -1424,7 +1424,7 @@ async fn typed_clock_deadline_stays_active_while_native_response_body_stalls() {
             .unwrap();
         let _ = held.await;
     });
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     NetworkTransport::default().request(
         HttpRequest {
             id: RequestId(201),
@@ -1472,7 +1472,7 @@ async fn explicit_binary_protocol_preserves_non_utf8_and_text_control_frames() {
             .unwrap();
         ws.close(None).await.unwrap();
     });
-    let (send, mut events) = mpsc::unbounded_channel();
+    let (send, mut events) = Events::channel();
     let outgoing = NetworkTransport::new().connect_encoding(
         true,
         SocketId(91),
@@ -1523,7 +1523,7 @@ async fn healthy_binary_frames_reset_the_silent_connection_streak() {
     plan.ws.public.fallback = Some(format!("{origin}/fallback"));
     let transport = NetworkTransport::with_routing(plan, tokens());
     for id in 0..4 {
-        let (send, mut events) = mpsc::unbounded_channel();
+        let (send, mut events) = Events::channel();
         let outgoing = transport.connect_encoding(
             true,
             SocketId(id),

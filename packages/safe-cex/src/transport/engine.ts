@@ -477,15 +477,21 @@ export const createEngineTransport = (
         if (connection) upgrade.set(connection.headers);
       }
       const headers = upgrade.toJSON() as Record<string, string>;
-      const receive = (text: string) => {
+      const receive = (text: string, receivedAt?: number) => {
         if (!route.ignoredMessages?.includes(text)) fallback?.onMessage();
-        handlers.onMessage(text);
+        if (receivedAt === undefined) handlers.onMessage(text);
+        else handlers.onMessage(text, receivedAt);
       };
-      const receiveBinary = (data: Uint8Array) => { fallback?.onMessage(); handlers.onBinary?.(data); };
+      const receiveBinary = (data: Uint8Array, receivedAt?: number) => {
+        fallback?.onMessage();
+        handlers.onBinary?.(data, receivedAt);
+      };
       if (connection?.kind !== 'relay') return transport.connect(target, { ...handlers, headers, onMessage: receive, onBinary: receiveBinary });
       let socket: { send(text: string): void; close(): void } | undefined;
       let closed = false;
+      let closing = false;
       let opened = false;
+      let decode: ReturnType<typeof socketMessages> | undefined;
       const pending: string[] = [];
       void import('@tealstreet/http-over-websocket/src/RelayWebSocket')
         .then(({ RelayWebSocket }) => {
@@ -506,30 +512,40 @@ export const createEngineTransport = (
               handlers.onOpen();
             }
           });
-          const decode = socketMessages(
-            (data) => {
-              if (!closed) { if (typeof data === 'string') receive(data); else receiveBinary(data); }
-            },
-            () => {
+          const finish = (code?: number, receivedAt?: number) => {
+            if (closed) return;
+            closed = true;
+            pending.length = 0;
+            handlers.onClose(code, receivedAt);
+          };
+          decode = socketMessages(
+            (data, receivedAt) => {
               if (!closed) {
-                closed = true;
-                pending.length = 0;
-                // Browser close() forbids protocol error codes.
-                relay.close();
-                handlers.onClose(1007);
+                if (typeof data === 'string') receive(data, receivedAt);
+                else receiveBinary(data, receivedAt);
               }
             },
+            (_error, receivedAt) => {
+              if (!closed) {
+                closing = true;
+                pending.length = 0;
+                decode!.close(1007, receivedAt);
+                // Browser close() forbids protocol error codes.
+                relay.close();
+              }
+            },
+            finish,
             handlers.binary,
           );
+          const close = (code: number) => {
+            closing = true;
+            decode!.close(code, transport.now());
+          };
           relay.addEventListener('message', (event) => {
-            if (!closed) decode((event as MessageEvent).data);
+            if (!closed && !closing) decode!((event as MessageEvent).data, transport.now());
           });
-          relay.addEventListener('close', (event) => {
-            if (!closed) {
-              closed = true;
-              handlers.onClose((event as CloseEvent).code);
-            }
-          });
+          relay.addEventListener('close', (event) => close((event as CloseEvent).code));
+          relay.addEventListener('error', () => close(1006));
         })
         .catch(() => {
           if (!closed) {
@@ -539,20 +555,22 @@ export const createEngineTransport = (
         });
       return {
         send: (text) => {
-          if (closed) return;
+          if (closed || closing) return;
           if (socket && opened) socket.send(text);
           else {
             if (pending.length >= 100) {
               closed = true;
               pending.length = 0;
+              decode?.cancel();
               socket?.close();
-              handlers.onClose(1006);
+              handlers.onClose(1006, transport.now());
             } else pending.push(text);
           }
         },
         close: () => {
           closed = true;
           pending.length = 0;
+          decode?.cancel();
           socket?.close();
         },
       };

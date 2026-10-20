@@ -20,6 +20,7 @@ it.each([true, false])('GRVT SDK uses the transport-selected authentication prot
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noop,
     wsMessage: noop,
+    wsMessages: noop,
     wsClose: noop,
     httpStart: noop,
     httpChunk: noop,

@@ -3,7 +3,7 @@ use crate::routing::{
     HttpRouteMode, ProxyTokenProvider, RoutingPlan, RoutingState, authenticate_how,
     authenticate_relay, insert_header, request_how,
 };
-use crate::{Events, HostEvent};
+use crate::{Events, HostEvent, now_ms};
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::{HttpRequest, Method, SocketId};
 use std::io::Read;
@@ -265,21 +265,24 @@ impl Transport for NetworkTransport {
                     tokio::select! {
                         message = ws.next() => match message {
                             Some(Ok(Message::Text(text))) => {
+                                let received_at = now_ms();
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
-                                let _ = events.send(HostEvent::WsMessage(socket, text.to_string()));
+                                if events.send_at(HostEvent::WsMessage(socket, text.to_string()), received_at).is_err() { return; }
                             }
                             Some(Ok(Message::Binary(bytes))) if binary => {
+                                let received_at = now_ms();
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.binary_message(key); }
-                                let _ = events.send(HostEvent::WsBinary(socket, bytes.to_vec()));
+                                if events.send_at(HostEvent::WsBinary(socket, bytes.to_vec()), received_at).is_err() { return; }
                             }
                             Some(Ok(Message::Binary(bytes))) => {
+                                let received_at = now_ms();
                                 let mut decoded = Vec::new();
                                 let result = if bytes.starts_with(&[0x1f, 0x8b]) { flate2::read::GzDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
                                     else if bytes.first() == Some(&0x78) { flate2::read::ZlibDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
                                     else { decoded.extend_from_slice(&bytes); Ok(decoded.len()) };
                                 let Ok(text) = result.and_then(|_| String::from_utf8(decoded).map_err(std::io::Error::other)) else { break 1007 };
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
-                                let _ = events.send(HostEvent::WsMessage(socket, text));
+                                if events.send_at(HostEvent::WsMessage(socket, text), received_at).is_err() { return; }
                             }
                             Some(Ok(Message::Ping(_))) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.flush()).await, Ok(Ok(()))) { break 1006; } }
                             Some(Ok(Message::Close(frame))) => break frame.map_or(1005, |frame| u16::from(frame.code)),

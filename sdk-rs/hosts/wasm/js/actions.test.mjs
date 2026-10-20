@@ -3,10 +3,10 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
-const built = new URL('../pkg/node/safe_cex_wasm.js', import.meta.url);
+const built = new URL('../pkg/node/phemex/safe_cex_wasm.js', import.meta.url);
 
 test('WASM optional string and byte actions preserve UTF-8 validation and authenticated subscriptions', { skip: !existsSync(built) }, () => {
-  const { WasmEngine } = createRequire(import.meta.url)('../pkg/node/safe_cex_wasm.js');
+  const { WasmEngine } = createRequire(import.meta.url)('../pkg/node/phemex/safe_cex_wasm.js');
   const now = 1_700_000_000_000;
   const encoder = new TextEncoder();
   const actions = (json) => json ? JSON.parse(json) : [];

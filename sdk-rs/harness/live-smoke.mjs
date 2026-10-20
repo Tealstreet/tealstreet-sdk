@@ -342,7 +342,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     }
     const profile = liveSmokeProfile(values.venue, values.mode, env);
     const venue = venueOf(values.venue);
-    const { WasmEngine } = await loadEngine();
+    const { WasmEngine } = await loadEngine(venue.rust);
     const out = values.out ?? `sdk-rs/harness/tapes/${values.venue}-live-private.jsonl`;
     mkdirSync(dirname(out), { recursive: true });
     fd = openSync(out, 'wx', 0o600);

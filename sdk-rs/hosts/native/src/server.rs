@@ -253,6 +253,7 @@ struct Account<V: Venue, T: Transport> {
     candles: HashMap<(String, String), usize>,
     pending: HashMap<u32, Pending>,
     next_command: u32,
+    control_now: Option<f64>,
 }
 
 impl<V: Venue, T: Transport> Account<V, T> {
@@ -266,6 +267,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             candles: HashMap::new(),
             pending: HashMap::new(),
             next_command: 0,
+            control_now: None,
         }
     }
 
@@ -274,14 +276,20 @@ impl<V: Venue, T: Transport> Account<V, T> {
         mut inbox: mpsc::Receiver<Control>,
         mut shutdown: watch::Receiver<bool>,
     ) {
-        self.host.engine.start((self.host.clock)());
+        let started_at = (self.host.clock)();
+        self.host.last_dispatched_at = started_at;
+        self.host.engine.start(started_at);
         self.execute();
         let mut flush = tokio::time::interval(self.config.flush_every);
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 _ = shutdown.changed() => break,
-                control = inbox.recv() => match control {
+                control = inbox.recv() => {
+                    let selected_at = (self.host.clock)();
+                    self.drain_ready_prefix().await;
+                    self.control_now = Some(selected_at);
+                    match control {
                     Some(Control::Join { client, outgoing, cancel, ready }) => {
                         if self.peers.len() >= self.config.max_clients_per_account {
                             let _ = ready.send(Err("account client limit reached"));
@@ -290,7 +298,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         // Snapshot and registration share this actor turn. Existing peers
                         // establish the same baseline before a new peer takes its snapshot.
                         self.flush();
-                        let snapshot: Arc<[u8]> = self.host.engine.snapshot_frame((self.host.clock)()).into();
+                        let snapshot: Arc<[u8]> = self.host.engine.snapshot_frame(selected_at).into();
                         if snapshot.len() > self.config.max_frame_bytes || outgoing.try_send(Outgoing::Frame(snapshot)).is_err() {
                             let _ = ready.send(Err("snapshot exceeds connection limits"));
                             continue;
@@ -301,25 +309,63 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     Some(Control::Command { client, command }) => self.command(client, command),
                     Some(Control::TickIntervalChanged { client, interval_ms }) => {
                         if self.peers.contains_key(&client) {
-                            self.host.engine.handle((self.host.clock)(), Event::TickIntervalChanged { interval_ms });
+                            self.host.engine.handle(selected_at, Event::TickIntervalChanged { interval_ms });
                         }
                     }
                     Some(Control::Leave(client)) => self.leave(client),
                     None => break,
+                    }
                 },
-                Some(event) = self.host.inbox.recv() => self.host.dispatch(event),
+                event = async {
+                    if self.host.pending.is_some() { None } else { self.host.inbox.recv().await }
+                } => {
+                    self.control_now = None;
+                    if let Some(event) = self.host.pending.take().or(event) {
+                        self.host.dispatch_ready(event, crate::MAX_BATCH_MESSAGES);
+                    }
+                },
                 _ = flush.tick() => {
+                    let selected_at = (self.host.clock)();
+                    self.drain_ready_prefix().await;
+                    self.control_now = Some(selected_at);
                     let gone: Vec<_> = self.peers.iter().filter(|(_, peer)| peer.outgoing.is_closed()).map(|(id, _)| *id).collect();
                     for client in gone { self.leave(client); }
                     self.flush();
                 }
             }
             self.execute();
+            tokio::task::yield_now().await;
         }
         for (_, peer) in self.peers.drain() {
             peer.cancel.send_replace(true);
         }
         self.host.stop();
+    }
+
+    fn now(&self) -> f64 {
+        self.control_now.unwrap_or(self.host.last_dispatched_at)
+    }
+
+    async fn drain_ready_prefix(&mut self) {
+        // Controls and flushes share the finite prefix ready when selected.
+        // Action-triggered arrivals stay behind that boundary without starving it.
+        self.control_now = None;
+        let mut remaining = self.host.inbox.len() + usize::from(self.host.pending.is_some());
+        while remaining > 0 {
+            let event = self.host.pending.take().unwrap_or_else(|| {
+                self.host
+                    .inbox
+                    .try_recv()
+                    .expect("the captured account prefix is still queued")
+            });
+            remaining -= self
+                .host
+                .dispatch_ready(event, remaining.min(crate::MAX_BATCH_MESSAGES));
+            self.execute();
+            if remaining > 0 {
+                tokio::task::yield_now().await;
+            }
+        }
     }
 
     fn execute(&mut self) {
@@ -357,7 +403,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
     }
 
     fn flush(&mut self) {
-        if let Some(frame) = self.host.engine.take_frame((self.host.clock)()) {
+        let now = self.now();
+        if let Some(frame) = self.host.engine.take_frame(now) {
             let frame: Arc<[u8]> = frame.into();
             if frame.len() > self.config.max_frame_bytes {
                 let clients: Vec<_> = self.peers.keys().copied().collect();
@@ -431,9 +478,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
     }
 
     fn handle(&mut self, command: Command) {
-        self.host
-            .engine
-            .handle((self.host.clock)(), Event::Command(command));
+        let now = self.now();
+        self.host.engine.handle(now, Event::Command(command));
     }
 
     fn command(&mut self, client: u64, mut command: Command) {
@@ -857,17 +903,32 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    struct Stub(Rc<RefCell<Vec<Command>>>);
+    struct Stub(Rc<RefCell<Vec<Command>>>, Rc<RefCell<Vec<(f64, String)>>>);
     impl Venue for Stub {
         type Pending = ();
         fn start(&mut self, _: &mut Cx<'_, ()>) {}
         fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
-        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+            self.1.borrow_mut().push((cx.now, text.into()));
+            cx.store.set_balance(safe_cex_engine::model::Balance {
+                total: cx.now,
+                ..Default::default()
+            });
+        }
+        fn on_binary(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, data: &[u8]) {
+            self.1
+                .borrow_mut()
+                .push((cx.now, format!("binary:{data:?}")));
+        }
+        fn on_tick_interval(&mut self, cx: &mut Cx<'_, ()>, _: f64) {
+            self.1.borrow_mut().push((cx.now, "tick".into()));
+        }
         fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
         fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
         fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
         fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
-        fn on_command(&mut self, _: &mut Cx<'_, ()>, command: Command) {
+        fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
+            self.1.borrow_mut().push((cx.now, "command".into()));
             self.0.borrow_mut().push(command);
         }
         fn book(&self, _: &str) -> Option<&Book> {
@@ -886,10 +947,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn account_controls_and_snapshot_follow_queued_mixed_arrivals() {
+        let trace = Rc::new(RefCell::new(Vec::new()));
+        let mut host = Host::new(Engine::new(Stub(Rc::default(), trace.clone())), NoTransport);
+        host.clock = || 50.0;
+        for (event, at) in [
+            (HostEvent::WsMessage(SocketId(1), "first".into()), 11.0),
+            (HostEvent::WsBinary(SocketId(1), vec![255]), 12.0),
+            (HostEvent::TickIntervalChanged(f64::INFINITY), 13.0),
+            (HostEvent::WsMessage(SocketId(1), "last".into()), 14.0),
+        ] {
+            host.event_sender().send_at(event, at).unwrap();
+        }
+        let actor = Account::new(host, ServerConfig::default());
+        let (commands, inbox) = mpsc::channel(4);
+        let (outgoing, mut frames) = mpsc::channel(8);
+        let (cancel, _canceled) = watch::channel(false);
+        let (ready, joined) = oneshot::channel();
+        commands
+            .send(Control::Join {
+                client: 1,
+                outgoing,
+                cancel,
+                ready,
+            })
+            .await
+            .unwrap();
+        commands
+            .send(Control::Command {
+                client: 1,
+                command: Command::SetTickerSymbols {
+                    symbols: vec!["BTCUSDT".into()],
+                },
+            })
+            .await
+            .unwrap();
+        drop(commands);
+        let (_shutdown, shutdown) = watch::channel(false);
+        actor.run(inbox, shutdown).await;
+        assert_eq!(joined.await.unwrap(), Ok(()));
+        assert_eq!(
+            *trace.borrow(),
+            [
+                (11.0, "first".into()),
+                (12.0, "binary:[255]".into()),
+                (13.0, "tick".into()),
+                (14.0, "last".into()),
+                (50.0, "command".into()),
+            ]
+        );
+        let Some(Outgoing::Frame(frame)) = frames.recv().await else {
+            panic!("first account message must be its snapshot");
+        };
+        assert_eq!(f64::from_le_bytes(frame[8..16].try_into().unwrap()), 50.0);
+        let balance = safe_cex_engine::wire::sections(&frame)
+            .find(|(kind, _)| *kind == safe_cex_engine::wire::section::BALANCE)
+            .unwrap()
+            .1;
+        assert_eq!(
+            f64::from_le_bytes(balance[16..24].try_into().unwrap()),
+            14.0
+        );
+    }
+
+    #[tokio::test]
     async fn full_peer_queue_cancels_and_releases_interest_without_dropping_a_delta() {
         let commands = Rc::new(RefCell::new(Vec::new()));
         let mut actor = Account::new(
-            Host::new(Engine::new(Stub(commands.clone())), NoTransport),
+            Host::new(
+                Engine::new(Stub(commands.clone(), Rc::default())),
+                NoTransport,
+            ),
             ServerConfig::default(),
         );
         let (outgoing, mut frames) = mpsc::channel(1);
@@ -933,7 +1061,7 @@ mod tests {
     #[tokio::test]
     async fn dropping_account_aborts_timers_and_closes_transport_input() {
         let mut actor = Account::new(
-            Host::new(Engine::new(Stub(Rc::default())), NoTransport),
+            Host::new(Engine::new(Stub(Rc::default(), Rc::default())), NoTransport),
             ServerConfig::default(),
         );
         let timer = tokio::spawn(std::future::pending::<()>());
@@ -956,7 +1084,8 @@ mod tests {
                     .is_err()
                 );
                 let mut server = FrameServer::new(ServerConfig::default()).unwrap();
-                let host = || Host::new(Engine::new(Stub(Rc::default())), NoTransport);
+                let host =
+                    || Host::new(Engine::new(Stub(Rc::default(), Rc::default())), NoTransport);
                 for (id, token) in [
                     ("", "valid"),
                     ("../bad", "valid"),

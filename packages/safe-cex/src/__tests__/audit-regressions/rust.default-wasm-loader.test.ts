@@ -1,15 +1,23 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import type { ExchangeName } from '../../types';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
 
-const wasm = vi.hoisted(() => ({ initialize: vi.fn(), generation: 0, engines: [] as WasmEngineLike[] }));
+const wasm = vi.hoisted(() => ({
+  initialize: vi.fn(),
+  generation: 0,
+  engines: [] as WasmEngineLike[],
+  venues: [] as string[],
+}));
 
 vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
   const engineModule = {
+    default: () => wasm.initialize(),
+    wasmMemoryBytes: () => 65536,
     WasmEngine: class {
       private readonly generation = wasm.generation;
 
@@ -18,6 +26,7 @@ vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
       }
 
       start = () => '';
+      accountId = () => undefined;
       command = () => '';
       takeFrame = () => undefined;
       snapshotFrame = () => {
@@ -26,18 +35,26 @@ vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
       };
       wsOpen = () => '';
       wsMessage = () => '';
+      wsMessageActions = () => undefined;
+      wsMessageBytes = () => undefined;
+      wsBinary = () => '';
+      wsMessages = () => '';
+      wsEvents = () => '';
       wsClose = () => '';
       httpStart = () => '';
       httpChunk = () => '';
       httpEnd = () => '';
       httpFailed = () => '';
       timer = () => '';
+      free = () => {};
     },
   };
   return {
-    loadEngine: async () => {
-      await wasm.initialize();
-      return engineModule;
+    loadEngine: async (venue: string) => {
+      wasm.venues.push(venue);
+      const { initializeWebEngine } = await import('@tealstreet/safe-cex-wasm/engine-cache');
+      const { venueFamily } = await import('@tealstreet/safe-cex-wasm/venues');
+      return initializeWebEngine(venueFamily(venue), async () => engineModule);
     },
   };
 });
@@ -48,6 +65,7 @@ beforeEach(() => {
   vi.resetModules();
   wasm.generation = 0;
   wasm.engines.length = 0;
+  wasm.venues.length = 0;
 });
 
 afterEach(() => {
@@ -65,11 +83,11 @@ const setup = async () => {
     setTimeout: () => 0,
     clearTimeout() {},
   }));
-  const account = () => {
+  const account = (name: ExchangeName = 'binance') => {
     const store = new DefaultStore();
     store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
     const exchange = new sdk.RustEngineExchange(
-      'binance',
+      name,
       { key: '', secret: '', publicDataOnly: true, transport: directTransport },
       store,
     );
@@ -139,11 +157,26 @@ it('lets a new account retry failed default initialization while failed accounts
 it('keeps custom loader invocation under the registered loader’s control', async () => {
   const { account, setWasmEngineLoader } = await setup();
   const { loadEngine } = await import('@tealstreet/safe-cex-wasm/engine');
-  const module = await loadEngine();
+  const module = await loadEngine('binance');
   wasm.initialize.mockClear();
   const custom = vi.fn(async () => module);
   setWasmEngineLoader(custom);
   await Promise.all([account().start(), account().start()]);
   expect(custom).toHaveBeenCalledTimes(2);
   expect(wasm.initialize).not.toHaveBeenCalled();
+});
+
+it('selects separate default family modules while aliases share initialization', async () => {
+  wasm.initialize.mockImplementation(async () => {
+    wasm.generation++;
+  });
+  const { account } = await setup();
+  await account('binance').start();
+  await account('bybit').start();
+  expect(wasm.initialize).toHaveBeenCalledTimes(2);
+  expect(wasm.venues.sort()).toEqual(['binance', 'bybit']);
+  await account('binancepm').start();
+  expect(wasm.initialize).toHaveBeenCalledTimes(2);
+  expect(wasm.venues).toHaveLength(2);
+  expect(wasm.engines).toHaveLength(3);
 });

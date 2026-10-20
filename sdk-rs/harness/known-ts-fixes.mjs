@@ -57,6 +57,23 @@ export function fixBlofinAccount(account) {
   }
 }
 
+// Bybit TS omits this native post-only rejection. Derive the correction from
+// the latest recorded order event so an incorrect engine result stays visible.
+export function fixBybitRejectReasons(account, records) {
+  const latest = new Map();
+  for (const record of records) {
+    if (record.type !== 'ws') continue;
+    const event = parse(record.text);
+    if (event.topic === 'order') for (const row of event.data) latest.set(String(row.orderId), row);
+  }
+  for (const order of account.orders) {
+    if (order.rejectReason === null && order.status === 'canceled'
+      && latest.get(order.id)?.rejectReason === 'EC_PostOnlyWillTakeLiquidity') {
+      order.rejectReason = 'PostOnly';
+    }
+  }
+}
+
 /** Phemex's execution, cumulative-size and flat-settings oracle uses venue rows only. */
 export function fixPhemexAccount(account, tapeRecords) {
     // TS deduplicates executions by order within each message, then repeats

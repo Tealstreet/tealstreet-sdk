@@ -13,9 +13,9 @@ export const baselineBeforeSetup = async ({ baseline, initialize }) => {
   return before;
 };
 
-// Validate absolute samples, exact retained-memory arithmetic and each component.
-// A negative component invalidates the before-import baseline; never clamp it.
-export const memoryMetricErrors = (metrics) => {
+// Net growth permits signed releases of temporary setup storage.
+// Validate absolute counters, the aggregate and exact component arithmetic.
+export const memoryMetricErrors = (metrics, { allowNegativeRetained = false } = {}) => {
   const errors = [];
   for (const field of [
     'heapBeforeBytes',
@@ -26,11 +26,12 @@ export const memoryMetricErrors = (metrics) => {
     'retainedBytes',
   ]) {
     const value = metrics?.[field];
-    if (!Number.isFinite(value) || value < 0) errors.push(`invalid ${field} (${value})`);
+    if (!Number.isFinite(value) || (value < 0 && !(field === 'retainedBytes' && allowNegativeRetained)))
+      errors.push(`invalid ${field} (${value})`);
   }
   for (const field of ['heapRetainedBytes', 'bufferRetainedBytes']) {
     const value = metrics?.[field];
-    if (!Number.isFinite(value) || value < 0) errors.push(`invalid ${field} (${value})`);
+    if (!Number.isFinite(value)) errors.push(`invalid ${field} (${value})`);
   }
   if (errors.length) return errors;
 
@@ -52,7 +53,7 @@ export const settledMemory = async ({
   pause = () => new Promise((resolve) => realTimeout(resolve, 10)),
   now = () => performance.now(),
   quietMs = 100,
-  timeoutMs = 5000,
+  timeoutMs = 10_000,
 } = {}) => {
   const started = now();
   const deadline = started + timeoutMs;

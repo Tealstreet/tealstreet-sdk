@@ -45,6 +45,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'a
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions,
     wsMessage: noActions,
+    wsMessages: noActions,
     wsClose: noActions,
     httpStart: noActions,
     httpChunk: noActions,

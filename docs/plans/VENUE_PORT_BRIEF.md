@@ -47,11 +47,19 @@ A crate `sdk-rs/venues/<venue>/ (crate `safe-cex-venue-<venue>`)` implementing `
 - Tests from the venue's documented payload examples.
 
 Register it (the workspace picks up `venues/*` itself): `hosts/wasm`
-(`Cargo.toml` and the `WasmEngine::new` match), `RUST_VENUES` in
+(`Cargo.toml` optional dependency and `venue-<family>` feature, cfg-gated
+imports and the `WasmEngine::new` match), `RUST_VENUES` in
 `packages/safe-cex/src/exchanges/rust/rust.exchange.ts`, a `venues.mjs` entry,
 and `sdk-rs/harness/private-tape-<venue>.mjs` with a root `package.json`
 script beside `rust:private-tape`. Extend `replay.mjs` generically; never
 break Binance.
+
+Register each WASM family in `hosts/wasm/js/venues.mjs`, package exports,
+`loadWebEngine`'s and `hosts/wasm/js/engine.web.mjs`'s literal import
+switches, and `harness/wasm-budgets.json`.
+Aliases share a family. `build.sh` builds every `venue-*` feature separately;
+CI checks each family's size, and loaders select by venue. Never restore an
+aggregate browser module when adding a venue.
 
 ## Gates (all must pass before you report done)
 

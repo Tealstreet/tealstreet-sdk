@@ -1,9 +1,512 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'node:test';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
 import { EngineHost, nativeTransport, socketMessages } from './host.mjs';
+
+const decode = (bytes) => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const rows = [];
+  for (let at = 0; at < bytes.length;) {
+    const size = view.getUint32(at + 4, true);
+    rows.push([view.getUint32(at, true), view.getFloat64(at + 8, true),
+      new TextDecoder().decode(bytes.subarray(at + 16, at + 16 + size))]);
+    at += 16 + size;
+  }
+  return rows;
+};
+const decodeEvents = (bytes) => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const rows = [];
+  for (let at = 0; at < bytes.length;) {
+    const size = view.getUint32(at + 4, true);
+    const payload = bytes.subarray(at + 20, at + 20 + size);
+    const kind = view.getUint32(at + 16, true);
+    assert.ok(kind === 0 || kind === 1);
+    rows.push([view.getUint32(at, true), view.getFloat64(at + 8, true),
+      kind ? Array.from(payload) : new TextDecoder().decode(payload)]);
+    at += 20 + size;
+  }
+  return rows;
+};
+const fixture = (options) => {
+  const calls = [];
+  const arrivals = new Map();
+  const tasks = new Map();
+  let clock = 1;
+  let next = 1;
+  const engine = Object.fromEntries(['start', 'command', 'wsOpen', 'wsClose', 'httpStart', 'httpChunk', 'httpEnd', 'httpFailed', 'timer'].map((name) =>
+    [name, (...args) => { calls.push([name, ...args]); return ''; }]));
+  engine.wsMessage = (socket, text, now) => { calls.push(['single', [[socket, now, text]]]); return ''; };
+  engine.wsBinary = (socket, data, now) => { calls.push(['binary', [[socket, now, Array.from(data)]]]); return ''; };
+  engine.wsMessages = (data) => { calls.push(['batch', decode(data)]); return ''; };
+  engine.wsEvents = (data) => { calls.push(['events', decodeEvents(data)]); return ''; };
+  engine.takeFrame = () => { calls.push(['frame']); };
+  engine.snapshotFrame = () => { calls.push(['snapshot']); return new Uint8Array(); };
+  const transport = {
+    now: () => clock++,
+    setTimeout: (fn) => { const id = next++; tasks.set(id, fn); return id; },
+    clearTimeout: (id) => tasks.delete(id),
+    connect: (url, handlers) => { arrivals.set(url, handlers); return { send() {}, close() {} }; },
+  };
+  const host = new EngineHost(engine, transport, {}, options);
+  for (const socket of [1, 2]) host.execute({ op: 'wsConnect', socket, url: String(socket) });
+  const send = (socket, text) => arrivals.get(String(socket)).onMessage(text);
+  const tick = () => { for (const [id, fn] of [...tasks]) { tasks.delete(id); fn(); } };
+  return { host, send, tick, calls, tasks, arrivals, engine };
+};
+
+test('one task batches mixed sockets, empty text, newlines and Unicode with arrival clocks', () => {
+  const f = fixture();
+  f.send(2, '雪😀\n\u001e');
+  f.send(1, '');
+  f.send(2, 'pong');
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.tasks.size, 1);
+  f.tick();
+  assert.deepEqual(f.calls, [['batch', [[2, 1, '雪😀\n\u001e'], [1, 2, ''], [2, 3, 'pong']]]]);
+  f.host.dispose();
+});
+
+test('one task batches text and owned binary snapshots in arrival order', () => {
+  const f = fixture();
+  f.host.execute({ op: 'wsConnect', socket: 7, url: 'binary', binary: true });
+  const binary = f.arrivals.get('binary');
+  assert.equal(binary.binary, true);
+  const storage = new Uint8Array([9, 0, 255, 9]);
+  f.arrivals.get('1').onMessage('first', 10);
+  binary.onBinary(storage.subarray(1, 3), 11.5);
+  storage.fill(42);
+  f.arrivals.get('2').onMessage('雪😀', 12);
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.tasks.size, 1);
+  f.tick();
+  assert.deepEqual(f.calls, [['events', [[1, 10, 'first'], [7, 11.5, [0, 255]], [2, 12, '雪😀']]]]);
+  f.host.dispose();
+});
+
+test('binary singleton stays deferred and crosses directly before later event barriers', async () => {
+  const f = fixture();
+  const binary = f.arrivals.get('1');
+  const payload = new Uint8Array([255, 0]);
+  binary.onBinary(payload, 17);
+  payload.fill(1);
+  assert.equal(f.calls.length, 0);
+  await f.host.command({ op: 'subscribeOrderBook', symbol: 'BTCUSDT' });
+  assert.deepEqual(f.calls.slice(0, 2), [['binary', [[1, 17, [255, 0]]]], ['command', '{"op":"subscribeOrderBook","symbol":"BTCUSDT"}', 1]]);
+  binary.onBinary(new Uint8Array(), 18);
+  f.host.receive(2, { status: 200, body: new Uint8Array() });
+  assert.deepEqual(f.calls.slice(-3).map(([name]) => name), ['binary', 'httpStart', 'httpEnd']);
+  binary.onBinary(new Uint8Array([7]), 19);
+  binary.onClose(1000, 20);
+  assert.deepEqual(f.calls.slice(-2), [['binary', [[1, 19, [7]]]], ['wsClose', 1, 1000, 20]]);
+  f.host.dispose();
+});
+
+test('mixed partitions deliver all captured messages before reentrant transport actions', () => {
+  const f = fixture();
+  const crossings = [];
+  const events = [];
+  f.engine.wsEvents = (data) => {
+    crossings.push({ bytes: data.length, rows: decodeEvents(data) });
+    events.push(`batch:${crossings.length}`);
+    return JSON.stringify([{ op: 'log', level: 'info', message: String(crossings.length) }]);
+  };
+  f.host.handlers.onLog = (_, message) => {
+    events.push(`log:${message}`);
+    if (message === '1') f.arrivals.get('2').onBinary(new Uint8Array([3]), 30);
+  };
+  f.arrivals.get('1').onMessage('before', 10);
+  const payload = new Uint8Array(70_000).fill(255);
+  f.arrivals.get('1').onBinary(payload, 20);
+  assert.deepEqual(events, ['batch:1', 'batch:2', 'log:1', 'log:2']);
+  assert.deepEqual(crossings.map(({ bytes }) => bytes), [26, 70_020]);
+  f.arrivals.get('2').onMessage('after', 40);
+  f.tick();
+  assert.deepEqual(crossings[0].rows, [[1, 10, 'before']]);
+  assert.equal(crossings[1].rows[0][2].length, payload.length);
+  assert.deepEqual(crossings[2].rows, [[2, 30, [3]], [2, 40, 'after']]);
+  assert.ok(f.host.batchBuffer.length <= 16 * 1024);
+  f.host.dispose();
+});
+
+test('mixed bursts share the count bound and disposal releases queued binary arrivals', () => {
+  const f = fixture();
+  for (let index = 0; index < 257; index++) {
+    if (index % 2) f.arrivals.get('1').onBinary(new Uint8Array([index % 256]), index);
+    else f.arrivals.get('2').onMessage(String(index), index);
+  }
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0][0], 'events');
+  assert.equal(f.calls[0][1].length, 256);
+  f.tick();
+  assert.deepEqual(f.calls[1], ['single', [[2, 256, '256']]]);
+  f.arrivals.get('1').onBinary(new Uint8Array([9]), 300);
+  f.host.dispose();
+  f.tick();
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.host.messages.length, 0);
+  assert.equal(f.host.messageBytes, 0);
+});
+
+test('disposal during mixed actions stops later resources and enclosing flush', () => {
+  const f = fixture();
+  f.engine.wsEvents = () => JSON.stringify([{ op: 'log', level: 'info', message: 'stop' },
+    { op: 'wsConnect', socket: 7, url: 'leak' }]);
+  f.host.handlers.onLog = () => f.host.dispose();
+  f.send(1, 'text');
+  f.arrivals.get('2').onBinary(new Uint8Array([255]), 17);
+  f.host.flush();
+  assert.equal(f.arrivals.has('leak'), false);
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.tasks.size, 0);
+});
+
+test('older binary engines retain ordered deferred actions without a mixed ABI', () => {
+  const f = fixture();
+  f.engine.wsEvents = undefined;
+  const seen = [];
+  f.engine.wsMessageActions = (_socket, text) => { seen.push(text); return JSON.stringify([{ op: 'log', level: 'info', message: text }]); };
+  f.engine.wsBinary = (_socket, bytes) => { seen.push([...bytes]); return ''; };
+  f.host.handlers.onLog = () => assert.deepEqual(seen, ['first', [255], 'last']);
+  f.send(1, 'first');
+  f.arrivals.get('2').onBinary(new Uint8Array([255]), 2);
+  f.send(1, 'last');
+  f.tick();
+  f.host.dispose();
+});
+
+test('singleton arrivals stay deferred and preserve their text and raw finite clocks', () => {
+  const f = fixture();
+  f.engine.wsMessages = () => assert.fail('a singleton must not be encoded');
+  const scratch = f.host.batchBuffer;
+  for (const [text, now] of [['', 17.25], ['雪😀\n\u001e', -7], ['\ud800', -0]]) {
+    f.arrivals.get('2').onMessage(text, now);
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.tasks.size, 1);
+    f.tick();
+    assert.deepEqual(f.calls.pop(), ['single', [[2, now, text]]]);
+    assert.equal(f.host.messages.length, 0);
+    assert.equal(f.host.messageBytes, 0);
+    assert.equal(f.host.batchTimer, undefined);
+    assert.equal(f.host.batchBuffer, scratch);
+  }
+  f.host.dispose();
+});
+
+test('singleton actions enqueue reentrant arrivals in a fresh scheduled task', () => {
+  const f = fixture();
+  f.engine.wsMessages = () => assert.fail('each captured queue has one arrival');
+  f.engine.wsMessage = (socket, text, now) => {
+    f.calls.push(['single', [[socket, now, text]]]);
+    return text === 'first' ? JSON.stringify([{ op: 'log', level: 'info', message: 'reenter' }]) : '';
+  };
+  f.host.handlers.onLog = () => {
+    assert.equal(f.host.messages.length, 0);
+    assert.equal(f.host.batchTimer, undefined);
+    f.arrivals.get('2').onMessage('second', 18);
+  };
+  f.arrivals.get('1').onMessage('first', 17);
+  f.tick();
+  assert.deepEqual(f.calls, [['single', [[1, 17, 'first']]]]);
+  assert.equal(f.tasks.size, 1);
+  f.tick();
+  assert.deepEqual(f.calls, [['single', [[1, 17, 'first']]], ['single', [[2, 18, 'second']]]]);
+  f.host.dispose();
+});
+
+test('singleton action disposal stops later resources and the enclosing flush', () => {
+  const f = fixture();
+  f.engine.wsMessage = () => {
+    f.calls.push(['single']);
+    return JSON.stringify([{ op: 'log', level: 'info', message: 'stop' },
+      { op: 'wsConnect', socket: 3, url: 'leak' }, { op: 'setTimer', timer: 9, at: 0 }]);
+  };
+  f.host.handlers.onLog = () => f.host.dispose();
+  f.send(1, 'pending');
+  f.host.flush();
+  f.tick();
+  assert.deepEqual(f.calls, [['single']]);
+  assert.equal(f.arrivals.has('leak'), false);
+  assert.equal(f.tasks.size, 0);
+});
+
+test('an oversized singleton crosses directly without allocating batch scratch', () => {
+  const f = fixture();
+  f.engine.wsMessages = () => assert.fail('oversized singleton must not be encoded');
+  const scratch = f.host.batchBuffer;
+  const text = '雪😀'.repeat(100_000);
+  f.arrivals.get('2').onMessage(text, 123.5);
+  assert.deepEqual(f.calls, [['single', [[2, 123.5, text]]]]);
+  assert.equal(f.host.batchBuffer, scratch);
+  assert.equal(f.tasks.size, 0);
+  f.host.dispose();
+});
+
+test('singleton undefined or empty actions are accepted and engine throws retain identity', () => {
+  const f = fixture();
+  for (const result of [undefined, '']) {
+    f.engine.wsMessage = () => result;
+    f.send(1, 'no actions');
+    assert.doesNotThrow(f.tick);
+  }
+  const error = new Error('engine failed');
+  f.engine.wsMessage = () => { throw error; };
+  f.send(1, 'throws');
+  assert.throws(f.tick, (actual) => actual === error);
+  assert.equal(f.host.messages.length, 0);
+  assert.equal(f.host.batchTimer, undefined);
+  f.engine.wsMessage = (socket, text, now) => { f.calls.push(['single', [[socket, now, text]]]); return ''; };
+  f.send(2, 'after failure');
+  f.tick();
+  assert.deepEqual(f.calls, [['single', [[2, 4, 'after failure']]]]);
+  f.host.dispose();
+});
+
+test('nonfinite and coercible clocks retain the batch encoding path', () => {
+  const f = fixture();
+  f.engine.wsMessage = () => assert.fail('invalid or coercible clocks must retain batch semantics');
+  for (const now of [NaN, Infinity, -Infinity, '7', new Number(8)]) {
+    f.arrivals.get('1').onMessage('payload', now);
+    f.tick();
+    const row = f.calls.pop();
+    assert.equal(row[0], 'batch');
+    assert.deepEqual(row[1], [[1, Number(now), 'payload']]);
+  }
+  const error = new Error('batch validation failed');
+  f.engine.wsMessages = () => { throw error; };
+  f.arrivals.get('1').onMessage('payload', NaN);
+  assert.throws(f.tick, (actual) => actual === error);
+  f.host.dispose();
+});
+
+test('nonstring singleton payloads retain the encoder rejection path', () => {
+  const f = fixture();
+  f.engine.wsMessage = () => assert.fail('nonstring payload must not reach the single-message API');
+  f.arrivals.get('1').onMessage(new String('payload'), 7);
+  assert.throws(f.tick, TypeError);
+  f.host.dispose();
+});
+
+test('commands, snapshots, flushes and socket lifecycle preserve queued-message order', async () => {
+  const f = fixture();
+  f.send(1, 'a');
+  await f.host.command({ op: 'subscribeOrderBook', symbol: 'BTCUSDT' });
+  f.send(1, 'b');
+  f.host.snapshot();
+  f.send(1, 'c');
+  f.host.flush();
+  f.send(1, 'd');
+  f.arrivals.get('1').onClose(1001);
+  f.send(2, 'e');
+  f.arrivals.get('2').onOpen();
+  assert.deepEqual(f.calls.map(([name]) => name), ['single', 'command', 'single', 'snapshot', 'single', 'frame', 'single', 'wsClose', 'single', 'wsOpen']);
+  assert.equal(f.tasks.size, 0);
+  f.host.dispose();
+});
+
+test('HTTP and timer events cannot overtake socket arrivals', async () => {
+  const f = fixture();
+  f.send(1, 'before headers');
+  const body = async function* () {
+    f.send(2, 'before chunk');
+    yield new Uint8Array([1]);
+    f.send(1, 'before end');
+  };
+  await f.host.receive(1, { status: 200, body: body() });
+  assert.deepEqual(f.calls.map(([name]) => name), ['single', 'httpStart', 'single', 'httpChunk', 'single', 'httpEnd']);
+  f.host.execute({ op: 'setTimer', timer: 1, at: 0 });
+  f.send(1, 'before timer');
+  f.tick();
+  assert.deepEqual(f.calls.slice(-2).map(([name]) => name), ['single', 'timer']);
+  f.host.dispose();
+});
+
+test('bounded batches do not drop messages and oversize scratch is released', () => {
+  const f = fixture();
+  for (let i = 0; i < 600; i++) f.send(1, String(i));
+  f.tick();
+  assert.deepEqual(f.calls.map(([, rows]) => rows.length), [256, 256, 88]);
+  assert.deepEqual(f.calls.flatMap(([, rows]) => rows.map((r) => r[2])), Array.from({ length: 600 }, (_, i) => String(i)));
+  f.send(2, 'x'.repeat(1024 * 1024));
+  assert.equal(f.calls.at(-1)[1][0][2].length, 1024 * 1024);
+  assert.ok(f.host.batchBuffer.length <= 1024 * 1024);
+  f.send(1, 'x'.repeat(10_000));
+  f.send(2, 'y'.repeat(10_000));
+  f.tick();
+  assert.equal(f.host.batchBuffer.length, 0, 'a moderate burst does not become retained scratch');
+  f.send(1, 'small message');
+  f.send(2, 'another small message');
+  f.tick();
+  assert.ok(f.host.batchBuffer.length > 0 && f.host.batchBuffer.length <= 16 * 1024);
+  f.host.dispose();
+});
+
+test('capacity flush cannot reorder an arrival behind a synchronous action callback', () => {
+  const f = fixture();
+  const batches = [];
+  const receive = (rows) => {
+    batches.push(rows);
+    return JSON.stringify([{ op: 'log', level: 'info', message: 'reenter' }]);
+  };
+  f.engine.wsMessages = (data) => receive(decode(data));
+  f.engine.wsMessage = (socket, text, now) => receive([[socket, now, text]]);
+  let reentered = false;
+  f.host.handlers.onLog = () => {
+    if (!reentered) {
+      reentered = true;
+      f.send(2, 'later');
+    }
+  };
+  f.send(1, 'x'.repeat(350_000));
+  f.tick();
+  assert.deepEqual(batches.flatMap((rows) => rows.map((row) => [row[0], row[2].length])), [[1, 350_000], [2, 5]]);
+  f.host.dispose();
+});
+
+test('oversized arrivals cross alone and all captured arrivals precede reentrant actions', () => {
+  const f = fixture();
+  const crossings = [];
+  const events = [];
+  f.engine.wsMessages = (data) => {
+    const rows = decode(data);
+    crossings.push({ bytes: data.length, rows });
+    events.push(`batch:${crossings.length}`);
+    return JSON.stringify([{ op: 'log', level: 'info', message: String(crossings.length) }]);
+  };
+  f.host.handlers.onLog = (_, message) => {
+    events.push(`log:${message}`);
+    if (message === '1') f.send(2, 'callback');
+  };
+  f.send(1, 'before');
+  f.send(1, 'x'.repeat(70_000));
+  assert.deepEqual(events, ['batch:1', 'batch:2', 'log:1', 'log:2']);
+  f.send(2, 'after');
+  f.tick();
+  assert.deepEqual(crossings.map(({ bytes }) => bytes), [22, 70_016, 45]);
+  assert.deepEqual(crossings.flatMap(({ rows }) => rows.map(([socket, now, text]) => [socket, now, text.length])),
+    [[1, 1, 6], [1, 2, 70_000], [2, 3, 8], [2, 4, 5]]);
+  assert.ok(f.host.batchBuffer.length <= 16 * 1024);
+  f.host.dispose();
+});
+
+test('disposal during partitioned batch actions stops later resource actions', () => {
+  const f = fixture();
+  let batches = 0;
+  let logs = 0;
+  f.engine.wsMessages = () => {
+    batches++;
+    return JSON.stringify([{ op: 'log', level: 'info', message: 'stop' },
+      { op: 'wsConnect', socket: 3, url: 'leak' }]);
+  };
+  f.host.handlers.onLog = () => { logs++; f.host.dispose(); };
+  f.send(1, 'before');
+  f.send(1, 'x'.repeat(70_000));
+  assert.equal(batches, 2, 'captured input reaches the engine before actions execute');
+  assert.equal(logs, 1);
+  assert.equal(f.arrivals.has('leak'), false);
+  assert.equal(f.tasks.size, 0);
+});
+
+test('disposal cancels queued deliveries and ignores late transport callbacks', async () => {
+  const f = fixture();
+  f.send(1, 'pending');
+  f.host.dispose();
+  f.send(2, 'late');
+  f.arrivals.get('1').onClose();
+  f.arrivals.get('2').onOpen();
+  await f.host.receive(2, { status: 200, body: new Uint8Array([1]) });
+  f.tick();
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.tasks.size, 0);
+});
+
+test('disposal rejects pending commands and ignores their later HTTP responses', async () => {
+  const f = fixture();
+  const command = f.host.command({ op: 'fetchCandles', symbol: 'BTCUSDT', interval: '1m' });
+  const rejected = assert.rejects(command, /engine disposed/);
+  assert.equal(f.host.commands.size, 1);
+  f.host.dispose();
+  await rejected;
+  assert.equal(f.host.commands.size, 0);
+  await f.host.receive(1, { status: 200, body: new Uint8Array([1]) });
+  assert.deepEqual(f.calls.map(([name]) => name), ['command']);
+  await assert.rejects(f.host.command({ op: 'fetchCandles' }), /engine disposed/);
+  assert.deepEqual(f.calls.map(([name]) => name), ['command']);
+});
+
+test('synchronous command validation failure leaves no hidden pending promise', async () => {
+  const f = fixture();
+  f.engine.command = () => { throw new Error('invalid command'); };
+  await assert.rejects(Promise.resolve().then(() => f.host.command({ op: 'invalid' })), /invalid command/);
+  assert.equal(f.host.commands.size, 0);
+  f.host.dispose();
+});
+
+test('outbound action failures reject and remove their pending command', async () => {
+  const f = fixture();
+  f.engine.command = () => JSON.stringify([{ op: 'wsSend', socket: 1, text: 'request' }]);
+  f.host.sockets.get(1).send = () => { throw new Error('send failed'); };
+  await assert.rejects(f.host.command({ op: 'fetchCandles' }), /send failed/);
+  assert.equal(f.host.commands.size, 0);
+  f.host.dispose();
+});
+
+test('malformed command results reject their promise and preserve subsequent actions', async () => {
+  const f = fixture();
+  let logged = false;
+  f.host.handlers.onLog = () => { logged = true; };
+  f.engine.command = (json) => JSON.stringify([
+    { op: 'done', command: JSON.parse(json).command, result: '{' },
+    { op: 'log', level: 'info', message: 'after malformed result' },
+  ]);
+  await assert.rejects(f.host.command({ op: 'fetchCandles' }), SyntaxError);
+  assert.equal(f.host.commands.size, 0);
+  assert.equal(logged, true);
+  f.host.dispose();
+});
+
+test('a throwing disposal callback returns the command cancellation without a hidden rejection', async () => {
+  const f = fixture();
+  f.engine.command = () => JSON.stringify([{ op: 'log', level: 'error', message: 'stop' }]);
+  f.host.handlers.onLog = () => {
+    f.host.dispose();
+    throw new Error('callback failed');
+  };
+  await assert.rejects(f.host.command({ op: 'fetchCandles' }), /engine disposed/);
+  assert.equal(f.host.commands.size, 0);
+});
+
+test('disposal during an action callback stops the remaining resource actions', () => {
+  const f = fixture();
+  f.host.handlers.onLog = () => f.host.dispose();
+  f.host.run(JSON.stringify([
+    { op: 'log', level: 'error', message: 'stop' },
+    { op: 'wsConnect', socket: 7, url: 'after-dispose' },
+    { op: 'setTimer', timer: 1, at: 0 },
+  ]));
+  assert.equal(f.arrivals.has('after-dispose'), false);
+  assert.equal(f.tasks.size, 0);
+  assert.equal(f.host.sockets.size, 0);
+  f.host.execute({ op: 'wsConnect', socket: 8, url: 'direct-after-dispose' });
+  assert.equal(f.arrivals.has('direct-after-dispose'), false);
+});
+
+test('disposal while draining a batch prevents its enclosing flush or command', async () => {
+  for (const enclosing of ['flush', 'command']) {
+    const f = fixture();
+    f.engine.wsMessages = () => JSON.stringify([{ op: 'log', level: 'error', message: 'stop' }]);
+    f.host.handlers.onLog = () => f.host.dispose();
+    f.send(1, 'pending');
+    f.send(2, 'also pending');
+    if (enclosing === 'command') await assert.rejects(f.host.command({ op: 'fetchCandles' }), /engine disposed/);
+    else f.host.flush();
+    assert.deepEqual(f.calls, []);
+    assert.equal(f.host.commands.size, 0);
+    assert.throws(() => f.host.snapshot(), /engine disposed/);
+  }
+});
 
 test('account identity is read from the live engine and unavailable after disposal', () => {
   let account;
@@ -14,6 +517,42 @@ test('account identity is read from the live engine and unavailable after dispos
   host.dispose();
   assert.throws(() => host.accountId(), /disposed/);
   assert.equal(new EngineHost({}, {}).accountId(), undefined);
+});
+
+test('account identity drains queued discovery before reading the live engine', () => {
+  const f = fixture();
+  let account;
+  f.engine.wsMessage = () => { account = 'queued-portfolio'; return ''; };
+  f.engine.accountId = () => account;
+  f.send(1, 'discovery');
+  assert.equal(account, undefined);
+  assert.equal(f.host.accountId(), 'queued-portfolio');
+  assert.equal(f.tasks.size, 0);
+  f.host.dispose();
+});
+
+test('account identity stops after queued actions dispose the host', () => {
+  const f = fixture();
+  let reads = 0;
+  f.engine.accountId = () => { reads++; return 'stale'; };
+  f.engine.wsMessage = () => '[{"op":"log","level":"error","message":"stop"}]';
+  f.host.handlers.onLog = () => f.host.dispose();
+  f.send(1, 'invalidate');
+  assert.throws(() => f.host.accountId(), /engine disposed/);
+  assert.equal(reads, 0);
+});
+
+test('tick interval changes drain prior arrivals and resolve without a reply ID', async () => {
+  const f = fixture();
+  f.send(1, 'before interval');
+  await f.host.command({ op: 'setTickInterval', interval: 250 });
+  assert.deepEqual(f.calls, [
+    ['single', [[1, 1, 'before interval']]],
+    ['command', '{"op":"setTickInterval","interval":250}', 2],
+  ]);
+  assert.equal(f.host.commands.size, 0);
+  assert.equal(f.host.nextCommand, 1);
+  f.host.dispose();
 });
 
 for (const entry of ['legacy', 'actions', 'bytes']) {
@@ -51,7 +590,7 @@ for (const entry of ['legacy', 'actions', 'bytes']) {
         receive = handlers.onMessage;
         return { send: (text) => effects.push(text), close() {} };
       },
-    }, { onLog: (_level, message) => effects.push(message) });
+    }, { onLog: (_level, message) => effects.push(message) }, { batchMessages: false });
     host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
     receive('quiet');
     assert.deepEqual(effects, []);
@@ -89,7 +628,7 @@ test('byte entry encodes complete Unicode messages with bounded reusable scratch
   const host = new EngineHost(engine, {
     now: () => 123,
     connect: (_url, handlers) => { receive = handlers.onMessage; return { close() {} }; },
-  });
+  }, {}, { batchMessages: false });
   host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
   // Exact 1365-unit boundary, lone surrogates, paired surrogates, and large frames.
   const messages = ['', 'ASCII', 'é漢🦀', '\ud800', '\udc00', '\ud800x\udc00', '漢'.repeat(1365), '\ud800'.repeat(1365), 'a'.repeat(1364) + '\ud800', '🦀'.repeat(683), '漢'.repeat(1366), 'small again'];
@@ -127,7 +666,7 @@ test('byte scratch is released when a custom synchronous engine throws', () => {
   }, {
     now: () => 123,
     connect: (_url, handlers) => { receive = handlers.onMessage; return { close() {} }; },
-  });
+  }, {}, { batchMessages: false });
   host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
   assert.throws(() => receive('first'), /test engine failure/);
   assert.equal(host.wsScratchBusy, false);
@@ -265,6 +804,7 @@ test('disposing a host cannot schedule a reconnect through close callbacks', () 
   let closedEvents = 0;
   const host = new EngineHost({ wsClose: () => { closedEvents++; return ''; } }, {
     now: () => 100,
+    clearTimeout() {},
     connect: (_, handlers) => { closeHandler = handlers.onClose; return { close: () => closeHandler(1000) }; },
   });
   host.execute({ op: 'wsConnect', socket: 1, url: 'wss://example.test' });
@@ -307,7 +847,7 @@ for (const continuation of ['chunk', 'end', 'error']) {
       httpEnd: () => record('end'),
       httpFailed: () => record('error'),
     };
-    const host = new EngineHost(engine, { now: () => 100 });
+    const host = new EngineHost(engine, { now: () => 100, clearTimeout() {} });
     const body = async function* () {
       try {
         yield Uint8Array.of(1);
@@ -334,6 +874,7 @@ test('late read and write request failures cannot reach a disposed engine or ret
     let failures = 0;
     const host = new EngineHost({ httpFailed: () => { failures++; return ''; } }, {
       now: () => 100,
+      clearTimeout() {},
       request: () => { requests++; return new Promise((_, fail) => { reject = fail; }); },
     });
     host.execute({ op: 'http', request: 1, method, url: 'https://example.test', headers: [] });
@@ -489,6 +1030,7 @@ test('an asynchronous binary message cannot enter a disposed engine', async () =
   let calls = 0;
   const host = new EngineHost({ wsMessage: () => { calls++; return ''; } }, {
     now: () => 100,
+    clearTimeout() {},
     connect: (_, handlers) => {
       receive = socketMessages((text) => { handlers.onMessage(text); delivered(); }, assert.fail);
       return { close() {}, send() {} };
@@ -522,6 +1064,51 @@ test('socket feed identity and protocol recovery reach the account transport', (
   host.execute({ op: 'wsConnect', socket: 1, url: 'wss://venue.test/shared', channel: 'public', context });
   assert.deepEqual(received, { url: 'wss://venue.test/shared', channel: 'public', context });
   host.dispose();
+});
+
+test('request rejection cannot overtake queued websocket arrivals', async () => {
+  const f = fixture();
+  let reject;
+  f.host.transport.request = () => new Promise((_, fail) => { reject = fail; });
+  f.host.execute({ op: 'http', request: 1, method: 'GET', url: 'https://example.test/list', headers: [] });
+  f.send(1, 'before failure');
+  reject(new Error('transport failed'));
+  await new Promise(setImmediate);
+  assert.deepEqual(f.calls.map(([name]) => name), ['single', 'httpFailed']);
+  assert.equal(f.host.requests.size, 0);
+  f.host.dispose();
+});
+
+test('deactivation while draining an HTTP rejection aborts it and stops later resource actions', async () => {
+  const f = fixture();
+  let reject;
+  let signal;
+  let requests = 0;
+  f.host.transport.request = (request) => {
+    requests++;
+    signal = request.signal;
+    return new Promise((_, fail) => { reject = fail; });
+  };
+  f.host.execute({ op: 'http', request: 1, method: 'GET', url: 'https://example.test/list', headers: [] });
+  f.engine.wsMessages = (data) => {
+    f.calls.push(['batch', decode(data)]);
+    return JSON.stringify([
+      { op: 'deactivate' },
+      { op: 'wsConnect', socket: 9, url: 'must not open' },
+      { op: 'http', request: 2, method: 'POST', url: 'must not send', headers: [] },
+    ]);
+  };
+  f.host.handlers.onDeactivate = () => f.host.dispose();
+  f.send(1, 'credentials rejected');
+  f.send(2, 'also before failure');
+  reject(new Error('later failure'));
+  await new Promise(setImmediate);
+  assert.deepEqual(f.calls.map(([name]) => name), ['batch']);
+  assert.equal(signal.aborted, true);
+  assert.equal(f.host.requests.size, 0);
+  assert.equal(requests, 1);
+  assert.equal(f.arrivals.has('must not open'), false);
+  assert.equal(f.host.disposed, true);
 });
 
 test('public HTTP routing metadata survives actions without changing ordinary requests', async () => {

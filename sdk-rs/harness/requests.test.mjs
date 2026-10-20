@@ -32,9 +32,10 @@ test('nested JSON login payloads retain credentials while clocks and validated s
   const login = (timestamp, signature, apiKey = 'key') => JSON.stringify({ op: 'login', args: [JSON.stringify({
     type: 'login', httpMethod: 'GET', requestPath: '/ws/accounts', apiKey, passphrase: 'pass', timestamp, signature,
   })] });
-  assert.equal(subscriptionKey(exchange, login(100, 'a')), subscriptionKey(exchange, login(200, 'b')));
-  assert.notEqual(subscriptionKey(exchange, login(100, 'a')), subscriptionKey(exchange, login(100, 'a', 'other')));
-  assert.notEqual(subscriptionKey(exchange, login(100, 'a')), subscriptionKey(exchange, { op: 'login', args: [{
+  const key = (payload) => subscriptionKey(exchange, payload, new Set(), { rust: 'apexomni' });
+  assert.equal(key(login(100, 'a')), key(login(200, 'b')));
+  assert.notEqual(key(login(100, 'a')), key(login(100, 'a', 'other')));
+  assert.notEqual(key(login(100, 'a')), key({ op: 'login', args: [{
     type: 'login', httpMethod: 'GET', requestPath: '/ws/accounts', apiKey: 'key', passphrase: 'pass', timestamp: 100, signature: 'a',
   }] }));
 });
@@ -627,6 +628,41 @@ test('caller IDs are collected from every command shape without collecting tape 
   );
 });
 
+test('Hyperliquid generated-field normalization cannot erase other venues economic fields', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  for (const name of ['binance', 'bybit', 'okx', 'weex', 'cryptocom', 'bingx', 'blofin', 'mexc', 'backpack', 'bitget']) {
+    const options = venueOf(name);
+    const key = (body) => requestKey('POST', 'https://fixture.test/order', body, new Set(), options);
+    assert.notEqual(key({ c: cloid(3) }), key({ c: cloid(4) }), name);
+    assert.notEqual(key({ action: { type: 'order' }, nonce: 1 }), key({ action: { type: 'order' }, nonce: 2 }), name);
+    assert.notEqual(requestKey('GET', 'https://fixture.test/order?c=1', undefined, new Set(), options),
+      requestKey('GET', 'https://fixture.test/order?c=2', undefined, new Set(), options), name);
+  }
+});
+
+test('nested explicit body IDs remain exact without a venue volatile-field opt-in', () => {
+  const key = (nested, options = {}) => requestKey('POST', url, { nested }, new Set(), options);
+  for (const field of ['clientOrderId', 'newClientOrderId', 'clientAlgoId', 'timestamp', 'signature']) {
+    assert.notEqual(key({ [field]: 'first' }), key({ [field]: 'second' }), field);
+    assert.equal(key({ [field]: 'first' }, { volatileBodyFields: true }),
+      key({ [field]: 'second' }, { volatileBodyFields: true }), field);
+    assert.notEqual(requestKey('POST', url, { nested: { [field]: 'caller-a' } }, callerIds, { volatileBodyFields: true }),
+      requestKey('POST', url, { nested: { [field]: 'second' } }, callerIds, { volatileBodyFields: true }), field);
+  }
+});
+
+test('Hyperliquid only normalizes generated cloids on new order fields', () => {
+  const key = (body, route = exchange) => requestKey('POST', route, body);
+  assert.equal(key({ action: { type: 'order', orders: [{ c: cloid(3) }] }, nonce: 1 }),
+    key({ action: { type: 'order', orders: [{ c: cloid(4) }] }, nonce: 2 }));
+  assert.notEqual(key({ action: { type: 'cancelByCloid', cancels: [{ asset: 0, cloid: cloid(3) }] } }),
+    key({ action: { type: 'cancelByCloid', cancels: [{ asset: 0, cloid: cloid(4) }] } }));
+  for (const body of [{ c: cloid(3) }, { action: { c: cloid(3) } }, { action: { orders: [{ c: 'invalid-a' }] } }]) {
+    assert.notEqual(key(body), key(JSON.parse(JSON.stringify(body).replace(cloid(3), cloid(4)).replace('invalid-a', 'invalid-b'))));
+  }
+  assert.notEqual(key({ action: { orders: [{ c: cloid(3) }] } }, info), key({ action: { orders: [{ c: cloid(4) }] } }, info));
+});
+
 test('KuCoin topic batches and acknowledgement preferences retain exact token and channel identity', async () => {
   const { venueOf } = await import('./venues.mjs');
   const venue = venueOf('kucoin');
@@ -661,6 +697,27 @@ test('WOO native topics and auth identity remain exact while fresh clocks vary',
   const auth = (apikey, timestamp, sign) => keys({ event: 'auth', params: { apikey, timestamp, sign } });
   assert.deepEqual(auth('key', 1, 'a'), auth('key', 2, 'b'));
   assert.notDeepEqual(auth('key', 1, 'a'), auth('other', 1, 'a'));
+});
+
+test('per-route request adapters preserve method normalization and exact bigint identities', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  const options = venueOf('bitrue');
+  const route = 'https://fapi.bitrue.com/fapi/v2/order';
+  assert.equal(requestKey('post', route, { clientOrderId: 'first', volume: '1' }, new Set(), options),
+    requestKey('POST', route, { clientOrderId: 'second', volume: '1' }, new Set(), options));
+  const key = (id) => requestKey('POST', 'https://fixture.test/cancel', { nested: { id } });
+  assert.equal(key(9007199254740993n), requestKey('POST', 'https://fixture.test/cancel', '{"nested":{"id":9007199254740993}}'));
+  assert.notEqual(key(9007199254740993n), key(9007199254740994n));
+  assert.notEqual(key(9007199254740993n), key('9007199254740993'));
+});
+
+
+test('nested login signatures remain strict outside the ApeX descriptor opt-in', () => {
+  const login = (signature) => ({ op: 'login', args: [JSON.stringify({ apiKey: 'caller-key', signature, timestamp: 100 })] });
+  for (const options of [{}, { rust: 'okx' }, { rust: 'blofin', blofinProtocol: true }, { rust: 'kraken' }]) {
+    assert.notEqual(subscriptionKey('wss://example.test/private', login('a'), new Set(), options),
+      subscriptionKey('wss://example.test/private', login('b'), new Set(), options));
+  }
 });
 
 test('Coinbase channel product arrays expand exact topics and batch identities', () => {

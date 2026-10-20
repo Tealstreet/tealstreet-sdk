@@ -1,4 +1,4 @@
-/** The wasm-bindgen engine module (`pkg/web` or `pkg/node`, built by `yarn rust:build-wasm`). */
+/** The wasm-bindgen engine module (`pkg/{web,node}/<family>`, built by `yarn rust:build-wasm`). */
 import type { WasmEngineLike } from './host.mjs';
 
 export class WasmEngine implements WasmEngineLike {
@@ -13,6 +13,8 @@ export class WasmEngine implements WasmEngineLike {
   wsMessageActions(socket: number, text: string, now: number): string | undefined;
   wsMessageBytes(socket: number, bytes: Uint8Array, now: number): string | undefined;
   wsBinary(socket: number, data: Uint8Array, now: number): string;
+  wsMessages(batch: Uint8Array): string;
+  wsEvents(batch: Uint8Array): string;
   wsClose(socket: number, code: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;
   httpChunk(request: number, data: Uint8Array, now: number): string;

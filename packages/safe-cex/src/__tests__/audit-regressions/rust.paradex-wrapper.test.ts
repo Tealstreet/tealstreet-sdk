@@ -32,7 +32,7 @@ describe('Rust Paradex account boundary', () => {
         return JSON.stringify([{ op: 'done', command: command.command, result: '["42"]' }]);
       },
       takeFrame: () => undefined, snapshotFrame: () => new Uint8Array(),
-      wsOpen: noActions, wsMessage: noActions, wsClose: noActions,
+      wsOpen: noActions, wsMessage: noActions, wsMessages: noActions, wsClose: noActions,
       httpStart: noActions, httpChunk: noActions, httpEnd: noActions, httpFailed: noActions, timer: noActions,
     };
     const construct = vi.fn(function (_venue: string, _options: string) { return engine; });

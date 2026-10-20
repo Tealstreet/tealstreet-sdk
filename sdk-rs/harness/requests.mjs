@@ -2,7 +2,7 @@
 // signatures/clocks are nondeterministic. Economic action fields stay intact.
 const CLOCKS = new Set(['timestamp', 'recvWindow', 'signature', 'requestId']);
 const URL_VOLATILE = new Set([...CLOCKS, 'requestId']);
-const CLIENT_IDS = new Set(['newClientOrderId', 'clientAlgoId', 'clientOrderId', 'c']);
+const CLIENT_IDS = new Set(['newClientOrderId', 'clientAlgoId', 'clientOrderId']);
 
 // Timed replies describe recorded state; polling must not consume its transitions.
 // Unstamped replies in a timed queue represent the state available at startup.
@@ -72,58 +72,52 @@ export const callerIdsOf = (records) => {
   return ids;
 };
 
-const normalize = (value, callerIds, root = true, options = {}) => {
+// Body fields below the envelope remain economic data unless a venue opts
+// into volatile body fields. Query JSON follows transport-query normalization.
+const normalize = (value, callerIds, root = true, options = {}, path = []) => {
   if (typeof value === 'bigint') return JSON.rawJSON(String(value));
   if (JSON.isRawJSON(value)) return value;
-  if (Array.isArray(value)) return value.map((item) => normalize(item, callerIds, false, options));
-  if (value && typeof value === 'object')
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .filter((key) => !(root && (CLOCKS.has(key) || (key === 'nonce' && value.action))))
-        .filter((key) => options.defaultBodyValues?.[key] !== value[key])
-        .filter((key) => callerIds.has(value[key]) || !options.generatedId?.(key, String(value[key])))
-        .filter((key) => !options.ignoreGeneratedBodyId?.(key, value[key], callerIds, options.bodyContext))
-        .filter(
-          (key) =>
-            !CLIENT_IDS.has(key) ||
-            callerIds.has(value[key]) ||
-            (options.generatedId && !options.generatedId(key, String(value[key]))),
-        )
-        .map((key) => [
-          key,
-          !callerIds.has(value[key]) && options.generatedBodyId?.(key, value[key])
-            ? '<generated>'
-            : normalize(value[key], callerIds, false, options),
-        ]),
-    );
+  if (Array.isArray(value)) return value.map((item) => normalize(item, callerIds, false, options, [...path, '*']));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
+    .filter((key) => options.defaultBodyValues?.[key] !== value[key])
+    .filter((key) => !options.ignoreGeneratedBodyId?.(key, value[key], callerIds, options.bodyContext))
+    .filter((key) => {
+      if (callerIds.has(value[key])) return true;
+      if (options.generatedId?.(key, JSON.isRawJSON(value[key]) ? value[key].rawJSON : String(value[key]))) return false;
+      if ((root || options.query || options.volatileBodyFields)
+        && (CLOCKS.has(key) || (CLIENT_IDS.has(key) && !options.generatedId))) return false;
+      if (root && options.hyperliquidExchange && key === 'nonce' && value.action) return false;
+      // `c` is a minted cloid only on newly placed Hyperliquid order wires.
+      // Cancel targets and unrelated fields named c remain exact.
+      return !(options.hyperliquidExchange && key === 'c' && typeof value[key] === 'string' && /^0x[0-9a-f]{32}$/i.test(value[key])
+        && ((options.hyperliquidAction === 'order' && path.join('.') === 'action.orders.*')
+          || (options.hyperliquidAction === 'batchModify' && path.join('.') === 'action.modifies.*.order')));
+    })
+    .map((key) => [key, !callerIds.has(value[key]) && options.generatedBodyId?.(key, value[key])
+      ? '<generated>' : normalize(value[key], callerIds, false, options, [...path, key])]));
   return value;
 };
 
-const canonicalParams = (params, callerIds, options = {}) =>
-  new URLSearchParams(
-    [...params]
-      .filter(([key]) => !URL_VOLATILE.has(key) && !options.volatileQueryFields?.includes(key))
-      .filter(([key, value]) => !CLIENT_IDS.has(key) || callerIds.has(value))
-      .filter(([key, value]) => callerIds.has(value) || !options.generatedQueryId?.(key, value))
-      .map(([key, value]) => {
-        if (CLIENT_IDS.has(key)) return [key, value];
-        if (!/^[\[{]/.test(value.trimStart())) return [key, value];
-        try {
-          return [key, JSON.stringify(normalize(parseJson(value), callerIds))];
-        } catch {
-          return [key, value];
-        }
-      })
-      .sort(([a, av], [b, bv]) => a.localeCompare(b) || av.localeCompare(bv)),
-  ).toString();
+const canonicalParams = (params, callerIds, options = {}) => new URLSearchParams([...params]
+  .filter(([key, value]) => callerIds.has(value) || (!URL_VOLATILE.has(key) && !options.volatileQueryFields?.includes(key)
+    && !options.generatedId?.(key, value) && !options.generatedQueryId?.(key, value) && (!CLIENT_IDS.has(key) || options.generatedId)))
+  .filter(([, value]) => !(value === '' && options.cacheBust))
+  .map(([key, value]) => {
+    if (CLIENT_IDS.has(key)) return [key, value];
+    if (!/^[\[{]/.test(value.trimStart())) return [key, value];
+    try { return [key, JSON.stringify(normalize(parseJson(value), callerIds, false, { ...options, query: true }))]; }
+    catch { return [key, value]; }
+  })
+  .sort(([a, av], [b, bv]) => a.localeCompare(b) || av.localeCompare(bv))).toString();
 
 export const canonicalUrl = (url, callerIds = new Set(), options = {}) => {
   const parsed = new URL(url);
-  return `${parsed.origin}${parsed.pathname}?${canonicalParams(parsed.searchParams, callerIds, options)}`;
+  return `${parsed.origin}${parsed.pathname}?${canonicalParams(parsed.searchParams, callerIds,
+    { ...options, cacheBust: options.cacheBustPaths?.includes(parsed.pathname) })}`;
 };
 
 export const requestKey = (method, url, body, callerIds = new Set(), options = {}) => {
+  method = method.toUpperCase();
   if (options.requestOptions) options = { ...options, ...options.requestOptions(method, new URL(url)) };
   body = options.wireBody?.(body, { method, url, callerIds }) ?? body;
   const prefix = `${method.toUpperCase()} ${canonicalUrl(options.requestUrl?.(url, method) ?? url, callerIds, options)}`;
@@ -139,21 +133,16 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
   } catch {
     if (typeof body === 'string' && body.includes('=')) {
       const form = new URLSearchParams(body);
-      if (!options.requestBody) return `${prefix} ${canonicalParams(form, callerIds, options)}`;
-      parsed = Object.fromEntries(form);
-    } else {
-      return `${prefix} ${body}`;
-    }
+      if (options.requestBody) parsed = Object.fromEntries(form);
+      else return `${prefix} ${canonicalParams(form, callerIds, options)}`;
+    } else return `${prefix} ${body}`;
   }
   parsed = options.requestBody?.(parsed, { method, url, callerIds }) ?? parsed;
-  return `${prefix} ${JSON.stringify(
-    normalize(
-      parsed,
-      callerIds,
-      true,
-      options.ignoreGeneratedBodyId ? { ...options, bodyContext: { method: method.toUpperCase(), url } } : options,
-    ),
-  )}`;
+  const route = new URL(url);
+  options = { ...options, hyperliquidAction: parsed?.action?.type, hyperliquidExchange: method.toUpperCase() === 'POST' && route.pathname === '/exchange'
+    && /(^|\.)hyperliquid(?:-testnet)?\.xyz$/.test(route.hostname) };
+  return `${prefix} ${JSON.stringify(normalize(parsed, callerIds, true, options.ignoreGeneratedBodyId
+    ? { ...options, bodyContext: { method: method.toUpperCase(), url } } : options))}`;
 };
 
 export const subscriptionMessage = (message) => {
@@ -242,7 +231,7 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     // the outbound identity retains API key and passphrase for comparison.
     if (method === 'login' && Array.isArray(message.args)) {
       message.args = message.args.map((arg) => {
-        const nested = typeof arg === 'string';
+        const nested = options.rust === 'apexomni' && typeof arg === 'string';
         const payload = nested ? parseJson(arg) : arg;
         const normalized = {
           ...payload,

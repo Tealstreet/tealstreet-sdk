@@ -68,20 +68,20 @@ const recording = {
         write({ type: 'open', url, socket });
         handlers.onOpen();
       },
-      onMessage: (text) => {
+      onMessage: (text, receivedAt) => {
         frames++;
         for (const symbol of venue.recordTickerSymbols?.(text) ?? []) tickerSymbols.add(symbol);
-        write({ type: 'ws', url, socket, text });
-        handlers.onMessage(text);
+        write({ type: 'ws', t: (receivedAt ?? Date.now()) - started, url, socket, text });
+        handlers.onMessage(text, receivedAt);
       },
-      onBinary: (bytes) => {
+      onBinary: (bytes, receivedAt) => {
         frames++;
-        write({ type: 'ws', url, socket, binary: Buffer.from(bytes).toString('base64') });
-        handlers.onBinary?.(bytes);
+        write({ type: 'ws', t: (receivedAt ?? Date.now()) - started, url, socket, binary: Buffer.from(bytes).toString('base64') });
+        handlers.onBinary?.(bytes, receivedAt);
       },
-      onClose: (code) => {
-        write({ type: 'close', url, socket, code });
-        handlers.onClose(code);
+      onClose: (code, receivedAt) => {
+        write({ type: 'close', t: (receivedAt ?? Date.now()) - started, url, socket, code });
+        handlers.onClose(code, receivedAt);
       },
     });
     return {

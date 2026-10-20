@@ -202,8 +202,20 @@ fn markets_follow_the_page_cursor() {
         "{}",
         second.url
     );
-    h.reply(second.id, 200, support::INSTRUMENTS);
-    assert_eq!(h.engine.store().markets().len(), 4);
+    let second_page = support::INSTRUMENTS
+        .replace("BTCUSDT", "SOLUSDT")
+        .replace("ETHUSDT", "DOGEUSDT");
+    h.reply(second.id, 200, &second_page);
+    assert_eq!(
+        h.engine
+            .store()
+            .markets()
+            .iter()
+            .map(|market| market.symbol.as_str())
+            .collect::<Vec<_>>(),
+        ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT"],
+        "adopting the first page preserves all rows in response order"
+    );
 }
 
 #[test]

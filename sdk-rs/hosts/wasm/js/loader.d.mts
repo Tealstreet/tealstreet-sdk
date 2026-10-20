@@ -1,4 +1,8 @@
 import type { WasmEngine } from './engine.mjs';
 
-/** Loads the runtime's generated artifact, built by `yarn rust:build-wasm`. */
-export function loadEngine(): Promise<{ WasmEngine: typeof WasmEngine }>;
+export interface EngineModule {
+  WasmEngine: typeof WasmEngine;
+  wasmMemoryBytes(): number;
+}
+/** Loads only the runtime's venue family, built by `yarn rust:build-wasm`. */
+export function loadEngine(venue: string): Promise<EngineModule>;

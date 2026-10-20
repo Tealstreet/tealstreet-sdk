@@ -34,6 +34,8 @@ const { values } = parseArgs({
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     runs: { type: 'string', default: '3' },
     'no-egress': { type: 'boolean', default: false },
+    delivery: { type: 'string', default: 'batch' },
+    cadence: { type: 'string', default: 'recorded' },
   },
 });
 const tapeBytes = readFileSync(values.tape);
@@ -47,7 +49,8 @@ const smokeResult = assertLiveSmokeComplete(tapeRecords);
 // rather than the public benchmark's default three symbols.
 if (smokeResult) values.books = smokeResult.symbol;
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
-mkdirSync(outDir, { recursive: true });
+mkdirSync('sdk-rs/harness/out', { recursive: true });
+mkdirSync(outDir);
 
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
@@ -65,6 +68,7 @@ const replay = (impl, run) => {
     '--out',
     out,
   );
+  args.push('--delivery', values.delivery, '--cadence', values.cadence);
   if (values['no-egress']) args.push('--no-egress');
   // TSX's compiler worker retains shared buffers independently of engine work.
   const result = spawnSync(process.execPath, args, {
@@ -814,8 +818,8 @@ for (let run = 0; run < runs; run++) {
     const output = results[impl][run];
     if (Boolean(output.account) !== isPrivate)
       differences.push(impl + ': account presence differs from tape classification');
-    // Invalid baselines fail on every run, including informational private metrics.
-    for (const error of memoryMetricErrors(output.metrics)) differences.push(`${impl}: ${error}; baseline is invalid`);
+    // Validate finite counters and arithmetic on every run, including private metrics.
+    for (const error of memoryMetricErrors(output.metrics, { allowNegativeRetained: isPrivate })) differences.push(`${impl}: ${error}; baseline is invalid`);
     if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
     for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
     for (const symbol of values.books.split(',').filter(Boolean)) {

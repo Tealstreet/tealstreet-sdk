@@ -8,7 +8,7 @@ import { createEngineObject, workersTransport, WorkersWebSocket } from './worker
 import { Frame } from './wire.mjs';
 
 const require = createRequire(import.meta.url);
-const loadEngine = async () => require('../pkg/node/safe_cex_wasm.js');
+const loadEngine = async () => require('../pkg/node/binance/safe_cex_wasm.js');
 
 const RESPONSES = {
   exchangeInfo: JSON.stringify({
@@ -78,7 +78,7 @@ globalThis.Response = class {
 globalThis.fetch = async (url, init = {}) => {
   if (init.headers?.Upgrade === 'websocket') {
     const socket = new FakeSocket();
-    upgrades.push({ url, init, socket });
+    upgrades.push({ url, init, socket, headers: init.headers });
     return { webSocket: socket };
   }
   const name = new URL(url).pathname.split('/').pop();
@@ -104,16 +104,49 @@ const until = async (check) => {
 test('the transport opens client sockets with an https upgrade', async () => {
   const events = [];
   workersTransport().connect('wss://fstream.binance.com/public/ws', {
+    headers: { 'ACCESS-SIGN': 'signature' },
     onOpen: () => events.push('open'),
     onMessage: (text) => events.push(text),
     onClose: (code) => events.push(code),
   });
   await until(() => upgrades.length > 0);
-  const { url, socket } = upgrades.at(-1);
+  const { url, socket, headers } = upgrades.at(-1);
   assert.equal(url, 'https://fstream.binance.com/public/ws');
+  assert.equal(headers['ACCESS-SIGN'], 'signature');
   socket.dispatch('message', { data: 'hello' });
   socket.close(1001);
   assert.deepEqual(events, ['open', 'hello', 1001]);
+});
+
+test('the Workers transport delivers pending binary data before a single remote close', async () => {
+  let release;
+  const ready = new Promise((resolve) => { release = resolve; });
+  const data = new class extends Blob {
+    async arrayBuffer() { await ready; return super.arrayBuffer(); }
+  }(['last fill']);
+  const events = [];
+  const before = upgrades.length;
+  workersTransport().connect('wss://fixture/market', {
+    onOpen() {},
+    onMessage: (text, now) => events.push([text, now]),
+    onClose: (code, now) => events.push(['close', code, now]),
+  });
+  await until(() => upgrades.length > before);
+  const socket = upgrades.at(-1).socket;
+  const originalNow = Date.now;
+  try {
+    Date.now = () => 17;
+    socket.dispatch('message', { data });
+    Date.now = () => 18;
+    socket.dispatch('message', { data: 'later text' });
+    Date.now = () => 19;
+    socket.dispatch('close', { code: 1000 });
+    socket.dispatch('error', {});
+  } finally { Date.now = originalNow; }
+  assert.deepEqual(events, []);
+  release();
+  await until(() => events.length >= 3);
+  assert.deepEqual(events, [['last fill', 17], ['later text', 18], ['close', 1000, 19]]);
 });
 
 test('the Durable Object runs an engine and streams frames to its clients', async () => {
@@ -141,6 +174,111 @@ test('the Durable Object runs an engine and streams frames to its clients', asyn
   assert.equal(object.host, undefined, 'the last client leaving stops the engine');
 });
 
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
+
+const idleModule = (constructed) => ({
+  WasmEngine: class {
+    constructor(venue) { constructed.push(venue); }
+    start() { return ''; }
+    command(json) { return JSON.stringify([{ op: 'done', command: JSON.parse(json).command, result: '"done"' }]); }
+    takeFrame() { return undefined; }
+    snapshotFrame() { return new Uint8Array(); }
+  },
+});
+
+const connectClient = async (object) => {
+  const response = await object.fetch({ headers: new Map([['Upgrade', 'websocket']]) });
+  return response.webSocket.peer;
+};
+
+test('concurrent starts share one load and reject a conflicting venue', async () => {
+  const loading = deferred();
+  const constructed = [];
+  const loaded = [];
+  const EngineObject = createEngineObject({ loadEngine: (venue) => { loaded.push(venue); return loading.promise; } });
+  const object = new EngineObject({ storage: { setAlarm: async () => {} } });
+  const first = await connectClient(object);
+  const second = await connectClient(object);
+  const start = object.receive(first, '{"op":"start","venue":"okx"}');
+  const same = object.receive(second, '{"op":"start","venue":"okx"}');
+  await assert.rejects(object.receive(second, '{"op":"start","venue":"bybit"}'), /different venue/);
+  assert.deepEqual(loaded, ['okx']);
+  loading.resolve(idleModule(constructed));
+  await Promise.all([start, same]);
+  assert.deepEqual(constructed, ['okx']);
+  assert.equal(object.timers.length, 2);
+  object.leave(first);
+  assert.ok(object.host, 'another active client keeps the engine');
+  object.leave(second);
+  assert.equal(object.host, undefined);
+  assert.equal(object.timers.length, 0);
+});
+
+test('leaving during load invalidates the attempt across a new connection', async () => {
+  const oldLoad = deferred();
+  const newLoad = deferred();
+  const constructed = [];
+  const EngineObject = createEngineObject({ loadEngine: (venue) => venue === 'okx' ? oldLoad.promise : newLoad.promise });
+  const object = new EngineObject({ storage: { setAlarm: async () => {} } });
+  const oldClient = await connectClient(object);
+  const oldStart = object.receive(oldClient, '{"op":"start","venue":"okx"}');
+  object.leave(oldClient);
+  const newClient = await connectClient(object);
+  const newStart = object.receive(newClient, '{"op":"start","venue":"bybit"}');
+  oldLoad.resolve(idleModule(constructed));
+  await oldStart;
+  assert.deepEqual(constructed, [], 'the abandoned account never constructs an engine');
+  assert.equal(object.host, undefined);
+  assert.equal(object.starting.venue, 'bybit', 'the stale load cannot clear its replacement');
+  newLoad.resolve(idleModule(constructed));
+  await newStart;
+  assert.deepEqual(constructed, ['bybit']);
+  object.leave(newClient);
+});
+
+test('a failed venue download can retry without dropping active clients', async () => {
+  const loading = deferred();
+  const constructed = [];
+  let attempts = 0;
+  const EngineObject = createEngineObject({ loadEngine: () => ++attempts === 1 ? loading.promise : Promise.resolve(idleModule(constructed)) });
+  const object = new EngineObject({ storage: { setAlarm: async () => {} } });
+  const client = await connectClient(object);
+  const start = object.receive(client, '{"op":"start","venue":"okx"}');
+  const command = object.receive(client, '{"op":"command","id":11,"command":{"op":"fetchCandles"}}');
+  loading.reject(new Error('download interrupted'));
+  await assert.rejects(start, /download interrupted/);
+  await command;
+  assert.deepEqual(JSON.parse(client.sent.at(-1)), { op: 'done', id: 11, error: 'download interrupted' });
+  assert.equal(object.starting, undefined);
+  assert.equal(object.host, undefined);
+  assert.equal(object.clients.size, 1);
+  await object.receive(client, '{"op":"start","venue":"okx"}');
+  assert.equal(attempts, 2);
+  assert.deepEqual(constructed, ['okx']);
+  object.leave(client);
+});
+
+test('commands await a pending start and report a missing engine explicitly', async () => {
+  const loading = deferred();
+  const EngineObject = createEngineObject({ loadEngine: () => loading.promise });
+  const object = new EngineObject({ storage: { setAlarm: async () => {} } });
+  const client = await connectClient(object);
+  await object.receive(client, '{"op":"command","id":7,"command":{"op":"fetchCandles"}}');
+  assert.deepEqual(JSON.parse(client.sent.pop()), { op: 'done', id: 7, error: 'the engine has not started' });
+  const start = object.receive(client, '{"op":"start","venue":"okx"}');
+  const command = object.receive(client, '{"op":"command","id":8,"command":{"op":"fetchCandles"}}');
+  assert.deepEqual(client.sent, []);
+  loading.resolve(idleModule([]));
+  await Promise.all([start, command]);
+  assert.deepEqual(JSON.parse(client.sent.at(-1)), { op: 'done', id: 8, result: 'done' });
+  object.leave(client);
+});
+
 test('Workers derives private upgrade capability from its transport', async () => {
   let options;
   const EngineObject = createEngineObject({ loadEngine: async () => ({ WasmEngine: class {
@@ -149,8 +287,9 @@ test('Workers derives private upgrade capability from its transport', async () =
   } }) });
   const object = new EngineObject({ storage: { setAlarm() {} } });
   const client = { send() {} };
+  object.clients.add(client);
   try {
-    await object.receive(client, JSON.stringify({ op: 'start', venue: 'weex', options: { key: 'replay-key' } }));
+    await object.receive(client, JSON.stringify({ op: 'start', venue: 'weex', options: { key: 'replay-key', privateWsHeaders: false } }));
     assert.equal(options.privateWsHeaders, true);
     assert.equal(options.key, 'replay-key');
   } finally { object.leave(client); }
@@ -173,6 +312,7 @@ test('Workers runs engine effects through its configured account transport', asy
   });
   const object = new EngineObject({ storage: { setAlarm() {} } });
   const client = { send() {} };
+  object.clients.add(client);
   try {
     await object.receive(client, JSON.stringify({ op: 'start', venue: 'okx', options: { tealstreetProxy: true } }));
     assert.deepEqual(destinations, [['wss://venue.test/shared', 'private']]);
@@ -187,9 +327,10 @@ test('Workers refuses requested routing without an account transport factory', a
   const object = new EngineObject({ storage: { setAlarm() {} } });
   for (const options of [{ tealstreetProxy: true }, { tealstreetTunnel: true }, { tealstreetWsRoute: true },
     { overrideProxyUrl: 'https://proxy.test' }, { bybitSiteId: 'BRA_BTL' }]) {
-    await object.receive({ send: (text) => messages.push(JSON.parse(text)) }, JSON.stringify({
-      op: 'start', venue: 'bingx', options,
-    }));
+    const client = { send: (text) => messages.push(JSON.parse(text)) };
+    object.clients.add(client);
+    await object.receive(client, JSON.stringify({ op: 'start', venue: 'bingx', options }));
+    object.leave(client);
   }
   assert.equal(object.host, undefined);
   assert.equal(messages[0].level, 'error');
@@ -259,6 +400,20 @@ test('a Workers raw socket failure reports one abnormal close despite a followin
   assert.deepEqual(events, ['error', 1006]);
 });
 
+test('credential deactivation reaches connected Workers clients once', async () => {
+  const received = [];
+  const EngineObject = createEngineObject({ loadEngine: async () => ({ WasmEngine: class {
+    start() { return '[{"op":"deactivate"}]'; }
+  } }) });
+  const object = new EngineObject({ storage: { setAlarm() {} } });
+  const client = { send: (text) => received.push(JSON.parse(text)) };
+  object.clients.add(client);
+  try {
+    await object.receive(client, JSON.stringify({ op: 'start', venue: 'orderly', options: {} }));
+    assert.deepEqual(received, [{ op: 'deactivate' }]);
+  } finally { object.leave(client); }
+});
+
 test('Workers applies factory protocol options after caller flags while retaining upgrade capability', async () => {
   for (const sessionProxy of [true, false]) {
     let received;
@@ -274,6 +429,7 @@ test('Workers applies factory protocol options after caller flags while retainin
     });
     const object = new EngineObject({ storage: { setAlarm() {} } });
     const client = { send() {} };
+    object.clients.add(client);
     try {
       await object.receive(client, JSON.stringify({ op: 'start', venue: 'grvt', options: {
         key: 'fixture-key', grvtSessionProxy: !sessionProxy, privateWsHeaders: false,

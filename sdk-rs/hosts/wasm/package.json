@@ -17,24 +17,233 @@
       "types": "./js/workers.d.mts",
       "default": "./js/workers.mjs"
     },
-    "./web": {
-      "types": "./js/engine.d.mts",
-      "default": "./pkg/web/safe_cex_wasm.js"
+    "./venues": {
+      "types": "./js/venues.d.mts",
+      "default": "./js/venues.mjs"
     },
-    "./node": {
+    "./web/binance": {
       "types": "./js/engine.d.mts",
-      "default": "./pkg/node/safe_cex_wasm.js"
+      "default": "./pkg/web/binance/safe_cex_wasm.js"
+    },
+    "./web/bybit": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/bybit/safe_cex_wasm.js"
+    },
+    "./web/okx": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/okx/safe_cex_wasm.js"
+    },
+    "./node/binance": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/binance/safe_cex_wasm.js"
+    },
+    "./node/bybit": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/bybit/safe_cex_wasm.js"
+    },
+    "./node/okx": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/okx/safe_cex_wasm.js"
+    },
+    "./web/cryptocom": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/cryptocom/safe_cex_wasm.js"
+    },
+    "./node/cryptocom": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/cryptocom/safe_cex_wasm.js"
+    },
+    "./web/weex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/weex/safe_cex_wasm.js"
+    },
+    "./node/weex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/weex/safe_cex_wasm.js"
+    },
+    "./web/bingx": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/bingx/safe_cex_wasm.js"
+    },
+    "./node/bingx": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/bingx/safe_cex_wasm.js"
+    },
+    "./web/mexc": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/mexc/safe_cex_wasm.js"
+    },
+    "./node/mexc": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/mexc/safe_cex_wasm.js"
+    },
+    "./web/blofin": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/blofin/safe_cex_wasm.js"
+    },
+    "./node/blofin": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/blofin/safe_cex_wasm.js"
+    },
+    "./web/backpack": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/backpack/safe_cex_wasm.js"
+    },
+    "./node/backpack": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/backpack/safe_cex_wasm.js"
+    },
+    "./web/bitget": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/bitget/safe_cex_wasm.js"
+    },
+    "./node/bitget": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/bitget/safe_cex_wasm.js"
+    },
+    "./web/hyperliquid": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/hyperliquid/safe_cex_wasm.js"
+    },
+    "./node/hyperliquid": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/hyperliquid/safe_cex_wasm.js"
+    },
+    "./web/bitrue": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/bitrue/safe_cex_wasm.js"
+    },
+    "./node/bitrue": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/bitrue/safe_cex_wasm.js"
+    },
+    "./web/lighter": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/lighter/safe_cex_wasm.js"
+    },
+    "./node/lighter": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/lighter/safe_cex_wasm.js"
+    },
+    "./web/woo": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/woo/safe_cex_wasm.js"
+    },
+    "./node/woo": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/woo/safe_cex_wasm.js"
     },
     "./engine": {
       "types": "./js/loader.d.mts",
       "browser": "./js/engine.web.mjs",
       "node": "./js/engine.node.mjs",
       "default": "./js/engine.web.mjs"
+    },
+    "./engine-cache": {
+      "types": "./js/engine-cache.d.mts",
+      "default": "./js/engine-cache.mjs"
+    },
+    "./web/orderly": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/orderly/safe_cex_wasm.js"
+    },
+    "./node/orderly": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/orderly/safe_cex_wasm.js"
+    },
+    "./web/asterdex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/asterdex/safe_cex_wasm.js"
+    },
+    "./node/asterdex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/asterdex/safe_cex_wasm.js"
+    },
+    "./web/kucoin": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/kucoin/safe_cex_wasm.js"
+    },
+    "./node/kucoin": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/kucoin/safe_cex_wasm.js"
+    },
+    "./web/kraken": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/kraken/safe_cex_wasm.js"
+    },
+    "./node/kraken": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/kraken/safe_cex_wasm.js"
+    },
+    "./web/apexomni": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/apexomni/safe_cex_wasm.js"
+    },
+    "./node/apexomni": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/apexomni/safe_cex_wasm.js"
+    },
+    "./web/phemex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/phemex/safe_cex_wasm.js"
+    },
+    "./node/phemex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/phemex/safe_cex_wasm.js"
+    },
+    "./web/paradex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/paradex/safe_cex_wasm.js"
+    },
+    "./node/paradex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/paradex/safe_cex_wasm.js"
+    },
+    "./web/coinbase": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/coinbase/safe_cex_wasm.js"
+    },
+    "./node/coinbase": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/coinbase/safe_cex_wasm.js"
+    },
+    "./web/polymarket": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/polymarket/safe_cex_wasm.js"
+    },
+    "./node/polymarket": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/polymarket/safe_cex_wasm.js"
+    },
+    "./web/grvt": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/grvt/safe_cex_wasm.js"
+    },
+    "./node/grvt": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/grvt/safe_cex_wasm.js"
+    },
+    "./web/breakoutprop": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/breakoutprop/safe_cex_wasm.js"
+    },
+    "./node/breakoutprop": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/breakoutprop/safe_cex_wasm.js"
+    },
+    "./web/txflow": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/txflow/safe_cex_wasm.js"
+    },
+    "./node/txflow": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/txflow/safe_cex_wasm.js"
     }
   },
   "scripts": {
     "build-wasm": "bash ../../harness/build.sh",
     "test": "node --test js/*.test.mjs",
+    "check-sizes": "node ../../harness/check-wasm-sizes.mjs",
     "test-host": "node --test js/host.test.mjs"
   },
   "dependencies": {

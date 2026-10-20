@@ -66,7 +66,7 @@ test('both replay implementations include setup allocations and their later rele
     const retained = metricsFor(before, memory);
     assert.equal(retained.retainedBytes, 1200);
     assert.deepEqual(memoryMetricErrors(retained), []);
-    assert(memoryMetricErrors(metricsFor(temporary, memory)).some((error) => error.startsWith('invalid heapRetainedBytes')));
+    assert(memoryMetricErrors(metricsFor(temporary, memory)).some((error) => error.startsWith('invalid retainedBytes')));
   }
 });
 
@@ -113,24 +113,24 @@ test('baseline and setup failures propagate before implementation loading', asyn
   }
 });
 
-test('negative buffer retention invalidates the before-import baseline', () => {
+test('buffer releases can accompany larger retained heap and WASM', () => {
   const metrics = metricsFor(
     { heapUsed: 30_271_936, arrayBuffers: 2_324_049 },
     { heapUsed: 33_195_616, arrayBuffers: 2_323_961 },
   );
   assert.equal(metrics.bufferRetainedBytes, -88);
   assert.equal(metrics.retainedBytes, 2_923_592);
-  assert(memoryMetricErrors(metrics).some((error) => error.startsWith('invalid bufferRetainedBytes (-88)')));
+  assert.deepEqual(memoryMetricErrors(metrics), []);
 });
 
-test('negative heap retention invalidates the before-import baseline', () => {
+test('heap shrinkage can accompany larger retained backing buffers and WASM', () => {
   const metrics = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 900, arrayBuffers: 500 }, 100);
   assert.equal(metrics.heapRetainedBytes, -100);
   assert.equal(metrics.retainedBytes, 300);
-  assert(memoryMetricErrors(metrics).some((error) => error.startsWith('invalid heapRetainedBytes (-100)')));
+  assert.deepEqual(memoryMetricErrors(metrics), []);
 });
 
-test('invalid absolute counters and retained components fail validation', () => {
+test('invalid absolute counters and nonfinite signed deltas fail validation', () => {
   const valid = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 300 }, 100);
   for (const field of [
     'heapBeforeBytes',
@@ -148,7 +148,7 @@ test('invalid absolute counters and retained components fail validation', () => 
     }
   }
   for (const field of ['heapRetainedBytes', 'bufferRetainedBytes']) {
-    for (const value of [-1, NaN, Infinity, -Infinity, null, undefined]) {
+    for (const value of [NaN, Infinity, -Infinity, null, undefined]) {
       assert(
         memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)),
         `${field}=${value}`,
@@ -287,6 +287,41 @@ test('settled samples use real time when replay replaces global timers', async (
   }
 });
 
+test('settling permits delayed cleanup beyond one second while retaining 100ms quiescence', async () => {
+  let time = 0;
+  const memory = await settledMemory({
+    collect() {},
+    pause: async () => { time += 10; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: time < 1500 ? time : 44, heapUsed: 1000 }),
+  });
+  assert.equal(time, 1600);
+  assert.equal(memory.arrayBuffers, 44);
+});
+
+test('elapsed quiescence also requires two equal comparisons after the first sample', async () => {
+  let time = 0;
+  await settledMemory({
+    collect() {},
+    pause: async () => { time += 110; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: 44, heapUsed: 1000 }),
+  });
+  assert.equal(time, 330);
+});
+
+
+test('private net releases remain informational while absolute counters and arithmetic stay checked', () => {
+  const released = metricsFor({ heapUsed: 3000, arrayBuffers: 1000 }, { heapUsed: 1000, arrayBuffers: 1000 });
+  assert.equal(released.retainedBytes, -2000);
+  assert(memoryMetricErrors(released).some((error) => error.startsWith('invalid retainedBytes (-2000)')));
+  assert.deepEqual(memoryMetricErrors(released, { allowNegativeRetained: true }), []);
+  assert(memoryMetricErrors({ ...released, heapUsedBytes: -1 }, { allowNegativeRetained: true })
+    .some((error) => error.startsWith('invalid heapUsedBytes (-1)')));
+  assert(memoryMetricErrors({ ...released, retainedBytes: -1999 }, { allowNegativeRetained: true })
+    .some((error) => error.startsWith('inconsistent retainedBytes (-1999')));
+});
+
 // A busy worker may need several full GCs to release cold loader storage.
 test('cold backing-store cleanup can exceed one second before the first quiet sample', async () => {
   let time = 0;
@@ -310,7 +345,7 @@ test('the extended startup deadline still rejects continuously changing backing 
     now: () => time,
     sample: () => ({ arrayBuffers: time, heapUsed: 1000 }),
   }), /memory did not settle/);
-  assert.equal(time, 5100);
+  assert.equal(time, 10100);
 });
 
 // Collection diagnostics include the entire awaited collector lifecycle.

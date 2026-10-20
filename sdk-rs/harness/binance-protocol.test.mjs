@@ -211,11 +211,13 @@ test('filled-status TS correction is pinned to explicit native input identity an
 
 test('Binance generated ACK IDs echo the matched signed query without weakening mutation identity', () => {
   const url='https://dapi.binance.com/dapi/v1/order';
-  const venue={requestKey:venueOf('binanceinverse').requestKey};
-  const tape=new Tape([{type:'http',method:'POST',url:url+'?symbol=BTCUSD_PERP&quantity=7',status:200,body:'{"orderId":123,"clientOrderId":"$newClientOrderId"}'}],venue);
-  assert.equal(tape.respond('POST',url+'?symbol=BTCUSD_PERP&quantity=8&newClientOrderId=generated').status,599);
-  assert.deepEqual(JSON.parse(tape.respond('POST',url+'?symbol=BTCUSD_PERP&quantity=7&newClientOrderId=generated').body),{orderId:123,clientOrderId:'generated'});
-  assert.equal(tape.respond('POST',url+'?symbol=BTCUSD_PERP&quantity=7&newClientOrderId=generated').status,599);
+  for (const body of [undefined, null, '']) {
+    const venue={requestKey:venueOf('binanceinverse').requestKey};
+    const tape=new Tape([{type:'http',method:'POST',url:url+'?symbol=BTCUSD_PERP&quantity=7',status:200,body:'{"orderId":123,"clientOrderId":"$newClientOrderId"}'}],venue);
+    assert.equal(tape.respond('POST',url+'?symbol=BTCUSD_PERP&quantity=8&newClientOrderId=generated',body).status,599);
+    assert.deepEqual(JSON.parse(tape.respond('POST',url+'?symbol=BTCUSD_PERP&quantity=7&newClientOrderId=generated',body).body),{orderId:123,clientOrderId:'generated'});
+    assert.equal(tape.respond('POST',url+'?symbol=BTCUSD_PERP&quantity=7&newClientOrderId=generated',body).status,599);
+  }
 });
 
 

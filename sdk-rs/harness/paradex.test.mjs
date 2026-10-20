@@ -128,3 +128,13 @@ test('Paradex account settings read the configured cache independently of effect
   exchange.leverageSettings.clear();
   assert.equal(venue.tsSettings(exchange, store)[0].leverage, 10);
 });
+
+test('Paradex request identity keeps unsafe numeric leaves distinct from objects and strings', () => {
+  const url = 'https://api.prod.paradex.trade/v1/orders/batch';
+  const key = (body) => requestKey('POST', url, body, new Set(), venue);
+  const numeric = '[{"id":9007199254740993,"size":"1"}]';
+  assert.notEqual(key(numeric), key('[{"id":{"rawJSON":"9007199254740993"},"size":"1"}]'));
+  assert.notEqual(key(numeric), key('[{"id":"9007199254740993","size":"1"}]'));
+  assert.notEqual(key(numeric), key('[{"id":9007199254740992,"size":"1"}]'));
+  assert.equal(key(numeric), key('[{"size":"1","id":9007199254740993,"signature":"ignored"}]'));
+});

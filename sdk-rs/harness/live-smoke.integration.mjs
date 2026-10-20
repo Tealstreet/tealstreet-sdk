@@ -93,7 +93,7 @@ function fakeBinance({ startupOrders = [], losePlacement = false, failAmend = fa
   return { transport, calls, orders };
 }
 
-const { WasmEngine } = await loadEngine();
+const { WasmEngine } = await loadEngine('binance');
 const profile = liveSmokeProfile('binance', 'testnet', {
   RUST_LIVE_SMOKE_BINANCE_KEY: 'fake-live-key-do-not-persist', RUST_LIVE_SMOKE_BINANCE_SECRET: 'fake-live-secret-do-not-persist',
 });

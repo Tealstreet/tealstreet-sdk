@@ -9,7 +9,7 @@ import { FrameApplier } from '../../packages/safe-cex/src/store/frameApplier.ts'
 import { DefaultStore } from '../../packages/safe-cex/src/store/store.base.ts';
 
 const require = createRequire(import.meta.url);
-const { WasmEngine } = require('../hosts/wasm/pkg/node/safe_cex_wasm.js');
+const { WasmEngine } = require('../hosts/wasm/pkg/node/breakoutprop/safe_cex_wasm.js');
 const encoder = new TextEncoder();
 const account = 'default:00002';
 const session = 'documented-replay-session';

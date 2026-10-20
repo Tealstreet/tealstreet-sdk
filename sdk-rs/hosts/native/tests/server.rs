@@ -567,7 +567,7 @@ async fn message_and_account_client_limits_close_connections_without_stopping_th
 async fn native_socket_transport_cancels_when_the_host_event_receiver_closes() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
-    let (events, mut inbox) = mpsc::unbounded_channel();
+    let (events, mut inbox) = Events::channel();
     let outgoing = safe_cex_native::NetworkTransport::new().connect(SocketId(1), url, events);
     let (stream, _) = tokio::time::timeout(DEADLINE, listener.accept())
         .await

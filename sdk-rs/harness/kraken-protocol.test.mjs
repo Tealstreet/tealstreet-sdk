@@ -88,3 +88,59 @@ test('full ticker correction derives live statistics and zero funding only from 
  fixKrakenOutput(output,records);
  assert.deepEqual(output.tickers,[{symbol:'PF_XBTUSD',fundingRate:0,percentage:20,volume:0,quoteVolume:0,openInterest:0,mark:99}]);
 });
+
+
+test('Kraken nested signed batch targets retain distinct unsafe numeric and string identities', () => {
+  const url = 'https://futures.kraken.com/derivatives/api/v3/batchorder';
+  const options = { requestBody: krakenRequestBody };
+  const key = (id) => requestKey('POST', url, new URLSearchParams({
+    json: `{"batchOrder":[{"order":"cancel","order_id":${id},"nested":{"target":${id}}}]}`,
+  }).toString(), new Set(), options);
+  const first = key('9007199254740992');
+  const second = key('9007199254740993');
+  assert.notEqual(first, second, 'different encoded native numeric targets must not round together');
+  assert.match(second, /"order_id":9007199254740993/);
+  assert.match(second, /"target":9007199254740993/);
+  assert.notEqual(second, key('"9007199254740993"'), 'numeric and string targets remain different');
+  assert.notEqual(key('"001"'), key('"1"'), 'string identity is never coerced');
+});
+
+test('Kraken body normalization preserves raw JSON numbers and explicit caller IDs', () => {
+  const number = JSON.rawJSON('9007199254740993');
+  const callerIds = new Set(['ts_caller']);
+  const body = { batchOrder: [{ order_id: number, nested: [number], cliOrdId: 'ts_caller' },
+    { cliOrdId: 'ts_generated' }, { cliOrdId: 'external-caller' }] };
+  const normalized = krakenRequestBody(body, { callerIds });
+  assert.equal(normalized.batchOrder[0].order_id, number);
+  assert.equal(normalized.batchOrder[0].nested[0], number);
+  assert.equal(krakenRequestBody(number), number);
+  assert.equal(normalized.batchOrder[0].cliOrdId, 'ts_caller');
+  assert.equal(normalized.batchOrder[1].cliOrdId, '<generated>');
+  assert.equal(normalized.batchOrder[2].cliOrdId, 'external-caller');
+  assert.equal(JSON.stringify(normalized), '{"batchOrder":[{"order_id":9007199254740993,"nested":[9007199254740993],"cliOrdId":"ts_caller"},{"cliOrdId":"<generated>"},{"cliOrdId":"external-caller"}]}');
+});
+
+
+test('Kraken unsafe decimal and exponent targets stay lossless without changing safe numbers', () => {
+  const url = 'https://futures.kraken.com/derivatives/api/v3/batchorder';
+  const key = (id) => requestKey('POST', url, new URLSearchParams({
+    json: `{"batchOrder":[{"order_id":${id},"nested":[${id}]}]}`,
+  }).toString(), new Set(), { requestBody: krakenRequestBody });
+  for (const [first, second] of [
+    ['9007199254740992.0', '9007199254740993.0'],
+    ['9007199254740992e0', '9007199254740993e0'],
+    ['9.007199254740992e15', '9.007199254740993e15'],
+  ]) {
+    assert.notEqual(key(first), key(second), `${first} and ${second} are different native targets`);
+    assert(key(second).includes(`"order_id":${second}`));
+    assert(key(second).includes(`"nested":[${second}]`));
+    for (const literal of [first, second]) {
+      const raw = JSON.rawJSON(literal);
+      const normalized = krakenRequestBody({ order_id: raw, nested: [raw] });
+      assert.equal(normalized.order_id, raw);
+      assert.equal(normalized.nested[0], raw);
+    }
+  }
+  assert.deepEqual(krakenRequestBody({ json: '{"integer":42,"decimal":1.25,"exponent":1e3}' }),
+    { integer: 42, decimal: 1.25, exponent: 1000 });
+});

@@ -1,8 +1,69 @@
+import type { VenueFamily } from '@tealstreet/safe-cex-wasm/venues';
 import type { WasmEngineModule } from './rust.exchange';
 
-/** The wasm engine for browsers and Workers; fetches its module once. */
-export const loadWebEngine = async (): Promise<WasmEngineModule> => {
-  const engine = await import('@tealstreet/safe-cex-wasm/web');
-  await engine.default();
-  return engine;
+import { initializeWebEngine } from '@tealstreet/safe-cex-wasm/engine-cache';
+import { venueFamily } from '@tealstreet/safe-cex-wasm/venues';
+
+// Literal imports keep each venue in its own browser chunk.
+const importEngine = (family: VenueFamily) => {
+  switch (family) {
+    case 'txflow':
+      return import('@tealstreet/safe-cex-wasm/web/txflow');
+    case 'coinbase':
+      return import('@tealstreet/safe-cex-wasm/web/coinbase');
+    case 'polymarket':
+      return import('@tealstreet/safe-cex-wasm/web/polymarket');
+    case 'grvt':
+      return import('@tealstreet/safe-cex-wasm/web/grvt');
+    case 'breakoutprop':
+      return import('@tealstreet/safe-cex-wasm/web/breakoutprop');
+    case 'phemex':
+      return import('@tealstreet/safe-cex-wasm/web/phemex');
+    case 'paradex':
+      return import('@tealstreet/safe-cex-wasm/web/paradex');
+    case 'apexomni':
+      return import('@tealstreet/safe-cex-wasm/web/apexomni');
+    case 'kraken':
+      return import('@tealstreet/safe-cex-wasm/web/kraken');
+    case 'asterdex':
+      return import('@tealstreet/safe-cex-wasm/web/asterdex');
+    case 'kucoin':
+      return import('@tealstreet/safe-cex-wasm/web/kucoin');
+    case 'orderly':
+      return import('@tealstreet/safe-cex-wasm/web/orderly');
+    case 'woo':
+      return import('@tealstreet/safe-cex-wasm/web/woo');
+    case 'lighter':
+      return import('@tealstreet/safe-cex-wasm/web/lighter');
+    case 'bitrue':
+      return import('@tealstreet/safe-cex-wasm/web/bitrue');
+    case 'backpack':
+      return import('@tealstreet/safe-cex-wasm/web/backpack');
+    case 'binance':
+      return import('@tealstreet/safe-cex-wasm/web/binance');
+    case 'bingx':
+      return import('@tealstreet/safe-cex-wasm/web/bingx');
+    case 'bitget':
+      return import('@tealstreet/safe-cex-wasm/web/bitget');
+    case 'blofin':
+      return import('@tealstreet/safe-cex-wasm/web/blofin');
+    case 'bybit':
+      return import('@tealstreet/safe-cex-wasm/web/bybit');
+    case 'cryptocom':
+      return import('@tealstreet/safe-cex-wasm/web/cryptocom');
+    case 'hyperliquid':
+      return import('@tealstreet/safe-cex-wasm/web/hyperliquid');
+    case 'mexc':
+      return import('@tealstreet/safe-cex-wasm/web/mexc');
+    case 'okx':
+      return import('@tealstreet/safe-cex-wasm/web/okx');
+    case 'weex':
+      return import('@tealstreet/safe-cex-wasm/web/weex');
+  }
+};
+
+/** Loads only this venue's engine, shared by accounts and aliases in this realm. */
+export const loadWebEngine = (venue: string): Promise<WasmEngineModule> => {
+  const family = venueFamily(venue);
+  return initializeWebEngine(family, () => importEngine(family));
 };

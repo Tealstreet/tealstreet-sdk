@@ -62,9 +62,9 @@ const options = (transport?: TransportProvider, extra: Partial<ExchangeOptions> 
 afterEach(() => {
   setDefaultTransport(directTransport);
   setRustEngineTransport(nativeTransport);
-  setWasmEngineLoader(async () => {
+  setWasmEngineLoader(async (venue) => {
     const { loadEngine } = await import('@tealstreet/safe-cex-wasm/engine');
-    return loadEngine();
+    return loadEngine(venue);
   });
 });
 
@@ -147,6 +147,7 @@ describe('Orderly Rust transport boundary', () => {
       snapshotFrame: () => new Uint8Array(),
       wsOpen: noActions,
       wsMessage: noActions,
+      wsMessages: noActions,
       wsClose: noActions,
       httpStart: noActions,
       httpChunk: noActions,

@@ -24,7 +24,7 @@ export interface Transport {
   now(): number;
   connect(
     url: string,
-    handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
+    handlers: { binary?: boolean; onBinary?(data: Uint8Array, receivedAt?: number): void; context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string, receivedAt?: number): void; onClose(code?: number, receivedAt?: number): void },
   ): Socket;
   request(request: {
     method: string;
@@ -63,6 +63,9 @@ export interface WasmEngineLike {
   /** Optional UTF-8 entry; invalid bytes are ignored without changing engine state. */
   wsMessageBytes?(socket: number, bytes: Uint8Array, now: number): string | undefined;
   wsBinary?(socket: number, data: Uint8Array, now: number): string;
+  wsMessages(batch: Uint8Array): string;
+  /** Mixed 20-byte records: socket u32, length u32, arrival f64, kind u32, payload. */
+  wsEvents?(batch: Uint8Array): string;
   wsClose(socket: number, code: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;
   httpChunk(request: number, data: Uint8Array, now: number): string;
@@ -73,20 +76,25 @@ export interface WasmEngineLike {
 
 export class EngineHost {
   accountId(): string | undefined;
-  constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers);
+  constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers, options?: { batchMessages?: boolean });
   start(): void;
   /** Resolves with the command's result for commands that report one. */
   command(command: { op: string; [field: string]: unknown }): Promise<unknown>;
   /** With `marketOnly`, only books, candles and fills. */
   flush(marketOnly?: boolean): void;
   snapshot(): ArrayBuffer;
+  drainMessages(): void;
   dispose(): void;
 }
 
 export function nativeTransport(): Transport;
 
 /** Ordered text and gzip/deflate binary WebSocket message decoding. */
-export function socketMessages(onMessage: (text: string) => void, onError: (error: unknown) => void): (data: string | Blob | ArrayBuffer | ArrayBufferView) => void;
-
-/** Preserve binary application frames when explicitly requested by the venue. */
-export function socketMessages(onMessage: (data: string | Uint8Array) => void, onError: (error: unknown) => void, binary: boolean | undefined): (data: string | Blob | ArrayBuffer | ArrayBufferView) => void;
+export interface SocketMessages {
+  (data: string | Blob | ArrayBuffer | ArrayBufferView, receivedAt?: number): void | Promise<void>;
+  close(code?: number, receivedAt?: number): void | Promise<void>;
+  cancel(): void;
+}
+export function socketMessages(onMessage: (text: string, receivedAt?: number) => void, onError: (error: unknown, receivedAt?: number) => void, onClose?: (code?: number, receivedAt?: number) => void): SocketMessages;
+export function socketMessages(onMessage: (data: string | Uint8Array, receivedAt?: number) => void, onError: (error: unknown, receivedAt?: number) => void, onClose: ((code?: number, receivedAt?: number) => void) | undefined, binary: boolean | undefined): SocketMessages;
+export function socketMessages(onMessage: (data: string | Uint8Array, receivedAt?: number) => void, onError: (error: unknown, receivedAt?: number) => void, binary: boolean): SocketMessages;

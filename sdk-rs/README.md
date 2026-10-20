@@ -28,6 +28,20 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 
 CI runs all of these (`.github/workflows/rust.yml`).
 
+From the repository root, `corepack yarn rust:build-wasm` builds separate browser/Workers
+and Node packages for every registered venue family. Use
+`corepack yarn rust:build-wasm --venue hyperliquid` to build only that family.
+Each package lives under `hosts/wasm/pkg/{web,node}/<family>/`; its constructor
+accepts only that family's venue names. Browser, Node and Workers loaders select
+by venue, and aliases share their family's module. The default Cargo features
+retain all registered venues for workspace checks. CI builds isolated modules
+and enforces each fixed budget from `harness/wasm-budgets.json`.
+
+The default `@tealstreet/safe-cex-wasm/engine` loader selects the same family
+packages as the explicit SDK loaders. Browser entry points share initialization
+by family so concurrent accounts and aliases keep one live WASM instance;
+failed initialization may retry. Node entry points share Node's module cache.
+
 ## Account transport routing
 
 Venues emit real URLs and logical socket roles; the core never chooses a proxy.
@@ -47,12 +61,14 @@ a context token callback to `NetworkTransport::with_routing`; see
 into the native host. Secondary signing keys remain unsupported and fail before
 engine startup, so the host cannot silently bypass their distinct read egress.
 
-From the repository root, `corepack yarn rust:build-wasm` builds the combined
-host. Use `corepack yarn rust:build-wasm --venue hyperliquid` (or `grvt` / `bitget` / `backpack` / `blofin` / `mexc` / `bingx` / `binance` / `bybit` / `cryptocom` / `okx` / `weex`) to
-build a single-venue browser/Workers bundle. Each build replaces the bindings
-under `hosts/wasm/pkg/`; its constructor accepts only the compiled venues.
-The default Cargo features retain all registered venues. CI replays each single-venue
-bundle and applies the existing 1.2 MB budget to each one separately.
+From the repository root, `corepack yarn rust:build-wasm` builds a separate
+browser/Workers and Node package for each venue family. Use
+`corepack yarn rust:build-wasm --venue hyperliquid` to build one family.
+Bindings live under `hosts/wasm/pkg/{web,node}/<family>/`; aliases such as
+`coinbasespot` share their family's package. SDK and Workers loaders select
+the family before loading WASM. Cargo's default features retain all venues
+for workspace checks; release packages use one `venue-<family>` feature.
+CI checks each family against `harness/wasm-budgets.json`.
 ## Replay tapes
 
 From the repository root, `corepack yarn rust:test-harness` checks the tape
@@ -66,9 +82,16 @@ including reconnects. This distinguishes MEXC's public and private sockets on
 the same URL. HTTP records may include `requestBody`: object keys are compared
 canonically, preserving large IDs and ignoring generated `externalOid` only.
 Every mutation consumes a recorded response; only reads may reuse their last
-snapshot. Public replay advances timers by tape timestamps; private replay is
-paced from the epoch after startup. Trimming keeps every HTTP anchor inside the
+snapshot. MEXC, Bitrue and Orderly public replay advance virtual timers by timestamp groups;
+other venues preserve recorded message bursts. Private replay is paced after
+startup, with the signing epoch continuous through startup. Trimming keeps every HTTP anchor inside the
 selected time window so later depth resynchronizations remain reproducible.
+
+WebSocket batches preserve socket IDs and individual arrival times. JS partitions
+at roughly 64 KiB (oversized messages alone), retains at most 16 KiB scratch, and
+drains before commands, HTTP, timers, closes and snapshots. Native drains ready
+bursts without copying the message text or binary payload. Optional `rust:profile` diagnostics are
+separate from the uninstrumented public gate.
 
 ## Phemex perpetuals
 

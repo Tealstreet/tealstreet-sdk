@@ -61,7 +61,7 @@ const verifyRequest = ({ method, url, body, headers }) => {
       ['timestamp', 'market', 'side', 'orderType', 'size', 'price', ...(amend ? ['id'] : [])], message, testnet));
   });
 };
-const requestBody = (value) => Array.isArray(value) ? value.map(requestBody) : value && typeof value === 'object'
+const requestBody = (value) => JSON.isRawJSON(value) ? value : Array.isArray(value) ? value.map(requestBody) : value && typeof value === 'object'
   ? Object.fromEntries(Object.entries(value).filter(([key]) => !['signature', 'signature_timestamp'].includes(key)).map(([key, item]) => [key, requestBody(item)])) : value;
 const socketMessage = (message) => {
   if (['ping', 'pong'].includes(message?.type)) return;

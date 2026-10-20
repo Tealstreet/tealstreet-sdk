@@ -1,29 +1,42 @@
 #!/usr/bin/env bash
-# Build the release wasm engine with bindings for browsers and Workers (web)
-# and for Node (the harness and tests). --venue selects one venue for size gates.
+# Build one browser/Workers and Node package per venue family; --venue selects one.
 set -euo pipefail
-build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown)
-if [[ $# -gt 0 ]]; then
-  if [[ $# -ne 2 || $1 != --venue ]]; then
-    echo "Usage: $0 [--venue breakoutprop|asterdex|binance|kucoin|bybit|hyperliquid|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|orderly|paradex|coinbase|polymarket]" >&2
-    exit 2
-  fi
-  case "$2" in
-    breakoutprop|asterdex|binance|kucoin|bybit|hyperliquid|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|paradex|polymarket) build_args+=(--no-default-features --features "$2") ;;
-    coinbase|coinbasespot) build_args+=(--no-default-features --features coinbase) ;;
-    orderly|tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) build_args+=(--no-default-features --features orderly) ;;
-    *) echo "Unsupported venue: $2 (expected breakoutprop, asterdex, binance, kucoin, bybit, hyperliquid, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, phemex, woo, lighter, apexomni, kraken, paradex, coinbase, orderly or polymarket)" >&2; exit 2 ;;
-  esac
-fi
 cd "$(dirname "$0")/.."
 # macOS strips DYLD_* from inherited environments; rust-lld needs the toolchain's libLLVM.
 if [[ $(uname) == Darwin ]]; then
   export DYLD_LIBRARY_PATH="$(rustc --print sysroot)/lib"
 fi
-cargo build "${build_args[@]}"
-for target in web nodejs; do
-  wasm-bindgen --remove-name-section --remove-producers-section --target "$target" --out-dir "hosts/wasm/pkg/${target/nodejs/node}" \
-    target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
+# Feature names are the build manifest: registering another venue adds its build.
+families=()
+while IFS= read -r family; do families+=("$family"); done < <(sed -n 's/^venue-\([a-z0-9-]*\) = .*/\1/p' hosts/wasm/Cargo.toml)
+if [[ $# -gt 0 ]]; then
+  if [[ $# -ne 2 || $1 != --venue ]]; then
+    echo "Usage: $0 [--venue FAMILY]" >&2
+    exit 2
+  fi
+  case "$2" in
+    coinbasespot) set -- --venue coinbase ;;
+    tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) set -- --venue orderly ;;
+  esac
+  selected=""
+  for family in "${families[@]}"; do
+    if [[ "$family" == "$2" ]]; then selected="$family"; break; fi
+  done
+  if [[ -z "$selected" ]]; then
+    echo "Unsupported venue family: $2" >&2
+    exit 2
+  fi
+  families=("$selected")
+fi
+for family in "${families[@]}"; do
+  cargo build --locked --release -p safe-cex-wasm --target wasm32-unknown-unknown \
+    --no-default-features --features "venue-$family"
+  for target in web nodejs; do
+    out="hosts/wasm/pkg/${target/nodejs/node}/$family"
+    wasm-bindgen --remove-name-section --remove-producers-section --target "$target" --out-dir "$out" \
+      target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
+    if [[ "$target" == nodejs ]]; then
+      echo '{"type":"commonjs"}' > "$out/package.json"
+    fi
+  done
 done
-# The Node bindings are CommonJS inside an ESM package.
-echo '{"type":"commonjs"}' > hosts/wasm/pkg/node/package.json

@@ -115,26 +115,32 @@ export const workersTransport = () => ({
   now: () => Date.now(),
   connect(url, { headers = {}, binary = false, onOpen, onMessage, onBinary, onClose }) {
     const socket = new WorkersWebSocket(url, [], { headers });
-    let closed = false;
-    const finish = (code) => {
-      if (closed) return;
-      closed = true;
-      onClose(code);
+    let localClose = false;
+    let closing = false;
+    let reported = false;
+    const reportClose = (code, receivedAt) => {
+      if (!reported) { reported = true; onClose(code, receivedAt); }
     };
-    const receive = socketMessages(
-      (data) => { if (!closed) { if (typeof data === 'string') onMessage(data); else onBinary?.(data); } },
-      () => { if (!closed) { finish(1007); socket.close(); } },
-      binary,
-    );
-    socket.onopen = () => { if (!closed) onOpen(); };
-    socket.onmessage = (event) => { if (!closed) receive(event.data); };
-    socket.onclose = (event) => finish(event.code);
+    const receive = socketMessages((data, receivedAt) => {
+      if (typeof data === 'string') onMessage(data, receivedAt);
+      else onBinary?.(data, receivedAt);
+    }, (_error, receivedAt) => {
+      closing = true;
+      receive.close(1007, receivedAt);
+      socket.close();
+    }, reportClose, binary);
+    const close = (code, receivedAt) => {
+      closing = true;
+      if (localClose) reportClose(code, receivedAt);
+      else receive.close(code, receivedAt);
+    };
+    socket.onopen = () => { if (!closing) onOpen(); };
+    socket.onmessage = (event) => receive(event.data, Date.now());
+    socket.onclose = (event) => close(event.code, Date.now());
+    socket.onerror = () => close(1006, Date.now());
     return {
-      send: (text) => { if (!closed) socket.send(text); },
-      close: () => {
-        closed = true;
-        socket.close();
-      },
+      send: (text) => { if (!closing) socket.send(text); },
+      close: () => { localClose = true; closing = true; receive.cancel(); socket.close(); },
     };
   },
   async request({ method, url, headers, body, signal, route, timeoutMs }) {
@@ -169,8 +175,8 @@ async function* chunks(stream) {
 const KEEPALIVE_MS = 30_000;
 
 /**
- * A Durable Object class running one engine. `loadEngine` resolves the
- * wasm-bindgen module (`{ WasmEngine }`) the deployment bundles; `flush`
+ * A Durable Object class running one engine. `loadEngine(venue)` resolves the
+ * venue-specific wasm-bindgen module (`{ WasmEngine }`) the deployment bundles; `flush`
  * gives the store and book cadences in ms. Account-backed deployments supply
  * `createTransport(venue, options, raw)` from safe-cex's createEngineTransport;
  * the default is an explicitly direct engine host. The returned transport
@@ -183,6 +189,8 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
       this.state = state;
       this.clients = new Set();
       this.host = undefined;
+      this.venue = undefined;
+      this.starting = undefined;
       this.timers = [];
     }
 
@@ -193,7 +201,13 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
       const [client, server] = Object.values(new WebSocketPair());
       server.accept();
       this.clients.add(server);
-      server.addEventListener('message', (event) => this.receive(server, event.data));
+      server.addEventListener('message', (event) => {
+        this.receive(server, event.data).catch((error) => {
+          if (this.clients.has(server)) {
+            server.send(JSON.stringify({ op: 'log', level: 'error', message: String(error?.message ?? error) }));
+          }
+        });
+      });
       server.addEventListener('close', () => this.leave(server));
       if (this.host) server.send(this.host.snapshot());
       await this.state.storage.setAlarm(Date.now() + KEEPALIVE_MS);
@@ -203,34 +217,69 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
     async receive(client, data) {
       if (typeof data !== 'string') return;
       const message = JSON.parse(data);
-      if (message.op === 'start' && !this.host) {
-        const { WasmEngine } = await loadEngine();
-        if (!createTransport && (message.options?.tealstreetProxy || message.options?.tealstreetTunnel
-          || message.options?.tealstreetWsRoute || message.options?.overrideProxyUrl || message.options?.bybitSiteId)) {
-          client.send(JSON.stringify({ op: 'log', level: 'error', message: 'Engine routing requires a configured createTransport factory' }));
-          return;
+      if (message.op === 'start') {
+        if (this.host || this.starting) {
+          if (message.venue !== (this.venue ?? this.starting.venue)) {
+            throw new Error('this account already selected a different venue');
+          }
+          return this.starting?.promise;
         }
-        const raw = workersTransport();
-        const transport = createTransport ? createTransport(message.venue, message.options, raw) : raw;
-        this.host = new EngineHost(
-          new WasmEngine(message.venue, JSON.stringify({ ...message.options, ...transport.engineOptions, privateWsHeaders: transport.webSocketHeaders })),
-          transport,
-          {
-            onFrame: (frame) => this.broadcast(frame),
-            onDeactivate: () => this.broadcast(JSON.stringify({ op: 'deactivate' })),
-            onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),
-          },
-        );
-        this.host.start();
-        this.timers.push(setInterval(() => this.host?.flush(), flush.store));
-        if (flush.books < flush.store) this.timers.push(setInterval(() => this.host?.flush(true), flush.books));
+        const starting = { venue: message.venue };
+        this.starting = starting;
+        starting.promise = (async () => {
+          const { WasmEngine } = await loadEngine(message.venue);
+          // Leaving invalidates this attempt even if another client reconnects
+          // before its module finishes loading.
+          if (this.starting !== starting || this.clients.size === 0) return;
+          if (!createTransport && (message.options?.tealstreetProxy || message.options?.tealstreetTunnel
+            || message.options?.tealstreetWsRoute || message.options?.overrideProxyUrl || message.options?.bybitSiteId)) {
+            client.send(JSON.stringify({ op: 'log', level: 'error', message: 'Engine routing requires a configured createTransport factory' }));
+            return;
+          }
+          const raw = workersTransport();
+          const transport = createTransport ? createTransport(message.venue, message.options, raw) : raw;
+          const host = new EngineHost(
+            new WasmEngine(message.venue, JSON.stringify({ ...message.options, ...transport.engineOptions, privateWsHeaders: transport.webSocketHeaders })),
+            transport,
+            {
+              onFrame: (frame) => this.broadcast(frame),
+              onDeactivate: () => this.broadcast(JSON.stringify({ op: 'deactivate' })),
+              onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),
+            },
+          );
+          this.host = host;
+          this.venue = message.venue;
+          try {
+            host.start();
+          } catch (error) {
+            host.dispose();
+            this.host = undefined;
+            this.venue = undefined;
+            throw error;
+          }
+          this.timers.push(setInterval(() => this.host?.flush(), flush.store));
+          if (flush.books < flush.store) this.timers.push(setInterval(() => this.host?.flush(true), flush.books));
+        })();
+        try {
+          await starting.promise;
+        } finally {
+          if (this.starting === starting) this.starting = undefined;
+        }
+
         return;
       }
-      if (message.op === 'command' && this.host) {
-        this.host.command(message.command).then(
-          (result) => client.send(JSON.stringify({ op: 'done', id: message.id, result })),
-          (error) => client.send(JSON.stringify({ op: 'done', id: message.id, error: String(error?.message ?? error) })),
-        );
+      if (message.op === 'command') {
+        try {
+          if (!this.host && this.starting) await this.starting.promise;
+          if (!this.clients.has(client)) return;
+          if (!this.host) throw new Error('the engine has not started');
+          const result = await this.host.command(message.command);
+          if (this.clients.has(client)) client.send(JSON.stringify({ op: 'done', id: message.id, result }));
+        } catch (error) {
+          if (this.clients.has(client)) {
+            client.send(JSON.stringify({ op: 'done', id: message.id, error: String(error?.message ?? error) }));
+          }
+        }
       }
     }
 
@@ -246,6 +295,8 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
       this.timers = [];
       this.host?.dispose();
       this.host = undefined;
+      this.venue = undefined;
+      this.starting = undefined;
     }
 
     async alarm() {

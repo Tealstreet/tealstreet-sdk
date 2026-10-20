@@ -154,3 +154,52 @@ test('ApeX server ping without args requires one fresh decimal timestamp string'
   a.received(url, '{"op":"ping"}'); a.sent(url, JSON.stringify({ op: 'pong', args: [String(Date.now())] }));
   assert.deepEqual(a.errors(), []);
 });
+
+
+test('ApeX wire JSON cannot collapse adjacent unsafe numeric order identities in any numeric spelling', async () => {
+  const { requestKey } = await import('./requests.mjs');
+  const url = 'https://omni.apex.exchange/api/v3/delete-order';
+  const options = { wireBody: apexWireBody };
+  const key = (literal) => requestKey('POST', url, `{"id":${literal},"clientId":"caller-exact-01"}`, new Set(['caller-exact-01']), options);
+  for (const [first, second] of [
+    ['9007199254740992', '9007199254740993'],
+    ['9007199254740992.0', '9007199254740993.0'],
+    ['9007199254740992e0', '9007199254740993e0'],
+    ['9.007199254740992e15', '9.007199254740993e15'],
+  ]) {
+    assert.notEqual(key(first), key(second), `${first} and ${second} are distinct wire identities`);
+    assert.equal(apexWireBody(`{"id":${second}}`).id, second);
+  }
+});
+
+test('ApeX wire fields retain raw JSON identity, exact caller strings and ordinary number serialization', () => {
+  for (const literal of ['9007199254740993', '9007199254740993.0', '9007199254740993e0']) {
+    const raw = JSON.rawJSON(literal);
+    const body = { id: raw, clientId: 'apexomni-caller', size: 42, price: 1.25, exponent: 1e3 };
+    assert.deepEqual(apexWireBody(body), { id: literal, clientId: 'apexomni-caller', size: '42', price: '1.25', exponent: '1000' });
+    assert.equal(body.id, raw, 'normalization never mutates the input raw node');
+  }
+});
+
+test('replay request validation receives the exact recorded caller-ID set and keeps failures persistent', async () => {
+  const { Tape } = await import('./tape.mjs');
+  const url = 'https://omni.apex.exchange/api/v3/user';
+  const records = [
+    { type: 'http', method: 'GET', url, status: 200, body: '{}' },
+    { type: 'command', op: 'placeOrders', orders: [{ clientOrderId: 'apexomni-caller' }] },
+  ];
+  let valid = true;
+  let captured;
+  const tape = new Tape(records, { validateRequest({ callerIds }) {
+    captured = callerIds;
+    assert(callerIds.has('apexomni-caller'));
+    return valid;
+  } }, true);
+  assert.equal(tape.respond('GET', url).status, 200);
+  assert.equal(captured, tape.callerIds);
+  tape.assertWritesConsumed();
+  valid = false;
+  assert.throws(() => tape.respond('GET', url), /invalid replay request validation/);
+  assert.equal(tape.invalidSignatures, 1);
+  assert.throws(() => tape.assertWritesConsumed(), /invalid replay signature/);
+});

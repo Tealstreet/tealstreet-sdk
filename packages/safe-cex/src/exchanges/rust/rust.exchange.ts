@@ -25,6 +25,7 @@ import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 import bs58 from 'bs58';
 
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import { venueFamily } from '@tealstreet/safe-cex-wasm/venues';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
@@ -191,19 +192,23 @@ export type WasmEngineModule = {
  * Workers, the Node build on servers and in tests. Registered once by the
  * host, like the transport.
  */
-let defaultWasmInitialization: Promise<WasmEngineModule> | undefined;
-const defaultWasmLoader = (): Promise<WasmEngineModule> =>
-  (defaultWasmInitialization ??= (async () => {
-    // wasm-bindgen initialization replaces module-wide memory, including the
-    // pointers held by existing accounts. Share pending and completed startup.
-    const { loadEngine } = await import('@tealstreet/safe-cex-wasm/engine');
-    return loadEngine();
-  })().catch((error) => {
-    defaultWasmInitialization = undefined;
-    throw error;
-  }));
-let loadWasmEngine: () => Promise<WasmEngineModule> = defaultWasmLoader;
-export const setWasmEngineLoader = (loader: () => Promise<WasmEngineModule>) => {
+const defaultWasmInitializations = new Map<string, Promise<WasmEngineModule>>();
+const defaultWasmLoader = (venue: string): Promise<WasmEngineModule> => {
+  const family = venueFamily(venue);
+  let loading = defaultWasmInitializations.get(family);
+  if (!loading) {
+    loading = import('@tealstreet/safe-cex-wasm/engine')
+      .then(({ loadEngine }) => loadEngine(venue))
+      .catch((error) => {
+        if (defaultWasmInitializations.get(family) === loading) defaultWasmInitializations.delete(family);
+        throw error;
+      });
+    defaultWasmInitializations.set(family, loading);
+  }
+  return loading;
+};
+let loadWasmEngine: (venue: string) => Promise<WasmEngineModule> = defaultWasmLoader;
+export const setWasmEngineLoader = (loader: (venue: string) => Promise<WasmEngineModule>) => {
   loadWasmEngine = loader;
 };
 
@@ -438,7 +443,7 @@ export class RustEngineExchange extends BaseExchange {
       };
       this.startupWaiters.add(disposed);
       try {
-        void loadWasmEngine()
+        void loadWasmEngine(RUST_VENUES[this.name]!)
           .then(resolve, reject)
           .finally(() => this.startupWaiters.delete(disposed));
       } catch (error) {

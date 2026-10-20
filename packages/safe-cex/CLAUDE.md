@@ -958,6 +958,18 @@ writeback. For fire-and-forget worker commands with no `reqId`,
 handled failures should still emit `exec-log` so the terminal displays
 the error.
 
+## Rust engine loading
+
+The registered WASM loader receives the Rust venue name. `loadWebEngine` and
+`loadNodeEngine` select a family package from the shared `venueFamily` registry; aliases
+share a module, while different families instantiate separate binaries. Browser
+imports use literal family subpaths so a browser downloads only its venue. Add
+a family to the WASM Cargo features, package exports, shared `venueFamily`
+registry and the explicit/default browser loader switches when registering another Rust venue.
+Default and explicit browser paths share `engine-cache` initialization by family;
+never initialize the same family module twice while an account is alive. CI checks
+each family against `sdk-rs/harness/wasm-budgets.json`.
+
 ## Orderly Rust engine
 
 Tealstreet DEX, KodiakFi, WOOFi, Mode, SalsaDEX and What use one Rust venue

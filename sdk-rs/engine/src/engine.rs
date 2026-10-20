@@ -954,8 +954,7 @@ impl<V: Venue> Engine<V> {
         if let Some(splitter) = &incoming.splitter {
             let outside = splitter.outside();
             if !splitter.finished() {
-                let body = splitter.envelope();
-                if serde_json::from_str::<serde::de::IgnoredAny>(body).is_ok() {
+                if let Some(body) = splitter.validated_envelope() {
                     self.venue.on_stream_error(
                         &mut cx,
                         pending,
@@ -1029,6 +1028,13 @@ impl<V: Venue> Engine<V> {
         let buffer = std::mem::take(&mut self.io.snapshot);
         let mut w = FrameWriter::new(buffer, now);
         let everything = self.store.everything();
+        let book_bytes: usize = self
+            .venue
+            .books()
+            .filter(|(symbol, _)| self.store.market_index(symbol).is_some())
+            .map(|(_, book)| book.frame_size_hint())
+            .sum();
+        w.reserve(self.store.frame_size_hint(&everything) + book_bytes);
         self.store.write(&everything, &mut w);
         for (symbol, book) in self.venue.books() {
             if let Some(market) = self.store.market_index(symbol) {
@@ -1096,6 +1102,23 @@ impl<V: Venue> Engine<V> {
         let buffer = std::mem::take(&mut self.io.frame);
         let mut w = FrameWriter::new(buffer, now);
         let pending = store.then(|| self.store.take_pending());
+        let book_bytes: usize = self.io.changed_books[..self.io.changed_books_active]
+            .iter()
+            .filter_map(|symbol| {
+                let (Some(book), Some(_)) =
+                    (self.venue.book(symbol), self.store.market_index(symbol))
+                else {
+                    return None;
+                };
+                Some(book.frame_size_hint())
+            })
+            .sum();
+        w.reserve(
+            pending
+                .as_ref()
+                .map_or(0, |p| self.store.frame_size_hint(p))
+                + book_bytes,
+        );
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
         }
@@ -1199,7 +1222,8 @@ mod streaming_tests {
         rows: Vec<String>,
         body: Option<String>,
         failure: Option<String>,
-        book: Option<Book>,
+        hook_calls: usize,
+        books: Vec<(String, Book)>,
     }
 
     impl Venue for StreamVenue {
@@ -1237,6 +1261,15 @@ mod streaming_tests {
         ) {
             pending.push(item.to_owned());
         }
+        fn on_stream_error(
+            &mut self,
+            cx: &mut Cx<'_, Self::Pending>,
+            pending: Self::Pending,
+            _response: Response<'_>,
+        ) {
+            self.hook_calls += 1;
+            self.on_request_failed(cx, pending, "complete business envelope");
+        }
         fn on_request_failed(
             &mut self,
             _cx: &mut Cx<'_, Self::Pending>,
@@ -1247,11 +1280,18 @@ mod streaming_tests {
         }
         fn on_timer(&mut self, _cx: &mut Cx<'_, Self::Pending>, _timer: TimerId) {}
         fn on_command(&mut self, _cx: &mut Cx<'_, Self::Pending>, _command: Command) {}
-        fn book(&self, _symbol: &str) -> Option<&Book> {
-            self.book.as_ref()
+        fn book(&self, symbol: &str) -> Option<&Book> {
+            self.books
+                .iter()
+                .find(|(s, _)| s == symbol)
+                .map(|(_, book)| book)
         }
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-            Box::new(self.book.iter().map(|book| ("A", book)))
+            Box::new(
+                self.books
+                    .iter()
+                    .map(|(symbol, book)| (symbol.as_str(), book)),
+            )
         }
     }
 
@@ -1303,7 +1343,8 @@ mod streaming_tests {
             rows: Vec::new(),
             body: None,
             failure: None,
-            book: None,
+            hook_calls: 0,
+            books: Vec::new(),
         });
         engine.start(0.0);
         let request = engine
@@ -1334,7 +1375,11 @@ mod streaming_tests {
             rows: Vec::new(),
             body: None,
             failure: None,
-            book: Some(Book::default()),
+            hook_calls: 0,
+            books: ["A", "B", "missing"]
+                .into_iter()
+                .map(|symbol| (symbol.into(), Book::default()))
+                .collect(),
         })
     }
 
@@ -1375,18 +1420,20 @@ mod streaming_tests {
     }
 
     #[cfg(feature = "book-deltas")]
+    fn delta_engine() -> Engine<StreamVenue> {
+        let mut engine = frame_engine();
+        engine.venue.books.retain(|(symbol, _)| symbol == "A");
+        engine
+    }
+
+    #[cfg(feature = "book-deltas")]
     fn change_book(
         engine: &mut Engine<StreamVenue>,
         side: crate::book::BookSide,
         price: f64,
         amount: f64,
     ) {
-        engine
-            .venue
-            .book
-            .as_mut()
-            .unwrap()
-            .apply(side, price, amount);
+        engine.venue.books[0].1.apply(side, price, amount);
         engine.handle(
             1.,
             Event::WsMessage {
@@ -1408,7 +1455,7 @@ mod streaming_tests {
     #[test]
     fn deltas_coalesce_net_changes_and_snapshots_do_not_consume_the_baseline() {
         use crate::book::BookSide::{Asks, Bids};
-        let mut engine = frame_engine();
+        let mut engine = delta_engine();
         engine.set_book_deltas(true);
         engine.store.set_markets(vec![market("A")]);
         change_book(&mut engine, Bids, 100., 1.);
@@ -1449,27 +1496,19 @@ mod streaming_tests {
     #[test]
     fn deltas_resync_on_book_reset_subscription_and_market_identity_changes() {
         use crate::book::BookSide::Bids;
-        let mut engine = frame_engine();
+        let mut engine = delta_engine();
         engine.set_book_deltas(true);
         engine.store.set_markets(vec![market("A")]);
         change_book(&mut engine, Bids, 100., 1.);
         engine.take_frame(0.).unwrap();
         for reset in 0..5 {
             match reset {
-                0 => engine.venue.book.as_mut().unwrap().clear(),
-                1 => engine
-                    .venue
-                    .book
-                    .as_mut()
-                    .unwrap()
-                    .load_sorted(Bids, [(100., 1.)]),
-                2 => engine
-                    .venue
-                    .book
-                    .as_mut()
-                    .unwrap()
+                0 => engine.venue.books[0].1.clear(),
+                1 => engine.venue.books[0].1.load_sorted(Bids, [(100., 1.)]),
+                2 => engine.venue.books[0]
+                    .1
                     .load_sorted_owned(Bids, vec![(100., 1.)]),
-                3 => engine.venue.book = Some(Book::default()),
+                3 => engine.venue.books[0].1 = Book::default(),
                 _ => engine.handle(
                     1.,
                     Event::Command(Command::SubscribeOrderBook { symbol: "A".into() }),
@@ -1502,7 +1541,7 @@ mod streaming_tests {
     #[test]
     fn delta_baselines_are_removed_with_books_and_markets_and_modes_can_switch() {
         use crate::book::BookSide::Bids;
-        let mut engine = frame_engine();
+        let mut engine = delta_engine();
         engine.set_book_deltas(true);
         engine.store.set_markets(vec![market("A")]);
         change_book(&mut engine, Bids, 100., 1.);
@@ -1513,9 +1552,9 @@ mod streaming_tests {
             Event::Command(Command::UnsubscribeOrderBook { symbol: "A".into() }),
         );
         assert!(engine.book_baselines.is_empty());
-        engine.venue.book = None;
+        engine.venue.books.clear();
         assert!(engine.take_frame(1.).is_none());
-        engine.venue.book = Some(Book::default());
+        engine.venue.books.push(("A".into(), Book::default()));
         change_book(&mut engine, Bids, 100., 1.);
         assert_eq!(
             book_sections(engine.take_frame(2.).unwrap())[0].0,
@@ -1641,6 +1680,95 @@ mod streaming_tests {
     }
 
     #[test]
+    fn frame_reservations_filter_missing_books_and_preserve_market_only_pending_state() {
+        use crate::book::BookSide;
+        use crate::model::{Limits, Market, MinMax, Precision};
+        use crate::wire::{book_top, sections};
+
+        for market_only in [false, true] {
+            let mut book = Book::default();
+            book.load_sorted(BookSide::Bids, [(99.0, 2.0)]);
+            book.load_sorted(BookSide::Asks, [(101.0, 3.0)]);
+            let mut engine = Engine::new(StreamVenue {
+                at: ArrayAt::Root,
+                rows: Vec::new(),
+                body: None,
+                failure: None,
+                hook_calls: 0,
+                books: vec![("A".into(), book.clone()), ("missing-market".into(), book)],
+            });
+            let market = Market {
+                id: "A-SWAP".into(),
+                symbol: "A".into(),
+                pretty_symbol: None,
+                base: "A".into(),
+                quote: "USD".into(),
+                active: true,
+                precision: Precision {
+                    amount: 1.0,
+                    price: 1.0,
+                },
+                limits: Limits {
+                    amount: MinMax {
+                        min: 1.0,
+                        max: 10.0,
+                    },
+                    leverage: MinMax {
+                        min: 1.0,
+                        max: 10.0,
+                    },
+                    price: None,
+                },
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: None,
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
+            };
+            let mut no_book = market.clone();
+            no_book.id = "no-book".into();
+            no_book.symbol = "no-book".into();
+            engine.store.set_markets(vec![market, no_book]);
+            engine.io.changed_books = vec!["no-book".into(), "missing-market".into(), "A".into()];
+            engine.io.changed_books_active = engine.io.changed_books.len();
+
+            let mut sequential = FrameWriter::new(Vec::new(), 5.0);
+            engine
+                .store
+                .write(&engine.store.everything(), &mut sequential);
+            engine.venue.book("A").unwrap().write(0, &mut sequential);
+            let expected = sequential.finish();
+            assert_eq!(engine.snapshot_frame(5.0), expected);
+            let frame = if market_only {
+                engine.take_market_frame(5.0)
+            } else {
+                engine.take_frame(5.0)
+            }
+            .unwrap()
+            .to_vec();
+            let books: Vec<_> = sections(&frame)
+                .filter(|(kind, _)| *kind == section::BOOK)
+                .collect();
+            assert_eq!(books.len(), 1);
+            assert_eq!(book_top(books[0].1), Some((0, 99.0, 101.0)));
+            if market_only {
+                assert_eq!(sections(&frame).count(), 1);
+                let deferred = engine.take_frame(5.0).unwrap();
+                assert_eq!(
+                    sections(deferred).map(|(kind, _)| kind).collect::<Vec<_>>(),
+                    [section::MARKETS, section::STATUS, section::STRINGS]
+                );
+            } else {
+                assert!(sections(&frame).any(|(kind, _)| kind == section::MARKETS));
+            }
+            assert!(engine.take_frame(5.0).is_none());
+        }
+    }
+
+    #[test]
     fn streamed_completion_preserves_bybit_cursor_and_bingx_alias_envelopes() {
         for (at, body) in [
             (ArrayAt::Root, "[1]"),
@@ -1668,6 +1796,23 @@ mod streaming_tests {
             assert_eq!(venue.rows, ["1"]);
             let expected = body.replace("[1]", "[]");
             assert_eq!(venue.body.as_deref(), Some(expected.as_str()));
+        }
+    }
+
+    #[test]
+    fn complete_business_envelopes_never_accept_capped_or_malformed_responses() {
+        let valid = r#"{"code":"40774"}"#;
+        let at = ArrayAt::Envelope(&[&["data"]]);
+        assert_eq!(stream(at, valid.as_bytes()).hook_calls, 1);
+        let capped = format!("{valid}{}garbage", " ".repeat(1024 * 1024 - valid.len()));
+        for body in [
+            capped.as_bytes(),
+            br#"{"code":"40774""#,
+            b"{\"code\":\"\xff\"}",
+        ] {
+            let venue = stream(at, body);
+            assert_eq!(venue.hook_calls, 0);
+            assert!(venue.failure.is_some());
         }
     }
 

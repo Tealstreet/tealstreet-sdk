@@ -1,0 +1,3502 @@
+{
+  "status": "Valid initial eleven-family cohort; all public/private threshold gates pass, but CPU margin is narrower for six families, so requested performance outcome remains open. Never discard or reclassify these results.",
+  "baselineSource": "c5bc2c4adf9f9de175314a714556bdefb40dd475",
+  "afterEngineSource": "3c6a0918ce",
+  "afterRuntimeSource": "30b5d05a07",
+  "harnessHashes": {
+    "gate.mjs": "85d6044335df7012827e652731061476bd830e1c1aa6b4bde1a5594db633f60c",
+    "known-ts-fixes.mjs": "d2ea10caa54666cf6400df2f4c672fc045a6cb5c4909e754d23f9af116ff1bae",
+    "memory.mjs": "8f7b89b575ccff157421568c7ca14ad516fb8ae9d2da687490c70763044ce083",
+    "profile-engine.mjs": "592b13ac81fc66893ee364f51b30de3af1247e7c4c4d9d042abb35af2b6ae01f",
+    "replay.mjs": "bfc43ea7dbaa75bef4f98371f85aba41e486e4c9cef9a8c127e7faedd658f3ec",
+    "request-json.mjs": "953914312fdbc90719565721c44212f3070da8943613d461bc12e2b5f4cef69a",
+    "requests.mjs": "ed34e771b726b7265332491b03a429bf44f0ec23ecec7acfcdf95d8696b205ec",
+    "responses.mjs": "3839ccd3bfccc78850b32c4ba9c8ba953a8495499125d812ff0e7fab87a82427",
+    "subscriptions.mjs": "197c04a147e96c8c4d865c3580c4557fcb63a7419abc384ccb1f71ac4f3d460e",
+    "tape.mjs": "5b8bee57be7978c316f75f47035d94bbb6efc584d1198df260fb2f897d22a878",
+    "venues.mjs": "e09e2baf95401f06b579e8255a113b1a19664f717fe17e21c996684dd76f4741"
+  },
+  "pairs": {
+    "protocol": "Ten fixed venue pairs, official three-run gate per side; alternate AB/BA by fixed venue index; all runs retained without CPU-directed extension. MEXC separate predeclared crossover.",
+    "pairs": [
+      {
+        "venue": "binance",
+        "order": [
+          "before",
+          "after"
+        ],
+        "fixtureSha256": "cc3f426ededcee74edd3e70d4b20c564867a8009a325b43a422fbfd9f6460790",
+        "results": {
+          "before": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-before-binance.log",
+            "outputs": {
+              "ts": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/binance-71386/ts-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/binance-71386/ts-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/binance-71386/ts-2.json"
+              ],
+              "rust": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/binance-71386/rust-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/binance-71386/rust-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/binance-71386/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 297.054,
+                  "steadyCpuMs": 178.773,
+                  "processCpuMs": 357.679,
+                  "wallMs": 3774.7765419999996,
+                  "rssBytes": 168099840,
+                  "heapBeforeBytes": 27974344,
+                  "heapUsedBytes": 32258512,
+                  "heapRetainedBytes": 4284168,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2962219,
+                  "buffersAfter": 2962251,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4284200
+                },
+                {
+                  "cpuMs": 309.588,
+                  "steadyCpuMs": 186.746,
+                  "processCpuMs": 373.351,
+                  "wallMs": 3263.0376670000005,
+                  "rssBytes": 155844608,
+                  "heapBeforeBytes": 27985984,
+                  "heapUsedBytes": 32211752,
+                  "heapRetainedBytes": 4225768,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2962219,
+                  "buffersAfter": 2962251,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4225800
+                },
+                {
+                  "cpuMs": 296.144,
+                  "steadyCpuMs": 176.383,
+                  "processCpuMs": 364.247,
+                  "wallMs": 3000.062,
+                  "rssBytes": 170606592,
+                  "heapBeforeBytes": 27975904,
+                  "heapUsedBytes": 32203576,
+                  "heapRetainedBytes": 4227672,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2962219,
+                  "buffersAfter": 2962251,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4227704
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 150.639,
+                  "steadyCpuMs": 66.431,
+                  "processCpuMs": 239.319,
+                  "wallMs": 3012.1103329999996,
+                  "rssBytes": 111755264,
+                  "heapBeforeBytes": 12798968,
+                  "heapUsedBytes": 13220296,
+                  "heapRetainedBytes": 421328,
+                  "bufferRetainedBytes": 430096,
+                  "buffersBefore": 796549,
+                  "buffersAfter": 1226645,
+                  "wasmBytes": 1638400,
+                  "retainedBytes": 2489824
+                },
+                {
+                  "cpuMs": 146.806,
+                  "steadyCpuMs": 69.341,
+                  "processCpuMs": 231.913,
+                  "wallMs": 2419.828,
+                  "rssBytes": 110444544,
+                  "heapBeforeBytes": 12801112,
+                  "heapUsedBytes": 13217352,
+                  "heapRetainedBytes": 416240,
+                  "bufferRetainedBytes": 430096,
+                  "buffersBefore": 796549,
+                  "buffersAfter": 1226645,
+                  "wasmBytes": 1638400,
+                  "retainedBytes": 2484736
+                },
+                {
+                  "cpuMs": 140.368,
+                  "steadyCpuMs": 62.635,
+                  "processCpuMs": 225.941,
+                  "wallMs": 2562.56525,
+                  "rssBytes": 112640000,
+                  "heapBeforeBytes": 12801184,
+                  "heapUsedBytes": 13217408,
+                  "heapRetainedBytes": 416224,
+                  "bufferRetainedBytes": 430096,
+                  "buffersBefore": 796549,
+                  "buffersAfter": 1226645,
+                  "wasmBytes": 1638400,
+                  "retainedBytes": 2484720
+                }
+              ]
+            },
+            "gateLog": "frames 871, markets 917, tickers 783, books 3\nmain-thread cpu  ts    297.1 ms   rust    146.8 ms   2.02x\nsteady cpu       ts    178.8 ms   rust     66.4 ms   2.69x\nprocess cpu      ts    364.2 ms   rust    231.9 ms   1.57x\nretained memory  ts      4.2 MB   rust      2.5 MB   1.70x\n(rust wasm linear memory 1.6 MB)\nPASS\n"
+          },
+          "after": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-after-binance.log",
+            "outputs": {
+              "ts": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/binance-75502/ts-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/binance-75502/ts-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/binance-75502/ts-2.json"
+              ],
+              "rust": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/binance-75502/rust-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/binance-75502/rust-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/binance-75502/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 273.592,
+                  "steadyCpuMs": 161.166,
+                  "processCpuMs": 326.474,
+                  "wallMs": 3376.408458,
+                  "rssBytes": 155123712,
+                  "heapBeforeBytes": 27957024,
+                  "heapUsedBytes": 32235688,
+                  "heapRetainedBytes": 4278664,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2962219,
+                  "buffersAfter": 2962251,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4278696
+                },
+                {
+                  "cpuMs": 288.101,
+                  "steadyCpuMs": 164.893,
+                  "processCpuMs": 342.73,
+                  "wallMs": 3161.7733329999996,
+                  "rssBytes": 154583040,
+                  "heapBeforeBytes": 27988408,
+                  "heapUsedBytes": 32274656,
+                  "heapRetainedBytes": 4286248,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2962219,
+                  "buffersAfter": 2962251,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4286280
+                },
+                {
+                  "cpuMs": 278.484,
+                  "steadyCpuMs": 162.799,
+                  "processCpuMs": 334.095,
+                  "wallMs": 2347.9184999999998,
+                  "rssBytes": 180060160,
+                  "heapBeforeBytes": 27972424,
+                  "heapUsedBytes": 32250728,
+                  "heapRetainedBytes": 4278304,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2962219,
+                  "buffersAfter": 2962251,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4278336
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 134.782,
+                  "steadyCpuMs": 58.028,
+                  "processCpuMs": 209.001,
+                  "wallMs": 2215.3697920000004,
+                  "rssBytes": 108675072,
+                  "heapBeforeBytes": 12642248,
+                  "heapUsedBytes": 13113800,
+                  "heapRetainedBytes": 471552,
+                  "bufferRetainedBytes": 438467,
+                  "buffersBefore": 796549,
+                  "buffersAfter": 1235016,
+                  "wasmBytes": 1441792,
+                  "retainedBytes": 2351811
+                },
+                {
+                  "cpuMs": 100.687,
+                  "steadyCpuMs": 30.169,
+                  "processCpuMs": 177.131,
+                  "wallMs": 1027.917875,
+                  "rssBytes": 110641152,
+                  "heapBeforeBytes": 12642176,
+                  "heapUsedBytes": 13089544,
+                  "heapRetainedBytes": 447368,
+                  "bufferRetainedBytes": 446435,
+                  "buffersBefore": 796549,
+                  "buffersAfter": 1242984,
+                  "wasmBytes": 1441792,
+                  "retainedBytes": 2335595
+                },
+                {
+                  "cpuMs": 124.139,
+                  "steadyCpuMs": 49.85,
+                  "processCpuMs": 204.248,
+                  "wallMs": 1409.465833,
+                  "rssBytes": 109592576,
+                  "heapBeforeBytes": 12651712,
+                  "heapUsedBytes": 13111112,
+                  "heapRetainedBytes": 459400,
+                  "bufferRetainedBytes": 439348,
+                  "buffersBefore": 796549,
+                  "buffersAfter": 1235897,
+                  "wasmBytes": 1441792,
+                  "retainedBytes": 2340540
+                }
+              ]
+            },
+            "gateLog": "frames 871, markets 917, tickers 783, books 3\nmain-thread cpu  ts    278.5 ms   rust    124.1 ms   2.24x\nsteady cpu       ts    162.8 ms   rust     49.9 ms   3.27x\nprocess cpu      ts    334.1 ms   rust    204.2 ms   1.64x\nretained memory  ts      4.3 MB   rust      2.3 MB   1.83x\n(rust wasm linear memory 1.4 MB)\nPASS\n"
+          }
+        }
+      },
+      {
+        "venue": "bybit",
+        "order": [
+          "after",
+          "before"
+        ],
+        "fixtureSha256": "e9cbcf3f61fca67d96bab52657f3aceb8a05375704652adb47526341bd847356",
+        "results": {
+          "after": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-after-bybit.log",
+            "outputs": {
+              "ts": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bybit-78158/ts-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bybit-78158/ts-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bybit-78158/ts-2.json"
+              ],
+              "rust": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bybit-78158/rust-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bybit-78158/rust-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bybit-78158/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 375.804,
+                  "steadyCpuMs": 225.325,
+                  "processCpuMs": 435.939,
+                  "wallMs": 4786.592833,
+                  "rssBytes": 190332928,
+                  "heapBeforeBytes": 28348848,
+                  "heapUsedBytes": 34094168,
+                  "heapRetainedBytes": 5745320,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2877131,
+                  "buffersAfter": 2877163,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5745352
+                },
+                {
+                  "cpuMs": 384.575,
+                  "steadyCpuMs": 236.295,
+                  "processCpuMs": 450.725,
+                  "wallMs": 3780.5762919999997,
+                  "rssBytes": 188956672,
+                  "heapBeforeBytes": 28338312,
+                  "heapUsedBytes": 34092160,
+                  "heapRetainedBytes": 5753848,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2877131,
+                  "buffersAfter": 2877163,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5753880
+                },
+                {
+                  "cpuMs": 385.781,
+                  "steadyCpuMs": 236.502,
+                  "processCpuMs": 450.732,
+                  "wallMs": 3635.7433750000005,
+                  "rssBytes": 189562880,
+                  "heapBeforeBytes": 28358320,
+                  "heapUsedBytes": 34105768,
+                  "heapRetainedBytes": 5747448,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2877131,
+                  "buffersAfter": 2877163,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5747480
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 248.729,
+                  "steadyCpuMs": 117.32,
+                  "processCpuMs": 353.407,
+                  "wallMs": 3386.896083,
+                  "rssBytes": 116588544,
+                  "heapBeforeBytes": 12060568,
+                  "heapUsedBytes": 12364248,
+                  "heapRetainedBytes": 303680,
+                  "bufferRetainedBytes": 303820,
+                  "buffersBefore": 711461,
+                  "buffersAfter": 1015281,
+                  "wasmBytes": 1179648,
+                  "retainedBytes": 1787148
+                },
+                {
+                  "cpuMs": 233.955,
+                  "steadyCpuMs": 102.337,
+                  "processCpuMs": 336.94,
+                  "wallMs": 2556.95325,
+                  "rssBytes": 117669888,
+                  "heapBeforeBytes": 12063424,
+                  "heapUsedBytes": 12355632,
+                  "heapRetainedBytes": 292208,
+                  "bufferRetainedBytes": 308604,
+                  "buffersBefore": 711461,
+                  "buffersAfter": 1020065,
+                  "wasmBytes": 1179648,
+                  "retainedBytes": 1780460
+                },
+                {
+                  "cpuMs": 236.988,
+                  "steadyCpuMs": 109.217,
+                  "processCpuMs": 341.015,
+                  "wallMs": 2866.802458,
+                  "rssBytes": 121159680,
+                  "heapBeforeBytes": 12062584,
+                  "heapUsedBytes": 12363104,
+                  "heapRetainedBytes": 300520,
+                  "bufferRetainedBytes": 308604,
+                  "buffersBefore": 711461,
+                  "buffersAfter": 1020065,
+                  "wasmBytes": 1179648,
+                  "retainedBytes": 1788772
+                }
+              ]
+            },
+            "gateLog": "frames 8742, markets 912, tickers 912, books 2\nmain-thread cpu  ts    384.6 ms   rust    237.0 ms   1.62x\nsteady cpu       ts    236.3 ms   rust    109.2 ms   2.16x\nprocess cpu      ts    450.7 ms   rust    341.0 ms   1.32x\nretained memory  ts      5.7 MB   rust      1.8 MB   3.22x\n(rust wasm linear memory 1.2 MB)\nPASS\n"
+          },
+          "before": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-before-bybit.log",
+            "outputs": {
+              "ts": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bybit-81495/ts-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bybit-81495/ts-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bybit-81495/ts-2.json"
+              ],
+              "rust": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bybit-81495/rust-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bybit-81495/rust-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bybit-81495/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 364.75,
+                  "steadyCpuMs": 218.754,
+                  "processCpuMs": 435.821,
+                  "wallMs": 2819.934583,
+                  "rssBytes": 188645376,
+                  "heapBeforeBytes": 28368328,
+                  "heapUsedBytes": 34111384,
+                  "heapRetainedBytes": 5743056,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2877131,
+                  "buffersAfter": 2877163,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5743088
+                },
+                {
+                  "cpuMs": 418.322,
+                  "steadyCpuMs": 258.286,
+                  "processCpuMs": 489.232,
+                  "wallMs": 5725.1055,
+                  "rssBytes": 188940288,
+                  "heapBeforeBytes": 28350424,
+                  "heapUsedBytes": 34098800,
+                  "heapRetainedBytes": 5748376,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2877131,
+                  "buffersAfter": 2877163,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5748408
+                },
+                {
+                  "cpuMs": 406.349,
+                  "steadyCpuMs": 258.501,
+                  "processCpuMs": 464.477,
+                  "wallMs": 9051.568292,
+                  "rssBytes": 162086912,
+                  "heapBeforeBytes": 28364864,
+                  "heapUsedBytes": 34132624,
+                  "heapRetainedBytes": 5767760,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2877131,
+                  "buffersAfter": 2877163,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5767792
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 282.766,
+                  "steadyCpuMs": 136.138,
+                  "processCpuMs": 376.714,
+                  "wallMs": 3252.7539589999997,
+                  "rssBytes": 122765312,
+                  "heapBeforeBytes": 12249592,
+                  "heapUsedBytes": 12494528,
+                  "heapRetainedBytes": 244936,
+                  "bufferRetainedBytes": 296800,
+                  "buffersBefore": 711461,
+                  "buffersAfter": 1008261,
+                  "wasmBytes": 1638400,
+                  "retainedBytes": 2180136
+                },
+                {
+                  "cpuMs": 302.13,
+                  "steadyCpuMs": 160.649,
+                  "processCpuMs": 393.292,
+                  "wallMs": 7043.116125,
+                  "rssBytes": 120668160,
+                  "heapBeforeBytes": 12229816,
+                  "heapUsedBytes": 12448664,
+                  "heapRetainedBytes": 218848,
+                  "bufferRetainedBytes": 296800,
+                  "buffersBefore": 711461,
+                  "buffersAfter": 1008261,
+                  "wasmBytes": 1638400,
+                  "retainedBytes": 2154048
+                },
+                {
+                  "cpuMs": 271.45,
+                  "steadyCpuMs": 139.682,
+                  "processCpuMs": 362.247,
+                  "wallMs": 4278.758208,
+                  "rssBytes": 122781696,
+                  "heapBeforeBytes": 12242016,
+                  "heapUsedBytes": 12461632,
+                  "heapRetainedBytes": 219616,
+                  "bufferRetainedBytes": 296800,
+                  "buffersBefore": 711461,
+                  "buffersAfter": 1008261,
+                  "wasmBytes": 1638400,
+                  "retainedBytes": 2154816
+                }
+              ]
+            },
+            "gateLog": "frames 8742, markets 912, tickers 912, books 2\nmain-thread cpu  ts    406.3 ms   rust    282.8 ms   1.44x\nsteady cpu       ts    258.3 ms   rust    139.7 ms   1.85x\nprocess cpu      ts    464.5 ms   rust    376.7 ms   1.23x\nretained memory  ts      5.7 MB   rust      2.2 MB   2.67x\n(rust wasm linear memory 1.6 MB)\nPASS\n"
+          }
+        }
+      },
+      {
+        "venue": "okx",
+        "order": [
+          "before",
+          "after"
+        ],
+        "fixtureSha256": "ee3b0acaefcc25998601a7a9c6151d94cbf88a39010f737f5f2816f5ef6eff50",
+        "results": {
+          "before": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-before-okx.log",
+            "outputs": {
+              "ts": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/okx-87140/ts-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/okx-87140/ts-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/okx-87140/ts-2.json"
+              ],
+              "rust": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/okx-87140/rust-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/okx-87140/rust-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/okx-87140/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 334.045,
+                  "steadyCpuMs": 220.073,
+                  "processCpuMs": 407.433,
+                  "wallMs": 3549.1923750000005,
+                  "rssBytes": 147423232,
+                  "heapBeforeBytes": 24973296,
+                  "heapUsedBytes": 29360336,
+                  "heapRetainedBytes": 4387040,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2658197,
+                  "buffersAfter": 2658229,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4387072
+                },
+                {
+                  "cpuMs": 338.288,
+                  "steadyCpuMs": 216.834,
+                  "processCpuMs": 417.355,
+                  "wallMs": 3027.028666,
+                  "rssBytes": 150814720,
+                  "heapBeforeBytes": 24943416,
+                  "heapUsedBytes": 29354328,
+                  "heapRetainedBytes": 4410912,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2658197,
+                  "buffersAfter": 2658229,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4410944
+                },
+                {
+                  "cpuMs": 334.499,
+                  "steadyCpuMs": 220.401,
+                  "processCpuMs": 405.316,
+                  "wallMs": 2367.7899580000003,
+                  "rssBytes": 150732800,
+                  "heapBeforeBytes": 24946848,
+                  "heapUsedBytes": 29352992,
+                  "heapRetainedBytes": 4406144,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2658197,
+                  "buffersAfter": 2658229,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4406176
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 234.936,
+                  "steadyCpuMs": 124.757,
+                  "processCpuMs": 370.317,
+                  "wallMs": 2525.981583,
+                  "rssBytes": 124289024,
+                  "heapBeforeBytes": 9831440,
+                  "heapUsedBytes": 11127136,
+                  "heapRetainedBytes": 1295696,
+                  "bufferRetainedBytes": 152760,
+                  "buffersBefore": 492527,
+                  "buffersAfter": 645287,
+                  "wasmBytes": 1376256,
+                  "retainedBytes": 2824712
+                },
+                {
+                  "cpuMs": 230.146,
+                  "steadyCpuMs": 122.99,
+                  "processCpuMs": 358.53,
+                  "wallMs": 1796.660375,
+                  "rssBytes": 124928000,
+                  "heapBeforeBytes": 9842224,
+                  "heapUsedBytes": 11132504,
+                  "heapRetainedBytes": 1290280,
+                  "bufferRetainedBytes": 152760,
+                  "buffersBefore": 492527,
+                  "buffersAfter": 645287,
+                  "wasmBytes": 1376256,
+                  "retainedBytes": 2819296
+                },
+                {
+                  "cpuMs": 244.251,
+                  "steadyCpuMs": 134.025,
+                  "processCpuMs": 372.159,
+                  "wallMs": 2615.048875,
+                  "rssBytes": 124108800,
+                  "heapBeforeBytes": 9835024,
+                  "heapUsedBytes": 11127712,
+                  "heapRetainedBytes": 1292688,
+                  "bufferRetainedBytes": 152760,
+                  "buffersBefore": 492527,
+                  "buffersAfter": 645287,
+                  "wasmBytes": 1376256,
+                  "retainedBytes": 2821704
+                }
+              ]
+            },
+            "gateLog": "frames 8902, markets 494, tickers 494, books 2\nmain-thread cpu  ts    334.5 ms   rust    234.9 ms   1.42x\nsteady cpu       ts    220.1 ms   rust    124.8 ms   1.76x\nprocess cpu      ts    407.4 ms   rust    370.3 ms   1.10x\nretained memory  ts      4.4 MB   rust      2.8 MB   1.56x\n(rust wasm linear memory 1.4 MB)\n(documented OKX corrections: 13; output is compared without OKX-specific normalization)\nPASS\n"
+          },
+          "after": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-after-okx.log",
+            "outputs": {
+              "ts": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/okx-89991/ts-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/okx-89991/ts-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/okx-89991/ts-2.json"
+              ],
+              "rust": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/okx-89991/rust-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/okx-89991/rust-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/okx-89991/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 364.928,
+                  "steadyCpuMs": 240.726,
+                  "processCpuMs": 445.008,
+                  "wallMs": 5807.693959,
+                  "rssBytes": 148652032,
+                  "heapBeforeBytes": 24976584,
+                  "heapUsedBytes": 29430816,
+                  "heapRetainedBytes": 4454232,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2658197,
+                  "buffersAfter": 2658229,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4454264
+                },
+                {
+                  "cpuMs": 361.33,
+                  "steadyCpuMs": 231.716,
+                  "processCpuMs": 440.417,
+                  "wallMs": 4857.353791,
+                  "rssBytes": 150306816,
+                  "heapBeforeBytes": 24965464,
+                  "heapUsedBytes": 29413456,
+                  "heapRetainedBytes": 4447992,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2658197,
+                  "buffersAfter": 2658229,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4448024
+                },
+                {
+                  "cpuMs": 371.354,
+                  "steadyCpuMs": 249.674,
+                  "processCpuMs": 457.895,
+                  "wallMs": 4973.600208,
+                  "rssBytes": 151764992,
+                  "heapBeforeBytes": 24973064,
+                  "heapUsedBytes": 29370480,
+                  "heapRetainedBytes": 4397416,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2658197,
+                  "buffersAfter": 2658229,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4397448
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 246.968,
+                  "steadyCpuMs": 135.89,
+                  "processCpuMs": 388.053,
+                  "wallMs": 5205.318625,
+                  "rssBytes": 91963392,
+                  "heapBeforeBytes": 9657376,
+                  "heapUsedBytes": 11012760,
+                  "heapRetainedBytes": 1355384,
+                  "bufferRetainedBytes": 159186,
+                  "buffersBefore": 492527,
+                  "buffersAfter": 651713,
+                  "wasmBytes": 983040,
+                  "retainedBytes": 2497610
+                },
+                {
+                  "cpuMs": 245.557,
+                  "steadyCpuMs": 141.992,
+                  "processCpuMs": 380.219,
+                  "wallMs": 4304.970291,
+                  "rssBytes": 115507200,
+                  "heapBeforeBytes": 9663792,
+                  "heapUsedBytes": 11020976,
+                  "heapRetainedBytes": 1357184,
+                  "bufferRetainedBytes": 159186,
+                  "buffersBefore": 492527,
+                  "buffersAfter": 651713,
+                  "wasmBytes": 983040,
+                  "retainedBytes": 2499410
+                },
+                {
+                  "cpuMs": 232.054,
+                  "steadyCpuMs": 127.829,
+                  "processCpuMs": 364.654,
+                  "wallMs": 3803.7847090000005,
+                  "rssBytes": 117506048,
+                  "heapBeforeBytes": 9657376,
+                  "heapUsedBytes": 11020952,
+                  "heapRetainedBytes": 1363576,
+                  "bufferRetainedBytes": 158150,
+                  "buffersBefore": 492527,
+                  "buffersAfter": 650677,
+                  "wasmBytes": 983040,
+                  "retainedBytes": 2504766
+                }
+              ]
+            },
+            "gateLog": "frames 8902, markets 494, tickers 494, books 2\nmain-thread cpu  ts    364.9 ms   rust    245.6 ms   1.49x\nsteady cpu       ts    240.7 ms   rust    135.9 ms   1.77x\nprocess cpu      ts    445.0 ms   rust    380.2 ms   1.17x\nretained memory  ts      4.4 MB   rust      2.5 MB   1.78x\n(rust wasm linear memory 1.0 MB)\n(documented OKX corrections: 13; output is compared without OKX-specific normalization)\nPASS\n"
+          }
+        }
+      },
+      {
+        "venue": "cryptocom",
+        "order": [
+          "after",
+          "before"
+        ],
+        "fixtureSha256": "6a03418b27ab1a0be57dfa2773833ddfa8bdc071afef28456b70a4bb68f2a0b9",
+        "results": {
+          "after": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-after-cryptocom.log",
+            "outputs": {
+              "ts": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/cryptocom-94354/ts-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/cryptocom-94354/ts-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/cryptocom-94354/ts-2.json"
+              ],
+              "rust": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/cryptocom-94354/rust-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/cryptocom-94354/rust-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/cryptocom-94354/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 170.149,
+                  "steadyCpuMs": 116.738,
+                  "processCpuMs": 212.305,
+                  "wallMs": 2677.554208,
+                  "rssBytes": 130187264,
+                  "heapBeforeBytes": 21621256,
+                  "heapUsedBytes": 23521672,
+                  "heapRetainedBytes": 1900416,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2512604,
+                  "buffersAfter": 2512636,
+                  "wasmBytes": 0,
+                  "retainedBytes": 1900448
+                },
+                {
+                  "cpuMs": 167.315,
+                  "steadyCpuMs": 116.918,
+                  "processCpuMs": 201.558,
+                  "wallMs": 3045.5885839999996,
+                  "rssBytes": 130203648,
+                  "heapBeforeBytes": 21617264,
+                  "heapUsedBytes": 23520520,
+                  "heapRetainedBytes": 1903256,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2512604,
+                  "buffersAfter": 2512636,
+                  "wasmBytes": 0,
+                  "retainedBytes": 1903288
+                },
+                {
+                  "cpuMs": 162.373,
+                  "steadyCpuMs": 114.148,
+                  "processCpuMs": 192.133,
+                  "wallMs": 3083.0695840000003,
+                  "rssBytes": 128794624,
+                  "heapBeforeBytes": 21601216,
+                  "heapUsedBytes": 23455008,
+                  "heapRetainedBytes": 1853792,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2512604,
+                  "buffersAfter": 2512636,
+                  "wasmBytes": 0,
+                  "retainedBytes": 1853824
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 114.708,
+                  "steadyCpuMs": 62.879,
+                  "processCpuMs": 175.793,
+                  "wallMs": 2713.923875,
+                  "rssBytes": 86867968,
+                  "heapBeforeBytes": 7623744,
+                  "heapUsedBytes": 8185672,
+                  "heapRetainedBytes": 561928,
+                  "bufferRetainedBytes": 106144,
+                  "buffersBefore": 346934,
+                  "buffersAfter": 453078,
+                  "wasmBytes": 655360,
+                  "retainedBytes": 1323432
+                },
+                {
+                  "cpuMs": 132.086,
+                  "steadyCpuMs": 77.132,
+                  "processCpuMs": 207.975,
+                  "wallMs": 3394.838167,
+                  "rssBytes": 84934656,
+                  "heapBeforeBytes": 7623744,
+                  "heapUsedBytes": 8195776,
+                  "heapRetainedBytes": 572032,
+                  "bufferRetainedBytes": 98964,
+                  "buffersBefore": 346934,
+                  "buffersAfter": 445898,
+                  "wasmBytes": 655360,
+                  "retainedBytes": 1326356
+                },
+                {
+                  "cpuMs": 138.315,
+                  "steadyCpuMs": 80.61,
+                  "processCpuMs": 216.295,
+                  "wallMs": 3956.0664590000006,
+                  "rssBytes": 85557248,
+                  "heapBeforeBytes": 7623744,
+                  "heapUsedBytes": 8201360,
+                  "heapRetainedBytes": 577616,
+                  "bufferRetainedBytes": 104099,
+                  "buffersBefore": 346934,
+                  "buffersAfter": 451033,
+                  "wasmBytes": 655360,
+                  "retainedBytes": 1337075
+                }
+              ]
+            },
+            "gateLog": "frames 2177, markets 404, tickers 404, books 2\nmain-thread cpu  ts    167.3 ms   rust    132.1 ms   1.27x\nsteady cpu       ts    116.7 ms   rust     77.1 ms   1.51x\nprocess cpu      ts    201.6 ms   rust    208.0 ms   0.97x\nretained memory  ts      1.9 MB   rust      1.3 MB   1.43x\n(rust wasm linear memory 0.7 MB)\nPASS\n"
+          },
+          "before": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-before-cryptocom.log",
+            "outputs": {
+              "ts": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/cryptocom-97916/ts-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/cryptocom-97916/ts-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/cryptocom-97916/ts-2.json"
+              ],
+              "rust": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/cryptocom-97916/rust-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/cryptocom-97916/rust-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/cryptocom-97916/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 157.567,
+                  "steadyCpuMs": 104.54,
+                  "processCpuMs": 192.91,
+                  "wallMs": 2687.891625,
+                  "rssBytes": 132530176,
+                  "heapBeforeBytes": 21624920,
+                  "heapUsedBytes": 23457288,
+                  "heapRetainedBytes": 1832368,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2512604,
+                  "buffersAfter": 2512636,
+                  "wasmBytes": 0,
+                  "retainedBytes": 1832400
+                },
+                {
+                  "cpuMs": 148.36,
+                  "steadyCpuMs": 89.93,
+                  "processCpuMs": 180.1,
+                  "wallMs": 2258.826459,
+                  "rssBytes": 128532480,
+                  "heapBeforeBytes": 21624160,
+                  "heapUsedBytes": 23520496,
+                  "heapRetainedBytes": 1896336,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2512604,
+                  "buffersAfter": 2512636,
+                  "wasmBytes": 0,
+                  "retainedBytes": 1896368
+                },
+                {
+                  "cpuMs": 133.283,
+                  "steadyCpuMs": 88.05,
+                  "processCpuMs": 167.137,
+                  "wallMs": 1285.4445419999997,
+                  "rssBytes": 130482176,
+                  "heapBeforeBytes": 21619312,
+                  "heapUsedBytes": 23513112,
+                  "heapRetainedBytes": 1893800,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2512604,
+                  "buffersAfter": 2512636,
+                  "wasmBytes": 0,
+                  "retainedBytes": 1893832
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 112.548,
+                  "steadyCpuMs": 55.1,
+                  "processCpuMs": 186.271,
+                  "wallMs": 2521.3687499999996,
+                  "rssBytes": 95928320,
+                  "heapBeforeBytes": 7814616,
+                  "heapUsedBytes": 8346648,
+                  "heapRetainedBytes": 532032,
+                  "bufferRetainedBytes": 92928,
+                  "buffersBefore": 346934,
+                  "buffersAfter": 439862,
+                  "wasmBytes": 917504,
+                  "retainedBytes": 1542464
+                },
+                {
+                  "cpuMs": 117.611,
+                  "steadyCpuMs": 59.311,
+                  "processCpuMs": 198.493,
+                  "wallMs": 2734.2298330000003,
+                  "rssBytes": 96534528,
+                  "heapBeforeBytes": 7815032,
+                  "heapUsedBytes": 8347104,
+                  "heapRetainedBytes": 532072,
+                  "bufferRetainedBytes": 92928,
+                  "buffersBefore": 346934,
+                  "buffersAfter": 439862,
+                  "wasmBytes": 917504,
+                  "retainedBytes": 1542504
+                },
+                {
+                  "cpuMs": 104.352,
+                  "steadyCpuMs": 49.29,
+                  "processCpuMs": 177.254,
+                  "wallMs": 1932.1471250000002,
+                  "rssBytes": 94748672,
+                  "heapBeforeBytes": 7814688,
+                  "heapUsedBytes": 8346488,
+                  "heapRetainedBytes": 531800,
+                  "bufferRetainedBytes": 92928,
+                  "buffersBefore": 346934,
+                  "buffersAfter": 439862,
+                  "wasmBytes": 917504,
+                  "retainedBytes": 1542232
+                }
+              ]
+            },
+            "gateLog": "frames 2177, markets 404, tickers 404, books 2\nmain-thread cpu  ts    148.4 ms   rust    112.5 ms   1.32x\nsteady cpu       ts     89.9 ms   rust     55.1 ms   1.63x\nprocess cpu      ts    180.1 ms   rust    186.3 ms   0.97x\nretained memory  ts      1.9 MB   rust      1.5 MB   1.23x\n(rust wasm linear memory 0.9 MB)\nPASS\n"
+          }
+        }
+      },
+      {
+        "venue": "weex",
+        "order": [
+          "before",
+          "after"
+        ],
+        "fixtureSha256": "dcf8d8097627f62b1a4e14ee5f7d234f1e9bb511b976557c4ca81dd55bf276bd",
+        "results": {
+          "before": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-before-weex.log",
+            "outputs": {
+              "ts": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/weex-1039/ts-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/weex-1039/ts-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/weex-1039/ts-2.json"
+              ],
+              "rust": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/weex-1039/rust-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/weex-1039/rust-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/weex-1039/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 219.886,
+                  "steadyCpuMs": 128.861,
+                  "processCpuMs": 265.939,
+                  "wallMs": 3483.438708,
+                  "rssBytes": 143310848,
+                  "heapBeforeBytes": 23613968,
+                  "heapUsedBytes": 28777040,
+                  "heapRetainedBytes": 5163072,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2570979,
+                  "buffersAfter": 2571011,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5163104
+                },
+                {
+                  "cpuMs": 207.489,
+                  "steadyCpuMs": 115.961,
+                  "processCpuMs": 254.914,
+                  "wallMs": 2354.945708,
+                  "rssBytes": 144130048,
+                  "heapBeforeBytes": 23592816,
+                  "heapUsedBytes": 28750880,
+                  "heapRetainedBytes": 5158064,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2570979,
+                  "buffersAfter": 2571011,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5158096
+                },
+                {
+                  "cpuMs": 213.969,
+                  "steadyCpuMs": 108.777,
+                  "processCpuMs": 257.665,
+                  "wallMs": 2492.5467080000003,
+                  "rssBytes": 143360000,
+                  "heapBeforeBytes": 23614912,
+                  "heapUsedBytes": 28778704,
+                  "heapRetainedBytes": 5163792,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2570979,
+                  "buffersAfter": 2571011,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5163824
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 128.934,
+                  "steadyCpuMs": 47.599,
+                  "processCpuMs": 217.159,
+                  "wallMs": 1304.5460420000002,
+                  "rssBytes": 102711296,
+                  "heapBeforeBytes": 9075096,
+                  "heapUsedBytes": 9554936,
+                  "heapRetainedBytes": 479840,
+                  "bufferRetainedBytes": 261800,
+                  "buffersBefore": 405309,
+                  "buffersAfter": 667109,
+                  "wasmBytes": 1638400,
+                  "retainedBytes": 2380040
+                },
+                {
+                  "cpuMs": 128.348,
+                  "steadyCpuMs": 62.228,
+                  "processCpuMs": 234.044,
+                  "wallMs": 1651.4961250000001,
+                  "rssBytes": 103415808,
+                  "heapBeforeBytes": 9074840,
+                  "heapUsedBytes": 9549072,
+                  "heapRetainedBytes": 474232,
+                  "bufferRetainedBytes": 261800,
+                  "buffersBefore": 405309,
+                  "buffersAfter": 667109,
+                  "wasmBytes": 1638400,
+                  "retainedBytes": 2374432
+                },
+                {
+                  "cpuMs": 152.051,
+                  "steadyCpuMs": 60.709,
+                  "processCpuMs": 253.203,
+                  "wallMs": 2142.8825,
+                  "rssBytes": 101531648,
+                  "heapBeforeBytes": 9075208,
+                  "heapUsedBytes": 9555192,
+                  "heapRetainedBytes": 479984,
+                  "bufferRetainedBytes": 261800,
+                  "buffersBefore": 405309,
+                  "buffersAfter": 667109,
+                  "wasmBytes": 1638400,
+                  "retainedBytes": 2380184
+                }
+              ]
+            },
+            "gateLog": "frames 2028, markets 1040, tickers 1040, books 2\nmain-thread cpu  ts    214.0 ms   rust    128.9 ms   1.66x\nsteady cpu       ts    116.0 ms   rust     60.7 ms   1.91x\nprocess cpu      ts    257.7 ms   rust    234.0 ms   1.10x\nretained memory  ts      5.2 MB   rust      2.4 MB   2.17x\n(rust wasm linear memory 1.6 MB)\nPASS\n"
+          },
+          "after": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-after-weex.log",
+            "outputs": {
+              "ts": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/weex-3506/ts-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/weex-3506/ts-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/weex-3506/ts-2.json"
+              ],
+              "rust": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/weex-3506/rust-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/weex-3506/rust-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/weex-3506/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 211.561,
+                  "steadyCpuMs": 117.392,
+                  "processCpuMs": 259.199,
+                  "wallMs": 2679.8735830000005,
+                  "rssBytes": 143556608,
+                  "heapBeforeBytes": 23617560,
+                  "heapUsedBytes": 28781552,
+                  "heapRetainedBytes": 5163992,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2570979,
+                  "buffersAfter": 2571011,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5164024
+                },
+                {
+                  "cpuMs": 220.229,
+                  "steadyCpuMs": 125.282,
+                  "processCpuMs": 272.459,
+                  "wallMs": 1955.6269169999998,
+                  "rssBytes": 147111936,
+                  "heapBeforeBytes": 23594984,
+                  "heapUsedBytes": 28753064,
+                  "heapRetainedBytes": 5158080,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2570979,
+                  "buffersAfter": 2571011,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5158112
+                },
+                {
+                  "cpuMs": 231.978,
+                  "steadyCpuMs": 131.949,
+                  "processCpuMs": 276.166,
+                  "wallMs": 1841.0772499999998,
+                  "rssBytes": 144736256,
+                  "heapBeforeBytes": 23620464,
+                  "heapUsedBytes": 28760840,
+                  "heapRetainedBytes": 5140376,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2570979,
+                  "buffersAfter": 2571011,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5140408
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 151.087,
+                  "steadyCpuMs": 76.294,
+                  "processCpuMs": 250.85,
+                  "wallMs": 2241.9159999999997,
+                  "rssBytes": 92307456,
+                  "heapBeforeBytes": 8929048,
+                  "heapUsedBytes": 9455800,
+                  "heapRetainedBytes": 526752,
+                  "bufferRetainedBytes": 269150,
+                  "buffersBefore": 405309,
+                  "buffersAfter": 674459,
+                  "wasmBytes": 1376256,
+                  "retainedBytes": 2172158
+                },
+                {
+                  "cpuMs": 145.97,
+                  "steadyCpuMs": 68.978,
+                  "processCpuMs": 236.271,
+                  "wallMs": 1144.485666,
+                  "rssBytes": 92258304,
+                  "heapBeforeBytes": 8944464,
+                  "heapUsedBytes": 9452760,
+                  "heapRetainedBytes": 508296,
+                  "bufferRetainedBytes": 277113,
+                  "buffersBefore": 405309,
+                  "buffersAfter": 682422,
+                  "wasmBytes": 1376256,
+                  "retainedBytes": 2161665
+                },
+                {
+                  "cpuMs": 134.119,
+                  "steadyCpuMs": 57.567,
+                  "processCpuMs": 224.746,
+                  "wallMs": 1062.4745839999998,
+                  "rssBytes": 92192768,
+                  "heapBeforeBytes": 8944464,
+                  "heapUsedBytes": 9449040,
+                  "heapRetainedBytes": 504576,
+                  "bufferRetainedBytes": 276488,
+                  "buffersBefore": 405309,
+                  "buffersAfter": 681797,
+                  "wasmBytes": 1376256,
+                  "retainedBytes": 2157320
+                }
+              ]
+            },
+            "gateLog": "frames 2028, markets 1040, tickers 1040, books 2\nmain-thread cpu  ts    220.2 ms   rust    146.0 ms   1.51x\nsteady cpu       ts    125.3 ms   rust     69.0 ms   1.82x\nprocess cpu      ts    272.5 ms   rust    236.3 ms   1.15x\nretained memory  ts      5.2 MB   rust      2.2 MB   2.39x\n(rust wasm linear memory 1.4 MB)\nPASS\n"
+          }
+        }
+      },
+      {
+        "venue": "bingx",
+        "order": [
+          "after",
+          "before"
+        ],
+        "fixtureSha256": "eb0cff2c2d707a3a6fa4c358de27f0a066e0e0d97d1586cb1943feecbf588ead",
+        "results": {
+          "after": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-after-bingx.log",
+            "outputs": {
+              "ts": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bingx-5488/ts-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bingx-5488/ts-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bingx-5488/ts-2.json"
+              ],
+              "rust": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bingx-5488/rust-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bingx-5488/rust-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bingx-5488/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 139.073,
+                  "steadyCpuMs": 64.513,
+                  "processCpuMs": 172.406,
+                  "wallMs": 727.8025419999999,
+                  "rssBytes": 170000384,
+                  "heapBeforeBytes": 28310656,
+                  "heapUsedBytes": 31987760,
+                  "heapRetainedBytes": 3677104,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2957653,
+                  "buffersAfter": 2957685,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3677136
+                },
+                {
+                  "cpuMs": 136.8,
+                  "steadyCpuMs": 59.142,
+                  "processCpuMs": 173.672,
+                  "wallMs": 851.2288749999998,
+                  "rssBytes": 169820160,
+                  "heapBeforeBytes": 28324920,
+                  "heapUsedBytes": 31978848,
+                  "heapRetainedBytes": 3653928,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2957653,
+                  "buffersAfter": 2957685,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3653960
+                },
+                {
+                  "cpuMs": 142.205,
+                  "steadyCpuMs": 66.5,
+                  "processCpuMs": 178.29,
+                  "wallMs": 1166.0325000000003,
+                  "rssBytes": 170721280,
+                  "heapBeforeBytes": 28327200,
+                  "heapUsedBytes": 31987176,
+                  "heapRetainedBytes": 3659976,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2957653,
+                  "buffersAfter": 2957685,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3660008
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 108.225,
+                  "steadyCpuMs": 44.769,
+                  "processCpuMs": 175.391,
+                  "wallMs": 683.5219999999999,
+                  "rssBytes": 117194752,
+                  "heapBeforeBytes": 12643688,
+                  "heapUsedBytes": 13044440,
+                  "heapRetainedBytes": 400752,
+                  "bufferRetainedBytes": 314544,
+                  "buffersBefore": 790959,
+                  "buffersAfter": 1105503,
+                  "wasmBytes": 1441792,
+                  "retainedBytes": 2157088
+                },
+                {
+                  "cpuMs": 104.108,
+                  "steadyCpuMs": 42.732,
+                  "processCpuMs": 162.671,
+                  "wallMs": 552.0632499999999,
+                  "rssBytes": 115113984,
+                  "heapBeforeBytes": 12656960,
+                  "heapUsedBytes": 13044664,
+                  "heapRetainedBytes": 387704,
+                  "bufferRetainedBytes": 314544,
+                  "buffersBefore": 790959,
+                  "buffersAfter": 1105503,
+                  "wasmBytes": 1441792,
+                  "retainedBytes": 2144040
+                },
+                {
+                  "cpuMs": 111.865,
+                  "steadyCpuMs": 49.971,
+                  "processCpuMs": 169.188,
+                  "wallMs": 1027.574333,
+                  "rssBytes": 114163712,
+                  "heapBeforeBytes": 12656960,
+                  "heapUsedBytes": 13044472,
+                  "heapRetainedBytes": 387512,
+                  "bufferRetainedBytes": 314544,
+                  "buffersBefore": 790959,
+                  "buffersAfter": 1105503,
+                  "wasmBytes": 1441792,
+                  "retainedBytes": 2143848
+                }
+              ]
+            },
+            "gateLog": "frames 188, markets 1268, tickers 1260, books 2\nmain-thread cpu  ts    139.1 ms   rust    108.2 ms   1.29x\nsteady cpu       ts     64.5 ms   rust     44.8 ms   1.44x\nprocess cpu      ts    173.7 ms   rust    169.2 ms   1.03x\nretained memory  ts      3.7 MB   rust      2.1 MB   1.71x\n(rust wasm linear memory 1.4 MB)\nPASS\n"
+          },
+          "before": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-before-bingx.log",
+            "outputs": {
+              "ts": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bingx-6909/ts-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bingx-6909/ts-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bingx-6909/ts-2.json"
+              ],
+              "rust": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bingx-6909/rust-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bingx-6909/rust-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bingx-6909/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 128.174,
+                  "steadyCpuMs": 55.519,
+                  "processCpuMs": 163.846,
+                  "wallMs": 711.5045419999999,
+                  "rssBytes": 170229760,
+                  "heapBeforeBytes": 28310136,
+                  "heapUsedBytes": 31984800,
+                  "heapRetainedBytes": 3674664,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2957653,
+                  "buffersAfter": 2957685,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3674696
+                },
+                {
+                  "cpuMs": 139.503,
+                  "steadyCpuMs": 67.426,
+                  "processCpuMs": 174.861,
+                  "wallMs": 872.952833,
+                  "rssBytes": 168099840,
+                  "heapBeforeBytes": 28336592,
+                  "heapUsedBytes": 31995152,
+                  "heapRetainedBytes": 3658560,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2957653,
+                  "buffersAfter": 2957685,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3658592
+                },
+                {
+                  "cpuMs": 125.82,
+                  "steadyCpuMs": 55.327,
+                  "processCpuMs": 162.068,
+                  "wallMs": 451.4823749999998,
+                  "rssBytes": 168738816,
+                  "heapBeforeBytes": 28317352,
+                  "heapUsedBytes": 31994640,
+                  "heapRetainedBytes": 3677288,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2957653,
+                  "buffersAfter": 2957685,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3677320
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 107.101,
+                  "steadyCpuMs": 47.943,
+                  "processCpuMs": 163.808,
+                  "wallMs": 814.140167,
+                  "rssBytes": 116244480,
+                  "heapBeforeBytes": 12788408,
+                  "heapUsedBytes": 13162176,
+                  "heapRetainedBytes": 373768,
+                  "bufferRetainedBytes": 314544,
+                  "buffersBefore": 790959,
+                  "buffersAfter": 1105503,
+                  "wasmBytes": 1572864,
+                  "retainedBytes": 2261176
+                },
+                {
+                  "cpuMs": 97.221,
+                  "steadyCpuMs": 42.163,
+                  "processCpuMs": 157.784,
+                  "wallMs": 455.34466599999996,
+                  "rssBytes": 115605504,
+                  "heapBeforeBytes": 12788408,
+                  "heapUsedBytes": 13162216,
+                  "heapRetainedBytes": 373808,
+                  "bufferRetainedBytes": 314544,
+                  "buffersBefore": 790959,
+                  "buffersAfter": 1105503,
+                  "wasmBytes": 1572864,
+                  "retainedBytes": 2261216
+                },
+                {
+                  "cpuMs": 96.886,
+                  "steadyCpuMs": 43.472,
+                  "processCpuMs": 155.859,
+                  "wallMs": 372.686167,
+                  "rssBytes": 115261440,
+                  "heapBeforeBytes": 12800944,
+                  "heapUsedBytes": 13162368,
+                  "heapRetainedBytes": 361424,
+                  "bufferRetainedBytes": 314544,
+                  "buffersBefore": 790959,
+                  "buffersAfter": 1105503,
+                  "wasmBytes": 1572864,
+                  "retainedBytes": 2248832
+                }
+              ]
+            },
+            "gateLog": "frames 188, markets 1268, tickers 1260, books 2\nmain-thread cpu  ts    128.2 ms   rust     97.2 ms   1.32x\nsteady cpu       ts     55.5 ms   rust     43.5 ms   1.28x\nprocess cpu      ts    163.8 ms   rust    157.8 ms   1.04x\nretained memory  ts      3.7 MB   rust      2.3 MB   1.63x\n(rust wasm linear memory 1.6 MB)\nPASS\n"
+          }
+        }
+      },
+      {
+        "venue": "blofin",
+        "order": [
+          "before",
+          "after"
+        ],
+        "fixtureSha256": "269db0cd591754c68141eef213dcc1b4bfc8cbc5a98af54e7e33aa9daa96690c",
+        "results": {
+          "before": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-before-blofin.log",
+            "outputs": {
+              "ts": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/blofin-7972/ts-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/blofin-7972/ts-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/blofin-7972/ts-2.json"
+              ],
+              "rust": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/blofin-7972/rust-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/blofin-7972/rust-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/blofin-7972/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 167.17,
+                  "steadyCpuMs": 97.628,
+                  "processCpuMs": 203.148,
+                  "wallMs": 578.6137089999999,
+                  "rssBytes": 136249344,
+                  "heapBeforeBytes": 22021072,
+                  "heapUsedBytes": 25065704,
+                  "heapRetainedBytes": 3044632,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2457811,
+                  "buffersAfter": 2457843,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3044664
+                },
+                {
+                  "cpuMs": 176.831,
+                  "steadyCpuMs": 106.081,
+                  "processCpuMs": 215.431,
+                  "wallMs": 770.8356670000001,
+                  "rssBytes": 135495680,
+                  "heapBeforeBytes": 22053512,
+                  "heapUsedBytes": 25078392,
+                  "heapRetainedBytes": 3024880,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2457811,
+                  "buffersAfter": 2457843,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3024912
+                },
+                {
+                  "cpuMs": 180.761,
+                  "steadyCpuMs": 114.293,
+                  "processCpuMs": 221.019,
+                  "wallMs": 744.5825829999999,
+                  "rssBytes": 135512064,
+                  "heapBeforeBytes": 22032224,
+                  "heapUsedBytes": 25086232,
+                  "heapRetainedBytes": 3054008,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2457811,
+                  "buffersAfter": 2457843,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3054040
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 142.738,
+                  "steadyCpuMs": 75.581,
+                  "processCpuMs": 249.362,
+                  "wallMs": 1190.2682499999999,
+                  "rssBytes": 100745216,
+                  "heapBeforeBytes": 7147920,
+                  "heapUsedBytes": 7930520,
+                  "heapRetainedBytes": 782600,
+                  "bufferRetainedBytes": 154616,
+                  "buffersBefore": 292141,
+                  "buffersAfter": 446757,
+                  "wasmBytes": 917504,
+                  "retainedBytes": 1854720
+                },
+                {
+                  "cpuMs": 150.29,
+                  "steadyCpuMs": 71.748,
+                  "processCpuMs": 262.305,
+                  "wallMs": 1083.4285830000001,
+                  "rssBytes": 105005056,
+                  "heapBeforeBytes": 7134672,
+                  "heapUsedBytes": 7930696,
+                  "heapRetainedBytes": 796024,
+                  "bufferRetainedBytes": 154616,
+                  "buffersBefore": 292141,
+                  "buffersAfter": 446757,
+                  "wasmBytes": 917504,
+                  "retainedBytes": 1868144
+                },
+                {
+                  "cpuMs": 149.634,
+                  "steadyCpuMs": 80.397,
+                  "processCpuMs": 260.493,
+                  "wallMs": 991.592708,
+                  "rssBytes": 106397696,
+                  "heapBeforeBytes": 7132344,
+                  "heapUsedBytes": 7927936,
+                  "heapRetainedBytes": 795592,
+                  "bufferRetainedBytes": 154616,
+                  "buffersBefore": 292141,
+                  "buffersAfter": 446757,
+                  "wasmBytes": 917504,
+                  "retainedBytes": 1867712
+                }
+              ]
+            },
+            "gateLog": "frames 2764, markets 512, tickers 512, books 2\nmain-thread cpu  ts    176.8 ms   rust    149.6 ms   1.18x\nsteady cpu       ts    106.1 ms   rust     75.6 ms   1.40x\nprocess cpu      ts    215.4 ms   rust    260.5 ms   0.83x\nretained memory  ts      3.0 MB   rust      1.9 MB   1.63x\n(rust wasm linear memory 0.9 MB)\nPASS\n"
+          },
+          "after": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-after-blofin.log",
+            "outputs": {
+              "ts": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/blofin-9043/ts-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/blofin-9043/ts-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/blofin-9043/ts-2.json"
+              ],
+              "rust": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/blofin-9043/rust-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/blofin-9043/rust-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/blofin-9043/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 196.949,
+                  "steadyCpuMs": 117.625,
+                  "processCpuMs": 235.614,
+                  "wallMs": 1621.586458,
+                  "rssBytes": 136118272,
+                  "heapBeforeBytes": 22034272,
+                  "heapUsedBytes": 25081360,
+                  "heapRetainedBytes": 3047088,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2457811,
+                  "buffersAfter": 2457843,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3047120
+                },
+                {
+                  "cpuMs": 197.699,
+                  "steadyCpuMs": 120.295,
+                  "processCpuMs": 245.99,
+                  "wallMs": 1660.160125,
+                  "rssBytes": 136314880,
+                  "heapBeforeBytes": 22015712,
+                  "heapUsedBytes": 25064032,
+                  "heapRetainedBytes": 3048320,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2457811,
+                  "buffersAfter": 2457843,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3048352
+                },
+                {
+                  "cpuMs": 195.492,
+                  "steadyCpuMs": 110.436,
+                  "processCpuMs": 240.866,
+                  "wallMs": 1900.7454590000002,
+                  "rssBytes": 136740864,
+                  "heapBeforeBytes": 22033008,
+                  "heapUsedBytes": 25094552,
+                  "heapRetainedBytes": 3061544,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2457811,
+                  "buffersAfter": 2457843,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3061576
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 127.522,
+                  "steadyCpuMs": 53.293,
+                  "processCpuMs": 242.102,
+                  "wallMs": 714.415292,
+                  "rssBytes": 94568448,
+                  "heapBeforeBytes": 6964968,
+                  "heapUsedBytes": 7784064,
+                  "heapRetainedBytes": 819096,
+                  "bufferRetainedBytes": 166893,
+                  "buffersBefore": 292141,
+                  "buffersAfter": 459034,
+                  "wasmBytes": 786432,
+                  "retainedBytes": 1772421
+                },
+                {
+                  "cpuMs": 128.777,
+                  "steadyCpuMs": 52.534,
+                  "processCpuMs": 243.13,
+                  "wallMs": 1039.3733339999999,
+                  "rssBytes": 92192768,
+                  "heapBeforeBytes": 6965312,
+                  "heapUsedBytes": 7798808,
+                  "heapRetainedBytes": 833496,
+                  "bufferRetainedBytes": 165956,
+                  "buffersBefore": 292141,
+                  "buffersAfter": 458097,
+                  "wasmBytes": 786432,
+                  "retainedBytes": 1785884
+                },
+                {
+                  "cpuMs": 172.94,
+                  "steadyCpuMs": 90.937,
+                  "processCpuMs": 296.217,
+                  "wallMs": 2190.152458,
+                  "rssBytes": 96141312,
+                  "heapBeforeBytes": 6965152,
+                  "heapUsedBytes": 7809096,
+                  "heapRetainedBytes": 843944,
+                  "bufferRetainedBytes": 167854,
+                  "buffersBefore": 292141,
+                  "buffersAfter": 459995,
+                  "wasmBytes": 786432,
+                  "retainedBytes": 1798230
+                }
+              ]
+            },
+            "gateLog": "frames 2764, markets 512, tickers 512, books 2\nmain-thread cpu  ts    196.9 ms   rust    128.8 ms   1.53x\nsteady cpu       ts    117.6 ms   rust     53.3 ms   2.21x\nprocess cpu      ts    240.9 ms   rust    243.1 ms   0.99x\nretained memory  ts      3.0 MB   rust      1.8 MB   1.71x\n(rust wasm linear memory 0.8 MB)\nPASS\n"
+          }
+        }
+      },
+      {
+        "venue": "backpack",
+        "order": [
+          "after",
+          "before"
+        ],
+        "fixtureSha256": "da5ece3f5d39138c55e223ec08a4b14ee8b534ba8bc58a193e093dc2dab2c6a5",
+        "results": {
+          "after": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-after-backpack.log",
+            "outputs": {
+              "ts": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/backpack-11146/ts-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/backpack-11146/ts-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/backpack-11146/ts-2.json"
+              ],
+              "rust": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/backpack-11146/rust-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/backpack-11146/rust-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/backpack-11146/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 202.043,
+                  "steadyCpuMs": 120.488,
+                  "processCpuMs": 239.559,
+                  "wallMs": 3339.456166,
+                  "rssBytes": 128106496,
+                  "heapBeforeBytes": 21086760,
+                  "heapUsedBytes": 24083032,
+                  "heapRetainedBytes": 2996272,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2388436,
+                  "buffersAfter": 2388468,
+                  "wasmBytes": 0,
+                  "retainedBytes": 2996304
+                },
+                {
+                  "cpuMs": 184.069,
+                  "steadyCpuMs": 112.13,
+                  "processCpuMs": 218.126,
+                  "wallMs": 2818.6677919999993,
+                  "rssBytes": 127582208,
+                  "heapBeforeBytes": 21048776,
+                  "heapUsedBytes": 24146624,
+                  "heapRetainedBytes": 3097848,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2388436,
+                  "buffersAfter": 2388468,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3097880
+                },
+                {
+                  "cpuMs": 180.053,
+                  "steadyCpuMs": 111.727,
+                  "processCpuMs": 214.133,
+                  "wallMs": 2800.364667,
+                  "rssBytes": 125632512,
+                  "heapBeforeBytes": 21061280,
+                  "heapUsedBytes": 24061720,
+                  "heapRetainedBytes": 3000440,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2388436,
+                  "buffersAfter": 2388468,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3000472
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 105.211,
+                  "steadyCpuMs": 43.953,
+                  "processCpuMs": 204.609,
+                  "wallMs": 977.4084169999999,
+                  "rssBytes": 86949888,
+                  "heapBeforeBytes": 6452792,
+                  "heapUsedBytes": 6870000,
+                  "heapRetainedBytes": 417208,
+                  "bufferRetainedBytes": 196948,
+                  "buffersBefore": 222766,
+                  "buffersAfter": 419714,
+                  "wasmBytes": 720896,
+                  "retainedBytes": 1335052
+                },
+                {
+                  "cpuMs": 91.605,
+                  "steadyCpuMs": 37.388,
+                  "processCpuMs": 192.865,
+                  "wallMs": 862.9224999999999,
+                  "rssBytes": 88080384,
+                  "heapBeforeBytes": 6337336,
+                  "heapUsedBytes": 6867664,
+                  "heapRetainedBytes": 530328,
+                  "bufferRetainedBytes": 196981,
+                  "buffersBefore": 222766,
+                  "buffersAfter": 419747,
+                  "wasmBytes": 720896,
+                  "retainedBytes": 1448205
+                },
+                {
+                  "cpuMs": 90.166,
+                  "steadyCpuMs": 42.041,
+                  "processCpuMs": 189.488,
+                  "wallMs": 541.996667,
+                  "rssBytes": 88948736,
+                  "heapBeforeBytes": 6337072,
+                  "heapUsedBytes": 6870800,
+                  "heapRetainedBytes": 533728,
+                  "bufferRetainedBytes": 198497,
+                  "buffersBefore": 222766,
+                  "buffersAfter": 421263,
+                  "wasmBytes": 720896,
+                  "retainedBytes": 1453121
+                }
+              ]
+            },
+            "gateLog": "frames 1087, markets 100, tickers 91, books 2\nmain-thread cpu  ts    184.1 ms   rust     91.6 ms   2.01x\nsteady cpu       ts    112.1 ms   rust     42.0 ms   2.67x\nprocess cpu      ts    218.1 ms   rust    192.9 ms   1.13x\nretained memory  ts      3.0 MB   rust      1.4 MB   2.07x\n(rust wasm linear memory 0.7 MB)\nPASS\n"
+          },
+          "before": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-before-backpack.log",
+            "outputs": {
+              "ts": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/backpack-13739/ts-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/backpack-13739/ts-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/backpack-13739/ts-2.json"
+              ],
+              "rust": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/backpack-13739/rust-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/backpack-13739/rust-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/backpack-13739/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 198.143,
+                  "steadyCpuMs": 118.329,
+                  "processCpuMs": 232.062,
+                  "wallMs": 3439.708625,
+                  "rssBytes": 127352832,
+                  "heapBeforeBytes": 21038032,
+                  "heapUsedBytes": 24133880,
+                  "heapRetainedBytes": 3095848,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2388436,
+                  "buffersAfter": 2388468,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3095880
+                },
+                {
+                  "cpuMs": 197.62,
+                  "steadyCpuMs": 114.586,
+                  "processCpuMs": 233.07,
+                  "wallMs": 3190.2866670000003,
+                  "rssBytes": 126648320,
+                  "heapBeforeBytes": 21041472,
+                  "heapUsedBytes": 24058392,
+                  "heapRetainedBytes": 3016920,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2388436,
+                  "buffersAfter": 2388468,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3016952
+                },
+                {
+                  "cpuMs": 190.904,
+                  "steadyCpuMs": 110.461,
+                  "processCpuMs": 226.254,
+                  "wallMs": 3187.4278339999996,
+                  "rssBytes": 126599168,
+                  "heapBeforeBytes": 21048920,
+                  "heapUsedBytes": 24073712,
+                  "heapRetainedBytes": 3024792,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2388436,
+                  "buffersAfter": 2388468,
+                  "wasmBytes": 0,
+                  "retainedBytes": 3024824
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 95.56,
+                  "steadyCpuMs": 50.741,
+                  "processCpuMs": 193.909,
+                  "wallMs": 955.1827499999999,
+                  "rssBytes": 97173504,
+                  "heapBeforeBytes": 6504472,
+                  "heapUsedBytes": 7012288,
+                  "heapRetainedBytes": 507816,
+                  "bufferRetainedBytes": 183392,
+                  "buffersBefore": 222766,
+                  "buffersAfter": 406158,
+                  "wasmBytes": 1048576,
+                  "retainedBytes": 1739784
+                },
+                {
+                  "cpuMs": 93.966,
+                  "steadyCpuMs": 47.502,
+                  "processCpuMs": 191.728,
+                  "wallMs": 713.633959,
+                  "rssBytes": 98615296,
+                  "heapBeforeBytes": 6522456,
+                  "heapUsedBytes": 7015784,
+                  "heapRetainedBytes": 493328,
+                  "bufferRetainedBytes": 183392,
+                  "buffersBefore": 222766,
+                  "buffersAfter": 406158,
+                  "wasmBytes": 1048576,
+                  "retainedBytes": 1725296
+                },
+                {
+                  "cpuMs": 103.56,
+                  "steadyCpuMs": 54.19,
+                  "processCpuMs": 205.094,
+                  "wallMs": 875.99325,
+                  "rssBytes": 96239616,
+                  "heapBeforeBytes": 6506320,
+                  "heapUsedBytes": 7017048,
+                  "heapRetainedBytes": 510728,
+                  "bufferRetainedBytes": 183392,
+                  "buffersBefore": 222766,
+                  "buffersAfter": 406158,
+                  "wasmBytes": 1048576,
+                  "retainedBytes": 1742696
+                }
+              ]
+            },
+            "gateLog": "frames 1087, markets 100, tickers 91, books 2\nmain-thread cpu  ts    197.6 ms   rust     95.6 ms   2.07x\nsteady cpu       ts    114.6 ms   rust     50.7 ms   2.26x\nprocess cpu      ts    232.1 ms   rust    193.9 ms   1.20x\nretained memory  ts      3.0 MB   rust      1.7 MB   1.74x\n(rust wasm linear memory 1.0 MB)\nPASS\n"
+          }
+        }
+      },
+      {
+        "venue": "bitget",
+        "order": [
+          "before",
+          "after"
+        ],
+        "fixtureSha256": "f02b65db358454211db54b7684034862e90c2fac3e463e590d5d42c603a5131d",
+        "results": {
+          "before": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-before-bitget.log",
+            "outputs": {
+              "ts": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bitget-16301/ts-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bitget-16301/ts-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bitget-16301/ts-2.json"
+              ],
+              "rust": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bitget-16301/rust-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bitget-16301/rust-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/bitget-16301/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 662.223,
+                  "steadyCpuMs": 447.97,
+                  "processCpuMs": 809.422,
+                  "wallMs": 3078.9248330000005,
+                  "rssBytes": 321011712,
+                  "heapBeforeBytes": 50862480,
+                  "heapUsedBytes": 55217200,
+                  "heapRetainedBytes": 4354720,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 6064074,
+                  "buffersAfter": 6064106,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4354752
+                },
+                {
+                  "cpuMs": 621.54,
+                  "steadyCpuMs": 411.16,
+                  "processCpuMs": 777.476,
+                  "wallMs": 2016.5123749999998,
+                  "rssBytes": 319488000,
+                  "heapBeforeBytes": 50873376,
+                  "heapUsedBytes": 55191296,
+                  "heapRetainedBytes": 4317920,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 6064074,
+                  "buffersAfter": 6064106,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4317952
+                },
+                {
+                  "cpuMs": 599.309,
+                  "steadyCpuMs": 399.99,
+                  "processCpuMs": 757.029,
+                  "wallMs": 2030.3827079999999,
+                  "rssBytes": 318767104,
+                  "heapBeforeBytes": 50880928,
+                  "heapUsedBytes": 55204432,
+                  "heapRetainedBytes": 4323504,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 6064074,
+                  "buffersAfter": 6064106,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4323536
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 604.925,
+                  "steadyCpuMs": 406.453,
+                  "processCpuMs": 786.816,
+                  "wallMs": 2234.0504579999997,
+                  "rssBytes": 290914304,
+                  "heapBeforeBytes": 35043896,
+                  "heapUsedBytes": 35043776,
+                  "heapRetainedBytes": -120,
+                  "bufferRetainedBytes": 228672,
+                  "buffersBefore": 3898404,
+                  "buffersAfter": 4127076,
+                  "wasmBytes": 1310720,
+                  "retainedBytes": 1539272
+                },
+                {
+                  "cpuMs": 579.213,
+                  "steadyCpuMs": 390.955,
+                  "processCpuMs": 767.412,
+                  "wallMs": 2126.430708,
+                  "rssBytes": 294273024,
+                  "heapBeforeBytes": 35031872,
+                  "heapUsedBytes": 35041856,
+                  "heapRetainedBytes": 9984,
+                  "bufferRetainedBytes": 228672,
+                  "buffersBefore": 3898404,
+                  "buffersAfter": 4127076,
+                  "wasmBytes": 1310720,
+                  "retainedBytes": 1549376
+                },
+                {
+                  "cpuMs": 579.853,
+                  "steadyCpuMs": 393.957,
+                  "processCpuMs": 764.514,
+                  "wallMs": 1780.2593339999999,
+                  "rssBytes": 296173568,
+                  "heapBeforeBytes": 35042120,
+                  "heapUsedBytes": 35037120,
+                  "heapRetainedBytes": -5000,
+                  "bufferRetainedBytes": 228672,
+                  "buffersBefore": 3898404,
+                  "buffersAfter": 4127076,
+                  "wasmBytes": 1310720,
+                  "retainedBytes": 1534392
+                }
+              ]
+            },
+            "gateLog": "frames 36634, markets 846, tickers 846, books 2\nmain-thread cpu  ts    621.5 ms   rust    579.9 ms   1.07x\nsteady cpu       ts    411.2 ms   rust    394.0 ms   1.04x\nprocess cpu      ts    777.5 ms   rust    767.4 ms   1.01x\nretained memory  ts      4.3 MB   rust      1.5 MB   2.81x\n(rust wasm linear memory 1.3 MB)\nPASS\n"
+          },
+          "after": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-after-bitget.log",
+            "outputs": {
+              "ts": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bitget-18948/ts-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bitget-18948/ts-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bitget-18948/ts-2.json"
+              ],
+              "rust": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bitget-18948/rust-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bitget-18948/rust-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/bitget-18948/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 609.792,
+                  "steadyCpuMs": 399.55,
+                  "processCpuMs": 785.397,
+                  "wallMs": 1657.103625,
+                  "rssBytes": 312442880,
+                  "heapBeforeBytes": 50842040,
+                  "heapUsedBytes": 55165648,
+                  "heapRetainedBytes": 4323608,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 6064074,
+                  "buffersAfter": 6064106,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4323640
+                },
+                {
+                  "cpuMs": 609.395,
+                  "steadyCpuMs": 396.644,
+                  "processCpuMs": 759.382,
+                  "wallMs": 1384.768125,
+                  "rssBytes": 313688064,
+                  "heapBeforeBytes": 50851640,
+                  "heapUsedBytes": 55173904,
+                  "heapRetainedBytes": 4322264,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 6064074,
+                  "buffersAfter": 6064106,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4322296
+                },
+                {
+                  "cpuMs": 568.428,
+                  "steadyCpuMs": 377.047,
+                  "processCpuMs": 725.443,
+                  "wallMs": 1213.76025,
+                  "rssBytes": 317964288,
+                  "heapBeforeBytes": 50892264,
+                  "heapUsedBytes": 55201160,
+                  "heapRetainedBytes": 4308896,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 6064074,
+                  "buffersAfter": 6064106,
+                  "wasmBytes": 0,
+                  "retainedBytes": 4308928
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 486.83,
+                  "steadyCpuMs": 306.881,
+                  "processCpuMs": 683.433,
+                  "wallMs": 833.179,
+                  "rssBytes": 290045952,
+                  "heapBeforeBytes": 34877560,
+                  "heapUsedBytes": 34961352,
+                  "heapRetainedBytes": 83792,
+                  "bufferRetainedBytes": 231395,
+                  "buffersBefore": 3898404,
+                  "buffersAfter": 4129799,
+                  "wasmBytes": 1114112,
+                  "retainedBytes": 1429299
+                },
+                {
+                  "cpuMs": 521.036,
+                  "steadyCpuMs": 350.265,
+                  "processCpuMs": 719.702,
+                  "wallMs": 1338.539209,
+                  "rssBytes": 291799040,
+                  "heapBeforeBytes": 34876904,
+                  "heapUsedBytes": 34965728,
+                  "heapRetainedBytes": 88824,
+                  "bufferRetainedBytes": 228672,
+                  "buffersBefore": 3898404,
+                  "buffersAfter": 4127076,
+                  "wasmBytes": 1114112,
+                  "retainedBytes": 1431608
+                },
+                {
+                  "cpuMs": 595.816,
+                  "steadyCpuMs": 384.96,
+                  "processCpuMs": 814.424,
+                  "wallMs": 2349.086083,
+                  "rssBytes": 291012608,
+                  "heapBeforeBytes": 34877632,
+                  "heapUsedBytes": 34961072,
+                  "heapRetainedBytes": 83440,
+                  "bufferRetainedBytes": 228672,
+                  "buffersBefore": 3898404,
+                  "buffersAfter": 4127076,
+                  "wasmBytes": 1114112,
+                  "retainedBytes": 1426224
+                }
+              ]
+            },
+            "gateLog": "frames 36634, markets 846, tickers 846, books 2\nmain-thread cpu  ts    609.4 ms   rust    521.0 ms   1.17x\nsteady cpu       ts    396.6 ms   rust    350.3 ms   1.13x\nprocess cpu      ts    759.4 ms   rust    719.7 ms   1.06x\nretained memory  ts      4.3 MB   rust      1.4 MB   3.02x\n(rust wasm linear memory 1.1 MB)\nPASS\n"
+          }
+        }
+      },
+      {
+        "venue": "hyperliquid",
+        "order": [
+          "after",
+          "before"
+        ],
+        "fixtureSha256": "1ae037ecae4713647f9087962cfda6d5f6974c18c156a6c4f92daa853636fdfc",
+        "results": {
+          "after": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-after-hyperliquid.log",
+            "outputs": {
+              "ts": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/hyperliquid-20338/ts-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/hyperliquid-20338/ts-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/hyperliquid-20338/ts-2.json"
+              ],
+              "rust": [
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/hyperliquid-20338/rust-0.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/hyperliquid-20338/rust-1.json",
+                "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/hyperliquid-20338/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 428.829,
+                  "steadyCpuMs": 44.63,
+                  "processCpuMs": 534.975,
+                  "wallMs": 12794.035958,
+                  "rssBytes": 140132352,
+                  "heapBeforeBytes": 28081752,
+                  "heapUsedBytes": 33215736,
+                  "heapRetainedBytes": 5133984,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2443490,
+                  "buffersAfter": 2443522,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5134016
+                },
+                {
+                  "cpuMs": 404.298,
+                  "steadyCpuMs": 38.785,
+                  "processCpuMs": 514.337,
+                  "wallMs": 12451.395875,
+                  "rssBytes": 140050432,
+                  "heapBeforeBytes": 28095744,
+                  "heapUsedBytes": 33211808,
+                  "heapRetainedBytes": 5116064,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2443490,
+                  "buffersAfter": 2443522,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5116096
+                },
+                {
+                  "cpuMs": 427.142,
+                  "steadyCpuMs": 38.341,
+                  "processCpuMs": 521.718,
+                  "wallMs": 12215.46975,
+                  "rssBytes": 140951552,
+                  "heapBeforeBytes": 28058832,
+                  "heapUsedBytes": 33208768,
+                  "heapRetainedBytes": 5149936,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2443490,
+                  "buffersAfter": 2443522,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5149968
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 62.201,
+                  "steadyCpuMs": 16.174,
+                  "processCpuMs": 152.134,
+                  "wallMs": 171.793291,
+                  "rssBytes": 80527360,
+                  "heapBeforeBytes": 6136232,
+                  "heapUsedBytes": 6576544,
+                  "heapRetainedBytes": 440312,
+                  "bufferRetainedBytes": 95697,
+                  "buffersBefore": 276092,
+                  "buffersAfter": 371789,
+                  "wasmBytes": 1310720,
+                  "retainedBytes": 1846729
+                },
+                {
+                  "cpuMs": 74.865,
+                  "steadyCpuMs": 27.963,
+                  "processCpuMs": 175.732,
+                  "wallMs": 382.35883399999994,
+                  "rssBytes": 78938112,
+                  "heapBeforeBytes": 6136232,
+                  "heapUsedBytes": 6577576,
+                  "heapRetainedBytes": 441344,
+                  "bufferRetainedBytes": 94335,
+                  "buffersBefore": 276092,
+                  "buffersAfter": 370427,
+                  "wasmBytes": 1310720,
+                  "retainedBytes": 1846399
+                },
+                {
+                  "cpuMs": 64.51,
+                  "steadyCpuMs": 19.359,
+                  "processCpuMs": 161.911,
+                  "wallMs": 143.98566699999998,
+                  "rssBytes": 78151680,
+                  "heapBeforeBytes": 6146352,
+                  "heapUsedBytes": 6577160,
+                  "heapRetainedBytes": 430808,
+                  "bufferRetainedBytes": 97976,
+                  "buffersBefore": 276092,
+                  "buffersAfter": 374068,
+                  "wasmBytes": 1310720,
+                  "retainedBytes": 1839504
+                }
+              ]
+            },
+            "gateLog": "frames 285, markets 341, tickers 341, books 2\nmain-thread cpu  ts    427.1 ms   rust     64.5 ms   6.62x\nsteady cpu       ts     38.8 ms   rust     19.4 ms   2.00x\nprocess cpu      ts    521.7 ms   rust    161.9 ms   3.22x\nretained memory  ts      5.1 MB   rust      1.8 MB   2.78x\n(rust wasm linear memory 1.3 MB)\nPASS\n"
+          },
+          "before": {
+            "exit": 0,
+            "log": "/tmp/perf-final11-before-hyperliquid.log",
+            "outputs": {
+              "ts": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/hyperliquid-25105/ts-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/hyperliquid-25105/ts-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/hyperliquid-25105/ts-2.json"
+              ],
+              "rust": [
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/hyperliquid-25105/rust-0.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/hyperliquid-25105/rust-1.json",
+                "/tmp/rust-perf-baseline/sdk-rs/harness/out/hyperliquid-25105/rust-2.json"
+              ]
+            },
+            "metrics": {
+              "ts": [
+                {
+                  "cpuMs": 447.347,
+                  "steadyCpuMs": 32.24,
+                  "processCpuMs": 521.177,
+                  "wallMs": 12209.311959,
+                  "rssBytes": 136527872,
+                  "heapBeforeBytes": 28079104,
+                  "heapUsedBytes": 33210504,
+                  "heapRetainedBytes": 5131400,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2443490,
+                  "buffersAfter": 2443522,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5131432
+                },
+                {
+                  "cpuMs": 445.129,
+                  "steadyCpuMs": 32.067,
+                  "processCpuMs": 544.996,
+                  "wallMs": 12212.080958,
+                  "rssBytes": 136593408,
+                  "heapBeforeBytes": 28059800,
+                  "heapUsedBytes": 33208120,
+                  "heapRetainedBytes": 5148320,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2443490,
+                  "buffersAfter": 2443522,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5148352
+                },
+                {
+                  "cpuMs": 463.995,
+                  "steadyCpuMs": 31.38,
+                  "processCpuMs": 539.949,
+                  "wallMs": 12134.386333999999,
+                  "rssBytes": 148766720,
+                  "heapBeforeBytes": 28065944,
+                  "heapUsedBytes": 33210088,
+                  "heapRetainedBytes": 5144144,
+                  "bufferRetainedBytes": 32,
+                  "buffersBefore": 2443490,
+                  "buffersAfter": 2443522,
+                  "wasmBytes": 0,
+                  "retainedBytes": 5144176
+                }
+              ],
+              "rust": [
+                {
+                  "cpuMs": 67.254,
+                  "steadyCpuMs": 24.556,
+                  "processCpuMs": 171.401,
+                  "wallMs": 237.48216699999998,
+                  "rssBytes": 87146496,
+                  "heapBeforeBytes": 6303968,
+                  "heapUsedBytes": 6705296,
+                  "heapRetainedBytes": 401328,
+                  "bufferRetainedBytes": 82808,
+                  "buffersBefore": 276092,
+                  "buffersAfter": 358900,
+                  "wasmBytes": 1638400,
+                  "retainedBytes": 2122536
+                },
+                {
+                  "cpuMs": 61.849,
+                  "steadyCpuMs": 20.833,
+                  "processCpuMs": 169.284,
+                  "wallMs": 155.286292,
+                  "rssBytes": 88014848,
+                  "heapBeforeBytes": 6313896,
+                  "heapUsedBytes": 6707312,
+                  "heapRetainedBytes": 393416,
+                  "bufferRetainedBytes": 82808,
+                  "buffersBefore": 276092,
+                  "buffersAfter": 358900,
+                  "wasmBytes": 1638400,
+                  "retainedBytes": 2114624
+                },
+                {
+                  "cpuMs": 59.139,
+                  "steadyCpuMs": 19.516,
+                  "processCpuMs": 158.042,
+                  "wallMs": 180.63491599999998,
+                  "rssBytes": 85884928,
+                  "heapBeforeBytes": 6304008,
+                  "heapUsedBytes": 6705296,
+                  "heapRetainedBytes": 401288,
+                  "bufferRetainedBytes": 82808,
+                  "buffersBefore": 276092,
+                  "buffersAfter": 358900,
+                  "wasmBytes": 1638400,
+                  "retainedBytes": 2122496
+                }
+              ]
+            },
+            "gateLog": "frames 285, markets 341, tickers 341, books 2\nmain-thread cpu  ts    447.3 ms   rust     61.8 ms   7.23x\nsteady cpu       ts     32.1 ms   rust     20.8 ms   1.54x\nprocess cpu      ts    539.9 ms   rust    169.3 ms   3.19x\nretained memory  ts      5.1 MB   rust      2.1 MB   2.42x\n(rust wasm linear memory 1.6 MB)\nPASS\n"
+          }
+        }
+      }
+    ]
+  },
+  "mexc": {
+    "protocol": "10 valid crossover pairs, AB/BA alternating by valid pair, maximum15 attempts; reject entire pair only existing memory-baseline quality failures; all attempts retained; no CPU-directed stopping",
+    "attempts": [
+      {
+        "attempt": 0,
+        "order": [
+          "before",
+          "after"
+        ],
+        "results": {
+          "before": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-0-before.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 551.883,
+                "steadyCpuMs": 318.117,
+                "processCpuMs": 672.727,
+                "wallMs": 865.097375,
+                "rssBytes": 216137728,
+                "heapBeforeBytes": 31303304,
+                "heapUsedBytes": 41158864,
+                "heapRetainedBytes": 9855560,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9855592
+              },
+              "rust": {
+                "cpuMs": 201.026,
+                "steadyCpuMs": 110.113,
+                "processCpuMs": 300.81,
+                "wallMs": 373.97187500000007,
+                "rssBytes": 136396800,
+                "heapBeforeBytes": 16383280,
+                "heapUsedBytes": 16569160,
+                "heapRetainedBytes": 185880,
+                "bufferRetainedBytes": 407360,
+                "buffersBefore": 785449,
+                "buffersAfter": 1192809,
+                "wasmBytes": 2031616,
+                "retainedBytes": 2624856
+              }
+            },
+            "outputs": {
+              "ts": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-35343/ts-0.json",
+              "rust": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-35343/rust-0.json"
+            }
+          },
+          "after": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-0-after.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 477.356,
+                "steadyCpuMs": 278.221,
+                "processCpuMs": 605.84,
+                "wallMs": 561.376542,
+                "rssBytes": 216645632,
+                "heapBeforeBytes": 31300264,
+                "heapUsedBytes": 41133560,
+                "heapRetainedBytes": 9833296,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9833328
+              },
+              "rust": {
+                "cpuMs": 156.705,
+                "steadyCpuMs": 70.443,
+                "processCpuMs": 259.051,
+                "wallMs": 225.13770899999997,
+                "rssBytes": 132956160,
+                "heapBeforeBytes": 16217352,
+                "heapUsedBytes": 16465736,
+                "heapRetainedBytes": 248384,
+                "bufferRetainedBytes": 420745,
+                "buffersBefore": 785449,
+                "buffersAfter": 1206194,
+                "wasmBytes": 1441792,
+                "retainedBytes": 2110921
+              }
+            },
+            "outputs": {
+              "ts": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-35632/ts-0.json",
+              "rust": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-35632/rust-0.json"
+            }
+          }
+        },
+        "qualityValid": true
+      },
+      {
+        "attempt": 1,
+        "order": [
+          "after",
+          "before"
+        ],
+        "results": {
+          "after": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-1-after.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 461.944,
+                "steadyCpuMs": 277.721,
+                "processCpuMs": 565.987,
+                "wallMs": 499.510708,
+                "rssBytes": 212533248,
+                "heapBeforeBytes": 31311592,
+                "heapUsedBytes": 41146952,
+                "heapRetainedBytes": 9835360,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9835392
+              },
+              "rust": {
+                "cpuMs": 158.507,
+                "steadyCpuMs": 67.886,
+                "processCpuMs": 260.997,
+                "wallMs": 230.02945799999998,
+                "rssBytes": 133169152,
+                "heapBeforeBytes": 16217376,
+                "heapUsedBytes": 16465904,
+                "heapRetainedBytes": 248528,
+                "bufferRetainedBytes": 420745,
+                "buffersBefore": 785449,
+                "buffersAfter": 1206194,
+                "wasmBytes": 1441792,
+                "retainedBytes": 2111065
+              }
+            },
+            "outputs": {
+              "ts": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-35800/ts-0.json",
+              "rust": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-35800/rust-0.json"
+            }
+          },
+          "before": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-1-before.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 461.769,
+                "steadyCpuMs": 269.246,
+                "processCpuMs": 572.895,
+                "wallMs": 515.2392500000001,
+                "rssBytes": 211648512,
+                "heapBeforeBytes": 31325760,
+                "heapUsedBytes": 41159000,
+                "heapRetainedBytes": 9833240,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9833272
+              },
+              "rust": {
+                "cpuMs": 157.033,
+                "steadyCpuMs": 69.579,
+                "processCpuMs": 253.16,
+                "wallMs": 205.72554100000002,
+                "rssBytes": 137953280,
+                "heapBeforeBytes": 16383280,
+                "heapUsedBytes": 16569352,
+                "heapRetainedBytes": 186072,
+                "bufferRetainedBytes": 407360,
+                "buffersBefore": 785449,
+                "buffersAfter": 1192809,
+                "wasmBytes": 2031616,
+                "retainedBytes": 2625048
+              }
+            },
+            "outputs": {
+              "ts": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-35996/ts-0.json",
+              "rust": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-35996/rust-0.json"
+            }
+          }
+        },
+        "qualityValid": true
+      },
+      {
+        "attempt": 2,
+        "order": [
+          "before",
+          "after"
+        ],
+        "results": {
+          "before": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-2-before.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 461.971,
+                "steadyCpuMs": 266.712,
+                "processCpuMs": 575.746,
+                "wallMs": 509.11045800000005,
+                "rssBytes": 214499328,
+                "heapBeforeBytes": 31312368,
+                "heapUsedBytes": 41148688,
+                "heapRetainedBytes": 9836320,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9836352
+              },
+              "rust": {
+                "cpuMs": 146.932,
+                "steadyCpuMs": 66.606,
+                "processCpuMs": 239.003,
+                "wallMs": 183.236041,
+                "rssBytes": 137019392,
+                "heapBeforeBytes": 16385864,
+                "heapUsedBytes": 16571784,
+                "heapRetainedBytes": 185920,
+                "bufferRetainedBytes": 407360,
+                "buffersBefore": 785449,
+                "buffersAfter": 1192809,
+                "wasmBytes": 2031616,
+                "retainedBytes": 2624896
+              }
+            },
+            "outputs": {
+              "ts": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-36193/ts-0.json",
+              "rust": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-36193/rust-0.json"
+            }
+          },
+          "after": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-2-after.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 445.838,
+                "steadyCpuMs": 261.474,
+                "processCpuMs": 554.515,
+                "wallMs": 477.20820900000007,
+                "rssBytes": 213434368,
+                "heapBeforeBytes": 31316888,
+                "heapUsedBytes": 41145392,
+                "heapRetainedBytes": 9828504,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9828536
+              },
+              "rust": {
+                "cpuMs": 162.974,
+                "steadyCpuMs": 72.456,
+                "processCpuMs": 264.808,
+                "wallMs": 252.98050000000003,
+                "rssBytes": 133038080,
+                "heapBeforeBytes": 16217352,
+                "heapUsedBytes": 16465736,
+                "heapRetainedBytes": 248384,
+                "bufferRetainedBytes": 420745,
+                "buffersBefore": 785449,
+                "buffersAfter": 1206194,
+                "wasmBytes": 1441792,
+                "retainedBytes": 2110921
+              }
+            },
+            "outputs": {
+              "ts": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-36420/ts-0.json",
+              "rust": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-36420/rust-0.json"
+            }
+          }
+        },
+        "qualityValid": true
+      },
+      {
+        "attempt": 3,
+        "order": [
+          "after",
+          "before"
+        ],
+        "results": {
+          "after": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-3-after.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 466.087,
+                "steadyCpuMs": 278.011,
+                "processCpuMs": 580.306,
+                "wallMs": 558.5760829999999,
+                "rssBytes": 216023040,
+                "heapBeforeBytes": 31311112,
+                "heapUsedBytes": 41114496,
+                "heapRetainedBytes": 9803384,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9803416
+              },
+              "rust": {
+                "cpuMs": 150.473,
+                "steadyCpuMs": 67.885,
+                "processCpuMs": 250.11,
+                "wallMs": 215.87116699999999,
+                "rssBytes": 132005888,
+                "heapBeforeBytes": 16214768,
+                "heapUsedBytes": 16463352,
+                "heapRetainedBytes": 248584,
+                "bufferRetainedBytes": 420745,
+                "buffersBefore": 785449,
+                "buffersAfter": 1206194,
+                "wasmBytes": 1441792,
+                "retainedBytes": 2111121
+              }
+            },
+            "outputs": {
+              "ts": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-36603/ts-0.json",
+              "rust": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-36603/rust-0.json"
+            }
+          },
+          "before": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-3-before.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 443.43,
+                "steadyCpuMs": 261.505,
+                "processCpuMs": 545.357,
+                "wallMs": 478.07824999999997,
+                "rssBytes": 213385216,
+                "heapBeforeBytes": 31326168,
+                "heapUsedBytes": 41156664,
+                "heapRetainedBytes": 9830496,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9830528
+              },
+              "rust": {
+                "cpuMs": 144.695,
+                "steadyCpuMs": 65.279,
+                "processCpuMs": 240.926,
+                "wallMs": 182.10916600000002,
+                "rssBytes": 138215424,
+                "heapBeforeBytes": 16383304,
+                "heapUsedBytes": 16569280,
+                "heapRetainedBytes": 185976,
+                "bufferRetainedBytes": 407360,
+                "buffersBefore": 785449,
+                "buffersAfter": 1192809,
+                "wasmBytes": 2031616,
+                "retainedBytes": 2624952
+              }
+            },
+            "outputs": {
+              "ts": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-36839/ts-0.json",
+              "rust": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-36839/rust-0.json"
+            }
+          }
+        },
+        "qualityValid": true
+      },
+      {
+        "attempt": 4,
+        "order": [
+          "before",
+          "after"
+        ],
+        "results": {
+          "before": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-4-before.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 507.58,
+                "steadyCpuMs": 287.299,
+                "processCpuMs": 616.388,
+                "wallMs": 635.9608329999999,
+                "rssBytes": 211582976,
+                "heapBeforeBytes": 31325616,
+                "heapUsedBytes": 41167008,
+                "heapRetainedBytes": 9841392,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9841424
+              },
+              "rust": {
+                "cpuMs": 152.717,
+                "steadyCpuMs": 68.319,
+                "processCpuMs": 248.662,
+                "wallMs": 195.331916,
+                "rssBytes": 136134656,
+                "heapBeforeBytes": 16385864,
+                "heapUsedBytes": 16571784,
+                "heapRetainedBytes": 185920,
+                "bufferRetainedBytes": 407360,
+                "buffersBefore": 785449,
+                "buffersAfter": 1192809,
+                "wasmBytes": 2031616,
+                "retainedBytes": 2624896
+              }
+            },
+            "outputs": {
+              "ts": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-37080/ts-0.json",
+              "rust": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-37080/rust-0.json"
+            }
+          },
+          "after": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-4-after.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 497.198,
+                "steadyCpuMs": 287.641,
+                "processCpuMs": 586.84,
+                "wallMs": 679.850083,
+                "rssBytes": 215433216,
+                "heapBeforeBytes": 31302712,
+                "heapUsedBytes": 41108520,
+                "heapRetainedBytes": 9805808,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9805840
+              },
+              "rust": {
+                "cpuMs": 172.654,
+                "steadyCpuMs": 79.136,
+                "processCpuMs": 276.734,
+                "wallMs": 283.84925,
+                "rssBytes": 134905856,
+                "heapBeforeBytes": 16217352,
+                "heapUsedBytes": 16465904,
+                "heapRetainedBytes": 248552,
+                "bufferRetainedBytes": 420745,
+                "buffersBefore": 785449,
+                "buffersAfter": 1206194,
+                "wasmBytes": 1441792,
+                "retainedBytes": 2111089
+              }
+            },
+            "outputs": {
+              "ts": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-37354/ts-0.json",
+              "rust": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-37354/rust-0.json"
+            }
+          }
+        },
+        "qualityValid": true
+      },
+      {
+        "attempt": 5,
+        "order": [
+          "after",
+          "before"
+        ],
+        "results": {
+          "after": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-5-after.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 436.957,
+                "steadyCpuMs": 253.669,
+                "processCpuMs": 544.666,
+                "wallMs": 467.814916,
+                "rssBytes": 213401600,
+                "heapBeforeBytes": 31325992,
+                "heapUsedBytes": 41167128,
+                "heapRetainedBytes": 9841136,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9841168
+              },
+              "rust": {
+                "cpuMs": 151.288,
+                "steadyCpuMs": 71.242,
+                "processCpuMs": 248.077,
+                "wallMs": 215.34824999999998,
+                "rssBytes": 133398528,
+                "heapBeforeBytes": 16214768,
+                "heapUsedBytes": 16463352,
+                "heapRetainedBytes": 248584,
+                "bufferRetainedBytes": 420745,
+                "buffersBefore": 785449,
+                "buffersAfter": 1206194,
+                "wasmBytes": 1441792,
+                "retainedBytes": 2111121
+              }
+            },
+            "outputs": {
+              "ts": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-37529/ts-0.json",
+              "rust": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-37529/rust-0.json"
+            }
+          },
+          "before": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-5-before.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 457.033,
+                "steadyCpuMs": 269.29,
+                "processCpuMs": 564.806,
+                "wallMs": 500.215291,
+                "rssBytes": 212795392,
+                "heapBeforeBytes": 31316400,
+                "heapUsedBytes": 41156256,
+                "heapRetainedBytes": 9839856,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9839888
+              },
+              "rust": {
+                "cpuMs": 146.708,
+                "steadyCpuMs": 66.48,
+                "processCpuMs": 240.158,
+                "wallMs": 182.220375,
+                "rssBytes": 136708096,
+                "heapBeforeBytes": 16385864,
+                "heapUsedBytes": 16571472,
+                "heapRetainedBytes": 185608,
+                "bufferRetainedBytes": 407360,
+                "buffersBefore": 785449,
+                "buffersAfter": 1192809,
+                "wasmBytes": 2031616,
+                "retainedBytes": 2624584
+              }
+            },
+            "outputs": {
+              "ts": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-37698/ts-0.json",
+              "rust": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-37698/rust-0.json"
+            }
+          }
+        },
+        "qualityValid": true
+      },
+      {
+        "attempt": 6,
+        "order": [
+          "before",
+          "after"
+        ],
+        "results": {
+          "before": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-6-before.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 468.467,
+                "steadyCpuMs": 275.859,
+                "processCpuMs": 578.894,
+                "wallMs": 517.5957500000001,
+                "rssBytes": 209289216,
+                "heapBeforeBytes": 31326320,
+                "heapUsedBytes": 41158360,
+                "heapRetainedBytes": 9832040,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9832072
+              },
+              "rust": {
+                "cpuMs": 153.559,
+                "steadyCpuMs": 68.918,
+                "processCpuMs": 251.143,
+                "wallMs": 193.48554199999998,
+                "rssBytes": 138838016,
+                "heapBeforeBytes": 16383280,
+                "heapUsedBytes": 16569064,
+                "heapRetainedBytes": 185784,
+                "bufferRetainedBytes": 407360,
+                "buffersBefore": 785449,
+                "buffersAfter": 1192809,
+                "wasmBytes": 2031616,
+                "retainedBytes": 2624760
+              }
+            },
+            "outputs": {
+              "ts": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-37838/ts-0.json",
+              "rust": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-37838/rust-0.json"
+            }
+          },
+          "after": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-6-after.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 444.578,
+                "steadyCpuMs": 259.873,
+                "processCpuMs": 549.295,
+                "wallMs": 479.91254200000003,
+                "rssBytes": 212238336,
+                "heapBeforeBytes": 31316368,
+                "heapUsedBytes": 41125080,
+                "heapRetainedBytes": 9808712,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9808744
+              },
+              "rust": {
+                "cpuMs": 156.365,
+                "steadyCpuMs": 72.277,
+                "processCpuMs": 252.52,
+                "wallMs": 222.85754099999997,
+                "rssBytes": 133365760,
+                "heapBeforeBytes": 16217376,
+                "heapUsedBytes": 16465760,
+                "heapRetainedBytes": 248384,
+                "bufferRetainedBytes": 420745,
+                "buffersBefore": 785449,
+                "buffersAfter": 1206194,
+                "wasmBytes": 1441792,
+                "retainedBytes": 2110921
+              }
+            },
+            "outputs": {
+              "ts": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-38032/ts-0.json",
+              "rust": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-38032/rust-0.json"
+            }
+          }
+        },
+        "qualityValid": true
+      },
+      {
+        "attempt": 7,
+        "order": [
+          "after",
+          "before"
+        ],
+        "results": {
+          "after": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-7-after.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 443.818,
+                "steadyCpuMs": 261.478,
+                "processCpuMs": 549.959,
+                "wallMs": 475.399667,
+                "rssBytes": 213696512,
+                "heapBeforeBytes": 31327608,
+                "heapUsedBytes": 41157936,
+                "heapRetainedBytes": 9830328,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9830360
+              },
+              "rust": {
+                "cpuMs": 149.962,
+                "steadyCpuMs": 71.32,
+                "processCpuMs": 247.068,
+                "wallMs": 213.960625,
+                "rssBytes": 132644864,
+                "heapBeforeBytes": 16217424,
+                "heapUsedBytes": 16465808,
+                "heapRetainedBytes": 248384,
+                "bufferRetainedBytes": 420745,
+                "buffersBefore": 785449,
+                "buffersAfter": 1206194,
+                "wasmBytes": 1441792,
+                "retainedBytes": 2110921
+              }
+            },
+            "outputs": {
+              "ts": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-38206/ts-0.json",
+              "rust": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-38206/rust-0.json"
+            }
+          },
+          "before": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-7-before.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 436.999,
+                "steadyCpuMs": 254.27,
+                "processCpuMs": 540.804,
+                "wallMs": 468.017625,
+                "rssBytes": 210649088,
+                "heapBeforeBytes": 31325808,
+                "heapUsedBytes": 41165536,
+                "heapRetainedBytes": 9839728,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9839760
+              },
+              "rust": {
+                "cpuMs": 165.937,
+                "steadyCpuMs": 62.729,
+                "processCpuMs": 264.741,
+                "wallMs": 224.58229100000003,
+                "rssBytes": 136740864,
+                "heapBeforeBytes": 16385864,
+                "heapUsedBytes": 16571736,
+                "heapRetainedBytes": 185872,
+                "bufferRetainedBytes": 407360,
+                "buffersBefore": 785449,
+                "buffersAfter": 1192809,
+                "wasmBytes": 2031616,
+                "retainedBytes": 2624848
+              }
+            },
+            "outputs": {
+              "ts": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-38335/ts-0.json",
+              "rust": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-38335/rust-0.json"
+            }
+          }
+        },
+        "qualityValid": true
+      },
+      {
+        "attempt": 8,
+        "order": [
+          "before",
+          "after"
+        ],
+        "results": {
+          "before": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-8-before.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 438.391,
+                "steadyCpuMs": 256.51,
+                "processCpuMs": 544.821,
+                "wallMs": 470.478,
+                "rssBytes": 210305024,
+                "heapBeforeBytes": 31325320,
+                "heapUsedBytes": 41157856,
+                "heapRetainedBytes": 9832536,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9832568
+              },
+              "rust": {
+                "cpuMs": 149.695,
+                "steadyCpuMs": 66.017,
+                "processCpuMs": 245.573,
+                "wallMs": 187.62400000000002,
+                "rssBytes": 139378688,
+                "heapBeforeBytes": 16385864,
+                "heapUsedBytes": 16571640,
+                "heapRetainedBytes": 185776,
+                "bufferRetainedBytes": 407360,
+                "buffersBefore": 785449,
+                "buffersAfter": 1192809,
+                "wasmBytes": 2031616,
+                "retainedBytes": 2624752
+              }
+            },
+            "outputs": {
+              "ts": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-38502/ts-0.json",
+              "rust": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-38502/rust-0.json"
+            }
+          },
+          "after": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-8-after.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 414.466,
+                "steadyCpuMs": 241.496,
+                "processCpuMs": 512.272,
+                "wallMs": 442.570291,
+                "rssBytes": 211894272,
+                "heapBeforeBytes": 31326744,
+                "heapUsedBytes": 41151848,
+                "heapRetainedBytes": 9825104,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9825136
+              },
+              "rust": {
+                "cpuMs": 132.567,
+                "steadyCpuMs": 58.58,
+                "processCpuMs": 223.607,
+                "wallMs": 192.325042,
+                "rssBytes": 133054464,
+                "heapBeforeBytes": 16217376,
+                "heapUsedBytes": 16465760,
+                "heapRetainedBytes": 248384,
+                "bufferRetainedBytes": 420745,
+                "buffersBefore": 785449,
+                "buffersAfter": 1206194,
+                "wasmBytes": 1441792,
+                "retainedBytes": 2110921
+              }
+            },
+            "outputs": {
+              "ts": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-38652/ts-0.json",
+              "rust": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-38652/rust-0.json"
+            }
+          }
+        },
+        "qualityValid": true
+      },
+      {
+        "attempt": 9,
+        "order": [
+          "after",
+          "before"
+        ],
+        "results": {
+          "after": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-9-after.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 418.173,
+                "steadyCpuMs": 243.284,
+                "processCpuMs": 516.638,
+                "wallMs": 447.038333,
+                "rssBytes": 209862656,
+                "heapBeforeBytes": 31326784,
+                "heapUsedBytes": 41155072,
+                "heapRetainedBytes": 9828288,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9828320
+              },
+              "rust": {
+                "cpuMs": 137.804,
+                "steadyCpuMs": 61.524,
+                "processCpuMs": 231.467,
+                "wallMs": 199.274958,
+                "rssBytes": 131481600,
+                "heapBeforeBytes": 16217352,
+                "heapUsedBytes": 16465736,
+                "heapRetainedBytes": 248384,
+                "bufferRetainedBytes": 420745,
+                "buffersBefore": 785449,
+                "buffersAfter": 1206194,
+                "wasmBytes": 1441792,
+                "retainedBytes": 2110921
+              }
+            },
+            "outputs": {
+              "ts": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-38794/ts-0.json",
+              "rust": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/rust-okx/sdk-rs/harness/out/mexc-38794/rust-0.json"
+            }
+          },
+          "before": {
+            "exit": 0,
+            "qualityFailure": false,
+            "log": "/tmp/perf-mexc-crossover11-9-before.log",
+            "metrics": {
+              "ts": {
+                "cpuMs": 452.481,
+                "steadyCpuMs": 267.276,
+                "processCpuMs": 557.528,
+                "wallMs": 489.227417,
+                "rssBytes": 212598784,
+                "heapBeforeBytes": 31326424,
+                "heapUsedBytes": 41162912,
+                "heapRetainedBytes": 9836488,
+                "bufferRetainedBytes": 32,
+                "buffersBefore": 2951119,
+                "buffersAfter": 2951151,
+                "wasmBytes": 0,
+                "retainedBytes": 9836520
+              },
+              "rust": {
+                "cpuMs": 140.732,
+                "steadyCpuMs": 61.212,
+                "processCpuMs": 231.458,
+                "wallMs": 174.44570799999997,
+                "rssBytes": 138018816,
+                "heapBeforeBytes": 16385936,
+                "heapUsedBytes": 16571712,
+                "heapRetainedBytes": 185776,
+                "bufferRetainedBytes": 407360,
+                "buffersBefore": 785449,
+                "buffersAfter": 1192809,
+                "wasmBytes": 2031616,
+                "retainedBytes": 2624752
+              }
+            },
+            "outputs": {
+              "ts": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-38982/ts-0.json",
+              "rust": "/tmp/rust-perf-baseline/sdk-rs/harness/out/mexc-38982/rust-0.json"
+            }
+          }
+        },
+        "qualityValid": true
+      }
+    ],
+    "pairRatios": [
+      {
+        "order": [
+          "before",
+          "after"
+        ],
+        "before": 2.7453314496632277,
+        "after": 3.046207842761877
+      },
+      {
+        "order": [
+          "after",
+          "before"
+        ],
+        "before": 2.9405857367559687,
+        "after": 2.914344476900074
+      },
+      {
+        "order": [
+          "before",
+          "after"
+        ],
+        "before": 3.144114284158659,
+        "after": 2.7356388135530825
+      },
+      {
+        "order": [
+          "after",
+          "before"
+        ],
+        "before": 3.06458412522893,
+        "after": 3.0974792819974346
+      },
+      {
+        "order": [
+          "before",
+          "after"
+        ],
+        "before": 3.323664032164068,
+        "after": 2.8797363513153473
+      },
+      {
+        "order": [
+          "after",
+          "before"
+        ],
+        "before": 3.1152561550835673,
+        "after": 2.8882462587911797
+      },
+      {
+        "order": [
+          "before",
+          "after"
+        ],
+        "before": 3.0507296869607123,
+        "after": 2.843206599942442
+      },
+      {
+        "order": [
+          "after",
+          "before"
+        ],
+        "before": 2.633523566172704,
+        "after": 2.959536415892026
+      },
+      {
+        "order": [
+          "before",
+          "after"
+        ],
+        "before": 2.928561408196667,
+        "after": 3.12646435387389
+      },
+      {
+        "order": [
+          "after",
+          "before"
+        ],
+        "before": 3.2151962595571724,
+        "after": 3.0345490696931874
+      }
+    ],
+    "summary": {
+      "before": {
+        "metrics": {
+          "ts": {
+            "cpuMs": 461.769,
+            "steadyCpuMs": 269.246,
+            "processCpuMs": 572.895,
+            "retainedBytes": 9836520,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 152.717,
+            "steadyCpuMs": 66.606,
+            "processCpuMs": 248.662,
+            "retainedBytes": 2624856,
+            "wasmBytes": 2031616
+          }
+        },
+        "cpuRatio": 3.0236908792079467,
+        "memoryRatio": 3.747451288756412,
+        "steadyRatio": 4.0423685553854005
+      },
+      "after": {
+        "metrics": {
+          "ts": {
+            "cpuMs": 445.838,
+            "steadyCpuMs": 261.478,
+            "processCpuMs": 554.515,
+            "retainedBytes": 9828536,
+            "wasmBytes": 0
+          },
+          "rust": {
+            "cpuMs": 156.365,
+            "steadyCpuMs": 71.242,
+            "processCpuMs": 252.52,
+            "retainedBytes": 2110921,
+            "wasmBytes": 1441792
+          }
+        },
+        "cpuRatio": 2.8512646692034664,
+        "memoryRatio": 4.656041604588708,
+        "steadyRatio": 3.6702787681423876
+      }
+    },
+    "decision": {
+      "pass": false,
+      "failures": [
+        [
+          "after",
+          "cpuRatio",
+          "not wider than before"
+        ]
+      ]
+    }
+  },
+  "artifacts": {
+    "binance": {
+      "bytes": 776148,
+      "budget": 817152,
+      "sha256": "01c866ee1dff91165338ac77561d7bde78689cccb4793ba71f47574ed7265f9d"
+    },
+    "bybit": {
+      "bytes": 747536,
+      "budget": 796672,
+      "sha256": "d06814d0eae128a352c0392bf414783a2a052d7477a09cc8b25bb7733413ee53"
+    },
+    "okx": {
+      "bytes": 764906,
+      "budget": 782336,
+      "sha256": "83d6f621c85da2de637854234a88ea50b2e40b610a0fdb4a2376ac6fc32a71ba"
+    },
+    "cryptocom": {
+      "bytes": 671864,
+      "budget": 686080,
+      "sha256": "5da43a3429812feae6009ba64bef2e974d01097efd42859e4b369f7c5df43f51"
+    },
+    "weex": {
+      "bytes": 805113,
+      "budget": 884736,
+      "sha256": "9fe8629b01881868b7ccc8b340ad8065f607cbae438edb2ab3860448adcb872b"
+    },
+    "bingx": {
+      "bytes": 795025,
+      "budget": 856064,
+      "sha256": "85b95b79a6a6bc4d7cebe93bde6449fe374b62b2d4e4f5f8970359dfb80bf068"
+    },
+    "mexc": {
+      "bytes": 793913,
+      "budget": 818176,
+      "sha256": "3f755f68c8d4181163c2cc1ae2ae4a49630780ec78215d34b14aa2a12393bcf8"
+    },
+    "blofin": {
+      "bytes": 805191,
+      "budget": 823296,
+      "sha256": "a612a20d958d4ec125bca8ca27c767360584082af0c90bd0fa7903d7695034e4"
+    },
+    "backpack": {
+      "bytes": 785260,
+      "budget": 803840,
+      "sha256": "8bfefcf74e8859f56a98566cfa508bbec87437bbbceeaa3c60bf5de22f2c6400"
+    },
+    "bitget": {
+      "bytes": 910176,
+      "budget": 931840,
+      "sha256": "fcba1bb638c613340c56ce92609cebd139790d5f0ac78d7620a6394f7645c37a"
+    },
+    "hyperliquid": {
+      "bytes": 1012824,
+      "budget": 1043456,
+      "sha256": "756c160bdf53181b6337e70cf78315c999ea976d70667c4d7ae2dcc16fababe9"
+    }
+  }
+}

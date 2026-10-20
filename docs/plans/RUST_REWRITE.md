@@ -144,10 +144,15 @@ defined once in `sdk-rs/engine/src/wire.rs` and mirrored by the decoder in
 
 ### Crossing rules
 
-- A websocket frame crosses into the engine once, as text or borrowed binary
-  bytes for explicitly negotiated binary protocols; an HTTP body once, as bytes.
-  Nothing else crosses per message. Paradex negotiates SBE schema1 version2;
-  its typed codec lives in the venue, and hosts preserve the application bytes.
+- Hosts queue websocket arrivals to a macrotask batch (bounded by 256 messages;
+  JS partitions at roughly 64 KiB, with oversized messages alone, and native
+  drains at 1 MiB). One byte-buffer crossing carries length-prefixed text or binary
+  payloads with socket IDs and individual arrival times; Rust borrows each text
+  slice, or borrows binary bytes. Paradex negotiates SBE schema1 version2;
+  its typed codec lives in the venue. Commands, timers, HTTP events, closes
+  and flushes first drain queued arrivals. HTTP bodies cross once as streamed bytes.
+- Browser/Node loaders select one Cargo-feature-built module per venue family;
+  aliases share that family. CI enforces separate family size budgets.
 - Frames cross out once per flush. A section appears only when its data
   changed; an idle flush writes no frame.
 - Logs and command results are rare and stay JSON.
@@ -384,9 +389,12 @@ fixture assumptions, not a live-feed bandwidth forecast.
 
 - Bans, fmt, clippy, native tests, wasm32 build and clippy.
 - Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned
-  wasm-bindgen, an explicit per-venue size budget in `rust.yml`, committed public fixtures
-  (`harness/fixtures/`) gated on identical output and lower CPU and memory,
-  and each venue's generated private tape gated on identical account state.
+  wasm-bindgen, one module per venue family and fixed size budgets in
+  `harness/wasm-budgets.json`. Every committed public fixture is gated on
+  identical output and lower CPU and retained memory; private tapes gate
+  identical account state, requests and command results. Memory includes JS
+  backing buffers plus WASM, with stable GC outside the CPU window. Equal
+  recorded timestamps preserve network bursts on both implementations.
 
 ### 8. Remaining venues — in progress
 

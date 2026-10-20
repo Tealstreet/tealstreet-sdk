@@ -1,14 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  bodyBytes,
-  canonicalBody,
-  canonicalUrl,
-  deliverSocketFrame,
-  replayStoreReady,
-  ReplayClock,
-  Tape,
-} from './tape.mjs';
+import { prepareTsReplaySockets, bodyBytes, canonicalBody, canonicalUrl, deliverSocketFrame, replayStoreReady, ReplayClock, Tape } from './tape.mjs';
 import { createTape, withTimeout, sameCommandResults } from './tape.mjs';
 import { createHmac, createPrivateKey, sign } from 'node:crypto';
 import { venueOf } from './venues.mjs';
@@ -1492,15 +1484,298 @@ test('missing recorded welcome keeps readiness bounded and wrong tokens never ma
 });
 
 {
-  const URL = 'https://example.test/order';
-  const record = (method, requestBody) => ({
-    type: 'http',
-    method,
-    url: URL,
-    status: 200,
-    body: '{}',
-    ...(requestBody === undefined ? {} : { requestBody: JSON.stringify(requestBody) }),
+const URL = 'https://example.test/order';
+const record = (method, requestBody) => ({ type: 'http', method, url: URL, status: 200, body: '{}', ...(requestBody === undefined ? {} : { requestBody: JSON.stringify(requestBody) }) });
+test('TS readiness sends Crypto ticker subscriptions after async socket open and awaits the wire audit', async () => {
+  const venue = venueOf('cryptocom');
+  const publicUrl = 'wss://stream.crypto.com/exchange/v1/market';
+  const tape = new Tape([]);
+  tape.open.set('closed-old-generation', { closed: true });
+  tape.audit = venue.createSocketAudit('ts', { isPrivate: false, books: [], tickers: ['BTCUSD-PERP'] });
+  let isOpen = false;
+  let dropped = 0;
+  const socket = tape.connect(publicUrl, () => { isOpen = true; }, () => {});
+  const exchange = { store: { markets: [{ id: 'BTCUSD-PERP' }] }, publicWebsocket: {
+    subscribeToMarketData(markets) {
+      if (!isOpen) { dropped++; return; }
+      const frame = { method: 'subscribe', params: { channels: markets.map((m) => 'ticker.' + m.instrumentName) } };
+      // The actual wire send arrives one event-loop turn after registration.
+      setImmediate(() => tape.audit.sent(publicUrl, JSON.stringify(frame)));
+    },
+  } };
+  let prepared = false;
+  const checks = [];
+  const until = async (predicate, label) => {
+    checks.push(label);
+    for (let turns = 0; !predicate(); turns++) {
+      assert(turns < 10, label);
+      await new Promise(setImmediate);
+    }
+  };
+  await prepareTsReplaySockets(tape, () => {
+    assert(isOpen, 'the real asynchronous open must precede the preparation hook');
+    prepared = true;
+    venue.prepareTsReady(exchange, { isPrivate: false });
+    assert.equal(tape.audit.ready(), false, 'registration alone cannot satisfy readiness');
+  }, until);
+  assert(prepared);
+  assert.equal(dropped, 0);
+  assert.equal(tape.audit.ready(), true);
+  assert.deepEqual(tape.audit.errors(), []);
+  assert.deepEqual(checks, ['TS initial socket', 'TS socket authentication/subscriptions']);
+  tape.close(socket);
+});
+
+test('actual legacy venue tapes retain typed matching and consume writes once', () => {
+  // WEEX's market route is unsigned; authentication has its own tests above.
+  for (const name of ['binance', 'bybit', 'okx', 'weex', 'cryptocom', 'bingx', 'blofin']) {
+    const route = name === 'cryptocom'
+      ? 'https://api.crypto.com/exchange/v1/private/create-order'
+      : 'https://example.test/capi/v3/market/order';
+    // Binance carries signed batch JSON in the query, never a request body.
+    const request = (quantity) => {
+      if (name !== 'binance') return { url: route, body: { quantity } };
+      const query = new URLSearchParams({ batchOrders: JSON.stringify([{ symbol: 'BTCUSDT', quantity }]),
+        timestamp: String(Date.now()), recvWindow: '5000' }).toString();
+      const signature = createHmac('sha256', 'replay-secret').update(query).digest('hex');
+      return { url: `https://fapi.binance.com/fapi/v1/batchOrders?${query}&signature=${signature}`,
+        headers: { 'X-MBX-APIKEY': 'replay-key' } };
+    };
+    // Isolate matching/consumption from Crypto's independently tested signing.
+    const venue = name === 'cryptocom' ? { ...venueOf(name), checkRequest: undefined } : venueOf(name);
+    const expected = request(1);
+    const tape = new Tape([{ ...record('POST', expected.body), url: expected.url }], venue, false);
+    const respond = (quantity) => {
+      const { url, body, headers } = request(quantity);
+      return tape.respond('POST', url, body, headers);
+    };
+    assert.equal(respond('1').status, 599, name);
+    assert.equal(respond(1).status, 200, name);
+    assert.equal(respond(1).status, 599, name);
+    assert.equal(tape.missingWrites, 0);
+    assert.equal(tape.invalidSignatures, 0);
+  }
+});
+
+test('recorded cadence groups equal timestamps while frame cadence yields per message', async () => {
+  for (const cadence of ['recorded', 'frame']) {
+    const url = 'wss://example.test';
+    const tape = new Tape(['one', 'two', 'three'].map((text, i) =>
+      ({ type: 'ws', url, text, t: i < 2 ? 0 : 1 })));
+    tape.cadence = cadence;
+    const events = [];
+    const advances = [];
+    tape.connect(url, () => {}, (text) => {
+      events.push(text);
+      setImmediate(() => events.push(`yield:${text}`));
+    });
+    await tape.play(undefined, async () => {}, undefined,
+      { start() {}, async advance(t) { advances.push(t); } });
+    assert.deepEqual(advances, cadence === 'recorded' ? [0, 1] : [0, 0, 1]);
+    assert.equal(events.indexOf('two') < events.indexOf('yield:one'), cadence === 'recorded');
+    assert.deepEqual(events.filter((event) => !event.startsWith('yield:')), ['one', 'two', 'three']);
+  }
+});
+
+test('legacy venue delivery does not parse frames for Bitget routing', async () => {
+  const route = 'wss://example.test';
+  const tape = createTape([], { rust: 'binance' }, false);
+  const delivered = [];
+  tape.connect(route, () => {}, (text) => delivered.push(text));
+  await tape.socketFor(route);
+  const parse = JSON.parse;
+  let parses = 0;
+  JSON.parse = (...args) => { parses++; return parse(...args); };
+  try {
+    await tape.deliver({ type: 'ws', url: route, text: '{"stream":"ticker"}' });
+  } finally {
+    JSON.parse = parse;
+  }
+  assert.equal(parses, 0);
+  assert.deepEqual(delivered, ['{"stream":"ticker"}']);
+});
+}
+
+
+test('qualified and unqualified routing retain the latest live matching listener', async () => {
+  const tape = new Tape([], { streamOf: (text) => JSON.parse(text).stream });
+  const route = 'wss://example.test/shared';
+  const first = tape.connect(route, () => {}, () => {});
+  const second = tape.connect(route, () => {}, () => {});
+  for (const socket of [first, second]) tape.send(socket, JSON.stringify({ method: 'SUBSCRIBE', params: ['account.orderUpdate'] }));
+  const frame = JSON.stringify({ stream: 'account.orderUpdate' });
+  // Opening is asynchronous; wait for both listeners before testing precedence.
+  assert.equal(await tape.socketFor(route, frame, second.ordinal), second);
+  assert.equal(await tape.socketFor(route, frame), second);
+  assert.equal(await tape.socketFor(route), second);
+  assert.equal(await tape.socketFor(route, frame, second.ordinal), second);
+  tape.close(second);
+  assert.equal(await tape.socketFor(route, frame), first);
+  assert.equal(await tape.socketFor(route), first);
+});
+
+
+test('caught transport validator failures persist after successful startup reads', () => {
+  for (const kind of ['request', 'socket']) for (const failure of ['throw', 'false']) {
+    let reject = false;
+    const validate = () => {
+      if (!reject) return;
+      if (failure === 'throw') throw new Error('invalid transport signature');
+      return false;
+    };
+    const route = 'https://fixture.test/account';
+    const tape = new Tape([{ type: 'http', method: 'GET', url: route, status: 200, body: '{}' }],
+      { [kind === 'request' ? 'validateRequest' : 'validateSocketMessage']: validate }, true);
+    assert.equal(tape.respond('GET', route).status, 200);
+    assert.equal(tape.missingWrites, 0);
+    const socket = { url: 'wss://fixture.test/private' };
+    reject = true;
+    assert.throws(() => kind === 'request' ? tape.respond('GET', route) : tape.send(socket, '{}'),
+      failure === 'throw' ? /invalid transport signature/ : /invalid replay .* validation/);
+    assert.equal(tape.invalidSignatures, 1, `${kind}/${failure}`);
+    assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
+  }
+});
+
+
+test('every caught outbound socket audit failure remains fatal exactly once', () => {
+  const error = new Error('protocol rejected');
+  const cases = [
+    [{ requestBodies: true }, '{"op":"login","args":{}}'],
+    [{ createSocketAudit: () => ({ sent() { throw error; } }) }, '{}'],
+    [{ createSocketAudit: () => ({ sent: () => false }) }, '{}'],
+    [{ validateLogin: true }, '{'],
+    [{ validateLogin: true }, '{"op":"subscribe","args":{}}'],
+    [{ validateLogin: true }, '{"op":"login","args":[]}'],
+    [{ validateLogin: true }, JSON.stringify({ op: 'login', args: [{ apiKey: 'replay-key', passphrase: 'replay-passphrase',
+      timestamp: String(Math.floor(Date.now() / 1000)), sign: 'invalid' }] })],
+  ];
+  for (const [venue, text] of cases) {
+    const tape = new Tape([], venue, true);
+    assert.throws(() => tape.send({ url: 'wss://fixture.test/private' }, text));
+    assert.equal(tape.invalidSignatures, 1);
+    assert.equal(tape.missingWrites, 0);
+    assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
+  }
+});
+
+
+test('WEEX upgrade rejection caught by the real host remains fatal in the replay audit', async () => {
+  const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
+  const tape = new Tape([], venueOf('weex'), true);
+  let connected = false;
+  const host = new EngineHost({ command: () => JSON.stringify([{ op: 'wsConnect', socket: 1,
+    url: 'wss://ws-contract.weex.com/v3/ws/private', headers: [['ACCESS-KEY', 'wrong']] }]) }, {
+    webSocketHeaders: true,
+    now: Date.now,
+    clearTimeout() {},
+    connect(url, { headers }) {
+      tape.validateSocket(url, headers);
+      connected = true;
+      return { close() {} };
+    },
   });
+  try {
+    await assert.rejects(host.command({ op: 'fetchBalance' }), /invalid WEEX authentication timestamp/);
+    assert.equal(connected, false);
+    assert.equal(host.commands.size, 0);
+    assert.equal(tape.invalidSignatures, 1);
+    assert.equal(tape.missingWrites, 0);
+    assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
+  } finally { host.dispose(); }
+});
+
+test('upgrade validation accepts void success and persists explicit false exactly once', () => {
+  let reject = false;
+  const tape = new Tape([], { validateSocket: () => reject ? false : undefined });
+  tape.validateSocket('wss://fixture.test/socket', {});
+  assert.equal(tape.invalidSignatures, 0);
+  reject = true;
+  assert.throws(() => tape.validateSocket('wss://fixture.test/socket', {}), /invalid replay socket upgrade validation/);
+  assert.equal(tape.invalidSignatures, 1);
+  assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
+});
+
+test('recorded socket cache preserves strict query, caller ID and typed JSON routing', async () => {
+  const ids = [{ type: 'command', orders: [{ clientOrderId: 'caller' }] }];
+  const routes = [
+    'wss://EXAMPLE.test:443/private?b=2&a=1&requestId=recorded',
+    'wss://example.test/private?newClientOrderId=caller',
+    'wss://example.test/private?newClientOrderId=generated',
+    'wss://example.test/private?c=1',
+    'wss://example.test/private?c=2',
+    ...[{ quantity: 1 }, { quantity: '1' }, { newClientOrderId: 'caller' }, { newClientOrderId: 'generated' }]
+      .map((value) => `wss://example.test/private?batchOrders=${encodeURIComponent(JSON.stringify([value]))}`),
+  ];
+  const tape = new Tape([...ids, ...routes.map((url) => ({ type: 'ws', url }))]);
+  const uncached = new Tape(ids);
+  for (const route of routes) {
+    const key = canonicalUrl(route, tape.callerIds);
+    const socket = { url: route, ordinal: 0, closed: false };
+    tape.open.set(key, new Set([socket]));
+    uncached.open.set(key, new Set([socket]));
+  }
+  const cache = tape.recordedSocketKeys;
+  for (const route of routes) assert.equal(await tape.socketFor(route), await uncached.socketFor(route));
+  assert.equal(tape.recordedSocketKeys, cache);
+  assert.equal(cache.size, routes.length);
+  assert.notEqual(await tape.socketFor(routes[1]), await tape.socketFor(routes[2]));
+  assert.notEqual(await tape.socketFor(routes[3]), await tape.socketFor(routes[4]));
+  assert.notEqual(await tape.socketFor(routes[5]), await tape.socketFor(routes[6]));
+});
+
+test('only unique valid recorded socket strings are cached and live fallbacks never grow it', async () => {
+  const OriginalURL = globalThis.URL;
+  const parsed = [];
+  globalThis.URL = class extends OriginalURL {
+    constructor(url, base) { parsed.push(url); super(url, base); }
+  };
+  try {
+    const first = 'wss://example.test/private?b=2&a=1&requestId=recorded';
+    const second = 'wss://example.test/other';
+    const invalid = 'not a valid URL';
+    const ignored = 'wss://example.test/not-a-socket';
+    const tape = new Tape([
+      { type: 'ws', url: first }, { type: 'ws', url: first },
+      { type: 'open', url: second }, { type: 'close', url: first },
+      { type: 'ws', url: invalid }, { type: 'close', url: invalid },
+      { type: 'config', url: ignored }, { type: 'command', url: ignored },
+      { type: 'ws', url: { toString: () => ignored } },
+    ]);
+    assert.deepEqual(parsed, [first, second, invalid]);
+    const cache = tape.recordedSocketKeys;
+    assert.equal(cache.size, 2);
+    const one = { closed: false };
+    const two = { closed: false };
+    tape.open.set(cache.get(first), new Set([one]));
+    tape.open.set(cache.get(second), new Set([two]));
+    parsed.length = 0;
+    for (let i = 0; i < 100; i++) assert.equal(await tape.socketFor(first), one);
+    assert.equal(await tape.socketFor(second), two);
+    assert.equal(parsed.length, 0, 'known delivery avoids URL parsing entirely');
+    const dynamic = 'wss://example.test/private?a=1&b=2&requestId=live';
+    for (let i = 0; i < 3; i++) assert.equal(await tape.socketFor(dynamic), one);
+    assert.deepEqual(parsed, [dynamic, dynamic, dynamic]);
+    let target = first;
+    const mutable = { toString: () => target };
+    assert.equal(await tape.socketFor(mutable), one);
+    target = second;
+    assert.equal(await tape.socketFor(mutable), two);
+    assert.equal(parsed.length, 5, 'non-string URL objects retain live coercion');
+    await assert.rejects(tape.socketFor(invalid), TypeError);
+    await assert.rejects(tape.socketFor(invalid), TypeError);
+    assert.deepEqual(parsed.slice(-2), [invalid, invalid]);
+    assert.equal(tape.recordedSocketKeys, cache);
+    assert.equal(cache.size, 2);
+    assert.equal(cache.has(dynamic), false);
+    assert.equal(cache.has(invalid), false);
+    assert.equal(cache.has(ignored), false);
+  } finally { globalThis.URL = OriginalURL; }
+});
+
+{
+  const URL = 'https://example.test/order';
+  const record = (method, requestBody) => ({ type: 'http', method, url: URL, status: 200, body: '{}', ...(requestBody === undefined ? {} : { requestBody: JSON.stringify(requestBody) }) });
   test('extracted Tape scopes both HTTP stores and write ordering to the selected implementation', () => {
     const records = [
       { ...record('POST', { family: 'shared' }) },
@@ -1612,6 +1887,36 @@ test('caught WOO request validation failures remain fatal after a valid retry', 
   assert.equal(tape.unserved, 0);
   assert.equal(tape.invalidSignatures, 1);
   assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
+});
+
+test('new venue recorded opens retain incoming routing metadata without changing legacy cadence', () => {
+  const records = [{ type: 'open', t: 0, url: 'wss://example.test/socket', socket: 0 },
+    { type: 'ws', t: 1, url: 'wss://example.test/socket', text: '{}' }];
+  for (const rust of ['bitrue', 'woo', 'lighter']) assert.deepEqual(new Tape(records, { rust }).frames, records);
+  assert.deepEqual(new Tape(records, { rust: 'bybit' }).frames, [records[1]]);
+});
+
+test('legacy sockets keep subscription, delivery and close behavior without correlation state', async () => {
+  const address = 'wss://fstream.binance.com/ws';
+  const tape = new Tape([], VENUES.binance, false);
+  const delivered = [], closed = [];
+  const socket = tape.connect(address, () => {}, (text) => delivered.push(text), (code) => closed.push(code));
+  await new Promise(setImmediate);
+  for (const field of ['recordedSocketRequests', 'recordedSocketQueues']) assert.equal(tape[field], undefined);
+  for (const field of ['requests', 'requestIds', 'requestCounts', 'mappedRequests', 'responseIds']) assert.equal(socket[field], undefined);
+  const topic = 'btcusdt@depth20@100ms';
+  tape.send(socket, JSON.stringify({ method: 'SUBSCRIBE', params: [topic], id: 1 }));
+  assert.ok(socket.subscriptions.has(topic));
+  const text = '{"e":"depthUpdate","s":"BTCUSDT","b":[["1","2"]],"a":[["3","4"]]}';
+  assert.equal(await tape.socketFor(address, text, 0), socket);
+  tape.deliver(socket, text);
+  assert.deepEqual(delivered, [text]);
+  tape.send(socket, JSON.stringify({ method: 'UNSUBSCRIBE', params: [topic], id: 2 }));
+  assert.equal(socket.subscriptions.has(topic), false);
+  tape.close(socket, 1006);
+  tape.close(socket, 1006);
+  assert.deepEqual(closed, [1006]);
+  assert.equal(tape.invalidSignatures, 0);
 });
 
 test('Coinbase same-URL sockets retain exact channel and product scope across batches and unsubscribe', async () => {
@@ -1744,4 +2049,20 @@ test('paced waits observe real timer work without socket traffic or extra comman
 test('wait markers reject absent, negative and nonfinite observation times', () => {
   for (const time of [undefined, -1, NaN, Infinity, '30'])
     assert.throws(() => new Tape([{ type: 'wait', t: time }]), /Invalid replay wait timestamp/);
+});
+
+test('subscription-routed playback starts when recorded and active socket ordinals differ', async () => {
+  const url = 'wss://example.test/shared';
+  const text = '{"params":{"channel":"order_book.BTC.deltas"}}';
+  const tape = new Tape([{ type: 'ws', t: 0, url, socket: 7, text }], {
+    rust: 'paradex', subscriptionRouting: true,
+    streamOf: (data) => JSON.parse(data)?.params?.channel,
+  }, false, 25);
+  const seen = [];
+  const socket = tape.connect(url, () => {}, (data) => seen.push(data));
+  await new Promise(setImmediate);
+  tape.send(socket, '{"method":"subscribe","params":{"channel":"order_book.BTC.deltas"}}');
+  assert.equal(socket.ordinal, 0);
+  assert.equal(await tape.play(), 1);
+  assert.deepEqual(seen, [text]);
 });

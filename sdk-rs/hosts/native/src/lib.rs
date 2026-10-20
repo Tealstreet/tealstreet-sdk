@@ -7,6 +7,8 @@
 
 mod routing;
 mod server;
+#[cfg(test)]
+mod tests;
 mod transport;
 
 pub use routing::{
@@ -43,7 +45,83 @@ pub enum HostEvent {
     Timer(TimerId),
 }
 
-pub type Events = mpsc::UnboundedSender<HostEvent>;
+const MAX_BATCH_MESSAGES: usize = 256;
+const MAX_BATCH_BYTES: usize = 1024 * 1024;
+
+struct QueuedEvent {
+    event: HostEvent,
+    received_at: f64,
+}
+
+/// A transport's event sender. Events retain their arrival time, including
+/// when the host is busy processing an earlier burst. The existing inbox is
+/// unbounded; batching borrows its messages without an extra payload buffer.
+#[derive(Clone)]
+pub struct Events {
+    sender: mpsc::UnboundedSender<QueuedEvent>,
+    clock: fn() -> f64,
+}
+
+/// Receives transport events when observing a standalone transport. The host
+/// keeps these same events' arrival timestamps internally for engine dispatch.
+pub struct EventReceiver {
+    receiver: mpsc::UnboundedReceiver<QueuedEvent>,
+}
+
+impl EventReceiver {
+    /// Stop new transport events while permitting already queued events to drain.
+    pub fn close(&mut self) {
+        self.receiver.close();
+    }
+
+    pub async fn recv(&mut self) -> Option<HostEvent> {
+        self.receiver.recv().await.map(|queued| queued.event)
+    }
+
+    pub fn try_recv(&mut self) -> Result<HostEvent, mpsc::error::TryRecvError> {
+        self.receiver.try_recv().map(|queued| queued.event)
+    }
+}
+
+impl Events {
+    /// Create an event channel for a standalone transport observer.
+    pub fn channel() -> (Self, EventReceiver) {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        (
+            Self {
+                sender,
+                clock: now_ms,
+            },
+            EventReceiver { receiver },
+        )
+    }
+
+    /// Complete when the host inbox is gone so in-flight requests can cancel.
+    pub async fn closed(&self) {
+        self.sender.closed().await;
+    }
+
+    /// Whether the host inbox has closed or its receiver has been dropped.
+    pub fn is_closed(&self) -> bool {
+        self.sender.is_closed()
+    }
+
+    /// Enqueue a transport event without blocking, preserving arrival order.
+    pub fn send(&self, event: HostEvent) -> Result<(), mpsc::error::SendError<HostEvent>> {
+        self.send_at(event, (self.clock)())
+    }
+
+    /// Preserve the raw arrival time when decoding a received frame takes time.
+    pub fn send_at(
+        &self,
+        event: HostEvent,
+        received_at: f64,
+    ) -> Result<(), mpsc::error::SendError<HostEvent>> {
+        self.sender
+            .send(QueuedEvent { event, received_at })
+            .map_err(|error| mpsc::error::SendError(error.0.event))
+    }
+}
 
 /// Wall-clock milliseconds, the engine's notion of now.
 pub fn now_ms() -> f64 {
@@ -56,23 +134,33 @@ pub struct Host<V: Venue, T: Transport> {
     engine: Engine<V>,
     transport: T,
     events: Events,
-    inbox: mpsc::UnboundedReceiver<HostEvent>,
+    inbox: mpsc::UnboundedReceiver<QueuedEvent>,
+    pending: Option<QueuedEvent>,
     sockets: HashMap<SocketId, mpsc::UnboundedSender<String>>,
     timers: HashMap<TimerId, AbortHandle>,
     clock: fn() -> f64,
+    actions: Vec<Action>,
+    last_dispatched_at: f64,
 }
 
 impl<V: Venue, T: Transport> Host<V, T> {
     pub fn new(engine: Engine<V>, transport: T) -> Self {
-        let (events, inbox) = mpsc::unbounded_channel();
+        let (sender, inbox) = mpsc::unbounded_channel();
+        let events = Events {
+            sender,
+            clock: now_ms,
+        };
         Self {
             engine,
             transport,
             events,
             inbox,
+            pending: None,
             sockets: HashMap::new(),
             timers: HashMap::new(),
             clock: now_ms,
+            actions: Vec::new(),
+            last_dispatched_at: now_ms(),
         }
     }
 
@@ -97,18 +185,33 @@ impl<V: Venue, T: Transport> Host<V, T> {
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
-                Some(event) = self.inbox.recv() => self.dispatch(event),
+                event = async {
+                    if self.pending.is_some() { None } else { self.inbox.recv().await }
+                } => {
+                    if let Some(event) = self.pending.take().or(event) {
+                        self.dispatch_ready(event, MAX_BATCH_MESSAGES);
+                    }
+                },
                 command = commands.recv() => match command {
-                    Some(command) => self.engine.handle((self.clock)(), Event::Command(command)),
-                    None => break,
+                    Some(command) => {
+                        self.dispatch_command(command, &mut on_notice).await;
+                    }
+                    None => {
+                        self.drain_ready_prefix(&mut on_notice).await;
+                        break;
+                    },
                 },
                 _ = flush.tick() => {
+                    self.drain_ready_prefix(&mut on_notice).await;
                     if let Some(frame) = self.engine.take_frame((self.clock)()) {
                         on_frame(frame);
                     }
                 }
             }
             self.execute(&mut on_notice);
+            // A permanently ready socket must still let the producers, timers
+            // and command sender run on a single-threaded runtime.
+            tokio::task::yield_now().await;
         }
         if let Some(frame) = self.engine.take_frame((self.clock)()) {
             on_frame(frame);
@@ -125,10 +228,81 @@ impl<V: Venue, T: Transport> Host<V, T> {
         }
     }
 
-    fn dispatch(&mut self, event: HostEvent) {
-        let now = (self.clock)();
+    async fn dispatch_command(&mut self, command: Command, on_notice: &mut impl FnMut(Notice)) {
+        let selected_at = (self.clock)();
+        self.drain_ready_prefix(on_notice).await;
+        self.engine.handle(selected_at, Event::Command(command));
+    }
+
+    async fn drain_ready_prefix(&mut self, on_notice: &mut impl FnMut(Notice)) {
+        // Commands have a separate channel. Their barrier is the inbox prefix
+        // ready when selected; later arrivals cannot postpone them indefinitely.
+        let mut remaining = self.inbox.len() + usize::from(self.pending.is_some());
+        while remaining > 0 {
+            let event = self.pending.take().unwrap_or_else(|| {
+                self.inbox
+                    .try_recv()
+                    .expect("the captured prefix is still queued")
+            });
+            remaining -= self.dispatch_ready(event, remaining.min(MAX_BATCH_MESSAGES));
+            self.execute(on_notice);
+            if remaining > 0 {
+                tokio::task::yield_now().await;
+            }
+        }
+    }
+
+    fn dispatch_ready(&mut self, first: QueuedEvent, max_messages: usize) -> usize {
+        if !matches!(
+            first.event,
+            HostEvent::WsMessage(..) | HostEvent::WsBinary(..)
+        ) {
+            self.dispatch(first);
+            return 1;
+        }
+        let mut next = first;
+        let mut count = 0;
+        let mut bytes = 0;
+        loop {
+            let size = match &next.event {
+                HostEvent::WsMessage(_, text) => text.len(),
+                HostEvent::WsBinary(_, data) => data.len(),
+                _ => unreachable!("only websocket messages enter this burst"),
+            };
+            if count > 0 && bytes + size > MAX_BATCH_BYTES {
+                self.pending = Some(next);
+                break;
+            }
+            bytes += size;
+            self.dispatch(next);
+            count += 1;
+            if count >= max_messages || bytes >= MAX_BATCH_BYTES {
+                break;
+            }
+            match self.inbox.try_recv() {
+                Ok(event)
+                    if matches!(
+                        event.event,
+                        HostEvent::WsMessage(..) | HostEvent::WsBinary(..)
+                    ) =>
+                {
+                    next = event;
+                }
+                Ok(event) => {
+                    self.pending = Some(event);
+                    break;
+                }
+                Err(_) => break,
+            }
+        }
+        count
+    }
+
+    fn dispatch(&mut self, queued: QueuedEvent) {
+        let now = queued.received_at;
+        self.last_dispatched_at = now;
         let engine = &mut self.engine;
-        match event {
+        match queued.event {
             HostEvent::TickIntervalChanged(interval_ms) => {
                 engine.handle(now, Event::TickIntervalChanged { interval_ms })
             }
@@ -186,8 +360,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 
     fn execute(&mut self, on_notice: &mut impl FnMut(Notice)) {
-        let actions: Vec<Action> = self.engine.drain_actions().collect();
-        for action in actions {
+        let mut actions = std::mem::take(&mut self.actions);
+        actions.extend(self.engine.drain_actions());
+        for action in actions.drain(..) {
             match action {
                 Action::WsConnect {
                     binary,
@@ -261,6 +436,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 Action::Notice(notice) => on_notice(notice),
             }
         }
+        self.actions = actions;
     }
 }
 
@@ -344,7 +520,7 @@ mod timer_tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(matches!(event, HostEvent::Timer(timer) if timer == normal));
+        assert!(matches!(event.event, HostEvent::Timer(timer) if timer == normal));
         host.dispatch(event);
         assert_eq!(host.engine.venue().fired, [normal]);
         assert!(host.timers.is_empty());

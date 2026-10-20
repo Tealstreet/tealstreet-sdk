@@ -51,11 +51,13 @@ const headersOf = (headers) => Object.fromEntries((Array.isArray(headers) ? head
 const hmac = (secret, text) => createHmac('sha256', Buffer.from(secret).toString('base64')).update(text).digest('base64');
 const check = (condition, message) => { if (!condition) throw new Error(`ApeX Omni: ${message}`); };
 
+const wireField = (value) => JSON.isRawJSON(value) ? value.rawJSON : String(value);
+
 export function apexWireBody(body) {
   if (body === undefined || body === null || body === '') return undefined;
   if (typeof body?.getBuffer === 'function') body = body.getBuffer().toString('utf8');
   else if (body?.entries && typeof body !== 'string' && !ArrayBuffer.isView(body)) {
-    return Object.fromEntries([...body.entries()].map(([key, value]) => [key, String(value)]));
+    return Object.fromEntries([...body.entries()].map(([key, value]) => [key, wireField(value)]));
   }
   if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
   if (typeof body === 'string' && body.startsWith('--')) {
@@ -74,7 +76,9 @@ export function apexWireBody(body) {
     return fields;
   }
   if (typeof body === 'string') {
-    if (body.trimStart().startsWith('{')) body = JSON.parse(body);
+    if (body.trimStart().startsWith('{')) body = JSON.parse(body, (_key, value, context) =>
+      typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)
+        ? JSON.rawJSON(context.source) : value);
     else {
       const fields = {};
       for (const [key, value] of new URLSearchParams(body)) {
@@ -85,7 +89,7 @@ export function apexWireBody(body) {
     }
   }
   check(body && typeof body === 'object' && !Array.isArray(body), 'unexpected body shape');
-  return Object.fromEntries(Object.entries(body).map(([key, value]) => [key, String(value)]));
+  return Object.fromEntries(Object.entries(body).map(([key, value]) => [key, wireField(value)]));
 }
 
 function signedContract(id, size, price, buy) {
