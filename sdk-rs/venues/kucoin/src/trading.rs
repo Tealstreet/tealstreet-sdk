@@ -56,7 +56,6 @@ pub struct Trading {
     queue: VecDeque<CommandId>,
     active: bool,
     timer: Option<TimerId>,
-    next_oid: u64,
 }
 
 #[derive(Serialize)]
@@ -286,11 +285,10 @@ impl Kucoin {
         } else {
             setting.leverage
         };
-        self.trading.next_oid += 1;
-        let oid = order
-            .client_order_id
-            .clone()
-            .unwrap_or_else(|| format!("rust-{}-{}", cx.now as u64, self.trading.next_oid));
+        let oid = match &order.client_order_id {
+            Some(id) => id.clone(),
+            None => safe_cex_crypto::uuid::uuid()?,
+        };
         let price = |n: f64| num::format(num::adjust(n, market.precision.price));
         let (up, down) = if order.side == OrderSide::Buy {
             (order.take_profit, order.stop_loss)
