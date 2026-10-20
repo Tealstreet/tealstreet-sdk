@@ -180,3 +180,8 @@ supplies metadata omitted from the native snapshot.
 Carry native bracket field presence through sparse snapshots as well as public
 values: a clear followed by an omitted field still overrides a late placement
 acknowledgement, rather than restoring the requested bracket.
+
+Rust `setLeverage(symbol, leverage, side)` changes only the selected Long or
+Short rail, using its native `positionId` when open and `positionType` when
+flat. Omitting side changes both rails. A confirmed write updates that leg's
+position and fetched leverage; a failed write preserves its previous setting.

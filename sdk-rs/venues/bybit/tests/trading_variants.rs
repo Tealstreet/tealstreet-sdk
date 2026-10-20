@@ -218,12 +218,14 @@ fn spot_stops_use_native_filter_and_derivative_controls_fail_before_writes() {
     h.command(Command::SetPositionMode {
         command: 3,
         hedged: true,
+        symbol: None,
     });
     assert!(h.result(3).unwrap().is_err());
     h.command(Command::SetLeverage {
         command: 4,
         symbol: "BTCUSDT".into(),
         leverage: 3.0,
+        side: None,
     });
     assert!(h.result(4).unwrap().is_err());
     assert!(h.requests.is_empty());
@@ -668,17 +670,309 @@ fn spot_trigger_cancel_uses_its_native_order_family() {
 }
 
 #[test]
-fn demo_cancel_all_retires_every_captured_row_including_old_terminal_rows() {
+fn demo_cancel_all_retires_listed_parent_projections_and_old_terminal_rows() {
     let mut h = ready(Variant::Demo);
     h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"old-filled","orderStatus":"Filled","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"1","leavesQty":"0"},{"category":"linear","symbol":"BTCUSDT","orderId":"resting","orderStatus":"New","orderType":"Limit","side":"Buy","price":"99","qty":"1","cumExecQty":"0","leavesQty":"1"}]}"#);
     assert_eq!(h.engine.store().orders().len(), 2);
+    let parent = h.engine.store().order("resting").unwrap().clone();
+    for suffix in ["__stop_loss", "__take_profit"] {
+        let mut projection = parent.clone();
+        projection.id.push_str(suffix);
+        projection.parent_id = Some(parent.id.clone());
+        h.engine.store_mut().upsert_order(projection);
+    }
     h.command(Command::CancelSymbolOrders {
         command: 1,
         symbol: "BTCUSDT".into(),
     });
-    h.respond("/v5/order/cancel-all", 200, r#"{"retCode":0,"result":{}}"#);
+    h.respond(
+        "/v5/order/cancel-all",
+        200,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"resting","orderLinkId":""}],"success":"1"}}"#,
+    );
     assert!(h.engine.store().orders().is_empty());
+    assert_eq!(h.result(1), Some(&Ok("[]".into())));
     assert!(h.requests.is_empty());
+}
+
+// Futures cancel-all selects at most 500 orders; the per-symbol placement
+// limits separately allow 500 active and 10 conditional orders.
+// https://bybit-exchange.github.io/docs/v5/order/cancel-all
+// https://bybit-exchange.github.io/docs/v5/order/create-order
+#[test]
+fn demo_capped_cancel_all_preserves_omitted_live_order_and_reports_partial_failure() {
+    let mut h = ready(Variant::Demo);
+    let survivor = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"survivor","orderStatus":"Untriggered","orderType":"Limit","stopOrderType":"Stop","triggerPrice":"70000","triggerDirection":1,"side":"Buy","price":"70000","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{survivor}]}}"#),
+    );
+    let seed = h.engine.store().order("survivor").unwrap().clone();
+    for index in 0..500 {
+        let mut active = seed.clone();
+        active.id = format!("active-{index}");
+        active.kind = OrderType::Limit;
+        h.engine.store_mut().upsert_order(active);
+    }
+    assert_eq!(h.engine.store().orders().len(), 501);
+    h.command(Command::CancelSymbolOrders {
+        command: 91,
+        symbol: "BTCUSDT".into(),
+    });
+    let affected = (0..500)
+        .map(|index| format!(r#"{{"orderId":"active-{index}","orderLinkId":""}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    h.respond(
+        "/v5/order/cancel-all",
+        200,
+        &format!(r#"{{"retCode":0,"result":{{"list":[{affected}],"success":"1"}}}}"#),
+    );
+    assert!(
+        h.engine.store().order("survivor").is_some(),
+        "omitted order must remain visible"
+    );
+    assert_eq!(h.engine.store().orders().len(), 1);
+    assert!(
+        h.result(91)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .contains("1 live order")
+    );
+
+    // A read issued after the ACK must commit the omitted row and unrelated
+    // arrivals while still filtering a replica-stale listed order.
+    h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+    h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+    let unrelated = survivor.replace("survivor", "unrelated-live");
+    let stale = survivor.replace("survivor", "active-0");
+    h.respond("settleCoin=USDT&limit=50", 200, &format!(r#"{{"retCode":0,"result":{{"list":[{survivor},{unrelated},{stale}],"nextPageCursor":""}}}}"#));
+    h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+    for id in ["survivor", "unrelated-live"] {
+        assert_eq!(
+            h.engine.store().order(id).unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open
+        );
+    }
+    assert!(h.engine.store().order("active-0").is_none());
+    assert!(!h.has_request("/v5/order/realtime"));
+}
+
+#[test]
+fn demo_cancel_all_without_affected_identity_cannot_retire_or_tombstone_live_rows() {
+    for ack in [
+        r#"{"retCode":0,"result":{}}"#,
+        r#"{"retCode":0,"result":{"success":"1"}}"#,
+        r#"{"retCode":0,"result":{"list":[],"success":"1"}}"#,
+        r#"{"retCode":0,"result":{"list":{}}}"#,
+        r#"{"retCode":0,"result":{"list":null}}"#,
+        r#"{"retCode":0,"result":null}"#,
+        r#"{"retCode":0,"result":{"list":[{"orderLinkId":"client"}]}}"#,
+        r#"{"retCode":0,"result":{"list":[{"orderId":""}]}}"#,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"   "}]}}"#,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"live"},{}]}}"#,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"live__stop_loss"}]}}"#,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"live"}],"success":"0"}}"#,
+        r#"{"retCode":110001,"retMsg":"order not exists or too late to cancel"}"#,
+    ] {
+        let mut h = ready(Variant::Demo);
+        let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"live","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+        );
+        h.command(Command::CancelSymbolOrders {
+            command: 92,
+            symbol: "BTCUSDT".into(),
+        });
+        h.respond("/v5/order/cancel-all", 200, ack);
+        assert!(h.engine.store().order("live").is_some(), "{ack}");
+        assert!(h.result(92).unwrap().is_err(), "{ack}");
+        h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+        h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+        h.respond(
+            "settleCoin=USDT&limit=50",
+            200,
+            &format!(r#"{{"retCode":0,"result":{{"list":[{row}],"nextPageCursor":""}}}}"#),
+        );
+        h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+        assert_eq!(
+            h.engine.store().order("live").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open,
+            "{ack}"
+        );
+        assert!(!h.has_request("/v5/order/realtime"), "{ack}");
+    }
+}
+
+#[test]
+fn demo_cancel_all_accepts_documented_empty_list_with_no_live_targets() {
+    let mut h = ready(Variant::Demo);
+    h.command(Command::CancelSymbolOrders {
+        command: 93,
+        symbol: "BTCUSDT".into(),
+    });
+    h.respond(
+        "/v5/order/cancel-all",
+        200,
+        r#"{"retCode":0,"result":{"list":[],"success":"1"}}"#,
+    );
+    assert_eq!(h.result(93), Some(&Ok("[]".into())));
+}
+
+#[test]
+fn demo_terminal_cleanup_does_not_prove_cancellation_of_omitted_native_ids() {
+    let mut h = ready(Variant::Demo);
+    let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"live","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+    h.message(
+        "/v5/private",
+        &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+    );
+    // Local terminal rows have no native terminal event or cancellation proof.
+    let seed = h.engine.store().order("live").unwrap().clone();
+    for (id, status) in [
+        ("old-filled", safe_cex_engine::model::OrderStatus::Closed),
+        (
+            "old-canceled",
+            safe_cex_engine::model::OrderStatus::Canceled,
+        ),
+    ] {
+        let mut terminal = seed.clone();
+        terminal.id = id.into();
+        terminal.status = status;
+        h.engine.store_mut().upsert_order(terminal);
+    }
+    h.command(Command::CancelSymbolOrders {
+        command: 97,
+        symbol: "BTCUSDT".into(),
+    });
+    // An unrelated terminal arrival was not captured by this command.
+    let mut arrival = seed;
+    arrival.id = "later-terminal".into();
+    arrival.status = safe_cex_engine::model::OrderStatus::Closed;
+    h.engine.store_mut().upsert_order(arrival);
+    h.respond(
+        "/v5/order/cancel-all",
+        200,
+        r#"{"retCode":0,"result":{"list":[],"success":"1"}}"#,
+    );
+    for id in ["old-filled", "old-canceled"] {
+        assert!(h.engine.store().order(id).is_none());
+    }
+    assert!(h.engine.store().order("later-terminal").is_some());
+    assert!(h.engine.store().order("live").is_some());
+    assert!(h.result(97).unwrap().is_err());
+    h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+    h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+    let filled = row.replace("live", "old-filled");
+    let canceled = row.replace("live", "old-canceled");
+    h.respond(
+        "settleCoin=USDT&limit=50",
+        200,
+        &format!(
+            r#"{{"retCode":0,"result":{{"list":[{row},{filled},{canceled}],"nextPageCursor":""}}}}"#
+        ),
+    );
+    h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+    for id in ["live", "old-filled", "old-canceled"] {
+        assert_eq!(
+            h.engine.store().order(id).unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open,
+            "terminal cleanup must not invent native cancellation proof for {id}"
+        );
+    }
+}
+
+#[test]
+fn demo_cancel_all_fences_listed_native_ids_absent_from_captured_store() {
+    for arrived_during_request in [false, true] {
+        let mut h = ready(Variant::Demo);
+        let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"external","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+        h.command(Command::CancelSymbolOrders {
+            command: 94,
+            symbol: "BTCUSDT".into(),
+        });
+        if arrived_during_request {
+            h.message(
+                "/v5/private",
+                &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+            );
+        }
+        h.respond("/v5/order/cancel-all", 200, r#"{"retCode":0,"result":{"list":[{"orderId":"external","orderLinkId":""},{"orderId":"external","orderLinkId":""}],"success":"1"}}"#);
+        assert!(h.engine.store().order("external").is_none());
+        assert_eq!(h.result(94), Some(&Ok("[]".into())));
+        h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+        h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+        let other = row.replace("external", "unrelated");
+        h.respond(
+            "settleCoin=USDT&limit=50",
+            200,
+            &format!(r#"{{"retCode":0,"result":{{"list":[{row},{other}],"nextPageCursor":""}}}}"#),
+        );
+        h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+        assert!(h.engine.store().order("external").is_none());
+        assert_eq!(
+            h.engine.store().order("unrelated").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open
+        );
+        assert!(!h.has_request("/v5/order/realtime"));
+    }
+}
+
+#[test]
+fn cancel_all_omitted_targets_that_finished_during_request_are_not_partial_failures() {
+    for status in ["Filled", "Cancelled"] {
+        let mut h = ready(Variant::Demo);
+        let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"finished","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+        );
+        h.command(Command::CancelSymbolOrders {
+            command: 95,
+            symbol: "BTCUSDT".into(),
+        });
+        let terminal = row
+            .replace("New", status)
+            .replace(r#""leavesQty":"1""#, r#""leavesQty":"0""#);
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{terminal}]}}"#),
+        );
+        h.respond(
+            "/v5/order/cancel-all",
+            200,
+            r#"{"retCode":0,"result":{"list":[],"success":"1"}}"#,
+        );
+        assert_eq!(h.result(95), Some(&Ok("[]".into())));
+        assert!(h.engine.store().order("finished").is_none());
+    }
+}
+
+#[test]
+fn inverse_cancel_all_without_success_field_uses_only_documented_affected_ids() {
+    let mut h = ready(Variant::Inverse);
+    h.message("/v5/private", r#"{"topic":"order.inverse","data":[{"category":"inverse","symbol":"BTCUSD","orderId":"listed","orderStatus":"New","orderType":"Limit","side":"Buy","price":"50000","qty":"1000","cumExecQty":"0","leavesQty":"1000"},{"category":"inverse","symbol":"BTCUSD","orderId":"omitted","orderStatus":"New","orderType":"Limit","side":"Buy","price":"50000","qty":"1000","cumExecQty":"0","leavesQty":"1000"}]}"#);
+    h.command(Command::CancelSymbolOrders {
+        command: 96,
+        symbol: "BTCUSD".into(),
+    });
+    // UTA1.0 inverse responses do not contain success.
+    h.respond(
+        "/v5/order/cancel-all",
+        200,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"listed","orderLinkId":""}]}}"#,
+    );
+    assert_eq!(
+        h.engine.store().order("listed").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Canceled
+    );
+    assert_eq!(
+        h.engine.store().order("omitted").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+    assert!(h.result(96).unwrap().is_err());
 }
 
 #[test]
@@ -853,7 +1147,17 @@ fn spot_cancel_all_covers_each_family_and_keeps_failed_family_open() {
                     r#"{"retCode":10006,"retMsg":"Too many visits"}"#
                 }
             } else {
-                r#"{"retCode":0,"result":{"list":[],"success":"1"}}"#
+                match filter {
+                    "Order" => {
+                        r#"{"retCode":0,"result":{"list":[{"orderId":"ordinary","orderLinkId":""}],"success":"1"}}"#
+                    }
+                    "StopOrder" => {
+                        r#"{"retCode":0,"result":{"list":[{"orderId":"conditional","orderLinkId":""}],"success":"1"}}"#
+                    }
+                    _ => {
+                        r#"{"retCode":0,"result":{"list":[{"orderId":"stop","orderLinkId":""}],"success":"1"}}"#
+                    }
+                }
             };
             h.reply(request.id, 200, reply);
         }
@@ -938,4 +1242,321 @@ fn hyro_invalid_nonfinite_option_cannot_alias_pending_intent() {
     created(&mut h, "first");
     assert_eq!(h.result(1), Some(&Ok("[\"first\"]".into())));
     assert!(h.requests.is_empty());
+}
+
+// V5 acknowledgement and realtime shapes:
+// https://bybit-exchange.github.io/docs/v5/order/cancel-order
+// https://bybit-exchange.github.io/docs/v5/order/open-order
+#[test]
+fn demo_cancel_ack_fences_in_flight_order_snapshot_at_same_clock() {
+    for mode in [
+        "accepted",
+        "already-gone",
+        "cancel-all",
+        "partial",
+        "rejected",
+    ] {
+        let mut h = ready(Variant::Demo);
+        let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"canceled","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}"#;
+        let failed = row.replace("canceled", "rejected");
+        let rows = if mode == "partial" {
+            format!("{row},{failed}")
+        } else {
+            row.to_owned()
+        };
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{rows}]}}"#),
+        );
+        let command = if mode == "cancel-all" {
+            Command::CancelSymbolOrders {
+                command: 91,
+                symbol: "BTCUSDT".into(),
+            }
+        } else {
+            Command::CancelOrders {
+                command: 91,
+                ids: if mode == "partial" {
+                    vec!["canceled".into(), "rejected".into()]
+                } else {
+                    vec!["canceled".into()]
+                },
+            }
+        };
+        h.command(command);
+        let cancel = h.take(if mode == "cancel-all" {
+            "/v5/order/cancel-all"
+        } else {
+            "/v5/order/cancel-batch"
+        });
+        // Subscription reconciliation starts while cancellation is in flight.
+        h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+        h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+        let stale = h.take("settleCoin=USDT&limit=50");
+        let reply = match mode {
+            "already-gone" => {
+                r#"{"retCode":110001,"retMsg":"order not exists or too late to cancel"}"#
+            }
+            "cancel-all" => {
+                r#"{"retCode":0,"result":{"list":[{"orderId":"canceled","orderLinkId":""}],"success":"1"}}"#
+            }
+            "partial" => {
+                r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110001,"msg":"permission denied"}]}}"#
+            }
+            "rejected" => {
+                r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":110001,"msg":"permission denied"}]}}"#
+            }
+            _ => r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+        };
+        h.reply(cancel.id, 200, reply);
+        assert_eq!(
+            h.engine.store().order("canceled").is_none(),
+            mode != "rejected",
+            "{mode}"
+        );
+        h.reply(
+            stale.id,
+            200,
+            &format!(r#"{{"retCode":0,"result":{{"list":[{rows}],"nextPageCursor":""}}}}"#),
+        );
+        h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+        assert_eq!(
+            h.engine.store().order("canceled").is_none(),
+            mode != "rejected",
+            "{mode}: old snapshot reopened canceled order"
+        );
+        assert_eq!(
+            h.has_request("/v5/order/realtime"),
+            mode != "rejected",
+            "{mode}: accepted cancellation invalidates read; rejection does not"
+        );
+        if mode == "partial" {
+            assert_eq!(
+                h.engine.store().order("rejected").unwrap().status,
+                safe_cex_engine::model::OrderStatus::Open
+            );
+            assert!(h.result(91).unwrap().is_err());
+        }
+        while h.has_request("/v5/order/realtime") {
+            h.respond("/v5/order/realtime", 200, EMPTY);
+        }
+        assert_eq!(
+            h.engine.store().order("canceled").is_none(),
+            mode != "rejected",
+            "{mode}"
+        );
+    }
+}
+
+#[test]
+fn hyro_cancel_ack_fences_snapshot_started_after_dispatch() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 90, vec![order("BTCUSDT", 1.0)]);
+    created(&mut h, "canceled");
+    h.command(Command::CancelOrders {
+        command: 91,
+        ids: vec!["canceled".into()],
+    });
+    let cancel = h.take("/v5/order/cancel");
+    h.advance(5000.0);
+    let stale = h.take("/v5/order/realtime");
+    h.reply(
+        cancel.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"canceled"}}"#,
+    );
+    assert!(h.engine.store().order("canceled").is_none());
+    h.reply(stale.id, 200, r#"{"retCode":0,"result":{"list":[{"category":"linear","symbol":"BTCUSDT","orderId":"canceled","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}],"nextPageCursor":""}}"#);
+    h.respond("/v5/position/list", 200, EMPTY);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    assert!(
+        h.engine.store().order("canceled").is_none(),
+        "atomic snapshot reopened canceled order"
+    );
+    assert!(h.has_request("/v5/order/realtime"));
+    finish_hyro_snapshot(&mut h);
+    assert!(h.engine.store().order("canceled").is_none());
+}
+
+// https://bybit-exchange.github.io/docs/v5/order/amend-order
+#[test]
+fn inverse_amend_ack_keeps_native_and_coin_units_until_stream_confirmation() {
+    let mut h = ready(Variant::Inverse);
+    h.message("/v5/private", r#"{"topic":"order.inverse","data":[{"category":"inverse","symbol":"BTCUSD","orderId":"inverse-amend","orderStatus":"PartiallyFilled","orderType":"Limit","side":"Buy","price":"50000","qty":"1000","cumExecQty":"250","leavesQty":"750"}]}"#);
+    h.command(Command::AmendOrder {
+        command: 92,
+        id: "inverse-amend".into(),
+        price: Some(40000.0),
+        amount: Some(1500.0),
+    });
+    if h.has_request("/v5/position/list") {
+        resolve_mode(&mut h, "BTCUSD");
+    }
+    let request = h.take("/v5/order/amend");
+    assert!(body(&request).contains(r#""qty":"1500""#));
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"inverse-amend"}}"#,
+    );
+    let before = h.engine.store().order("inverse-amend").unwrap();
+    assert_eq!(
+        (before.amount, before.filled, before.remaining),
+        (1000.0, 250.0, 0.015)
+    );
+    assert_eq!(before.extra.as_ref().unwrap().remaining_native, Some(750.0));
+    h.message("/v5/private", r#"{"topic":"order.inverse","data":[{"category":"inverse","symbol":"BTCUSD","orderId":"inverse-amend","orderStatus":"PartiallyFilled","orderType":"Limit","side":"Buy","price":"40000","qty":"1500","cumExecQty":"250","leavesQty":"1250"}]}"#);
+    let after = h.engine.store().order("inverse-amend").unwrap();
+    assert_eq!(
+        (after.amount, after.filled, after.remaining),
+        (1500.0, 250.0, 0.03125)
+    );
+    assert_eq!(after.extra.as_ref().unwrap().remaining_native, Some(1250.0));
+}
+
+#[test]
+fn demo_terminal_stream_at_snapshot_issue_time_cannot_be_reopened() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+    h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"stream-canceled","orderStatus":"Cancelled","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"0"}]}"#);
+    h.respond("settleCoin=USDT&limit=50", 200, r#"{"retCode":0,"result":{"list":[{"category":"linear","symbol":"BTCUSDT","orderId":"stream-canceled","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}],"nextPageCursor":""}}"#);
+    h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+    assert_eq!(
+        h.engine.store().order("stream-canceled").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Canceled
+    );
+    assert!(h.has_request("/v5/order/realtime"));
+}
+
+#[test]
+fn local_cancel_tombstone_filters_replica_stale_reads_issued_after_ack() {
+    for variant in [Variant::Demo, Variant::Hyrotrader] {
+        let mut h = ready(variant);
+        let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"retired","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+        );
+        h.command(Command::CancelOrders {
+            command: 95,
+            ids: vec!["retired".into()],
+        });
+        h.respond(
+            if variant.is_hyro() {
+                "/v5/order/cancel"
+            } else {
+                "/v5/order/cancel-batch"
+            },
+            200,
+            r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+        );
+        assert!(h.engine.store().order("retired").is_none());
+        // The stale replica read starts after cancellation is already acknowledged.
+        for (terminal, reconnect) in [(false, false), (true, false), (false, true)] {
+            if reconnect {
+                let socket = h.socket("/v5/private").unwrap();
+                h.event(Event::WsClosed { socket, code: 1006 });
+                h.advance(2000.0);
+                let fresh = h.socket("/v5/private").unwrap();
+                assert_ne!(socket, fresh);
+                h.event(Event::WsOpened { socket: fresh });
+                for op in ["auth", "subscribe"] {
+                    if variant.is_hyro() {
+                        #[derive(serde::Deserialize)]
+                        struct Sent {
+                            req_id: String,
+                        }
+                        let sent = h
+                            .sent_on("/v5/private")
+                            .into_iter()
+                            .rev()
+                            .find(|message| message.contains(&format!("\"op\":\"{op}\"")))
+                            .unwrap();
+                        let sent: Sent = serde_json::from_str(&sent).unwrap();
+                        h.message(
+                            "/v5/private",
+                            &format!(
+                                r#"{{"op":"{op}","req_id":"{}","success":true}}"#,
+                                sent.req_id
+                            ),
+                        );
+                    } else {
+                        h.message("/v5/private", &format!(r#"{{"op":"{op}","success":true}}"#));
+                    }
+                }
+            } else if variant.is_hyro() {
+                h.advance(5000.0);
+            } else {
+                h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+                h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+            }
+            let other = row.replace("retired", "legitimate");
+            let stale = if terminal {
+                row.replace("New", "Cancelled")
+                    .replace(r#""leavesQty":"1""#, r#""leavesQty":"0""#)
+            } else {
+                row.to_owned()
+            };
+            h.respond(
+                "settleCoin=USDT&limit=50",
+                200,
+                &format!(
+                    r#"{{"retCode":0,"result":{{"list":[{stale},{other}],"nextPageCursor":""}}}}"#
+                ),
+            );
+            if !variant.is_hyro() {
+                h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+            }
+            if variant.is_hyro() {
+                h.respond("/v5/position/list", 200, EMPTY);
+                h.respond("/v5/account/wallet-balance", 200, WALLET);
+            }
+            assert!(
+                h.engine
+                    .store()
+                    .order("retired")
+                    .is_none_or(|o| o.status != safe_cex_engine::model::OrderStatus::Open),
+                "{variant:?}: post-ack replica resurrected retired native ID"
+            );
+            assert_eq!(
+                h.engine.store().order("legitimate").unwrap().status,
+                safe_cex_engine::model::OrderStatus::Open
+            );
+            assert!(
+                !h.has_request("/v5/order/realtime"),
+                "{variant:?}: filtered/terminal rows must not cause a retry loop"
+            );
+        }
+    }
+}
+
+#[test]
+fn transitional_trigger_and_pending_cancel_do_not_tombstone_native_id() {
+    for status in ["Triggered", "PendingCancel"] {
+        let mut h = ready(Variant::Demo);
+        let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"transition","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+        h.message(
+            "/v5/private",
+            &format!(
+                r#"{{"topic":"order","data":[{}]}}"#,
+                row.replace("New", status)
+            ),
+        );
+        for body in [row.replace("New", status), row.to_owned()] {
+            h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+            h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+            h.respond(
+                "settleCoin=USDT&limit=50",
+                200,
+                &format!(r#"{{"retCode":0,"result":{{"list":[{body}],"nextPageCursor":""}}}}"#),
+            );
+            h.respond("settleCoin=USDC&limit=50", 200, EMPTY);
+        }
+        assert_eq!(
+            h.engine.store().order("transition").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open,
+            "{status} is transitional"
+        );
+    }
 }

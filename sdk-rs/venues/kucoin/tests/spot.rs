@@ -718,6 +718,7 @@ fn fixed_settings_changes_never_send_derivative_writes() {
             command: 1,
             symbol: "BTC-USDT".into(),
             leverage: 99.0,
+            side: None,
         },
         Command::SetMarginType {
             command: 2,
@@ -727,6 +728,7 @@ fn fixed_settings_changes_never_send_derivative_writes() {
         Command::SetPositionMode {
             command: 3,
             hedged: true,
+            symbol: None,
         },
     ] {
         h.command(c);

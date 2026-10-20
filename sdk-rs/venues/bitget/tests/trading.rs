@@ -509,6 +509,7 @@ fn setting_commands_update_store_only_after_ack_and_failures_preserve_settings()
         command: 1,
         symbol: "BTCUSDT".into(),
         leverage: 500.0,
+        side: None,
     });
     let (request, p) = body(&mut h, "/set-leverage");
     assert_eq!(p["leverage"].as_f64(), Some(125.0));
@@ -532,6 +533,7 @@ fn setting_commands_update_store_only_after_ack_and_failures_preserve_settings()
     h.command(Command::SetPositionMode {
         command: 3,
         hedged: true,
+        symbol: None,
     });
     h.respond("/set-position-mode", 200, r#"{"code":"00000","data":{}}"#);
     assert!(h.engine.store().hedged());
@@ -729,6 +731,7 @@ fn isolated_hedge_leverage_ack_only_updates_the_requested_long_side() {
             command: 1,
             symbol: "BTCUSDT".into(),
             leverage: 20.0,
+            side: None,
         });
         let (request, p) = body(&mut h, "/set-leverage");
         assert_eq!(p[if uta_account { "posSide" } else { "holdSide" }], "long");

@@ -652,3 +652,21 @@ at 200, so this sweep does not claim unbounded Phemex TS history.
 ## Rust socket supervision
 
 The Rust public socket uses `engine::socket::Supervisor`: a 10-second connection deadline, 20-second idle watchdog, native `server.ping` every five seconds, and capped exponential reconnect delay with jitter. Short open/close flaps retain the failure count; sustained traffic resets it. Public reconnect still invalidates book generations and restores active subscriptions.
+
+Rust `setLeverage(symbol, leverage, side)` preserves the opposite hedge leg's
+cached leverage in the required two-field request. Both values retain their
+margin sign: negative in cross, positive in isolated. Only the selected leg's
+settings and positions change after success. Omitting side changes both legs;
+one-way mode uses `leverageRr` and ignores side. An unknown opposite hedge
+leverage fails before a write rather than inventing a replacement value.
+
+Rust `changePositionMode` also requires a symbol and sends one PUT for that
+symbol. A successful mode-only write for a market absent from account rows
+records its confirmed mode separately, without inventing margin or leverage.
+Orders and leverage changes still require the full reconciled context. Fresh
+authoritative account rows replace the mode-only record; reads started before
+the write cannot overwrite it. Conflicting delayed stream rows also wait for
+that authoritative read before replacing the confirmed mode. Missing, unknown
+or rejected symbols never
+trigger writes for other markets. The account hedge indicator reflects whether
+any known symbol remains hedged.

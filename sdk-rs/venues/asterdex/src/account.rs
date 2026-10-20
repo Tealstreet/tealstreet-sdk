@@ -829,6 +829,8 @@ impl AsterDex {
                 ot: None,
                 o: Some(event.kind),
                 status: event.status,
+                x: None,
+                t: None,
                 p: event.p,
                 sp: event.sp,
                 ap: None,
