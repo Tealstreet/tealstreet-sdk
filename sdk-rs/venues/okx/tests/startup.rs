@@ -101,3 +101,269 @@ fn catalogue_transport_failure_retries_with_fresh_accumulation() {
     reply(&mut engine, &request, &envelope(MARKET), 1002.);
     assert_eq!(engine.store().markets().len(), 1);
 }
+
+#[test]
+fn eea_later_source_cannot_hide_all_malformed_rows_behind_an_earlier_product() {
+    const FUTURE: &str = r#"{"instId":"BTC-USD-UM","instType":"FUTURES","ruleType":"xperp","ctType":"linear","ctVal":"0.001","ctValCcy":"BTC","settleCcy":"USD","uly":"BTC-USD","state":"live","lotSz":"1","tickSz":"0.1","minSz":"1","maxLmtSz":"1000","lever":"10"}"#;
+    let mut e = Engine::new(Okx::new(Options {
+        eea: true,
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(MARKET), 1.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope("{}"), 2.0);
+    assert!(e.store().loaded().markets);
+    assert_eq!(e.store().markets().len(), 1);
+    let out = actions(&mut e);
+    let timer = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1002.0,
+            } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    let request = out
+        .into_iter()
+        .find(|a| is_get(a, "tickers?instType=SWAP"))
+        .unwrap();
+    reply(&mut e, &request, &envelope(TICKER), 3.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(""), 4.0);
+    let out = actions(&mut e);
+    let socket = out
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/public") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(5.0, Event::WsOpened { socket });
+    actions(&mut e);
+    ws(
+        &mut e,
+        socket,
+        r#"{"arg":{"channel":"mark-price"},"data":[{"instId":"BTC-USDT-SWAP","markPx":"77"}]}"#,
+    );
+    actions(&mut e);
+    e.handle(1002.0, Event::TimerFired { timer });
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(MARKET), 1003.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(FUTURE), 1004.0);
+    assert_eq!(e.store().markets().len(), 2);
+    let out = actions(&mut e);
+    assert!(!out.iter().any(|a| matches!(a, Action::WsConnect { .. })));
+    let request = out
+        .into_iter()
+        .find(|a| is_get(a, "tickers?instType=SWAP"))
+        .unwrap();
+    reply(&mut e, &request, &envelope(TICKER), 1005.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope("{}"), 1006.0);
+    assert!(e.store().loaded().tickers);
+    assert_eq!(e.store().tickers().len(), 1);
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().mark, 77.0);
+    let out = actions(&mut e);
+    assert!(!out.iter().any(|a| matches!(a, Action::WsConnect { .. })));
+    let timer = out
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 2006.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(2006.0, Event::TimerFired { timer });
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(TICKER), 2007.0);
+    let request = actions(&mut e).remove(0);
+    let future_quote = TICKER.replace("BTC-USDT-SWAP", "BTC-USD-UM");
+    reply(&mut e, &request, &envelope(&future_quote), 2008.0);
+    assert!(e.store().loaded().tickers);
+    assert_eq!(e.store().tickers().len(), 2);
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().mark, 77.0);
+    assert!(
+        !actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+}
+
+#[test]
+fn nonfinite_or_nonpositive_instrument_rails_are_isolated_from_valid_peers() {
+    for field in ["ctVal", "lotSz", "tickSz", "minSz", "lever"] {
+        for bad in ["NaN", "inf", "-inf", "0", "-1"] {
+            let key = format!("\"{field}\":\"");
+            let start = MARKET.find(&key).unwrap() + key.len();
+            let end = start + MARKET[start..].find('"').unwrap();
+            let bad_market = format!("{}{bad}{}", &MARKET[..start], &MARKET[end..])
+                .replace("BTC-USDT-SWAP", "BAD-USDT-SWAP");
+            let mut e = Engine::new(Okx::new(Options::default()));
+            e.start(0.0);
+            let request = actions(&mut e).remove(0);
+            reply(
+                &mut e,
+                &request,
+                &envelope(&format!("{bad_market},{MARKET}")),
+                1.0,
+            );
+            assert_eq!(e.store().markets().len(), 1, "{field}={bad}");
+            assert_eq!(e.store().markets()[0].id, "BTC-USDT-SWAP");
+            assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message == "Skipped malformed public discovery row")));
+        }
+    }
+}
+
+#[test]
+fn recovering_an_earlier_product_keeps_existing_market_setting_indices() {
+    let future = MARKET.replace("BTC-USDT-SWAP", "BTC-USD-UM").replace(
+        "\"instType\":\"SWAP\"",
+        "\"instType\":\"FUTURES\",\"ruleType\":\"xperp\"",
+    );
+    let mut e = Engine::new(Okx::new(Options {
+        eea: true,
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope("{}"), 1.0);
+    let request = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "instruments?instType=FUTURES"))
+        .unwrap();
+    reply(&mut e, &request, &envelope(&future), 2.0);
+    let symbol = e.store().market_by_id("BTC-USD-UM").unwrap().symbol.clone();
+    e.store_mut()
+        .update_setting(&symbol, |setting| setting.leverage = 7.0);
+    assert_eq!(e.store().market_index_by_id("BTC-USD-UM"), Some(0));
+    let timer = actions(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1002.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1002.0, Event::TimerFired { timer });
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(MARKET), 1003.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(&future), 1004.0);
+    assert_eq!(e.store().market_index_by_id("BTC-USD-UM"), Some(0));
+    assert_eq!(e.store().market_index_by_id("BTC-USDT-SWAP"), Some(1));
+    assert_eq!(e.store().setting(&symbol).unwrap().leverage, 7.0);
+    assert!(
+        !actions(&mut e).iter().any(|a| matches!(a, Action::Http(_))),
+        "catalogue recovery must queue behind the existing ticker walk"
+    );
+}
+
+#[test]
+fn overlapping_catalogue_and_ticker_retries_keep_one_walk_and_protect_live_fields_until_the_queue_settles()
+ {
+    let future = MARKET.replace("BTC-USDT-SWAP", "BTC-USD-UM").replace(
+        "\"instType\":\"SWAP\"",
+        "\"instType\":\"FUTURES\",\"ruleType\":\"xperp\"",
+    );
+    let future_quote = TICKER.replace("BTC-USDT-SWAP", "BTC-USD-UM");
+    let mut e = Engine::new(Okx::new(Options {
+        eea: true,
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(MARKET), 1.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope("{}"), 2.0);
+    let out = actions(&mut e);
+    let catalogue_timer = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1002.0,
+            } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    let request = out
+        .into_iter()
+        .find(|a| is_get(a, "tickers?instType=SWAP"))
+        .unwrap();
+    reply(&mut e, &request, &envelope(TICKER), 3.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope("{}"), 4.0);
+    let out = actions(&mut e);
+    let ticker_timer = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1004.0,
+            } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    let socket = out
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/public") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(5.0, Event::WsOpened { socket });
+    actions(&mut e);
+    e.handle(
+        1002.0,
+        Event::TimerFired {
+            timer: catalogue_timer,
+        },
+    );
+    let catalogue = actions(&mut e).remove(0);
+    e.handle(
+        1004.0,
+        Event::TimerFired {
+            timer: ticker_timer,
+        },
+    );
+    let ticker = actions(&mut e).remove(0);
+    reply(&mut e, &catalogue, &envelope(MARKET), 1005.0);
+    let catalogue = actions(&mut e).remove(0);
+    reply(&mut e, &catalogue, &envelope(&future), 1006.0);
+    assert!(
+        !actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+    );
+    reply(&mut e, &ticker, &envelope(TICKER), 1007.0);
+    let ticker = actions(&mut e).remove(0);
+    reply(&mut e, &ticker, &envelope(&future_quote), 1008.0);
+    let ticker = actions(&mut e)
+        .into_iter()
+        .find(|a| is_get(a, "tickers?instType=SWAP"))
+        .expect("one queued refresh");
+    ws(
+        &mut e,
+        socket,
+        r#"{"arg":{"channel":"mark-price"},"data":[{"instId":"BTC-USDT-SWAP","markPx":"77"}]}"#,
+    );
+    actions(&mut e);
+    reply(&mut e, &ticker, &envelope(TICKER), 1010.0);
+    let ticker = actions(&mut e).remove(0);
+    reply(&mut e, &ticker, &envelope(&future_quote), 1011.0);
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().mark, 77.0);
+    assert!(
+        !actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
+    );
+}

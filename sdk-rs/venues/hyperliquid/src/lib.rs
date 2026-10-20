@@ -13,7 +13,7 @@ use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wire::*;
 
 #[derive(Clone, Debug, Default)]
@@ -95,6 +95,8 @@ pub struct Hyperliquid {
     coins: HashMap<String, String>,
     dex_queue: std::collections::VecDeque<(String, u32)>,
     dex_names: Vec<String>,
+    advanced_scopes: HashSet<String>,
+    core_discovery_incomplete: bool,
     startup: safe_cex_engine::startup::Backoff<(String, u32)>,
 }
 impl Hyperliquid {
@@ -112,6 +114,8 @@ impl Hyperliquid {
             coins: HashMap::new(),
             dex_queue: Default::default(),
             dex_names: Vec::new(),
+            advanced_scopes: HashSet::new(),
+            core_discovery_incomplete: true,
             startup: Default::default(),
         }
     }
@@ -211,6 +215,51 @@ impl Hyperliquid {
                 },
             ));
         }
+    }
+    // A context retry must not advance discovery again or open a second session.
+    fn advance_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
+        if !self.advanced_scopes.insert(dex.into()) {
+            return;
+        }
+        if !self.spot && dex.is_empty() {
+            self.info(
+                cx,
+                "{\"type\":\"perpDexs\"}".into(),
+                ArrayAt::Root,
+                Pending::Dexs {
+                    dexs: Vec::new(),
+                    index: 0,
+                },
+            );
+        } else {
+            self.next_dex(cx);
+        }
+    }
+    // Keep table indices and known rails for omitted contexts. Fresh rows use
+    // native identity, so retries neither duplicate peers nor move settings.
+    fn commit_discovery(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        markets: Vec<Market>,
+        tickers: Vec<Ticker>,
+    ) {
+        let mut all = cx.store.markets().to_vec();
+        for market in markets {
+            if let Some(old) = all.iter_mut().find(|old| old.id == market.id) {
+                *old = market;
+            } else {
+                all.push(market);
+            }
+        }
+        cx.store.set_markets(all);
+        let mut all = cx.store.tickers().to_vec();
+        for ticker in tickers {
+            // Discovery retries hydrate missing contexts, preserving live quotes.
+            if !all.iter().any(|old| old.id == ticker.id) {
+                all.push(ticker);
+            }
+        }
+        cx.store.set_tickers(all);
     }
     fn subscription(
         &self,
@@ -509,6 +558,7 @@ fn market_rows(
             return;
         };
         let Some(price) = ctx.mid_px.filter(|p| p.is_finite() && *p > 0.0) else {
+            safe_cex_engine::startup::skipped_row(cx);
             return;
         };
         if !dex.is_empty() && meta.is_delisted {
@@ -648,7 +698,8 @@ fn spot_rows(
         else {
             continue;
         };
-        let Some(price) = ctx.context.mid_px.filter(|p| *p > 0.0) else {
+        let Some(price) = ctx.context.mid_px.filter(|p| p.is_finite() && *p > 0.0) else {
+            safe_cex_engine::startup::skipped_row(cx);
             continue;
         };
         let id = native.name.clone();
@@ -858,6 +909,14 @@ impl Venue for Hyperliquid {
                     );
                     return;
                 }
+                let complete = meta.as_ref().is_some_and(|meta| {
+                    meta.universe.iter().all(|row| {
+                        row.0
+                            .as_ref()
+                            .is_some_and(|native| markets.iter().any(|m| m.id == native.name))
+                    })
+                });
+                self.core_discovery_incomplete = !complete;
                 if let Some(meta) = meta {
                     for native in meta.universe.into_iter().filter_map(|row| row.0) {
                         if let Some(m) = markets.iter().find(|m| m.id == native.name) {
@@ -866,7 +925,12 @@ impl Venue for Hyperliquid {
                                 let replace = self
                                     .spot_tokens
                                     .get(token)
-                                    .and_then(|s| markets.iter().find(|m| &m.symbol == s))
+                                    .and_then(|s| {
+                                        markets
+                                            .iter()
+                                            .find(|m| &m.symbol == s)
+                                            .or_else(|| cx.store.market(s))
+                                    })
                                     .is_none_or(|existing| {
                                         existing.quote != "USDC" && m.quote == "USDC"
                                     });
@@ -879,10 +943,20 @@ impl Venue for Hyperliquid {
                         }
                     }
                 }
-                self.startup.succeeded(cx, &(String::new(), 0));
-                cx.store.set_markets(markets);
-                cx.store.set_tickers(tickers);
-                self.next_dex(cx);
+                if complete || !markets.is_empty() {
+                    self.commit_discovery(cx, markets, tickers);
+                }
+                if complete {
+                    self.startup.succeeded(cx, &(String::new(), 0));
+                } else {
+                    self.startup.failed(cx, (String::new(), 0));
+                }
+                if self.account.started && !self.options.public_data_only && self.user().is_some() {
+                    self.refresh_account(cx);
+                }
+                if cx.store.loaded().markets {
+                    self.advance_scope(cx, "");
+                }
             }
             Pending::Account(request) => {
                 let builder = matches!(request, account::Request::Builder);
@@ -920,7 +994,27 @@ impl Venue for Hyperliquid {
                     );
                     return;
                 }
-                self.startup.succeeded(cx, &(dex.clone(), offset));
+                let complete = instruments.iter().all(|row| {
+                    row.as_ref().is_some_and(|native| {
+                        if !dex.is_empty() && native.is_delisted {
+                            return true;
+                        }
+                        let id = if dex.is_empty() || native.name.contains(':') {
+                            native.name.clone()
+                        } else {
+                            format!("{dex}:{}", native.name)
+                        };
+                        markets.iter().any(|market| market.id == id)
+                    })
+                });
+                if dex.is_empty() {
+                    self.core_discovery_incomplete = !complete;
+                }
+                if complete {
+                    self.startup.succeeded(cx, &(dex.clone(), offset));
+                } else {
+                    self.startup.failed(cx, (dex.clone(), offset));
+                }
                 if valid {
                     for (index, meta) in instruments.iter().enumerate() {
                         let Some(meta) = meta else {
@@ -937,25 +1031,15 @@ impl Venue for Hyperliquid {
                                 .insert(m.id.to_ascii_lowercase(), m.symbol.clone());
                         }
                     }
-                    let mut all = cx.store.markets().to_vec();
-                    all.extend(markets);
-                    cx.store.set_markets(all);
-                    let mut all = cx.store.tickers().to_vec();
-                    all.extend(tickers);
-                    cx.store.set_tickers(all);
+                    if complete || !markets.is_empty() {
+                        self.commit_discovery(cx, markets, tickers);
+                    }
                 }
-                if dex.is_empty() {
-                    self.info(
-                        cx,
-                        "{\"type\":\"perpDexs\"}".into(),
-                        ArrayAt::Root,
-                        Pending::Dexs {
-                            dexs: Vec::new(),
-                            index: 0,
-                        },
-                    );
-                } else {
-                    self.next_dex(cx);
+                if self.account.started && !self.options.public_data_only && self.user().is_some() {
+                    self.refresh_account(cx);
+                }
+                if cx.store.loaded().markets {
+                    self.advance_scope(cx, &dex);
                 }
             }
             Pending::Dexs { dexs, .. } => {
@@ -1077,9 +1161,9 @@ impl Venue for Hyperliquid {
             Pending::Dexs { .. } => self.next_dex(cx),
             Pending::Meta { dex, offset, .. } => {
                 let optional = !dex.is_empty();
-                self.startup.failed(cx, (dex, offset));
+                self.startup.failed(cx, (dex.clone(), offset));
                 if optional {
-                    self.next_dex(cx);
+                    self.advance_scope(cx, &dex);
                 }
             }
         }
@@ -1264,3 +1348,6 @@ fn valid_interval(interval: &str) -> bool {
     ]
     .contains(&interval)
 }
+
+#[cfg(test)]
+mod startup_tests;

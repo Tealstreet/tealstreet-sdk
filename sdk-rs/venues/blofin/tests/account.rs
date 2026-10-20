@@ -362,3 +362,55 @@ fn regressive_snapshot_cannot_reinsert_an_order_removed_by_reconciliation() {
     h.ws(&order_event("123", "2", "partially_filled"));
     assert!(h.e.store().orders().is_empty());
 }
+#[test]
+fn unmapped_owned_position_rejects_scope_but_zero_and_other_products_are_ignored() {
+    for (quantity, kind, rejected) in [
+        ("4", "SWAP", true),
+        ("0", "SWAP", false),
+        ("4", "SPOT", false),
+    ] {
+        let mut h = Harness::new();
+        h.seed();
+        let previous = h.e.store().positions().to_vec();
+        let balance = h.e.store().balance().clone();
+        h.e.handle(10_000., Event::TimerFired { timer: h.tick });
+        h.collect();
+        let known = POSITION.replace("\"positions\":\"4\"", "\"positions\":\"2\"");
+        h.reply("account/positions", &format!(r#"{{"code":"0","data":[{known},{{"instId":"MISSING-USDT","instType":"{kind}","positions":"{quantity}"}}]}}"#));
+        if rejected {
+            assert_eq!(h.e.store().positions(), previous);
+            assert_eq!(*h.e.store().balance(), balance);
+            assert!(!h.pending.iter().any(|r| r.url.contains("asset/balances")));
+            assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("owned position has unavailable market metadata"))));
+        } else {
+            h.reply(
+                "balances",
+                r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#,
+            );
+            assert_eq!(h.e.store().positions()[0].contracts, 0.002);
+        }
+    }
+}
+#[test]
+fn unmapped_initial_position_does_not_claim_empty_account_loaded() {
+    let mut h = Harness::new();
+    h.modes();
+    h.reply(
+        "account/positions",
+        r#"{"code":"0","data":[{"instId":"MISSING-USDT","positions":"2"}]}"#,
+    );
+    assert!(!h.e.store().loaded().positions);
+    assert!(!h.e.store().loaded().balance);
+}
+#[test]
+fn unmapped_working_order_rejects_authoritative_order_scope() {
+    let mut h = Harness::new();
+    h.seed();
+    h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"original","orderType":"limit","side":"buy","size":"1","price":"60000","state":"live"}]}"#);
+    let previous = h.e.store().orders().to_vec();
+    h.e.handle(10_000., Event::TimerFired { timer: h.tick });
+    h.collect();
+    h.reply("orders-pending", r#"{"code":"0","data":[{"instId":"MISSING-USDT","instType":"SWAP","orderId":"external","size":"1","state":"live"}]}"#);
+    assert_eq!(h.e.store().orders(), previous);
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("working order has unavailable market metadata"))));
+}

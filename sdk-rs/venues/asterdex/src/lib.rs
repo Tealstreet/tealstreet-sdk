@@ -778,7 +778,7 @@ impl Venue for AsterDex {
             Pending::Trade(req) => self.on_trade_response(cx, req, Ok(response)),
             Pending::History(req) => self.on_history_response(cx, req, Ok(response)),
             Pending::ExchangeInfo { rows, malformed } => {
-                if response.status != 200 || malformed {
+                if response.status != 200 || (malformed && rows.is_empty()) {
                     self.startup.failed(cx, true);
                     return;
                 }
@@ -803,7 +803,7 @@ impl Venue for AsterDex {
                 }
             }
             Pending::Daily { rows, malformed } => {
-                if response.status != 200 || malformed {
+                if response.status != 200 || (malformed && rows.is_empty()) {
                     self.startup.failed(cx, false);
                     return;
                 }
@@ -849,7 +849,7 @@ impl Venue for AsterDex {
             Pending::Account(req) => self.on_account_item(cx, req, item),
             Pending::History(req) => self.on_history_item(cx, req, item),
             Pending::Clock(_) | Pending::Trade(_) => {}
-            Pending::ExchangeInfo { rows, malformed: _ } => {
+            Pending::ExchangeInfo { rows, malformed } => {
                 match serde_json::from_str::<SymbolInfo>(item) {
                     Ok(row) if row.status == "TRADING" => {
                         let (market, rule) = market_from_wire(row);
@@ -863,25 +863,30 @@ impl Venue for AsterDex {
                             || !rule.tick_size.is_finite()
                             || rule.tick_size <= 0.0
                         {
+                            *malformed = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         } else {
                             rows.push((market, rule));
                         }
                     }
                     Ok(_) => {}
-                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                    Err(_) => {
+                        *malformed = true;
+                        safe_cex_engine::startup::skipped_row(cx);
+                    }
                 }
             }
-            Pending::Daily { rows, malformed: _ } => match serde_json::from_str::<Daily>(item) {
+            Pending::Daily { rows, malformed } => match serde_json::from_str::<Daily>(item) {
                 Ok(row)
-                    if [
-                        &row.last_price,
-                        &row.price_change_percent,
-                        &row.volume,
-                        &row.quote_volume,
-                    ]
-                    .iter()
-                    .all(|text| safe_cex_engine::startup::number_or_zero(text).is_some()) =>
+                    if !row.symbol.trim().is_empty()
+                        && [
+                            &row.last_price,
+                            &row.price_change_percent,
+                            &row.volume,
+                            &row.quote_volume,
+                        ]
+                        .iter()
+                        .all(|text| safe_cex_engine::startup::number_or_zero(text).is_some()) =>
                 {
                     rows.push(Ticker {
                         id: row.symbol.to_string(),
@@ -893,7 +898,10 @@ impl Venue for AsterDex {
                         ..Ticker::default()
                     })
                 }
-                _ => safe_cex_engine::startup::skipped_row(cx),
+                _ => {
+                    *malformed = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
             },
             Pending::OpenInterest { rows, .. } => collect_interest(item, rows),
             Pending::Klines {

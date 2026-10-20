@@ -525,3 +525,63 @@ fn documented_empty_bal_data_is_a_valid_zero_balance() {
     assert!(e.store().loaded().balance && e.store().loaded().positions);
     assert_eq!(e.store().balance().total, 0.0);
 }
+
+#[test]
+fn unavailable_owned_metadata_never_turns_account_scopes_into_empty_success() {
+    for prior in [false, true] {
+        let (mut e, private, _, mut pending) = startup();
+        if prior {
+            ws(
+                &mut e,
+                private,
+                &format!(r#"{{"arg":{{"channel":"positions"}},"data":[{POSITION}]}}"#),
+            );
+            ws(
+                &mut e,
+                private,
+                &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{ORDER}]}}"#),
+            );
+            actions(&mut e);
+        }
+        let positions = e.store().positions().to_vec();
+        let orders = e.store().orders().to_vec();
+        let unknown_position = POSITION.replace("BTC-USDT-SWAP", "MISSING-USDT-SWAP");
+        let unknown_order = ORDER.replace("BTC-USDT-SWAP", "MISSING-USDT-SWAP");
+        let mut logs = vec![];
+        while let Some(action) = pending.pop() {
+            match &action {
+                Action::Http(r) => {
+                    let body = if r.url.contains("account-position-risk") {
+                        envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+                    } else if r.url.contains("/positions?") {
+                        envelope(&unknown_position)
+                    } else if r.url.contains("orders-pending") {
+                        envelope(&unknown_order)
+                    } else {
+                        envelope("")
+                    };
+                    reply(&mut e, &action, &body, 5.0);
+                    pending.extend(actions(&mut e));
+                }
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
+                    logs.push(message.clone())
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(e.store().positions(), positions);
+        assert_eq!(e.store().orders(), orders);
+        if !prior {
+            assert!(!e.store().loaded().positions);
+            assert!(!e.store().loaded().orders);
+        }
+        assert!(
+            logs.iter()
+                .any(|log| log.contains("owned position market unavailable"))
+        );
+        assert!(
+            logs.iter()
+                .any(|log| log.contains("working order market unavailable"))
+        );
+    }
+}

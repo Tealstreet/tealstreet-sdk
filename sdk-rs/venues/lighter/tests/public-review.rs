@@ -250,3 +250,67 @@ fn prior_subscription_depth_failure_cannot_release_the_new_request() {
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("orderBookOrders")))
     );
 }
+#[test]
+fn wholly_unusable_ticker_seed_retains_live_quotes_and_retries_with_backoff() {
+    for invalid in [
+        r#"{"market_id":0,"mark_price":"bad"}"#,
+        r#"{"market_id":999,"mark_price":"100"}"#,
+        r#"{}"#,
+    ] {
+        let (mut e, socket, mut request, _) = setup();
+        message(
+            &mut e,
+            socket,
+            1000.,
+            r#"{"channel":"ticker:0","ticker":{"mark_price":"123"}}"#,
+        );
+        e.drain_actions().for_each(drop);
+        let previous = e.store().tickers().to_vec();
+        for (at, retry_at) in [(1000., 2000.), (2000., 4000.)] {
+            reply(
+                &mut e,
+                &request,
+                at,
+                &format!(r#"{{"code":200,"order_book_stats":[{invalid}]}}"#),
+            );
+            assert_eq!(e.store().tickers(), previous);
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert!(actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::Log {
+                    level: safe_cex_engine::LogLevel::Warning,
+                    ..
+                })
+            )));
+            let timer = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } if *at_ms == retry_at => Some(*timer),
+                    _ => None,
+                })
+                .expect("bad ticker source must back off even while live quotes exist");
+            e.handle(retry_at, Event::TimerFired { timer });
+            request = e
+                .drain_actions()
+                .find_map(|a| match a {
+                    Action::Http(r) if r.url.ends_with("exchangeStats") => Some(r),
+                    _ => None,
+                })
+                .expect("retry must send a fresh ticker read");
+        }
+        reply(
+            &mut e,
+            &request,
+            4000.,
+            &format!(
+                r#"{{"code":200,"order_book_stats":[{invalid},{{"market_id":1,"mark_price":"200"}}]}}"#
+            ),
+        );
+        assert_eq!(e.store().ticker("ETH").unwrap().mark, 123.);
+        assert_eq!(e.store().ticker("BTC").unwrap().mark, 200.);
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::SetTimer { .. }))
+        );
+    }
+}

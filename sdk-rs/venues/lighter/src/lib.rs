@@ -834,163 +834,167 @@ impl Venue for Lighter {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
-            Pending::Markets {
-                rows,
-                metadata,
-                failed: _,
-                ..
-            } => match serde_json::from_str::<Instrument<'_>>(item) {
-                Ok(m) => {
-                    if m.status != "active" || m.market_type.eq_ignore_ascii_case("spot") {
-                        return;
-                    }
-                    let size = m
-                        .supported_size_decimals
-                        .filter(|n| *n >= 0.0)
-                        .unwrap_or(3.0) as u32;
-                    let price = m
-                        .supported_price_decimals
-                        .filter(|n| *n >= 0.0)
-                        .unwrap_or(2.0) as u32;
-                    if size > 18
-                        || price > 18
-                        || m.market_id < 0.0
-                        || m.market_id > 32767.0
-                        || m.market_id == 255.0
-                        || m.market_id.fract() != 0.0
-                    {
-                        safe_cex_engine::startup::skipped_row(cx);
-                        return;
-                    }
-                    let fraction = m
-                        .min_initial_margin_fraction
-                        .or(m.default_initial_margin_fraction)
-                        .unwrap_or(0.0);
-                    let (base, quote) = if let Some((b, q)) = m.symbol.split_once('/') {
-                        (
-                            b,
-                            q.split('/')
-                                .next()
-                                .filter(|q| !q.is_empty())
-                                .unwrap_or(self.quote()),
-                        )
-                    } else if let Some(q) = ["USDT", "USDC", "USDG"]
-                        .into_iter()
-                        .find(|q| m.symbol.ends_with(q))
-                    {
-                        (&m.symbol[..m.symbol.len() - q.len()], q)
-                    } else {
-                        (m.symbol.as_ref(), self.quote())
-                    };
-                    let symbol = m.symbol.to_string();
-                    metadata.insert(
-                        symbol.clone(),
-                        MarketMeta {
-                            size_decimals: size,
-                            price_decimals: price,
-                            min_quote: m.min_quote_amount,
-                            margin_mode: m.market_config.map_or(0, |m| m.market_margin_mode),
-                            initial_margin_fraction: fraction / 10000.0,
-                            maintenance_margin_fraction: m.maintenance_margin_fraction / 10000.0,
-                        },
-                    );
-                    rows.push(Market {
-                        id: format!("{:.0}", m.market_id),
-                        symbol: symbol.clone(),
-                        base: base.into(),
-                        quote: quote.into(),
-                        pretty_symbol: None,
-                        active: true,
-                        precision: Precision {
-                            amount: 10_f64.powi(-(size as i32)),
-                            price: 10_f64.powi(-(price as i32)),
-                        },
-                        limits: Limits {
-                            amount: MinMax {
-                                min: m.min_base_amount,
-                                max: m.order_quote_limit.unwrap_or(1_000_000.0),
-                            },
-                            leverage: MinMax {
-                                min: 1.0,
-                                max: if fraction > 0.0 {
-                                    10_000.0 / fraction
-                                } else {
-                                    50.0
-                                },
-                            },
-                            price: None,
-                        },
-                        contract_size: None,
-                        is_expiring: Some(false),
-                        is_inverse: None,
-                        is_spot: Some(false),
-                        is_perpetual: None,
-                        is_read_only: None,
-                        taker_fee: None,
-                        maker_fee: None,
-                    });
-                }
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
-            },
-            Pending::Tickers {
-                rows, failed: _, ..
-            } => match serde_json::from_str::<Stats<'_>>(item) {
-                Ok(stats) => {
-                    let id = stats.market_id.map(|v| format!("{v:.0}"));
-                    if let Some(symbol) = self
-                        .symbol_for_id(id.as_deref().unwrap_or(""))
-                        .or_else(|| cx.store.ticker(&stats.symbol).map(|t| t.symbol.as_str()))
-                    {
-                        let mut ticker = cx.store.ticker(symbol).cloned().unwrap();
-                        if let Some(v) = stats.mark_price {
-                            ticker.mark = v;
+            Pending::Markets { rows, metadata, .. } => {
+                match serde_json::from_str::<Instrument<'_>>(item) {
+                    Ok(m) => {
+                        if m.status != "active" || m.market_type.eq_ignore_ascii_case("spot") {
+                            return;
                         }
-                        if let Some(v) = stats.index_price {
-                            ticker.index = v;
-                            if stats.mark_price.is_none() {
+                        let size = m
+                            .supported_size_decimals
+                            .filter(|n| *n >= 0.0)
+                            .unwrap_or(3.0) as u32;
+                        let price = m
+                            .supported_price_decimals
+                            .filter(|n| *n >= 0.0)
+                            .unwrap_or(2.0) as u32;
+                        if size > 18
+                            || price > 18
+                            || m.market_id < 0.0
+                            || m.market_id > 32767.0
+                            || m.market_id == 255.0
+                            || m.market_id.fract() != 0.0
+                        {
+                            safe_cex_engine::startup::skipped_row(cx);
+                            return;
+                        }
+                        let fraction = m
+                            .min_initial_margin_fraction
+                            .or(m.default_initial_margin_fraction)
+                            .unwrap_or(0.0);
+                        let (base, quote) = if let Some((b, q)) = m.symbol.split_once('/') {
+                            (
+                                b,
+                                q.split('/')
+                                    .next()
+                                    .filter(|q| !q.is_empty())
+                                    .unwrap_or(self.quote()),
+                            )
+                        } else if let Some(q) = ["USDT", "USDC", "USDG"]
+                            .into_iter()
+                            .find(|q| m.symbol.ends_with(q))
+                        {
+                            (&m.symbol[..m.symbol.len() - q.len()], q)
+                        } else {
+                            (m.symbol.as_ref(), self.quote())
+                        };
+                        let symbol = m.symbol.to_string();
+                        metadata.insert(
+                            symbol.clone(),
+                            MarketMeta {
+                                size_decimals: size,
+                                price_decimals: price,
+                                min_quote: m.min_quote_amount,
+                                margin_mode: m.market_config.map_or(0, |m| m.market_margin_mode),
+                                initial_margin_fraction: fraction / 10000.0,
+                                maintenance_margin_fraction: m.maintenance_margin_fraction
+                                    / 10000.0,
+                            },
+                        );
+                        rows.push(Market {
+                            id: format!("{:.0}", m.market_id),
+                            symbol: symbol.clone(),
+                            base: base.into(),
+                            quote: quote.into(),
+                            pretty_symbol: None,
+                            active: true,
+                            precision: Precision {
+                                amount: 10_f64.powi(-(size as i32)),
+                                price: 10_f64.powi(-(price as i32)),
+                            },
+                            limits: Limits {
+                                amount: MinMax {
+                                    min: m.min_base_amount,
+                                    max: m.order_quote_limit.unwrap_or(1_000_000.0),
+                                },
+                                leverage: MinMax {
+                                    min: 1.0,
+                                    max: if fraction > 0.0 {
+                                        10_000.0 / fraction
+                                    } else {
+                                        50.0
+                                    },
+                                },
+                                price: None,
+                            },
+                            contract_size: None,
+                            is_expiring: Some(false),
+                            is_inverse: None,
+                            is_spot: Some(false),
+                            is_perpetual: None,
+                            is_read_only: None,
+                            taker_fee: None,
+                            maker_fee: None,
+                        });
+                    }
+                    Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                }
+            }
+            Pending::Tickers { rows, failed, .. } => {
+                match serde_json::from_str::<Stats<'_>>(item) {
+                    Ok(stats) => {
+                        let id = stats.market_id.map(|v| format!("{v:.0}"));
+                        if let Some(symbol) = self
+                            .symbol_for_id(id.as_deref().unwrap_or(""))
+                            .or_else(|| cx.store.ticker(&stats.symbol).map(|t| t.symbol.as_str()))
+                        {
+                            let mut ticker = cx.store.ticker(symbol).cloned().unwrap();
+                            if let Some(v) = stats.mark_price {
                                 ticker.mark = v;
                             }
+                            if let Some(v) = stats.index_price {
+                                ticker.index = v;
+                                if stats.mark_price.is_none() {
+                                    ticker.mark = v;
+                                }
+                            }
+                            if let Some(v) = stats.last_trade_price {
+                                ticker.last = v;
+                            }
+                            if let Some(v) = stats
+                                .best_bid_price
+                                .as_ref()
+                                .or(stats.b.as_ref())
+                                .and_then(BestPrice::price)
+                            {
+                                ticker.bid = v;
+                            }
+                            if let Some(v) = stats
+                                .best_ask_price
+                                .as_ref()
+                                .or(stats.a.as_ref())
+                                .and_then(BestPrice::price)
+                            {
+                                ticker.ask = v;
+                            }
+                            if let Some(v) = stats.open_interest {
+                                ticker.open_interest = v;
+                            }
+                            if let Some(v) = stats.current_funding_rate.or(stats.funding_rate) {
+                                ticker.funding_rate =
+                                    if v == 0.0012 { 0.0001 } else { v * 8.0 / 100.0 };
+                            }
+                            if let Some(v) = stats.daily_base_token_volume {
+                                ticker.volume = v;
+                            }
+                            if let Some(v) = stats.daily_quote_token_volume {
+                                ticker.quote_volume = v;
+                            }
+                            if let Some(v) = stats.daily_price_change {
+                                ticker.percentage = v;
+                            }
+                            rows.push((symbol.into(), ticker));
+                        } else {
+                            *failed = true;
+                            safe_cex_engine::startup::skipped_row(cx);
                         }
-                        if let Some(v) = stats.last_trade_price {
-                            ticker.last = v;
-                        }
-                        if let Some(v) = stats
-                            .best_bid_price
-                            .as_ref()
-                            .or(stats.b.as_ref())
-                            .and_then(BestPrice::price)
-                        {
-                            ticker.bid = v;
-                        }
-                        if let Some(v) = stats
-                            .best_ask_price
-                            .as_ref()
-                            .or(stats.a.as_ref())
-                            .and_then(BestPrice::price)
-                        {
-                            ticker.ask = v;
-                        }
-                        if let Some(v) = stats.open_interest {
-                            ticker.open_interest = v;
-                        }
-                        if let Some(v) = stats.current_funding_rate.or(stats.funding_rate) {
-                            ticker.funding_rate =
-                                if v == 0.0012 { 0.0001 } else { v * 8.0 / 100.0 };
-                        }
-                        if let Some(v) = stats.daily_base_token_volume {
-                            ticker.volume = v;
-                        }
-                        if let Some(v) = stats.daily_quote_token_volume {
-                            ticker.quote_volume = v;
-                        }
-                        if let Some(v) = stats.daily_price_change {
-                            ticker.percentage = v;
-                        }
-                        rows.push((symbol.into(), ticker));
+                    }
+                    Err(_) => {
+                        *failed = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                     }
                 }
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
-            },
+            }
             Pending::Candles { rows, failed, .. } => {
                 match serde_json::from_str::<CandleRow>(item) {
                     Ok(row) => rows.push(row.candle()),
@@ -1072,12 +1076,14 @@ impl Venue for Lighter {
                 revision,
             } => {
                 self.ticker_in_flight = false;
+                if failed && rows.is_empty() {
+                    self.startup.failed(cx, false);
+                    return;
+                }
                 self.startup.succeeded(cx, &false);
-                if !failed {
-                    for (symbol, ticker) in rows {
-                        if self.ticker_sources.get(&symbol).copied().unwrap_or(0) <= revision {
-                            cx.store.update_ticker(&symbol, |t| *t = ticker);
-                        }
+                for (symbol, ticker) in rows {
+                    if self.ticker_sources.get(&symbol).copied().unwrap_or(0) <= revision {
+                        cx.store.update_ticker(&symbol, |t| *t = ticker);
                     }
                 }
             }

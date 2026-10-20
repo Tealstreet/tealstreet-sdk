@@ -835,3 +835,9 @@ Public quotes do not mark private datasets loaded and do not change balance;
 the next authenticated account snapshot calculates balance with the current
 provider last price. Later native REST ticker seeds cannot replace provider
 quotes and reapply position valuations after restoration.
+
+A partial Rust catalogue must not turn unknown owned exposure into an empty
+successful account. A REST snapshot with an unmappable nonzero position, or
+an open-order scope with an unmappable working order, warns and retains its
+previous scope. Zero unknown positions and terminal unknown orders remain
+ignorable. This bounded whole-scope guard precedes separate row-isolation work.

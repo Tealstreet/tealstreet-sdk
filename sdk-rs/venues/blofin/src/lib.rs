@@ -70,6 +70,7 @@ pub struct Blofin {
     trading: trading::Trading,
     public: Connection,
     startup: safe_cex_engine::startup::Backoff<bool>,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
     books: HashMap<String, DepthState>,
     candles: HashMap<(String, String), CandleState>,
 }
@@ -129,6 +130,7 @@ impl Blofin {
             trading: trading::Trading::default(),
             public: Connection::default(),
             startup: Default::default(),
+            live_tickers: Default::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
         }
@@ -150,7 +152,10 @@ impl Blofin {
         self.public.last_received = cx.now;
         self.public.watchdog = Some(cx.set_timer(5_000.0));
     }
-    fn read(&self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
+    fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
+        if matches!(&pending, Pending::Tickers { .. }) {
+            self.live_tickers.begin();
+        }
         cx.request_streamed(
             Method::Get,
             format!("{}{path}", self.host()),
@@ -242,7 +247,7 @@ impl Blofin {
             );
         }
     }
-    fn ticker(&self, cx: &mut Cx<'_, Pending>, row: &Tick<'_>, funding: bool) {
+    fn ticker(&mut self, cx: &mut Cx<'_, Pending>, row: &Tick<'_>, funding: bool) {
         let Some(m) = cx.store.market_by_id(&row.inst_id) else {
             return;
         };
@@ -263,6 +268,12 @@ impl Blofin {
                 t.quote_volume = row.vol24h.0;
             }
         });
+        let mask = if funding {
+            (1 << 7) | (1 << 8)
+        } else {
+            ((1 << 7) - 1) | (1 << 9) | (1 << 10)
+        };
+        self.live_tickers.record(cx.store, &symbol, mask);
     }
     fn depth(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, message: &Message<'_>, d: &Depth) {
         if message.arg.channel == "books5" {
@@ -595,6 +606,9 @@ impl Venue for Blofin {
                             quote_volume: t.vol24h.0,
                             ..Ticker::default()
                         });
+                    } else {
+                        *failed = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                     }
                 }
                 Err(_) => {
@@ -648,8 +662,9 @@ impl Venue for Blofin {
                 );
                 self.private_start(cx);
             }
-            Pending::Tickers { rows, failed } if !failed || !rows.is_empty() => {
+            Pending::Tickers { mut rows, failed } if !failed || !rows.is_empty() => {
                 self.startup.succeeded(cx, &false);
+                self.live_tickers.finish(cx.store, &mut rows);
                 cx.store.set_tickers(rows);
             }
             Pending::Candles {

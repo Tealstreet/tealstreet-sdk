@@ -798,3 +798,10 @@ Terminal order rows remain until reconciliation, and cancel-all selects only ope
 orders in both TS and Rust. Rust additionally keeps terminal socket states
 monotonic and rejects amending or merging terminal protection, preventing late
 frames or retained canceled legs from creating new orders.
+
+Rust startup can publish a partial valid catalogue while public metadata retries.
+A REST account scope containing an unmappable nonzero SWAP position or working
+SWAP order is rejected visibly and retains the previous scope; it must not
+publish a successful empty account. Zero unknown positions and explicitly
+non-SWAP products remain outside the owned scope. Full per-row retention is
+planned separately from this temporary whole-scope safety guard.

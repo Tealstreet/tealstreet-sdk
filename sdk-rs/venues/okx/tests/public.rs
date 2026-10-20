@@ -497,5 +497,4 @@ fn price_channels_follow_last_duplicate_symbol_in_reordered_ticker_seed() {
         "earlier duplicate ticker must remain untouched"
     );
     assert_eq!(e.store().ticker("ETHUSDT").unwrap().mark, 88.0);
-    assert!(e.store().ticker("SOLUSDT").is_none());
 }

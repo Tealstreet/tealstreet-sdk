@@ -288,9 +288,14 @@ impl Hyperliquid {
                 );
             }
         }
-        cx.store.set_orders(Vec::new());
-        cx.store.set_positions(Vec::new());
-        cx.store.set_balance(Balance::default());
+        // Partial discovery may start real account reads, not an empty snapshot.
+        if self.spot || !self.core_discovery_incomplete || self.options.public_data_only {
+            cx.store.set_orders(Vec::new());
+            cx.store.set_positions(Vec::new());
+        }
+        if !self.core_discovery_incomplete || self.options.public_data_only {
+            cx.store.set_balance(Balance::default());
+        }
         cx.store.set_hedged(false);
         let settings = cx
             .store
@@ -798,6 +803,10 @@ impl Hyperliquid {
                     }
                     if let Some(order) = self.map_order(cx, &row) {
                         orders.push(order);
+                    } else {
+                        *valid = false;
+                        cx.log(LogLevel::Warning,
+                            "Hyperliquid owned order has unavailable market metadata; preserving previous orders");
                     }
                 }
                 Err(_) => *valid = false,
@@ -988,6 +997,17 @@ impl Hyperliquid {
         authoritative: bool,
         settings_revision: Option<u64>,
     ) {
+        // Context discovery may be retrying. Unknown nonzero native ownership
+        // cannot become a successful empty/partial authoritative account scope.
+        if state
+            .asset_positions
+            .iter()
+            .any(|row| row.position.szi != 0.0 && self.symbol(&row.position.coin).is_none())
+        {
+            cx.log(LogLevel::Error,
+                "Hyperliquid owned position has unavailable market metadata; preserving previous account snapshot");
+            return;
+        }
         let source_time = state.server_time.or(state.time);
         if (authoritative || !dex.is_empty())
             && let Some(time) = source_time
@@ -1228,6 +1248,14 @@ impl Hyperliquid {
                     .and_then(|symbol| cx.store.market(symbol))
                     .map_or(b.coin.as_ref(), |m| m.base.as_str());
                 let price = self.spot_price(cx, coin, &mut valuation_path);
+                if self.core_discovery_incomplete
+                    && (b.total != 0.0 || b.hold != 0.0)
+                    && (!price.is_finite() || price <= 0.0)
+                {
+                    cx.log(LogLevel::Error,
+                        "Hyperliquid owned spot balance has unavailable valuation; preserving previous account snapshot");
+                    return;
+                }
                 let free = (b.total - b.hold).max(0.0);
                 balance.total += b.total * price;
                 balance.used += b.hold * price;

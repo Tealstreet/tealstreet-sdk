@@ -1008,7 +1008,9 @@ impl Lighter {
             ..Snapshot::default()
         };
         if let Some(raw) = wire.positions {
+            let mut unmapped_owned = false;
             each_row(raw, |row: PositionWire<'_>, hint| {
+                let owned = row.size.as_ref().is_some_and(|n| n.0 != 0.0);
                 let known = margin(row.margin_mode.as_ref()).is_some()
                     && (row.leverage.as_ref().is_some_and(|n| n.0 > 0.0)
                         || row
@@ -1024,8 +1026,13 @@ impl Lighter {
                     if let Some(position) = position {
                         snapshot.positions.push(position);
                     }
+                } else if owned {
+                    unmapped_owned = true;
                 }
             })?;
+            if unmapped_owned {
+                return Err("Lighter owned position has unavailable market metadata".into());
+            }
         }
         Ok(snapshot)
     }
@@ -1058,16 +1065,20 @@ impl Lighter {
             &wire.market_id.0
         };
         let symbol = if !wire.symbol.is_empty() {
-            wire.symbol.as_ref()
+            Some(wire.symbol.as_ref())
         } else {
-            match self.symbol_for_id(market_id) {
-                Some(s) => s,
-                None => return Ok(None),
-            }
+            self.symbol_for_id(market_id)
         };
-        if cx.store.market(symbol).is_none() {
-            return Ok(None);
-        }
+        let Some(symbol) = symbol.filter(|symbol| cx.store.market(symbol).is_some()) else {
+            let status = normalized(&wire.status);
+            if matches!(status.as_str(), "FILLED" | "EXPIRED" | "REJECTED")
+                || status.starts_with("CANCELED")
+                || status.starts_with("CANCELLED")
+            {
+                return Ok(None);
+            }
+            return Err("Lighter working order has unavailable market metadata".into());
+        };
         let existing = cx
             .store
             .orders()

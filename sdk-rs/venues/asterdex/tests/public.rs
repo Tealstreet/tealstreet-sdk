@@ -539,3 +539,37 @@ fn catalogue_skips_bad_neighbor_and_account_starts_before_ticker_response() {
     assert_eq!(h.engine.store().tickers().len(), 1);
     assert_eq!(h.engine.store().tickers()[0].last, 4.000002);
 }
+
+#[test]
+fn all_malformed_discovery_rows_retry_and_preserve_existing_catalogue_and_quotes() {
+    let mut h = Harness::start(Options {
+        public_data_only: true,
+        ..Default::default()
+    });
+    h.reply("/time", 200, r#"{"serverTime":1700000000000}"#);
+    h.reply("/exchangeInfo", 200, r#"{"symbols":[{}]}"#);
+    assert!(!h.engine.store().loaded().markets);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/leverageBracket"))
+    );
+    h.advance(1000.0);
+    h.reply("/exchangeInfo", 200, MARKETS);
+    let markets = h.engine.store().markets().to_vec();
+    h.reply("/leverageBracket", 200, "[]");
+    let prior = safe_cex_engine::model::Ticker {
+        id: "BTCUSDT".into(),
+        symbol: "BTCUSDT".into(),
+        last: 123.0,
+        ..Default::default()
+    };
+    h.engine.store_mut().set_tickers(vec![prior.clone()]);
+    h.reply("/ticker/24hr", 200,
+        r#"[{},{"symbol":"","lastPrice":"1","priceChangePercent":"0","volume":"1","quoteVolume":"1"}]"#);
+    assert_eq!(h.engine.store().markets(), markets);
+    assert_eq!(h.engine.store().ticker("BTCUSDT"), Some(&prior));
+    h.advance(1000.0);
+    h.reply("/ticker/24hr", 200, DAILY);
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 4.000002);
+}

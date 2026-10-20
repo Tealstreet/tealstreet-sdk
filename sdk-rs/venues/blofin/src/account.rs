@@ -650,6 +650,14 @@ impl Blofin {
                 ..
             } => match serde_json::from_str::<PositionRow<'_>>(item) {
                 Ok(p) => {
+                    if (p.inst_type.is_empty() || p.inst_type.eq_ignore_ascii_case("SWAP"))
+                        && p.positions.0 != 0.0
+                        && cx.store.market_by_id(&p.inst_id).is_none()
+                    {
+                        *failed = true;
+                        cx.log(LogLevel::Warning, "BloFin owned position has unavailable market metadata; preserving account snapshot");
+                        return;
+                    }
                     if let Some(position) = self.map_position(cx, &p) {
                         *used += p.maintenance_margin.0;
                         *upnl += position.unrealized_pnl;
@@ -680,6 +688,17 @@ impl Blofin {
                 ..
             } => match serde_json::from_str::<OrderRow<'_>>(item) {
                 Ok(o) => {
+                    if (o.inst_type.is_empty() || o.inst_type.eq_ignore_ascii_case("SWAP"))
+                        && !matches!(
+                            o.state.as_ref(),
+                            "filled" | "effective" | "canceled" | "order_failed"
+                        )
+                        && cx.store.market_by_id(&o.inst_id).is_none()
+                    {
+                        *failed = true;
+                        cx.log(LogLevel::Warning, "BloFin working order has unavailable market metadata; preserving order snapshot");
+                        return;
+                    }
                     *page_rows += 1;
                     *last_cursor = match family {
                         0 => o.order_id.to_string(),

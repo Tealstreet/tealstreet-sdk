@@ -119,9 +119,10 @@ impl Okx {
     }
 
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_none() {
+        if self.credentials.is_none() || self.account_started {
             return;
         }
+        self.account_started = true;
         self.get(
             cx,
             "/api/v5/account/config",
@@ -362,20 +363,30 @@ impl Okx {
                 rows,
                 invalid,
                 ..
-            } => match serde_json::from_str::<PositionRow<'_>>(item) {
-                Ok(p) => {
-                    if !self.account_scope(*product, p.inst_id, p.inst_type) {
-                        *invalid = true;
-                        return;
+            } => {
+                match serde_json::from_str::<PositionRow<'_>>(item) {
+                    Ok(p) => {
+                        if !self.account_scope(*product, p.inst_id, p.inst_type) {
+                            *invalid = true;
+                            return;
+                        }
+                        if cx.store.market_by_id(p.inst_id).is_none()
+                            && p.pos.parse::<f64>().ok() != Some(0.0)
+                        {
+                            *invalid = true;
+                            cx.log(LogLevel::Warning, "OKX owned position market unavailable; preserving account snapshot");
+                            return;
+                        }
+                        if let Some(row) = self.position(cx, &p) {
+                            rows.push(row);
+                        } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some()
+                        {
+                            *invalid = true;
+                        }
                     }
-                    if let Some(row) = self.position(cx, &p) {
-                        rows.push(row);
-                    } else if p.inst_id.is_empty() || cx.store.market_by_id(p.inst_id).is_some() {
-                        *invalid = true;
-                    }
+                    Err(_) => *invalid = true,
                 }
-                Err(_) => *invalid = true,
-            },
+            }
             Request::Orders {
                 product,
                 rows,
@@ -397,6 +408,19 @@ impl Okx {
                         || (cx.store.market_by_id(o.inst_id).is_some() && !valid_order(&o))
                     {
                         *invalid = true;
+                        return;
+                    }
+                    if cx.store.market_by_id(o.inst_id).is_none()
+                        && !matches!(
+                            o.state,
+                            "filled" | "canceled" | "mmp_canceled" | "order_failed" | "effective"
+                        )
+                    {
+                        *invalid = true;
+                        cx.log(
+                            LogLevel::Warning,
+                            "OKX working order market unavailable; preserving order snapshot",
+                        );
                         return;
                     }
                     for order in self.orders(cx, &o) {
@@ -909,6 +933,13 @@ impl Okx {
         match message.arg.channel {
             "orders" | "orders-algo" | "algo-advance" => {
                 let _ = json::each::<OrderRow<'_>>(data.get(), |row| {
+                    if cx.store.market_by_id(row.inst_id).is_none() {
+                        cx.log(
+                            LogLevel::Warning,
+                            "OKX order update market unavailable; preserving previous orders",
+                        );
+                        return;
+                    }
                     if !valid_order(&row) {
                         return;
                     }
@@ -987,6 +1018,13 @@ impl Okx {
                             self.account.risk.insert(p.id.clone(), risk);
                         }
                         cx.store.upsert_position(p);
+                    } else if cx.store.market_by_id(row.inst_id).is_none()
+                        && row.pos.parse::<f64>().ok() != Some(0.0)
+                    {
+                        cx.log(
+                            LogLevel::Warning,
+                            "OKX owned position market unavailable; preserving previous positions",
+                        );
                     }
                 });
                 if !valid {

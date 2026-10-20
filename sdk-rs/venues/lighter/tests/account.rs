@@ -539,3 +539,99 @@ fn initial_and_reconnecting_private_handshakes_have_watchdogs_before_open() {
         e.handle(timeout + 1000.0, Event::TimerFired { timer: reconnect });
     }
 }
+#[test]
+fn unmapped_owned_position_rejects_snapshot_but_zero_rows_remain_legitimate() {
+    for quantity in ["2", "0"] {
+        let (mut e, socket) = ready();
+        let positions = e.store().positions().to_vec();
+        let balance = e.store().balance().clone();
+        e.handle(NOW + 1., Event::WsOpened { socket });
+        let request = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("/account?"))
+            .unwrap();
+        let body = ACCOUNT
+            .replace(
+                "\"positions\":[",
+                &format!(r#""positions":[{{"market_id":999,"position":"{quantity}"}},"#),
+            )
+            .replace(
+                "\"available_balance\":\"900\"",
+                "\"available_balance\":\"850\"",
+            );
+        reply_at(&mut e, NOW + 2., &request, 200, &body);
+        if quantity == "2" {
+            assert_eq!(e.store().positions(), positions);
+            assert_eq!(*e.store().balance(), balance);
+            assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { level: safe_cex_engine::LogLevel::Warning, message }) if message.contains("account snapshot failed"))));
+        } else {
+            assert_eq!(e.store().positions().len(), positions.len());
+            assert_eq!(e.store().positions()[0].contracts, positions[0].contracts);
+            assert_eq!(e.store().positions()[0].symbol, positions[0].symbol);
+            assert_eq!(e.store().balance().free, 850.);
+        }
+    }
+}
+#[test]
+fn unmapped_working_order_rejects_snapshot_but_terminal_unknown_rows_are_ignored() {
+    for status in ["open", "canceled", "filled"] {
+        let (mut e, socket) = ready();
+        let previous = e.store().orders().to_vec();
+        e.handle(NOW + 1., Event::WsOpened { socket });
+        let request = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.contains("accountActiveOrders"))
+            .unwrap();
+        let body = format!(
+            r#"{{"code":200,"orders":[{{"order_index":"999","market_id":999,"status":"{status}","remaining_base_amount":"2"}}]}}"#
+        );
+        reply_at(&mut e, NOW + 2., &request, 200, &body);
+        if status == "open" {
+            assert_eq!(e.store().orders(), previous);
+            assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { level: safe_cex_engine::LogLevel::Warning, message }) if message.contains("order snapshot failed"))));
+        } else {
+            assert!(e.store().orders().is_empty());
+        }
+    }
+}
+#[test]
+fn unmapped_initial_position_never_claims_empty_private_account_loaded() {
+    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_lighter::Lighter::new(options()));
+    e.start(NOW);
+    let bad = ACCOUNT.replace("\"market_id\":1", "\"market_id\":999");
+    let mut warning = false;
+    for _ in 0..20 {
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        if actions.is_empty() {
+            break;
+        }
+        for action in actions {
+            match action {
+                Action::Http(r) => {
+                    let body = if r.url.contains("orderBookDetails") || r.url.contains("orderBooks")
+                    {
+                        META
+                    } else if r.url.contains("exchangeStats") {
+                        r#"{"code":200,"order_book_stats":[]}"#
+                    } else if r.url.contains("accountActiveOrders") {
+                        OPEN
+                    } else if r.url.contains("/account?") {
+                        &bad
+                    } else {
+                        panic!("unexpected request {}", r.url)
+                    };
+                    reply(&mut e, &r, 200, body);
+                }
+                Action::Notice(safe_cex_engine::Notice::Log {
+                    level: safe_cex_engine::LogLevel::Warning,
+                    message,
+                }) if message.contains("account snapshot failed") => warning = true,
+                _ => {}
+            }
+        }
+    }
+    assert!(warning);
+    assert!(!e.store().loaded().positions);
+    assert!(!e.store().loaded().balance);
+    assert!(e.store().positions().is_empty());
+}

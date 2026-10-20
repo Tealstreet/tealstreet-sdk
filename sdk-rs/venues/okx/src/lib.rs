@@ -75,11 +75,15 @@ pub enum Pending {
     Markets {
         kind: InstrumentType,
         rows: Vec<Market>,
+        scope_start: usize,
+        incomplete: bool,
         invalid: bool,
     },
     Tickers {
         kind: InstrumentType,
         rows: Vec<Ticker>,
+        scope_start: usize,
+        incomplete: bool,
         invalid: bool,
     },
     Candles {
@@ -115,6 +119,11 @@ pub struct Okx {
     underlying_products: HashMap<String, Vec<String>>,
     price_tickers: HashMap<String, Option<u32>>,
     startup: safe_cex_engine::startup::Backoff<bool>,
+    account_started: bool,
+    catalogue_incomplete: bool,
+    ticker_reading: bool,
+    ticker_refresh_pending: bool,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
 }
 
 impl Okx {
@@ -149,6 +158,11 @@ impl Okx {
             underlying_products: HashMap::new(),
             price_tickers: HashMap::new(),
             startup: Default::default(),
+            account_started: false,
+            catalogue_incomplete: false,
+            ticker_reading: false,
+            ticker_refresh_pending: false,
+            live_tickers: Default::default(),
         }
     }
 
@@ -162,6 +176,27 @@ impl Okx {
 
     pub(crate) fn instrument_type(&self, id: &str) -> &'static str {
         self.products.get(id).map_or("SWAP", |p| p.kind.as_str())
+    }
+
+    fn ticker_seed(&mut self, cx: &mut Cx<'_, Pending>, catalogue_changed: bool) {
+        if self.ticker_reading {
+            self.ticker_refresh_pending |= catalogue_changed;
+            return;
+        }
+        self.ticker_reading = true;
+        self.live_tickers.begin();
+        self.list(
+            cx,
+            "/api/v5/market/tickers?instType=SWAP",
+            false,
+            Pending::Tickers {
+                kind: InstrumentType::Swap,
+                scope_start: 0,
+                incomplete: false,
+                rows: Vec::new(),
+                invalid: false,
+            },
+        );
     }
 
     fn next_instrument_type(&self, kind: InstrumentType) -> Option<InstrumentType> {
@@ -563,6 +598,26 @@ impl Okx {
                     }
                     _ => {}
                 });
+                let mask = match channel {
+                    "tickers" => {
+                        3 | (1 << 9)
+                            | (1 << 10)
+                            | if !p.last.is_empty() { 1 << 2 } else { 0 }
+                            | if !p.last.is_empty() && !p.open24h.is_empty() {
+                                1 << 5
+                            } else {
+                                0
+                            }
+                    }
+                    "mark-price" => 1 << 3,
+                    "index-tickers" => 1 << 4,
+                    "open-interest" => 1 << 6,
+                    "funding-rate" => (1 << 7) | (1 << 8),
+                    _ => 0,
+                };
+                if let Some(ticker) = cx.store.tickers().get(index as usize) {
+                    self.live_tickers.record(cx.store, &ticker.symbol, mask);
+                }
             };
             if channel == "index-tickers" {
                 if let Some(ids) = self.underlying_products.get(p.inst_id) {
@@ -580,6 +635,7 @@ impl Okx {
 impl Venue for Okx {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.live_tickers.begin();
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read
                 .validate()
@@ -600,6 +656,8 @@ impl Venue for Okx {
             private,
             Pending::Markets {
                 kind: InstrumentType::Swap,
+                scope_start: 0,
+                incomplete: false,
                 rows: Vec::new(),
                 invalid: false,
             },
@@ -694,6 +752,7 @@ impl Venue for Okx {
                 kind,
                 rows,
                 invalid,
+                ..
             } => match serde_json::from_str::<wire::Instrument<'_>>(item) {
                 Ok(m) => {
                     if m.inst_id.is_empty() || m.ct_type.is_empty() {
@@ -759,7 +818,11 @@ impl Venue for Okx {
                         || (*kind == InstrumentType::Swap && !m.inst_id.ends_with("-SWAP"))
                         || [m.ct_val, m.lot_sz, m.tick_sz, m.min_sz, m.lever]
                             .iter()
-                            .any(|n| n.parse::<f64>().is_err() || num::parse(n) <= 0.0)
+                            .any(|n| {
+                                n.parse::<f64>()
+                                    .ok()
+                                    .is_none_or(|value| !value.is_finite() || value <= 0.0)
+                            })
                     {
                         {
                             *invalid = true;
@@ -858,6 +921,7 @@ impl Venue for Okx {
                 kind,
                 rows,
                 invalid,
+                ..
             } => match serde_json::from_str::<wire::Prices<'_>>(item) {
                 Ok(p) => {
                     if let Some(m) = cx.store.market_by_id(p.inst_id) {
@@ -891,6 +955,9 @@ impl Venue for Okx {
                             quote_volume: num::parse(p.vol24h),
                             ..Ticker::default()
                         });
+                    } else {
+                        *invalid = true;
+                        safe_cex_engine::startup::skipped_row(cx);
                     }
                 }
                 Err(_) => {
@@ -937,7 +1004,10 @@ impl Venue for Okx {
                 kind,
                 rows,
                 invalid,
-            } if !invalid || !rows.is_empty() => {
+                scope_start,
+                incomplete,
+            } => {
+                let incomplete = incomplete || (invalid && rows.len() == scope_start);
                 if let Some(next) = self.next_instrument_type(kind) {
                     let private = self.options.eea && self.credentials.is_some();
                     let scope = if private { "account" } else { "public" };
@@ -947,14 +1017,35 @@ impl Venue for Okx {
                         private,
                         Pending::Markets {
                             kind: next,
+                            scope_start: rows.len(),
+                            incomplete,
                             rows,
                             invalid: false,
                         },
                     );
                     return;
                 }
-                self.startup.succeeded(cx, &true);
-                cx.store.set_markets(rows);
+                self.catalogue_incomplete = incomplete;
+                if incomplete {
+                    self.startup.failed(cx, true);
+                } else {
+                    self.startup.succeeded(cx, &true);
+                }
+                if rows.is_empty() && incomplete {
+                    return;
+                }
+                let was_loaded = cx.store.loaded().markets;
+                let mut merged = cx.store.markets().to_vec();
+                for row in rows {
+                    if let Some(old) = merged.iter_mut().find(|old| old.id == row.id) {
+                        *old = row;
+                    } else {
+                        merged.push(row);
+                    }
+                }
+                cx.store.set_markets(merged);
+                self.products
+                    .retain(|id, _| cx.store.market_by_id(id).is_some());
                 self.price_tickers = price_ticker_indexes(cx.store);
                 self.underlying_products.clear();
                 for market in cx.store.markets() {
@@ -965,23 +1056,26 @@ impl Venue for Okx {
                             .push(market.id.clone());
                     }
                 }
-                self.list(
-                    cx,
-                    "/api/v5/market/tickers?instType=SWAP",
-                    false,
-                    Pending::Tickers {
-                        kind: InstrumentType::Swap,
-                        rows: Vec::new(),
-                        invalid: false,
-                    },
-                );
-                self.account_start(cx);
+                self.ticker_seed(cx, was_loaded);
+                if !was_loaded {
+                    self.account_start(cx);
+                } else {
+                    if self.connections[PUBLIC].open {
+                        self.subscribe(cx, PUBLIC);
+                    }
+                    if self.connections[BUSINESS].open {
+                        self.subscribe(cx, BUSINESS);
+                    }
+                }
             }
             Pending::Tickers {
                 kind,
                 rows,
                 invalid,
-            } if !invalid || !rows.is_empty() => {
+                scope_start,
+                incomplete,
+            } => {
+                let incomplete = incomplete || (invalid && rows.len() == scope_start);
                 if let Some(next) = self.next_instrument_type(kind) {
                     self.list(
                         cx,
@@ -989,17 +1083,49 @@ impl Venue for Okx {
                         false,
                         Pending::Tickers {
                             kind: next,
+                            scope_start: rows.len(),
+                            incomplete,
                             rows,
                             invalid: false,
                         },
                     );
                     return;
                 }
-                self.startup.succeeded(cx, &false);
+                self.ticker_reading = false;
+                let refresh = std::mem::take(&mut self.ticker_refresh_pending);
+                if incomplete {
+                    self.startup.failed(cx, false);
+                } else {
+                    self.startup.succeeded(cx, &false);
+                }
+                if rows.is_empty() && incomplete {
+                    if refresh {
+                        self.ticker_seed(cx, false);
+                    }
+                    return;
+                }
+                let mut rows = rows;
+                if incomplete || self.catalogue_incomplete || refresh {
+                    for old in cx.store.tickers() {
+                        if !rows.iter().any(|row| row.id == old.id) {
+                            rows.push(old.clone());
+                        }
+                    }
+                    self.live_tickers.overlay(cx.store, &mut rows);
+                } else {
+                    self.live_tickers.finish(cx.store, &mut rows);
+                }
                 cx.store.set_tickers(rows);
                 self.price_tickers = price_ticker_indexes(cx.store);
-                self.connect(cx, PUBLIC);
-                self.connect(cx, BUSINESS);
+                if self.connections[PUBLIC].socket.is_none() {
+                    self.connect(cx, PUBLIC);
+                }
+                if self.connections[BUSINESS].socket.is_none() {
+                    self.connect(cx, BUSINESS);
+                }
+                if refresh {
+                    self.ticker_seed(cx, false);
+                }
             }
             Pending::Candles {
                 command,
@@ -1044,27 +1170,21 @@ impl Venue for Okx {
             cx.log(LogLevel::Error, error);
             cx.done(command, Ok("[]".into()));
         } else {
-            self.startup
-                .failed(cx, matches!(pending, Pending::Markets { .. }));
+            let markets = matches!(pending, Pending::Markets { .. });
+            if !markets {
+                self.ticker_reading = false;
+                self.ticker_refresh_pending = false;
+            }
+            self.startup.failed(cx, markets);
         }
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(markets) = self.startup.on_timer(timer) {
             if markets {
-                self.products.clear();
                 self.start(cx);
             } else {
-                self.list(
-                    cx,
-                    "/api/v5/market/tickers?instType=SWAP",
-                    false,
-                    Pending::Tickers {
-                        kind: InstrumentType::Swap,
-                        rows: Vec::new(),
-                        invalid: false,
-                    },
-                );
+                self.ticker_seed(cx, false);
             }
             return;
         }
