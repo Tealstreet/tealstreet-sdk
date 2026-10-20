@@ -423,7 +423,13 @@ impl AsterDex {
         }
         let job = self.trading.jobs.remove(&id).expect("present");
         match job.error {
-            Some(error) if !job.continue_on_error || job.successes == 0 => cx.fail(id, error),
+            Some(mut error) if !job.continue_on_error || job.successes == 0 => {
+                // A later rejection after a step took effect cannot mean nothing happened.
+                if job.successes > 0 && error.outcome == Some(Outcome::Rejected) {
+                    error.outcome = None;
+                }
+                cx.fail(id, error)
+            }
             _ => cx.done(
                 id,
                 Ok(job
@@ -440,6 +446,10 @@ impl AsterDex {
     ) {
         let command = request.command;
         let was_place = matches!(&request.call, Call::Place { .. });
+        // A gateway failure is unproven whatever body it carries.
+        let unproven = response
+            .as_ref()
+            .is_ok_and(|r| r.status == 408 || r.status >= 500);
         let outcome = match response {
             Ok(ref response) => venue_error(response).map_or(Ok(response.body), Err),
             Err(error) => Err((0, error.to_owned())),
@@ -593,10 +603,11 @@ impl AsterDex {
                     cx.log(LogLevel::Error, message.clone());
                     let mut error = failure(code, message);
                     // An earlier leg that may have executed keeps the command unknown.
-                    if job
-                        .error
-                        .as_ref()
-                        .is_some_and(|e| e.outcome == Some(Outcome::Unknown))
+                    if unproven
+                        || job
+                            .error
+                            .as_ref()
+                            .is_some_and(|e| e.outcome == Some(Outcome::Unknown))
                     {
                         error.outcome = Some(Outcome::Unknown);
                     }
@@ -1063,7 +1074,7 @@ mod tests {
 /// failure, a non-JSON HTTP error or an unproven acknowledgement.
 fn failure(code: i64, message: String) -> VenueError {
     let (kind, outcome) = match code {
-        0 => (None, Outcome::Unknown),
+        0 | -1000 => (None, Outcome::Unknown),
         -1007 => (Some(ErrorKind::Timeout), Outcome::Unknown),
         -1001 | -1006 => (Some(ErrorKind::VenueUnavailable), Outcome::Unknown),
         -1008 => (Some(ErrorKind::VenueUnavailable), Outcome::Rejected),
