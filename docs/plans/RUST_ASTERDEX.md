@@ -66,4 +66,12 @@ for green CI, merge, and cut a fresh follow-up branch.
 
 - Planning: read latest brief/spec, parent and Aster guidance, inspected TS and
   Binance engine. Two independent read-only audits cover auth and venue surfaces.
-- Public phase pending implementation. No gates claimed yet.
+- Public phase complete: typed streamed bootstrap, partial snapshots, OI fallback,
+  subscriptions/watchdog and candle reads. Native public tests10/10; signing unit
+  tests5/5 (eight independent ethers/HTTP-serializer vectors); crate clippy and
+  fmt pass. Independent code-correctness review found only initial OI timing;
+  fixed first background attempt to250ms with bounded symbol fallback.
+- Signer exact-byte oracle exposed query square-bracket serialization differences;
+  matched the actual HTTP serializer rather than normalizing requests.
+- Private/trading/queries implementation underway; their reviews and full gates
+  are not yet claimed.
