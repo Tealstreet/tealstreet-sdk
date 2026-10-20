@@ -2976,3 +2976,45 @@ two below500percent readings15seconds apart immediately before its launch.
 Stop on any failure. No passed opt3EU/private controls are repeated merely to
 select different samples. Exact-published-head adversarial reviews, all green
 CI, merge and fresh branch remain mandatory after local gates complete.
+
+
+## Resumed landing integration: 702a62050c
+
+Required status/log/PR check found clean a0949b3d57, open PR1309 still at
+6b2d58033228ab28ad6f468ad969bd72b7a4fca5. Fetch finds21newlandingcommits.
+Stop only our publication batch and its qualifier while waiting for host capacity;
+final private gate passed, no final public attempt started. Preserve its logs.
+Merge the landing branch before continuing, retaining nested workspace structure.
+
+Resolve five conflicts with independent bounded reviewers: preserve BloFin
+pre-start passphrase guard plus both direct/proxy broker cases; preserve callable
+strict gate normalizers/input oracles and all local KuCoin identity/socket tests,
+add incoming cancellation/TIF notes and unchanged production-method control.
+Replay keeps active-clock/work ownership, full memory/constructor accounting and
+all authentication guards; signing clocks now begin after module setup before
+both constructors, never rebase at readiness. Independent clock audit PASS;
+actual incoming slow-module/delayed-readiness Aster production regression PASS.
+
+KuCoin public broker headers must join our queue at actual dispatch: futures
+configured public reads use primary signing, private GETs use secondary, unsigned
+public/Spot requests retain channel attribution. Do not select/sign before queue
+admission. Refresh global native checks, helpers, source checks and rebuilt
+compiled/consumer proofs after resolution; remaining replay batch uses new log
+names and per-profile objective quiet-host qualification. No completed performance
+failure is erased, retried unchanged, or counted as a pass.
+
+Incoming unknown-cancel audit incorrectly says Bitunix is not registered. Reading
+its actual implementation exposes a real counterpart: absent-store IDs silently
+continue in plan_cancel. Add a causal authenticated native regression for unknown
+alone and known+unknown, prove failure, then reject the entire plan before writes.
+Keep empty-list no-op behavior. Independently audit that follow-up after merge.
+
+Merge resolutions independently audited PASS. Focused checks PASS:79 harness
+merge/auth/identity tests, incoming slow-setup Aster signer regression, and5
+KuCoin broker-attribution/pacing controls across futures/Spot/public-only paths.
+New queued-public control exercises the actual3-request timer and independently
+checks primary HMAC/partner timestamps at delayed dispatch. Other full validations
+remain pending. The separate Bitunix unknown-cancel regression proves failure on
+prior production: named-error assertion sees CommandDone Ok([]) for an unknown
+ID; preserve /tmp/bitunix-702-cancel-fail-before.log. Its test/source fix is kept
+outside the landing merge commit and follows immediately afterward.

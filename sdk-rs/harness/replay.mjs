@@ -50,9 +50,9 @@ if (values.venue === 'hyrotrader' && replayOptions.endpoints) {
 }
 const bookSymbols = values.books.split(',').filter(Boolean);
 const metadata = records.find((r) => r.type === 'meta');
-// Signing clocks remain continuous through startup. Tape.play separately
-// schedules records relative to readiness without rebasing Date.now.
-const clockStart = performance.now();
+// Signing clocks begin after module setup and remain continuous through startup.
+// Tape.play separately schedules records without rebasing Date.now at readiness.
+let clockStart = performance.now();
 if (Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
 // A wrong startup URL, missing socket or lost command must fail the gate.
 const replayDeadline = realTimeout(() => {
@@ -463,6 +463,7 @@ async function runRust() {
   tape.sampleMemory = () => retainedMemory(heapBefore, process.memoryUsage(), wasmMemoryBytes());
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
+  clockStart = performance.now();
   if (!isPrivate) clock?.beginStartup();
   const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
     onFrame: (buffer) => {
@@ -763,6 +764,7 @@ async function runTs() {
   tape.sampleMemory = () => retainedMemory(heapBefore, process.memoryUsage());
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
+  clockStart = performance.now();
   if (!isPrivate) clock?.beginStartup();
   const store = new DefaultStore();
   const mainStore = new DefaultStore();

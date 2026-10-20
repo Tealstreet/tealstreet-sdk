@@ -1567,3 +1567,14 @@ terminal total (BingX, ApeX, Coinbase), two events per execution (Lighter),
 string sizes or algo totals (WOO, Orderly), a cumulative fallback (Bitget,
 KuCoin Spot) or an unchecked unit, and the web builds no provisional position
 from it. Verify a venue before listing it; do not list one to turn the feature on.
+
+## Rust cancellation requires evidence
+
+For every registered Rust venue, canceling a nonempty ID absent from the local
+store must send a native cancellation request or reject the command explicitly.
+Store absence cannot prove an exchange order was canceled. Venues whose native
+cancel needs a symbol, asset index, or ordinary/conditional provenance reject the
+whole mixed known/unknown batch before writes. Native ID-only cancel APIs may
+send the supplied identity directly. Empty requested lists remain valid no-ops.
+The family inventory and regression evidence live in
+`docs/plans/RUST_UNKNOWN_CANCEL.md`.

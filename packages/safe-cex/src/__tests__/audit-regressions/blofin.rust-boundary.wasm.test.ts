@@ -7,6 +7,7 @@ import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderType } from '../../types';
+import { directTransport } from '../../transport/direct';
 
 it('rejects a private BloFin engine without a passphrase before startup', async () => {
   const { WasmEngine } = await loadNodeEngine();
@@ -20,7 +21,7 @@ it('rejects a private BloFin engine without a passphrase before startup', async 
   expect(() => new WasmEngine('blofin', JSON.stringify({ publicDataOnly: true }))).not.toThrow();
 });
 
-it('preserves BloFin SDK range units, flat leverage, global margin and caller IDs through wasm', async () => {
+it.each([false, true])('preserves BloFin broker gate, range units, flat leverage, margin and caller IDs through wasm with proxy=%s', async (tealstreetProxy) => {
   let hedged = false;
   const requests: Array<{ method: string; url: string; body?: string }> = [];
   const ok = (data: unknown) => ({ status: 200, body: new TextEncoder().encode(JSON.stringify({ code: '0', data })) });
@@ -100,7 +101,11 @@ it('preserves BloFin SDK range units, flat leverage, global margin and caller ID
   const store = new DefaultStore();
   const exchange = new RustEngineExchange(
     'blofin',
-    { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase' },
+    {
+      key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', tealstreetProxy,
+      // Accept the proxy intent while keeping every request on the scripted transport.
+      transport: { ...directTransport, rest: ({ config }) => ({ baseURL: config?.baseURL, proxied: false }) },
+    },
     store,
   );
   const main = new BaseExchange('blofin', { key: '', secret: '' }, new DefaultStore());
@@ -167,12 +172,14 @@ it('preserves BloFin SDK range units, flat leverage, global margin and caller ID
       side: OrderSide.Buy,
       amount: 1,
       price: 60000,
-      clientOrderId: 'b3cdedc0a20880baCaller123',
+      clientOrderId: 'Caller123',
     });
     expect(ref.orderIds).toEqual(['300']);
     expect(JSON.parse(requests.find((r) => r.url.includes('/batch-orders'))!.body!)[0].clientOrderId).toBe(
-      'b3cdedc0a20880baCaller123',
+      'Caller123',
     );
+    const placed = JSON.parse(requests.find((r) => r.url.includes('/batch-orders'))!.body!)[0];
+    expect(placed.brokerId).toBe(tealstreetProxy ? 'b3cdedc0a20880ba' : undefined);
     await exchange.changePositionMode(true);
     expect(await exchange.fetchLeverageForSymbol('BTCUSDT')).toMatchObject({ buyLeverage: 13, sellLeverage: 7 });
     await exchange.changeMarginType(true);

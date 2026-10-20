@@ -490,8 +490,10 @@ KNOWN_TS_FIXES.kucoin = [
     'conditional orders and mixed bracket trigger references fail before writes instead of dropping fields',
     'explicit protected-market slippage is rejected before batch I/O rather than silently dropped',
     'Bybit-only BBO and tick-slippage controls are rejected on KuCoin before batch I/O',
-    'cancelSymbolOrders cancels the stop book too (reference signed transport fills this omission)',
     'open orders walk every numbered page; TS reads only its default first page',
+    // TS cancelNormalOrders throws on a rejected ID before attempting later IDs.
+    // Native mixed-batch regressions prove continuation and a visible final error.
+    'one rejected cancellation does not prevent later IDs from being attempted',
     'socket readiness and subscriptions wait for welcome; TS sends on TCP open',
     'cancel-replace proves terminal cancellation and subtracts fills during cancellation',
     'stop-to-normal migration remains visible across independent REST books',
@@ -503,6 +505,8 @@ KNOWN_TS_FIXES.kucoin = [
     'cached book snapshot gaps retain the entire contiguous buffered suffix (TS reference fixed with a regression)',
     'unbridged recovery snapshots cannot mutate previously published book references (production TS fixed; full event hashes remain exact)',
   ];
+// Fresh TS private rows retain native/cached TIF and default to GTC, matching
+// REST and client-ID lookup; command results remain compared without repair.
 KNOWN_TS_FIXES.bitrue = [];
 KNOWN_TS_FIXES.bitget = {
   // Each correction is covered by documented-payload Rust tests. Normal

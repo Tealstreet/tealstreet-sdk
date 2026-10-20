@@ -300,3 +300,13 @@ test('KuCoin audit isolates welcomes, subscriptions and active readiness by actu
   audit.connected(url, { closed: false });
   assert.equal(audit.ready(), false, 'closed generations cannot satisfy startup coverage');
 });
+
+test('KuCoin replay preserves the symbol cancel method and never adds a stop-book write', async () => {
+  const calls = [];
+  const cancelSymbolOrders = async (symbol) => { calls.push(symbol); };
+  const exchange = { xhr: { get: async () => ({}) }, cancelSymbolOrders };
+  kucoin.configureTs(exchange);
+  assert.equal(exchange.cancelSymbolOrders, cancelSymbolOrders);
+  await exchange.cancelSymbolOrders('BTCUSDT');
+  assert.deepEqual(calls, ['BTCUSDT']);
+});

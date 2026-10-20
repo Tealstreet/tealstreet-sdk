@@ -64,7 +64,7 @@ impl Kucoin {
             read_credentials
                 .as_ref()
                 .or(self.credentials.as_ref())
-                .map_or_else(Vec::new, |credentials| {
+                .map_or_else(sign::public_headers, |credentials| {
                     sign::headers(
                         credentials,
                         request.method,
@@ -74,7 +74,14 @@ impl Kucoin {
                     )
                 })
         } else {
-            vec![]
+            // Futures public endpoints retain the primary factory attribution;
+            // public-data-only accounts have only unsigned channel headers.
+            sign::public_request_headers(
+                self.credentials.as_ref(),
+                request.method,
+                &request.path,
+                cx.now,
+            )
         };
         let id = cx.request(
             request.method,
