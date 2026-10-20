@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Default)]
 pub(crate) struct State {
+    acknowledged: HashMap<String, Order>,
     jobs: HashMap<CommandId, Job>,
     sides: HashMap<String, String>,
     brackets: HashMap<String, Brackets>,
@@ -492,6 +493,7 @@ impl PhemexPerpetuals {
                 .store
                 .order(&base)
                 .or_else(|| cx.store.order(&id))
+                .or_else(|| self.trading.acknowledged.get(&base))
                 .ok_or(
                     "Phemex cancel requires a cached order to resolve symbol and position side",
                 )?;
@@ -794,12 +796,18 @@ impl PhemexPerpetuals {
         cx: &mut Cx<'_, Pending>,
         command: Command,
     ) -> Option<Command> {
-        self.trading
-            .sides
-            .retain(|id, _| cx.store.order(id).is_some_and(active));
-        self.trading
-            .brackets
-            .retain(|id, _| cx.store.order(id).is_some_and(active));
+        self.trading.acknowledged.retain(|id, _| {
+            !cx.store
+                .orders()
+                .iter()
+                .any(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
+        });
+        self.trading.sides.retain(|id, _| {
+            cx.store.order(id).is_some_and(active) || self.trading.acknowledged.contains_key(id)
+        });
+        self.trading.brackets.retain(|id, _| {
+            cx.store.order(id).is_some_and(active) || self.trading.acknowledged.contains_key(id)
+        });
         let is_settings = matches!(
             command,
             Command::SetLeverage { .. }
@@ -819,7 +827,16 @@ impl PhemexPerpetuals {
             | Command::FetchLeverage { command, .. } => {
                 (command, Err("Phemex command is unsupported".into()))
             }
-            Command::PlaceOrders { command, orders } => (command, self.place_plan(cx, orders)),
+            Command::PlaceOrders { command, orders } => {
+                (
+                    command,
+                    if self.trading.acknowledged.len() >= 4096 {
+                        Err("Phemex unobserved placement capacity exceeded; reconcile before placing".into())
+                    } else {
+                        self.place_plan(cx, orders)
+                    },
+                )
+            }
             Command::CancelOrders { command, ids } => (command, self.cancel_plan(cx, ids)),
             Command::CancelSymbolOrders { command, symbol } => {
                 let ids = cx
@@ -828,6 +845,13 @@ impl PhemexPerpetuals {
                     .iter()
                     .filter(|o| o.symbol == symbol && active(o))
                     .map(|o| o.id.clone())
+                    .chain(
+                        self.trading
+                            .acknowledged
+                            .iter()
+                            .filter(|(_, o)| o.symbol == symbol)
+                            .map(|(id, _)| id.clone()),
+                    )
                     .collect();
                 (
                     command,
@@ -1030,11 +1054,29 @@ impl PhemexPerpetuals {
             let env: Envelope = serde_json::from_str(response.body)
                 .map_err(|_| "Phemex malformed write acknowledgement")?;
             if env.code != 0 {
-                return Err(if env.msg.is_empty() {
-                    format!("Phemex error {}", env.code)
-                } else {
-                    env.msg
-                });
+                // Only documented balance/parameter/risk rejects with no order data
+                // prove no placement. Duplicate/routing/internal errors stay unknown.
+                // https://github.com/phemex/phemex-api-docs/blob/master/TradingErrorCode.md
+                if matches!(request.call, Call::Place { .. })
+                    && env.data.as_ref().is_none_or(|data| data.get() == "null")
+                    && matches!(
+                        env.code,
+                        11001
+                            | 11027
+                            | 11034
+                            | 11035
+                            | 11036
+                            | 11053
+                            | 11055
+                            | 11056
+                            | 11058
+                            | 11081
+                            | 11082
+                    )
+                {
+                    cx.placement_resolved(request.command);
+                }
+                return Err(format!("Phemex {} {}", env.code, env.msg));
             }
             match &request.call {
                 Call::Place {
@@ -1050,7 +1092,6 @@ impl PhemexPerpetuals {
                         .client_id
                         .as_ref()
                         .is_some_and(|id| Some(id) != order.client_order_id.as_ref())
-                        || identity.biz_error != 0
                         || identity.code != 0
                     {
                         return Err(
@@ -1076,9 +1117,33 @@ impl PhemexPerpetuals {
                             row.kind.as_ref(),
                             "Market" | "Limit" | "Stop" | "MarketIfTouched"
                         )
-                        || row.status.eq_ignore_ascii_case("Rejected")
                     {
                         return Err("Phemex create response does not match submitted order".into());
+                    }
+                    if row.status.eq_ignore_ascii_case("Rejected") {
+                        let kind = match order.kind {
+                            OrderType::Market => "Market",
+                            OrderType::Limit => "Limit",
+                            OrderType::TakeProfit => "MarketIfTouched",
+                            _ => "Stop",
+                        };
+                        // Missing correlation is not evidence that our write failed.
+                        if identity.client_id.as_ref() == order.client_order_id.as_ref()
+                            && identity.client_id.is_some()
+                            && row.pos_side == pos_side.as_str()
+                            && row.order_qty.or(row.order_qty_rq) == Some(order.amount)
+                            && row.kind == kind
+                            && native(&identity.order_id)? == identity.order_id
+                        {
+                            cx.placement_resolved(request.command);
+                        }
+                        return Err(format!(
+                            "Phemex order rejected: bizError {}",
+                            identity.biz_error
+                        ));
+                    }
+                    if identity.biz_error != 0 {
+                        return Err("Phemex create acknowledgement rejection mismatch".into());
                     }
                     let pending = identity.ord_status == "Init";
                     if !pending {
@@ -1088,6 +1153,14 @@ impl PhemexPerpetuals {
                     cx.store.remove_orders(&[order.id.as_str()]);
                     if !pending && self.account.order_revision() == request.revision {
                         self.accept_write_order(cx, &row);
+                    }
+                    if cx.store.order(&identity.order_id).is_none() {
+                        let mut route = (**order).clone();
+                        route.id = identity.order_id.clone();
+                        route.status = OrderStatus::Open;
+                        self.trading
+                            .acknowledged
+                            .insert(identity.order_id.clone(), route);
                     }
                     self.trading
                         .sides
@@ -1197,6 +1270,9 @@ impl PhemexPerpetuals {
                                 cx.store.set_order_status(&o.id, o.status);
                             }
                         }
+                    }
+                    for id in &accepted {
+                        self.trading.acknowledged.remove(id);
                     }
                     for id in finalized.keys() {
                         self.account.terminal(id, cx.now);

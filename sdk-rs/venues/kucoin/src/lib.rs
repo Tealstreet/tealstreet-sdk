@@ -715,6 +715,10 @@ impl Kucoin {
 }
 
 impl Venue for Kucoin {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -1212,12 +1216,7 @@ impl Venue for Kucoin {
         self.books.get(symbol).filter(|b| b.synced).map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, b)| b.synced)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
 

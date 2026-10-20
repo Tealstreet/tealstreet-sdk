@@ -204,6 +204,8 @@ pub struct Snapshot {
 }
 #[derive(Deserialize)]
 pub struct Delta {
+    #[serde(default, rename = "prevTs", deserialize_with = "optional_number")]
+    pub previous: Option<f64>,
     pub bids: Vec<(Price, Price)>,
     pub asks: Vec<(Price, Price)>,
 }

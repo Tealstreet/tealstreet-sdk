@@ -21,6 +21,8 @@ pub struct Options {
     pub public_data_only: bool,
     pub spot_only: bool,
     pub testnet: bool,
+    /// A saved read-only key signs REST reads; writes and the user stream keep the primary key.
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProductKind {
@@ -30,7 +32,8 @@ pub enum ProductKind {
 }
 pub enum Pending {
     Public(public::Request),
-    Account(account::Request),
+    /// The flag records whether the read-only key signed the request.
+    Account(account::Request, bool),
     Trading(trading::Request),
     History(history::Request),
 }
@@ -38,6 +41,9 @@ pub struct Coinbase {
     pub(crate) options: Options,
     pub(crate) public: public::Public,
     pub(crate) credentials: Option<sign::Credentials>,
+    pub(crate) read_credentials: Option<sign::Credentials>,
+    /// The host routes GETs through the read key's egress unless told otherwise.
+    pub(crate) read_supplied: bool,
     rest: rest::Rest,
     pub(crate) account: account::Account,
     pub(crate) trading: trading::Trading,
@@ -53,6 +59,16 @@ impl Coinbase {
         } else {
             Some(sign::Credentials::new(&raw_key, &secret)?)
         };
+        let read = options.read_credentials.take();
+        let read_credentials = match (&credentials, read) {
+            (Some(_), Some(read)) => {
+                read.validate()?;
+                let key = Zeroizing::new(read.key);
+                let secret = Zeroizing::new(read.secret);
+                Some(sign::Credentials::new(&key, &secret)?)
+            }
+            _ => None,
+        };
         options.key = credentials
             .as_ref()
             .map_or_else(String::new, |c| c.key().to_owned());
@@ -60,6 +76,8 @@ impl Coinbase {
             options,
             public: public::Public::new(),
             credentials,
+            read_supplied: read_credentials.is_some(),
+            read_credentials,
             rest: rest::Rest::default(),
             account: account::Account::default(),
             trading: trading::Trading::default(),
@@ -68,6 +86,10 @@ impl Coinbase {
     }
 }
 impl Venue for Coinbase {
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn account_id(&self) -> Option<&str> {
         self.account.portfolio_id.as_deref()
@@ -98,7 +120,7 @@ impl Venue for Coinbase {
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         match pending {
             Pending::Public(p) => self.public_response(cx, p, response),
-            Pending::Account(p) => self.private_on_response(cx, p, response),
+            Pending::Account(p, read) => self.private_on_response(cx, p, read, response),
             Pending::Trading(p) => self.trading_response(cx, p, response),
             Pending::History(p) => self.history_response(cx, p, response),
         }
@@ -106,7 +128,7 @@ impl Venue for Coinbase {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Public(p) => self.public_item(cx, p, item),
-            Pending::Account(p) => self.private_on_item(cx, p, item),
+            Pending::Account(p, _) => self.private_on_item(cx, p, item),
             Pending::Trading(_) => {}
             Pending::History(p) => self.history_item(cx, p, item),
         }
@@ -114,7 +136,7 @@ impl Venue for Coinbase {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Public(p) => self.public_failed(cx, p, error),
-            Pending::Account(p) => self.private_failed(cx, p, error),
+            Pending::Account(p, _) => self.private_failed(cx, p, error),
             Pending::Trading(p) => self.trading_failed(cx, p, error),
             Pending::History(p) => self.history_failed(cx, p, error),
         }
@@ -141,12 +163,6 @@ impl Venue for Coinbase {
             .map(|b| &b.book)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.public
-                .books
-                .iter()
-                .filter(|(_, b)| b.live)
-                .map(|(s, b)| (s.as_str(), &b.book)),
-        )
+        Box::new(self.public.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }

@@ -53,7 +53,11 @@ struct Reduction {
     amount: f64,
     native_id: Option<String>,
     accounted_fill: f64,
+    /// Time and account revision of a write whose outcome was never reported.
+    unresolved: Option<(f64, u64)>,
 }
+/// An unidentified placement is released after this long and one later order snapshot.
+const UNRESOLVED_PLACEMENT_MS: f64 = 30_000.0;
 struct PositionProof {
     native_position: f64,
     generation: u64,
@@ -115,9 +119,17 @@ struct Created {
 }
 #[derive(Deserialize)]
 struct CreateError {
+    error: Option<String>,
     new_order_failure_reason: Option<String>,
     preview_failure_reason: Option<String>,
     message: Option<String>,
+    error_details: Option<String>,
+}
+#[derive(Deserialize)]
+struct HttpError {
+    error: Option<String>,
+    message: Option<String>,
+    error_details: Option<String>,
 }
 #[derive(Deserialize)]
 struct Canceled {
@@ -261,9 +273,10 @@ impl Coinbase {
         }
         let tif = match opts.kind {
             OrderType::Market => {
+                // Coinbase market orders are always IOC; the CLI sends GTC.
                 if !matches!(
                     opts.time_in_force,
-                    None | Some(TimeInForce::ImmediateOrCancel)
+                    None | Some(TimeInForce::ImmediateOrCancel | TimeInForce::GoodTillCancel)
                 ) {
                     return Err("Coinbase market orders support IOC only".into());
                 }
@@ -385,7 +398,9 @@ impl Coinbase {
                 amount: displayed,
                 filled: 0.0,
                 remaining: displayed,
-                reduce_only: opts.reduce_only == Some(true) || opts.close == Some(true),
+                // Spot has no position to reduce, so reduce-only spot is a plain order.
+                reduce_only: (opts.reduce_only == Some(true) || opts.close == Some(true))
+                    && market.is_spot != Some(true),
                 close: None,
                 time_in_force: Some(tif),
                 last_update: cx.now,
@@ -590,7 +605,7 @@ impl Coinbase {
             }
             _ => unreachable!(),
         }
-        let mut planned = HashMap::<(String, OrderSide), f64>::new();
+        let mut planned = HashMap::<(String, OrderSide, bool), f64>::new();
         let mut constrained = HashSet::new();
         let excluded: HashSet<_> = job
             .steps
@@ -609,22 +624,21 @@ impl Coinbase {
             .chain(&job.steps)
         {
             if let Step::Place { order, .. } = step {
+                let key = (order.symbol.clone(), order.side, protective(order.kind));
                 if order.reduce_only {
-                    constrained.insert((order.symbol.clone(), order.side));
+                    constrained.insert(key.clone());
                 }
                 let amount = order
                     .extra
                     .as_ref()
                     .and_then(|e| e.remaining_native)
                     .unwrap();
-                *planned
-                    .entry((order.symbol.clone(), order.side))
-                    .or_default() += amount;
+                *planned.entry(key).or_default() += amount;
             }
         }
-        for ((symbol, side), amount) in planned {
-            if constrained.contains(&(symbol.clone(), side))
-                && amount > self.reduction_capacity(cx, &symbol, side, &excluded)?
+        for ((symbol, side, stop), amount) in planned {
+            if constrained.contains(&(symbol.clone(), side, stop))
+                && amount > self.reduction_capacity(cx, &symbol, side, stop, &excluded)?
             {
                 return Err(
                     "Coinbase reduce-only orders exceed observed unreserved position size".into(),
@@ -639,6 +653,7 @@ impl Coinbase {
         cx: &Cx<'_, Pending>,
         symbol: &str,
         side: OrderSide,
+        stop: bool,
         excluded: &HashSet<String>,
     ) -> Result<f64, String> {
         if self
@@ -675,9 +690,16 @@ impl Coinbase {
         if positions.len() != 1 || !positions[0].contracts.is_finite() {
             return Err("Coinbase reduce-only needs exactly one opposite position".into());
         }
+        // A protective stop and a take-profit close the same position as
+        // alternatives, so each class reserves its own remaining size. Executed
+        // and unidentified reductions below count against both classes.
         let mut reserved = 0.0;
         for order in cx.store.orders().iter().filter(|o| {
-            o.symbol == symbol && o.side == side && live(o) && !excluded.contains(&o.id)
+            o.symbol == symbol
+                && o.side == side
+                && protective(o.kind) == stop
+                && live(o)
+                && !excluded.contains(&o.id)
         }) {
             let amount = order
                 .extra
@@ -875,6 +897,7 @@ impl Coinbase {
                 amount: order.amount / scale,
                 native_id: Some(order.id.clone()),
                 accounted_fill: previous_base / scale,
+                unresolved: None,
             },
         );
     }
@@ -882,6 +905,31 @@ impl Coinbase {
         self.reconcile_reductions(cx);
     }
     fn reconcile_reductions(&mut self, cx: &Cx<'_, Pending>) {
+        let committed = self.account.committed_orders_revision();
+        let positions = self.account.position_read_revision();
+        let expired = self
+            .trading
+            .reductions
+            .iter()
+            .filter(|(_, f)| {
+                // A derivative fill must also be visible in a later position read.
+                let spot = cx
+                    .store
+                    .market(&f.symbol)
+                    .is_some_and(|m| m.is_spot == Some(true));
+                f.native_id.is_none()
+                    && f.unresolved.is_some_and(|(at, revision)| {
+                        cx.now >= at + UNRESOLVED_PLACEMENT_MS
+                            && committed >= revision
+                            && (spot || positions.is_some_and(|read| read >= revision))
+                    })
+            })
+            .map(|(client, _)| client.clone())
+            .collect::<Vec<_>>();
+        for client in expired {
+            self.trading.reductions.remove(&client);
+            self.private_placement_finished(&client);
+        }
         let account = &self.account;
         self.trading.reductions.retain(|_, f| {
             !f.native_id
@@ -1095,7 +1143,13 @@ impl Coinbase {
                     .unwrap();
                 if order.reduce_only
                     && amount
-                        > self.reduction_capacity(cx, &order.symbol, order.side, &HashSet::new())?
+                        > self.reduction_capacity(
+                            cx,
+                            &order.symbol,
+                            order.side,
+                            protective(order.kind),
+                            &HashSet::new(),
+                        )?
                 {
                     return Err("Coinbase reduce-only position changed before dispatch".into());
                 }
@@ -1118,6 +1172,7 @@ impl Coinbase {
                         amount,
                         native_id: None,
                         accounted_fill: 0.0,
+                        unresolved: None,
                     },
                 );
             }
@@ -1176,6 +1231,7 @@ impl Coinbase {
                 .filter(|o| o.symbol == symbol && live(o))
                 .map(|o| o.id.clone())
                 .collect::<HashSet<_>>();
+            ids.extend(self.account.foreign_orders(&symbol).map(String::from));
             for f in self
                 .trading
                 .reductions
@@ -1259,6 +1315,7 @@ impl Coinbase {
         error: &str,
     ) {
         self.private_after_write(cx);
+        self.placement_unresolved(cx, &request.step);
         self.trading_finish_error(
             cx,
             request.command,
@@ -1281,11 +1338,23 @@ impl Coinbase {
             return;
         }
         if !(200..300).contains(&response.status) {
-            self.trading_finish_error(
-                cx,
-                request.command,
-                format!("Coinbase HTTP {}", response.status),
-            );
+            let error = http_error(response.status, response.body);
+            // 408 and 5xx do not prove the write was rejected.
+            if response.status == 408 || response.status >= 500 {
+                self.private_after_write(cx);
+                self.placement_unresolved(cx, &request.step);
+                self.trading_finish_error(
+                    cx,
+                    request.command,
+                    format!("Coinbase write outcome requires reconciliation: {error}"),
+                );
+                return;
+            }
+            if let Step::Place { payload, .. } = &request.step {
+                self.trading.reductions.remove(&payload.client_order_id);
+                self.private_placement_finished(&payload.client_order_id);
+            }
+            self.trading_finish_error(cx, request.command, error);
             return;
         }
         let result = self.apply_trade_response(cx, &request.step, response.body);
@@ -1299,8 +1368,19 @@ impl Coinbase {
             }
             Err(error) => {
                 self.private_after_write(cx);
+                self.placement_unresolved(cx, &request.step);
                 self.trading_finish_error(cx, request.command, error);
             }
+        }
+    }
+
+    fn placement_unresolved(&mut self, cx: &Cx<'_, Pending>, step: &Step) {
+        let revision = self.account.revision();
+        if let Step::Place { payload, .. } = step
+            && let Some(reservation) = self.trading.reductions.get_mut(&payload.client_order_id)
+            && reservation.native_id.is_none()
+        {
+            reservation.unresolved = Some((cx.now, revision));
         }
     }
 
@@ -1317,15 +1397,10 @@ impl Coinbase {
                 if !result.success {
                     self.trading.reductions.remove(&payload.client_order_id);
                     self.private_placement_finished(&payload.client_order_id);
-                    return Err(result
-                        .error_response
-                        .and_then(|e| {
-                            e.new_order_failure_reason
-                                .or(e.preview_failure_reason)
-                                .or(e.message)
-                        })
-                        .or(result.failure_reason)
-                        .unwrap_or_else(|| "Coinbase placement rejected".into()));
+                    return Err(placement_rejection(
+                        result.error_response,
+                        result.failure_reason,
+                    ));
                 }
                 let id = if let Some(created) = result.success_response {
                     if created
@@ -1405,6 +1480,7 @@ impl Coinbase {
                 let mut errors = vec![];
                 for result in result.results {
                     if result.success {
+                        self.account.forget_foreign(&result.order_id);
                         self.private_order_changed(&result.order_id);
                         if cx.store.order(&result.order_id).is_some_and(live) {
                             cx.store
@@ -1469,6 +1545,47 @@ impl Coinbase {
     }
 }
 
+fn protective(kind: OrderType) -> bool {
+    kind == OrderType::StopLoss
+}
+fn reason(code: Option<String>) -> Option<String> {
+    code.filter(|c| !c.is_empty() && !c.starts_with("UNKNOWN_"))
+}
+fn describe(prefix: &str, message: Option<String>, code: Option<String>) -> String {
+    let message = message.filter(|m| !m.is_empty());
+    let text = match (message, reason(code)) {
+        (Some(m), Some(c)) if m != c => format!("{prefix}: {m} ({c})"),
+        (Some(m), _) => format!("{prefix}: {m}"),
+        (None, Some(c)) => format!("{prefix}: {c}"),
+        (None, None) => prefix.into(),
+    };
+    text.chars().take(512).collect()
+}
+fn placement_rejection(error: Option<CreateError>, failure_reason: Option<String>) -> String {
+    let Some(e) = error else {
+        return describe("Coinbase placement rejected", None, failure_reason);
+    };
+    let code = reason(e.error)
+        .or(reason(e.new_order_failure_reason))
+        .or(reason(e.preview_failure_reason))
+        .or(reason(failure_reason));
+    describe(
+        "Coinbase placement rejected",
+        e.message.filter(|m| !m.is_empty()).or(e.error_details),
+        code,
+    )
+}
+fn http_error(status: u16, body: &str) -> String {
+    let prefix = format!("Coinbase HTTP {status}");
+    match serde_json::from_str::<HttpError>(body) {
+        Ok(e) => describe(
+            &prefix,
+            e.message.filter(|m| !m.is_empty()).or(e.error_details),
+            e.error,
+        ),
+        Err(_) => prefix,
+    }
+}
 fn cancel_steps(ids: Vec<String>) -> Result<VecDeque<Step>, String> {
     if ids.len() > 10_000 {
         return Err("Coinbase cancel batch exceeds 10000 IDs".into());

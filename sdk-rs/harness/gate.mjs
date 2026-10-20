@@ -19,6 +19,7 @@ import { withMexcMiniTickerSubscription } from './mexc-mini-subscription.mjs';
 import { requestKey, callerIdsOf, subscriptionKeys } from './requests.mjs';
 import { venueOf } from './venues.mjs';
 import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
+import { fixBitrue, BITRUE_TS_FIXES } from './known-ts-fixes-bitrue.mjs';
 import { compareCoinbaseSpotMidpoints } from './coinbase-spot-midpoints.mjs';
 
 const { values } = parseArgs({
@@ -307,6 +308,10 @@ const fixBackpack = (ts) => {
 // TS reports resting executionReport.p instead of this trade's L.
 
 // TxFlow compares both implementations directly; no venue-specific output repair.
+// Audit corrections are exercised by native interleaving regressions, never
+// rewritten into the replay result: Kraken Spot verifies raw-decimal CRC32;
+// WOO validates prevTs and clears invalid books during recovery; Backpack
+// preserves positions after an unqualified 404 rather than committing [].
 const KNOWN_TS_FIXES = (account, rustAccount) => {
   if (values.venue === 'blofin') {
     // TS can retain the zero-size placeholder's margin. Derive the repair
@@ -473,7 +478,7 @@ KNOWN_TS_FIXES.krakenspot = {
 // Price-only cancel/replace amendments re-place the remaining quantity after
 // partial execution; TS re-places the original amount and increases exposure.
 KNOWN_TS_FIXES.lighter = { fills: fixLighterFills, commands: fixLighterCommands };
-KNOWN_TS_FIXES.woo = ['Close rejected private authentication and bound pending authentication independently of pongs.'];
+KNOWN_TS_FIXES.woo = ['Validate prevTs continuity and clear resync books; TS accepts unbridged depth deltas.', 'Close rejected private authentication and bound pending authentication independently of pongs.'];
   // ApeX repairs are in the TS reference; output is compared without rewriting:
   // continuous book sequences and atomic invalid depth updates; top-level ping
   // detection avoids answering echoed ping acknowledgements; stable original
@@ -503,6 +508,7 @@ KNOWN_TS_FIXES.kraken = {
     output: fixKrakenOutput,
     fixes: [
       'TS production now retains full depth, rejects stale/gapped updates, and resubscribes for recovery; exact intermediate timestamp/hash checks stay unchanged.',
+      'Validate Kraken Spot top-ten CRC32 using original decimal tokens; TS ignores checksum.',
       'Full native ticker statistics stay live; omitted relative funding resets zero instead of retaining a stale rate.',
       'Negative instrument quantity precision is a positive power-of-ten step; TS clamps it to 0.1.',
       'Deduplicate native execution IDs; suppress historical fills snapshots.',
@@ -564,7 +570,10 @@ KNOWN_TS_FIXES.kucoin = [
 // Flat rows may omit leverage until explicitly set; balance still commits.
 // Cancellation continues after failures, including child fallbacks after a
 // failed parent, and reports each failed ID. TS stops subsequent chunks.
-KNOWN_TS_FIXES.bitrue = [];
+// TS assigns a cumulative gap to the last native L and drops an older l/L
+// execution. Only the exact private fixture and exact legacy TS fills may be
+// corrected; the independent l/L table never reads or changes Rust output.
+KNOWN_TS_FIXES.bitrue = BITRUE_TS_FIXES;
 KNOWN_TS_FIXES.bitget = {
   // Each correction is covered by documented-payload Rust tests. Normal
   // tapes still compare unchanged; these notes do not rewrite mismatches.
@@ -729,6 +738,7 @@ for (let run = 0; run < runs; run++) {
   // the linear feed; malformed supplied option WS Greeks coerced to zero
   // instead of retaining proven position/Greek state. Dedicated API tests compare
   // options terms/queries/signing, and assert native option depth25 separately.
+  if (values.venue === 'bitrue') fixBitrue(ts, tape);
   if (values.venue === 'mexc') {
     // The official sub.tickers sparse all-contract feed prevents stale prices
     // past the first 100 detailed subscriptions. Add that exact expected TS
@@ -940,6 +950,7 @@ row('sampled peak', t.peakMB, r.peakMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
 if (venue.family === 'orderly') console.log(`(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`);
+if (values.venue === 'bitrue' && isPrivate) console.log(`(documented Bitrue corrections: ${BITRUE_TS_FIXES.length}; exact fixture and TS baseline checked)`);
 if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
 if (venue.family === 'coinbase') console.log(`(documented Coinbase corrections: ${COINBASE_TS_FIXES.length}; input-derived corrections only)`);

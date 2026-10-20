@@ -299,6 +299,11 @@ impl AsterDex {
     fn close_public(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.socket = None;
         self.public.open = false;
+        for (symbol, state) in &mut self.books {
+            state.book.clear();
+            state.last_id = None;
+            cx.book_changed(symbol);
+        }
         self.public.supervisor.retry(cx);
     }
 
@@ -664,6 +669,14 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
 }
 
 impl Venue for AsterDex {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+
     type Pending = Pending;
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1104,7 +1117,6 @@ impl Venue for AsterDex {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, state)| !state.book.is_empty())
                 .map(|(symbol, state)| (symbol.as_str(), &state.book)),
         )
     }

@@ -23,18 +23,28 @@ struct Session {
     private: Option<SocketId>,
     urls: Vec<String>,
     kind: &'static str,
+    open_orders: String,
+    requests: Vec<HttpRequest>,
+    read_portfolio: &'static str,
+    failing_positions: bool,
+    reject_read_key: bool,
+    key_permission_failures: u32,
+    deactivated: bool,
 }
 impl Session {
     fn new(kind: &'static str, spot: bool) -> Self {
-        let mut e = Engine::new(
-            Coinbase::new(Options {
+        Self::with_options(
+            kind,
+            Options {
                 key: "organizations/test/apiKeys/test".into(),
                 secret: STANDARD.encode([7; 32]),
                 spot_only: spot,
                 ..Default::default()
-            })
-            .unwrap(),
-        );
+            },
+        )
+    }
+    fn with_options(kind: &'static str, options: Options) -> Self {
+        let mut e = Engine::new(Coinbase::new(options).unwrap());
         e.start(1000.0);
         Self {
             details: std::collections::HashMap::new(),
@@ -45,6 +55,13 @@ impl Session {
             urls: vec![],
             results: vec![],
             kind,
+            open_orders: String::new(),
+            requests: vec![],
+            read_portfolio: "portfolio-one",
+            failing_positions: false,
+            reject_read_key: false,
+            key_permission_failures: 0,
+            deactivated: false,
         }
     }
     fn reply(&mut self, r: HttpRequest, status: u16, body: &str) {
@@ -67,8 +84,10 @@ impl Session {
                 Action::Notice(safe_cex_engine::Notice::CommandDone { command, result }) => {
                     self.results.push((command, result))
                 }
+                Action::Notice(safe_cex_engine::Notice::Deactivate) => self.deactivated = true,
                 Action::Http(r) => {
                     self.urls.push(r.url.clone());
+                    self.requests.push(r.clone());
                     requests.push(r)
                 }
                 Action::SetTimer { timer, at_ms } => self.timers.push((at_ms, timer)),
@@ -89,7 +108,30 @@ impl Session {
     }
     fn answer(&mut self, r: HttpRequest) {
         let url = &r.url;
-        let body = if url.ends_with("/portfolios") {
+        if self.failing_positions && url.contains("/positions") {
+            return self.reply(r, 503, "unavailable");
+        }
+        if url.ends_with("/key_permissions") && self.key_permission_failures > 0 {
+            self.key_permission_failures -= 1;
+            return self.reply(r, 503, "unavailable");
+        }
+        if self.reject_read_key
+            && !url.ends_with("/key_permissions")
+            && r.headers
+                .iter()
+                .any(|(n, _)| n.eq_ignore_ascii_case("authorization"))
+            && jwt_subject(&r).ends_with("/read")
+        {
+            return self.reply(r, 401, r#"{"error":"UNAUTHENTICATED"}"#);
+        }
+        let body = if url.ends_with("/key_permissions") {
+            let portfolio = if jwt_subject(&r).ends_with("/read") {
+                self.read_portfolio
+            } else {
+                "portfolio-one"
+            };
+            format!(r#"{{"can_view":true,"can_trade":true,"portfolio_uuid":"{portfolio}"}}"#)
+        } else if url.ends_with("/portfolios") {
             format!(
                 r#"{{"portfolios":[{{"uuid":"portfolio-one","type":"{}"}}]}}"#,
                 self.kind
@@ -113,7 +155,12 @@ impl Session {
                 r#"{{"order":{{"order_id":"{id}","product_id":"BTC-USD","order_configuration":{{"limit_limit_gtc":{{"base_size":"1","limit_price":"100"}}}}}}}}"#
             ))
         } else if url.contains("/orders/historical/batch") {
-            r#"{"orders":[],"has_next":false}"#.into()
+            let rows = if url.contains("order_status=OPEN") {
+                self.open_orders.as_str()
+            } else {
+                ""
+            };
+            format!(r#"{{"orders":[{rows}],"has_next":false}}"#)
         } else if url.contains("/products") {
             if url.contains("contract_expiry_type=PERPETUAL") {
                 INTX.into()
@@ -1441,4 +1488,528 @@ fn lost_create_partially_filled_cancel_recovers_and_releases_only_after_position
             .base_size,
         "1"
     );
+}
+
+impl Session {
+    fn place(&mut self, command: u32, order: PlaceOrderOpts) -> HttpRequest {
+        self.command(Command::PlaceOrders {
+            command,
+            orders: vec![order],
+        });
+        self.write()
+    }
+    fn cancel_symbol(&mut self, command: u32) -> Result<String, String> {
+        self.command(Command::CancelSymbolOrders {
+            command,
+            symbol: "BTC-USD".into(),
+        });
+        self.done(command)
+    }
+    fn advance(&mut self, ms: f64) {
+        let until = self.now + ms;
+        while self.now < until {
+            for r in self.collect() {
+                assert_eq!(r.method, safe_cex_engine::Method::Get);
+                self.answer(r);
+            }
+            self.fire();
+        }
+        for r in self.collect() {
+            self.answer(r);
+        }
+    }
+}
+
+#[test]
+fn cli_market_order_with_gtc_is_sent_as_ioc() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let mut market = opts("BTC-USD", OrderType::Market, OrderSide::Buy, 1.0);
+    market.time_in_force = Some(TimeInForce::GoodTillCancel);
+    let r = s.place(300, market);
+    assert!(
+        create_wire(&r)
+            .order_configuration
+            .market_market_ioc
+            .is_some()
+    );
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"market"}}"#,
+    );
+    assert!(s.done(300).is_ok());
+    let order = s.e.store().order("market").unwrap();
+    assert_eq!(order.time_in_force, Some(TimeInForce::ImmediateOrCancel));
+}
+
+#[test]
+fn definite_http_rejection_releases_reservation_and_keeps_coinbase_message() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let r = s.place(301, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
+    s.reply(
+        r,
+        400,
+        r#"{"error":"INVALID_ARGUMENT","error_details":"","message":"limit price too far from market"}"#,
+    );
+    let error = s.done(301).unwrap_err();
+    assert_eq!(
+        error,
+        "Coinbase HTTP 400: limit price too far from market (INVALID_ARGUMENT)"
+    );
+    assert!(s.cancel_symbol(302).is_ok());
+}
+
+#[test]
+fn ambiguous_placement_blocks_cancel_symbol_until_bounded_reconciliation() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let r = s.place(303, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
+    s.reply(r, 503, r#"{"error":"UNAVAILABLE","message":"try again"}"#);
+    let error = s.done(303).unwrap_err();
+    assert!(error.contains("requires reconciliation"), "{error}");
+    assert!(error.contains("try again"), "{error}");
+    assert!(s.cancel_symbol(304).unwrap_err().contains("unresolved"));
+    s.advance(31_000.0);
+    assert!(s.cancel_symbol(305).is_ok());
+}
+
+#[test]
+fn lost_placement_response_is_released_after_bounded_reconciliation() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let r = s.place(306, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
+    s.e.handle(
+        s.now,
+        Event::HttpFailed {
+            request: r.id,
+            error: "response lost",
+        },
+    );
+    assert!(s.done(306).is_err());
+    s.advance(10_000.0);
+    assert!(s.cancel_symbol(307).unwrap_err().contains("unresolved"));
+    s.advance(21_000.0);
+    assert!(s.cancel_symbol(308).is_ok());
+}
+
+#[test]
+fn rejected_placement_keeps_coinbase_message_and_reason() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let r = s.place(309, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
+    s.reply(
+        r,
+        200,
+        r#"{"success":false,"failure_reason":"UNKNOWN_FAILURE_REASON","order_id":"","error_response":{"error":"INSUFFICIENT_FUND","message":"Insufficient balance in source account","error_details":"","preview_failure_reason":"PREVIEW_INSUFFICIENT_FUND","new_order_failure_reason":"UNKNOWN_FAILURE_REASON"}}"#,
+    );
+    assert_eq!(
+        s.done(309).unwrap_err(),
+        "Coinbase placement rejected: Insufficient balance in source account (INSUFFICIENT_FUND)"
+    );
+    assert!(s.cancel_symbol(310).is_ok());
+}
+
+#[test]
+fn protective_stop_and_take_profit_reserve_capacity_independently() {
+    let mut s = Session::new("INTX", false).ready();
+    let mut stop = opts("BTC-PERP-INTX", OrderType::StopLoss, OrderSide::Sell, 2.0);
+    stop.reduce_only = Some(true);
+    stop.trigger_price = Some(90.0);
+    stop.price = Some(90.0);
+    let r = s.place(311, stop.clone());
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"sl"}}"#,
+    );
+    assert!(s.done(311).is_ok());
+    let mut tp = opts("BTC-PERP-INTX", OrderType::Limit, OrderSide::Sell, 2.0);
+    tp.reduce_only = Some(true);
+    tp.price = Some(120.0);
+    let r = s.place(312, tp.clone());
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"tp"}}"#,
+    );
+    assert!(s.done(312).is_ok());
+    tp.amount = 0.5;
+    s.command(Command::PlaceOrders {
+        command: 313,
+        orders: vec![tp],
+    });
+    assert!(s.done(313).unwrap_err().contains("exceed"));
+    stop.amount = 0.5;
+    s.command(Command::PlaceOrders {
+        command: 314,
+        orders: vec![stop],
+    });
+    assert!(s.done(314).unwrap_err().contains("exceed"));
+}
+
+#[test]
+fn spot_reduce_only_sell_is_a_plain_sell() {
+    let mut s = Session::new("DEFAULT", true).ready();
+    let mut sell = opts("BTC-USD", OrderType::Limit, OrderSide::Sell, 1.0);
+    sell.reduce_only = Some(true);
+    let r = s.place(315, sell);
+    assert_eq!(create_wire(&r).side, "SELL");
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"spot-sell"}}"#,
+    );
+    assert!(s.done(315).is_ok());
+    assert!(!s.e.store().order("spot-sell").unwrap().reduce_only);
+}
+
+const BRACKET_REST: &str = r#"{"order_id":"bracket-1","client_order_id":"site","product_id":"BTC-PERP-INTX","side":"SELL","status":"OPEN","order_type":"BRACKET","filled_size":"0","average_filled_price":"0","order_configuration":{"trigger_bracket_gtc":{"base_size":"1","limit_price":"120","stop_trigger_price":"90"}}}"#;
+
+#[test]
+fn external_bracket_order_neither_blocks_trading_nor_escapes_cancel_symbol() {
+    let mut s = Session::new("INTX", false);
+    s.open_orders = BRACKET_REST.into();
+    let mut s = s.ready();
+    assert!(s.e.store().orders().is_empty());
+    let site = r#"{"order_id":"bracket-2","client_order_id":"","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"SELL","order_type":"Bracket","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"120","stop_price":"90","avg_price":"0"}"#;
+    let ours = r#"{"order_id":"ours","client_order_id":"mine","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"BUY","order_type":"Limit","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"100","stop_price":"0","avg_price":"0"}"#;
+    s.message(0, "snapshot", &format!("[{site},{ours}]"));
+    assert!(s.e.store().order("ours").is_some());
+    let r = s.place(
+        316,
+        opts("BTC-PERP-INTX", OrderType::Limit, OrderSide::Buy, 1.0),
+    );
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"placed"}}"#,
+    );
+    assert!(s.done(316).is_ok());
+    s.command(Command::CancelSymbolOrders {
+        command: 317,
+        symbol: "BTC-PERP-INTX".into(),
+    });
+    let cancel = s.write();
+    #[derive(Deserialize)]
+    struct Cancel {
+        order_ids: Vec<String>,
+    }
+    let body: Cancel = serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body.order_ids, vec!["bracket-2", "ours", "placed"]);
+}
+
+#[test]
+fn rest_snapshot_with_external_bracket_still_loads_orders() {
+    let mut s = Session::new("INTX", false);
+    s.open_orders = format!(
+        r#"{BRACKET_REST},{{"order_id":"ours","client_order_id":"mine","product_id":"BTC-PERP-INTX","side":"BUY","status":"OPEN","order_type":"LIMIT","filled_size":"0","average_filled_price":"0","order_configuration":{{"limit_limit_gtc":{{"base_size":"1","limit_price":"100"}}}}}}"#
+    );
+    let mut s = s.ready();
+    assert!(s.e.store().order("ours").is_some());
+    s.command(Command::CancelSymbolOrders {
+        command: 318,
+        symbol: "BTC-PERP-INTX".into(),
+    });
+    let cancel = s.write();
+    assert!(cancel.body.as_deref().unwrap().contains("bracket-1"));
+}
+
+fn jwt_subject(request: &HttpRequest) -> String {
+    let (_, auth) = request
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+        .unwrap();
+    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(
+            auth.strip_prefix("Bearer ")
+                .unwrap()
+                .split('.')
+                .nth(1)
+                .unwrap(),
+        )
+        .unwrap();
+    #[derive(Deserialize)]
+    struct Claims {
+        sub: String,
+    }
+    serde_json::from_slice::<Claims>(&claims).unwrap().sub
+}
+
+#[test]
+fn saved_read_only_key_signs_reads_while_writes_keep_the_trading_key() {
+    let read: safe_cex_engine::ReadCredentials = serde_json::from_str(&format!(
+        r#"{{"key":"organizations/test/apiKeys/read","secret":"{}"}}"#,
+        STANDARD.encode([9; 32])
+    ))
+    .unwrap();
+    let mut s = Session::with_options(
+        "DEFAULT",
+        Options {
+            key: "organizations/test/apiKeys/test".into(),
+            secret: STANDARD.encode([7; 32]),
+            spot_only: true,
+            read_credentials: Some(read),
+            ..Default::default()
+        },
+    )
+    .ready();
+    let r = s.place(319, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
+    assert_eq!(jwt_subject(&r), "organizations/test/apiKeys/test");
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"signed"}}"#,
+    );
+    assert!(s.done(319).is_ok());
+    let reads = s
+        .requests
+        .iter()
+        .filter(|r| {
+            r.method == safe_cex_engine::Method::Get
+                && r.url.contains("/brokerage/")
+                && !r.url.contains("/market/")
+        })
+        .collect::<Vec<_>>();
+    assert!(reads.len() > 3);
+    for read in reads {
+        let catalogue = read.url.contains("/products");
+        if catalogue
+            || read.url.ends_with("/key_permissions") && jwt_subject(read).ends_with("/test")
+        {
+            assert!(jwt_subject(read).ends_with("/test"), "{}", read.url);
+            assert_eq!(read.route, Some(safe_cex_engine::RequestRoute::Primary));
+            continue;
+        }
+        assert_eq!(
+            jwt_subject(read),
+            "organizations/test/apiKeys/read",
+            "{}",
+            read.url
+        );
+        assert_eq!(read.route, None);
+    }
+}
+
+fn read_key_session(read_portfolio: &'static str) -> Session {
+    read_key_session_with(read_portfolio, |_| {})
+}
+fn read_key_session_with(
+    read_portfolio: &'static str,
+    setup: impl FnOnce(&mut Session),
+) -> Session {
+    let read: safe_cex_engine::ReadCredentials = serde_json::from_str(&format!(
+        r#"{{"key":"organizations/test/apiKeys/read","secret":"{}"}}"#,
+        STANDARD.encode([9; 32])
+    ))
+    .unwrap();
+    let mut s = Session::with_options(
+        "DEFAULT",
+        Options {
+            key: "organizations/test/apiKeys/test".into(),
+            secret: STANDARD.encode([7; 32]),
+            spot_only: true,
+            read_credentials: Some(read),
+            ..Default::default()
+        },
+    );
+    s.read_portfolio = read_portfolio;
+    setup(&mut s);
+    s.ready()
+}
+
+#[test]
+fn read_only_key_from_another_portfolio_is_refused_and_reads_use_the_trading_key() {
+    let s = read_key_session("other-portfolio");
+    let reads = s
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/brokerage/") && !r.url.contains("/market/"))
+        .skip(2)
+        .collect::<Vec<_>>();
+    assert!(reads.len() > 3);
+    for read in reads {
+        assert_eq!(
+            jwt_subject(read),
+            "organizations/test/apiKeys/test",
+            "{}",
+            read.url
+        );
+        assert_eq!(read.route, Some(safe_cex_engine::RequestRoute::Primary));
+    }
+    assert_eq!(s.e.account_id(), Some("portfolio-one"));
+}
+
+#[test]
+fn unresolved_derivative_placement_waits_for_a_later_position_read() {
+    let mut s = Session::new("INTX", false).ready();
+    let r = s.place(
+        320,
+        opts("BTC-PERP-INTX", OrderType::Market, OrderSide::Buy, 1.0),
+    );
+    s.e.handle(
+        s.now,
+        Event::HttpFailed {
+            request: r.id,
+            error: "response lost",
+        },
+    );
+    assert!(s.done(320).is_err());
+    s.failing_positions = true;
+    s.advance(31_000.0);
+    s.command(Command::CancelSymbolOrders {
+        command: 321,
+        symbol: "BTC-PERP-INTX".into(),
+    });
+    assert!(s.done(321).unwrap_err().contains("unresolved"));
+    s.failing_positions = false;
+    s.advance(6_000.0);
+    s.command(Command::CancelSymbolOrders {
+        command: 322,
+        symbol: "BTC-PERP-INTX".into(),
+    });
+    assert!(s.done(322).is_ok());
+}
+
+#[test]
+fn rejected_read_only_key_falls_back_without_deactivating_trading() {
+    let mut s = read_key_session("portfolio-one");
+    s.reject_read_key = true;
+    let before = s.requests.len();
+    s.advance(12_000.0);
+    s.reject_read_key = false;
+    let r = s.place(323, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"after-401"}}"#,
+    );
+    assert!(s.done(323).is_ok());
+    let later = s.requests[before..]
+        .iter()
+        .filter(|r| {
+            r.method == safe_cex_engine::Method::Get
+                && r.url.contains("/brokerage/")
+                && !r.url.contains("/market/")
+        })
+        .collect::<Vec<_>>();
+    assert!(later.iter().any(|r| jwt_subject(r).ends_with("/test")
+        && r.route == Some(safe_cex_engine::RequestRoute::Primary)));
+}
+
+#[test]
+fn transient_key_permission_failure_retries_before_refusing_the_read_key() {
+    let s = read_key_session_with("portfolio-one", |s| s.key_permission_failures = 1);
+    let last = s
+        .requests
+        .iter()
+        .rev()
+        .find(|r| r.method == safe_cex_engine::Method::Get && r.url.contains("/portfolios/"))
+        .unwrap();
+    assert!(jwt_subject(last).ends_with("/read"));
+}
+
+#[test]
+fn cancelled_foreign_orders_are_not_cancelled_again() {
+    let mut s = Session::new("INTX", false);
+    s.open_orders = BRACKET_REST.into();
+    let mut s = s.ready();
+    s.command(Command::CancelSymbolOrders {
+        command: 324,
+        symbol: "BTC-PERP-INTX".into(),
+    });
+    let cancel = s.write();
+    s.reply(
+        cancel,
+        200,
+        r#"{"results":[{"order_id":"bracket-1","success":true}]}"#,
+    );
+    assert!(s.done(324).is_ok());
+    s.command(Command::CancelSymbolOrders {
+        command: 325,
+        symbol: "BTC-PERP-INTX".into(),
+    });
+    assert!(s.done(325).is_ok());
+}
+
+fn read_credentials() -> safe_cex_engine::ReadCredentials {
+    serde_json::from_str(&format!(
+        r#"{{"key":"organizations/test/apiKeys/read","secret":"{}"}}"#,
+        STANDARD.encode([9; 32])
+    ))
+    .unwrap()
+}
+
+#[test]
+fn intx_amend_cancellation_proof_is_read_with_the_trading_key() {
+    let mut s = Session::with_options(
+        "INTX",
+        Options {
+            key: "organizations/test/apiKeys/test".into(),
+            secret: STANDARD.encode([7; 32]),
+            read_credentials: Some(read_credentials()),
+            ..Default::default()
+        },
+    )
+    .ready();
+    s.seed("old", "BTC-PERP-INTX", "1", "100");
+    s.command(Command::AmendOrder {
+        command: 326,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    let r = s.write();
+    s.reply(r, 200, r#"{"results":[{"order_id":"old","success":true}]}"#);
+    let r = s.write();
+    assert!(r.url.ends_with("/historical/old"));
+    assert!(jwt_subject(&r).ends_with("/test"));
+    assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+}
+
+#[test]
+fn concurrent_read_key_rejections_never_deactivate_the_account() {
+    let mut s = read_key_session("portfolio-one");
+    let mut held = vec![];
+    for _ in 0..50 {
+        for r in s.collect() {
+            if r.method == safe_cex_engine::Method::Get
+                && r.url.contains("/brokerage/")
+                && !r.url.contains("/market/")
+                && !r.url.contains("/products")
+                && jwt_subject(&r).ends_with("/read")
+            {
+                held.push(r);
+            } else {
+                s.answer(r);
+            }
+        }
+        if held.len() >= 2 {
+            break;
+        }
+        s.fire();
+    }
+    assert!(held.len() >= 2);
+    for r in held {
+        s.reply(r, 401, r#"{"error":"UNAUTHENTICATED"}"#);
+    }
+    s.collect();
+    assert!(!s.deactivated);
+    let r = s.place(327, opts("BTC-USD", OrderType::Limit, OrderSide::Buy, 1.0));
+    s.reply(
+        r,
+        200,
+        r#"{"success":true,"success_response":{"order_id":"still-active"}}"#,
+    );
+    assert!(s.done(327).is_ok());
+}
+
+#[test]
+fn transient_then_mismatched_key_check_still_discovers_the_portfolio() {
+    let mut s = read_key_session_with("other-portfolio", |s| s.key_permission_failures = 2);
+    let portfolios = s
+        .requests
+        .iter()
+        .filter(|r| r.url.ends_with("/portfolios"))
+        .count();
+    assert_eq!(portfolios, 1);
+    s.collect();
+    assert!(!s.deactivated);
 }

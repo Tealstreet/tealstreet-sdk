@@ -103,6 +103,8 @@ const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
   weex: 'ACCESS-KEY',
   blofin: 'ACCESS-KEY',
   woo: 'x-api-key',
+  coinbase: 'Authorization',
+  coinbasespot: 'Authorization',
 };
 
 export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: ExchangeName): void => {
