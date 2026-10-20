@@ -143,7 +143,8 @@ test('the Durable Object runs an engine and streams frames to its clients', asyn
 
 test('Workers derives private upgrade capability from its transport', async () => {
   let options;
-  const EngineObject = createEngineObject({ loadEngine: async () => ({ WasmEngine: class {
+  const loaded = [];
+  const EngineObject = createEngineObject({ loadEngine: async (venue) => (loaded.push(venue), { WasmEngine: class {
     constructor(_, json) { options = JSON.parse(json); }
     start() { return ''; }
   } }) });
@@ -153,6 +154,7 @@ test('Workers derives private upgrade capability from its transport', async () =
     await object.receive(client, JSON.stringify({ op: 'start', venue: 'weex', options: { key: 'replay-key' } }));
     assert.equal(options.privateWsHeaders, true);
     assert.equal(options.key, 'replay-key');
+    assert.deepEqual(loaded, ['weex'], 'the loader receives the venue to select its family');
   } finally { object.leave(client); }
 });
 

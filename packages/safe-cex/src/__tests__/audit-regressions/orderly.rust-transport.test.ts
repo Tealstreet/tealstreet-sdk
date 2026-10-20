@@ -62,9 +62,9 @@ const options = (transport?: TransportProvider, extra: Partial<ExchangeOptions> 
 afterEach(() => {
   setDefaultTransport(directTransport);
   setRustEngineTransport(nativeTransport);
-  setWasmEngineLoader(async () => {
+  setWasmEngineLoader(async (venue) => {
     const { loadEngine } = await import('@tealstreet/safe-cex-wasm/engine');
-    return loadEngine();
+    return loadEngine(venue);
   });
 });
 

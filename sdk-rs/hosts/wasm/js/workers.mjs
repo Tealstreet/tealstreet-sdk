@@ -169,8 +169,9 @@ async function* chunks(stream) {
 const KEEPALIVE_MS = 30_000;
 
 /**
- * A Durable Object class running one engine. `loadEngine` resolves the
- * wasm-bindgen module (`{ WasmEngine }`) the deployment bundles; `flush`
+ * A Durable Object class running one engine. `loadEngine(venue)` resolves the
+ * wasm-bindgen module (`{ WasmEngine }`) the deployment bundles for that venue,
+ * such as `engine/web`'s family loader; `flush`
  * gives the store and book cadences in ms. Account-backed deployments supply
  * `createTransport(venue, options, raw)` from safe-cex's createEngineTransport;
  * the default is an explicitly direct engine host. The returned transport
@@ -204,7 +205,7 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
       if (typeof data !== 'string') return;
       const message = JSON.parse(data);
       if (message.op === 'start' && !this.host) {
-        const { WasmEngine } = await loadEngine();
+        const { WasmEngine } = await loadEngine(message.venue);
         if (!createTransport && (message.options?.tealstreetProxy || message.options?.tealstreetTunnel
           || message.options?.tealstreetWsRoute || message.options?.overrideProxyUrl || message.options?.bybitSiteId)) {
           client.send(JSON.stringify({ op: 'log', level: 'error', message: 'Engine routing requires a configured createTransport factory' }));
