@@ -256,6 +256,21 @@ BreakoutProp uses polling rather than a venue WebSocket and needs no socket
 supervisor migration. Native mandatory-pong/subscription/session state remains
 venue-owned even on migrated feeds.
 
+### Follow-up migration plan (lane `claude-sockets`)
+
+Behaviour-preserving cutover of the inventory above, one `Supervisor` per
+connection, deleting venue-owned watchdog/retry timers. Existing timeout and
+ping cadences are kept as `Config` values and existing backoff constants as
+base/cap; fixed delays become base = cap. Deliberate shared-contract changes:
+transport open no longer resets backoff (stable ready traffic does), and
+delays gain the shared deterministic 0.75-1.0 jitter. Every venue gets
+reconnect/resubscribe/flap regressions.
+
+1. Public ApeX Omni, Bitget, BloFin, MEXC, WOO.
+2. Private Phemex and Coinbase; Binance; Bybit.
+3. Backpack, Hyperliquid, Kraken, Lighter.
+4. OKX, Orderly brokers, TxFlow, WEEX.
+
 
 ## Published PR integration and adversarial review
 

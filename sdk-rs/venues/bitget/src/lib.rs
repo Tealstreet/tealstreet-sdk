@@ -11,6 +11,7 @@ use book::BookState;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
+use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
@@ -59,15 +60,28 @@ pub enum Pending {
     },
 }
 
-#[derive(Default)]
+// The private connection (index 3) is supervised by `account.supervisor`.
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    last_received: f64,
     ping_at: f64,
-    watchdog: Option<TimerId>,
-    reconnect: Option<TimerId>,
-    attempts: u32,
+    supervisor: Supervisor,
+}
+
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            socket: None,
+            open: false,
+            ping_at: 0.0,
+            supervisor: Supervisor::new(Config {
+                connect_timeout_ms: 20_000.0,
+                idle_timeout_ms: 20_000.0,
+                ping_interval_ms: Some(5_000.0),
+                ..Config::default()
+            }),
+        }
+    }
 }
 
 pub struct BitgetFutures {
@@ -168,12 +182,6 @@ impl BitgetFutures {
         if let Some(socket) = connection.socket.take() {
             cx.close(socket);
         }
-        if let Some(timer) = connection.watchdog.take() {
-            cx.clear_timer(timer);
-        }
-        if let Some(timer) = connection.reconnect.take() {
-            cx.clear_timer(timer);
-        }
         connection.socket = Some(cx.connect_feed(
             url,
             if index == 3 {
@@ -185,12 +193,11 @@ impl BitgetFutures {
             recover,
         ));
         connection.open = false;
-        connection.last_received = cx.now;
         if index == 3 {
             self.account.authenticated = false;
             self.account.supervisor.connecting(cx);
         } else {
-            connection.watchdog = Some(cx.set_timer(5_000.0));
+            connection.supervisor.connecting(cx);
         }
     }
 
@@ -246,19 +253,12 @@ impl BitgetFutures {
         let connection = &mut self.sockets[index];
         connection.open = false;
         connection.socket = None;
-        if let Some(timer) = connection.watchdog.take() {
-            cx.clear_timer(timer);
-        }
         if index == 3 {
             self.account.authenticated = false;
             self.account.supervisor.retry(cx);
             return;
         }
-        if connection.reconnect.is_none() {
-            let delay = (1_000.0 * 2f64.powi(connection.attempts.min(5) as i32)).min(30_000.0);
-            connection.attempts += 1;
-            connection.reconnect = Some(cx.set_timer(delay));
-        }
+        connection.supervisor.retry(cx);
         if index == 0 {
             for state in self.books.values_mut() {
                 state.reset();
@@ -499,21 +499,14 @@ impl Venue for BitgetFutures {
         };
         let connection = &mut self.sockets[index];
         connection.open = true;
-        if index != 3 {
-            connection.attempts = 0;
-        }
-        connection.last_received = cx.now;
         connection.ping_at = cx.now;
-        if let Some(timer) = connection.watchdog.take() {
-            cx.clear_timer(timer);
-        }
         if index == 3 {
             self.account.supervisor.opened(cx);
             self.private_open(cx, socket);
             cx.send(socket, "ping");
             return;
         }
-        connection.watchdog = Some(cx.set_timer(5_000.0));
+        connection.supervisor.opened(cx);
         let mut topics: Vec<_> = cx
             .store
             .markets()
@@ -540,9 +533,10 @@ impl Venue for BitgetFutures {
         let Some(index) = self.channel(socket) else {
             return;
         };
-        self.sockets[index].last_received = cx.now;
         if index == 3 {
             self.account.supervisor.received(cx.now);
+        } else {
+            self.sockets[index].supervisor.received(cx.now);
         }
         if text == "pong" {
             cx.store
@@ -747,42 +741,30 @@ impl Venue for BitgetFutures {
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
         self.history_timer(cx, timer);
-        match self.account.supervisor.on_timer(cx, timer) {
-            safe_cex_engine::socket::Tick::Reconnect => self.connect(cx, 3),
-            safe_cex_engine::socket::Tick::Ping => {
-                if let Some(socket) = self.sockets[3].socket {
-                    cx.send(socket, "ping");
-                    self.sockets[3].ping_at = cx.now;
-                }
-            }
-            safe_cex_engine::socket::Tick::TimedOut(_) => {
-                if let Some(socket) = self.sockets[3].socket {
-                    cx.close(socket);
-                    self.disconnected(cx, 3);
-                }
-            }
-            _ => (),
-        }
         for index in 0..self.sockets.len() {
-            if self.sockets[index].reconnect == Some(timer) {
-                self.sockets[index].reconnect = None;
-                self.connect(cx, index);
-            }
-            if self.sockets[index].watchdog == Some(timer) {
-                self.sockets[index].watchdog = None;
-                if cx.now - self.sockets[index].last_received >= 20_000.0 {
+            let tick = if index == 3 {
+                self.account.supervisor.on_timer(cx, timer)
+            } else {
+                self.sockets[index].supervisor.on_timer(cx, timer)
+            };
+            match tick {
+                Tick::Unhandled => continue,
+                Tick::Reconnect => self.connect(cx, index),
+                Tick::Ping => {
+                    if let Some(socket) = self.sockets[index].socket {
+                        cx.send(socket, "ping");
+                        self.sockets[index].ping_at = cx.now;
+                    }
+                }
+                Tick::TimedOut(_) => {
                     if let Some(socket) = self.sockets[index].socket {
                         cx.close(socket);
                     }
                     self.disconnected(cx, index);
-                } else if let Some(socket) = self.sockets[index].socket {
-                    if self.sockets[index].open {
-                        cx.send(socket, "ping");
-                        self.sockets[index].ping_at = cx.now;
-                    }
-                    self.sockets[index].watchdog = Some(cx.set_timer(5_000.0));
                 }
+                Tick::Handled => (),
             }
+            return;
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
