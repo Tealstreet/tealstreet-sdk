@@ -15,6 +15,8 @@ export interface Transport {
   signPayload?(request: {
     exchangeName: 'paradex'; key: string; payload: string; scheme: 'stark'; encoding: 'felt-pair';
   }, context: { signal: AbortSignal }): Promise<{ signature: string; headers?: Record<string, string> }> | { signature: string; headers?: Record<string, string> };
+  /** Host-derived protocol options; apply after caller options when constructing the engine. */
+  engineOptions?: Readonly<Record<string, unknown>>;
   /** Header-capable raw socket constructor for HOW and relay protocol clients. */
   WebSocket?: typeof globalThis.WebSocket;
   /** Server fetch does not add browser Origin/Referer headers automatically. */

@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # Paradex streams binary SBE; its JSON control messages use the stable text entry.
 text-ingress = []
+grvt = ["dep:safe-cex-venue-grvt", "text-ingress"]
 polymarket = ["dep:safe-cex-venue-polymarket", "text-ingress"]
 coinbase = ["dep:safe-cex-venue-coinbase", "text-ingress"]
 paradex = ["dep:safe-cex-venue-paradex"]
@@ -27,6 +28,7 @@ bingx = ["dep:safe-cex-venue-bingx", "text-ingress"]
 weex = ["dep:safe-cex-venue-weex", "text-ingress"]
 phemex = ["dep:safe-cex-venue-phemex", "text-ingress"]
 default = [
+    "grvt",
     "polymarket",
     "coinbase",
     "paradex",
@@ -62,6 +64,7 @@ okx = ["dep:safe-cex-venue-okx", "text-ingress"]
 orderly = ["dep:safe-cex-venue-orderly", "text-ingress"]
 
 [dependencies]
+safe-cex-venue-grvt = { workspace = true, optional = true }
 safe-cex-venue-polymarket = { path = "../../venues/polymarket", optional = true }
 safe-cex-venue-coinbase = { path = "../../venues/coinbase", optional = true }
 safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }
