@@ -695,7 +695,8 @@ impl Lighter {
     fn connect_private(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.connection.open = false;
         self.account.connection.last_received = cx.now;
-        self.account.connection.socket = Some(cx.connect(self.ws_url()));
+        self.account.connection.socket =
+            Some(cx.connect_channel(self.ws_url(), safe_cex_engine::SocketChannel::Private));
         if let Some(timer) = self.account.connection.watchdog.take() {
             cx.clear_timer(timer);
         }

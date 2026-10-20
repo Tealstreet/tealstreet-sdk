@@ -515,6 +515,18 @@ async function runTs() {
     if (!values['no-egress'] && state) mainStore.update(structuredClone(worker._prepareStorePayload(state)), true);
   };
   const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
+  // Model worker dispatch through the exchange's real local methods.
+  exchange.emitter.on('callMethod', ({ method, args, requestId }) => {
+    setImmediate(async () => {
+      try {
+        if (!['removeOrders', 'fetchAndSetOrders'].includes(method)) throw new Error(`Unsupported taped worker method ${method}`);
+        const result = await exchange[method](...args);
+        exchange.emitter.emit('callMethod:done', { requestId, success: true, result });
+      } catch (error) {
+        exchange.emitter.emit('callMethod:done', { requestId, success: false, result: { message: error.message } });
+      }
+    });
+  });
   venue.configureTs?.(exchange);
   venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];

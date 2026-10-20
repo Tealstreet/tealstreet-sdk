@@ -191,7 +191,8 @@ impl Lighter {
         );
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket = Some(cx.connect(self.ws_url()));
+        self.public.socket =
+            Some(cx.connect_channel(self.ws_url(), safe_cex_engine::SocketChannel::Public));
         self.public.open = false;
         self.public.last_received = cx.now;
         self.public.watchdog = Some(cx.set_timer(10_000.0));

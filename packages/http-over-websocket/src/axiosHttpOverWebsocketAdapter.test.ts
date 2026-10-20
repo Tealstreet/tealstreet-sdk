@@ -357,6 +357,81 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
     expect(mockWs.sendToken).not.toHaveBeenCalled();
   });
 
+  it('request cancellation during token acquisition sends neither credentials nor a stale write', async () => {
+    let resolveToken!: (token: string) => void;
+    const token = new Promise<string>((resolve) => { resolveToken = resolve; });
+    const getProxyToken = vi.fn(() => token);
+    configureHOW({ getProxyToken, isTokenExpired: () => false });
+    mockWs.authState = 'Unknown';
+    mockWs.isTokenSent = false;
+    const controller = new AbortController();
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    try {
+      const callerConfig: any = { url: '/cancelled', method: 'POST', baseURL: 'https://example.com', headers: {}, signal: controller.signal };
+      const pending = adapter(callerConfig);
+      const canceled = expect(pending).rejects.toMatchObject({ name: 'TradeTunnelCanceledError', config: callerConfig });
+      await vi.waitFor(() => expect(getProxyToken).toHaveBeenCalledOnce());
+      controller.abort();
+      await canceled;
+      resolveToken('arrived-after-cancellation');
+      await token;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockWs.sendToken).not.toHaveBeenCalled();
+      expect(mockWs.sentMessages).toEqual([]);
+    } finally { adapter.dispose(); }
+  });
+
+  it('a request-specific abort leaves another request on the same adapter able to refresh shared authentication', async () => {
+    vi.useFakeTimers();
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    try {
+      const staleToken = new Promise<string>(() => {});
+      const getProxyToken = vi.fn(() => {
+        if (getProxyToken.mock.calls.length <= 2) return Promise.resolve('initial-token');
+        if (getProxyToken.mock.calls.length === 3) return staleToken;
+        return Promise.resolve('survivor-token');
+      });
+      configureHOW({ getProxyToken, isTokenExpired: () => false });
+      mockWs.authState = 'Bad';
+      mockWs.isTokenSent = true;
+      mockWs.sendToken.mockImplementation(() => { mockWs.authState = 'Good'; });
+      mockWs.replyTo = (sent) => {
+        mockWs.emitter.emit('sub:' + sent.nonce, { data: { ok: true }, status: 200, headers: {} });
+      };
+      const controller = new AbortController();
+      const firstConfig: any = { url: '/cancelled', method: 'POST', baseURL: 'https://example.com', headers: {}, timeout: 5_000, signal: controller.signal };
+      const secondConfig: any = { url: '/surviving', method: 'GET', baseURL: 'https://example.com', headers: {}, timeout: 5_000 };
+      const first = adapter(firstConfig).catch((error) => error);
+      const second = adapter(secondConfig);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(getProxyToken).toHaveBeenCalledTimes(3);
+      controller.abort();
+      await expect(first).resolves.toMatchObject({ name: 'TradeTunnelCanceledError', config: firstConfig });
+      await vi.advanceTimersByTimeAsync(600);
+      await expect(second).resolves.toMatchObject({ data: { ok: true }, config: secondConfig });
+      expect(mockWs.sendToken).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ token: 'survivor-token' }));
+      expect(mockWs.sentMessages.filter((message) => message.type === 'rpc.http')).toHaveLength(1);
+    } finally {
+      adapter.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels a response wait without closing a peer request on the same connection', async () => {
+    const controller = new AbortController();
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    try {
+      mockWs.replyTo = (sent) => {
+        if (sent.arg.url.endsWith('/peer')) mockWs.emitter.emit('sub:' + sent.nonce, { data: { ok: true }, status: 200, headers: {} });
+      };
+      const pending = adapter({ url: '/cancelled', method: 'GET', baseURL: 'https://example.com', headers: {}, signal: controller.signal } as any);
+      const canceled = expect(pending).rejects.toMatchObject({ name: 'TradeTunnelCanceledError' });
+      controller.abort();
+      await canceled;
+      await expect(adapter({ url: '/peer', method: 'GET', baseURL: 'https://example.com', headers: {} } as any)).resolves.toMatchObject({ data: { ok: true } });
+    } finally { adapter.dispose(); }
+  });
+
   it('coalesces concurrent Bad-auth refreshes into one token fetch and rpc.auth frame', async () => {
     vi.useFakeTimers();
     try {
@@ -458,6 +533,48 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
       expect(mockWs.sendToken).toHaveBeenCalledTimes(1);
       expect(mockWs.sendToken).toHaveBeenCalledWith(expect.objectContaining({ token: 'retry-token' }));
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('disposal of a shared Bad-auth refresh owner leaves another adapter free to reauthenticate', async () => {
+    vi.useFakeTimers();
+    const firstAdapter = createAxiosHttpOverWebsocketAdapter();
+    const secondAdapter = createAxiosHttpOverWebsocketAdapter();
+    try {
+      let resolveStaleToken!: (token: string) => void;
+      const staleToken = new Promise<string>((resolve) => { resolveStaleToken = resolve; });
+      const getProxyToken = vi.fn(() => {
+        if (getProxyToken.mock.calls.length <= 2) return Promise.resolve('initial-token');
+        if (getProxyToken.mock.calls.length === 3) return staleToken;
+        return Promise.resolve('survivor-token');
+      });
+      configureHOW({ getProxyToken, isTokenExpired: () => false });
+      mockWs.authState = 'Bad';
+      mockWs.isTokenSent = true;
+      mockWs.sendToken.mockImplementation(() => { mockWs.authState = 'Good'; });
+      mockWs.replyTo = (sent) => {
+        mockWs.emitter.emit('sub:' + sent.nonce, { data: { ok: true }, status: 200, headers: {} });
+      };
+      const config = (url: string): any => ({ url, method: 'GET', baseURL: 'https://example.com', headers: {}, timeout: 5_000 });
+      const firstConfig = config('/disposed-owner');
+      const secondConfig = config('/surviving-account');
+      const first = firstAdapter(firstConfig).catch((error) => error);
+      const second = secondAdapter(secondConfig);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(getProxyToken).toHaveBeenCalledTimes(3);
+      firstAdapter.dispose();
+      await expect(first).resolves.toMatchObject({ name: 'TradeTunnelDisposedError', config: firstConfig });
+      await vi.advanceTimersByTimeAsync(600);
+      await expect(second).resolves.toMatchObject({ data: { ok: true }, config: secondConfig });
+      expect(mockWs.sendToken).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ token: 'survivor-token' }));
+      resolveStaleToken('arrived-after-disposal');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockWs.sendToken).toHaveBeenCalledOnce();
+      expect(mockWs.sentMessages.filter((message) => message.type === 'rpc.http')).toHaveLength(1);
+    } finally {
+      firstAdapter.dispose();
+      secondAdapter.dispose();
       vi.useRealTimers();
     }
   });

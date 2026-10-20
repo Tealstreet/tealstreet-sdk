@@ -153,3 +153,14 @@ TS/Rust CPU 590.3/434.2 ms (1.36x), steady 407.4/280.5 ms (1.45x), retained
 Private latest PASS: 14 events, eight commands, 11 tx in ten writes;
 TS/Rust CPU 164.2/171.8 ms (private correctness only), retained 1.2/0.9 MB.
 Landing advanced to Bitrue/transport integration; merge it before final proof.
+
+### Landing integration
+
+Merged `origin/feat/rust-rewrite` at `fc18c55874` (Bitrue and transport routing).
+Kept incoming workspace/host layout and every Bitrue feature, CI job, harness
+validator and event-based heartbeat. Preserved Lighter's type-based heartbeat,
+independent crypto and exact result checks. Lighter sockets now explicitly carry
+public/private roles for identical URLs. Added the new optional slippage field
+to Bitrue's amendment constructor. Earlier broad checks are superseded by the
+merged source; rerun native/wasm, wrapper/transport, harness and replay gates.
+Pre-integration combined Wasm boundary: 31 tests; JS/Workers host: 25 tests.

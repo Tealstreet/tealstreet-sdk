@@ -32,7 +32,7 @@ impl Harness {
             .actions
             .iter()
             .find_map(|a| match a {
-                Action::WsConnect { socket, url } if url.ends_with("/private") => Some(*socket),
+                Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(*socket),
                 _ => None,
             })
             .unwrap();

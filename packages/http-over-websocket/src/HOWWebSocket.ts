@@ -84,7 +84,10 @@ export class HOWWebSocket {
 
   private url: string | undefined;
 
-  constructor(url: string) {
+  constructor(
+    url: string,
+    private readonly WebSocketCtor?: typeof WebSocket,
+  ) {
     if (!url) {
       throw new Error('No HOW websocket endpoint provided');
     }
@@ -100,8 +103,9 @@ export class HOWWebSocket {
     // 3. Force HTTP/1.1 via ALPNProtocols (WebSocket upgrade doesn't work over HTTP/2)
     const options: Record<string, unknown> = {};
 
-    if (NodeWebSocket) {
-      options.WebSocket = NodeWebSocket;
+    const Socket = this.WebSocketCtor ?? NodeWebSocket;
+    if (Socket) {
+      options.WebSocket = Socket;
       options.headers = {
         Origin: 'https://preview.tealstreet.io',
         'User-Agent':

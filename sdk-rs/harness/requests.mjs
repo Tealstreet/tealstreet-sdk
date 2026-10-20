@@ -94,6 +94,7 @@ export const canonicalUrl = (url, callerIds = new Set()) => {
 };
 
 export const requestKey = (method, url, body, callerIds = new Set(), options = {}) => {
+  if (options.requestOptions) options = { ...options, ...options.requestOptions(method, new URL(url)) };
   const prefix = `${method.toUpperCase()} ${canonicalUrl(options.requestUrl?.(url, method) ?? url, callerIds)}`;
   if (body == null || body === '') return prefix;
   if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
@@ -125,7 +126,14 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
   catch { return `WS ${canonicalUrl(url, callerIds)} ${text}`; }
   message = options.subscriptionMessage?.(message) ?? message;
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? '').toLowerCase();
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
+  if (options.bitrueProtocol) {
+    if (message?.ping !== undefined || message?.pong !== undefined) return undefined;
+    if (message?.params?.cb_id !== undefined) {
+      message = { ...message, params: { ...message.params } };
+      delete message.params.cb_id;
+    }
+  }
   if (options.bingxProtocol && (message?.ping !== undefined || message?.pong !== undefined)) return undefined;
   if (options.cryptoProtocol && method === 'public/respond-heartbeat') return undefined;
   if (['ping', 'pong', 'heartbeat'].includes(method)) return undefined;
@@ -169,7 +177,7 @@ export const subscriptionKeys = (url, text, callerIds = new Set(), options = {})
     const key = subscriptionKey(url, text, callerIds, options);
     return key === undefined ? [] : [key];
   }
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? '').toLowerCase();
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
     if (options.cryptoProtocol && Array.isArray(message.params?.channels)) {
       return message.params.channels.map((channel) => subscriptionKey(url,
