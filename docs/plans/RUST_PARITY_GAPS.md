@@ -198,3 +198,30 @@ auth-path/array cases were added; full rerun is required for the final head.
 - Current complete root lint passes 28 tasks. The merged-source native and
   harness pipelines are running; prior incomplete runs spanning landing merges
   are not final gate evidence.
+
+### Final verification checkpoint
+
+- Prediction packaging `131fa13fae`: engine feature off/on 67/69 tests,
+  Polymarket 87, standalone Paradex WASM 6 and both scoped Clippy modes pass.
+  Independent review passes; feature-on frame behavior is unchanged.
+- Spot execution preflight `84dd4f063e`: 135 native tests, including 36 Spot,
+  and Clippy pass. Root and Bitrue independent reviews pass. Invalid execution
+  IDs remain reusable by corrected native rows; legitimate late fills survive.
+- Full workspace: 2,141 native tests, fmt, all-target Clippy, wasm32 Clippy and
+  banned-pattern checks pass. Root typecheck 44 tasks, lint 28 tasks, harness
+  373 tests pass. Repository tests are rerunning after a fixture-order-only
+  Coinbase merge fix; all 58 by-name routing golden values are unchanged.
+- Paradex standard standalone build `26fd74339e`: web and Node each
+  **1,257,099 bytes**, SHA-256
+  `75a8611dbcbbb0ebe6b217bbbe97baf64f85a2113c4dc451c7a5c3700be4765b`.
+  The fixed 1,258,291-byte budget is unchanged. Only its standalone host uses
+  `opt-level=2`; default and other standalone builds retain their profiles.
+  Standard build reproduces the measured candidate byte for byte.
+- Paradex public three-run gate passes: 15,085 frames, 66 markets/tickers,
+  two books. Median TS/Rust CPU 824.587/768.698 ms, steady 508.390/389.793 ms,
+  retained 22,252,865/2,386,964 bytes. Private correctness passes 33 frames,
+  15 commands; two actual SDK signing tests pass on the same artifact.
+  Proof: `/tmp/parity-paradex-proof.json`. Normal egress comparison is enabled.
+- Remaining: final repository tests; Binance and Bitrue replays; feature-on
+  Polymarket packaging replay; KuCoin Spot SDK/capture/public/private gates and
+  futures gates; combined build/host SDK tests; PR reviews and green CI.
