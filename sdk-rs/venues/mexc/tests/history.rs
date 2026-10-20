@@ -254,10 +254,66 @@ fn wide_ranges_are_split_into_disjoint_ninety_day_windows() {
             limit: Some(1000),
         },
     );
-    assert!(r.url.contains("end_time=7776000000"));
+    // 91 days split newest first: [to - 90d + 1, to], then the remaining day.
+    assert!(r.url.contains("start_time=86400001"), "{}", r.url);
     response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
     let r = requests(&mut e).remove(0);
-    assert!(r.url.contains("start_time=7776000001"));
+    assert!(r.url.contains("end_time=86400000"), "{}", r.url);
     response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
     assert_eq!(result(&mut e).unwrap(), "[]");
+}
+
+/// Pins the exact request sequence of a windowed, page-numbered read. Paging
+/// refactors keep it; a deliberate change updates it with its regression.
+#[test]
+fn windowed_order_history_request_sequence_is_pinned() {
+    let mut e = ready();
+    let day = 86_400_000.0;
+    let r = query(
+        &mut e,
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: Some(1.0),
+            to_ms: Some(100.0 * day),
+            limit: Some(1000),
+        },
+    );
+    let mut sent = vec![r.url.split_once("/api/").unwrap().1.to_owned()];
+    response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    let r = requests(&mut e).remove(0);
+    sent.push(r.url.split_once("/api/").unwrap().1.to_owned());
+    response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    assert_eq!(result(&mut e).unwrap(), "[]");
+    assert_eq!(
+        sent,
+        [
+            "v1/private/order/list/history_orders?end_time=8640000000&page_num=1&page_size=100&start_time=864000001&states=3%2C4%2C5",
+            "v1/private/order/list/history_orders?end_time=864000000&page_num=1&page_size=100&start_time=1&states=3%2C4%2C5",
+        ]
+    );
+}
+
+#[test]
+fn a_limited_wide_read_returns_the_newest_rows_not_the_oldest_window() {
+    let mut e = ready();
+    let day = 86_400_000.0;
+    let r = query(
+        &mut e,
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: Some(1.0),
+            to_ms: Some(100.0 * day),
+            limit: Some(1),
+        },
+    );
+    // The newest window comes first, so one row is enough to stop.
+    assert!(r.url.contains("start_time=864000001"), "{}", r.url);
+    let order = r#"{"orderId":"newest","symbol":"BTC_USDT","positionId":1,"price":60000,"vol":1,"leverage":10,"side":1,"category":1,"orderType":1,"dealAvgPrice":60000,"dealVol":1,"orderMargin":6,"takerFee":0,"makerFee":0,"profit":0,"feeCurrency":"USDT","openType":1,"state":3,"externalOid":"","errorCode":0,"usedMargin":6,"createTime":8600000000,"updateTime":8600000000}"#;
+    response(
+        &mut e,
+        &r,
+        &format!(r#"{{"success":true,"code":0,"data":[{order}]}}"#),
+    );
+    // Completing after the first page means no older window was requested.
+    assert!(result(&mut e).unwrap().contains("newest"));
 }

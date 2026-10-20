@@ -2,6 +2,7 @@
 use crate::{MexcFutures, Pending, REST, sign, wire::*};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
+use safe_cex_engine::paging::{self, WindowOrder};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
@@ -239,7 +240,8 @@ impl MexcFutures {
         }
         let limit = limit.unwrap_or(100) as usize;
         let (window_from, window_to) = match (from, to) {
-            (Some(a), None) => (Some(a), Some(cx.now)),
+            // Whole milliseconds keep newest-first window edges gap-free.
+            (Some(a), None) => (Some(a), Some(cx.now.floor())),
             (None, Some(b)) => (Some((b - 7.0 * 86_400_000.0).max(0.0)), Some(b)),
             pair => pair,
         };
@@ -250,16 +252,13 @@ impl MexcFutures {
         let mut windows = VecDeque::new();
         if matches!(kind, Kind::Funding | Kind::Trades) || order_id.is_some() {
             windows.push_back((None, None));
-        } else if let (Some(mut a), Some(b)) = (window_from, window_to) {
-            while a <= b {
-                if windows.len() >= 1000 {
-                    cx.done(command, Err("MEXC query range exceeds 1000 windows".into()));
-                    return;
-                }
-                let end = (a + WINDOW).min(b);
-                windows.push_back((Some(a), Some(end)));
-                a = end + 1.0;
-            }
+        } else if let (Some(a), Some(b)) = (window_from, window_to) {
+            // Newest first: a limited read stops with the most recent rows.
+            let Some(tiles) = paging::windows(a, b, WINDOW, WindowOrder::NewestFirst, 1000) else {
+                cx.done(command, Err("MEXC query range exceeds 1000 windows".into()));
+                return;
+            };
+            windows.extend(tiles.into_iter().map(|(a, b)| (Some(a), Some(b))));
         } else {
             windows.push_back((window_from, window_to));
         }

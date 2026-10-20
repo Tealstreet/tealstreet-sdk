@@ -1,6 +1,8 @@
 use crate::{Coinbase, Pending, account::Editable};
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Command, CommandId, Cx, Method, Outcome, Response, VenueError, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, LogLevel, Method, Outcome, Response, VenueError, num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -16,6 +18,7 @@ enum Step {
         payload: Create,
         order: Box<Order>,
         canceled: Option<String>,
+        reducer: Reducer,
     },
     Cancel {
         ids: Vec<String>,
@@ -55,6 +58,8 @@ struct Reduction {
     accounted_fill: f64,
     /// Time and account revision of a write whose outcome was never reported.
     unresolved: Option<(f64, u64)>,
+    /// The pool of a reduce-only placement; stored orders never report it.
+    reducer: Option<Reducer>,
 }
 /// An unidentified placement is released after this long and one later order snapshot.
 const UNRESOLVED_PLACEMENT_MS: f64 = 30_000.0;
@@ -410,6 +415,7 @@ impl Coinbase {
                 }),
             }),
             canceled,
+            reducer: reducer(opts.kind, opts.close == Some(true)),
         })
     }
 
@@ -572,7 +578,9 @@ impl Coinbase {
                         tp_trigger_type: None,
                         sl_trigger_type: None,
                         client_order_id: None,
-                        close: None,
+                        close: (self.stored_reducer(order) == Reducer::Close
+                            && order.kind != OrderType::Market)
+                            .then_some(true),
                         bybit_bbo: None,
                         bybit_slippage_tolerance_ticks: None,
                         implied_volatility: None,
@@ -601,7 +609,7 @@ impl Coinbase {
             }
             _ => unreachable!(),
         }
-        let mut planned = HashMap::<(String, OrderSide, bool), f64>::new();
+        let mut planned = HashMap::<(String, OrderSide, Reducer), f64>::new();
         let mut constrained = HashSet::new();
         let excluded: HashSet<_> = job
             .steps
@@ -619,22 +627,27 @@ impl Coinbase {
             .chain(self.trading.queue.iter().flat_map(|j| &j.steps))
             .chain(&job.steps)
         {
-            if let Step::Place { order, .. } = step {
-                let key = (order.symbol.clone(), order.side, protective(order.kind));
+            if let Step::Place { order, reducer, .. } = step {
                 if order.reduce_only {
-                    constrained.insert(key.clone());
+                    constrained.insert((order.symbol.clone(), order.side, *reducer));
                 }
                 let amount = order
                     .extra
                     .as_ref()
                     .and_then(|e| e.remaining_native)
                     .unwrap();
-                *planned.entry(key).or_default() += amount;
+                for pool in [Reducer::Stop, Reducer::TakeProfit, Reducer::Close] {
+                    if reserves(*reducer, pool) {
+                        *planned
+                            .entry((order.symbol.clone(), order.side, pool))
+                            .or_default() += amount;
+                    }
+                }
             }
         }
-        for ((symbol, side, stop), amount) in planned {
-            if constrained.contains(&(symbol.clone(), side, stop))
-                && amount > self.reduction_capacity(cx, &symbol, side, stop, &excluded)?
+        for ((symbol, side, class), amount) in planned {
+            if constrained.contains(&(symbol.clone(), side, class))
+                && amount > self.reduction_capacity(cx, &symbol, side, class, &excluded)?
             {
                 return Err(
                     "Coinbase reduce-only orders exceed observed unreserved position size".into(),
@@ -649,7 +662,7 @@ impl Coinbase {
         cx: &Cx<'_, Pending>,
         symbol: &str,
         side: OrderSide,
-        stop: bool,
+        class: Reducer,
         excluded: &HashSet<String>,
     ) -> Result<f64, String> {
         if self
@@ -686,14 +699,14 @@ impl Coinbase {
         if positions.len() != 1 || !positions[0].contracts.is_finite() {
             return Err("Coinbase reduce-only needs exactly one opposite position".into());
         }
-        // A protective stop and a take-profit close the same position as
-        // alternatives, so each class reserves its own remaining size. Executed
-        // and unidentified reductions below count against both classes.
+        // Stops, take-profits and closes reduce the same position as alternatives,
+        // so each pool reserves its own remaining size (see `reserves`). Executed
+        // and unidentified reductions below count against every pool.
         let mut reserved = 0.0;
         for order in cx.store.orders().iter().filter(|o| {
             o.symbol == symbol
                 && o.side == side
-                && protective(o.kind) == stop
+                && reserves(self.stored_reducer(o), class)
                 && live(o)
                 && !excluded.contains(&o.id)
         }) {
@@ -737,6 +750,53 @@ impl Coinbase {
         Ok(capacity.max(0.0))
     }
 
+    fn stored_reducer(&self, order: &Order) -> Reducer {
+        let placed = order
+            .client_order_id
+            .as_ref()
+            .and_then(|c| self.trading.reductions.get(c))
+            .and_then(|r| r.reducer);
+        placed.unwrap_or_else(|| reducer(order.kind, order.close == Some(true)))
+    }
+    /// Coinbase has no native reduce-only, so resting reductions a close leaves
+    /// uncovered can open a new position; name them rather than cancel them.
+    fn warn_orphaned_reductions(&self, cx: &mut Cx<'_, Pending>, close: &Order, amount: f64) {
+        let Some(position) = self.observed_position_native(cx, &close.symbol, close.side) else {
+            return;
+        };
+        let left = (position - amount).max(0.0);
+        for class in [Reducer::Stop, Reducer::TakeProfit] {
+            let resting: Vec<_> = cx
+                .store
+                .orders()
+                .iter()
+                .filter(|o| {
+                    o.symbol == close.symbol
+                        && o.side == close.side
+                        && live(o)
+                        && o.client_order_id
+                            .as_ref()
+                            .and_then(|c| self.trading.reductions.get(c))
+                            .is_some_and(|r| r.reducer == Some(class))
+                })
+                .collect();
+            let reserved: f64 = resting
+                .iter()
+                .filter_map(|o| o.extra.as_ref().and_then(|e| e.remaining_native))
+                .sum();
+            if reserved > left {
+                let ids: Vec<_> = resting.iter().map(|o| o.id.as_str()).collect();
+                cx.log(
+                    LogLevel::Warning,
+                    format!(
+                        "Coinbase close of {} leaves reduce-only orders {} exceeding the remaining position; Coinbase cannot enforce reduce-only, so cancel them or they may open a new position",
+                        close.symbol,
+                        ids.join(", ")
+                    ),
+                );
+            }
+        }
+    }
     fn observed_position_native(
         &self,
         cx: &Cx<'_, Pending>,
@@ -894,6 +954,7 @@ impl Coinbase {
                 native_id: Some(order.id.clone()),
                 accounted_fill: previous_base / scale,
                 unresolved: None,
+                reducer: None,
             },
         );
     }
@@ -1106,6 +1167,7 @@ impl Coinbase {
                 order,
                 payload,
                 canceled,
+                reducer,
             } => {
                 if let Some(id) = canceled
                     && !cx
@@ -1143,11 +1205,14 @@ impl Coinbase {
                             cx,
                             &order.symbol,
                             order.side,
-                            protective(order.kind),
+                            *reducer,
                             &HashSet::new(),
                         )?
                 {
                     return Err("Coinbase reduce-only position changed before dispatch".into());
+                }
+                if order.reduce_only && *reducer == Reducer::Close {
+                    self.warn_orphaned_reductions(cx, order, amount);
                 }
                 self.private_placement_started(&payload.client_order_id)?;
                 let baseline = self
@@ -1169,6 +1234,7 @@ impl Coinbase {
                         native_id: None,
                         accounted_fill: 0.0,
                         unresolved: None,
+                        reducer: order.reduce_only.then_some(*reducer),
                     },
                 );
             }
@@ -1570,8 +1636,24 @@ fn unknown(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
 
-fn protective(kind: OrderType) -> bool {
-    kind == OrderType::StopLoss
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Reducer {
+    Stop,
+    TakeProfit,
+    Close,
+}
+/// A close is never held back by resting take-profits or stops, but a new
+/// take-profit still counts resting closes so it cannot outlive the position.
+fn reserves(order: Reducer, pool: Reducer) -> bool {
+    order == pool || pool == Reducer::TakeProfit && order == Reducer::Close
+}
+fn reducer(kind: OrderType, close: bool) -> Reducer {
+    match kind {
+        OrderType::StopLoss => Reducer::Stop,
+        OrderType::Market => Reducer::Close,
+        _ if close => Reducer::Close,
+        _ => Reducer::TakeProfit,
+    }
 }
 fn reason(code: Option<String>) -> Option<String> {
     code.filter(|c| !c.is_empty() && !c.starts_with("UNKNOWN_"))

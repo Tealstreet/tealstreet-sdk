@@ -2,6 +2,12 @@ use serde::Deserialize;
 use std::borrow::Cow;
 
 pub use safe_cex_engine::de::Number;
+/// Public discovery fields: blank reads as 0, null and malformed reject the row.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(transparent)]
+pub struct PublicNumber(
+    #[serde(deserialize_with = "safe_cex_engine::de::number_or_blank_zero")] pub f64,
+);
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Gamma<'a> {
@@ -23,8 +29,8 @@ pub struct Gamma<'a> {
     pub closed: Option<bool>,
     pub enable_order_book: Option<bool>,
     pub accepting_orders: Option<bool>,
-    pub order_price_min_tick_size: Option<Number>,
-    pub order_min_size: Option<Number>,
+    pub order_price_min_tick_size: Option<PublicNumber>,
+    pub order_min_size: Option<PublicNumber>,
     pub neg_risk: Option<bool>,
 }
 #[derive(Deserialize)]

@@ -1,3 +1,4 @@
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 
@@ -27,6 +28,7 @@ it.each([
   const construct = vi.fn(function (_venue: string, _options: string) { return engine; });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
   const store = new DefaultStore();
+  installNativeStartupFrames(engine, store);
   store.update({ loaded: nativeLoaded });
   const exchange = new RustEngineExchange('blofin', {
     key: 'fixture-key', secret: 'fixture-secret', passphrase: 'fixture-pass', tealstreetProxy,
