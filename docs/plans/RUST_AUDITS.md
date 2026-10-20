@@ -296,3 +296,19 @@ further cutover and warrants re-checking coinbase, Orderly, txflow.
 - Low: Asterdex unsupported interval mapped to 1h breaks candle matching;
   `num::adjust` with step ≤ 0; no command deadline, `execute` drops the batch tail
   on an unknown action; candles drop `lastSide`, orders lack generic `triggerType`.
+
+### Kraken
+Futures matches TS on nearly every input; no high regression.
+- Medium: isolated positions flip to cross when a WS row omits
+  `maxFixedLeverage` (`kraken/src/account.rs:1056,1132`; confirm live);
+  `more_candles: true` fails the whole candle fetch, empty chart (`lib.rs:727`);
+  spot `EGeneral:Permission denied` on an order deactivates the account
+  (`spot/account.rs:513`).
+- Owner decision: market entry with attached TP/SL — TS silently drops the
+  legs, Rust rejects the order.
+- Low: income over 500 rows errors (TS partial); one bad row rejects
+  catalogue/tickers/open orders and blocks private start (startup lane);
+  missing funding field set to 0; raw error text; spot 3m candles.
+- Confirm (TS bugs Rust fixed): index trigger signal; full_fill not canceled;
+  live % change/volume/OI; stop amend racing a fill; spot fills over-reported
+  and mislabelled XBT/BTC.
