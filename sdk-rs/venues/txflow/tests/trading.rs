@@ -338,7 +338,7 @@ fn unconfirmed_consensus_success_is_not_executed_success() {
     ));
 }
 #[test]
-fn explicit_rejections_stay_plain_and_lost_responses_are_unknown() {
+fn explicit_rejections_are_rejected_and_lost_responses_are_unknown() {
     let mut e = engine();
     place(&mut e, 7, vec![limit("rejected")]);
     let r = write(&mut e);
@@ -581,4 +581,23 @@ fn preflight_refusals_are_never_sent() {
     let [error] = failures(&mut e).try_into().unwrap();
     assert!(error.message.contains("Duplicate"));
     assert_eq!(error.outcome, Some(Outcome::NotSent));
+}
+
+#[test]
+fn a_single_action_error_status_is_a_rejection() {
+    let mut e = engine();
+    place(&mut e, 7, vec![limit("rejected")]);
+    let r = write(&mut e);
+    ack(
+        &mut e,
+        &r,
+        200,
+        r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"PlaceOrder","data":{"statuses":[{"error":"Insufficient margin"}]}}}"#,
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(
+        error.legacy_text(),
+        "Insufficient margin; reconcile before any resubmission"
+    );
+    assert_eq!(error.outcome, Some(Outcome::Rejected));
 }

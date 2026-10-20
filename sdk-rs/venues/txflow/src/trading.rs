@@ -317,10 +317,15 @@ impl TxFlow {
             _ => return,
         };
         if !self.options.testnet || self.options.public_data_only || self.user().is_none() {
+            // Only a missing account is an auth problem; mainnet or public-only is unsupported.
+            let kind = if !self.options.testnet || self.options.public_data_only {
+                ErrorKind::Unsupported
+            } else {
+                ErrorKind::AuthInvalid
+            };
             cx.fail(
                 id,
-                not_sent("TxFlow trading requires an authenticated testnet account")
-                    .kind(ErrorKind::AuthInvalid),
+                not_sent("TxFlow trading requires an authenticated testnet account").kind(kind),
             );
             return;
         }
