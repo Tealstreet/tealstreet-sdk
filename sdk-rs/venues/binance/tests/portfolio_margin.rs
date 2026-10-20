@@ -12,6 +12,10 @@ const OPEN_ORDERS: &str = r#"[{"avgPrice":"0.00000","clientOrderId":"x-s3vFFRQpr
 const OPEN_CONDITIONAL: &str = r#"[{"newClientStrategyId":"abc","strategyId":123445,"strategyStatus":"NEW","strategyType":"TAKE_PROFIT_MARKET","origQty":"0.010","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","stopPrice":"99000","symbol":"BTCUSDT","bookTime":1566818724710,"updateTime":1566818724722,"timeInForce":"GTC","workingType":"MARK_PRICE","priceProtect":false}]"#;
 
 fn ready() -> Harness {
+    ready_with(OPEN_ORDERS)
+}
+
+fn ready_with(open_orders: &str) -> Harness {
     let mut h = Harness::started(Options {
         key: Some("api-key".into()),
         secret: Some("secret".into()),
@@ -35,7 +39,7 @@ fn ready() -> Harness {
     );
     h.respond("/papi/v1/um/positionRisk", 200, POSITION_RISK);
     h.respond("/papi/v1/balance", 200, BALANCE);
-    h.respond("/papi/v1/um/openOrders", 200, OPEN_ORDERS);
+    h.respond("/papi/v1/um/openOrders", 200, open_orders);
     h.respond("/papi/v1/um/conditional/openOrders", 200, OPEN_CONDITIONAL);
     for path in ["/public/ws", "/market/ws", "/pm/ws"] {
         let socket = h.socket(path).unwrap();
@@ -299,6 +303,20 @@ fn margin_type_is_refused_on_a_cross_only_account() {
     }));
     assert!(h.requests.is_empty());
     assert!(matches!(h.result(5), Some(Err(message)) if message.contains("cross margin only")));
+}
+
+#[test]
+fn an_invalid_open_order_row_names_the_order_and_fails_the_snapshot() {
+    let overfilled = OPEN_ORDERS.replace(r#""executedQty":"0""#, r#""executedQty":"0.50""#);
+    let h = ready_with(&overfilled);
+    assert!(
+        h.logs
+            .iter()
+            .any(|log| log == "Binance open order row has invalid economics: order 1917641"),
+        "{:?}",
+        h.logs
+    );
+    assert!(h.engine.store().order("x-s3vFFRQpresting").is_none());
 }
 
 #[test]
