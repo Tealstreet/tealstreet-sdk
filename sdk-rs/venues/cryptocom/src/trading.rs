@@ -292,6 +292,7 @@ impl Cryptocom {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => {
                 if cx.store.market(&symbol).is_none()
                     || !(1.0..=100.0).contains(&leverage)

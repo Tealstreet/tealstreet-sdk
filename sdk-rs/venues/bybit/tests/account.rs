@@ -372,7 +372,13 @@ fn order_and_execution_frames_drive_the_lifecycle_and_report_each_execution() {
         "/v5/private",
         &order_frame("Filled", "0.002", "0", "EC_NoError"),
     );
-    h.message("/v5/private", &execution_frame("0.001", "97001"));
+    h.message(
+        "/v5/private",
+        &execution_frame("0.001", "97001").replace(
+            "0ab1bdf7-4219-438b-b30a-32ec863018f7",
+            "0ab1bdf7-4219-438b-b30a-32ec863018f8",
+        ),
+    );
     assert_eq!(
         h.engine.store().order(id).unwrap().status,
         OrderStatus::Closed
@@ -807,6 +813,7 @@ fn leverage_margin_and_position_mode_update_the_settings_frame() {
         command: 16,
         symbol: "BTCUSDT".into(),
         leverage: 500.0,
+        side: None,
     });
     let request = h.take("/v5/position/set-leverage");
     assert_eq!(
@@ -822,6 +829,7 @@ fn leverage_margin_and_position_mode_update_the_settings_frame() {
         command: 17,
         symbol: "ETHUSDT".into(),
         leverage: 20.0,
+        side: None,
     });
     assert!(h.requests.is_empty(), "already at 20x");
     assert_eq!(h.result(17), Some(&Ok("[]".to_owned())));
@@ -846,6 +854,7 @@ fn leverage_margin_and_position_mode_update_the_settings_frame() {
     h.command(Command::SetPositionMode {
         command: 19,
         hedged: true,
+        symbol: None,
     });
     let request = h.take("/v5/position/switch-mode");
     assert_eq!(
@@ -1089,6 +1098,7 @@ fn a_mode_switch_fences_old_position_snapshots_and_queues_a_refresh() {
     h.command(Command::SetPositionMode {
         command: 55,
         hedged: true,
+        symbol: None,
     });
     h.respond("/v5/position/switch-mode", 200, OK_EMPTY);
     h.reply(usdt.id, 200, POSITIONS);

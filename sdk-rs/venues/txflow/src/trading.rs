@@ -180,6 +180,7 @@ impl TxFlow {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => {
                 let step = self
                     .assets
@@ -237,7 +238,11 @@ impl TxFlow {
                         }])
                     }),
             ),
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 let steps = if cx.store.positions().iter().any(|p| p.contracts != 0.0)
                     || !cx.store.orders().is_empty()
                 {

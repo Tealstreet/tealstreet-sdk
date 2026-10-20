@@ -873,3 +873,22 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Classic and UTA both send `clientOid`, rule `^[.A-Z:/a-z0-9_-]{1,32}$`. Inherited by inverse and USDC.
 - **The native modify-order sends `newClientOid: uuid()`**, so an amend rewrites the client ID even though it keeps the order. Not changed: whether Bitget accepts the old ID as `newClientOid` is unverified, and a rejection falls back to cancel+replace silently.
+
+## Rust account and trading audit fixes
+
+Isolated hedge leverage preserves the requested Long/Short through the shared
+command: Classic uses `holdSide`, UTA uses `posSide`; omission defaults long.
+Successful writes and snapshots retain independent buy/sell settings, including
+flat legs and stale-read fences. Cross and one-way leverage stay coupled.
+Commands wait for the existing account probe. Anonymous orders below one lot
+are skipped within a batch; explicit caller IDs still fail preflight if no
+order can honor them. Sized full-position stops emit a downgrade warning.
+
+Classic history recognizes forced-close long/short suffixes and absent profit
+as zero. Typed unmappable account rows warn and skip independently; wholly
+unmappable nonempty snapshots preserve known state, while actual empty lists
+clear it. Malformed envelopes and failed reads never clear good state. Busy
+Classic stream refreshes reschedule, zero leverage limits default to 1/20, and
+invalid bounds fail visibly before writes. UTA one-way fills retain their
+execution-derived position leg. Startup retry and Confirm audit items remain
+outside this change.

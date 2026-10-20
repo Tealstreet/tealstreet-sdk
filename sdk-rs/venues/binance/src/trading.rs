@@ -88,17 +88,25 @@ struct CancelTarget {
 
 enum CancelProof {
     One(CancelTarget),
+    Algo(CancelTarget),
+    Strategy(CancelTarget),
     Batch(Vec<CancelTarget>),
     SpotAll {
         symbol: String,
         targets: Vec<CancelTarget>,
     },
     CoinAll(Vec<CancelTarget>),
+    SymbolAll {
+        targets: Vec<CancelTarget>,
+        strategy: bool,
+    },
 }
 
 #[derive(Default)]
 pub struct TradingState {
     jobs: HashMap<CommandId, Job>,
+    #[cfg(test)]
+    id_generator: Option<fn() -> Result<String, String>>,
 }
 
 /// Request parameters in order, rendered as a query or as a batch JSON object.
@@ -172,9 +180,10 @@ fn is_algo(kind: OrderType) -> bool {
     )
 }
 
-fn generated_id() -> String {
-    let id = safe_cex_crypto::uuid::uuid().unwrap_or_default();
-    format!("{BROKER_PREFIX}{id}")
+fn generated_id_with(uuid: impl FnOnce() -> Result<String, String>) -> Result<String, String> {
+    let id =
+        uuid().map_err(|error| format!("Binance client order ID generation failed: {error}"))?;
+    Ok(format!("{BROKER_PREFIX}{id}"))
 }
 
 /// USD-M's documented client order ID charset.
@@ -190,6 +199,21 @@ fn number(value: f64) -> String {
 }
 
 impl BinanceFutures {
+    fn generated_id(&self) -> Result<String, String> {
+        #[cfg(test)]
+        if let Some(generator) = self.trading.id_generator {
+            return generated_id_with(generator);
+        }
+        generated_id_with(safe_cex_crypto::uuid::uuid)
+    }
+
+    fn client_id(&self, input: &Option<String>) -> Result<String, String> {
+        match input {
+            Some(id) => Ok(id.clone()),
+            None => self.generated_id(),
+        }
+    }
+
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         if let Command::FetchStpMode { command }
         | Command::AmendOrderWithSymbol { command, .. }
@@ -253,8 +277,14 @@ impl BinanceFutures {
                         path: self.paths.cancel_all,
                         query: Query::new().str("symbol", &symbol),
                         call: Call::Cancel {
+                            proof: Some(CancelProof::SymbolAll {
+                                targets: regular
+                                    .iter()
+                                    .map(|order| self.cancel_target(order))
+                                    .collect(),
+                                strategy: false,
+                            }),
                             ids: ids(regular),
-                            proof: None,
                         },
                     },
                     Planned {
@@ -262,8 +292,14 @@ impl BinanceFutures {
                         path: self.paths.cancel_all_conditional,
                         query: Query::new().str("symbol", &symbol),
                         call: Call::Cancel {
+                            proof: Some(CancelProof::SymbolAll {
+                                targets: algo
+                                    .iter()
+                                    .map(|order| self.cancel_target(order))
+                                    .collect(),
+                                strategy: true,
+                            }),
                             ids: ids(algo),
-                            proof: None,
                         },
                     },
                 ];
@@ -311,6 +347,7 @@ impl BinanceFutures {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => (command, self.plan_leverage(cx, symbol, leverage)),
             Command::SetMarginType {
                 command,
@@ -327,7 +364,11 @@ impl BinanceFutures {
                 };
                 (command, plan)
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 let plan = if cx.store.positions().iter().any(|p| p.contracts > 0.0) {
                     Err("Please close all positions before switching position mode".to_owned())
                 } else {
@@ -526,9 +567,9 @@ impl BinanceFutures {
                 },
                 Ok(body),
             ) => match proof {
-                Some(proof) => self.confirm_cancel(cx, &canceled, proof, body),
+                Some(proof) => self.confirm_cancel(cx, proof, body),
                 None => {
-                    mark_canceled(cx, &canceled);
+                    self.mark_canceled(cx, &canceled);
                     None
                 }
             },
@@ -539,22 +580,32 @@ impl BinanceFutures {
                 },
                 Err((UNKNOWN_ORDER, message)),
             ) => {
-                if proof.is_some()
-                    && self
-                        .trading
-                        .jobs
-                        .get(&command)
-                        .is_some_and(|job| job.amendment.is_some())
+                if self
+                    .trading
+                    .jobs
+                    .get(&command)
+                    .is_some_and(|job| job.amendment.is_some())
                 {
                     Some((
                         UNKNOWN_ORDER,
                         format!("Cancellation was not confirmed: {message}"),
                     ))
                 } else {
-                    if proof.is_some() {
-                        mark_canceled_preserving_closed(cx, &canceled);
-                    } else {
-                        mark_canceled(cx, &canceled);
+                    match proof {
+                        Some(CancelProof::One(target)) => {
+                            self.mark_captured_canceled(cx, &[target], false);
+                        }
+                        Some(CancelProof::Algo(target) | CancelProof::Strategy(target)) => {
+                            self.mark_captured_canceled(cx, &[target], true);
+                        }
+                        Some(CancelProof::SymbolAll { targets, strategy }) => {
+                            self.mark_captured_canceled(cx, &targets, strategy);
+                        }
+                        Some(CancelProof::Batch(targets) | CancelProof::CoinAll(targets))
+                        | Some(CancelProof::SpotAll { targets, .. }) => {
+                            self.mark_captured_canceled(cx, &targets, false);
+                        }
+                        None => self.mark_canceled(cx, &canceled),
                     }
                     None
                 }
@@ -741,7 +792,7 @@ impl BinanceFutures {
             .iter()
             .filter(|o| {
                 o.symbol == opts.symbol
-                    && (!self.is_inverse() || o.status == OrderStatus::Open)
+                    && o.status == OrderStatus::Open
                     && o.close == Some(true)
                     && o.amount == 0.0
                     && o.kind == opts.kind
@@ -769,9 +820,11 @@ impl BinanceFutures {
                         .str(field, &order.id),
                     call: Call::Cancel {
                         ids: vec![order.id.clone()],
-                        proof: self
-                            .is_spot()
-                            .then(|| CancelProof::One(self.cancel_target(order))),
+                        proof: Some(if !self.is_spot() && is_algo(order.kind) {
+                            CancelProof::Strategy(self.cancel_target(order))
+                        } else {
+                            CancelProof::One(self.cancel_target(order))
+                        }),
                     },
                 }]);
             }
@@ -800,7 +853,7 @@ impl BinanceFutures {
                     query,
                     call: Call::Cancel {
                         ids: ids.clone(),
-                        proof: self.is_inverse().then(|| {
+                        proof: Some({
                             CancelProof::One(CancelTarget {
                                 id: id.clone(),
                                 symbol: symbol.clone(),
@@ -822,7 +875,7 @@ impl BinanceFutures {
                     query,
                     call: Call::Cancel {
                         ids: lot.to_vec(),
-                        proof: self.is_inverse().then(|| {
+                        proof: Some({
                             CancelProof::Batch(
                                 lot.iter()
                                     .map(|id| CancelTarget {
@@ -847,7 +900,7 @@ impl BinanceFutures {
                 query: Query::new().str("algoId", &order.id),
                 call: Call::Cancel {
                     ids: vec![order.id.clone()],
-                    proof: None,
+                    proof: Some(CancelProof::Algo(self.cancel_target(order))),
                 },
             }]);
         }
@@ -924,10 +977,7 @@ impl BinanceFutures {
             return Err("Client order ID requires one native order".into());
         }
         for p in &mut out {
-            p.set(
-                "newClientOrderId",
-                opts.client_order_id.clone().unwrap_or_else(generated_id),
-            );
+            p.set("newClientOrderId", self.client_id(&opts.client_order_id)?);
         }
         for (kind, trigger) in [
             ("STOP_LOSS", opts.stop_loss),
@@ -952,7 +1002,7 @@ impl BinanceFutures {
                 for mut part in
                     sized_payloads(p, amount, market.limits.amount.max, market.precision.amount)?
                 {
-                    part.set("newClientOrderId", generated_id());
+                    part.set("newClientOrderId", self.generated_id()?);
                     out.push(part);
                 }
             }
@@ -1051,7 +1101,7 @@ impl BinanceFutures {
             sized_payloads(p, amount, market.limits.amount.max, market.precision.amount)?
         };
         for p in &mut out {
-            p.set("newClientOrderId", generated_id());
+            p.set("newClientOrderId", self.generated_id()?);
         }
         for (kind, trigger) in [
             (OrderType::StopLoss, opts.stop_loss),
@@ -1119,13 +1169,11 @@ impl BinanceFutures {
         price: Option<f64>,
         amount: Option<f64>,
     ) -> Result<Job, String> {
-        if (self.is_spot() || self.is_inverse())
-            && self.trading.jobs.values().any(|job| {
-                job.amendment
-                    .as_ref()
-                    .is_some_and(|amendment| amendment.id == id)
-            })
-        {
+        if self.trading.jobs.values().any(|job| {
+            job.amendment
+                .as_ref()
+                .is_some_and(|amendment| amendment.id == id)
+        }) {
             return Err("An amendment is already pending for this order".into());
         }
         let order = cx
@@ -1133,7 +1181,7 @@ impl BinanceFutures {
             .order(id)
             .cloned()
             .ok_or_else(|| format!("Order {id} not found"))?;
-        if (self.is_spot() || self.is_inverse()) && order.status != OrderStatus::Open {
+        if order.status != OrderStatus::Open {
             return Err("Only an open order can be amended".into());
         }
         let replacement = PlaceOrderOpts {
@@ -1162,22 +1210,19 @@ impl BinanceFutures {
             close: Some(order.close.unwrap_or(false)),
             stp_mode: None,
         };
-        let place = self.plan_place(cx, std::slice::from_ref(&replacement))?;
+        // Validate before canceling; build the final payload after its cumulative fill is known.
+        self.plan_place(cx, std::slice::from_ref(&replacement))?;
         let mut job = self.plan_cancel(std::slice::from_ref(&order));
-        if self.is_spot() || self.is_inverse() {
-            let step = cx
-                .store
-                .market(&order.symbol)
-                .map_or(1.0, |market| market.precision.amount);
-            let target_total = num::adjust(replacement.amount, step);
-            job.amendment = Some(Amendment {
-                id: id.to_owned(),
-                target_total,
-                replacement,
-            });
-        } else {
-            job.steps.extend(place.steps);
-        }
+        let step = cx
+            .store
+            .market(&order.symbol)
+            .map_or(1.0, |market| market.precision.amount);
+        let target_total = num::adjust(replacement.amount, step);
+        job.amendment = Some(Amendment {
+            id: id.to_owned(),
+            target_total,
+            replacement,
+        });
         Ok(job)
     }
 
@@ -1292,7 +1337,7 @@ impl BinanceFutures {
                 params.set("reduceOnly", "true");
             }
             params.set("workingType", working_type(opts));
-            params.set("clientAlgoId", generated_id());
+            params.set("clientAlgoId", self.generated_id()?);
             algo.push(params);
         } else {
             let mut params = Params::default();
@@ -1337,7 +1382,7 @@ impl BinanceFutures {
                 ));
             }
             for mut payload in payloads {
-                let id = opts.client_order_id.clone().unwrap_or_else(generated_id);
+                let id = self.client_id(&opts.client_order_id)?;
                 payload.set("newClientOrderId", id);
                 regular.push(payload);
             }
@@ -1377,7 +1422,7 @@ impl BinanceFutures {
                 ..opts.clone()
             };
             params.set("workingType", working_type(&bracket));
-            params.set("clientAlgoId", generated_id());
+            params.set("clientAlgoId", self.generated_id()?);
             algo.push(params);
         }
         Ok((regular, algo))
@@ -1425,7 +1470,7 @@ impl BinanceFutures {
         params.set("quantity", number(position.contracts));
         params.set("callbackRate", number(rate));
         params.set("priceProtect", "TRUE");
-        params.set("clientAlgoId", generated_id());
+        params.set("clientAlgoId", self.generated_id()?);
         Ok(params)
     }
 }
@@ -1462,12 +1507,6 @@ fn working_type(opts: &PlaceOrderOpts) -> &'static str {
             Some(StopTriggerType::LastPrice) => "CONTRACT_PRICE",
             _ => "MARK_PRICE",
         },
-    }
-}
-
-fn mark_canceled(cx: &mut Cx<'_, Pending>, ids: &[String]) {
-    for id in ids {
-        cx.store.set_order_status(id, OrderStatus::Canceled);
     }
 }
 
@@ -1546,6 +1585,22 @@ struct CancelAck {
     client_order_id: Option<String>,
     #[serde(default)]
     orig_client_order_id: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum CancelCode {
+    Number(u16),
+    Text(String),
+}
+
+impl CancelCode {
+    fn success(&self) -> bool {
+        match self {
+            Self::Number(code) => *code == 200,
+            Self::Text(code) => code == "200",
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -1646,11 +1701,108 @@ fn mark_canceled_preserving_closed(cx: &mut Cx<'_, Pending>, ids: &[String]) {
 }
 
 impl BinanceFutures {
+    fn mark_canceled(&mut self, cx: &mut Cx<'_, Pending>, ids: &[String]) {
+        for id in ids {
+            if let Some(order) = cx.store.order(id) {
+                let symbol = order.symbol.clone();
+                let filled = order.filled;
+                let native_regular = self.is_inverse() || !is_algo(order.kind);
+                let closed = order.status == OrderStatus::Closed;
+                if !native_regular {
+                    self.observe_strategy_terminal(&symbol, id);
+                } else {
+                    let native = if self.is_spot() || self.options.portfolio_margin {
+                        self.spot_native_order_id(&symbol, id)
+                    } else {
+                        id.parse().ok()
+                    };
+                    if let Some(native) = native {
+                        if closed {
+                            self.observe_native_terminal(&symbol, native, filled);
+                        } else {
+                            self.observe_unquantified_cancel(&symbol, native, filled);
+                        }
+                    }
+                }
+            }
+        }
+        mark_canceled_preserving_closed(cx, ids);
+        self.fence_order_snapshots();
+    }
+
+    fn cancel_target_is_current(
+        &self,
+        cx: &Cx<'_, Pending>,
+        target: &CancelTarget,
+        strategy: bool,
+    ) -> bool {
+        let current = if self.options.portfolio_margin && strategy {
+            self.pm_strategy_native_order_id(&target.symbol, &target.id)
+        } else if self.is_spot() || self.options.portfolio_margin {
+            self.spot_native_order_id(&target.symbol, &target.id)
+        } else {
+            target.id.parse().ok()
+        };
+        target.native.is_some()
+            && current == target.native
+            && !self.client_order_row_is_foreign(cx, &target.symbol, &target.id)
+            && cx.store.order(&target.id).is_none_or(|order| {
+                (!(self.is_spot() || self.is_inverse()) && is_algo(order.kind)) == strategy
+            })
+    }
+
+    fn observe_captured_cancel(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        target: &CancelTarget,
+        strategy: bool,
+        current: bool,
+    ) {
+        let Some(native) = target.native else { return };
+        if strategy {
+            if self.options.portfolio_margin {
+                self.observe_native_strategy_terminal(&target.symbol, native);
+            } else {
+                self.observe_strategy_terminal(&target.symbol, &target.id);
+            }
+        } else {
+            let order = current.then(|| cx.store.order(&target.id)).flatten();
+            let filled = self
+                .known_native_filled(&target.symbol, native)
+                .max(order.map_or(0.0, |order| order.filled));
+            if order.is_some_and(|order| order.status == OrderStatus::Closed) {
+                self.observe_native_terminal(&target.symbol, native, filled);
+            } else {
+                self.observe_unquantified_cancel(&target.symbol, native, filled);
+            }
+        }
+    }
+
+    fn mark_captured_canceled(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        targets: &[CancelTarget],
+        strategy: bool,
+    ) {
+        let mut unchanged = Vec::new();
+        for target in targets {
+            let current = self.cancel_target_is_current(cx, target, strategy);
+            self.observe_captured_cancel(cx, target, strategy, current);
+            if current {
+                unchanged.push(target.id.clone());
+            }
+        }
+        mark_canceled_preserving_closed(cx, &unchanged);
+        self.fence_order_snapshots();
+    }
+
     fn cancel_target(&self, order: &Order) -> CancelTarget {
         CancelTarget {
             id: order.id.clone(),
             symbol: order.symbol.clone(),
-            native: if self.is_spot() {
+            native: if self.options.portfolio_margin && is_algo(order.kind) {
+                self.pm_strategy_native_order_id(&order.symbol, &order.id)
+            } else if self.is_spot() || self.options.portfolio_margin {
                 self.spot_native_order_id(&order.symbol, &order.id)
             } else {
                 order.id.parse().ok()
@@ -1662,58 +1814,58 @@ impl BinanceFutures {
         ack.order_id > 0
             && ack.symbol == target.symbol
             && target.native.is_none_or(|native| native == ack.order_id)
-            && (!self.is_spot()
+            && (!(self.is_spot() || self.options.portfolio_margin)
                 || ack.orig_client_order_id.as_deref() == Some(target.id.as_str())
                 || ack.client_order_id.as_deref() == Some(target.id.as_str()))
-            && (!self.is_spot()
-                || self
-                    .spot_native_order_id(&target.symbol, &target.id)
-                    .is_none_or(|current| target.native == Some(current)))
             && canceled_status(&ack.status)
             && cancel_quantities(ack).is_some()
     }
 
-    fn apply_cancel_ack(&mut self, cx: &mut Cx<'_, Pending>, id: &str, ack: &CancelAck) {
+    fn apply_cancel_ack(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        target: &CancelTarget,
+        ack: &CancelAck,
+    ) -> bool {
         let (amount, filled) = cancel_quantities(ack).expect("validated cancellation quantities");
         let now = cx.now;
         let inverse = self.is_inverse();
         let mut final_filled = filled.max(self.known_native_filled(&ack.symbol, ack.order_id));
-        cx.store.update_order(id, |order| {
-            order.filled = order.filled.max(final_filled);
-            final_filled = order.filled;
-            order.remaining = (amount - order.filled).max(0.0);
-            if inverse {
-                order
-                    .extra
-                    .get_or_insert_with(Default::default)
-                    .remaining_native = Some(order.remaining);
-            }
-            if order.status != OrderStatus::Closed {
-                order.status = if ack.status == "FILLED" || (amount > 0.0 && order.filled >= amount)
-                {
-                    OrderStatus::Closed
-                } else {
-                    OrderStatus::Canceled
-                };
-            }
-            order.last_update = now;
-        });
+        let current = self.cancel_target_is_current(cx, target, false);
+        if current {
+            cx.store.update_order(&target.id, |order| {
+                order.filled = order.filled.max(final_filled);
+                final_filled = order.filled;
+                order.remaining = (amount - order.filled).max(0.0);
+                if inverse {
+                    order
+                        .extra
+                        .get_or_insert_with(Default::default)
+                        .remaining_native = Some(order.remaining);
+                }
+                if order.status != OrderStatus::Closed {
+                    order.status =
+                        if ack.status == "FILLED" || (amount > 0.0 && order.filled >= amount) {
+                            OrderStatus::Closed
+                        } else {
+                            OrderStatus::Canceled
+                        };
+                }
+                order.last_update = now;
+            });
+        }
         self.observe_native_terminal(&ack.symbol, ack.order_id, final_filled);
+        current
     }
 
     fn remember_cancel_all_row(&mut self, cx: &mut Cx<'_, Pending>, target: &CancelTarget) {
-        if let Some(native) = target.native
-            && let Some(order) = cx.store.order(&target.id)
-            && order.status != OrderStatus::Closed
-        {
-            self.observe_unquantified_cancel(&target.symbol, native, order.filled);
-        }
+        let current = self.cancel_target_is_current(cx, target, false);
+        self.observe_captured_cancel(cx, target, false, current);
     }
 
     fn confirm_cancel(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        ids: &[String],
         proof: CancelProof,
         body: &str,
     ) -> Option<(i64, String)> {
@@ -1731,7 +1883,56 @@ impl BinanceFutures {
                 if !self.valid_cancel_ack(&target, &ack) {
                     return invalid();
                 }
-                self.apply_cancel_ack(cx, &target.id, &ack);
+                if !self.apply_cancel_ack(cx, &target, &ack) {
+                    return invalid();
+                }
+            }
+            CancelProof::Algo(target) => {
+                #[derive(serde::Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Ack {
+                    algo_id: u64,
+                    code: CancelCode,
+                }
+                let Ok(ack) = serde_json::from_str::<Ack>(body) else {
+                    return invalid();
+                };
+                if ack.algo_id == 0 || target.native != Some(ack.algo_id) || !ack.code.success() {
+                    return invalid();
+                }
+                let current = self.cancel_target_is_current(cx, &target, true);
+                self.mark_captured_canceled(cx, &[target], true);
+                if !current {
+                    return invalid();
+                }
+            }
+            CancelProof::Strategy(target) => {
+                #[derive(serde::Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Ack {
+                    symbol: String,
+                    strategy_id: u64,
+                    new_client_strategy_id: String,
+                    strategy_status: String,
+                }
+                let Ok(ack) = serde_json::from_str::<Ack>(body) else {
+                    return invalid();
+                };
+                if ack.strategy_id == 0
+                    || target
+                        .native
+                        .is_some_and(|native| native != ack.strategy_id)
+                    || ack.symbol != target.symbol
+                    || ack.new_client_strategy_id != target.id
+                    || ack.strategy_status != "CANCELED"
+                {
+                    return invalid();
+                }
+                let current = self.cancel_target_is_current(cx, &target, true);
+                self.mark_captured_canceled(cx, &[target], true);
+                if !current {
+                    return invalid();
+                }
             }
             CancelProof::Batch(targets) => {
                 let Ok(rows) = serde_json::from_str::<Vec<CancelRow>>(body) else {
@@ -1759,7 +1960,9 @@ impl BinanceFutures {
                                 error.get_or_insert_with(|| invalid().unwrap());
                                 continue;
                             }
-                            self.apply_cancel_ack(cx, &target.id, &ack);
+                            if !self.apply_cancel_ack(cx, target, &ack) {
+                                error.get_or_insert_with(|| invalid().unwrap());
+                            }
                         }
                         CancelRow::Error { code, msg } => {
                             error.get_or_insert((code, msg));
@@ -1778,10 +1981,7 @@ impl BinanceFutures {
                 let mut seen = std::collections::HashSet::new();
                 for ack in &rows {
                     if targets.iter().any(|target| {
-                        target.native == Some(ack.order_id)
-                            && self.spot_native_order_id(&target.symbol, &target.id)
-                                == target.native
-                            && !self.valid_cancel_ack(target, ack)
+                        target.native == Some(ack.order_id) && !self.valid_cancel_ack(target, ack)
                     }) {
                         return invalid();
                     }
@@ -1800,25 +2000,31 @@ impl BinanceFutures {
                         .find(|target| target.native == Some(ack.order_id))
                         && self.valid_cancel_ack(target, ack)
                     {
-                        self.apply_cancel_ack(cx, &target.id, ack);
+                        self.apply_cancel_ack(cx, target, ack);
                     }
                 }
                 let unchanged: Vec<String> = targets
                     .iter()
-                    .filter(|target| {
-                        self.spot_native_order_id(&target.symbol, &target.id) == target.native
-                    })
+                    .filter(|target| self.cancel_target_is_current(cx, target, false))
                     .map(|target| target.id.clone())
                     .collect();
                 for target in &targets {
-                    if target.native.is_some_and(|native| !seen.contains(&native))
-                        && self.spot_native_order_id(&target.symbol, &target.id) == target.native
-                    {
+                    if target.native.is_some_and(|native| !seen.contains(&native)) {
                         self.remember_cancel_all_row(cx, target);
                     }
                 }
                 mark_canceled_preserving_closed(cx, &unchanged);
                 self.fence_order_snapshots();
+            }
+            CancelProof::SymbolAll { targets, strategy } => {
+                #[derive(serde::Deserialize)]
+                struct Success {
+                    code: CancelCode,
+                }
+                if !matches!(serde_json::from_str::<Success>(body), Ok(ack) if ack.code.success()) {
+                    return invalid();
+                }
+                self.mark_captured_canceled(cx, &targets, strategy);
             }
             CancelProof::CoinAll(targets) => {
                 #[derive(serde::Deserialize)]
@@ -1831,13 +2037,156 @@ impl BinanceFutures {
                 ) {
                     return invalid();
                 }
-                for target in &targets {
-                    self.remember_cancel_all_row(cx, target);
-                }
-                mark_canceled_preserving_closed(cx, ids);
-                self.fence_order_snapshots();
+                self.mark_captured_canceled(cx, &targets, false);
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::generated_id_with;
+    use crate::{BinanceFutures, Options, Variant, market_from_wire, wire::SymbolInfo};
+    use safe_cex_engine::model::{
+        OrderSide, OrderType, PlaceOrderOpts, Position, PositionSide, Ticker,
+    };
+    use safe_cex_engine::{Action, Command, Engine, Event, Notice};
+    use std::cell::Cell;
+
+    thread_local! {
+        static FAIL_AT: Cell<usize> = const { Cell::new(1) };
+        static IDS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    fn injected_uuid() -> Result<String, String> {
+        let next = IDS.get() + 1;
+        IDS.set(next);
+        if next == FAIL_AT.get() {
+            Err("entropy unavailable".into())
+        } else {
+            Ok(format!("fresh-{next}"))
+        }
+    }
+
+    fn limit() -> PlaceOrderOpts {
+        PlaceOrderOpts {
+            symbol: "BTCUSDT".into(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            amount: 2.0,
+            price: Some(100.0),
+            trigger_price: None,
+            stop_loss: None,
+            take_profit: None,
+            reduce_only: None,
+            time_in_force: None,
+            trigger_type: None,
+            tp_trigger_type: None,
+            sl_trigger_type: None,
+            client_order_id: None,
+            max_slippage_pct: None,
+            bybit_bbo: None,
+            bybit_slippage_tolerance_ticks: None,
+            implied_volatility: None,
+            close: None,
+            stp_mode: None,
+        }
+    }
+
+    fn engine(variant: Variant, fail_at: usize) -> Engine<BinanceFutures> {
+        FAIL_AT.set(fail_at);
+        IDS.set(0);
+        let mut venue = BinanceFutures::new(Options {
+            variant,
+            key: Some("api-key".into()),
+            secret: Some("secret".into()),
+            ..Options::default()
+        });
+        venue.trading.id_generator = Some(injected_uuid);
+        let mut engine = Engine::new(venue);
+        let info: SymbolInfo<'_> = serde_json::from_str(r#"{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","contractSize":100,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"},{"filterType":"MARKET_LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"}]}"#).unwrap();
+        engine
+            .store_mut()
+            .set_markets(vec![market_from_wire(&info, variant)]);
+        engine.store_mut().set_tickers(vec![Ticker {
+            id: "BTCUSDT".into(),
+            symbol: "BTCUSDT".into(),
+            last: 100.0,
+            ..Ticker::default()
+        }]);
+        engine.store_mut().upsert_position(Position {
+            id: "BTCUSDT".into(),
+            symbol: "BTCUSDT".into(),
+            side: PositionSide::Short,
+            entry_price: 100.0,
+            notional: 200.0,
+            leverage: 1.0,
+            margin_type: None,
+            position_mode: None,
+            unrealized_pnl: 0.0,
+            realized_pnl: None,
+            contracts: 2.0,
+            liquidation_price: 0.0,
+            margin_size: None,
+            last_update: None,
+        });
+        engine
+    }
+
+    #[test]
+    fn uuid_failures_on_every_native_order_family_reject_before_any_write() {
+        for variant in [
+            Variant::UsdM,
+            Variant::PortfolioMargin,
+            Variant::CoinM,
+            Variant::Spot,
+        ] {
+            let mut cases = vec![(limit(), 1)];
+            let mut bracketed = limit();
+            bracketed.stop_loss = Some(90.0);
+            bracketed.take_profit = Some(110.0);
+            cases.extend([(bracketed.clone(), 2), (bracketed, 3)]);
+            for kind in [
+                OrderType::StopLoss,
+                OrderType::TakeProfit,
+                OrderType::TrailingStopLoss,
+            ] {
+                if variant == Variant::Spot && kind == OrderType::TrailingStopLoss {
+                    continue;
+                }
+                cases.push((PlaceOrderOpts { kind, ..limit() }, 1));
+            }
+            for (order, fail_at) in cases {
+                let kind = order.kind;
+                let mut engine = engine(variant, fail_at);
+                engine.handle(
+                    1000.0,
+                    Event::Command(Command::PlaceOrders {
+                        command: 91,
+                        orders: vec![order],
+                    }),
+                );
+                let actions: Vec<_> = engine.drain_actions().collect();
+                assert!(
+                    !actions
+                        .iter()
+                        .any(|action| matches!(action, Action::Http(_))),
+                    "{variant:?} {kind:?} fail_at={fail_at}"
+                );
+                assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 91, result: Err(error) }) if error.contains("entropy unavailable"))), "{variant:?} {kind:?} fail_at={fail_at}: {actions:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn entropy_failure_never_falls_back_to_the_shared_broker_prefix() {
+        let result = generated_id_with(|| {
+            safe_cex_crypto::uuid::uuid_with_entropy(|_| Err("entropy unavailable".into()))
+        });
+        assert_eq!(
+            result,
+            Err("Binance client order ID generation failed: entropy unavailable".into())
+        );
     }
 }

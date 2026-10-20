@@ -337,6 +337,7 @@ describe.each(venues)('%s consumer conformance', (name) => {
     expect(worker.store.updateIds).toEqual(counts);
     expect(fills).toHaveBeenCalledExactlyOnceWith({
       id: 'order-1',
+      orderId: 'order-1',
       symbol: 'BTCUSDT',
       side: OrderSide.Buy,
       price: 100,
