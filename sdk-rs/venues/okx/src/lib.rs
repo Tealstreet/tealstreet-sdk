@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 const PUBLIC: usize = 0;
 const BUSINESS: usize = 2;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub eea: bool,
@@ -29,6 +29,17 @@ pub struct Options {
     pub secret: Option<String>,
     pub passphrase: Option<String>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
+}
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+        if let Some(read) = self.read_credentials.as_mut() {
+            read.erase_secrets();
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -124,7 +135,7 @@ pub struct CandleRead {
 }
 
 pub struct Okx {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     credentials: Option<Credentials>,
     account: account::AccountState,
     trading: trading::TradingState,
@@ -148,6 +159,7 @@ pub struct Okx {
 
 impl Okx {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = if options.public_data_only {
             None
         } else {

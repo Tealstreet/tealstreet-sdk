@@ -29,6 +29,7 @@ pub struct Harness {
     /// Commands completed with `outcome: Unknown`.
     pub unknown: Vec<u32>,
     pub logs: Vec<String>,
+    pub notices: Vec<Notice>,
     pub command_errors: Vec<(u32, String)>,
     pub command_notices: Vec<(u32, &'static str)>,
     pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
@@ -61,6 +62,7 @@ impl Harness {
             done: Vec::new(),
             unknown: Vec::new(),
             logs: Vec::new(),
+            notices: Vec::new(),
             command_errors: Vec::new(),
             command_notices: Vec::new(),
             progress: Vec::new(),
@@ -89,6 +91,9 @@ impl Harness {
 
     pub fn collect(&mut self) {
         for action in self.engine.drain_actions().collect::<Vec<_>>() {
+            if let Action::Notice(notice) = &action {
+                self.notices.push(notice.clone());
+            }
             match action {
                 Action::Http(request) => {
                     self.progress_at_request

@@ -19,7 +19,7 @@ pub use session::timeout_ms as parse_session_timeout_ms;
 
 const BASE_URL: &str = "https://breakout.prosp.devexperts.com/dxsca-web";
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Options {
     pub key: String,
     pub secret: String,
@@ -28,6 +28,14 @@ pub struct Options {
     pub tick_interval: f64,
     pub timeout_ms: u32,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+    }
+}
+
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -42,7 +50,7 @@ impl Default for Options {
 }
 
 pub struct BreakoutProp {
-    pub(crate) options: Options,
+    pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) session: session::Session,
     auth_failed: bool,
     auth_error: String,
@@ -180,10 +188,10 @@ struct EventType<'a> {
 }
 
 impl BreakoutProp {
-    pub fn new(mut options: Options) -> Self {
-        if options.tick_interval.is_nan() || options.tick_interval <= 0.0 {
-            options.tick_interval = 2_000.0;
-        }
+    pub fn new(options: Options) -> Self {
+        let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
+        options.tick_interval =
+            safe_cex_engine::engine::bounded_tick_interval(options.tick_interval);
         Self {
             options,
             session: session::Session::default(),
@@ -1256,5 +1264,24 @@ fn http_failure(status: u16) -> VenueError {
         408 => error.outcome(Outcome::Unknown),
         400..=499 => rejected(error, ErrorKind::Rejected),
         _ => error.outcome(Outcome::Unknown),
+    }
+}
+
+#[cfg(test)]
+mod security_poll_interval {
+    use super::*;
+    #[test]
+    fn native_constructor_clamps_polling_before_any_timer_is_scheduled() {
+        for (value, expected) in [
+            (0.001, 1000.0),
+            (1e20, 120000.0),
+            (f64::INFINITY, f64::INFINITY),
+        ] {
+            let venue = BreakoutProp::new(Options {
+                tick_interval: value,
+                ..Options::default()
+            });
+            assert_eq!(venue.options.tick_interval, expected);
+        }
     }
 }

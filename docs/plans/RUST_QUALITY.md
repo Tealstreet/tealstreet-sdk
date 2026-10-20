@@ -20,10 +20,14 @@ Strike items as PRs merge. Trading-semantic changes are marked **risky**.
   (`rust.exchange.ts:795`). Needs a terminal startup failure.~~ Engine
   `StartupFailed{error}` rejects `start()`; Bybit fails startup on definitive
   key rejections (10003/10004 after resend/10010/33004) of its signed fee read.
-- Secrets in logs: 53 log sites interpolate raw bodies; Bitrue logs whole
-  private frames (`bitrue/src/account.rs:700`), Bybit logs the signed request
-  body (`bybit/src/lib.rs:550`); native transport errors include signed URLs
-  (`hosts/native/src/transport.rs:390,404`).
+- Secrets in logs: 53 log sites interpolate raw bodies (broader sweep remains).
+  ~~Bitrue logs whole private frames (`bitrue/src/account.rs:700`), Bybit logs
+  the signed request body (`bybit/src/lib.rs:550`); native transport errors
+  include signed URLs (`hosts/native/src/transport.rs:390,404`).~~ Fixed at
+  private diagnostic/signing and native connection-error boundaries, with
+  all-notice credential/URL regressions. Current reqwest body-stream errors
+  already omit URLs; that path is regression coverage, not a reproduced fix.
+  Ordinary business rejection messages remain actionable.
 - Native and Durable Object hosts drop logs with no client attached; an
   oversized native broadcast disconnects every peer (`server.rs:386`).
 

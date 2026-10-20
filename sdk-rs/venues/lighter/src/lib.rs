@@ -28,7 +28,7 @@ fn revalue_position(position: &mut Position, price: f64) {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Options {
     pub testnet: bool,
     pub robinhood: bool,
@@ -42,6 +42,15 @@ pub struct Options {
     pub integrator_account_index: Option<u64>,
     pub stop_slippage_pct: f64,
 }
+safe_cex_crypto::redacted_debug!(Options);
+impl safe_cex_crypto::secrets::EraseSecrets for Options {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.api_key_index);
+    }
+}
+
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -141,7 +150,7 @@ struct CandleState {
     in_flight: bool,
 }
 pub struct Lighter {
-    options: Options,
+    options: safe_cex_crypto::secrets::Sensitive<Options>,
     account: account::Account,
     trading: trading::Trading,
     limits: limits::Limits,
@@ -167,6 +176,7 @@ fn supported(interval: Interval) -> bool {
 }
 impl Lighter {
     pub fn new(options: Options) -> Self {
+        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::default(),
