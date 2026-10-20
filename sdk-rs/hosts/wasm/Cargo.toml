@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # Paradex streams binary SBE; its JSON control messages use the stable text entry.
 text-ingress = []
+coinbase = ["dep:safe-cex-venue-coinbase", "text-ingress"]
 paradex = ["dep:safe-cex-venue-paradex"]
 apexomni = ["dep:safe-cex-venue-apexomni", "text-ingress"]
 kraken = ["dep:safe-cex-venue-kraken", "text-ingress"]
@@ -25,6 +26,7 @@ bingx = ["dep:safe-cex-venue-bingx", "text-ingress"]
 weex = ["dep:safe-cex-venue-weex", "text-ingress"]
 phemex = ["dep:safe-cex-venue-phemex", "text-ingress"]
 default = [
+    "coinbase",
     "paradex",
     "apexomni",
     "kraken",
@@ -58,6 +60,7 @@ okx = ["dep:safe-cex-venue-okx", "text-ingress"]
 orderly = ["dep:safe-cex-venue-orderly", "text-ingress"]
 
 [dependencies]
+safe-cex-venue-coinbase = { path = "../../venues/coinbase", optional = true }
 safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }
 safe-cex-venue-apexomni = { path = "../../venues/apexomni", optional = true }
 safe-cex-venue-kraken = { path = "../../venues/kraken", optional = true }

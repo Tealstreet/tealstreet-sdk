@@ -1,6 +1,6 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../store/store.interface';
+import type { Store } from '../../../store/store.interface';
 
 import rateLimit from 'axios-rate-limit';
 import BigNumber from 'bignumber.js';
@@ -32,13 +32,13 @@ import {
   Ticker,
   Timeframe,
   UpdateOrderOpts,
-} from '../../types';
-import { createPositionId } from '../../utils/createPositionId';
-import { loop } from '../../utils/loop';
-import { adjust, multiply, round } from '../../utils/safe-math';
-import { uuid } from '../../utils/uuid';
-import { BaseExchange } from '../base';
-import { patternClientOrderIdRule } from '../clientOrderId';
+} from '../../../types';
+import { createPositionId } from '../../../utils/createPositionId';
+import { loop } from '../../../utils/loop';
+import { adjust, multiply, round } from '../../../utils/safe-math';
+import { uuid } from '../../../utils/uuid';
+import { BaseExchange } from '../../../exchanges/base';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import { createAPI } from './coinbase.api';
 import { mapCoinbaseRestOrder } from './coinbase.orders';
 import {
@@ -241,7 +241,9 @@ export class CoinbaseExchange extends BaseExchange {
     this.log(`Ready to watch public data on Coinbase`);
 
     // Fetch tickers from public INTX endpoint
-    const tickers = await this.fetchTickersIntx();
+    const tickers = this.replayPublicSpot
+      ? this.formatSpotCfmTicker(await this.fetchReplayPublicSpotProducts())
+      : await this.fetchTickersIntx();
     this.store.update({
       tickers,
       orders: [],
@@ -254,6 +256,7 @@ export class CoinbaseExchange extends BaseExchange {
       positions: [],
       loaded: { ...this.store.loaded, tickers: true, orders: true, balance: true, positions: true },
     });
+    if (this.replayPublicSpot) loop(() => this.tickReplayPublicSpot(), this.getTickInterval());
   };
 
   tick = async () => {
@@ -757,18 +760,55 @@ export class CoinbaseExchange extends BaseExchange {
     }
   };
 
+  private get replayPublicSpot() {
+    return Boolean((this.options.extra as { coinbasePublicSpot?: boolean } | undefined)?.coinbasePublicSpot);
+  }
+
+  // Declared replay correction: saved spot-only public accounts use the venue's
+  // keyless products, paginate fully, and keep polling tickers after startup.
+  private fetchReplayPublicSpotProducts = async (): Promise<MARKET_RESPONSE> => {
+    const products: MARKET_RESPONSE['products'] = [];
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < 50; page++) {
+      const { data } = await this.xhr.get<MARKET_RESPONSE & {
+        pagination?: { has_next?: boolean; next_cursor?: string };
+      }>('/api/v3/brokerage/market/products', {
+        params: { limit: 1000, ...(cursor ? { cursor } : {}) },
+      });
+      products.push(...data.products.filter((product) => product.product_type === 'SPOT' && !product.future_product_details));
+      if (!data.pagination?.has_next) return { products, num_products: products.length };
+      cursor = data.pagination.next_cursor;
+      if (!cursor || cursors.has(cursor)) throw new Error('Coinbase invalid product cursor');
+      cursors.add(cursor);
+    }
+    throw new Error('Coinbase product page limit');
+  };
+
+  private tickReplayPublicSpot = async () => {
+    if (this.isDisposed) return;
+    try {
+      const tickers = this.formatSpotCfmTicker(await this.fetchReplayPublicSpotProducts());
+      if (!this.isDisposed) this.store.update({ tickers, loaded: { ...this.store.loaded, tickers: true } });
+    } finally {
+      if (!this.isDisposed) loop(() => this.tickReplayPublicSpot(), this.getTickInterval());
+    }
+  };
+
   fetchMarkets = async () => {
     try {
       // In public-only mode, use the public INTX instruments endpoint
       // since /api/v3/brokerage/products requires JWT authentication
-      if (this.isPublicDataOnly) {
+      const publicSpot = this.isPublicDataOnly && this.replayPublicSpot;
+      if (this.isPublicDataOnly && !publicSpot) {
         return this.fetchMarketsFromIntxInstruments();
       }
 
-      const supportedTypes = await this.getSupportedTypes();
+      const supportedTypes = publicSpot ? ['spot'] : await this.getSupportedTypes();
 
       const responses = await Promise.all(
         supportedTypes.map((type) => {
+          if (publicSpot) return this.fetchReplayPublicSpotProducts().then((data) => ({ data }));
           return this.xhr.get<MARKET_RESPONSE>(ENDPOINTS.MARKETS, {
             params:
               type === 'spot'

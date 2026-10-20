@@ -52,6 +52,7 @@ export interface EngineHandlers {
 
 /** The subset of the wasm-bindgen engine the host drives. */
 export interface WasmEngineLike {
+  accountId?(): string | undefined;
   start(now: number): string;
   command(json: string, now: number): string;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
@@ -75,6 +76,7 @@ export interface WasmEngineLike {
 }
 
 export class EngineHost {
+  accountId(): string | undefined;
   constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers);
   start(): void;
   /** Resolves with the command's result for commands that report one. */

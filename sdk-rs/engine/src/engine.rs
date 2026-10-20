@@ -779,6 +779,11 @@ pub trait Venue {
         self.on_request_failed(cx, pending, error);
     }
 
+    /// Account identity is available only after authenticated discovery.
+    fn account_id(&self) -> Option<&str> {
+        None
+    }
+
     fn start(&mut self, cx: &mut Cx<'_, Self::Pending>);
     fn on_open(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId);
     fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
@@ -855,6 +860,10 @@ impl<V: Venue> Engine<V> {
 
     pub fn venue(&self) -> &V {
         &self.venue
+    }
+
+    pub fn account_id(&self) -> Option<&str> {
+        self.venue.account_id()
     }
 
     pub fn start(&mut self, now: f64) {

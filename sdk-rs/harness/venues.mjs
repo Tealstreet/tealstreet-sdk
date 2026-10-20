@@ -1,18 +1,43 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
-import { APEX_SEED, apexWireBody, createApexSocketAudit, prepareApexReplay, prepareApexTs, validateApexRequest } from './apexomni-protocol.mjs';
+import {
+  COINBASE_REPLAY,
+  verifyCoinbaseRequest,
+  verifyCoinbaseSubscribe,
+  coinbaseSubscription,
+  createCoinbaseSocketAudit,
+} from './coinbase-protocol.mjs';
+import {
+  APEX_SEED,
+  apexWireBody,
+  createApexSocketAudit,
+  prepareApexReplay,
+  prepareApexTs,
+  validateApexRequest,
+} from './apexomni-protocol.mjs';
 import { createRequire } from 'node:module';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
 import { kucoinspot } from './kucoinspot.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
+import {
+  asterRequestUrl,
+  asterSocketAudit,
+  createAsterRequestValidator,
+  initializeAsterCrypto,
+} from './asterdex-requests.mjs';
 import { paradexProtocol } from './paradex-protocol.mjs';
-import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
 
-import {createKrakenRequestAudit,validateKrakenSocketMessage,validateKrakenSocketFrame,krakenRequestBody,krakenCommandResult} from './kraken-protocol.mjs';
+import {
+  createKrakenRequestAudit,
+  validateKrakenSocketMessage,
+  validateKrakenSocketFrame,
+  krakenRequestBody,
+  krakenCommandResult,
+} from './kraken-protocol.mjs';
 let krakenRequestAudit;
 let lighterVerifier;
 
@@ -137,7 +162,8 @@ const orderlyClasses = {
   what: 'WhatExchange',
   woofi: 'WoofiExchange',
 };
-const orderlyNative = (symbol) => symbol.replace(/^(.+)USDC(_[A-Za-z0-9_-]+)?$/, (_, base, suffix = '') => `PERP_${base}_USDC${suffix}`);
+const orderlyNative = (symbol) =>
+  symbol.replace(/^(.+)USDC(_[A-Za-z0-9_-]+)?$/, (_, base, suffix = '') => `PERP_${base}_USDC${suffix}`);
 const orderlyPrivateUrl = (url) => new URL(url).pathname.startsWith('/v2/ws/private/stream/');
 const orderlySocketRequest = (message) => {
   if (message.event !== 'request') return undefined;
@@ -303,8 +329,7 @@ const orderly = (alias) => {
             if (message.event === 'subscribe') {
               state.channels.add(message.topic);
               if (state.channels.size > 100) failures.push('Orderly socket exceeds its 100-topic limit');
-            }
-            else state.channels.delete(message.topic);
+            } else state.channels.delete(message.topic);
           } else if (message.event === 'pong') {
             if (!state.serverPings) failures.push('unexpected Orderly heartbeat response');
             else state.serverPings--;
@@ -356,7 +381,6 @@ const orderly = (alias) => {
     },
   };
 };
-
 
 // Replay transport and signing clocks both default to wall-clock milliseconds.
 const validWeexTimestamp = (time, now) =>
@@ -514,71 +538,162 @@ export const mexcRequestUrl = (url) => {
   return parsed.href;
 };
 
+const coinbase = (name) => ({
+  family: 'coinbase',
+  currencyBalances: true,
+  rust: name,
+  ts: {
+    module: `${root}/../__tests__/reference/coinbase/${name}.exchange.ts`,
+    className: name === 'coinbasespot' ? 'CoinbaseSpotExchange' : 'CoinbaseExchange',
+    name,
+  },
+  publicOptions: { spotOnly: true, extra: { coinbasePublicSpot: true } },
+  options: { testnet: false, ...(name === 'coinbasespot' ? { spotOnly: true } : {}) },
+  replayCredentials: COINBASE_REPLAY,
+  privateSocket: 'advanced-trade-ws-user.coinbase.com',
+  tsBooksSubscribed: (exchange, count) =>
+    Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('level2.')).length >= count,
+  verifyRequest: verifyCoinbaseRequest,
+  verifySubscribe: verifyCoinbaseSubscribe,
+  subscriptionMessage: coinbaseSubscription,
+  createSocketAudit: createCoinbaseSocketAudit,
+  streamOf: (text) => {
+    try {
+      const message = JSON.parse(text);
+      const channel = message.channel === 'l2_data' ? 'level2' : message.channel;
+      if (['heartbeats', 'user'].includes(channel)) return channel;
+      const product = message.events?.[0]?.product_id;
+      return product ? `${channel}.${product}` : undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  subscriptionGenerations: true,
+  matchRequestBody: true,
+  requestBodies: true,
+  compareWriteOrder: true,
+  compareClientIds: true,
+  compareFillPrices: true,
+  isWrite: (method) => method !== 'GET',
+  generatedBodyId: (key, value) =>
+    key === 'client_order_id' && typeof value === 'string' && value.startsWith('tealstreet-'),
+});
+
 export const VENUES = {
+  coinbase: coinbase('coinbase'),
+  coinbasespot: coinbase('coinbasespot'),
   phemex: {
     rust: 'phemex',
     phemexProtocol: true,
-    tsReplaySettled: (exchange, count) => Object.values(exchange.publicWebsocket.orderBookInnerState).filter((s) => s.isSnapshotLoaded).length >= count,
+    tsReplaySettled: (exchange, count) =>
+      Object.values(exchange.publicWebsocket.orderBookInnerState).filter((s) => s.isSnapshotLoaded).length >= count,
     ts: { module: `${root}/phemex/phemex.exchange.ts`, className: 'PhemexExchange', name: 'phemex' },
     matchRequestBody: true,
     compareFillPrices: true,
-    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.topics).filter((t) => t.startsWith('orderbook_p.subscribe')).length >= count,
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.topics).filter((t) => t.startsWith('orderbook_p.subscribe')).length >= count,
     isPrivateRecord: (r) => r.type === 'ws' && /"(accounts_p|positions_p|orders_p)"/.test(r.text),
     generatedQueryId: (name, value) => name === 'clOrdID' && value.startsWith('Tealstreet_'),
     bootstrapFrame: (r) => r.bootstrap === true,
-    onSocketSend(socket, text) { if (JSON.parse(text).method === 'user.auth') socket.private = true; },
-    socketMatches: (socket, text) => Boolean(socket.private) === (JSON.parse(text).id === 999 || /"(accounts_p|positions_p|orders_p)"/.test(text)),
-    pingReply(text) { const m = JSON.parse(text); return m.method === 'server.ping' ? JSON.stringify({ id: m.id, result: 'pong', error: null }) : null; },
+    onSocketSend(socket, text) {
+      if (JSON.parse(text).method === 'user.auth') socket.private = true;
+    },
+    socketMatches: (socket, text) =>
+      Boolean(socket.private) === (JSON.parse(text).id === 999 || /"(accounts_p|positions_p|orders_p)"/.test(text)),
+    pingReply(text) {
+      const m = JSON.parse(text);
+      return m.method === 'server.ping' ? JSON.stringify({ id: m.id, result: 'pong', error: null }) : null;
+    },
     validateRequest({ url, body = '', headers = {} }) {
       const parsed = new URL(url);
       const get = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
       const expiry = get('x-phemex-request-expiry');
       if (!expiry && !parsed.pathname.startsWith('/g-') && !parsed.pathname.startsWith('/api-data/g-futures/')) return;
       const query = decodeURIComponent(parsed.search.slice(1).replace(/\+/g, '%20'));
-      const expected = createHmac('sha256', 'replay-secret').update(parsed.pathname + query + expiry + (body || '')).digest('hex');
-      if (get('x-phemex-access-token') !== 'replay-key' || get('x-phemex-request-signature') !== expected || !Number.isSafeInteger(Number(expiry)) || Math.abs(Number(expiry) - Date.now() / 1000 - 60) > 5) throw new Error(`invalid Phemex request: ${parsed.pathname}`);
+      const expected = createHmac('sha256', 'replay-secret')
+        .update(parsed.pathname + query + expiry + (body || ''))
+        .digest('hex');
+      if (
+        get('x-phemex-access-token') !== 'replay-key' ||
+        get('x-phemex-request-signature') !== expected ||
+        !Number.isSafeInteger(Number(expiry)) ||
+        Math.abs(Number(expiry) - Date.now() / 1000 - 60) > 5
+      )
+        throw new Error(`invalid Phemex request: ${parsed.pathname}`);
     },
     createSocketAudit(_impl, { isPrivate, books }) {
-      const failures = [], topics = new Set(), sockets = new Map();
+      const failures = [],
+        topics = new Set(),
+        sockets = new Map();
       const socket = (url, generation = 1) => {
         const key = `${url} ${generation}`;
-        if (!sockets.has(key)) sockets.set(key, { private: false, auth: false, acknowledged: false, subscribed: false, closed: false });
+        if (!sockets.has(key))
+          sockets.set(key, { private: false, auth: false, acknowledged: false, subscribed: false, closed: false });
         return sockets.get(key);
       };
       return {
-        connected(url, generation) { socket(url, generation); },
-        closed(url, generation) { socket(url, generation).closed = true; },
+        connected(url, generation) {
+          socket(url, generation);
+        },
+        closed(url, generation) {
+          socket(url, generation).closed = true;
+        },
         sent(url, text, generation) {
-          const m = JSON.parse(text), state = socket(url, generation);
+          const m = JSON.parse(text),
+            state = socket(url, generation);
           if (m.method === 'user.auth') {
             state.private = true;
             state.acknowledged = false;
             state.subscribed = false;
             const [kind, key, sig, expiry] = m.params ?? [];
-            state.auth = !state.closed && m.id === 999 && kind === 'API' && key === 'replay-key' && Number.isSafeInteger(expiry) && Math.abs(expiry - Date.now() / 1000 - 60) < 5 && sig === createHmac('sha256', 'replay-secret').update(key + expiry).digest('hex');
+            state.auth =
+              !state.closed &&
+              m.id === 999 &&
+              kind === 'API' &&
+              key === 'replay-key' &&
+              Number.isSafeInteger(expiry) &&
+              Math.abs(expiry - Date.now() / 1000 - 60) < 5 &&
+              sig ===
+                createHmac('sha256', 'replay-secret')
+                  .update(key + expiry)
+                  .digest('hex');
             if (!state.auth) failures.push('invalid Phemex WS auth');
           }
-          if (m.method === 'orderbook_p.subscribe' && (m.params?.length !== 3 || m.params[1] !== false || m.params[2] !== 0)) failures.push('Phemex books require full depth0 at20ms');
+          if (
+            m.method === 'orderbook_p.subscribe' &&
+            (m.params?.length !== 3 || m.params[1] !== false || m.params[2] !== 0)
+          )
+            failures.push('Phemex books require full depth0 at20ms');
           if (m.method === 'aop_p.subscribe') {
             state.private = true;
-            if (state.closed || !state.acknowledged) failures.push('Phemex private subscribe preceded auth acknowledgement');
+            if (state.closed || !state.acknowledged)
+              failures.push('Phemex private subscribe preceded auth acknowledgement');
             else state.subscribed = true;
           }
           if (m.method?.endsWith('.subscribe')) topics.add(m.method + ':' + (m.params?.[0] ?? ''));
         },
         received(url, text, generation) {
-          const m = JSON.parse(text), state = socket(url, generation);
+          const m = JSON.parse(text),
+            state = socket(url, generation);
           if (m.id !== 999 || state.closed) return;
           state.acknowledged = false;
           if (!state.auth) failures.push('Phemex auth ACK without request');
-          else if (m.error != null || m.result?.status !== 'success') failures.push('Phemex auth ACK did not confirm success');
+          else if (m.error != null || m.result?.status !== 'success')
+            failures.push('Phemex auth ACK did not confirm success');
           else state.acknowledged = true;
         },
         ready() {
           const privateSockets = [...sockets.values()].filter((state) => state.private && !state.closed);
-          return topics.has('perp_market24h_pack_p.subscribe:') && books.every((s) => topics.has('orderbook_p.subscribe:' + s)) && (!isPrivate || privateSockets.length > 0 && privateSockets.every((state) => state.acknowledged && state.subscribed));
+          return (
+            topics.has('perp_market24h_pack_p.subscribe:') &&
+            books.every((s) => topics.has('orderbook_p.subscribe:' + s)) &&
+            (!isPrivate ||
+              (privateSockets.length > 0 && privateSockets.every((state) => state.acknowledged && state.subscribed)))
+          );
         },
-        errors() { return failures; },
+        errors() {
+          return failures;
+        },
       };
     },
   },
@@ -588,9 +703,12 @@ export const VENUES = {
     rust: 'paradex',
     ts: { module: `${root}/paradex/paradex.exchange.ts`, className: 'ParadexExchange', name: 'paradex' },
     // Effective position leverage differs from configured cross-margin leverage.
-    tsSettings: (exchange, store) => store.markets.map(({ symbol }) => ({
-      symbol, marginType: 'cross', leverage: exchange.leverageSettings.get(symbol) ?? 10,
-    })),
+    tsSettings: (exchange, store) =>
+      store.markets.map(({ symbol }) => ({
+        symbol,
+        marginType: 'cross',
+        leverage: exchange.leverageSettings.get(symbol) ?? 10,
+      })),
     tsBooksSubscribed: (exchange, count) => exchange.publicWebsocket.orderbookCallbacks.size >= count,
   },
   apexomni: {
@@ -605,7 +723,18 @@ export const VENUES = {
     wireBody: apexWireBody,
     matchRequestBody: true,
     generatedId: () => false,
-    generatedBodyId: (key) => ['clientId', 'clientOrderId', 'tpClientOrderId', 'slClientOrderId', 'expiration', 'tpExpiration', 'slExpiration', 'tpSignature', 'slSignature'].includes(key),
+    generatedBodyId: (key) =>
+      [
+        'clientId',
+        'clientOrderId',
+        'tpClientOrderId',
+        'slClientOrderId',
+        'expiration',
+        'tpExpiration',
+        'slExpiration',
+        'tpSignature',
+        'slSignature',
+      ].includes(key),
     compareWriteOrder: true,
     compareFillPrices: true,
     compareClientIds: true,
@@ -613,38 +742,54 @@ export const VENUES = {
     createSocketAudit: createApexSocketAudit,
     validateRequest: validateApexRequest,
     independentLeverage: true,
-    tsSettings: (_exchange, store) => store.markets.map((market) => ({
-      symbol: market.symbol,
-      marginType: 'cross',
-      buyLeverage: store.positions.find((position) => position.symbol === market.symbol && position.side === 'long')?.leverage ?? 0,
-      sellLeverage: store.positions.find((position) => position.symbol === market.symbol && position.side === 'short')?.leverage ?? 0,
-    })),
-    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderBook200.H.')).length >= count,
+    tsSettings: (_exchange, store) =>
+      store.markets.map((market) => ({
+        symbol: market.symbol,
+        marginType: 'cross',
+        buyLeverage:
+          store.positions.find((position) => position.symbol === market.symbol && position.side === 'long')?.leverage ??
+          0,
+        sellLeverage:
+          store.positions.find((position) => position.symbol === market.symbol && position.side === 'short')
+            ?.leverage ?? 0,
+      })),
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderBook200.H.')).length >=
+      count,
     isWrite: (method) => method !== 'GET',
   },
   kraken: {
     rust: 'kraken',
-    compareBalanceCoins:true,
-    productSubscriptions:true,
-    tsBooksReady:(exchange,store)=>Boolean(store.loaded.tickers&&exchange.publicWebsocket),
-    tsSettings:(exchange,store)=>store.markets.map(m=>{
-      const position=store.positions.find(p=>p.symbol===m.symbol&&p.contracts>0);
-      return {symbol:m.symbol,leverage:exchange.leverageSettings.get(m.symbol)??position?.leverage??m.limits.leverage.max,marginType:exchange.marginTypePreferences.get(m.symbol)??position?.marginType??'cross'};
-    }),
-    ts: {module: `${root}/kraken/kraken.exchange.ts`, className: 'KrakenExchange', name: 'kraken'},
-    replayCredentials: {key:'replay-key',secret:'cmVwbGF5LXNlY3JldA=='},
-    tsBooksSubscribed: (exchange,count) => Object.values(exchange.publicWebsocket.orderBookHandlers).filter(v=>v.length).length>=count,
-    isPrivateRecord: record=>record.type==='ws'&&/"(?:fills|open_orders|open_positions|challenge)"/.test(record.text??''),
-    initializeReplay(impl){krakenRequestAudit=createKrakenRequestAudit({strict:impl==='rust'});},
-    validateRequest: request=>krakenRequestAudit(request),
-    validateSocketMessage:validateKrakenSocketMessage,
-    validateSocketFrame:validateKrakenSocketFrame,
-    requestBody:krakenRequestBody,
-    commandResult:krakenCommandResult,
-    requestBodies:true,
-    compareFillPrices:true,
-    compareWriteOrder:true,
-    isWrite:method=>method!=='GET',
+    compareBalanceCoins: true,
+    productSubscriptions: true,
+    tsBooksReady: (exchange, store) => Boolean(store.loaded.tickers && exchange.publicWebsocket),
+    tsSettings: (exchange, store) =>
+      store.markets.map((m) => {
+        const position = store.positions.find((p) => p.symbol === m.symbol && p.contracts > 0);
+        return {
+          symbol: m.symbol,
+          leverage: exchange.leverageSettings.get(m.symbol) ?? position?.leverage ?? m.limits.leverage.max,
+          marginType: exchange.marginTypePreferences.get(m.symbol) ?? position?.marginType ?? 'cross',
+        };
+      }),
+    ts: { module: `${root}/kraken/kraken.exchange.ts`, className: 'KrakenExchange', name: 'kraken' },
+    replayCredentials: { key: 'replay-key', secret: 'cmVwbGF5LXNlY3JldA==' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.values(exchange.publicWebsocket.orderBookHandlers).filter((v) => v.length).length >= count,
+    isPrivateRecord: (record) =>
+      record.type === 'ws' && /"(?:fills|open_orders|open_positions|challenge)"/.test(record.text ?? ''),
+    initializeReplay(impl) {
+      krakenRequestAudit = createKrakenRequestAudit({ strict: impl === 'rust' });
+    },
+    validateRequest: (request) => krakenRequestAudit(request),
+    validateSocketMessage: validateKrakenSocketMessage,
+    validateSocketFrame: validateKrakenSocketFrame,
+    requestBody: krakenRequestBody,
+    commandResult: krakenCommandResult,
+    requestBodies: true,
+    compareFillPrices: true,
+    compareWriteOrder: true,
+    isWrite: (method) => method !== 'GET',
   },
   asterdex: {
     initializeReplay: initializeAsterCrypto,
@@ -658,10 +803,16 @@ export const VENUES = {
     createRequestValidator: createAsterRequestValidator,
     createSocketAudit: asterSocketAudit,
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
-    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.topics).filter((topic) => topic.endsWith('@depth20@100ms')).length >= count,
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.topics).filter((topic) => topic.endsWith('@depth20@100ms')).length >= count,
     startupSubscriptions: (records, books) => {
-      const url = records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/stream')?.url ?? 'wss://fstream.asterdex.com/stream';
-      return subscriptionKeys(url, { method: 'SUBSCRIBE', params: ['!ticker@arr', '!markPrice@arr@1s', ...books.map((symbol) => `${symbol.toLowerCase()}@depth20@100ms`)] });
+      const url =
+        records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/stream')?.url ??
+        'wss://fstream.asterdex.com/stream';
+      return subscriptionKeys(url, {
+        method: 'SUBSCRIBE',
+        params: ['!ticker@arr', '!markPrice@arr@1s', ...books.map((symbol) => `${symbol.toLowerCase()}@depth20@100ms`)],
+      });
     },
     prepareTsTransport: async (_exchange, adapter) => {
       const { default: axios } = await import('axios');
@@ -680,14 +831,19 @@ export const VENUES = {
       const oracle = await initializeLighterCrypto(impl);
       lighterVerifier = createLighterVerifier(options, oracle);
     },
-    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers)
-      .filter((key) => key.startsWith('order_book:')).length >= count,
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('order_book:')).length >=
+      count,
     isPrivateRecord: (record) => record.type === 'ws' && /account_all/.test(record.text ?? ''),
     isWrite: (method) => method !== 'GET',
     requestBody: lighterRequestBody,
-    requestUrl(url) { const parsed = new URL(url); parsed.searchParams.delete('auth'); return parsed.href; },
+    requestUrl(url) {
+      const parsed = new URL(url);
+      parsed.searchParams.delete('auth');
+      return parsed.href;
+    },
     subscriptionMessage(message) {
-      return message.auth === undefined ? message : {...message,auth:'<verified-auth>'};
+      return message.auth === undefined ? message : { ...message, auth: '<verified-auth>' };
     },
     verifyRequest: (request) => lighterVerifier?.request(request) ?? false,
     verifySubscribe: (message) => lighterVerifier?.subscribe(message) ?? false,
@@ -704,7 +860,8 @@ export const VENUES = {
     privateSocket: '/v2/ws/private/',
     matchRequestBody: true,
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('@orderbookupdate')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('@orderbookupdate')).length >=
+      count,
     respondToPing: true,
     createSocketAudit: createWooSocketAudit,
     validateRequest: validateWooRequest,
@@ -721,25 +878,36 @@ export const VENUES = {
     // Creation mints IDs; cancellation must retain the exact native target.
     generatedId: () => false,
     requestOptions: (method, url) => ({
-      generatedBodyId: method === 'POST' && url.pathname === '/fapi/v2/order'
-        ? (key) => key === 'clientOrderId'
-        : undefined,
+      generatedBodyId:
+        method === 'POST' && url.pathname === '/fapi/v2/order' ? (key) => key === 'clientOrderId' : undefined,
     }),
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.includes('/listenKey'),
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('_simple_depth_step0')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('_simple_depth_step0'))
+        .length >= count,
     validateRequest: ({ method, url, body, headers }) => {
       const parsed = new URL(url);
       if (!['fapi.bitrue.com', 'fapiws-auth.bitrue.com'].includes(parsed.hostname))
         throw new Error('Bitrue must emit a real upstream URL');
-      const fields = Object.fromEntries(Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), String(value)]));
-      if (!fields['x-ch-apikey'] && method === 'GET' && parsed.hostname === 'fapi.bitrue.com' && parsed.pathname === '/fapi/v1/contracts') return;
+      const fields = Object.fromEntries(
+        Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), String(value)]),
+      );
+      if (
+        !fields['x-ch-apikey'] &&
+        method === 'GET' &&
+        parsed.hostname === 'fapi.bitrue.com' &&
+        parsed.pathname === '/fapi/v1/contracts'
+      )
+        return;
       if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
       const timestamp = fields['x-ch-ts'];
       const payload = timestamp + method + parsed.pathname + parsed.search + (body ?? '');
-      if (fields['x-ch-apikey'] !== 'replay-key' || !/^\d+$/.test(timestamp) ||
-          Math.abs(Date.now() - Number(timestamp)) > 60_000 ||
-          fields['x-ch-sign'] !== createHmac('sha256', 'replay-secret').update(payload).digest('hex'))
+      if (
+        fields['x-ch-apikey'] !== 'replay-key' ||
+        !/^\d+$/.test(timestamp) ||
+        Math.abs(Date.now() - Number(timestamp)) > 60_000 ||
+        fields['x-ch-sign'] !== createHmac('sha256', 'replay-secret').update(payload).digest('hex')
+      )
         throw new Error('Invalid Bitrue REST signature');
     },
     createSocketAudit: (_impl, { isPrivate, books }) => {
@@ -754,8 +922,16 @@ export const VENUES = {
           const frame = JSON.parse(text);
           const current = state(url);
           if (frame.ping !== undefined) current.pings.add(JSON.stringify({ pong: frame.ping }));
-          else if (frame.event === 'ping') current.pings.add(JSON.stringify(frame.ts === undefined ? { event: 'pong' } : { event: 'pong', ts: frame.ts }));
-          if (frame.channel && (frame.tick || frame.data) && frame.event_rep !== 'rep' && !current.channels.has(frame.channel))
+          else if (frame.event === 'ping')
+            current.pings.add(
+              JSON.stringify(frame.ts === undefined ? { event: 'pong' } : { event: 'pong', ts: frame.ts }),
+            );
+          if (
+            frame.channel &&
+            (frame.tick || frame.data) &&
+            frame.event_rep !== 'rep' &&
+            !current.channels.has(frame.channel)
+          )
             failures.push('data arrived without subscription: ' + frame.channel);
         },
         sent(url, text) {
@@ -774,15 +950,23 @@ export const VENUES = {
           }
         },
         ready() {
-          return !isPrivate || [...states].some(([url, s]) => url.startsWith('wss://fapiws.bitrue.com/stream?listenKey=') && s.channels.has('user_account_update'));
+          return (
+            !isPrivate ||
+            [...states].some(
+              ([url, s]) =>
+                url.startsWith('wss://fapiws.bitrue.com/stream?listenKey=') && s.channels.has('user_account_update'),
+            )
+          );
         },
         errors() {
           for (const [url, s] of states) {
             if (s.pings.size) failures.push('missing Bitrue heartbeat reply');
-            if (url.includes('fmarket-ws')) for (const symbol of books) {
-              const native = 'e_' + symbol.replace(/^E-/, '').replaceAll('-', '').toLowerCase();
-              if (!s.channels.has(`market_${native}_simple_depth_step0`)) failures.push('missing Bitrue depth subscription: ' + symbol);
-            }
+            if (url.includes('fmarket-ws'))
+              for (const symbol of books) {
+                const native = 'e_' + symbol.replace(/^E-/, '').replaceAll('-', '').toLowerCase();
+                if (!s.channels.has(`market_${native}_simple_depth_step0`))
+                  failures.push('missing Bitrue depth subscription: ' + symbol);
+              }
           }
           return failures;
         },
@@ -812,9 +996,15 @@ export const VENUES = {
   bitgetinverse: {
     inverseNativeAmounts: true,
     rust: 'bitgetinverse',
-    ts: { module: `${root}/bitget/bitgetinverse.exchange.ts`, className: 'BitgetInverseExchange', name: 'bitgetinverse' },
+    ts: {
+      module: `${root}/bitget/bitgetinverse.exchange.ts`,
+      className: 'BitgetInverseExchange',
+      name: 'bitgetinverse',
+    },
     tsBooksSubscribed: (exchange, count) =>
-      Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('orderBook_') && handlers.length).length >= count,
+      Object.entries(exchange.publicWebsocket.messageHandlers).filter(
+        ([key, handlers]) => key.startsWith('orderBook_') && handlers.length,
+      ).length >= count,
     privateSocket: '/ws/private',
     options: { passphrase: 'replay-passphrase' },
   },
@@ -1212,8 +1402,9 @@ export const venueOf = (name) => {
 
 /** Every axios instance the exchange owns, so all of its REST goes to the tape. */
 export const axiosClients = (exchange) =>
-  [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance]))]
-    .filter((value) => value?.defaults && value?.interceptors);
+  [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance]))].filter(
+    (value) => value?.defaults && value?.interceptors,
+  );
 
 /** Native Hyro callers supply endpoints; the harness uses the same public config as TS. */
 export const configuredOptions = (name) => {
