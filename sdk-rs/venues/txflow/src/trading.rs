@@ -3,7 +3,7 @@
 use crate::{Pending, TxFlow, sign};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, Outcome, Response, TimerId, VenueError, num,
+    Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
@@ -24,6 +24,8 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     waiting: Vec<(String, Option<String>)>,
+    /// A write took effect, so a later failure cannot mean nothing happened.
+    effective: bool,
 }
 struct Step {
     action: Action,
@@ -284,47 +286,53 @@ impl TxFlow {
                         .ok_or_else(|| {
                             format!("TxFlow account leverage is not confirmed for {symbol}")
                         });
-                cx.done(command, result);
+                match result {
+                    Ok(data) => cx.done(command, Ok(data)),
+                    Err(error) => cx.fail(command, VenueError::new(error)),
+                }
                 return;
             }
             Command::FetchAccount { command } => {
-                cx.done(command, Err("TxFlow account query completion is not implemented; use live account state".into()));
+                cx.fail(command, not_sent("TxFlow account query completion is not implemented; use live account state").kind(ErrorKind::Unsupported));
                 return;
             }
             Command::FetchOrderBook { command, .. } => {
-                cx.done(
+                cx.fail(
                     command,
-                    Err(
-                        "TxFlow order book queries are not implemented; use the book subscription"
-                            .into(),
-                    ),
+                    not_sent(
+                        "TxFlow order book queries are not implemented; use the book subscription",
+                    )
+                    .kind(ErrorKind::Unsupported),
                 );
                 return;
             }
             Command::FetchStpMode { command } | Command::SetStpMode { command, .. } => {
-                cx.done(
+                cx.fail(
                     command,
-                    Err("TxFlow does not document configurable self-trade prevention".into()),
+                    not_sent("TxFlow does not document configurable self-trade prevention")
+                        .kind(ErrorKind::Unsupported),
                 );
                 return;
             }
             _ => return,
         };
         if !self.options.testnet || self.options.public_data_only || self.user().is_none() {
-            cx.done(
+            cx.fail(
                 id,
-                Err("TxFlow trading requires an authenticated testnet account".into()),
+                not_sent("TxFlow trading requires an authenticated testnet account")
+                    .kind(ErrorKind::AuthInvalid),
             );
             return;
         }
         match built {
-            Err(error) => cx.done(id, Err(error)),
+            Err(error) => cx.fail(id, not_sent(error)),
             Ok(steps) => {
                 self.trading.queue.push_back(Job {
                     command: id,
                     steps,
                     ids: vec![],
                     waiting: vec![],
+                    effective: false,
                 });
                 self.pump_trades(cx);
             }
@@ -633,7 +641,7 @@ impl TxFlow {
             step = match self.amend_step(cx, id, *price, *amount) {
                 Ok(step) => step,
                 Err(error) => {
-                    self.finish_trade(cx, Err(error.into()));
+                    self.finish_trade(cx, Err(not_sent(error)));
                     return;
                 }
             };
@@ -642,7 +650,7 @@ impl TxFlow {
         if matches!(&action, Action::Leverage { .. }) && cx.store.hedged() {
             self.finish_trade(
                 cx,
-                Err("TxFlow hedge leverage requires an explicit side".into()),
+                Err(not_sent("TxFlow hedge leverage requires an explicit side")),
             );
             return;
         }
@@ -652,7 +660,9 @@ impl TxFlow {
         {
             self.finish_trade(
                 cx,
-                Err("TxFlow position mode requires a flat account without orders".into()),
+                Err(not_sent(
+                    "TxFlow position mode requires a flat account without orders",
+                )),
             );
             return;
         }
@@ -663,13 +673,13 @@ impl TxFlow {
                     .is_none_or(|m| !m.active)
             })
         {
-            self.finish_trade(cx, Err("TxFlow market is halted".into()));
+            self.finish_trade(cx, Err(not_sent("TxFlow market is halted")));
             return;
         }
         let nonce = match next_nonce(cx.now, self.trading.nonce) {
             Ok(n) => n,
             Err(e) => {
-                self.finish_trade(cx, Err(e.into()));
+                self.finish_trade(cx, Err(not_sent(e)));
                 return;
             }
         };
@@ -681,7 +691,7 @@ impl TxFlow {
         ) {
             Ok(s) => s,
             Err(e) => {
-                self.finish_trade(cx, Err(e.into()));
+                self.finish_trade(cx, Err(not_sent(e)));
                 return;
             }
         };
@@ -753,7 +763,7 @@ impl TxFlow {
         self.trading.inflight = false;
         // A transport or HTTP failure may follow execution.
         if let Err(mut error) = response
-            .map_err(unknown)
+            .map_err(|error| unknown(error).kind(ErrorKind::Network))
             .and_then(|r| parse_reply(r, request.response_type))
         {
             self.acknowledge_write(cx);
@@ -761,6 +771,7 @@ impl TxFlow {
             self.finish_trade(cx, Err(error));
             return;
         }
+        self.trading.active.as_mut().unwrap().effective = true;
         match request.effect {
             Effect::Place(cloids) => self.trading.active.as_mut().unwrap().waiting = cloids,
             Effect::Amend { id, .. } => self.trading.active.as_mut().unwrap().ids.push(id),
@@ -852,14 +863,15 @@ impl TxFlow {
         self.trading.reconcile_count = 0;
         if let Some(job) = self.trading.active.take() {
             match result {
-                // Unclassified failures keep the plain path until TxFlow migrates to `fail`.
-                Err(error) if error.outcome.is_some() => cx.fail(job.command, error),
-                result => cx.done(
-                    job.command,
-                    result
-                        .map(|_| serde_json::to_string(&job.ids).unwrap())
-                        .map_err(|error| error.message),
-                ),
+                Err(mut error) => {
+                    if (job.effective || !job.ids.is_empty())
+                        && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                    {
+                        error.outcome = None;
+                    }
+                    cx.fail(job.command, error);
+                }
+                Ok(()) => cx.done(job.command, Ok(serde_json::to_string(&job.ids).unwrap())),
             }
         }
         self.pump_trades(cx);
@@ -930,11 +942,11 @@ fn parse_reply(response: Response<'_>, expected: &str) -> Result<(), VenueError>
     let reply: Reply = serde_json::from_str(response.body)
         .map_err(|_| unknown("Invalid TxFlow execution response"))?;
     if reply.status == "err" {
-        return Err(reply
+        let message = reply
             .message
             .or(reply.response)
-            .unwrap_or_else(|| "TxFlow action rejected".into())
-            .into());
+            .unwrap_or_else(|| "TxFlow action rejected".into());
+        return Err(rejected(message));
     }
     if reply.status != "ok" || reply.code != Some(0) || reply.confirm.as_deref() != Some("executed")
     {
@@ -948,9 +960,21 @@ fn parse_reply(response: Response<'_>, expected: &str) -> Result<(), VenueError>
     }
     match data.data.statuses.into_iter().next().unwrap() {
         Status::Text(s) if s == "success" => Ok(()),
-        Status::Error { error } => Err(error.into()),
+        Status::Error { error } => Err(rejected(error)),
         _ => Err(unknown("Unknown TxFlow execution status")),
     }
+}
+
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+/// An explicit refusal of the whole single-status action.
+fn rejected(message: impl Into<String>) -> VenueError {
+    VenueError::new(message)
+        .kind(ErrorKind::Rejected)
+        .outcome(Outcome::Rejected)
 }
 
 /// The write may have executed; reconcile before resubmitting.
