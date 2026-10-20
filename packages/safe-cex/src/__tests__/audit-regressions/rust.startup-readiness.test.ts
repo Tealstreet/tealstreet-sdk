@@ -22,7 +22,7 @@ const align8 = (n: number) => Math.ceil(n / 8) * 8;
 
 // Independent format-1 encoder: a funded private position and native-loaded
 // flags, with no ticker table until the scripted native ticker seed succeeds.
-function nativeFrame(loaded: number): Uint8Array {
+function nativeFrame(loaded: number, includeEth = false): Uint8Array {
   const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
   const table = (kind: number, words: number[], values: number[]) => {
     const bytes = new Uint8Array(align8(words.length * 4) + values.length * 8);
@@ -31,14 +31,15 @@ function nativeFrame(loaded: number): Uint8Array {
     values.forEach((value, i) => view.setFloat64(align8(words.length * 4) + i * 8, value, true));
     sections.push({ kind, bytes });
   };
-  table(SECTION.MARKETS, [1, 0, 0, 1, 2, 9], [0.001, 0.1, 0.001, 1000, 1, 50, NaN, 1, NaN, NaN]);
+  const marketValues = [0.001, 0.1, 0.001, 1000, 1, 50, NaN, 1, NaN, NaN];
+  table(SECTION.MARKETS, includeEth ? [2, 0, 0, 1, 2, 3, 3, 4, 2, 9, 9] : [1, 0, 0, 1, 2, 9], includeEth ? marketValues.flatMap((value) => [value, value]) : marketValues);
   table(SECTION.POSITIONS, [1, 0, 0x20200], [100, 200, 10, 0, NaN, 2, 50, 20, 1000]);
   table(SECTION.ORDERS, [0], []);
   table(SECTION.BALANCE, [], [20, 980, 1000, 0]);
   if (loaded & LOADED_FLAG.TICKERS)
     table(SECTION.TICKERS, [1, 0], [99, 101, 100, 100, 100, 0, 0, 0, 0, 1, 100]);
   table(SECTION.STATUS, [loaded, 0], [1]);
-  const strings = ['BTCUSDT', 'BTC', 'USDT'].map((s) => new TextEncoder().encode(s));
+  const strings = ['BTCUSDT', 'BTC', 'USDT', 'ETHUSDT', 'ETH'].map((s) => new TextEncoder().encode(s));
   const bytes = new Uint8Array(align8(4 + (strings.length + 1) * 4 + strings.reduce((n, s) => n + s.length, 0)));
   const view = new DataView(bytes.buffer);
   view.setUint32(0, strings.length, true);
@@ -70,9 +71,12 @@ class ScriptedEngine implements WasmEngineLike {
   static startupLog?: 'warning' | 'error';
   pending?: Uint8Array;
   state = ScriptedEngine.initial;
+  includeEth = false;
+  completeBalanceOnEth = false;
+  acceptedSharedSymbols = new Set<string>();
   commands: Array<{ op: string }> = [];
   constructor() { ScriptedEngine.instances.push(this); }
-  emit(loaded: number) { this.state = loaded; this.pending = nativeFrame(loaded); }
+  emit(loaded: number) { this.state = loaded; this.pending = nativeFrame(loaded, this.includeEth); }
   start = () => {
     this.emit(this.state);
     return ScriptedEngine.startupLog ? JSON.stringify([{
@@ -83,12 +87,18 @@ class ScriptedEngine implements WasmEngineLike {
   command = (json: string) => {
     const command = JSON.parse(json);
     this.commands.push(command);
+    if (command.op === 'publicFeedUpdate') {
+      for (const ticker of command.tickers ?? []) {
+        if (ticker.symbol === 'BTCUSDT' || (this.includeEth && ticker.symbol === 'ETHUSDT')) this.acceptedSharedSymbols.add(ticker.symbol);
+      }
+      if (this.completeBalanceOnEth && this.acceptedSharedSymbols.has('ETHUSDT')) this.emit(PRIVATE);
+    }
     // Shared seed intentionally emits no changed frame: the existing explicit
     // startup waiter wake must continue supporting unchanged native snapshots.
     return command.command === undefined ? '' : JSON.stringify([{ op: 'done', command: command.command, result: '[]' }]);
   };
   takeFrame = () => { const pending = this.pending; this.pending = undefined; return pending; };
-  snapshotFrame = () => nativeFrame(this.state);
+  snapshotFrame = () => nativeFrame(this.state, this.includeEth);
   wsOpen = () => ''; wsMessage = () => ''; wsClose = () => '';
   httpStart = () => ''; httpChunk = () => ''; httpEnd = () => ''; httpFailed = () => ''; timer = () => '';
 }
@@ -238,5 +248,46 @@ it('preserves shared-catalog validation and requires a real matching seed even a
   await vi.advanceTimersByTimeAsync(0);
   expect(ScriptedEngine.instances[0].pending).toBeUndefined();
   expect(started).toBe(true);
+  await startup;
+});
+
+it('requests a fresh shared snapshot only when repaired native metadata gains symbols', async () => {
+  ScriptedEngine.initial = PRIVATE & ~LOADED_FLAG.BALANCE;
+  const listeners = new Set<(event: { data: unknown }) => void>();
+  const send = (data: unknown) => listeners.forEach((listener) => listener({ data }));
+  const requests: Array<{ op: string }> = [];
+  const market = (symbol: string) => ({ id: symbol, symbol, contractSize: 1, isSpot: false, isPerpetual: true, isInverse: false, isExpiring: false });
+  const port = {
+    addEventListener: (name: string, listener: (event: { data: unknown }) => void) => { if (name === 'message') listeners.add(listener); },
+    removeEventListener: (_name: string, listener: (event: { data: unknown }) => void) => listeners.delete(listener),
+    start() {}, close() {},
+    postMessage(message: { op: string }) {
+      requests.push(message);
+      if (message.op === 'hello') queueMicrotask(() => send({ op: 'ready', markets: [market('BTCUSDT'), market('ETHUSDT')] }));
+      if (message.op === 'ping') queueMicrotask(() => send({ op: 'pong' }));
+      if (message.op === 'snapshot') queueMicrotask(() => send({ op: 'publicFeedUpdate', tickers: [{ symbol: 'BTCUSDT', last: 100 }, { symbol: 'ETHUSDT', last: 20 }] }));
+    },
+  } as unknown as MessagePort;
+  const { exchange, store } = setup({ publicFeed: { mode: 'shared', port } });
+  let started = false;
+  const startup = exchange.start().then(() => { started = true; });
+  await vi.advanceTimersByTimeAsync(250);
+  const engine = ScriptedEngine.instances[0];
+  expect(engine.acceptedSharedSymbols.has('ETHUSDT')).toBe(false);
+  expect(started).toBe(false);
+  expect(requests.filter((request) => request.op === 'snapshot')).toHaveLength(1);
+  engine.completeBalanceOnEth = true;
+  engine.includeEth = true;
+  engine.emit(engine.state);
+  await vi.advanceTimersByTimeAsync(250);
+  expect(requests.filter((request) => request.op === 'snapshot')).toHaveLength(2);
+  expect(engine.acceptedSharedSymbols.has('ETHUSDT')).toBe(true);
+  expect(store.marketsBySymbol.ETHUSDT).toBeDefined();
+  expect(store.loaded.balance).toBe(true);
+  expect(started).toBe(true);
+  // Provider acceptance emits the same native catalogue; it cannot recurse.
+  engine.emit(engine.state);
+  await vi.advanceTimersByTimeAsync(250);
+  expect(requests.filter((request) => request.op === 'snapshot')).toHaveLength(2);
   await startup;
 });

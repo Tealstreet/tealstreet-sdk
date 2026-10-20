@@ -670,6 +670,10 @@ const KNOWN_TS_FIXES = {
   ],
 
   binance: (ts, rust) => {
+    // Native funded-wallet regressions: absent prices preserve native amounts
+    // and prior USD; validated native risk marks can prove startup conversion.
+    // Partial metadata cannot prove an asset unsupported, and real public
+    // prices supersede startup marks without replacing known live state.
     // KNOWN_TS_FIXES: one-way leverage writes used hedge IDs, leaving the cache
     // stale and skipping restoration; rejected writes were swallowed. Reference
     // setter and deterministic regression are fixed, so no output adjustment.

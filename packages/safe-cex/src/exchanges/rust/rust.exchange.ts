@@ -253,6 +253,7 @@ export class RustEngineExchange extends BaseExchange {
   }
   private sharedPublicFeed?: RustPublicFeedClient;
   private requestSharedSnapshot = false;
+  private sharedNativeSymbols = new Set<string>();
   private sharedPublicReady = false;
   private readonly publicFeedObservers = new Set<{ updated(catalogChanged: boolean): void; closed(): void }>();
 
@@ -737,7 +738,12 @@ export class RustEngineExchange extends BaseExchange {
         this.dispose();
         return;
       }
-      if (!this.requestSharedSnapshot) {
+      const symbols = new Set(this.store.markets.map((market) => market.symbol));
+      const gainedSymbols = [...symbols].some((symbol) => !this.sharedNativeSymbols.has(symbol));
+      // Install the catalogue before sending: a synchronous provider reply can
+      // flush another frame with the same catalogue.
+      this.sharedNativeSymbols = symbols;
+      if (!this.requestSharedSnapshot || gainedSymbols) {
         this.requestSharedSnapshot = true;
         this.sharedPublicFeed.send({ op: 'snapshot' });
       }

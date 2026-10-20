@@ -23,6 +23,14 @@ sequence, timestamp, revision, generation, closure and fill fences remain in for
   Distinguish intentional marketSlugs scope from rejected selected metadata;
   never guess prediction/token identities for an unknown asset.
 
+- **MEXC coordination update (2026-10-20):** `feat/rust-venue-highs-a` owns
+  public ticker interest, row-local order snapshots, stop snapping and single
+  pacing. This cross-venue lane owns markets/tickers startup plus private
+  position-mode and plan-list bootstrap failure/recovery/readiness in
+  `mexc/src/account.rs`. Integrate landing first; verify the other lane's ticker
+  and order-row work rather than duplicate it. Native authentication and
+  envelope/paging completeness remain strict. Transient private bootstrap
+  failures must not be exposed as invalid credentials that dispose the SDK.
 - **MEXC active ticker loss:** `mexc/src/lib.rs::on_open` subscribes only the
   first100 catalogue entries and `on_command` ignores SetTickerSymbols. The TS
   `mexc.ws-public.ts::reconcileTickerSubscriptions` first filters active symbols,

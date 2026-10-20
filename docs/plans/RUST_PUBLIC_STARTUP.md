@@ -163,3 +163,17 @@ all-target Clippy. The MEXC harness repair preserves signature validation and
 routes recorded public/private ordinals by sent semantic role; 121 focused
 harness cases and the default three-run private gate (final Store egress
 enabled) passed. Full final Wasm/replay/root gates remain required.
+
+Shared-provider follow-up: a repaired native catalogue can gain a funded
+market after the provider sent its first full snapshot. The SDK requests a
+fresh provider snapshot only for genuine symbol gains (compatibility is
+validated first, and symbol state is installed before sending to prevent a
+synchronous feedback loop). Four focused SDK suites passed 24/24; SDK typecheck
+and source lint passed. Independent review passed this boundary and Binance's
+partial metadata repair; final native edge tests are still being completed.
+
+Landing moved with #1348 (Binance/Bybit audit) and #1349 (side leverage). Merge
+those before final artifacts/gates. Integration review requires retaining current
+unknown-owned snapshot safety alongside incoming side settings, especially
+Bitget's all-unmappable-only guard, and preserving native wallet valuation
+alongside incoming Binance execution/identity fences.
