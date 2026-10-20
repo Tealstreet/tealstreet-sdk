@@ -10,6 +10,12 @@ This package is a library, not the deployed exchange-server application.
 - **Ticker cache**: bootstrap seeds accepted for 150 seconds, 300-second TTL;
   these seeds are not live trading quotes
 - **Key file**: `src/candleCache/RedisCandleCacheBackend.ts`
+- **Native sessions**: `ServerSessionFactory` explicitly selects native SCXF
+  sessions or delegates to the existing `PublicExchangeFactory` handle. Native
+  account targets come from the trusted application resolver; connection failures
+  never fall back to a second TS engine. `NativeFrameSession` serializes async
+  snapshot/flush/notice delivery with bounded queues; gaps/backpressure close the
+  session. Commands retain the native JSON protocol and are never replayed.
 - **Dependency**: `@tealstreet/safe-cex`
 - **Constraint**: runtime-agnostic — accepts a `RedisLikeCandleCacheClient` interface so the backend works with `ioredis`, `redis`, Valkey, or any compatible client
 - **Design**: never imports a specific Redis client; consumers wire the connection
@@ -45,3 +51,5 @@ See `docs/plans/RUST_REWRITE.md`, “Native frame server migration”.
   public engine outside the factory; refresh disposes that old provider source.
 - Native factory conformance: build WASM, then run
   `corepack yarn -s workspace @tealstreet/safe-cex-server test-wasm`.
+The session adapter and adoption example are in `src/frameSession/README.md`;
+deployed application routes, authorization and shell features remain caller-owned.
