@@ -336,3 +336,129 @@ fn a_quiet_socket_is_pinged_and_a_silent_one_reconnected() {
     h.advance(1_000.0);
     assert_ne!(h.socket("/v5/public/linear"), Some(socket));
 }
+
+/// Candle rows `[timestamp, open, high, low, close, volume]` in the next frame.
+fn frame_candles(h: &mut Harness) -> Vec<[f64; 6]> {
+    let Some(frame) = h.engine.take_frame(h.now) else {
+        return Vec::new();
+    };
+    let frame = frame.to_vec();
+    let mut rows = Vec::new();
+    for (kind, payload) in safe_cex_engine::wire::sections(&frame) {
+        if kind != 6 {
+            continue;
+        }
+        let count = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+        let start = (4 + 8 * count).div_ceil(8) * 8;
+        for row in 0..count {
+            let at = start + row * 48;
+            rows.push(std::array::from_fn(|i| {
+                f64::from_le_bytes(payload[at + i * 8..at + i * 8 + 8].try_into().unwrap())
+            }));
+        }
+    }
+    rows
+}
+
+const KLINE_1M: &str = r#"{"topic":"kline.1.BTCUSDT","data":[{"start":1672324800000,"end":1672324859999,"interval":"1","open":"100","close":"101","high":"102","low":"99","volume":"2","turnover":"200","confirm":false,"timestamp":1672324810000}],"ts":1672324810000,"type":"snapshot"}"#;
+
+fn trades(rows: &[(u64, &str, &str)]) -> String {
+    let data: Vec<String> = rows
+        .iter()
+        .map(|(t, p, v)| format!(r#"{{"T":{t},"s":"BTCUSDT","S":"Buy","v":"{v}","p":"{p}","L":"PlusTick","i":"x","BT":false}}"#))
+        .collect();
+    format!(
+        r#"{{"topic":"publicTrade.BTCUSDT","type":"snapshot","ts":1,"data":[{}]}}"#,
+        data.join(",")
+    )
+}
+
+#[test]
+fn trades_extend_the_native_kline_and_roll_new_bars_in_order() {
+    let mut h = Harness::new();
+    h.command(Command::SubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: "1m".into(),
+    });
+    h.flush_subscriptions();
+    let sent = h.sent_on("/v5/public/linear").join("");
+    assert!(sent.contains(r#""kline.1.BTCUSDT""#) && sent.contains(r#""publicTrade.BTCUSDT""#));
+    h.engine.take_frame(h.now);
+    // A trade before any native bar has nothing to extend.
+    h.message("/v5/public/linear", &trades(&[(1672324811000, "103", "1")]));
+    assert!(frame_candles(&mut h).is_empty());
+    h.message("/v5/public/linear", KLINE_1M);
+    assert_eq!(
+        frame_candles(&mut h).last().unwrap(),
+        &[1672324800.0, 100.0, 102.0, 99.0, 101.0, 2.0]
+    );
+    // Every trade in a packet counts once, in order.
+    h.message(
+        "/v5/public/linear",
+        &trades(&[(1672324812000, "105", "0.5"), (1672324813000, "98", "0.25")]),
+    );
+    assert_eq!(
+        frame_candles(&mut h).last().unwrap(),
+        &[1672324800.0, 100.0, 105.0, 98.0, 98.0, 2.75]
+    );
+    // The next kline keeps trade extremes and takes the venue's cumulative volume.
+    h.message(
+        "/v5/public/linear",
+        &KLINE_1M.replace(r#""volume":"2""#, r#""volume":"3""#),
+    );
+    assert_eq!(
+        frame_candles(&mut h).last().unwrap(),
+        &[1672324800.0, 100.0, 105.0, 98.0, 101.0, 3.0]
+    );
+    // A trade in the next minute rolls a bar from the last close; an older one is ignored.
+    h.message(
+        "/v5/public/linear",
+        &trades(&[(1672324861000, "104", "1"), (1672324850000, "50", "9")]),
+    );
+    assert_eq!(
+        frame_candles(&mut h).last().unwrap(),
+        &[1672324860.0, 101.0, 104.0, 101.0, 104.0, 1.0]
+    );
+    // Only the last subscriber unsubscribes the shared trade topic.
+    h.command(Command::SubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: "5m".into(),
+    });
+    h.command(Command::UnsubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: "1m".into(),
+    });
+    h.flush_subscriptions();
+    assert!(
+        !h.sent_on("/v5/public/linear")
+            .last()
+            .unwrap()
+            .contains("publicTrade")
+    );
+}
+
+#[test]
+fn seconds_candles_are_built_from_trades_alone() {
+    let mut h = Harness::new();
+    h.command(Command::SubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: "5s".into(),
+    });
+    h.flush_subscriptions();
+    let sent = h.sent_on("/v5/public/linear").join("");
+    assert!(sent.contains(r#""publicTrade.BTCUSDT""#) && !sent.contains("kline."));
+    h.engine.take_frame(h.now);
+    h.message(
+        "/v5/public/linear",
+        &trades(&[(1672324801000, "100", "1"), (1672324804000, "102", "2")]),
+    );
+    assert_eq!(
+        frame_candles(&mut h).last().unwrap(),
+        &[1672324800.0, 100.0, 102.0, 100.0, 102.0, 3.0]
+    );
+    h.message("/v5/public/linear", &trades(&[(1672324806000, "101", "1")]));
+    assert_eq!(
+        frame_candles(&mut h).last().unwrap(),
+        &[1672324805.0, 102.0, 102.0, 101.0, 101.0, 1.0]
+    );
+}

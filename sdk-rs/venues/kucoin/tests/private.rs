@@ -882,3 +882,58 @@ fn unmappable_position_row_does_not_block_the_position_snapshot() {
     );
     assert!(h.engine.store().loaded().positions);
 }
+
+#[test]
+fn unmappable_parent_row_keeps_its_attached_protection_legs() {
+    let mut h = Harness::new();
+    let attached = ORDER.replace(
+        "\"createdAt\"",
+        "\"triggerStopDownPrice\":80,\"triggerStopUpPrice\":120,\"createdAt\"",
+    );
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{POSITION}]}}"#),
+    );
+    h.reply("/account-overview",r#"{"code":"200000","data":{"availableBalance":"950","orderMargin":"50","accountEquity":"1010","unrealisedPNL":"10"}}"#);
+    h.reply(
+        "/getPositionMode",
+        r#"{"code":"200000","data":{"positionMode":0}}"#,
+    );
+    h.reply("/orders?", &Harness::page(&attached, 1));
+    h.reply("/stopOrders?", EMPTY);
+    let ids = [
+        "5cdfc138b21023a909e5ad55",
+        "5cdfc138b21023a909e5ad55__stop_loss",
+        "5cdfc138b21023a909e5ad55__take_profit",
+    ];
+    let before: Vec<_> = ids
+        .iter()
+        .map(|id| h.engine.store().order(id).cloned().expect("seeded order"))
+        .collect();
+    h.poll();
+    h.reply(
+        "/orders?",
+        &Harness::page(&attached.replace("\"size\":10", "\"size\":\"lots\""), 1),
+    );
+    h.reply("/stopOrders?", EMPTY);
+    let after: Vec<_> = ids
+        .iter()
+        .map(|id| h.engine.store().order(id).cloned())
+        .collect();
+    assert_eq!(after, before.into_iter().map(Some).collect::<Vec<_>>());
+}
+
+#[test]
+fn unmappable_position_row_keeps_the_stored_position() {
+    let mut h = Harness::new();
+    h.ready();
+    let before = h.engine.store().positions().to_vec();
+    assert_eq!(before.len(), 1);
+    h.poll();
+    let bad = POSITION.replace("\"currentQty\":10", "\"currentQty\":\"lots\"");
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{bad}]}}"#),
+    );
+    assert_eq!(h.engine.store().positions(), before.as_slice());
+}
