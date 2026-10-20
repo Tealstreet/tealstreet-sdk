@@ -201,3 +201,58 @@ fn public_connect_deadline_and_open_flaps_use_the_independent_supervisor() {
         h.event(Event::WsClosed { socket, code: 1006 });
     }
 }
+
+#[test]
+fn missing_or_malformed_auth_codes_cannot_subscribe_or_cancel_the_login_deadline() {
+    for text in [
+        r#"{"method":"public/auth"}"#,
+        r#"{"method":"public/auth","code":null}"#,
+        r#"{"method":"public/auth","code":"0"}"#,
+        r#"{"method":"public/auth","code":false}"#,
+    ] {
+        let mut h = Harness::new();
+        let start = h.now;
+        let socket = opened_private(&mut h);
+        let watch = timer_at(&h.actions, start + 5000.0);
+        h.actions.clear();
+        h.event(Event::WsMessage { socket, text });
+        assert!(
+            !h.actions
+                .iter()
+                .any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("subscribe"))),
+            "malformed auth must not subscribe: {text}"
+        );
+        h.now = start + 4000.0;
+        h.event(Event::WsMessage {
+            socket,
+            text: r#"{"method":"public/heartbeat","id":81}"#,
+        });
+        assert!(h.actions.iter().any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("respond-heartbeat") && text.contains("81"))));
+        h.now = start + 5000.0;
+        h.event(Event::TimerFired { timer: watch });
+        let deadline = timer_at(&h.actions, start + 10_000.0);
+        h.now = start + 9000.0;
+        h.event(Event::WsMessage { socket, text });
+        h.event(Event::WsMessage {
+            socket,
+            text: r#"{"method":"public/heartbeat","id":82}"#,
+        });
+        assert!(
+            !h.actions
+                .iter()
+                .any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("subscribe")))
+        );
+        h.actions.clear();
+        h.now = start + 10_000.0;
+        h.event(Event::TimerFired { timer: deadline });
+        assert_eq!(
+            h.actions
+                .iter()
+                .filter(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+                .count(),
+            1,
+            "malformed auth must retain deadline: {text}"
+        );
+        assert!(h.actions.iter().any(|a| matches!(a, Action::SetTimer { at_ms, .. } if (750.0..=1000.0).contains(&(*at_ms-h.now)))));
+    }
+}

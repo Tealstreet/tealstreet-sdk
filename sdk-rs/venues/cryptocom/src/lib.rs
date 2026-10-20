@@ -408,7 +408,8 @@ impl Venue for Cryptocom {
                     ),
                 );
             } else if channel == 1 && envelope.method == "public/auth" {
-                if envelope.code != 0 {
+                let code = serde_json::from_str::<AuthenticationReply>(text)?.code;
+                if code != 0 {
                     cx.log(
                         LogLevel::Error,
                         format!(

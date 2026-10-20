@@ -11,3 +11,8 @@ immediately and retries after backoff. Heartbeats are answered with their native
 request ID but cannot extend the authentication deadline. Retired sockets cannot
 supply authentication acknowledgements to replacements, and duplicate successful
 acknowledgements do not duplicate subscriptions. No active client ping is added.
+
+Authentication requires an explicit numeric `code: 0` in the native reply.
+Missing or malformed auth codes leave the login pending until its existing
+deadline; heartbeat traffic still receives replies but cannot authenticate the
+session or extend that deadline. Public data-envelope defaults are unchanged.
