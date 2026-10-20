@@ -253,6 +253,8 @@ struct Account<V: Venue, T: Transport> {
     candles: HashMap<(String, String), usize>,
     pending: HashMap<u32, Pending>,
     next_command: u32,
+    /// Replayed to clients that join after startup failed, so none waits on it.
+    startup_failure: Option<Arc<str>>,
 }
 
 impl<V: Venue, T: Transport> Account<V, T> {
@@ -266,6 +268,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             candles: HashMap::new(),
             pending: HashMap::new(),
             next_command: 0,
+            startup_failure: None,
         }
     }
 
@@ -283,20 +286,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 _ = shutdown.changed() => break,
                 control = inbox.recv() => match control {
                     Some(Control::Join { client, outgoing, cancel, ready }) => {
-                        if self.peers.len() >= self.config.max_clients_per_account {
-                            let _ = ready.send(Err("account client limit reached"));
-                            continue;
-                        }
-                        // Snapshot and registration share this actor turn. Existing peers
-                        // establish the same baseline before a new peer takes its snapshot.
-                        self.flush();
-                        let snapshot: Arc<[u8]> = self.host.engine.snapshot_frame((self.host.clock)()).into();
-                        if snapshot.len() > self.config.max_frame_bytes || outgoing.try_send(Outgoing::Frame(snapshot)).is_err() {
-                            let _ = ready.send(Err("snapshot exceeds connection limits"));
-                            continue;
-                        }
-                        self.peers.insert(client, Peer { outgoing, cancel, books: HashSet::new(), candles: HashSet::new(), tickers: None });
-                        let _ = ready.send(Ok(()));
+                        let _ = ready.send(self.join(client, outgoing, cancel));
                     }
                     Some(Control::Command { client, command }) => self.command(client, command),
                     Some(Control::TickIntervalChanged { client, interval_ms }) => {
@@ -320,6 +310,40 @@ impl<V: Venue, T: Transport> Account<V, T> {
             peer.cancel.send_replace(true);
         }
         self.host.stop();
+    }
+
+    fn join(
+        &mut self,
+        client: u64,
+        outgoing: mpsc::Sender<Outgoing>,
+        cancel: watch::Sender<bool>,
+    ) -> Result<(), &'static str> {
+        if self.peers.len() >= self.config.max_clients_per_account {
+            return Err("account client limit reached");
+        }
+        // Snapshot and registration share this actor turn. Existing peers
+        // establish the same baseline before a new peer takes its snapshot.
+        self.flush();
+        let snapshot: Arc<[u8]> = self.host.engine.snapshot_frame((self.host.clock)()).into();
+        if snapshot.len() > self.config.max_frame_bytes
+            || outgoing.try_send(Outgoing::Frame(snapshot)).is_err()
+        {
+            return Err("snapshot exceeds connection limits");
+        }
+        if let Some(failure) = &self.startup_failure {
+            let _ = outgoing.try_send(Outgoing::Text(failure.clone()));
+        }
+        self.peers.insert(
+            client,
+            Peer {
+                outgoing,
+                cancel,
+                books: HashSet::new(),
+                candles: HashSet::new(),
+                tickers: None,
+            },
+        );
+        Ok(())
     }
 
     fn execute(&mut self) {
@@ -354,9 +378,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     }
                 }
                 Notice::StartupFailed { error } => {
-                    self.broadcast(Outgoing::Text(encode_notice(ServerNotice::StartupFailed {
-                        detail: &error,
-                    })))
+                    let text = encode_notice(ServerNotice::StartupFailed { detail: &error });
+                    self.startup_failure = Some(text.clone());
+                    self.broadcast(Outgoing::Text(text))
                 }
                 Notice::Deactivate => {
                     self.broadcast(Outgoing::Text(encode_notice(ServerNotice::Deactivate)))
@@ -961,6 +985,49 @@ mod tests {
             commands.borrow().last(),
             Some(Command::UnsubscribeOrderBook { .. })
         ));
+    }
+
+    struct FailsStartup;
+    impl Venue for FailsStartup {
+        type Pending = ();
+        fn start(&mut self, cx: &mut Cx<'_, ()>) {
+            cx.startup_failed(
+                VenueError::new("key rejected").kind(safe_cex_engine::ErrorKind::AuthInvalid),
+            );
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_startup_failure_reaches_clients_that_join_later() {
+        let mut actor = Account::new(
+            Host::new(Engine::new(FailsStartup), NoTransport),
+            ServerConfig::default(),
+        );
+        actor.host.engine.start((actor.host.clock)());
+        actor.execute();
+        let (outgoing, mut messages) = mpsc::channel(4);
+        actor.join(7, outgoing, watch::channel(false).0).unwrap();
+        assert!(matches!(messages.recv().await, Some(Outgoing::Frame(_))));
+        let Some(Outgoing::Text(text)) = messages.recv().await else {
+            panic!("startup failure was not replayed");
+        };
+        assert_eq!(
+            text.as_ref(),
+            r#"{"type":"startupFailed","detail":{"message":"key rejected","kind":"authInvalid"}}"#
+        );
     }
 
     #[tokio::test]

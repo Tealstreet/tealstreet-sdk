@@ -1,6 +1,6 @@
 # Rust error handling lane (claude-errors)
 
-Executes `RUST_QUALITY.md` "Error handling" and "Logging and observability".
+Executes `RUST_QUALITY.md` "Error handling". Logging moved to lane claude-8azlsz.
 Bridge one-error reporting, command deadlines and wasm trap containment land
 from `feat/rust-bridge-fixes` (claude-bridge); this lane builds on them.
 
@@ -15,4 +15,3 @@ from `feat/rust-bridge-fixes` (claude-bridge); this lane builds on them.
 3. TS `ExchangeError` from `detail` (after the bridge PR merges).
 4. `outcome: Unknown` at unknown-outcome sites; `isUnknownOutcome` honours it.
 5. Shared venue error parsers, one family per PR, replacing `malformed` flags.
-6. Logging facade, then venue batches.

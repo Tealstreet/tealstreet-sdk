@@ -197,6 +197,8 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
       server.addEventListener('message', (event) => this.receive(server, event.data));
       server.addEventListener('close', () => this.leave(server));
       if (this.host) server.send(this.host.snapshot());
+      // A client joining after startup failed must not wait on it.
+      if (this.startupFailure) server.send(this.startupFailure);
       await this.state.storage.setAlarm(Date.now() + KEEPALIVE_MS);
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -219,7 +221,10 @@ export const createEngineObject = ({ loadEngine, createTransport, flush = { stor
           {
             onFrame: (frame) => this.broadcast(frame),
             onDeactivate: () => this.broadcast(JSON.stringify({ op: 'deactivate' })),
-            onStartupFailed: (detail) => this.broadcast(JSON.stringify({ op: 'startupFailed', detail })),
+            onStartupFailed: (detail) => {
+              this.startupFailure = JSON.stringify({ op: 'startupFailed', detail });
+              this.broadcast(this.startupFailure);
+            },
             onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),
           },
         );

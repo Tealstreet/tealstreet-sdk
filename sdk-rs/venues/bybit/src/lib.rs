@@ -233,6 +233,8 @@ pub struct BybitLinear {
     config_error: Option<String>,
     credentials: Option<Credentials>,
     read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    /// Set once a startup read proved the key unusable; startup never retries it.
+    credentials_rejected: bool,
     public: Connection,
     private: Connection,
     books: HashMap<String, BookState>,
@@ -267,12 +269,12 @@ fn interval_code(interval: &str) -> Option<&'static str> {
     })
 }
 
-/// Bybit's message for a rejected request, from any envelope or body.
 /// Definitive key rejections: invalid key, bad signature after the re-signed
 /// resend, IP not allowed, expired key. 10005 (permission) is left out: a key
 /// lacking only this read's scope may still trade.
 const CREDENTIAL_REJECTIONS: [i64; 4] = [10003, 10004, 10010, 33004];
 
+/// Bybit's message for a rejected request, from any envelope or body.
 pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
     let status = serde_json::from_str::<Status>(response.body).ok();
     match status.as_ref().and_then(|s| s.ret_code) {
@@ -367,6 +369,7 @@ impl BybitLinear {
             config_error,
             credentials,
             read_credentials: options.read_credentials,
+            credentials_rejected: false,
             public: Connection::new(),
             private: Connection::new(),
             books: HashMap::new(),
@@ -723,6 +726,7 @@ impl BybitLinear {
         }
         if !self.startup.markets_loaded
             && self.credentials.is_some()
+            && !self.credentials_rejected
             && self.startup.fees.is_none()
             && !self.startup.fees_in_flight
         {
@@ -738,13 +742,25 @@ impl BybitLinear {
 
     /// The signed startup fee read proved the key unusable; retrying cannot
     /// fix it, so startup fails instead of waiting for an account that never loads.
+    /// Only the trading key's own invalid, bad-signature or expired verdicts
+    /// deactivate: an IP mismatch or a rejected read-only key leaves it usable.
     fn reject_credentials(&mut self, cx: &mut Cx<'_, Pending>, code: i64, message: &str) {
+        if std::mem::replace(&mut self.credentials_rejected, true) {
+            return;
+        }
         let kind = match code {
             33004 => ErrorKind::AuthExpired,
             10010 => ErrorKind::AuthPermission,
             _ => ErrorKind::AuthInvalid,
         };
-        let text = format!("Bybit rejected the API key ({code}): {message}");
+        // Signed GETs use the read-only key when one is configured.
+        let read_key = self.read_credentials.is_some();
+        let which = if read_key {
+            "read-only API key"
+        } else {
+            "API key"
+        };
+        let text = format!("Bybit rejected the {which} ({code}): {message}");
         cx.log(LogLevel::Error, &text);
         cx.startup_failed(
             VenueError::new(text)
@@ -752,7 +768,9 @@ impl BybitLinear {
                 .venue_code(code.to_string())
                 .venue_message(message),
         );
-        cx.deactivate();
+        if !read_key && code != 10010 {
+            cx.deactivate();
+        }
     }
 
     /// A required startup list failed: try the missing ones again, backing off.

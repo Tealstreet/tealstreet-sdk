@@ -14,6 +14,19 @@ fn private() -> Harness {
     })
 }
 
+fn with_read_key() -> Harness {
+    Harness::started(Options {
+        key: Some("api-key".into()),
+        secret: Some("secret".into()),
+        read_credentials: Some(safe_cex_engine::ReadCredentials {
+            key: "read-key".into(),
+            secret: "read-secret".into(),
+            passphrase: None,
+        }),
+        ..Options::default()
+    })
+}
+
 fn rejection(code: i64, message: &str) -> String {
     format!(
         r#"{{"retCode":{code},"retMsg":"{message}","result":{{}},"retExtInfo":{{}},"time":1676360412576}}"#
@@ -24,7 +37,6 @@ fn rejection(code: i64, message: &str) -> String {
 fn definitive_key_rejections_fail_startup_and_deactivate() {
     for (code, kind) in [
         (10003, ErrorKind::AuthInvalid),
-        (10010, ErrorKind::AuthPermission),
         (33004, ErrorKind::AuthExpired),
     ] {
         let mut h = private();
@@ -105,4 +117,57 @@ fn permission_and_transient_fee_failures_keep_starting() {
         assert!(h.startup_failures.is_empty());
         assert!(!h.deactivated);
     }
+}
+
+#[test]
+fn an_ip_mismatch_fails_startup_without_deactivating_the_key() {
+    let mut h = private();
+    h.respond(
+        "/v5/account/fee-rate",
+        200,
+        &rejection(
+            10010,
+            "Unmatched IP, please check your API key's bound IP addresses.",
+        ),
+    );
+    assert_eq!(h.startup_failures.len(), 1);
+    assert_eq!(h.startup_failures[0].kind, Some(ErrorKind::AuthPermission));
+    assert!(!h.deactivated);
+}
+
+#[test]
+fn a_rejected_read_only_key_is_named_and_leaves_the_trading_key_active() {
+    let mut h = with_read_key();
+    h.respond(
+        "/v5/account/fee-rate",
+        200,
+        &rejection(10003, "API key is invalid."),
+    );
+    let [failure] = h.startup_failures.as_slice() else {
+        panic!("one startup failure expected: {:?}", h.startup_failures);
+    };
+    assert_eq!(
+        failure.message,
+        "Bybit rejected the read-only API key (10003): API key is invalid."
+    );
+    assert!(!h.deactivated);
+}
+
+#[test]
+fn a_rejected_key_is_reported_once_and_never_reread() {
+    let mut h = private();
+    h.respond(
+        "/v5/account/fee-rate",
+        200,
+        &rejection(10003, "API key is invalid."),
+    );
+    h.respond("/v5/market/tickers", 503, "Service Unavailable");
+    h.advance(60_000.0);
+    assert!(
+        h.has_request("/v5/market/tickers"),
+        "startup retried: {:?}",
+        h.paths()
+    );
+    assert!(!h.has_request("/v5/account/fee-rate"), "{:?}", h.paths());
+    assert_eq!(h.startup_failures.len(), 1);
 }
