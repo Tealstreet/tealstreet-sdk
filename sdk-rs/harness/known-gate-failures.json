@@ -106,7 +106,11 @@
       "ciRun": 39471227996,
       "ciHead": "665b7e35da",
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39471227996",
-      "note": "Landing e5e527b156 (#1405) added a Rust-only fills read with start_at to the Paradex private tape generator. The new hash declares 87 of the 98 prior paths with their original rationale; all 87 failure lines, values included, are identical to run 39469014934 on the prior hash. Prior entry retained."
+      "note": "Landing e5e527b156 (#1405) added a Rust-only fills read with start_at to the Paradex private tape generator. The new hash carries the prior entry's 98 paths and rationale unchanged, including the transient reconciliation-boundary paths that vary between runs (run 39471227996 observed 87; run 39473146371 observed 4 of the transient ones). Prior entry retained.",
+      "ciRuns": [
+        39471227996,
+        39473146371
+      ]
     }
   },
   "failures": [
@@ -52869,9 +52873,13 @@
           "divergence": "Open-order lifecycle, bracket shape, terminal retention or economic fields differ at this boundary.",
           "keys": [
             "checkpoint 10 account.orders.length",
+            "checkpoint 10 account.orders[0]",
             "checkpoint 11 account.orders.length",
+            "checkpoint 11 account.orders[0]",
             "checkpoint 12 account.orders.length",
+            "checkpoint 12 account.orders[0]",
             "checkpoint 13 account.orders.length",
+            "checkpoint 13 account.orders[0]",
             "checkpoint 5 account.orders.length",
             "checkpoint 5 account.orders[1].amount",
             "checkpoint 5 account.orders[1].id",
@@ -52910,8 +52918,12 @@
             "checkpoint 7 account.orders[2].symbol",
             "checkpoint 7 account.orders[3]",
             "checkpoint 8 account.orders.length",
+            "checkpoint 8 account.orders[1]",
+            "checkpoint 8 account.orders[2]",
             "checkpoint 8 account.orders[3]",
             "checkpoint 9 account.orders.length",
+            "checkpoint 9 account.orders[1]",
+            "checkpoint 9 account.orders[2]",
             "checkpoint 9 account.orders[3]"
           ]
         },
@@ -52935,6 +52947,8 @@
         {
           "divergence": "Paradex terminal reconciliation is timing-sensitive: checkpoint 8 retains batch orders 2001/2002 natively for one more boundary, shifting rows against TS retained 1001; checkpoint 14 differs on retained canceled order 1000. These are different-ID row alignment/terminal-retention paths, not independent same-order economic differences.",
           "keys": [
+            "checkpoint 14 account.orders.length",
+            "checkpoint 14 account.orders[0]",
             "checkpoint 8 account.orders[1].amount",
             "checkpoint 8 account.orders[1].clientOrderId",
             "checkpoint 8 account.orders[1].id",
@@ -52947,6 +52961,12 @@
             "checkpoint 8 account.orders[2].remaining",
             "checkpoint 8 account.orders[2].side",
             "checkpoint 8 account.orders[2].symbol"
+          ]
+        },
+        {
+          "divergence": "At checkpoint 9 after cancelSymbolOrders, TS retains open existing order 1000 while native applies the taped empty orders response. Commands and checkpoint boundaries are unchanged; per-engine receipts match run 39426820375. This is interim acknowledged-cancel reconciliation visibility.",
+          "keys": [
+            "checkpoint 9 account.orders[0]"
           ]
         },
         {
