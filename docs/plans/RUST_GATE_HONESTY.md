@@ -310,3 +310,14 @@ never retry an unchanged failed performance measurement to obtain a pass.
   probes reject. No harness code or threshold changed in this refresh. All
   requested phase and PR reviews are recorded on #1346; merge still requires
   green CI on the published final head.
+- Certification run `39426820375` exposed fourteen additional literal Paradex
+  paths. Source/raw review confirms unchanged tape, boundaries, 33 events,
+  fifteen commands, nine writes, exact intrinsic receipts and zero protocol
+  errors. Checkpoint 8 briefly retains native batch rows 2001/2002, shifting
+  different-ID comparisons against TS retained 1001; checkpoint 14 retains
+  canceled native 1000 for one extra boundary, then both clear at checkpoint 15.
+  Added only these observed paths with timing/alignment caveats. Independent
+  adversarial review PASS (six adjacent/protected-error negative controls),
+  policy/verifier 9/9 PASS. Earlier declarations remain intact; no gate code,
+  performance threshold or protected failure changed. Collect full run before
+  the next certification push.
