@@ -128,7 +128,7 @@ the auth-path, array and callback receiver/arity regressions.
   key/payloadSigner requirement for JWT acquisition.
 - KuCoin Spot: typed public/private/trading/query state machine, feature-gated
   registration, fresh bullet-token recovery and SDK context commands are in place.
-  Native 135 tests pass, including 36 Spot. Current/newer malformed financial rows
+  Native 137 tests pass, including 38 Spot. Current/newer malformed financial rows
   are rejected before execution emission/dedup; rejected IDs remain reusable.
   Late distinct executions survive stale/terminal state fences. Missing/null
   required balances preserve good state. Missing/null/empty amend ACK IDs retain
@@ -171,8 +171,9 @@ tradeoff with no budget or gate relaxation.
 
 Bitrue's initial final replay missed main-thread CPU by 0.3 ms (259.623 versus
 259.853 ms) despite matching behavior and passing steady CPU/memory. Raw runs
-showed narrow margins. A standalone venue-crate `opt-level=3` candidate is being
-measured for a robust margin; the combined build retains its size profile. The
+showed narrow margins. The standard standalone build now uses venue-crate
+`opt-level=3`: 219.584 / 188.339 ms main-thread CPU and 123.728 / 96.398 ms
+steady CPU, at 810,579 bytes. The combined build retains its size profile. The
 failed checkpoint is retained, and no failed gate is reported as passed.
 
 ## Final gates
@@ -185,10 +186,10 @@ performance checkpoints from before that merge have been refreshed.
 | --- | ---: | ---: | ---: | ---: | --- |
 | Paradex | 15,085 | 1,362.011 / 1,143.063 | 18,758,073 / 2,352,276 | 33 / 15 | PASS, 3 public runs; SDK 2 |
 | Binance | 873 | 298.521 / 157.508 | 16,384,705 / 2,511,524 | 14 / 3 | PASS, 3 public runs |
-| Bitrue | 3,208 | pending optimization | pending final proof | 23 / 8 | Private + SDK 1 PASS; public pending |
-| KuCoin Spot | pending fresh capture | pending | pending | pending | Pending package handoff |
+| Bitrue | 3,208 | 219.584 / 188.339 | 15,936,841 / 2,643,036 | 23 / 8 | PASS, 3 public runs; SDK 1 |
+| KuCoin Spot | 26,427 | 924.078 / 811.831 | 16,646,745 / 3,295,436 | 22 / 13 | PASS before Breakout integration; revalidation pending |
 | KuCoin futures | pending fresh capture | pending | pending | pending | Pending package handoff |
-| Polymarket packaging | existing fixture | pending | pending | pending | Pending feature-on replay |
+| Polymarket packaging | 182 | 51.406 / 38.879 | 23,449,233 / 4,926,228 | 20 / 8 | PASS, 3 public runs |
 
 Paradex public capture has 66 markets/tickers and two books. Binance has 917
 markets, 783 tickers and three books. Both post-GRVT standard artifact hashes
@@ -204,6 +205,32 @@ run uses serial Turbo tasks and four Vitest workers after import/constructor
 wall-clock timeouts under parallel load; assertions and timeouts are unchanged.
 Spot's final ACK adjustment also passes its full 135-test crate and Clippy.
 
-Remaining: Bitrue public performance; feature-on Polymarket packaging replay;
-KuCoin Spot actual SDK, fresh capture/public/private gates and futures gates;
-combined build/host/SDK tests; PR correctness reviews and exact-head green CI.
+Remaining: post-Breakout integration checks and artifact provenance; KuCoin
+futures fresh capture/public gate; combined build/host/SDK tests; PR correctness
+reviews and exact-head green CI.
+
+## Latest integration checkpoint
+
+BreakoutProp landing `74b0a7dd14` merged in `2741ad7411`. Both routing matrices
+are retained, with 62 golden cases in TS declaration order. Its new polling
+controls use default-off engine `polling-control`, enabled by BreakoutProp and
+the native host; the WASM polling parser is enabled only with BreakoutProp.
+Independent review passes: non-polling replay readiness/timing/financial semantics
+remain unchanged, and combined/native controls remain available. Full checks
+are being refreshed on the merged source.
+
+Fresh KuCoin Spot traffic exposed a main-thread steady-CPU bottleneck. The
+ready public ticker fast path now decodes envelope and quote in one typed pass;
+control/private/book/candle messages keep the existing path. Independent review,
+137 native tests and all Spot gates pass at 672,731 bytes. Steady CPU falls from
+TS 626.704 to Rust 566.178 ms on 26,427 frames; no fixture or gate normalization.
+
+Fresh KuCoin futures initially failed protocol auditing despite identical data:
+concurrent identical bullet requests completed in reverse order, so replay
+swapped the token-to-shard association. Recorder `6ba4327e4a` now attaches the
+request issue ordinal before awaiting I/O. Replay sorts only each matching HTTP
+queue; legacy tapes retain their ordering. Mixed/invalid/duplicate ordinals
+reject explicitly, and staged/timed reads and single-use writes keep their guards.
+Independent review and all 393 pre-Breakout harness tests pass. The failed
+capture is checkpointed explicitly; the final fixture requires a new ordinary
+20-second recording, with protocol checks still enabled.
