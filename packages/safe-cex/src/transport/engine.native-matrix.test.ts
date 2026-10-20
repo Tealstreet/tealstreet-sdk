@@ -19,6 +19,7 @@ vi.mock('../accessToken', () => ({
   getProxyToken: async () => 'fixture-proxy-token',
   captureProxyTokenProvider: () => null,
   withProxyTokenProvider: (_provider: unknown, fn: () => unknown) => fn(),
+  bindProxyTokenLookup: () => async () => '',
 }));
 vi.mock('../utils/runtime', () => ({ isNodeOrBunRuntime: () => true }));
 vi.mock('../httpOverWebsocket/axiosHttpOverWebsocketAdapter', () => ({

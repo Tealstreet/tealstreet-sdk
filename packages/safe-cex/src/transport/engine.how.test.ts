@@ -51,6 +51,7 @@ vi.mock('../accessToken', () => ({
   isTokenExpired: () => false,
   captureProxyTokenProvider: () => null,
   withProxyTokenProvider: (_provider: unknown, fn: () => unknown) => fn(),
+  bindProxyTokenLookup: () => async () => '',
 }));
 
 const rawTransport = (): Transport => ({

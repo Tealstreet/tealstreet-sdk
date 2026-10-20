@@ -45,6 +45,7 @@ vi.mock('../accessToken', () => ({
   getProxyToken: mocks.token,
   captureProxyTokenProvider: () => null,
   withProxyTokenProvider: (_provider: unknown, fn: () => unknown) => fn(),
+  bindProxyTokenLookup: () => async () => '',
 }));
 vi.mock('../index', () => ({ createExchange: vi.fn() }));
 vi.mock('../utils/runtime', () => ({ isNodeOrBunRuntime: mocks.nodeRuntime }));

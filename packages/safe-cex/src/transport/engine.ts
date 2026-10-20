@@ -504,6 +504,8 @@ export const createEngineTransport = (
     business: wsRoute(routing.wsBusiness),
   };
   const productRoutes = publicWsRoutes(exchange, options, provider) ?? [];
+  // Relay sockets read the proxy token on open; see `httpTransport`.
+  const proxyTokenProvider = captureProxyTokenProvider();
   const requireSocketHeaders = (url: string) => {
     const connection = provider.wsConnection(url);
     // Tealstreet's identification headers are supplied by the browser itself.
@@ -627,9 +629,11 @@ export const createEngineTransport = (
             headers: { ...connection.headers, ...headers },
             ALPNProtocols: ['http/1.1'],
           };
-          const relay = transport.WebSocket
-            ? new RelayWebSocket(target, [], relayOptions, transport.WebSocket)
-            : new RelayWebSocket(target, [], relayOptions);
+          const relay = withProxyTokenProvider(proxyTokenProvider, () =>
+            transport.WebSocket
+              ? new RelayWebSocket(target, [], relayOptions, transport.WebSocket)
+              : new RelayWebSocket(target, [], relayOptions),
+          );
           socket = relay;
           relay.addEventListener('open', () => {
             if (!closed) {

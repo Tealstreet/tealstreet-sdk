@@ -212,6 +212,15 @@ export function withProxyTokenProvider<T>(provider: ProxyTokenProvider | null, f
 }
 
 /**
+ * A token lookup bound to the effective provider at call time (scope, then async
+ * context), for transports that read the token after awaits or from socket events.
+ */
+export function bindProxyTokenLookup(): () => Promise<string> {
+  const provider = scopedTokenProvider ?? contextualTokenProviderFn?.() ?? null;
+  return () => withProxyTokenProvider(provider, getProxyToken);
+}
+
+/**
  * Initialize the proxy token system.
  * Should be called early in app startup for browser contexts.
  */
