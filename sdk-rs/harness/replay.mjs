@@ -69,6 +69,7 @@ const isPrivate = config.private ?? metadata?.private ?? records.some((record) =
 const options = { ...venue.options, ...(isPrivate
   ? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', ...venue.replayCredentials }
   : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }), ...config.options };
+await venue.prepareReplay?.({ isPrivate, options });
 
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
@@ -305,6 +306,8 @@ const commandArgs = ({ t, type, ...args }) => args;
 async function tsCommand(exchange, store, record) {
   const { op, ...args } = commandArgs(record);
   switch (op) {
+    case 'getAccount':
+      return exchange.getAccount();
     case 'placeOrders':
       return exchange.placeOrders(args.orders);
     case 'cancelOrders':
@@ -533,7 +536,7 @@ async function runTs() {
     });
   });
   venue.configureTs?.(exchange);
-  venue.prepareTs?.(exchange, TapeWebSocket);
+  await venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;

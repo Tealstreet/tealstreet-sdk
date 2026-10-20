@@ -1,8 +1,8 @@
-import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import type { EngineHost as EngineHostType, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { Store } from '../../store/store.interface';
 import type {
   Candle,
+  ExchangeAccount,
   ExchangeName,
   ExchangeOptions,
   Execution,
@@ -25,12 +25,13 @@ import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
+import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
-import { BaseExchange } from '../base';
+import { BaseExchange, markBaseCapabilityFallback } from '../base';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import { isRegularClientOrderShape, patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
@@ -38,6 +39,7 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
+  apexomni: 'apexomni',
   binance: 'binance',
   backpack: 'backpack',
   binancepm: 'binancepm',
@@ -66,6 +68,7 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  apexomni: patternClientOrderIdRule('ApeX Omni', /^\S+$/),
   woo: {
     label: 'WOO',
     mint: () => String(100_000_000_000_000 + Math.floor(Math.random() * 900_000_000_000_000)),
@@ -147,6 +150,12 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
+    if (exchangeName === 'apexomni') {
+      this.getAccount = () => this.command<ExchangeAccount>({ op: 'getAccount' });
+      this.fetchHistoricalOrders = markBaseCapabilityFallback('fetchHistoricalOrders', async () => []);
+      this.fetchIncomeHistory = markBaseCapabilityFallback('fetchIncomeHistory', async () => []);
+      this.fetchIncomeHistoryRange = markBaseCapabilityFallback('fetchIncomeHistoryRange', async () => []);
+    }
     if (exchangeName === 'hyperliquid') {
       this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
         this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
@@ -162,7 +171,8 @@ export class RustEngineExchange extends BaseExchange {
         const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
         const orders = await this.fetchHistoricalOrders({ from, to });
         return wooOrdersToPositionRecords(orders, {
-          account: opts.account, from,
+          account: opts.account,
+          from,
           resolveSettleCurrency: (symbol) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
         });
       };
@@ -191,8 +201,17 @@ export class RustEngineExchange extends BaseExchange {
     if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
     const { WasmEngine } = await loadWasmEngine();
     if (this.isDisposed) return;
-    const { key, secret, passphrase, testnet, applicationId, vault, hyperliquidBuilder, enableSpotMarkets } =
-      this.options;
+    const {
+      key,
+      secret,
+      passphrase,
+      omniKeySeed,
+      testnet,
+      applicationId,
+      vault,
+      hyperliquidBuilder,
+      enableSpotMarkets,
+    } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
     const transport = createEngineTransport(this.name, this.options, engineTransport());
     const engine = new WasmEngine(
@@ -201,6 +220,7 @@ export class RustEngineExchange extends BaseExchange {
         key,
         secret,
         passphrase,
+        ...(this.name === 'apexomni' ? { omniKeySeed } : {}),
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
         ...(['backpack', 'bitrue'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
@@ -378,7 +398,7 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(['blofin', 'bitrue', 'hyperliquid', 'woo'].includes(this.name)
+      ...(['apexomni', 'blofin', 'bitrue', 'hyperliquid', 'woo'].includes(this.name)
         ? { from: milliseconds(opts.from), to: milliseconds(opts.to) }
         : {}),
     });
@@ -387,7 +407,8 @@ export class RustEngineExchange extends BaseExchange {
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (['blofin', 'bitrue'].includes(this.name)) leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      if (['blofin', 'bitrue'].includes(this.name))
+        leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
         leverage = { buyLeverage: value, sellLeverage: value };

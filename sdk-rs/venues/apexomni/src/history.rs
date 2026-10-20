@@ -243,7 +243,7 @@ impl Request {
         if price <= 0.0 || qty <= 0.0 {
             return None;
         }
-        let timestamp = seconds(first(&[
+        let source_time = first(&[
             &raw.created_at,
             &raw.fill_time,
             &raw.created_time,
@@ -258,7 +258,8 @@ impl Request {
             &raw.e,
             &raw.t,
             &raw.t_upper,
-        ])?)?;
+        ])?;
+        let timestamp = seconds(source_time)?;
         if self.from.is_some_and(|n| timestamp * 1000.0 < n)
             || self.to.is_some_and(|n| timestamp * 1000.0 > n)
         {
@@ -313,7 +314,7 @@ impl Request {
             format!("execution:{id}")
         } else {
             format!(
-                "{}:{timestamp}:{price}:{qty}:{side:?}",
+                "{}:{source_time}:{price}:{qty}:{side:?}",
                 order_id.as_deref().unwrap_or("no-order")
             )
         };
@@ -441,8 +442,11 @@ impl ApexOmni {
         let Some(row) = parsed.and_then(|row| request.row(row)) else {
             return;
         };
-        request.current.retain(|old| old.key != row.key);
-        request.current.push(row);
+        if let Some(index) = request.current.iter().position(|old| old.key == row.key) {
+            request.current[index] = row;
+        } else {
+            request.current.push(row);
+        }
         request
             .current
             .sort_by(|a, b| b.row.timestamp.total_cmp(&a.row.timestamp));
@@ -505,16 +509,7 @@ impl ApexOmni {
                         && request.to.is_none_or(|to| r.timestamp * 1000.0 <= to)
                 })
                 .map(|r| Entry {
-                    key: r.id.clone().unwrap_or_else(|| {
-                        format!(
-                            "{}:{}:{}:{}:{:?}",
-                            r.order_id.as_deref().unwrap_or("no-order"),
-                            r.timestamp,
-                            r.price,
-                            r.qty,
-                            r.side
-                        )
-                    }),
+                    key: r.identity.clone(),
                     row: Execution {
                         timestamp: r.timestamp,
                         symbol: r.symbol.clone(),

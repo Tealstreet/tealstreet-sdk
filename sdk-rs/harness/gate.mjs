@@ -118,6 +118,15 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  // ApeX repairs are in the TS reference; output is compared without rewriting:
+  // continuous book sequences and atomic invalid depth updates; top-level ping
+  // detection avoids answering echoed ping acknowledgements; stable original
+  // payloads for legacy HMAC across form transforms; canonical hedged position
+  // IDs; failure-safe private snapshots; documented realizedPnl aliases;
+  // one fill per genuine execution, isolated synthetic replay identity;
+  // distinct equal executions preserved in REST/WS history; exact tick splitting;
+  // both bracket siblings preserved during parent cancel/replace amendments.
+  apexomni: [],
   // WOO repairs live in the TS reference itself; no result normalization:
   // exact integer IDs; order-axis journal provenance; camel-case aliases;
   // monotonic cumulative/terminal state and reconciled optimistic fill deltas;

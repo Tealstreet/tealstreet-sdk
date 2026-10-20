@@ -103,6 +103,8 @@ pub struct PositionRow<'a> {
     pub unrealised_pnl: Option<f64>,
     #[serde(deserialize_with = "optional_number", alias = "cur_realised_pnl")]
     pub cur_realised_pnl: Option<f64>,
+    #[serde(deserialize_with = "optional_number", alias = "realized_pnl")]
+    pub realized_pnl: Option<f64>,
     #[serde(deserialize_with = "optional_number", alias = "liq_price")]
     pub liq_price: Option<f64>,
 }

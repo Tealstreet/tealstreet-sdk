@@ -326,3 +326,94 @@ fn exhausted_rest_failures_use_filtered_ws_cache_without_merging_authoritative_r
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].order_id.as_deref(), Some("order1"));
 }
+
+#[test]
+fn anonymous_distinct_subsecond_executions_remain_distinct_without_inventing_ids() {
+    let mut e = seeded();
+    query(&mut e, None, None, None, None);
+    let request = requests(&mut e).remove(0);
+    let first = FILL.replace("\"tradeId\":\"trade1\",", "");
+    let second = first.replace("1700000000123", "1700000000456");
+    response(
+        &mut e,
+        &request,
+        30.0,
+        &format!(r#"{{"code":0,"data":[{first},{second},{first}]}}"#),
+    );
+    let result = result(&mut e).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|r| r.timestamp == 1700000000.0));
+    assert!(!result.contains("\"id\""));
+}
+
+#[test]
+fn anonymous_ws_cache_preserves_raw_execution_identity_across_second_precision_output() {
+    let (mut e, socket) = seeded_socket();
+    ws(
+        &mut e,
+        socket,
+        15.0,
+        r#"{"topic":"ws_zk_accounts_v3","type":"delta","contents":{"fills":[{"orderId":"parent","symbol":"BTC-USDT","side":"BUY","size":"1","price":"102","createdAt":1700000000123},{"orderId":"parent","symbol":"BTC-USDT","side":"BUY","size":"1","price":"102","createdAt":1700000000456}]}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    query(&mut e, None, None, None, None);
+    for offset in 0..4 {
+        let request = requests(&mut e).remove(0);
+        response(
+            &mut e,
+            &request,
+            30.0 + offset as f64,
+            r#"{"code":0,"data":[]}"#,
+        );
+    }
+    let result = result(&mut e).unwrap();
+    let rows: Vec<Row> = serde_json::from_str(&result).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|r| r.timestamp == 1700000000.0));
+    assert!(!result.contains("\"id\""));
+}
+
+#[test]
+fn same_second_ws_cache_uses_most_recent_arrival_before_limit() {
+    let (mut e, socket) = seeded_socket();
+    ws(
+        &mut e,
+        socket,
+        15.0,
+        r#"{"topic":"ws_zk_accounts_v3","type":"delta","contents":{"fills":[{"id":"first","orderId":"first-order","symbol":"BTC-USDT","side":"BUY","size":"1","price":"102","createdAt":1700000000123},{"id":"second","orderId":"second-order","symbol":"BTC-USDT","side":"BUY","size":"2","price":"102","createdAt":1700000000456}]}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    query(&mut e, None, None, None, Some(1));
+    for offset in 0..4 {
+        let request = requests(&mut e).remove(0);
+        response(
+            &mut e,
+            &request,
+            30.0 + offset as f64,
+            r#"{"code":0,"data":[]}"#,
+        );
+    }
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].order_id.as_deref(), Some("second-order"));
+    assert_eq!(rows[0].qty, 2.0);
+}
+
+#[test]
+fn duplicate_rest_execution_preserves_first_seen_order_for_equal_second_timestamps() {
+    let mut e = seeded();
+    query(&mut e, None, None, None, None);
+    let request = requests(&mut e).remove(0);
+    let second = FILL
+        .replace("trade1", "trade2")
+        .replace("\"fillSize\":\"2\"", "\"fillSize\":\"3\"");
+    response(
+        &mut e,
+        &request,
+        30.0,
+        &format!(r#"{{"code":0,"data":[{FILL},{second},{FILL}]}}"#),
+    );
+    let rows: Vec<Row> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    assert_eq!(rows.iter().map(|r| r.qty).collect::<Vec<_>>(), [2.0, 3.0]);
+}

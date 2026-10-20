@@ -133,7 +133,7 @@ fn snapshot_commits_orders_positions_and_metadata_only_when_both_reads_succeed()
     assert!(e.store().positions().is_empty());
     assert!(!e.store().loaded().positions);
     response(&mut e, orders, 30.0, ORDERS);
-    assert_eq!(e.store().positions().len(), 2);
+    assert_eq!(e.store().positions().len(), 1);
     assert_eq!(e.store().orders().len(), 3);
     assert!(e.store().loaded().positions && e.store().loaded().orders);
     assert!(e.store().hedged());
@@ -438,6 +438,121 @@ fn newer_websocket_position_survives_snapshot_already_in_flight() {
 }
 
 #[test]
+fn flat_positions_leave_the_open_store_but_keep_per_side_leverage_settings() {
+    let (mut e, socket) = ready();
+    ws(
+        &mut e,
+        socket,
+        100.0,
+        &frame(
+            "delta",
+            r#"{"positions":[{"symbol":"BTC-USDT","side":"LONG","size":"0","entryPrice":"0","customImr":"0"}]}"#,
+        ),
+    );
+    assert!(e.store().positions().is_empty());
+    let setting = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!(
+        (setting.buy_leverage, setting.sell_leverage),
+        (Some(10.0), Some(100.0))
+    );
+    ws(
+        &mut e,
+        socket,
+        110.0,
+        &frame(
+            "delta",
+            r#"{"positions":[{"symbol":"BTC-USDT","side":"SHORT","size":"0","entryPrice":"0","customImr":"0.05"}]}"#,
+        ),
+    );
+    assert!(e.store().positions().is_empty());
+    let setting = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!(
+        (setting.buy_leverage, setting.sell_leverage),
+        (Some(10.0), Some(20.0))
+    );
+    ws(
+        &mut e,
+        socket,
+        10_000.0,
+        &frame(
+            "delta",
+            r#"{"positions":[{"symbol":"BTC-USDT","side":"LONG","size":"1","entryPrice":"101"}]}"#,
+        ),
+    );
+    assert_eq!(e.store().position("BTCUSDT:long").unwrap().leverage, 10.0);
+}
+
+#[test]
+fn a_late_rest_snapshot_cannot_reopen_a_position_removed_by_websocket_zero() {
+    let (mut e, socket) = ready();
+    ws(
+        &mut e,
+        socket,
+        100.0,
+        &frame("delta", r#"{"positions":[]}"#),
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1100.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1100.0, Event::TimerFired { timer });
+    let stale = requests(&mut e).remove(0);
+    ws(
+        &mut e,
+        socket,
+        1110.0,
+        &frame(
+            "delta",
+            r#"{"positions":[{"symbol":"BTC-USDT","side":"LONG","size":"0","entryPrice":"0"}]}"#,
+        ),
+    );
+    assert!(e.store().positions().is_empty());
+    response(&mut e, &stale, 20_000.0, ACCOUNT);
+    assert!(e.store().positions().is_empty());
+    assert_eq!(
+        e.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(10.0)
+    );
+}
+
+#[test]
+fn websocket_realized_pnl_alias_preserves_financial_value_and_current_field_precedence() {
+    let (mut e, socket) = ready();
+    ws(
+        &mut e,
+        socket,
+        100.0,
+        &frame(
+            "delta",
+            r#"{"positions":[{"symbol":"BTC-USDT","side":"LONG","size":"2","entryPrice":"100","realizedPnl":"-0.010238"}]}"#,
+        ),
+    );
+    assert_eq!(
+        e.store().position("BTCUSDT:long").unwrap().realized_pnl,
+        Some(-0.010238)
+    );
+    ws(
+        &mut e,
+        socket,
+        110.0,
+        &frame(
+            "delta",
+            r#"{"positions":[{"symbol":"BTC-USDT","side":"LONG","size":"2","entryPrice":"100","curRealisedPnl":"0","realizedPnl":"999"}]}"#,
+        ),
+    );
+    assert_eq!(
+        e.store().position("BTCUSDT:long").unwrap().realized_pnl,
+        Some(0.0)
+    );
+}
+
+#[test]
 fn unknown_order_market_does_not_abort_later_known_order() {
     let (mut e, socket) = ready();
     let unknown = order("unknown", "OPEN", "0").replace("BTC-USDT", "UNKNOWN");
@@ -501,6 +616,17 @@ fn server_ping_echoes_args_and_reconnect_fences_old_socket() {
         ),
     );
     assert_eq!(e.store().position("BTCUSDT:long").unwrap().contracts, 2.0);
+}
+
+#[test]
+fn private_pong_reports_rounded_one_way_latency() {
+    let (mut e, socket) = ready();
+    ws(&mut e, socket, 101.0, r#"{"op":"pong"}"#);
+    let frame = e.take_frame(101.0).unwrap();
+    let (_, status) = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::STATUS)
+        .unwrap();
+    assert_eq!(f64::from_le_bytes(status[8..16].try_into().unwrap()), 41.0);
 }
 
 #[test]
@@ -624,7 +750,7 @@ fn account_identity_uses_documented_id_and_does_not_replace_account_store() {
         r#"{"userId":"611779989544632629","affiliateId":null}"#
     );
     assert_eq!(e.store().orders().len(), 3);
-    assert_eq!(e.store().positions().len(), 2);
+    assert_eq!(e.store().positions().len(), 1);
 }
 
 #[test]

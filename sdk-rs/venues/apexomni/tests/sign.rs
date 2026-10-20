@@ -72,10 +72,23 @@ fn raw_order_legacy_signs_body_once_and_keeps_wire_body() {
 
 #[test]
 fn legacy_numeric_zero_bound_is_omitted_only_from_signature_not_wire_query() {
-    let request=sign::Request::get("/v3/fills",fields(&[("beginTimeInclusive","0"),("symbol","BTC-USDT")]));
-    let signed=sign::request(&options(),1700000000123.0,&request,true).unwrap();
-    assert_eq!(signed.path,"/v3/fills?beginTimeInclusive=0&symbol=BTC-USDT");
-    assert_eq!(header(&signed,"APEX-SIGNATURE"),safe_cex_crypto::hmac_sha256(b"bXlzZWNyZXQ=",b"1700000000000GET/api/v3/fills?symbol=BTC-USDT",safe_cex_crypto::Encoding::Base64));
+    let request = sign::Request::get(
+        "/v3/fills",
+        fields(&[("beginTimeInclusive", "0"), ("symbol", "BTC-USDT")]),
+    );
+    let signed = sign::request(&options(), 1700000000123.0, &request, true).unwrap();
+    assert_eq!(
+        signed.path,
+        "/v3/fills?beginTimeInclusive=0&symbol=BTC-USDT"
+    );
+    assert_eq!(
+        header(&signed, "APEX-SIGNATURE"),
+        safe_cex_crypto::hmac_sha256(
+            b"bXlzZWNyZXQ=",
+            b"1700000000000GET/api/v3/fills?symbol=BTC-USDT",
+            safe_cex_crypto::Encoding::Base64
+        )
+    );
 }
 
 #[test]

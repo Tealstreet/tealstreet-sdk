@@ -138,3 +138,32 @@ generated ID and preserves both virtual siblings when editing one leg.
 - Confirmed additional TS auth defect: resend saw transformed cancel strings
   or platform-specific multipart internals. Retaining original semantic payload
   makes legacy signing deterministic. Paired TS/API regressions in progress.
+
+### Paired reference and harness phase
+
+- Paired TS financial corrections pass independent code-correctness review:
+  strict failed-read guards, canonical hedged IDs/mode, realized-PnL alias,
+  native execution identity and raw millisecond anonymous identity, synthetic
+  cache isolation, per-execution notifications, exact tick splits and sibling
+  preservation. SDK wrapper forwards Omni seed/auth and keeps unsupported
+  history/income capabilities branded. Account identity is a typed engine read.
+- Public live tape: 20 seconds, 245 received frames, two books. Committed
+  six-second gzip fixture: 53 records / 51 frames, 89 markets/tickers.
+- Public gate PASS: main CPU TS 68.0 ms / Rust 29.8 ms; steady CPU 42.6 /
+  3.9 ms; process CPU 77.7 / 66.5 ms; retained memory 3.4 / 2.0 MB; Rust
+  linear memory 1.6 MB. Identical output. These are initial branch numbers;
+  final acceptance repeats after landing integration.
+- Live traffic exposed a TS pong-ack bug: nested `request.op=ping` was mistaken
+  for a server ping. Top-level control parsing fixes it; regression/review pass.
+- Strict private harness independently verifies API HMAC and unmodified npm
+  zkLink signatures for every parent/TP/SL leg, sizes, fee/expiry, broker,
+  caller IDs, socket role/auth/subscriptions/generations and ping responses.
+  Mutation tests cover mismatched multipart boundaries, invalid fallback pongs,
+  broker-prefixed caller IDs and legacy hour-boundary expiry quantization.
+- 177 harness tests pass. Root typecheck 44 tasks and lint 28 tasks pass.
+- Review additionally required unique generated IDs within precomputed batches:
+  per-job reservation/retry prevents six-digit random suffix collisions and
+  reserves caller/known IDs. Deterministic collision regression added.
+- Next: commit paired corrections/integration, merge latest landing branch
+  (Orderly and Lighter), rerun all native/WASM/root checks, public/private and
+  Binance gates, then PR code-correctness reviews and green CI.

@@ -170,6 +170,8 @@ Execution-history behavior (`fetchHistoricalFills`):
 - Normalizes to `Execution[]` with Unix-second timestamps, symbol guards, side/price/qty field fallbacks, and fee/orderId mapping when present
 - Supports both verbose row fields (for example `symbol/side/price/size/createdAt`) and compact fill rows (`s/S/p/v/T/i`)
 - Keeps a bounded private-WS fills cache and returns cached executions when REST execution-history requests timeout
+- Execution IDs are internal deduplication keys; equal fills in the same second remain distinct when their native IDs differ. The returned `Execution` shape is unchanged.
+- REST execution identity prefers `tradeId`, `tradeID`, `fillId`, `execId`, `id`, then compact `i`; history-order fallback rows use the same native-row identity. Private socket identity prefers documented fill `id`, then `matchFillId`. Synthetic order cache entries never reserve genuine execution replay identities.
 
 ## WebSocket Implementation
 
@@ -215,7 +217,9 @@ Execution-history behavior (`fetchHistoricalFills`):
 
 - `snapshot` messages: Completely replace the order book from `data.a` (asks) and `data.b` (bids).
 - `delta` messages: Update individual price levels using `updateOrderBook()`.
-- After each update: `sortOrderBook()` and `calcOrderBookTotal()` are called.
+- Validate every level before mutation; snapshot insertion sorts levels and drops zero sizes.
+- Snapshots reset the `data.u` cursor. Ignore pre-snapshot and duplicate/older deltas; require consecutive updates. A sequence gap clears the visible book and unsubscribes/subscribes while awaiting a fresh snapshot.
+- Reconnect clears each listener's sequence and book before resubscribing.
 
 **Ticker/InstrumentInfo Handling** (`apexomni.ws-public.ts:98-171`):
 
@@ -296,13 +300,15 @@ Execution-history behavior (`fetchHistoricalFills`):
 - Only triggers `throttleFetchOrders()` if no orders in the batch are `CANCELED` (cancellations are handled by blacklist).
 - Skips recently cancelled orders via `recentlyCancelledOrders` map.
 - Skips FILLED orders with `price <= 0 && amount <= 0` (false positives from order replacements).
-- `FILLED` orders with `shouldNotify`: Emits `'fill'` event. `shouldNotify` requires both `isFreshOrder` (within 5 seconds) and `isEnoughTimePassedAfterConnect` (5 seconds after WS connect).
+- Only genuine `contents.fills[]` executions emit `'fill'`, once per native execution ID and with the full execution quantity. Snapshot fills seed the cache and replay guard without notifications. Order cumulative totals can repair the history cache, never emit execution notifications; later genuine executions replace the corresponding synthetic quantity.
 - `CANCELED` orders: Removes from store including associated `__stop_loss` and `__take_profit` virtual orders. Emits error for non-trivial cancel reasons.
-- `OPEN`/`UNTRIGGERED` orders: Added or updated in the store.
+- Final filled/canceled/expired rows mark parent and virtual children terminal so delayed REST snapshots cannot reopen them. Terminal execution deduplication survives order removal; all private tracking collections are bounded.
+- `PENDING`/`OPEN`/`UNTRIGGERED` orders: Added or updated in the store.
 
 **Position Topic Handling** (`apexomni.ws-private.ts:321-328`):
 
 - Maps positions via `mapPosition()`, updates store, records `lastWebsocketPositionsUpdate` timestamp, then calls `throttleFetchPositions()` for reconciliation.
+- Realized PnL reads `curRealisedPnl` first, including explicit zero, then the documented WS `realizedPnl` field. Missing size, unknown side and non-finite financial values reject reconciliation; malformed balance values preserve the last known balance.
 
 ## Order Types and Mappings
 
@@ -393,7 +399,7 @@ Where `UINT32_MAX = '4294967295'` and `UINT64_MAX = '18446744073709551615'`.
    - Market: `mark * 1.02` (buy) or `mark * 0.98` (sell).
    - StopLoss/TakeProfit: `calculateTpSlPrice()` with 0.5% slippage from trigger.
 5. Build the request with the canonical `BROKER_ID` (`'6587'`).
-6. **Order splitting**: If amount exceeds `maxOrderSize`, split into lots. Only the first lot includes TP/SL. Rest amount (modulo) goes in a final lot.
+6. **Order splitting**: If amount exceeds `maxOrderSize`, allocate whole amount ticks across bounded lots so their sum is exactly the adjusted request. Split brackets reject before SDK initialization or writes.
 7. For each lot (sequential via `mapSeries`):
    - Generate client order ID.
    - Compute expiration: 30 days from now + 1-week buffer for on-chain validity.
@@ -546,11 +552,12 @@ Position leverage (`apexomni.exchange.ts:1218-1225`):
   helper and throttled WebSocket heal commit successful results with
   `store.addOrUpdateOrdersFull()` (full replacement), which removes orders no
   longer in the API response.
+- Missing arrays and malformed financial rows reject the read; they never become an authoritative empty snapshot.
 - WebSocket `handleOrderTopic()` uses `store.addOrUpdateOrders()` (partial update) and `store.removeOrders()` for cancellations.
 
 ### Fake Positions
 
-`fetchPositions()` creates placeholder long and short positions for every market (`apexomni.exchange.ts:384-418`) to ensure the UI always shows position slots. Uses `uniqBy` to deduplicate with real positions.
+`fetchPositions()` creates placeholder long and short positions for every market to ensure the UI always shows position slots. Real and placeholder IDs both use the canonical market symbol, so a native symbol such as `BTC-USDT` cannot create a second slot beside `BTCUSDT:long`.
 
 ## Exchange Metadata
 
@@ -624,6 +631,7 @@ Updating a virtual `__take_profit` or `__stop_loss` child cancels and replaces t
 replacement copies both stored virtual siblings before applying the edited price, so changing one leg
 does not silently remove the other. Any cancellation or replacement failure rejects the update; once
 the old parent has been cancelled, callers must never interpret an empty result as success.
+Amending the regular parent also preserves both protective siblings. Every replacement gets a fresh generated client ID; the original caller ID stays attached to the canceled order.
 
 ### OHLCV Kline Auth Exception
 
@@ -636,6 +644,7 @@ Order signatures include a 1-week buffer (168 hours) added to the expiration tim
 ### Position Mode and Margin
 
 - **Position mode**: Always `PositionMode.Hedged` (separate long/short per symbol).
+- Authenticated startup publishes `store.options.isHedged = true` for consumers of account mode.
 - **Margin type**: Always `MarginType.Cross` (not configurable).
 - **Leverage**: Sent as `initialMarginRate = 1/leverage` to the `SET_LEVERAGE` endpoint, clamped to market min/max bounds. If the symbol is absent from the store, `setLeverage()` refreshes positions, re-filters for the symbol, and fails clearly if state is still unavailable.
 - **Account identity**: `getAccount()` reads `data.data.id` from `/v3/account`. The documented v3 response has no inviter field, so `affiliateId` is null.
@@ -714,3 +723,4 @@ cd packages/safe-cex && yarn test-ci
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends the caller's ID as both `clientId` and `clientOrderId`; it is hashed into the signed nonce, so it is resolved before SDK init and signing. Rule: non-empty, no whitespace.
+- Mapped orders expose `clientOrderId` from the venue's `clientOrderId` or `clientId` field.

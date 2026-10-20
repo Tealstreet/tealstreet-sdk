@@ -48,20 +48,32 @@ fn side(side: OrderSide) -> &'static str {
 fn pair(key: &str, value: impl Into<String>) -> (String, String) {
     (key.into(), value.into())
 }
-fn generated_id(account: &str, now: f64) -> Result<String, String> {
-    let entropy = safe_cex_crypto::uuid::uuid()?;
-    let hash = safe_cex_crypto::sha256(entropy.as_bytes());
-    let suffix = 100_000 + u32::from_be_bytes(hash[..4].try_into().unwrap()) % 900_000;
-    Ok(format!(
-        "apexomni-{account}-{}-{suffix}",
-        num::format(now.floor())
-    ))
+fn mint_id(
+    account: &str,
+    now: f64,
+    issued: &mut HashSet<String>,
+    mut entropy: impl FnMut() -> Result<String, String>,
+) -> Result<String, String> {
+    for _ in 0..16 {
+        let hash = safe_cex_crypto::sha256(entropy()?.as_bytes());
+        let suffix = 100_000 + u32::from_be_bytes(hash[..4].try_into().unwrap()) % 900_000;
+        let id = format!("apexomni-{account}-{}-{suffix}", num::format(now.floor()));
+        if issued.insert(id.clone()) {
+            return Ok(id);
+        }
+    }
+    Err("ApeX Omni could not allocate a unique client order ID".into())
+}
+fn generated_id(account: &str, now: f64, issued: &mut HashSet<String>) -> Result<String, String> {
+    mint_id(account, now, issued, safe_cex_crypto::uuid::uuid)
 }
 fn parent_id(id: &str) -> &str {
-    id.split_once("__").map_or(id, |(parent, _)| parent)
+    id.strip_suffix("__stop_loss")
+        .or_else(|| id.strip_suffix("__take_profit"))
+        .unwrap_or(id)
 }
 fn valid_id(id: &str) -> bool {
-    !id.is_empty() && !id.chars().any(char::is_whitespace)
+    !id.is_empty() && !id.chars().any(|ch| ch.is_whitespace() || ch == '\u{feff}')
 }
 
 fn lots(order: &PlaceOrderOpts, market: &Market) -> Result<Vec<f64>, String> {
@@ -225,6 +237,7 @@ impl ApexOmni {
         &self,
         cx: &Cx<'_, Pending>,
         order: &PlaceOrderOpts,
+        issued: &mut HashSet<String>,
     ) -> Result<Vec<Step>, String> {
         let seed = self
             .options
@@ -290,7 +303,7 @@ impl ApexOmni {
                 .client_order_id
                 .clone()
                 .map(Ok)
-                .unwrap_or_else(|| generated_id(&self.account.account_id, cx.now))?;
+                .unwrap_or_else(|| generated_id(&self.account.account_id, cx.now, issued))?;
             let size = num::format(amount);
             let price_text = num::format(price);
             let signature = sign::contract_signature(
@@ -387,7 +400,7 @@ impl ApexOmni {
                 if !positive(leg_price) || !positive(trigger) {
                     return Err("ApeX Omni bracket price rounds to zero".into());
                 }
-                let leg_id = generated_id(&self.account.account_id, cx.now)?;
+                let leg_id = generated_id(&self.account.account_id, cx.now, issued)?;
                 let signature = sign::contract_signature(
                     seed,
                     &leg_id,
@@ -465,7 +478,13 @@ impl ApexOmni {
             } => {
                 let replacement = replacement(cx, &id, price, amount).and_then(|order| {
                     validate(std::slice::from_ref(&order), cx)?;
-                    self.prepare_order(cx, &order)
+                    let mut issued = cx
+                        .store
+                        .orders()
+                        .iter()
+                        .filter_map(|o| o.client_order_id.clone())
+                        .collect();
+                    self.prepare_order(cx, &order, &mut issued)
                 });
                 let steps = match replacement {
                     Ok(steps) => steps,
@@ -627,7 +646,7 @@ impl ApexOmni {
                 let result = if job.placements {
                     serde_json::to_string(&job.ids).unwrap()
                 } else {
-                    "null".into()
+                    "[]".into()
                 };
                 cx.done(job.command, Ok(result));
                 continue;
@@ -635,8 +654,15 @@ impl ApexOmni {
             match step {
                 Step::Build(orders) => {
                     let mut prepared = Vec::new();
+                    let mut issued: HashSet<_> = cx
+                        .store
+                        .orders()
+                        .iter()
+                        .filter_map(|o| o.client_order_id.clone())
+                        .chain(orders.iter().filter_map(|o| o.client_order_id.clone()))
+                        .collect();
                     let result = orders.iter().try_for_each(|o| {
-                        self.prepare_order(cx, o)
+                        self.prepare_order(cx, o, &mut issued)
                             .map(|steps| prepared.extend(steps))
                     });
                     if let Err(error) = result {
@@ -750,13 +776,39 @@ impl ApexOmni {
                 if let Some(index) = cx.store.market_index(&symbol) {
                     let mut setting = cx.store.setting(&symbol).unwrap_or_default();
                     setting.leverage = leverage;
+                    setting.buy_leverage = Some(leverage);
+                    setting.sell_leverage = Some(leverage);
                     setting.margin_type = Some(MarginType::Cross);
                     cx.store.set_settings([(index, setting)]);
                 }
+                cx.store.update_positions(|position| {
+                    if position.symbol == symbol {
+                        position.leverage = leverage;
+                    }
+                });
                 self.refresh_positions(cx);
             }
         }
         self.trading.waiting = false;
         self.drive_trading(cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn generated_ids_retry_entropy_collisions_before_any_write() {
+        let mut issued = HashSet::new();
+        let first = mint_id("account", 1.0, &mut issued, || Ok("first".into())).unwrap();
+        let mut draws = ["first", "second"].into_iter();
+        let second = mint_id("account", 1.0, &mut issued, || {
+            Ok(draws.next().unwrap().into())
+        })
+        .unwrap();
+        assert_ne!(first, second);
+        assert_eq!(issued.len(), 2);
+        assert!(mint_id("account", 1.0, &mut issued, || Ok("first".into())).is_err());
+        assert_eq!(issued.len(), 2);
     }
 }

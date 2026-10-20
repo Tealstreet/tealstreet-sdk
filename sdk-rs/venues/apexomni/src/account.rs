@@ -71,7 +71,7 @@ impl Request {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Execution {
     #[serde(skip)]
-    pub id: Option<String>,
+    pub(crate) identity: String,
     pub timestamp: f64,
     pub symbol: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -128,7 +128,7 @@ pub struct Account {
     snapshot: Option<Snapshot>,
     generation: u64,
     revision: u64,
-    position_versions: HashMap<String, (u64, f64)>,
+    position_versions: HashMap<String, (u64, f64, Position)>,
     leverage_versions: HashMap<String, (u64, f64, f64)>,
     order_versions: HashMap<String, u64>,
     order_queue: VecDeque<(String, u64)>,
@@ -193,7 +193,7 @@ impl Account {
     }
 
     fn cache(&mut self, execution: Execution) {
-        self.recent_executions.push(execution);
+        self.recent_executions.insert(0, execution);
         self.recent_executions
             .sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
         self.recent_executions.truncate(500);
@@ -399,6 +399,14 @@ impl ApexOmni {
         let leverage = rate
             .map(|r| 1.0 / r)
             .or_else(|| store.position(&id).map(|p| p.leverage))
+            .or_else(|| {
+                store
+                    .setting(&market.symbol)
+                    .and_then(|setting| match side {
+                        PositionSide::Long => setting.buy_leverage,
+                        PositionSide::Short => setting.sell_leverage,
+                    })
+            })
             .unwrap_or_else(|| {
                 self.contracts
                     .get(&market.symbol)
@@ -419,7 +427,7 @@ impl ApexOmni {
             margin_type: Some(MarginType::Cross),
             position_mode: Some(PositionMode::Hedged),
             unrealized_pnl: raw.unrealised_pnl.unwrap_or(0.0),
-            realized_pnl: Some(raw.cur_realised_pnl.unwrap_or(0.0)),
+            realized_pnl: Some(raw.cur_realised_pnl.or(raw.realized_pnl).unwrap_or(0.0)),
             contracts,
             liquidation_price: raw.liq_price.unwrap_or(0.0),
             margin_size: None,
@@ -429,13 +437,21 @@ impl ApexOmni {
 
     fn placeholders(&self, store: &Store, positions: &mut Vec<Position>) {
         for market in store.markets() {
-            let leverage = self
+            let default_leverage = self
                 .contracts
                 .get(&market.symbol)
                 .map(|c| 1.0 / c.initial_margin_rate)
                 .filter(|n| n.is_finite() && *n > 0.0)
                 .unwrap_or(10.0);
             for side in [PositionSide::Long, PositionSide::Short] {
+                let leverage = store
+                    .setting(&market.symbol)
+                    .and_then(|setting| match side {
+                        PositionSide::Long => setting.buy_leverage,
+                        PositionSide::Short => setting.sell_leverage,
+                    })
+                    .filter(|leverage| leverage.is_finite() && *leverage > 0.0)
+                    .unwrap_or(default_leverage);
                 let id = position_id(&market.symbol, side);
                 if !positions.iter().any(|p| p.id == id) {
                     positions.push(Position {
@@ -961,15 +977,10 @@ impl ApexOmni {
         mut rows: Vec<Position>,
         revision: u64,
     ) {
-        for current in cx.store.positions() {
-            if self
-                .account
-                .position_versions
-                .get(&current.id)
-                .is_some_and(|(version, at)| *version > revision || cx.now - at < 1000.0)
-            {
-                rows.retain(|p| p.id != current.id);
-                rows.push(current.clone());
+        for (id, (version, at, last)) in &self.account.position_versions {
+            if *version > revision || cx.now - at < 1000.0 {
+                rows.retain(|p| p.id != *id);
+                rows.push(cx.store.position(id).unwrap_or(last).clone());
             }
         }
         for row in &mut rows {
@@ -997,7 +1008,11 @@ impl ApexOmni {
                 }
             });
         }
-        cx.store.set_positions(rows);
+        cx.store.set_positions(
+            rows.into_iter()
+                .filter(|position| position.contracts > 0.0)
+                .collect(),
+        );
     }
 
     fn commit_orders(&mut self, cx: &mut Cx<'_, Pending>, mut rows: Vec<Order>, revision: u64) {
@@ -1086,7 +1101,7 @@ impl ApexOmni {
         }
         if message.op == "pong" || message.ret_msg == "pong" || message.pong.is_some() {
             cx.store
-                .set_latency((cx.now - self.account.ping_at).max(0.0));
+                .set_latency(((cx.now - self.account.ping_at).max(0.0) / 2.0).round());
         }
         if message.success == Some(false) {
             cx.log(
@@ -1129,9 +1144,10 @@ impl ApexOmni {
                         position.leverage = *leverage;
                     }
                     self.account.revision += 1;
-                    self.account
-                        .position_versions
-                        .insert(position.id.clone(), (self.account.revision, cx.now));
+                    self.account.position_versions.insert(
+                        position.id.clone(),
+                        (self.account.revision, cx.now, position.clone()),
+                    );
                     rows.retain(|p| p.id != position.id);
                     rows.push(position);
                 }
@@ -1176,7 +1192,7 @@ impl ApexOmni {
             .as_ref()
             .map(|id| format!("fill:{id}"))
             .unwrap_or_else(|| format!("fill:{}:{time}:{price}:{qty}:{side:?}", raw.order_id));
-        if !self.account.remember(key) {
+        if !self.account.remember(key.clone()) {
             return;
         }
         let symbol = market.symbol.clone();
@@ -1212,7 +1228,7 @@ impl ApexOmni {
             .recent_executions
             .retain(|execution| execution.qty > 0.0);
         self.account.cache(Execution {
-            id,
+            identity: key,
             timestamp: if time > 1e12 {
                 (time / 1000.0).floor()
             } else {
@@ -1292,7 +1308,7 @@ impl ApexOmni {
                     .or(raw.created_at)
                     .unwrap_or(cx.now);
                 self.account.cache(Execution {
-                    id: None,
+                    identity: format!("order:{}:{cumulative}:{time}", raw.id),
                     timestamp: if time > 1e12 {
                         (time / 1000.0).floor()
                     } else {

@@ -144,9 +144,17 @@ pub fn request(
         if legacy {
             // These API bounds originate as numbers; the compatibility signer
             // omits zero while the request URL keeps the primary serialization.
-            query(&request.params.iter().filter(|(key,value)| {
-                !matches!(key.as_str(), "beginTimeInclusive" | "endTimeExclusive") || value != "0"
-            }).cloned().collect::<Vec<_>>())
+            query(
+                &request
+                    .params
+                    .iter()
+                    .filter(|(key, value)| {
+                        !matches!(key.as_str(), "beginTimeInclusive" | "endTimeExclusive")
+                            || value != "0"
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
         } else {
             serialized_query
         }
