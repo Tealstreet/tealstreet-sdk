@@ -161,3 +161,19 @@ findings are fixed and rechecked. Verification: 16 public tests plus 5 native
 signer tests pass; strict venue Clippy passes; bans pass. Native signer cases
 independently verify P-256/Ed25519 signatures and reject altered claims.
 Full workspace, WASM, SDK and performance acceptance remain later gates.
+
+### Phase 2 checkpoint
+
+Portfolio selection, private JWT subscriptions, balances, positions, settings,
+50-row user snapshots, active-status REST pagination, execution deltas and stale
+read guards are implemented. Independent review's five P2 findings are fixed and
+rechecked: newer user snapshots fence old REST scans (including removals), native
+edit proofs require explicit spot metadata and no trigger, first live fills are
+retained across placement races, missing price provenance cannot invent an
+execution price, and enqueue failures release reconciliation state.
+
+Verification: 40 venue tests (8 module, 17 public, 15 account) and strict targeted
+Clippy pass; engine 49 tests and JS frame 7 tests pass. The currency extension's
+presence flag preserves independent absent/empty collateral and spot holdings.
+Future trading/query hooks have explicit temporary lint expectations, removed
+when their following phase consumes them. No replay or live private gate claimed.

@@ -65,6 +65,8 @@ pub(crate) struct Quote {
 pub(crate) struct Product {
     pub product_id: String,
     #[serde(default)]
+    pub product_type: String,
+    #[serde(default)]
     pub base_currency_id: String,
     pub quote_currency_id: String,
     pub status: String,

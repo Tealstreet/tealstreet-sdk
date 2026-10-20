@@ -85,6 +85,7 @@ export type PositionTable = { count: number; market: Uint32Array; enums: Uint32A
 export interface CoinBalance { base: string; amount: number; notional: number }
 export interface Balance {
   coins?: Record<string, CoinBalance>;
+  currencies?: Record<string, { total: number; free: number; used: number; upnl: number }>;
   used: number;
   free: number;
   total: number;

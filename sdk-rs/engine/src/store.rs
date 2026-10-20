@@ -2,7 +2,8 @@
 //! the changes with [`Store::take_pending`] and writes them into the flush
 //! frame with [`Store::write`].
 use crate::model::{
-    Balance, CoinBalance, Loaded, MarginType, Market, Order, OrderStatus, Position, Ticker,
+    Balance, CoinBalance, CurrencyBalance, Loaded, MarginType, Market, Order, OrderStatus,
+    Position, Ticker,
 };
 use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
 use std::collections::HashMap;
@@ -20,6 +21,7 @@ pub struct Store {
     position_ids: bool,
     balance: Balance,
     coin_balances: Option<Vec<CoinBalance>>,
+    currency_balances: Option<Vec<CurrencyBalance>>,
     /// Per-market account settings, keyed by market index.
     settings: HashMap<u32, MarketSetting>,
     hedged: bool,
@@ -322,6 +324,17 @@ impl Store {
         }
     }
 
+    pub fn currency_balances(&self) -> Option<&[CurrencyBalance]> {
+        self.currency_balances.as_deref()
+    }
+
+    pub fn set_currency_balances(&mut self, currencies: Vec<CurrencyBalance>) {
+        if self.currency_balances.as_ref() != Some(&currencies) {
+            self.currency_balances = Some(currencies);
+            self.changes.balance = true;
+        }
+    }
+
     pub fn set_balance(&mut self, balance: Balance) {
         if balance != self.balance {
             self.balance = balance;
@@ -486,7 +499,8 @@ impl Store {
             let b = &self.balance;
             w.begin(section::BALANCE);
             w.f64s([b.used, b.free, b.total, b.upnl]);
-            if let Some(coins) = &self.coin_balances {
+            if self.coin_balances.is_some() || self.currency_balances.is_some() {
+                let coins = self.coin_balances.as_deref().unwrap_or_default();
                 w.u32(coins.len() as u32);
                 for coin in coins {
                     let base = w.string(&coin.base);
@@ -495,6 +509,19 @@ impl Store {
                 w.pad();
                 w.f64s(coins.iter().map(|coin| coin.amount));
                 w.f64s(coins.iter().map(|coin| coin.notional));
+                if let Some(currencies) = &self.currency_balances {
+                    w.u32(currencies.len() as u32);
+                    w.u32(u32::from(self.coin_balances.is_none()));
+                    for currency in currencies {
+                        let name = w.string(&currency.currency);
+                        w.u32(name);
+                    }
+                    w.pad();
+                    w.f64s(currencies.iter().map(|row| row.total));
+                    w.f64s(currencies.iter().map(|row| row.free));
+                    w.f64s(currencies.iter().map(|row| row.used));
+                    w.f64s(currencies.iter().map(|row| row.upnl));
+                }
             }
             w.end();
         }
@@ -824,6 +851,46 @@ mod tests {
         let mut writer = FrameWriter::new(vec![], 0.0);
         store.write(&pending, &mut writer);
         writer.finish()
+    }
+
+    #[test]
+    fn spot_currency_tail_preserves_full_and_reserved_holdings() {
+        let mut store = Store::default();
+        assert_eq!(store.currency_balances(), None);
+        let holdings = vec![CurrencyBalance {
+            currency: "BTC".into(),
+            total: 2.,
+            free: 1.25,
+            used: 0.75,
+            upnl: 0.,
+        }];
+        store.set_currency_balances(holdings.clone());
+        let frame = balance_frame(&mut store);
+        let (_, payload) = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::BALANCE)
+            .unwrap();
+        assert_eq!(payload.len(), 88);
+        assert_eq!(u32::from_le_bytes(payload[32..36].try_into().unwrap()), 0);
+        assert_eq!(u32::from_le_bytes(payload[40..44].try_into().unwrap()), 1);
+        let value = |offset| f64::from_le_bytes(payload[offset..offset + 8].try_into().unwrap());
+        assert_eq!(
+            (value(56), value(64), value(72), value(80)),
+            (2., 1.25, 0.75, 0.)
+        );
+        assert_eq!(store.currency_balances(), Some(holdings.as_slice()));
+        store.set_currency_balances(holdings);
+        assert!(
+            crate::wire::sections(&balance_frame(&mut store))
+                .next()
+                .is_none()
+        );
+        store.set_currency_balances(vec![]);
+        let frame = balance_frame(&mut store);
+        let (_, payload) = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::BALANCE)
+            .unwrap();
+        assert_eq!(payload.len(), 48);
+        assert_eq!(u32::from_le_bytes(payload[40..44].try_into().unwrap()), 0);
     }
 
     #[test]

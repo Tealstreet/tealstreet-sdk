@@ -603,14 +603,28 @@ impl Coinbase {
                 ..
             } => match serde_json::from_str::<Product>(item) {
                 Ok(row) => {
-                    let spot = row.future_product_details.is_none();
+                    let future = row.future_product_details.is_some();
+                    if (row.product_type == "FUTURE" && !future)
+                        || (row.product_type == "SPOT" && future)
+                    {
+                        *invalid = true;
+                        return;
+                    }
+                    let spot = row.product_type == "SPOT" && !future;
                     let expiring = row
                         .future_product_details
                         .as_ref()
                         .is_some_and(|f| f.contract_expiry_type == "EXPIRING");
+                    if !matches!(row.product_type.as_str(), "SPOT" | "FUTURE") {
+                        return;
+                    }
                     if (*kind == ProductKind::Spot && !spot)
                         || (*kind == ProductKind::Cfm && !expiring)
-                        || (*kind == ProductKind::Intx && (spot || expiring))
+                        || (*kind == ProductKind::Intx
+                            && row
+                                .future_product_details
+                                .as_ref()
+                                .is_none_or(|f| f.contract_expiry_type != "PERPETUAL"))
                     {
                         return;
                     }
@@ -886,7 +900,7 @@ impl Coinbase {
                             cx.store.set_positions(vec![]);
                             cx.store.set_balance(Default::default());
                         }
-                        // Account startup hook is installed with the private phase.
+                        self.private_after_markets(cx);
                         if self.public.kind == Some(ProductKind::Intx) {
                             self.instruments(cx, false);
                         }

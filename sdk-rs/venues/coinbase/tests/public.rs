@@ -418,7 +418,7 @@ fn spot_only_public_profile_has_keyless_real_spot_products() {
         &mut e,
         &r,
         200,
-        r#"{"products":[{"product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.00000001","price_increment":"0.01","base_min_size":"0.00000001","base_max_size":"10000","price":"60000","volume_24h":"100","price_percentage_change_24h":"9.43%"},{"product_id":"ETH-USD","base_currency_id":"ETH","quote_currency_id":"USD","status":"TRADING","base_increment":"0.00000001","price_increment":"0.01","base_min_size":"0.00000001","base_max_size":"100000","price":"3000","volume_24h":"200","price_percentage_change_24h":"3"}],"pagination":{"has_next":false}}"#,
+        r#"{"products":[{"product_type":"SPOT","product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.00000001","price_increment":"0.01","base_min_size":"0.00000001","base_max_size":"10000","price":"60000","volume_24h":"100","price_percentage_change_24h":"9.43%"},{"product_type":"SPOT","product_id":"ETH-USD","base_currency_id":"ETH","quote_currency_id":"USD","status":"TRADING","base_increment":"0.00000001","price_increment":"0.01","base_min_size":"0.00000001","base_max_size":"100000","price":"3000","volume_24h":"200","price_percentage_change_24h":"3"}],"pagination":{"has_next":false}}"#,
     );
     assert_eq!(e.store().markets().len(), 2);
     assert_eq!(e.store().tickers()[0].last, 60000.);
@@ -441,7 +441,7 @@ fn spot_product_pages_commit_only_after_the_last_page() {
         &mut e,
         &first,
         200,
-        r#"{"products":[{"product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.00000001","price_increment":"0.01","base_min_size":"0.00000001","base_max_size":"10000","price":"60000","volume_24h":"100","price_percentage_change_24h":"2"}],"pagination":{"has_next":true,"next_cursor":"next/a+ b"}}"#,
+        r#"{"products":[{"product_type":"SPOT","product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.00000001","price_increment":"0.01","base_min_size":"0.00000001","base_max_size":"10000","price":"60000","volume_24h":"100","price_percentage_change_24h":"2"}],"pagination":{"has_next":true,"next_cursor":"next/a+ b"}}"#,
     );
     assert!(e.store().markets().is_empty());
     let timer = e
@@ -461,7 +461,7 @@ fn spot_product_pages_commit_only_after_the_last_page() {
         &mut e,
         &next,
         200,
-        r#"{"products":[{"product_id":"ETH-USD","base_currency_id":"ETH","quote_currency_id":"USD","status":"TRADING","base_increment":"0.00000001","price_increment":"0.01","base_min_size":"0.00000001","base_max_size":"10000","price":"3000","volume_24h":"100","price_percentage_change_24h":"3"}],"pagination":{"has_next":false}}"#,
+        r#"{"products":[{"product_type":"SPOT","product_id":"ETH-USD","base_currency_id":"ETH","quote_currency_id":"USD","status":"TRADING","base_increment":"0.00000001","price_increment":"0.01","base_min_size":"0.00000001","base_max_size":"10000","price":"3000","volume_24h":"100","price_percentage_change_24h":"3"}],"pagination":{"has_next":false}}"#,
     );
     assert_eq!(e.store().markets().len(), 2);
     assert_eq!(e.store().tickers().len(), 2);
@@ -547,4 +547,26 @@ fn unknown_envelopes_cannot_keep_stale_socket_alive() {
         e.drain_actions()
             .any(|a| matches!(a,Action::WsClose {socket:s} if s==socket))
     );
+}
+
+#[test]
+fn future_product_without_native_details_cannot_become_spot() {
+    let mut e = Engine::new(
+        Coinbase::new(Options {
+            public_data_only: true,
+            spot_only: true,
+            ..Options::default()
+        })
+        .unwrap(),
+    );
+    e.start(1000.);
+    let r = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"products":[{"product_type":"FUTURE","product_id":"BTC-CDE","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"1","price_increment":"0.01","base_min_size":"1","base_max_size":"10000","price":"60000","volume_24h":"100","price_percentage_change_24h":"2"}]}"#,
+    );
+    assert!(e.store().markets().is_empty());
+    assert!(!e.store().loaded().markets);
 }

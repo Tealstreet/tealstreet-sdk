@@ -360,3 +360,12 @@ appended zero count explicitly clears them. Bitget inverse frames carry native
 order amount/filled and display remaining; their position notional is the native
 contract quantity. The worker adapter retains these native quantities in the
 existing TS `extra` fields alongside coin balances.
+
+The collateral tail may itself append a spot currency table: `u32 count`, `u32 flags`,
+`u32 currency[count]` string references, 8-byte padding, then f64 columns
+`total`, `free`, `used`, `upnl`. The optional table preserves reserved quantities;
+an absent table leaves currencies unspecified, while an appended zero count
+clears them. Flag bit 0 leaves collateral unspecified, preserving its independent
+absent-versus-empty contract. Writers without collateral insert an empty collateral table before
+this extension. Existing collateral-only and 32-byte balance frames retain their
+layout.

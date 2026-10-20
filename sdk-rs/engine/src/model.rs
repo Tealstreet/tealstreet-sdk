@@ -260,6 +260,16 @@ pub struct CoinBalance {
     pub notional: f64,
 }
 
+/// Spot holdings retain available and reserved quantities independently.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct CurrencyBalance {
+    pub currency: String,
+    pub total: f64,
+    pub free: f64,
+    pub used: f64,
+    pub upnl: f64,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 pub struct Loaded {
     pub balance: bool,

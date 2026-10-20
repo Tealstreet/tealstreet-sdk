@@ -129,12 +129,16 @@ test('position IDs survive transfer and legacy frames never read the next sectio
   assert.equal(legacy.status().loaded, 31);
 });
 
-function balanceFrame(coins) {
-  const strings = coins?.map((c) => c.base) ?? [];
+function balanceFrame(coins, currencies) {
+  const coinsAbsent = coins === undefined;
+  if (currencies) coins ??= [];
+  const strings = [...(coins?.map((c) => c.base) ?? []), ...(currencies?.map((c) => c.currency) ?? [])];
   const stringBuffer = stringFrame(strings).buffer;
-  const count = strings.length;
+  const count = coins?.length ?? 0;
   const at = (36 + count * 4 + 7) & ~7;
-  const length = coins ? at + count * 16 : 32;
+  const tail = at + count * 16;
+  const currencyAt = (tail + 8 + (currencies?.length ?? 0) * 4 + 7) & ~7;
+  const length = currencies ? currencyAt + currencies.length * 32 : coins ? tail : 32;
   const result = new ArrayBuffer(16 + 8 + length + stringBuffer.byteLength - 16);
   const view = new DataView(result);
   new Uint8Array(result).set(new Uint8Array(stringBuffer, 0, 16));
@@ -150,6 +154,15 @@ function balanceFrame(coins) {
       view.setFloat64(24 + at + count * 8 + i * 8, coin.notional, true);
     });
   }
+  if (currencies) {
+    view.setUint32(24 + tail, currencies.length, true);
+    view.setUint32(24 + tail + 4, Number(coinsAbsent), true);
+    currencies.forEach((currency, i) => {
+      view.setUint32(24 + tail + 8 + i * 4, count + i, true);
+      ['total', 'free', 'used', 'upnl'].forEach((key, column) =>
+        view.setFloat64(24 + currencyAt + (column * currencies.length + i) * 8, currency[key], true));
+    });
+  }
   new Uint8Array(result, 24 + length).set(new Uint8Array(stringBuffer, 16));
   return result;
 }
@@ -162,4 +175,21 @@ test('optional collateral columns survive buffer transfer and distinguish absent
   const transferred = structuredClone(buffer, { transfer: [buffer] });
   assert.equal(buffer.byteLength, 0);
   assert.deepEqual(new Frame(transferred).balance().coins, { BTC: coins[0], ETH: coins[1] });
+});
+
+test('spot currency columns retain reserved quantities and explicitly clear an empty snapshot', () => {
+  const coins = [{ base: 'BTC', amount: 0.1, notional: 5000 }];
+  const currencies = [{ currency: 'BTC', total: 2, free: 1.25, used: 0.75, upnl: 0 },
+    { currency: '__proto__', total: 3, free: 0, used: 3, upnl: -1 }];
+  const source = balanceFrame(coins, currencies);
+  const result = new Frame(structuredClone(source, { transfer: [source] })).balance();
+  assert.deepEqual(result.coins, { BTC: coins[0] });
+  assert.deepEqual(result.currencies.BTC, { total: 2, free: 1.25, used: 0.75, upnl: 0 });
+  assert.equal(Object.getPrototypeOf(result.currencies), Object.prototype);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(result.currencies, '__proto__').value,
+    { total: 3, free: 0, used: 3, upnl: -1 });
+  assert.deepEqual(new Frame(balanceFrame([], [])).balance().currencies, {});
+  assert.equal(new Frame(balanceFrame(coins)).balance().currencies, undefined);
+  assert.equal(new Frame(balanceFrame(undefined, currencies)).balance().coins, undefined);
+  assert.deepEqual(new Frame(balanceFrame([], [])).balance().coins, {});
 });
