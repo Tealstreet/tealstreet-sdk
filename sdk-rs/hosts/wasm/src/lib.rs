@@ -286,7 +286,6 @@ struct EngineOptions {
         feature = "bybit",
         feature = "mexc"
     ))]
-
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
@@ -839,7 +838,6 @@ impl WasmEngine {
                 paradex_address: options.paradex_address.take(),
                 subkey_address: options.subkey_address.take(),
                 payload_signer: options.payload_signer,
-
             }))),
             #[cfg(feature = "apexomni")]
             "apexomni" => Box::new(Engine::new(ApexOmni::new(ApexOmniOptions {

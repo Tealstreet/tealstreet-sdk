@@ -159,3 +159,13 @@ live trading, weakened parity oracle, or performance threshold changes.
   exposure, replay/collision risk or uncontrolled financial writes. Default
   receive windows that already matched supported TS policy were not treated as
   bugs. No lifecycle-only parity item is being repaired in this lane.
+- Independent integration re-review accepted the new signer ownership, nonce
+  assertions, Debug redaction and generic callback errors. It caught one stale
+  delegated Paradex Wasm test expectation using the original 24-hour auth hash;
+  the test now uses the independent `shortAuth` vector and asserts the actual
+  HTTP expiration is 300 seconds. Original vectors remain unchanged.
+- Final merged-source root typecheck (44 tasks) and lint (28 tasks) pass; the
+  full root test run, native workspace checks, Wasm checks, then all 30 isolated
+  replay/build-size gates are queued. The primary matrix is read from current
+  CI rather than a hand-maintained venue subset, followed by combined bindings
+  and consumer/lifecycle checks.
