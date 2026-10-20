@@ -421,6 +421,21 @@ pub fn position_id(symbol: &str, side: PositionSide, mode: Option<PositionMode>)
 /// Map an order row: the order, plus its attached stop-loss and take-profit
 /// as `{id}__stop_loss` / `{id}__take_profit` rows. `None` for a row the
 /// store cannot hold (an unknown type or no side).
+/// The spot TP/SL kind from its trigger against the current last price, or
+/// `None` while there is no price or the order is not a TP/SL.
+fn priced_tpsl_kind(order: &Order, store: &Store) -> Option<OrderType> {
+    let last = store.ticker(&order.symbol).map_or(0.0, |t| t.last);
+    if last <= 0.0 || !matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+        return None;
+    }
+    let below = order.price < last;
+    Some(if (order.side == OrderSide::Sell) == below {
+        OrderType::StopLoss
+    } else {
+        OrderType::TakeProfit
+    })
+}
+
 pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     let stop_order_type = present(&o.stop_order_type);
     let tpsl_mode = present(&o.tpsl_mode);
@@ -1832,20 +1847,13 @@ impl BybitLinear {
     /// zero price; relabel them from their trigger now that one exists.
     pub(crate) fn reclassify_unpriced_tpsl(&mut self, cx: &mut Cx<'_, Pending>) {
         for id in std::mem::take(&mut self.account.unpriced_tpsl) {
-            let Some(order) = cx.store.order(&id) else {
-                continue;
-            };
-            let last = cx.store.ticker(&order.symbol).map_or(0.0, |t| t.last);
-            if last <= 0.0 || !matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit) {
-                continue;
+            if let Some(kind) = cx
+                .store
+                .order(&id)
+                .and_then(|o| priced_tpsl_kind(o, cx.store))
+            {
+                cx.store.update_order(&id, |order| order.kind = kind);
             }
-            let below = order.price < last;
-            let kind = if (order.side == OrderSide::Sell) == below {
-                OrderType::StopLoss
-            } else {
-                OrderType::TakeProfit
-            };
-            cx.store.update_order(&id, |order| order.kind = kind);
         }
     }
 
@@ -2323,9 +2331,16 @@ impl BybitLinear {
         self.account.orders_snapshot_version += 1;
         self.account.position_bound.clear();
         let mut orders = Vec::new();
-        for mapped in join.rows {
+        for mut mapped in join.rows {
             if self.stale_terminal_snapshot(&mapped) {
                 continue;
+            }
+            // Rows parsed before a seed that has since landed are relabelled here.
+            if mapped.unpriced_tpsl
+                && let Some(kind) = priced_tpsl_kind(&mapped.orders[0], cx.store)
+            {
+                mapped.orders[0].kind = kind;
+                self.account.unpriced_tpsl.remove(&mapped.orders[0].id);
             }
             if mapped.position_bound {
                 self.account
