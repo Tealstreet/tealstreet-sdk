@@ -427,13 +427,13 @@ async function tsCommand(exchange, store, record) {
       return result.clientOrderId ? { orderIds: [...result], clientOrderId: result.clientOrderId } : result;
     }
     case 'setLeverage':
-      await exchange.setLeverage(args.symbol, args.leverage);
+      await exchange.setLeverage(args.symbol, args.leverage, args.side);
       return [];
     case 'setMarginType':
       await exchange.changeMarginType(args.isolated, args.symbol);
       return [];
     case 'setPositionMode':
-      await exchange.changePositionMode(args.hedged);
+      await exchange.changePositionMode(args.hedged, args.symbol);
       return [];
     case 'fetchStpMode':
       return exchange.fetchStpMode();

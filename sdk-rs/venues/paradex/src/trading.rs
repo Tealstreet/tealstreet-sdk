@@ -529,6 +529,7 @@ impl Trading {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => {
                 let result = (|| {
                     if !leverage.is_finite() {
@@ -572,7 +573,11 @@ impl Trading {
                 );
                 return true;
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 cx.done(
                     command,
                     if hedged {

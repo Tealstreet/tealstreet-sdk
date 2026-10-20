@@ -203,6 +203,7 @@ fn hyro_handshake_timeout_reconnects_and_refuses_hedging() {
     h.command(Command::SetPositionMode {
         command: 99,
         hedged: true,
+        symbol: None,
     });
     assert!(h.result(99).unwrap().is_err());
 }

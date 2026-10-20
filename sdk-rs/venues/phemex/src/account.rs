@@ -69,13 +69,18 @@ impl State {
         &mut self,
         symbol: &str,
         leverage: Option<f64>,
+        side: Option<PositionSide>,
         margin: Option<MarginType>,
         mode: Option<PositionMode>,
     ) {
         if let Some(context) = self.contexts.get_mut(symbol) {
             if let Some(leverage) = leverage {
-                context.long_leverage = leverage;
-                context.short_leverage = leverage;
+                if side != Some(PositionSide::Short) {
+                    context.long_leverage = leverage;
+                }
+                if side != Some(PositionSide::Long) {
+                    context.short_leverage = leverage;
+                }
             }
             if let Some(margin) = margin {
                 context.margin_type = margin;
@@ -91,6 +96,11 @@ impl State {
     }
     pub fn context(&self, symbol: &str) -> Option<Context> {
         self.contexts.get(symbol).copied()
+    }
+    pub fn any_hedged(&self) -> bool {
+        self.contexts
+            .values()
+            .any(|context| context.mode == PositionMode::Hedged)
     }
     pub fn mode(&self, symbol: &str) -> Option<PositionMode> {
         self.context(symbol).map(|c| c.mode)
@@ -983,6 +993,8 @@ impl State {
         if leverage > 0. {
             cx.store.update_setting(symbol, |s| {
                 s.leverage = leverage;
+                s.buy_leverage = (context.long_leverage > 0.).then_some(context.long_leverage);
+                s.sell_leverage = (context.short_leverage > 0.).then_some(context.short_leverage);
                 s.margin_type = Some(context.margin_type)
             });
         }

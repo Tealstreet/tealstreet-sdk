@@ -823,3 +823,14 @@ preimages, builder fp5 aggregation, auth and the new high market IDs. Unused
 first-port grouped-order/approval signer surfaces and their unused 32-byte hash
 helpers are removed; the exchange places bracket siblings sequentially as TS
 currently does. Deliberate TS fixes are listed in the port plan and replay gate.
+
+## Rust position leverage and partial amendments
+
+Position `initial_margin_fraction` accepts ratios up to 1, percentages up to
+100, and basis-point ticks above 100; `"20.00"` therefore means 20% and 5x.
+Public market risk fractions keep their separate tick-based interpretation.
+Margin-mode writes preserve the parsed position leverage. Invalid market
+bounds fail without panicking or replacing a known account snapshot.
+Price-only cancel/recreate amendments use the observed remaining quantity;
+explicit replacement amounts keep the caller's requested quantity. This fixes
+the TS default that re-places the original amount after a partial execution.

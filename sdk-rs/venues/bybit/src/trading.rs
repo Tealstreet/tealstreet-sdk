@@ -248,7 +248,11 @@ impl BybitLinear {
         }
         if self.variant.is_hyro() {
             match command {
-                Command::SetPositionMode { command, hedged } => {
+                Command::SetPositionMode {
+                    command,
+                    hedged,
+                    symbol: _,
+                } => {
                     return Some((
                         *command,
                         if *hedged {
@@ -499,6 +503,7 @@ impl BybitLinear {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => (
                 command,
                 plan_leverage(cx, self.paths.category, symbol, leverage),
@@ -518,7 +523,11 @@ impl BybitLinear {
                     Ok(single("/v5/account/set-margin-mode", body, call)),
                 )
             }
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 if self.category == Category::Inverse {
                     let mut coins = std::collections::BTreeSet::new();
                     for market in cx.store.markets() {

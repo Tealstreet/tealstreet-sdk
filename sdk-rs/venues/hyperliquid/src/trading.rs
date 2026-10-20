@@ -293,6 +293,7 @@ impl Hyperliquid {
                 command,
                 symbol,
                 leverage,
+                side: _,
             } => (
                 command,
                 VecDeque::from([Step::Leverage {
@@ -313,7 +314,11 @@ impl Hyperliquid {
                     isolated: Some(isolated),
                 }]),
             ),
-            Command::SetPositionMode { command, hedged } => {
+            Command::SetPositionMode {
+                command,
+                hedged,
+                symbol: _,
+            } => {
                 if hedged {
                     cx.done(
                         command,

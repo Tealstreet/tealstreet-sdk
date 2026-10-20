@@ -648,3 +648,15 @@ perform this lookup even when ordinary GETs use secondary read credentials.
 TS still has inert income/order-history fallbacks and a non-definitive lookup
 fallback. Its implemented fill history is a symbol-scoped latest page capped
 at 200, so this sweep does not claim unbounded Phemex TS history.
+
+Rust `setLeverage(symbol, leverage, side)` preserves the opposite hedge leg's
+cached leverage in the required two-field request. Both values retain their
+margin sign: negative in cross, positive in isolated. Only the selected leg's
+settings and positions change after success. Omitting side changes both legs;
+one-way mode uses `leverageRr` and ignores side. An unknown opposite hedge
+leverage fails before a write rather than inventing a replacement value.
+
+Rust `changePositionMode` also requires a symbol and sends one PUT for that
+symbol. It updates that symbol's confirmed context after success; missing,
+unknown or rejected symbols never trigger writes for other markets. The store's
+account hedge indicator reflects whether any known symbol remains hedged.

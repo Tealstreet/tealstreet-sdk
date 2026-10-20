@@ -554,8 +554,11 @@ impl Kucoin {
                 {
                     return Err("KuCoin only exposes cross-margin leverage changes".into());
                 }
-                let leverage =
-                    leverage.clamp(market.limits.leverage.min, market.limits.leverage.max);
+                let leverage = num::clamp_leverage(
+                    leverage,
+                    market.limits.leverage.min,
+                    market.limits.leverage.max,
+                )?;
                 #[derive(Serialize)]
                 struct Body<'a> {
                     symbol: &'a str,
