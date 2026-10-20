@@ -1312,7 +1312,10 @@ fn spot_open_orders_are_loaded_and_externally_canceled_orders_are_removed() {
                 support::reply(&mut e, &r, 200, rows);
             }
             Action::Http(r) => support::reply(&mut e, &r, 200, r#"{"balances":[]}"#),
-            Action::SetTimer { timer, at_ms: 11_000.0 } => sync = Some(timer),
+            Action::SetTimer {
+                timer,
+                at_ms: 11_000.0,
+            } => sync = Some(timer),
             _ => {}
         }
     }
