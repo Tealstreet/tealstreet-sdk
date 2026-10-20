@@ -35,7 +35,7 @@ describe('TxFlow account identity at the worker seam', () => {
     const command = vi.spyOn(exchange as never as { command: (args: unknown) => Promise<unknown> }, 'command').mockResolvedValue(rails);
     try {
       expect(await exchange.fetchLeverageForSymbol('BTC-USDC')).toEqual(rails);
-      expect(command).toHaveBeenCalledWith({ op: 'fetchLeverage', symbol: 'BTC-USDC' });
+      expect(command).toHaveBeenCalledWith({ op: 'fetchLeverage', symbol: 'BTC-USDC' }, { report: false });
     } finally { exchange.dispose(); }
   });
 });

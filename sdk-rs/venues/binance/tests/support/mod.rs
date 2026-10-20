@@ -22,6 +22,10 @@ pub struct Harness {
     /// Structured detail of failed commands.
     pub failures: Vec<(u32, safe_cex_engine::VenueError)>,
     pub logs: Vec<String>,
+    pub command_errors: Vec<(u32, String)>,
+    pub command_notices: Vec<(u32, &'static str)>,
+    pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
+    pub progress_at_request: Vec<(RequestId, usize)>,
 }
 
 impl Harness {
@@ -50,6 +54,10 @@ impl Harness {
             done: Vec::new(),
             failures: Vec::new(),
             logs: Vec::new(),
+            command_errors: Vec::new(),
+            command_notices: Vec::new(),
+            progress: Vec::new(),
+            progress_at_request: Vec::new(),
         };
         harness.engine.start(harness.now);
         harness.collect();
@@ -73,7 +81,11 @@ impl Harness {
                 Action::SignPayload { .. } => {
                     panic!("delegated signing is unsupported in the binance test harness")
                 }
-                Action::Http(request) => self.requests.push(request),
+                Action::Http(request) => {
+                    self.progress_at_request
+                        .push((request.id, self.progress.len()));
+                    self.requests.push(request);
+                }
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
                 Action::WsConnectWithHeaders { .. } => {
                     panic!("Binance authenticates sockets with listen keys")
@@ -82,7 +94,16 @@ impl Harness {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(Notice::CommandProgress { command, receipts }) => {
+                    self.progress.push((command, receipts))
+                }
+                Action::Notice(Notice::CommandError { command, message }) => {
+                    self.logs.push(message.clone());
+                    self.command_errors.push((command, message));
+                    self.command_notices.push((command, "error"));
+                }
                 Action::Notice(Notice::CommandDone { command, result }) => {
+                    self.command_notices.push((command, "done"));
                     self.done.push((command, result))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
