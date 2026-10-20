@@ -1,11 +1,15 @@
 import type { Transport as EngineHostTransport } from '@tealstreet/safe-cex-wasm/host';
 import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { TransportProvider } from '../../transport/types';
 import type { ExchangeOptions } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { orderlyTransport } from '../../exchanges/rust/transport';
+import { DefaultStore } from '../../store/store.base';
 import { directTransport } from '../../transport/direct';
 import { setDefaultTransport } from '../../transport/registry';
 
@@ -53,7 +57,15 @@ const options = (transport?: TransportProvider, extra: Partial<ExchangeOptions> 
   ...extra,
 });
 
-afterEach(() => setDefaultTransport(directTransport));
+afterEach(() => {
+  setDefaultTransport(directTransport);
+  setRustEngineTransport(nativeTransport);
+  setWasmEngineLoader(async () => {
+    const module = await import('@tealstreet/safe-cex-wasm/engine');
+    if (typeof module.default === 'function') await module.default();
+    return module;
+  });
+});
 
 describe('Orderly Rust transport boundary', () => {
   it('keeps the direct transport and its streaming response unchanged', async () => {
@@ -272,7 +284,7 @@ describe('Orderly Rust transport boundary', () => {
     expect(base.request).not.toHaveBeenCalled();
   });
 
-  it('applies provider upgrade headers and refuses a relay or an unsupported browser upgrade', () => {
+  it('preflights provider upgrade headers and refuses a relay or an unsupported browser upgrade before connect', () => {
     const { base } = createBase();
     const url = 'wss://ws-evm.orderly.org/ws/stream/common';
     const handlers = { onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() };
@@ -285,11 +297,11 @@ describe('Orderly Rust transport boundary', () => {
       headers: { Origin: 'https://provider.test' },
     });
     base.connect.mockClear();
-    expect(() =>
-      orderlyTransport('mode', options(headers), { ...base, webSocketHeaders: false }).connect(url, handlers),
-    ).toThrow('upgrade headers');
+    expect(() => orderlyTransport('mode', options(headers), { ...base, webSocketHeaders: false })).toThrow(
+      'upgrade headers',
+    );
     const relay = provider({ wsConnection: () => ({ kind: 'relay', headers: {} }) });
-    expect(() => orderlyTransport('mode', options(relay), base).connect(url, handlers)).toThrow('relay');
+    expect(() => orderlyTransport('mode', options(relay), base)).toThrow('relay');
     expect(() =>
       orderlyTransport('mode', options(headers), base).connect(url, {
         ...handlers,
@@ -298,4 +310,97 @@ describe('Orderly Rust transport boundary', () => {
     ).toThrow('changed an existing');
     expect(base.connect).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])('preflights the actual public and private URLs and caches headers (testnet=%s)', (testnet) => {
+    const { base } = createBase();
+    const wsConnection = vi.fn(() => ({ kind: 'headers' as const, headers: { Origin: 'https://provider.test' } }));
+    const account = 'account-id';
+    const prefix = testnet ? 'testnet-' : '';
+    const publicUrl = `wss://${prefix}ws-evm.orderly.org/ws/stream/${account}`;
+    const privateUrl = `wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/${account}`;
+    const transport = orderlyTransport(
+      'mode',
+      options(provider({ wsConnection }), { testnet, applicationId: account }),
+      base,
+    );
+    expect(wsConnection.mock.calls).toEqual([[publicUrl], [privateUrl]]);
+    expect(base.connect).not.toHaveBeenCalled();
+    // Reconnecting/funding sockets reuse a route that was already validated at startup.
+    wsConnection.mockImplementation(() => {
+      throw new Error('route changed after startup');
+    });
+    const handlers = { onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() };
+    transport.connect(publicUrl, handlers);
+    transport.connect(publicUrl, handlers);
+    transport.connect(privateUrl, handlers);
+    expect(wsConnection).toHaveBeenCalledTimes(2);
+    expect(base.connect).toHaveBeenLastCalledWith(privateUrl, {
+      ...handlers,
+      headers: { Origin: 'https://provider.test' },
+    });
+  });
+
+  it.each([
+    { publicDataOnly: true, applicationId: undefined },
+    { publicDataOnly: true, applicationId: 'public-account' },
+    { key: '', secret: '', applicationId: undefined },
+  ])('only resolves the public socket when no private socket will be opened: %j', (overrides) => {
+    const { base } = createBase();
+    const wsConnection = vi.fn((url: string) => {
+      if (url.includes('ws-private-')) return { kind: 'relay' as const, headers: {} };
+      return undefined;
+    });
+    orderlyTransport('mode', options(provider({ wsConnection }), overrides), base);
+    expect(wsConnection).toHaveBeenCalledExactlyOnceWith(
+      `wss://ws-evm.orderly.org/ws/stream/${overrides.applicationId ?? 'OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY'}`,
+    );
+    expect(base.connect).not.toHaveBeenCalled();
+  });
+
+  it.each(
+    [
+      { testnet: false, privateRoute: false },
+      { testnet: true, privateRoute: false },
+      { testnet: false, privateRoute: true },
+      { testnet: true, privateRoute: true },
+    ].flatMap((scenario) => (['relay', 'headers'] as const).map((kind) => ({ ...scenario, kind }))),
+  )(
+    'rejects actual SDK startup before constructing an engine for an unsupported socket route: %j',
+    async ({ testnet, privateRoute, kind }) => {
+      const { base } = createBase();
+      const construct = vi.fn();
+      setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
+      setRustEngineTransport(() => ({ ...base, webSocketHeaders: kind !== 'headers' }));
+      const wsConnection = vi.fn((url: string) => {
+        if (url.includes('ws-private-') === privateRoute) return { kind, headers: { Origin: 'https://provider.test' } };
+        return undefined;
+      });
+      const exchange = new RustEngineExchange(
+        'mode',
+        {
+          key: '11111111111111111111111111111111',
+          secret: '11111111111111111111111111111111',
+          testnet,
+          publicDataOnly: !privateRoute,
+          ...(privateRoute ? { applicationId: 'account-id' } : {}),
+          transport: provider({ wsConnection }),
+        },
+        new DefaultStore(),
+      );
+      try {
+        await expect(exchange.start()).rejects.toThrow('unsupported relay');
+        const prefix = testnet ? 'testnet-' : '';
+        expect(wsConnection).toHaveBeenLastCalledWith(
+          privateRoute
+            ? `wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/account-id`
+            : `wss://${prefix}ws-evm.orderly.org/ws/stream/OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY`,
+        );
+        expect(construct).not.toHaveBeenCalled();
+        expect(base.connect).not.toHaveBeenCalled();
+        expect(base.request).not.toHaveBeenCalled();
+      } finally {
+        exchange.dispose();
+      }
+    },
+  );
 });

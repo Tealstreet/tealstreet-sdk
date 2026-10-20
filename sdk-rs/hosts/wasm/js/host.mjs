@@ -5,7 +5,7 @@
 // transport = {
 //   now(): number,
 //   connect(url, { onOpen, onMessage, onClose }): { send(text), close() },
-//   request({ method, url, headers, body }):
+//   request({ method, url, headers, body, signal }):
 //     Promise<{ status, headers?: string, body: Uint8Array | AsyncIterable<Uint8Array> }>,
 //     (`headers` as `name: value` lines; a streamed body is fed to the engine
 //     chunk by chunk so large lists never sit whole in its memory),
@@ -22,6 +22,7 @@ export class EngineHost {
     this.sockets = new Map();
     this.timers = new Map();
     this.commands = new Map();
+    this.requests = new Map();
     this.nextCommand = 1;
     this.disposed = false;
   }
@@ -73,6 +74,8 @@ export class EngineHost {
 
   dispose() {
     this.disposed = true;
+    for (const controller of this.requests.values()) controller.abort();
+    this.requests.clear();
     for (const pending of this.commands.values()) pending.reject(new Error('engine disposed'));
     this.commands.clear();
     for (const socket of this.sockets.values()) socket.close();
@@ -108,6 +111,26 @@ export class EngineHost {
     }
     if (this.disposed) return;
     this.run(engine.httpEnd(id, transport.now()));
+  }
+
+  async request(action) {
+    const id = action.request;
+    const controller = new AbortController();
+    this.requests.set(id, controller);
+    try {
+      const response = await this.transport.request({
+        method: action.method,
+        url: action.url,
+        headers: Object.fromEntries(action.headers),
+        body: action.body,
+        signal: controller.signal,
+      });
+      if (!this.disposed) await this.receive(id, response);
+    } catch (error) {
+      if (!this.disposed) this.run(this.engine.httpFailed(id, String(error?.message ?? error), this.transport.now()));
+    } finally {
+      this.requests.delete(id);
+    }
   }
 
   run(actionsJson) {
@@ -149,20 +172,7 @@ export class EngineHost {
         this.sockets.delete(action.socket);
         break;
       case 'http': {
-        const id = action.request;
-        transport
-          .request({
-            method: action.method,
-            url: action.url,
-            headers: Object.fromEntries(action.headers),
-            body: action.body,
-          })
-          .then(
-            (response) => this.receive(id, response),
-            (error) => {
-              if (!this.disposed) this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
-            },
-          );
+        void this.request(action);
         break;
       }
       case 'setTimer': {
@@ -217,10 +227,16 @@ export class EngineHost {
 async function* chunks(stream) {
   if (!stream) return;
   const reader = stream.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return;
-    yield value;
+  let complete = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) { complete = true; return; }
+      yield value;
+    }
+  } finally {
+    if (!complete) await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }
 
@@ -272,8 +288,9 @@ export const nativeTransport = () => {
     ws.addEventListener('close', (event) => reportClose(event.code));
     return { send: (text) => ws.send(text), close: () => ws.close() };
   },
-  async request({ method, url, headers, body }) {
-    const response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(20_000) });
+  async request({ method, url, headers, body, signal }) {
+    const timeout = AbortSignal.timeout(20_000);
+    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
     return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };

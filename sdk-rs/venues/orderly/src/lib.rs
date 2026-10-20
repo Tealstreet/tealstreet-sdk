@@ -149,6 +149,23 @@ impl Orderly {
                 .unwrap_or("OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY")
         )
     }
+    fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.public.open = false;
+        self.public.received = cx.now;
+        self.public.socket = Some(cx.connect(self.public_url()));
+        self.public.watchdog = Some(cx.set_timer(10000.0));
+    }
+    fn public_topic_available(&self, cx: &mut Cx<'_, Pending>) -> bool {
+        if self.books.len() + self.candles.len() >= 97 {
+            cx.log(
+                LogLevel::Error,
+                "Orderly public socket has reached its 100-topic limit",
+            );
+            false
+        } else {
+            true
+        }
+    }
     fn seed(&self, cx: &mut Cx<'_, Pending>, kind: Seed) {
         let (path, pending) = match kind {
             Seed::Markets => (
@@ -515,8 +532,11 @@ impl Venue for Orderly {
             self.private_open(cx, socket);
             return;
         }
-        if self.public.socket != Some(socket) {
+        if self.public.socket != Some(socket) || self.public.open {
             return;
+        }
+        if let Some(timer) = self.public.watchdog.take() {
+            cx.clear_timer(timer);
         }
         self.public.open = true;
         self.public.received = cx.now;
@@ -775,7 +795,7 @@ impl Venue for Orderly {
             } => {
                 cx.store.set_tickers(rows);
                 self.seed_attempts = 0;
-                self.public.socket = Some(cx.connect(self.public_url()));
+                self.connect_public(cx);
                 self.funding_start(cx);
                 self.account_start(cx);
             }
@@ -823,12 +843,12 @@ impl Venue for Orderly {
         }
         if self.public.reconnect == Some(timer) {
             self.public.reconnect = None;
-            self.public.socket = Some(cx.connect(self.public_url()));
+            self.connect_public(cx);
             return;
         }
         if self.public.watchdog == Some(timer) {
             self.public.watchdog = None;
-            if cx.now - self.public.received >= 20000.0 {
+            if !self.public.open || cx.now - self.public.received >= 20000.0 {
                 let socket = self.public.socket.unwrap();
                 cx.close(socket);
                 self.on_close(cx, socket, 1006);
@@ -866,6 +886,9 @@ impl Venue for Orderly {
                 }
                 if let Some(s) = self.books.get_mut(&symbol) {
                     s.subscribers = s.subscribers.saturating_add(1);
+                    return;
+                }
+                if !self.public_topic_available(cx) {
                     return;
                 }
                 self.books.insert(
@@ -909,6 +932,13 @@ impl Venue for Orderly {
             Command::SubscribeCandles { symbol, interval } => {
                 if (cx.store.loaded().markets && !self.native.contains_key(&symbol))
                     || !interval_valid(&interval)
+                {
+                    return;
+                }
+                if !self
+                    .candles
+                    .contains_key(&(symbol.clone(), interval.clone()))
+                    && !self.public_topic_available(cx)
                 {
                     return;
                 }

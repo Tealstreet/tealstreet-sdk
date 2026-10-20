@@ -24,6 +24,8 @@ export interface Transport {
     url: string;
     headers: Record<string, string>;
     body?: string;
+    /** Aborted on host disposal; check again after asynchronous authorization. */
+    signal?: AbortSignal;
   }): Promise<HttpResponse>;
   setTimeout(fn: () => void, ms: number): unknown;
   clearTimeout(handle: unknown): void;

@@ -222,7 +222,7 @@ impl Orderly {
     }
     fn account_ready(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.socket.socket.is_none() {
-            self.account.socket.socket = Some(cx.connect(self.private_url()));
+            self.private_connect(cx);
         }
         let symbols: Vec<_> = cx
             .store
@@ -844,9 +844,23 @@ impl Orderly {
             Request::Orders { algo, .. } => self.account.inflight[2 + algo as usize] = false,
         }
     }
+    fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.authenticated = false;
+        self.account.socket.open = false;
+        self.account.socket.received = cx.now;
+        if let Some(timer) = self.account.socket.watchdog.take() {
+            cx.clear_timer(timer);
+        }
+        self.account.socket.socket = Some(cx.connect(self.private_url()));
+        // Cover a transport that never produces either open or close.
+        self.account.socket.watchdog = Some(cx.set_timer(10000.0));
+    }
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.account.socket.socket != Some(socket) {
+        if self.account.socket.socket != Some(socket) || self.account.socket.open {
             return;
+        }
+        if let Some(timer) = self.account.socket.watchdog.take() {
+            cx.clear_timer(timer);
         }
         self.account.authenticated = false;
         self.account.socket.open = true;
@@ -1195,13 +1209,16 @@ impl Orderly {
         }
         if self.account.socket.reconnect == Some(timer) {
             self.account.socket.reconnect = None;
-            self.account.socket.socket = Some(cx.connect(self.private_url()));
+            self.private_connect(cx);
             return true;
         }
         if self.account.socket.watchdog == Some(timer) {
             self.account.socket.watchdog = None;
             let socket = self.account.socket.socket.unwrap();
-            if !self.account.authenticated || cx.now - self.account.socket.received >= 20000.0 {
+            if !self.account.socket.open
+                || !self.account.authenticated
+                || cx.now - self.account.socket.received >= 20000.0
+            {
                 cx.close(socket);
                 self.private_close(cx, socket);
             } else {

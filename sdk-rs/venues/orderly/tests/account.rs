@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Engine};
+use safe_cex_engine::{Action, Engine, Event, SocketId, TimerId};
 use safe_cex_venue_orderly::Orderly;
 use support::*;
 
@@ -286,4 +286,155 @@ fn only_definitive_account_validation_rejection_deactivates() {
             status != 401 && status != 403
         );
     }
+}
+
+fn private_connecting() -> (Driver, SocketId, TimerId) {
+    let mut e = Engine::new(Orderly::new(options()));
+    e.start(1000.0);
+    for _ in 0..10 {
+        let mut private = None;
+        for action in actions(&mut e) {
+            match action {
+                Action::Http(r) => {
+                    let body = if r.url.ends_with("/v1/client/info") {
+                        r#"{"success":true,"data":{"max_leverage":20}}"#
+                    } else if r.url.ends_with("/v1/public/info") {
+                        MARKETS
+                    } else if r.url.ends_with("/v1/public/futures") {
+                        TICKERS
+                    } else {
+                        assert!(r.url.ends_with("/v1/client/margin_modes"));
+                        r#"{"success":true,"data":{"rows":[]}}"#
+                    };
+                    reply(&mut e, &r, 200, body);
+                }
+                Action::WsConnect { socket, url } if url.contains("private") => {
+                    private = Some(socket);
+                }
+                Action::SetTimer { timer, at_ms } if private.is_some() => {
+                    assert_eq!(at_ms, 11000.0);
+                    return (e, private.unwrap(), timer);
+                }
+                _ => {}
+            }
+        }
+    }
+    panic!("private connect did not arm a handshake timer");
+}
+
+#[test]
+fn private_initial_and_reconnect_handshakes_time_out_without_open_callbacks() {
+    let (mut e, old, handshake) = private_connecting();
+    e.handle(11000.0, Event::TimerFired { timer: handshake });
+    let out = actions(&mut e);
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == old))
+    );
+    let retry = out
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 12000.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(12000.0, Event::TimerFired { timer: retry });
+    let out = actions(&mut e);
+    let fresh = out
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url } if url.contains("private") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(fresh, old);
+    let next_handshake = out
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 22000.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(13000.0, Event::WsOpened { socket: old });
+    assert!(
+        actions(&mut e).is_empty(),
+        "late old opens cannot authenticate or replace the fresh timer"
+    );
+    e.handle(
+        22000.0,
+        Event::TimerFired {
+            timer: next_handshake,
+        },
+    );
+    let out = actions(&mut e);
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == fresh))
+    );
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 24000.0)),
+        "consecutive handshake failures back off"
+    );
+}
+
+#[test]
+fn private_open_replaces_handshake_timer_and_duplicate_open_cannot_resend_auth() {
+    let (mut e, socket, handshake) = private_connecting();
+    e.handle(2000.0, Event::WsOpened { socket });
+    let out = actions(&mut e);
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == handshake))
+    );
+    assert_eq!(
+        out.iter()
+            .filter(
+                |a| matches!(a, Action::WsSend { text, .. } if text.contains("\"event\":\"auth\""))
+            )
+            .count(),
+        1
+    );
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 12000.0))
+    );
+    e.handle(
+        3000.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"event":"auth","success":true}"#,
+        },
+    );
+    let out = actions(&mut e);
+    assert_eq!(
+        out.iter()
+            .filter(|a| matches!(a, Action::WsSend { text, .. } if text.contains("subscribe")))
+            .count(),
+        3
+    );
+    e.handle(4000.0, Event::WsOpened { socket });
+    assert!(actions(&mut e).is_empty());
+    e.handle(11000.0, Event::TimerFired { timer: handshake });
+    assert!(
+        actions(&mut e).is_empty(),
+        "cleared handshake callbacks cannot close the authenticated socket"
+    );
+    e.handle(
+        11500.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"event":"auth","success":true}"#,
+        },
+    );
+    assert!(
+        actions(&mut e).is_empty(),
+        "duplicate opens must preserve authentication and subscriptions"
+    );
 }

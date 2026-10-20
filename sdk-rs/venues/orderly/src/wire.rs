@@ -35,14 +35,14 @@ pub struct Envelope<'a> {
     pub ts: u64,
     #[serde(borrow)]
     pub data: Option<&'a RawValue>,
-    #[serde(default, borrow)]
+    #[serde(default, borrow, alias = "errorMsg")]
     pub message: Cow<'a, str>,
 }
 
 #[derive(Deserialize)]
 pub struct Rest<'a> {
     pub success: bool,
-    #[serde(default, borrow)]
+    #[serde(default, borrow, alias = "errorMsg")]
     pub message: Cow<'a, str>,
     #[serde(borrow)]
     pub data: Option<&'a RawValue>,

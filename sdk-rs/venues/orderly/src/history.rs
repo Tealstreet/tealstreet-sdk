@@ -309,7 +309,10 @@ impl Orderly {
     ) {
         let (kind, symbol, order_id, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.done(command, Err("Orderly client-order lookup is not supported".into()));
+                cx.done(
+                    command,
+                    Err("Orderly client-order lookup is not supported".into()),
+                );
                 return;
             }
             Query::Fills {

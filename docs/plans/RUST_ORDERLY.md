@@ -226,3 +226,18 @@ per-venue budget replaces the obsolete aggregate-size workaround above.
 The new shared client-order lookup query fails explicitly for Orderly.
 Locked native checks of the Orderly crate and complete WASM host pass.
 Remaining integration and lifecycle gates above remain open.
+
+### Lifecycle review checkpoint
+
+Independent reviews cleared initial/reconnect handshake deadlines on main and
+private sockets, duplicate-open guards, the 97-topic main socket capacity,
+and host cancellation across authorization/fetch/stream consumption. Unsupported
+socket routes now fail synchronously during SDK startup, including testnet.
+Verification: 65 native Orderly tests, Orderly Clippy, full-workspace format,
+WASM host Clippy, 19 host tests and 23 SDK transport tests pass. The complete
+host suite needs the combined build (its Binance Workers test correctly rejects
+an Orderly-only binary). The single-venue WASM is770,916bytes below1,258,291.
+Fresh20s public tape captured637socket frames and two full books without topic
+errors; first gate has only legacy zero-opening-price NaN percentage diffs.
+Strict guarded private oracles are being updated for landing optional fields
+and newly enforced request-set accounting; no replay gate counted green yet.

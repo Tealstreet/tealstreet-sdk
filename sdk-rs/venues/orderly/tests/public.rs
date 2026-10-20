@@ -818,3 +818,120 @@ fn funding_watchdog_reconnects_only_its_shard_and_ignores_late_old_socket_frames
         0.0
     );
 }
+
+#[test]
+fn stalled_public_handshake_retries_and_duplicate_open_does_not_resubscribe() {
+    let mut e = Engine::new(Orderly::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.start(1000.0);
+    for body in [
+        rows_envelope(&[market_row("PERP_BTC_USDC")]),
+        rows_envelope(&[ticker_row("PERP_BTC_USDC")]),
+    ] {
+        let r = requests(&mut e).pop().unwrap();
+        reply(&mut e, &r, &body);
+    }
+    let out = actions(&mut e);
+    let main = out
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let timer = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(11000.0, Event::TimerFired { timer });
+    let out = actions(&mut e);
+    assert!(
+        out.iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == main))
+    );
+    let retry = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(12000.0, Event::TimerFired { timer: retry });
+    let out = actions(&mut e);
+    let socket = out
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let handshake = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(12000.0, Event::WsOpened { socket });
+    assert_eq!(subscription_topics(&actions(&mut e), socket).len(), 3);
+    e.handle(12000.0, Event::WsOpened { socket });
+    assert!(subscription_topics(&actions(&mut e), socket).is_empty());
+    e.handle(22000.0, Event::TimerFired { timer: handshake });
+    assert!(
+        !actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+    );
+}
+
+#[test]
+fn main_socket_caps_unique_topics_and_releases_capacity_on_unsubscribe() {
+    let (mut e, sockets) = many_market_sockets(201);
+    actions(&mut e);
+    for n in 0..100 {
+        e.handle(
+            2000.0,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: format!("ASSET{n:03}USDC"),
+            }),
+        );
+    }
+    let out = actions(&mut e);
+    assert_eq!(subscription_topics(&out, sockets[0]).len(), 97);
+    assert!(
+        out.iter().any(
+            |a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("100-topic limit"))
+        )
+    );
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "ASSET099USDC".into(),
+            interval: "1m".into(),
+        }),
+    );
+    assert!(subscription_topics(&actions(&mut e), sockets[0]).is_empty());
+    e.handle(
+        2000.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "ASSET000USDC".into(),
+        }),
+    );
+    actions(&mut e);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "ASSET099USDC".into(),
+            interval: "1m".into(),
+        }),
+    );
+    assert_eq!(
+        subscription_topics(&actions(&mut e), sockets[0]),
+        ["PERP_ASSET099_USDC@kline_1m"]
+    );
+}

@@ -1,5 +1,6 @@
 import type { Transport as EngineHostTransport, HttpResponse } from '@tealstreet/safe-cex-wasm/host';
 import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+import type { WsConnection } from '../../transport/types';
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
@@ -47,6 +48,24 @@ export const orderlyTransport = (
   ) {
     throw new Error(`[${name}] Orderly Rust WebSocket routing is not supported by this transport`);
   }
+  // Resolve the URLs the engine will actually open before any async host actions.
+  // In-message Orderly authentication does not supply additional upgrade headers.
+  const connections = new Map<string, WsConnection | undefined>();
+  const resolveConnection = (url: string) => {
+    const connection = provider.wsConnection(url);
+    if (connection && (connection.kind === 'relay' || !base.webSocketHeaders)) {
+      throw new Error(`[${name}] Orderly Rust WebSocket route requires unsupported relay or upgrade headers`);
+    }
+    const resolved = connection ? { ...connection, headers: { ...connection.headers } } : undefined;
+    connections.set(url, resolved);
+    return resolved;
+  };
+  const prefix = options.testnet ? 'testnet-' : '';
+  const account = options.applicationId ?? 'OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY';
+  resolveConnection(`wss://${prefix}ws-evm.orderly.org/ws/stream/${account}`);
+  if (!options.publicDataOnly && options.key && options.secret && options.applicationId) {
+    resolveConnection(`wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/${options.applicationId}`);
+  }
   const adapter = options.tealstreetTunnel
     ? provider.restAdapter({ exchange: name, options, variant: 'default' })
     : undefined;
@@ -64,11 +83,8 @@ export const orderlyTransport = (
     webSocketHeaders: base.webSocketHeaders,
     now: base.now.bind(base),
     connect(url, handlers) {
-      const connection = provider.wsConnection(url);
+      const connection = connections.has(url) ? connections.get(url) : resolveConnection(url);
       if (!connection) return base.connect(url, handlers);
-      if (connection.kind === 'relay' || !base.webSocketHeaders) {
-        throw new Error(`[${name}] Orderly Rust WebSocket route requires unsupported relay or upgrade headers`);
-      }
       const headers = AxiosHeaders.from(handlers.headers);
       for (const [key, value] of Object.entries(connection.headers)) {
         if (headers.has(key) && headers.get(key) !== value) {
