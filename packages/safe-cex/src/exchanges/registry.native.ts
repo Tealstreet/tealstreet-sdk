@@ -53,15 +53,15 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   polymarket: load(() => require('./polymarket/polymarket.exchange').PolymarketExchange),
   weex: load(() => require('./weex/weex.exchange').WeexExchange),
   woo: load(() => require('./woo/woo.exchange').WOOXExchange),
-  kodiakfi: load(() => require('./orderly/exchanges/kodiakfi/kodiakfi.exchange').KodiakFIExchange),
-  mode: load(() => require('./orderly/exchanges/mode/mode.exchange').MODEExchange),
-  salsadex: load(() => require('./orderly/exchanges/salsadex/salsadex.exchange').SalsaDEXExchange),
+  kodiakfi: load(() => require('./rust/rust.exchange').RustEngineExchange),
+  mode: load(() => require('./rust/rust.exchange').RustEngineExchange),
+  salsadex: load(() => require('./rust/rust.exchange').RustEngineExchange),
   'tealstreet-dex': load(
-    () => require('./orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange').TealstreetDEXExchange,
+    () => require('./rust/rust.exchange').RustEngineExchange,
   ),
   txflow: load(() => require('./txflow/txflow.exchange').TxFlowExchange),
-  what: load(() => require('./orderly/exchanges/what/what.exchange').WhatExchange),
-  woofi: load(() => require('./orderly/exchanges/woofi/woofi.exchange').WoofiExchange),
+  what: load(() => require('./rust/rust.exchange').RustEngineExchange),
+  woofi: load(() => require('./rust/rust.exchange').RustEngineExchange),
 };
 
 export const getRegisteredExchangeNames = (): ExchangeName[] => {

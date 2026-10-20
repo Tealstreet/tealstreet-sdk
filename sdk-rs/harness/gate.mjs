@@ -10,7 +10,8 @@ import { subscriptionKeys } from './requests.mjs';
 import { gunzipSync } from 'node:zlib';
 import { fixBlofinAccount, fixWeexConditionals, fixLighterFills, fixLighterCommands, fixKrakenOutput } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
-import { venueOf } from './venues.mjs';
+import { venueOf, ORDERLY_BROKERS } from './venues.mjs';
+import { fixOrderly, ORDERLY_TS_FIXES } from './known-ts-fixes-orderly.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 
 const { values } = parseArgs({
@@ -136,6 +137,8 @@ const KNOWN_TS_FIXES = {
       'Preserve absent position margin allocation instead of TS base-store synthetic zero.',
     ],
   },
+  // Independent documented-tape oracle; native request/protocol counters remain exact.
+  orderly: (ts) => fixOrderly(ts, tapeRecords),
   lighter: {
     fills: fixLighterFills,
     commands: fixLighterCommands,
@@ -440,6 +443,8 @@ const KNOWN_TS_FIXES = {
   },
 };
 
+for (const alias of Object.keys(ORDERLY_BROKERS)) KNOWN_TS_FIXES[alias] = KNOWN_TS_FIXES.orderly;
+
 const normalizeBingxPublic = (ts) => {
 // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
 // integer step 1. Correct that precision and its synthetic ticker touch only.
@@ -513,6 +518,7 @@ for (let run = 0; run < runs; run++) {
   const rust = results.rust[run];
   if (values.venue === 'backpack') KNOWN_TS_FIXES.backpack(ts);
   if (values.venue === 'kraken') KNOWN_TS_FIXES.kraken.output(ts,tapeRecords);
+  if (venue.family === 'orderly') KNOWN_TS_FIXES[values.venue](ts);
   if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
   // Every request must match a taped one: an unserved request sent different parameters.
   for (const impl of ['ts', 'rust']) {
@@ -558,8 +564,8 @@ for (let run = 0; run < runs; run++) {
       KNOWN_TS_FIXES.lighter.commands(ts.commands, tapeRecords);
     }
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-      const left = JSON.stringify(ts.account[field]);
-      const right = JSON.stringify(rust.account[field]);
+      const left = JSON.stringify(stable(ts.account[field]));
+      const right = JSON.stringify(stable(rust.account[field]));
       if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
     }
   }
@@ -612,6 +618,7 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
+if (venue.family === 'orderly') console.log(`(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`);
 if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
 const failures = [...differences];

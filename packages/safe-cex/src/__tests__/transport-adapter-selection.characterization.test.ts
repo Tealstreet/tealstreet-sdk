@@ -7,6 +7,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import '../transport/registerTealstreetTransport';
 
 import { exchangeRegistry } from '../exchanges/registry';
+import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import {
   axiosHttpOverWebsocketAdapter,
   bigIntAxiosHttpOverWebsocketAdapter,
@@ -137,7 +138,8 @@ describe('transport adapter selection per exchange', () => {
         }
       }
 
-      expect(Object.values(selection).every((instances) => Object.keys(instances).length > 0)).toBe(true);
+      const rust = Exchange === RustEngineExchange;
+      expect(Object.values(selection).every((instances) => rust ? Object.keys(instances).length === 0 : Object.keys(instances).length > 0)).toBe(true);
       expect(selection).toMatchSnapshot();
     },
     ADAPTER_SELECTION_TIMEOUT_MS,

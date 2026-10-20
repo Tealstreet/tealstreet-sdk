@@ -128,3 +128,12 @@ failed reads retain previous state, retry reads with bounded backoff.
   the redundant direct getrandom dependency (entropy belongs to crypto::uuid).
 - Latest fetched landing is f66bdc26f9 (Orderly). Integrate its structure after
   this stable checkpoint, repeat affected gates, then open the PR as authorized.
+
+### Landing merge reviewed
+
+Merged landing f66bdc26f9 (Orderly) by preserving incoming workspace/host structure
+and unioning Kraken registration with Orderly's broker aliases and protocol
+hooks. Five conflict files resolved: harness build, venues, gate, Wasm Cargo and
+constructor. Shared Tape retains both correlation/generation audits and sticky
+Kraken authentication failures. Independent code-correctness review accepted the
+union; 215 harness tests pass. Full landing-source gates are being rerun.
