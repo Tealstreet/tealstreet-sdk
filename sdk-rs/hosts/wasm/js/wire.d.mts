@@ -56,6 +56,7 @@ export interface EngineCapabilities {
   quantityUnits: QuantityUnits;
   accountTier: boolean;
   closedPositions: boolean;
+  balanceInfo: boolean;
 }
 export const LOADED_FLAG: { BALANCE: 1; ORDERS: 2; MARKETS: 4; TICKERS: 8; POSITIONS: 16 };
 export const STATUS_FLAG: { HEDGED: 1 };

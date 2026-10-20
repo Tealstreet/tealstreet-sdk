@@ -37,6 +37,8 @@ pub struct Capabilities {
     pub account_tier: bool,
     /// The `FetchClosedPositions` venue action: venue-reported closed-position rows.
     pub closed_positions: bool,
+    /// The `FetchBalanceInfo` venue action: the raw account payload for `balance.info`.
+    pub balance_info: bool,
 }
 
 /// How a market's order and position quantities relate to its placement units.
@@ -118,6 +120,7 @@ impl Capabilities {
         quantity_units: QuantityUnits::Base,
         account_tier: false,
         closed_positions: false,
+        balance_info: false,
     };
 
     /// No history axis: fills, orders and income are all unavailable.
@@ -152,6 +155,7 @@ impl Capabilities {
             self.options,
             self.account_tier,
             self.closed_positions,
+            self.balance_info,
         ]
         .iter()
         .enumerate()

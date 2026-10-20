@@ -163,6 +163,8 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const LIGHTER_TIER_SYNC_MS = 15_000;
+/** TS replaces `balance.info` on each REST balance tick; the engine caches the same payload. */
+const BALANCE_INFO_SYNC_MS = 2_000;
 const orderlyNames = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
 const okxNames = new Set<ExchangeName>(['okx', 'okxeu', 'okxdemo', 'okxeudemo']);
 const orderlyClientOrderIdRule = patternClientOrderIdRule('Orderly', /^(?!-)[\x00-\x09\x0b\x0c\x0e-\x7f]{1,36}$/);
@@ -962,6 +964,29 @@ export class RustEngineExchange extends BaseExchange {
     if (this.fetchAccountTier && !this.isPublicDataOnly) {
       void this.syncLighterTier();
       this.flushTimers.push(setInterval(() => void this.syncLighterTier(), LIGHTER_TIER_SYNC_MS));
+    }
+    // Interval only: a background read never interleaves with the caller's first commands.
+    if (this.capabilityRecord?.balanceInfo && !this.isPublicDataOnly) {
+      this.flushTimers.push(setInterval(() => void this.syncBalanceInfo(), BALANCE_INFO_SYNC_MS));
+    }
+  };
+
+  private balanceInfoJson?: string;
+
+  /**
+   * The venue's raw account payload as TS stores it in `balance.info` (Bybit: the wallet
+   * account with `accountType` and the `coin` collateral array), read by the web margin UI.
+   */
+  private syncBalanceInfo = async () => {
+    try {
+      const info = await this.command<Record<string, unknown> | null>({ op: 'fetchBalanceInfo' }, { report: false });
+      if (!info || this.isDisposed) return;
+      const json = JSON.stringify(info);
+      if (json === this.balanceInfoJson) return;
+      this.balanceInfoJson = json;
+      this.store.update({ balance: { ...this.store.balance, info } });
+    } catch {
+      // The engine reports wallet-read failures itself; the last payload stays.
     }
   };
 
