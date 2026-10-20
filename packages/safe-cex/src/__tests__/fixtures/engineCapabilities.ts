@@ -15,7 +15,11 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
   const noHistory = is('breakoutprop', 'hyperliquidspot', 'krakenspot', 'binancespot', 'binanceinverse');
   const noOrdersOrIncome = noHistory || is('apexomni', 'bitrue', 'kucoinspot');
   const record: EngineCapabilities = {
-    account: is('apexomni', 'kucoinspot', 'asterdex', 'polymarket')
+    account: is(
+      'apexomni', 'asterdex', 'backpack', 'binance', 'binancepm', 'bingx', 'bitget', 'bitgetinverse', 'bitgetusdc',
+      'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'cryptocom', 'grvt', 'kucoin', 'kucoinspot', 'lighter',
+      'lighter-robinhood', 'mexc', 'paradex', 'phemex', 'polymarket', 'weex', 'woo',
+    )
       ? 'query'
       : is('coinbase', 'coinbasespot', ...ORDERLY)
         ? 'afterLoad'

@@ -675,7 +675,6 @@ impl Venue for TxFlow {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
-            account: safe_cex_engine::AccountLookup::Query,
             ..safe_cex_engine::Capabilities::BASE
         }
     }

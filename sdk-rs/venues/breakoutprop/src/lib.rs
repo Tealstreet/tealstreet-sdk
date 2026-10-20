@@ -766,7 +766,6 @@ impl Venue for BreakoutProp {
         safe_cex_engine::Capabilities {
             cancel_all: safe_cex_engine::CancelAll::Native,
             max_leverage: safe_cex_engine::MaxLeverage::Unsupported,
-            account: safe_cex_engine::AccountLookup::Query,
             ..safe_cex_engine::Capabilities::NO_HISTORY
         }
     }
