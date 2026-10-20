@@ -6,7 +6,7 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, TimerId, num};
 use serde::Deserialize;
 use serde_json::value::RawValue;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 #[derive(Clone, Copy)]
 pub enum Read {
@@ -28,7 +28,7 @@ impl Read {
 
 pub enum Rows {
     Positions(Vec<Position>),
-    Balance(Option<Balance>),
+    Balance(Option<(Balance, Option<Vec<CurrencyBalance>>)>),
     Orders(Vec<Order>),
 }
 pub struct Request {
@@ -245,6 +245,22 @@ struct BalanceRow<'a> {
     total_available_balance: &'a str,
     total_initial_margin: &'a str,
     total_session_unrealized_pnl: &'a str,
+    #[serde(borrow, default)]
+    position_balances: Option<&'a RawValue>,
+}
+#[derive(Deserialize)]
+struct CoinRow<'a> {
+    instrument_name: &'a str,
+    quantity: &'a str,
+    max_withdrawal_balance: &'a str,
+}
+#[derive(Deserialize)]
+struct CoinKey<'a> {
+    #[serde(default)]
+    instrument_name: Option<&'a str>,
+}
+fn finite(text: &str) -> Option<f64> {
+    text.parse::<f64>().ok().filter(|v| v.is_finite())
 }
 impl BalanceRow<'_> {
     fn balance(&self) -> Balance {
@@ -254,6 +270,49 @@ impl BalanceRow<'_> {
             used: num::parse(self.total_initial_margin),
             upnl: num::parse(self.total_session_unrealized_pnl),
         }
+    }
+    /// Per-coin rows are parsed apart from the summary so a bad coin never costs the aggregate;
+    /// `None` (unreadable list) keeps the previously published coins.
+    fn currencies(&self, cx: &mut Cx<'_, Pending>) -> Option<Vec<CurrencyBalance>> {
+        let mut coins = BTreeMap::new();
+        let mut skipped = Skipped::default();
+        if let Some(raw) = self.position_balances.filter(|raw| raw.get() != "null") {
+            json::each::<&RawValue>(raw.get(), |item| {
+                let coin = serde_json::from_str::<CoinRow>(item.get())
+                    .ok()
+                    .and_then(|row| {
+                        let total = finite(row.quantity)?;
+                        let free = finite(row.max_withdrawal_balance)?;
+                        Some((row.instrument_name, total, free))
+                    });
+                match coin {
+                    Some((currency, total, free)) => {
+                        coins.insert(
+                            currency.to_owned(),
+                            Balance {
+                                total,
+                                free,
+                                used: (total - free).max(0.0),
+                                upnl: 0.0,
+                            },
+                        );
+                    }
+                    None => skipped.add(
+                        serde_json::from_str::<CoinKey>(item.get())
+                            .ok()
+                            .and_then(|k| k.instrument_name),
+                    ),
+                }
+            })
+            .ok()?;
+        }
+        skipped.report(cx, "currency balance");
+        Some(
+            coins
+                .into_iter()
+                .map(|(currency, balance)| CurrencyBalance { currency, balance })
+                .collect(),
+        )
     }
 }
 
@@ -424,7 +483,7 @@ impl Cryptocom {
             }),
             Rows::Balance(balance) => serde_json::from_str::<BalanceRow>(item).map(|row| {
                 if balance.is_none() {
-                    *balance = Some(row.balance());
+                    *balance = Some((row.balance(), row.currencies(cx)));
                 }
             }),
         };
@@ -571,10 +630,13 @@ impl Cryptocom {
                 self.read_account(cx, Read::Balance, 0);
             }
             Rows::Balance(balance) => {
-                if let Some(mut balance) = balance {
+                if let Some((mut balance, currencies)) = balance {
                     if fresh_balance {
                         balance.upnl = cx.store.positions().iter().map(|p| p.unrealized_pnl).sum();
                         cx.store.set_balance(balance);
+                        if let Some(currencies) = currencies {
+                            cx.store.set_currency_balances(currencies);
+                        }
                     }
                 } else {
                     cx.log(LogLevel::Error, "missing balance summary");
@@ -785,6 +847,9 @@ impl Cryptocom {
                         self.account.revision += 1;
                         self.account.balance_revision = self.account.revision;
                         cx.store.set_balance(row.balance());
+                        if let Some(currencies) = row.currencies(cx) {
+                            cx.store.set_currency_balances(currencies);
+                        }
                     }
                 })?;
             }

@@ -145,6 +145,71 @@ fn zero_equity_is_a_value_and_does_not_fall_back_to_cash_balance() {
     assert_eq!(e.store().balance().total, 0.0);
 }
 
+fn currency_totals(e: &TestEngine) -> Vec<(String, f64, f64, f64, f64)> {
+    e.store()
+        .currency_balances()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            let b = &c.balance;
+            (c.currency.clone(), b.total, b.free, b.used, b.upnl)
+        })
+        .collect()
+}
+
+#[test]
+fn asset_snapshot_and_asset_push_publish_every_currency_balance() {
+    let (mut e, socket, reads, _) = private_started();
+    let r = reads.iter().find(|r| r.url.contains("assets")).unwrap();
+    response(
+        &mut e,
+        r,
+        r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":964,"equity":1000,"unrealized":6,"frozenBalance":0},{"currency":"BTC","availableBalance":0.5,"cashBalance":0.75,"unrealized":0,"frozenBalance":0.3},{"currency":"","availableBalance":1,"equity":1}]}"#,
+    );
+    assert_eq!(e.store().balance().total, 1000.0);
+    assert_eq!(
+        currency_totals(&e),
+        vec![
+            ("BTC".into(), 0.75, 0.5, 0.3, 0.0),
+            ("USDT".into(), 1000.0, 964.0, 36.0, 6.0),
+        ]
+    );
+
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.asset","data":{"currency":"USDT","availableBalance":900}}"#,
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1200.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1200.0, Event::TimerFired { timer });
+    let r = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("assets"))
+        .unwrap();
+    response(
+        &mut e,
+        &r,
+        r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":900,"equity":950,"unrealized":-4,"frozenBalance":0},{"currency":"USDC","availableBalance":20,"equity":20}]}"#,
+    );
+    assert_eq!(e.store().balance().total, 950.0);
+    assert_eq!(
+        currency_totals(&e),
+        vec![
+            ("USDC".into(), 20.0, 20.0, 0.0, 0.0),
+            ("USDT".into(), 950.0, 900.0, 50.0, -4.0),
+        ]
+    );
+}
+
 #[test]
 fn private_429_pauses_periodic_reads() {
     let (mut e, _, reads, timer) = private_started();

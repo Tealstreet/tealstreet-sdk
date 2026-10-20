@@ -482,6 +482,17 @@ impl PhemexPerpetuals {
         }
         balance.upnl = (balance.upnl * 100.).round() / 100.;
         cx.store.set_balance(balance);
+        // Unread slices publish as zeros, matching TS failing closed per currency.
+        let mut currencies: Vec<CurrencyBalance> = CURRENCIES
+            .iter()
+            .zip(&self.account.slices)
+            .map(|(currency, slice)| CurrencyBalance {
+                currency: (*currency).to_owned(),
+                balance: slice.balance.clone(),
+            })
+            .collect();
+        currencies.sort_by(|a, b| a.currency.cmp(&b.currency));
+        cx.store.set_currency_balances(currencies);
     }
     pub(crate) fn accept_write_order(&mut self, cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>) {
         if matches!(row.pos_side.as_ref(), "Long" | "Short" | "Merged") {

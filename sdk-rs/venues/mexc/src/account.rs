@@ -5,7 +5,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, SocketId, TimerId};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Clone, Copy, Default)]
 pub struct Rails {
@@ -1099,6 +1099,21 @@ impl MexcFutures {
                                 .or_else(|| s.assets.first());
                             cx.store
                                 .set_balance(chosen.map(|(_, b)| b.clone()).unwrap_or_default());
+                            // Duplicate rows keep the last one, as the TS reducer does.
+                            let currencies: BTreeMap<String, Balance> = s
+                                .assets
+                                .into_iter()
+                                .filter(|(currency, _)| !currency.is_empty())
+                                .collect();
+                            cx.store.set_currency_balances(
+                                currencies
+                                    .into_iter()
+                                    .map(|(currency, balance)| CurrencyBalance {
+                                        currency,
+                                        balance,
+                                    })
+                                    .collect(),
+                            );
                         }
                     }
                     Scope::Positions => {

@@ -312,6 +312,68 @@ fn zero_available_is_zero_and_auto_detected_account_precedes_reads() {
 }
 
 #[test]
+fn spot_balances_publish_summed_per_currency_balances() {
+    let mut h = Harness::new(true);
+    h.reply(
+        "login",
+        r#"{"status":"success","sub_account_id":"777"}"#,
+        "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xaccount",
+    );
+    h.reply(
+        "aggregated_account_summary",
+        r#"{"r":{"te":"100","ts2":"80","tu":"2","sb":[{"c":"USDT","b":"60.5"},{"c":"BTC","b":"0.25"},{"c":"USDT","b":"4.5"}]}}"#,
+        "",
+    );
+    let coins: Vec<_> = h
+        .engine
+        .store()
+        .currency_balances()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c.currency.as_str(),
+                c.balance.total,
+                c.balance.free,
+                c.balance.used,
+                c.balance.upnl,
+            )
+        })
+        .collect();
+    assert_eq!(
+        coins,
+        [("BTC", 0.25, 0.25, 0., 0.), ("USDT", 65., 65., 0., 0.)]
+    );
+}
+
+#[test]
+fn malformed_spot_balance_row_keeps_aggregate_and_other_coins() {
+    let mut h = Harness::new(true);
+    h.reply(
+        "login",
+        r#"{"status":"success","sub_account_id":"777"}"#,
+        "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xaccount",
+    );
+    h.reply(
+        "aggregated_account_summary",
+        r#"{"r":{"te":"100","ts2":"80","tu":"2","spot_balances":[{"currency":"ETH","balance":"bad"},{"b":"3"},{"currency":"USDT","balance":"65"}]}}"#,
+        "",
+    );
+    let balance = h.engine.store().balance();
+    assert_eq!(
+        (balance.total, balance.free, balance.used),
+        (100., 80., 20.)
+    );
+    let coins = h.engine.store().currency_balances().unwrap();
+    assert_eq!(coins.len(), 1);
+    assert_eq!(
+        (coins[0].currency.as_str(), coins[0].balance.total),
+        ("USDT", 65.)
+    );
+    assert_eq!(skip_warnings(&h, "spot balance"), 1);
+}
+
+#[test]
 fn proxy_auth_is_first_and_native_defaults_use_upgrade_headers() {
     let mut proxy = Harness::new(true);
     proxy.authenticate();

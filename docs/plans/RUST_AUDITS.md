@@ -738,8 +738,9 @@ No confirmed highs.
 
 ### Crypto.com
 Mostly matches TS.
-- Medium: per-coin balances (`position_balances`) dropped
-  (`cryptocom/src/account.rs:232`) — resilience lane. ~~Caller client id refused
+- Medium: ~~per-coin balances (`position_balances`) dropped
+  (`cryptocom/src/account.rs:232`)~~ — published with the aggregate (REST and
+  `user.balance`). ~~Caller client id refused
   on stop/TP orders (`trading.rs:76`).~~ Matches TS and the client-order-id
   contract (`rust.exchange.ts` rejects it before the engine); a change is a
   contract decision, not a port bug.
@@ -767,7 +768,9 @@ Mostly matches TS.
   malformed snapshot never sets loaded.
 
 ### Cross-venue: per-coin balances and snapshot starvation
-- Per-coin balances missing on Bybit, Crypto.com, ~~Bitrue~~; check every venue.
+- Per-coin balances missing on Bybit (venues-a lane), ~~Crypto.com~~, ~~Bitrue~~;
+  ~~check every venue~~: GRVT, MEXC and Phemex also dropped the per-currency
+  balances TS publishes and now set them; ApeX and Backpack publish none in TS.
 - Revision-discarded snapshots starve under active trading on WEEX and Bitrue;
   check every venue that fences REST snapshots by stream revision.
 
