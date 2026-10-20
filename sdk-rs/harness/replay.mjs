@@ -554,8 +554,13 @@ async function runTs() {
   const adapter = async (config) => {
     const base = config.baseURL ?? '';
     const url = new URL(config.url.startsWith('http') ? config.url : `${base.replace(/\/+$/, '')}/${config.url.replace(/^\/+/, '')}`);
-    for (const [key, value] of Object.entries(config.params ?? {})) {
-      if (value !== undefined) url.searchParams.set(key, String(value));
+    const serializer = typeof config.paramsSerializer === 'function' ? config.paramsSerializer : config.paramsSerializer?.serialize;
+    if (serializer) {
+      for (const [key, value] of new URLSearchParams(serializer(config.params ?? {}))) url.searchParams.append(key, value);
+    } else {
+      for (const [key, value] of Object.entries(config.params ?? {})) {
+        if (value !== undefined) url.searchParams.set(key, String(value));
+      }
     }
     const {
       status,

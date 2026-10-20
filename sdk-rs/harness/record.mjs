@@ -133,6 +133,15 @@ const { WasmEngine } = await loadEngine(venue.rust, options);
 let frames = 0;
 let httpResponses = 0;
 let updates = 0;
+let recordingTimer;
+let startupTimer;
+let startedWindow = false;
+const beginWindow = () => {
+  if (startedWindow) return;
+  startedWindow = true;
+  clearTimeout(startupTimer);
+  recordingTimer = setTimeout(finish, Number(values.seconds) * 1000);
+};
 const seenBooks = new Set();
 const host = new EngineHost(
   new WasmEngine(
@@ -147,6 +156,7 @@ const host = new EngineHost(
       for (const book of frame.books()) seenBooks.add(book.market);
       const status = frame.status();
       if (status) loaded = replayStoreReady(status.loaded, false);
+      if (venue.recordAfterReady && loaded) beginWindow();
     },
     onLog: (level, message) => policy.log(level, message),
   },
@@ -156,20 +166,19 @@ for (const symbol of values.books.split(',').filter(Boolean)) {
   host.command({ op: 'subscribeOrderBook', symbol });
 }
 const flush = setInterval(() => host.flush(), 250);
-setTimeout(
-  () => {
-    clearInterval(flush);
-    host.flush();
-    host.dispose();
-    tape.end(() => {
-      console.log(
-        JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, httpResponses, books: seenBooks.size }),
-      );
-      process.exit(!recordingFailed && recordingReady(venue, {
-        frames, httpResponses, loaded, books: seenBooks.size,
-        requestedBooks: values.books.split(',').filter(Boolean).length,
-      }) ? 0 : 1);
-    });
-  },
-  Number(values.seconds) * 1000,
-);
+function finish() {
+  clearTimeout(recordingTimer);
+  clearTimeout(startupTimer);
+  clearInterval(flush);
+  host.flush();
+  host.dispose();
+  tape.end(() => {
+    console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, httpResponses, books: seenBooks.size }));
+    process.exit(!recordingFailed && recordingReady(venue, {
+      frames, httpResponses, loaded, books: seenBooks.size,
+      requestedBooks: values.books.split(',').filter(Boolean).length,
+    }) ? 0 : 1);
+  });
+}
+if (venue.recordAfterReady) startupTimer = setTimeout(finish, 120_000);
+else beginWindow();

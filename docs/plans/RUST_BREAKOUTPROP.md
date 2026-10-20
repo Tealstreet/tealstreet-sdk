@@ -285,3 +285,10 @@ provably unused crypto helpers were found by the independent caller audit.
   Root typecheck 44 tasks and lint 28 tasks pass. The final acceptance evidence
   for PR #1328 is recorded in its exact-head checks, body and comments;
   live connectivity still requires Sam's legacy DXtrade credentials.
+- Integrated Polymarket landing `a0c11afd871b` after it made the PR conflict.
+  Kept the incoming optional prediction-frame sections, full recorder window,
+  repeated query serializer and all venue registrations, together with Breakout
+  credential sanitization, post-ready response eligibility and native lot IDs.
+  Independent merge correctness reviews and refreshed gates run on this head;
+  exact-head CI must be green before merge. The documented public-fixture
+  authorization and Sam's live-credential gap remain unchanged.
