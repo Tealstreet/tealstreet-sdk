@@ -259,6 +259,9 @@ fn sign_digest(digest: &[u8; 32], private_key: &str) -> Result<Signature, String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_dyn_abi::TypedData as DynamicTypedData;
+    use alloy_signer::SignerSync;
+    use alloy_signer_local::PrivateKeySigner;
 
     fn leg() -> OrderLeg {
         OrderLeg {
@@ -446,6 +449,7 @@ mod tests {
     #[test]
     fn exact_words_match_dynamic_eip712_with_uint_bounds_and_both_domains() {
         let key = format!("0x{}", "01".repeat(32));
+        let signer: PrivateKeySigner = key.parse().unwrap();
         let legs = [
             leg(),
             OrderLeg {
@@ -469,17 +473,20 @@ mod tests {
             order.builder = builder;
             for testnet in [false, true] {
                 let chain = if testnet { 326 } else { 325 };
-                let typed = typed(&order, chain);
+                let typed: DynamicTypedData = serde_json::from_str(&typed(&order, chain)).unwrap();
                 assert_eq!(
                     format!(
                         "0x{}",
                         safe_cex_crypto::hex(&digest(&order, chain).unwrap())
                     ),
-                    eip712::hash_typed_data(&typed).unwrap()
+                    format!("{:#x}", typed.eip712_signing_hash().unwrap())
                 );
                 assert_eq!(
                     raw_signature(&sign_order(&order, &key, testnet).unwrap()),
-                    eip712::sign_typed_data(&typed, &key).unwrap()
+                    signer
+                        .sign_dynamic_typed_data_sync(&typed)
+                        .unwrap()
+                        .to_string()
                 );
             }
             assert_ne!(digest(&order, 325).unwrap(), digest(&order, 326).unwrap());

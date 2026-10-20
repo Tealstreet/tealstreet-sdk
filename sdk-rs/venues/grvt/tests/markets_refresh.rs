@@ -1,3 +1,6 @@
+use alloy_dyn_abi::TypedData;
+use alloy_signer::SignerSync;
+use alloy_signer_local::PrivateKeySigner;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Response, TimerId};
 use safe_cex_venue_grvt::{Grvt, Options};
@@ -193,7 +196,12 @@ fn catalog_only_refresh_keeps_rails_and_updates_signing_hash_and_decimal_metadat
             "legs":[{"assetID":"0x030599","contractSize":"1000","limitPrice":"100000000000","isBuyingContract":true}],
             "builder":o["b"],"builderFee":300,"nonce":s["n"],"expiration":s["e"]}
     });
-    let expected = safe_cex_crypto::eip712::sign_typed_data(&typed.to_string(), KEY).unwrap();
+    let typed: TypedData = serde_json::from_value(typed).unwrap();
+    let signer: PrivateKeySigner = KEY.parse().unwrap();
+    let expected = signer
+        .sign_dynamic_typed_data_sync(&typed)
+        .unwrap()
+        .to_string();
     let actual = format!(
         "0x{}{}{:02x}",
         &s["r"].as_str().unwrap()[2..],

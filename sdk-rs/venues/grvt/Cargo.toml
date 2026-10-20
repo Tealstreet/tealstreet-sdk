@@ -10,5 +10,10 @@ safe-cex-crypto.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]
+alloy-dyn-abi.workspace = true
+alloy-signer = { workspace = true, features = ["eip712"] }
+alloy-signer-local.workspace = true
+
 [lints]
 workspace = true

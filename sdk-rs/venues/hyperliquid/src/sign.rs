@@ -89,7 +89,13 @@ mod tests {
                         "0x{}",
                         safe_cex_crypto::hex(&agent_digest(connection_id, mainnet))
                     ),
-                    eip712::hash_typed_data(&typed.to_string()).unwrap()
+                    format!(
+                        "{:#x}",
+                        serde_json::from_value::<alloy_dyn_abi::TypedData>(typed)
+                            .unwrap()
+                            .eip712_signing_hash()
+                            .unwrap()
+                    )
                 );
             }
         }

@@ -113,7 +113,7 @@ export const workersTransport = () => ({
   serverHeaders: true,
   WebSocket: WorkersWebSocket,
   now: () => Date.now(),
-  connect(url, { headers = {}, onOpen, onMessage, onClose }) {
+  connect(url, { headers = {}, binary = false, onOpen, onMessage, onBinary, onClose }) {
     const socket = new WorkersWebSocket(url, [], { headers });
     let closed = false;
     const finish = (code) => {
@@ -122,8 +122,9 @@ export const workersTransport = () => ({
       onClose(code);
     };
     const receive = socketMessages(
-      (text) => { if (!closed) onMessage(text); },
+      (data) => { if (!closed) { if (typeof data === 'string') onMessage(data); else onBinary?.(data); } },
       () => { if (!closed) { finish(1007); socket.close(); } },
+      binary,
     );
     socket.onopen = () => { if (!closed) onOpen(); };
     socket.onmessage = (event) => { if (!closed) receive(event.data); };
