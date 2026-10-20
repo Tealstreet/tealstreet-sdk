@@ -29,9 +29,9 @@ test('Aster strict tape rejects an economically changed, correctly signed order'
     return tape.respond('POST', parsed.href, undefined, { 'X-MBX-APIKEY': 'replay-key' });
   };
   assert.equal(send('0.004').status, 599);
-  assert.equal(tape.unusedWrites, 1);
+  assert.equal(tape.unusedWrites(), 1);
   assert.equal(send('0.003').status, 200);
-  assert.equal(tape.unusedWrites, 0);
+  assert.equal(tape.unusedWrites(), 0);
 });
 
 for (const secondary of [false, true])

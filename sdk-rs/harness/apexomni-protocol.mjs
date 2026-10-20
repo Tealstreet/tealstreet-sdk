@@ -107,7 +107,7 @@ const fee = (price, size) => {
   return (Math.ceil(new BigNumber(value).times(1e6).toNumber()) / 1e6).toFixed(6);
 };
 function checkId(id, timestamp, callerIds) {
-  check(typeof id === 'string' && id.length > 0 && !/\s/.test(id), 'invalid client order ID');
+  check(typeof id === 'string' && /^\S+$/.test(id), 'invalid client order ID');
   if (!callerIds?.has(id)) {
     const match = new RegExp(`^apexomni-${APEX_ACCOUNT}-(\\d+)-[1-9]\\d{5}$`).exec(id);
     check(match && Math.abs(Number(match[1]) - timestamp) < 60000, 'invalid generated client order ID');
@@ -184,20 +184,13 @@ export function validateApexRequest({ method, url, body, headers = {}, now = Dat
   check(messages.some((message) => h['apex-signature'] === hmac(SECRET, message)), 'invalid REST HMAC');
   if (method !== 'GET' && method !== 'DELETE') {
     if (parsed.pathname === '/api/v3/set-initial-margin-rate') {
-      check(h['content-type']?.split(';',1)[0].trim().toLowerCase() === 'multipart/form-data', 'leverage is not multipart');
+      check(h['content-type']?.startsWith('multipart/form-data'), 'leverage is not multipart');
       if (typeof body === 'string') {
         const boundary = /(?:^|;)\s*boundary=(?:"([^"]+)"|([^;]+))/.exec(h['content-type']);
         check(boundary && body.startsWith(`--${boundary[1] ?? boundary[2]}\r\n`), 'multipart header boundary differs from body');
       }
       check(fields.symbol === 'BTC-USDT' && fields.token === 'USDT' && Number(fields.initialMarginRate) > 0, 'invalid leverage fields');
-    } else {
-      check(h['content-type']?.split(';',1)[0].trim().toLowerCase() === 'application/x-www-form-urlencoded', 'write is not form encoded');
-      // Matching may decode fixture objects and actual forms alike, but the
-      // authenticated transport must send form bytes under this content type.
-      const encoded = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
-      check(typeof encoded === 'string' && encoded.length > 0 && !/^[\s]*[\[{]/.test(encoded)
-        && encoded.split('&').every((part) => part.indexOf('=') > 0), 'write body is not encoded form bytes');
-    }
+    } else check(h['content-type']?.startsWith('application/x-www-form-urlencoded'), 'write is not form encoded');
   }
   if (method === 'POST' && parsed.pathname === '/api/v3/order') validateOrder(fields, Number(timestamp), callerIds);
 }
@@ -205,21 +198,18 @@ export function validateApexRequest({ method, url, body, headers = {}, now = Dat
 export function createApexSocketAudit(_impl, { isPrivate, books = [] }) {
   const states = new Map();
   const failures = [];
-  const state = (url, socket) => {
-    const identity = socket ?? url;
-    if (!states.has(identity)) states.set(identity, { closed: false, private: new URL(url).pathname === '/realtime_private', auth: false, topics: new Set(), pings: 0, pending: [] });
-    return states.get(identity);
+  const state = (url) => {
+    if (!states.has(url)) states.set(url, { private: new URL(url).pathname === '/realtime_private', auth: false, topics: new Set(), pings: 0, pending: [] });
+    return states.get(url);
   };
   return {
-    connected(url, socket) {
+    connected(url) {
       const parsed = new URL(url);
       if (!wsHosts.has(parsed.hostname) || parsed.protocol !== 'wss:' || !['/realtime_public', '/realtime_private'].includes(parsed.pathname) || parsed.searchParams.get('v') !== '2') failures.push('socket must use the real upstream URL and v2');
-      if (!socket) states.delete(url);
-      state(url, socket);
+      states.delete(url); state(url);
     },
-    closed(url, socket) { state(url, socket).closed = true; },
-    sent(url, text, socket) {
-      const s = state(url, socket);
+    sent(url, text) {
+      const s = state(url);
       const message = JSON.parse(text);
       if (message.op === 'login') {
         let login;
@@ -247,20 +237,19 @@ export function createApexSocketAudit(_impl, { isPrivate, books = [] }) {
           && Math.abs(Number(message.args[0]) - Date.now()) < 60000)) failures.push('server ping fallback timestamp is invalid');
       } else failures.push('unexpected outbound socket operation');
     },
-    received(url, text, socket) {
-      const s = state(url, socket);
+    received(url, text) {
+      const s = state(url);
       const message = JSON.parse(text);
       if (message.op === 'ping' || (s.private && 'ping' in message)) s.pending.push({ args: s.private && message.args?.length ? JSON.stringify(message.args) : undefined });
       if (message.topic && !s.topics.has(message.topic)) failures.push(`frame arrived without subscription ${message.topic}`);
       if (s.private && message.topic && !s.auth) failures.push('private data preceded login');
     },
     ready() {
-      return [...states.values()].some((s) => !s.closed && !s.private && ['instrumentInfo.all', ...books.map((symbol) => `orderBook200.H.${symbol}`)].every((topic) => s.topics.has(topic)))
-        && (!isPrivate || [...states.values()].some((s) => !s.closed && s.private && s.auth && ['ws_zk_accounts_v3', 'ws_user_v1', 'ws_notify_v1'].every((topic) => s.topics.has(topic))));
+      return [...states.values()].some((s) => !s.private && ['instrumentInfo.all', ...books.map((symbol) => `orderBook200.H.${symbol}`)].every((topic) => s.topics.has(topic)))
+        && (!isPrivate || [...states.values()].some((s) => s.private && s.auth && ['ws_zk_accounts_v3', 'ws_user_v1', 'ws_notify_v1'].every((topic) => s.topics.has(topic))));
     },
     errors() {
       for (const s of states.values()) {
-        if (s.closed) continue;
         if (!s.pings) failures.push('socket has no heartbeat');
         if (s.pending.length) failures.push('server ping was not answered');
         if (s.private && (!s.auth || !['ws_zk_accounts_v3', 'ws_user_v1', 'ws_notify_v1'].every((topic) => s.topics.has(topic)))) failures.push('private socket did not restore authentication and subscriptions');
@@ -269,16 +258,3 @@ export function createApexSocketAudit(_impl, { isPrivate, books = [] }) {
     },
   };
 }
-
-export const apexRequestOptions = (method, url) => ({
-  generatedBodyId: (key, value) => {
-    if (method !== 'POST' || url.pathname !== '/api/v3/order' || typeof value !== 'string') return false;
-    if (['clientId', 'clientOrderId', 'tpClientOrderId', 'slClientOrderId'].includes(key))
-      return !/\s/.test(value) && (new RegExp(`^apexomni-${APEX_ACCOUNT}-[0-9]+-[1-9][0-9]{5}$`).test(value)
-        || ['recorded-parent', 'recorded-tp', 'recorded-sl'].includes(value));
-    if (['expiration', 'tpExpiration', 'slExpiration'].includes(key)) return value === 'recorded-expiration' || /^[0-9]+$/.test(value) && !/\s/.test(value);
-    if (['tpSignature', 'slSignature'].includes(key)) return ['recorded-signature', 'recorded-tp-signature', 'recorded-sl-signature'].includes(value)
-      || /^(?:0x)?[0-9a-fA-F]{128}$/.test(value) && !/\s/.test(value);
-    return false;
-  },
-});

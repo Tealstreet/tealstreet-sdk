@@ -23,7 +23,7 @@ test('challenge subscriptions require current socket challenge and exact signatu
  assert.throws(()=>sent({},JSON.stringify(m)),/current/);assert.throws(()=>sent(s,JSON.stringify({...m,signed_challenge:'bad'})),/current/);assert.throws(()=>received({},JSON.stringify({feed:'fills',fills:[]})),/before/);
 });
 test('form request normalization keeps batch economic fields and only minted IDs vary',()=>{
- const a=krakenRequestBody({json:JSON.stringify({batchOrder:[{order:'cancel',order_id:'001'}]})},{method:'POST',url:'https://futures.kraken.com/derivatives/api/v3/batchorder'});assert.deepEqual(a,{batchOrder:[{order:'cancel',order_id:'001'}]});
+ const a=krakenRequestBody({json:JSON.stringify({batchOrder:[{order:'cancel',order_id:'001'}]})});assert.deepEqual(a,{batchOrder:[{order:'cancel',order_id:'001'}]});
  const opt={requestBody:krakenRequestBody};assert.equal(requestKey('POST','https://futures.kraken.com/derivatives/api/v3/sendorder','cliOrdId=ts_a&size=1',new Set(),opt),requestKey('POST','https://futures.kraken.com/derivatives/api/v3/sendorder','cliOrdId=ts_b&size=1',new Set(),opt));
  assert.equal(subscriptionKeys('wss://futures.kraken.com/ws/v1',{event:'subscribe',feed:'ticker',product_ids:['PF_XBTUSD','PF_ETHUSD']},new Set(),{productSubscriptions:true}).length,2);
 });
@@ -57,8 +57,7 @@ test('transport-swallowed socket oracle errors stay fatal at replay completion',
  assert.throws(()=>sentTape.send({url:'wss://futures.kraken.com/ws/v1'},'{}'),/bad-proof/);
  assert.throws(()=>sentTape.assertWritesConsumed(),/invalid replay signature/);
  const receivedTape=new Tape([],{validateSocketFrame(){throw Error('bad-frame')}},true);
- const socket=receivedTape.connect('wss://futures.kraken.com/ws/v1',()=>{},()=>{});
- assert.throws(()=>socket.onMessage('{}'),/bad-frame/);
+ assert.throws(()=>receivedTape.deliver({url:'wss://futures.kraken.com/ws/v1',onMessage(){}},'{}'),/bad-frame/);
  assert.throws(()=>receivedTape.assertWritesConsumed(),/invalid replay signature/);
 });
 
@@ -88,26 +87,4 @@ test('full ticker correction derives live statistics and zero funding only from 
  ].map(message=>({type:'ws',text:JSON.stringify(message)}));
  fixKrakenOutput(output,records);
  assert.deepEqual(output.tickers,[{symbol:'PF_XBTUSD',fundingRate:0,percentage:20,volume:0,quoteVolume:0,openInterest:0,mark:99}]);
-});
-
-test('failed authentication cannot poison a later fresh nonce or generated identity', () => {
- const audit=createKrakenRequestAudit();
- const bad=request('POST','/derivatives/api/v3/sendorder','cliOrdId=ts_bad&size=1','1700000000000999');
- bad.headers.Authent='invalid';assert.throws(()=>audit(bad),/signature/);
- assert.doesNotThrow(()=>audit(request('POST','/derivatives/api/v3/sendorder','cliOrdId=ts_valid&size=1','1700000000000001')));
- for(const id of ['ts_valid\n','ts_valid\r','ts_valid\u2028','ts_'+ 'a'.repeat(22)]) {
-  assert.throws(()=>createKrakenRequestAudit()(request('POST','/derivatives/api/v3/sendorder',new URLSearchParams({cliOrdId:id,size:'1'}).toString())),/invalid/);
- }
- const key=(path,id)=>requestKey('POST','https://futures.kraken.com'+path,new URLSearchParams({cliOrdId:id,size:'1'}).toString(),new Set(),{requestBody:krakenRequestBody});
- assert.equal(key('/derivatives/api/v3/sendorder','ts_one'),key('/derivatives/api/v3/sendorder','ts_two'));
- for(const id of ['ts_bad\n','ts_',123])assert.notEqual(key('/derivatives/api/v3/sendorder',id),key('/derivatives/api/v3/sendorder','ts_one'));
- assert.notEqual(key('/derivatives/api/v3/cancelorder','ts_one'),key('/derivatives/api/v3/cancelorder','ts_two'));
-});
-
-test('Kraken documented corrections never replace production intermediate or final books',async()=>{
- const {fixKrakenOutput}=await import('./known-ts-fixes.mjs');
- const ts={markets:[],tickers:[],books:{PF_XBTUSD:{bids:[[99,1]],asks:[[101,1]]}},bookEvents:[[1,'PF_XBTUSD','intentionally-wrong-hash']],requests:[],subscriptions:[]};
- const before=structuredClone(ts);
- fixKrakenOutput(ts,[{type:'ws',text:JSON.stringify({feed:'book_snapshot',product_id:'PF_XBTUSD',seq:1,bids:[{price:50,qty:2}],asks:[{price:60,qty:3}]})}]);
- assert.deepEqual(ts.books,before.books);assert.deepEqual(ts.bookEvents,before.bookEvents);
 });

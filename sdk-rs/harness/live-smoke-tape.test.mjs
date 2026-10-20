@@ -183,16 +183,14 @@ test('WebSocket capture failure latches and reports safely while allowing live c
   assert.equal(recorder.epoch, 1700000000000);
 });
 
-test('live smoke startup frames resolve readiness exactly once; ordinary tapes cannot opt in by frame alone', async () => {
+test('live smoke startup frames deliver before readiness exactly once; ordinary tapes cannot opt in by frame alone', async () => {
   const url = 'wss://example.com/private';
   const frame = { type: 'ws', url, t: 0, bootstrap: true, text: '{"auth":true}' };
   const records = [{ type: 'meta', private: true, liveSmoke: true }, { type: 'ws-send', url, text: 'PING' }, frame];
   const tape = new Tape(records, {}, true, 1000);
   let delivered = 0;
-  let acknowledge;
-  const acknowledged = new Promise((resolve) => { acknowledge = resolve; });
-  tape.connect(url, () => {}, () => { delivered++; acknowledge(); }, () => {});
-  assert.equal(await tape.play(undefined, async () => { await acknowledged; assert.equal(delivered, 1); }), 1);
+  tape.connect(url, () => {}, () => { delivered++; }, () => {});
+  await tape.play(undefined, async () => { assert.equal(delivered, 1); });
   assert.equal(delivered, 1);
   const ordinary = new Tape([{ type: 'meta', private: true }, frame]);
   assert.equal(ordinary.bootstrapFrame(frame), false);
@@ -327,11 +325,9 @@ test('live smoke bootstrap replays an interrupted startup generation before read
   ], {}, true, 1000);
   let received = 0;
   let closes = 0;
-  let acknowledge;
-  const acknowledged = new Promise((resolve) => { acknowledge = resolve; });
-  const connect = () => tape.connect(url, () => {}, () => { received++; acknowledge(); }, () => { closes++; connect(); });
+  const connect = () => tape.connect(url, () => {}, () => received++, () => { closes++; connect(); });
   connect();
-  assert.equal(await tape.play(undefined, async () => { await acknowledged; assert.equal(received, 1); assert.equal(closes, 1); }), 4);
+  await tape.play(undefined, async () => { assert.equal(received, 1); assert.equal(closes, 1); });
   assert.equal(received, 1);
   assert.equal(closes, 1);
 });

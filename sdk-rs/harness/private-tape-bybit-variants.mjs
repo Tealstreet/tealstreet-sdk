@@ -277,7 +277,7 @@ if (!spot) {
     http('/v5/order/create', null, ok({ orderId: placed }), 'POST', {
       category,
       ...payload,
-      orderLinkId: 'replay-generated',
+      orderLinkId: '@generated',
     });
   else
     http(

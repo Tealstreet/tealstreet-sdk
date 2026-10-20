@@ -1,150 +1,28 @@
-import { parseRequestJson } from './request-json.mjs';
+// Stable request identity. Caller IDs remain exact; generated IDs and transport
+// signatures/clocks are nondeterministic. Economic action fields stay intact.
+const CLOCKS = new Set(['timestamp', 'recvWindow', 'signature', 'requestId']);
+const URL_VOLATILE = new Set([...CLOCKS, 'requestId']);
+const CLIENT_IDS = new Set(['newClientOrderId', 'clientAlgoId', 'clientOrderId', 'c']);
 
-// Request matching keeps wire types and caller IDs; only clocks/signatures
-// and generated client IDs vary between otherwise equivalent replays.
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'requestId']);
-const CLIENT_IDS = new Set(['clientOrderId', 'newClientOrderId', 'clientAlgoId']);
-const stable =
-  (callerIds, options = {}, body = false) =>
-  ([name, value]) => {
-    if (value === undefined || options.defaultBodyValues?.[name] === value) return false;
-    if (options.ignoreGeneratedBodyId?.(name, value, callerIds, options.bodyContext)) return false;
-    if (callerIds.has(value)) return true;
-    if ((VOLATILE.has(name) && !(body ? options.preserveBodyFields?.includes(name) : options.preserveQueryFields?.includes(name))) || options.generatedId?.(name, String(value))) return false;
-    return !CLIENT_IDS.has(name) || Boolean(options.generatedId);
-  };
-
-const wireValue = (value, callerIds, options, key, query = false) => {
-  if (!callerIds.has(value) && options.generatedBodyId?.(key, value)) return ['generated'];
-  if (value === null) return ['null'];
-  if (Array.isArray(value))
-    return ['array', value.map((item) => wireValue(item, callerIds, options, undefined, query))];
-  if (typeof value === 'object')
-    return [
-      'object',
-      Object.entries(value)
-        .filter(([name, item]) =>
-          query || options.volatileBodyFields
-            ? stable(callerIds, options)([name, item])
-            : item !== undefined &&
-              options.defaultBodyValues?.[name] !== item &&
-              (callerIds.has(item) || !options.generatedId?.(name, String(item))) &&
-              !options.ignoreGeneratedBodyId?.(name, item, callerIds, options.bodyContext),
-        )
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([name, item]) => [name, wireValue(item, callerIds, options, name, query)]),
-    ];
-  if (typeof value === 'bigint' || typeof value === 'number') return ['number', value.toString()];
-  return [typeof value, value];
-};
-
-export const requestKey = (method, url, body, callerIds = new Set(), options = {}) => {
-  if (options.requestOptions) options = { ...options, ...options.requestOptions(method.toUpperCase(), new URL(url)) };
-  method = method.toUpperCase();
-  body = options.wireBody?.(body, { method, url, callerIds }) ?? body;
-  const parsed = new URL(options.requestUrl?.(url, method) ?? url);
-  const query = [...parsed.searchParams]
-    .filter(
-      ([name, value]) =>
-        stable(callerIds, options)([name, value]) && !options.volatileQueryFields?.includes(name) &&
-        (callerIds.has(value) || !options.generatedQueryId?.(name, value)) &&
-        !(value === '' && options.cacheBustPaths?.includes(parsed.pathname)),
-    )
-    .map(([name, value]) => {
-      if (/^[\[{]/.test(value)) {
-        try {
-          return [name, JSON.stringify(wireValue(parseRequestJson(value), callerIds, options, undefined, true))];
-        } catch {
-          /* Non-JSON query strings remain exact. */
-        }
-      }
-      return [name, value];
-    })
-    .sort(([a], [b]) => a.localeCompare(b));
-  if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
-  if (body instanceof URLSearchParams || (typeof body === 'string' && !/^[\[{]/.test(body.trimStart()) && body.includes('='))) {
-    const form = new URLSearchParams(body);
-    const entries = [...form].filter(stable(callerIds, options, true)).sort(([a], [b]) => a.localeCompare(b));
-    if (!options.requestBody || new Set([...form.keys()]).size !== [...form.keys()].length)
-      return `${method} ${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)} FORM ${new URLSearchParams(entries)}`;
-    body = Object.fromEntries(form);
-  }
-  let payload = typeof body === 'string' && body ? parseRequestJson(body) : (body === '' ? {} : (body ?? {}));
-  if (options.requestBody) payload = options.requestBody(payload, { method, url, callerIds });
-  const hyperliquid = /(^|\.)hyperliquid(?:-testnet)?\.xyz$/.test(parsed.hostname);
-  if (hyperliquid && payload?.action) {
-    const { nonce: _nonce, signature: _signature, ...action } = payload;
-    payload = action;
-    const priorGenerated = options.generatedId;
-    options = { ...options, generatedId: (key, value) => (key === 'c' && /^0x[0-9a-fA-F]{32}$/.test(value)) || Boolean(priorGenerated?.(key, value)) };
-  }
-  if (options.ignoreGeneratedBodyId) options = { ...options, bodyContext: { method, url } };
-  const data =
-    payload !== null && typeof payload === 'object' && !Array.isArray(payload)
-      ? [
-          'object',
-          Object.entries(payload)
-            .filter(stable(callerIds, options, true))
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([key, value]) => [key, wireValue(value, callerIds, options, key)]),
-        ]
-      : wireValue(payload, callerIds, options);
-  return `${method} ${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)} ${JSON.stringify(data)}`;
-};
-
-export const isRead = (method, url) => !isWriteRequest(method, url);
-
-export const takeResponse = (queue, method, url, time = 0, commandIndex = Infinity, repeat = isRead(method, url)) => {
-  if (!queue?.length) return undefined;
-  const eligible = queue.filter(
-    (r) => (r.availableAfter ?? r.effectiveAt ?? 0) <= time && (r.afterCommand ?? 0) <= commandIndex,
-  );
-  if (!eligible.length) return undefined;
-  const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
-  const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
-  if (repeat && current.some((r) => r.availableAfter !== undefined || r.effectiveAt !== undefined))
-    return current.at(-1);
-  const record = current[0];
-  if (current.length > 1 || !repeat) queue.splice(queue.indexOf(record), 1);
-  return record;
-};
-
-/** Subscription IDs and batching vary; native channels and operations must match. */
-const legacySubscriptionKeys = (url, text) => {
-  let message;
-  try {
-    message = JSON.parse(text);
-  } catch {
-    return [];
-  }
-  const method = String(message.method ?? message.reqType ?? message.op ?? '').toUpperCase();
-  if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return [];
-  const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
-  const parsed = new URL(url);
-  const topics =
-    message.params?.channels ?? message.params ?? message.args ?? (message.dataType ? [message.dataType] : []);
-  if (!Array.isArray(topics)) return [];
-  return topics.map(
-    (topic) =>
-      `${parsed.origin}${parsed.pathname} ${op} ${typeof topic === 'object' ? JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b)))) : topic}`,
-  );
-};
-
+// Timed replies describe recorded state; polling must not consume its transitions.
+// Unstamped replies in a timed queue represent the state available at startup.
 export const isWriteRequest = (method, url) => {
   method = method.toUpperCase();
   if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return false;
   const parsed = new URL(url);
   if (['POST', 'PUT', 'DELETE'].includes(method) && /\/(listenKey|userDataStream)$/.test(parsed.pathname)) return false;
   // Hyperliquid's /info POSTs are reads, including account/history polling.
-  return !(method === 'POST' && parsed.pathname === '/info'
-    && /(^|\.)hyperliquid(?:-testnet)?\.xyz$/.test(parsed.hostname));
+  return !(
+    method === 'POST' &&
+    parsed.pathname === '/info' &&
+    /(^|\.)hyperliquid(?:-testnet)?\.xyz$/.test(parsed.hostname)
+  );
 };
 
 export const selectResponse = (queue, elapsed, { write = false, commandIndex = 0 } = {}) => {
   if (!queue?.length) return undefined;
-  const at = (record) => Math.max(record.availableAt ?? 0, record.effectiveAt ?? 0, record.availableAfter ?? 0, record.after ?? 0);
-  const available = (record) => (record.afterCommand ?? 0) <= commandIndex
-    && at(record) <= elapsed;
+  const at = (record) => record.availableAt ?? record.effectiveAt ?? record.availableAfter ?? 0;
+  const available = (record) => (record.afterCommand ?? 0) <= commandIndex && at(record) <= elapsed;
   if (write) {
     // An acknowledgement proves one attempt. Never replay it for another write,
     // or skip an earlier outstanding write to consume a later staged one.
@@ -154,7 +32,12 @@ export const selectResponse = (queue, elapsed, { write = false, commandIndex = 0
   if (!eligible.length) return undefined;
   const stage = Math.max(...eligible.map((record) => record.afterCommand ?? 0));
   const current = eligible.filter((record) => (record.afterCommand ?? 0) === stage);
-  if (!current.some((record) => record.availableAt !== undefined || record.effectiveAt !== undefined || record.availableAfter !== undefined)) {
+  if (
+    !current.some(
+      (record) =>
+        record.availableAt !== undefined || record.effectiveAt !== undefined || record.availableAfter !== undefined,
+    )
+  ) {
     const record = current[0];
     if (current.length > 1) queue.splice(queue.indexOf(record), 1);
     return record;
@@ -171,13 +54,12 @@ export const selectResponse = (queue, elapsed, { write = false, commandIndex = 0
   return selected;
 };
 
-
-const IDENTITY_CLOCKS = new Set(['timestamp', 'recvWindow', 'signature', 'requestId']);
-const IDENTITY_URL_VOLATILE = new Set(IDENTITY_CLOCKS);
-const IDENTITY_CLIENT_IDS = new Set(['newClientOrderId', 'clientAlgoId', 'clientOrderId', 'c']);
-const parseJson = (text) => JSON.parse(text, (_key, value, context) =>
-  typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)
-    ? JSON.rawJSON(context.source) : value);
+const parseJson = (text) =>
+  JSON.parse(text, (_key, value, context) =>
+    typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)
+      ? JSON.rawJSON(context.source)
+      : value,
+  );
 
 export const callerIdsOf = (records) => {
   const ids = new Set();
@@ -194,42 +76,102 @@ const normalize = (value, callerIds, root = true, options = {}) => {
   if (typeof value === 'bigint') return JSON.rawJSON(String(value));
   if (JSON.isRawJSON(value)) return value;
   if (Array.isArray(value)) return value.map((item) => normalize(item, callerIds, false, options));
-  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
-    .filter((key) => !(root && (IDENTITY_CLOCKS.has(key) && !options.preserveBodyFields?.includes(key) || (key === 'nonce' && value.action))))
-    .filter((key) => options.defaultBodyValues?.[key] !== value[key])
-    .filter((key) => !options.ignoreGeneratedBodyId?.(key, value[key], callerIds, options.bodyContext))
-    .filter((key) => !IDENTITY_CLIENT_IDS.has(key) || callerIds.has(value[key])
-      || (options.generatedId && !options.generatedId(key, String(value[key]))))
-    .map((key) => [key, !callerIds.has(value[key]) && options.generatedBodyId?.(key, value[key])
-      ? '<generated>' : normalize(value[key], callerIds, false, options)]));
+  if (value && typeof value === 'object')
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .filter((key) => !(root && (CLOCKS.has(key) || (key === 'nonce' && value.action))))
+        .filter((key) => options.defaultBodyValues?.[key] !== value[key])
+        .filter((key) => callerIds.has(value[key]) || !options.generatedId?.(key, String(value[key])))
+        .filter((key) => !options.ignoreGeneratedBodyId?.(key, value[key], callerIds, options.bodyContext))
+        .filter(
+          (key) =>
+            !CLIENT_IDS.has(key) ||
+            callerIds.has(value[key]) ||
+            (options.generatedId && !options.generatedId(key, String(value[key]))),
+        )
+        .map((key) => [
+          key,
+          !callerIds.has(value[key]) && options.generatedBodyId?.(key, value[key])
+            ? '<generated>'
+            : normalize(value[key], callerIds, false, options),
+        ]),
+    );
   return value;
 };
 
-const canonicalParams = (params, callerIds, options = {}) => new URLSearchParams([...params]
-  .filter(([key]) => (!IDENTITY_URL_VOLATILE.has(key) || options.preserveQueryFields?.includes(key)) && !options.volatileQueryFields?.includes(key))
-  .filter(([key, value]) => !IDENTITY_CLIENT_IDS.has(key) || callerIds.has(value) || (options.generatedId && !options.generatedId(key, value)))
-  .map(([key, value]) => {
-    if (IDENTITY_CLIENT_IDS.has(key)) return [key, value];
-    if (!/^[\[{]/.test(value.trimStart())) return [key, value];
-    try { return [key, JSON.stringify(normalize(parseJson(value), callerIds, true, options))]; }
-    catch { return [key, value]; }
-  })
-  .sort(([a, av], [b, bv]) => a.localeCompare(b) || av.localeCompare(bv))).toString();
+const canonicalParams = (params, callerIds, options = {}) =>
+  new URLSearchParams(
+    [...params]
+      .filter(([key]) => !URL_VOLATILE.has(key) && !options.volatileQueryFields?.includes(key))
+      .filter(([key, value]) => !CLIENT_IDS.has(key) || callerIds.has(value))
+      .filter(([key, value]) => callerIds.has(value) || !options.generatedQueryId?.(key, value))
+      .map(([key, value]) => {
+        if (CLIENT_IDS.has(key)) return [key, value];
+        if (!/^[\[{]/.test(value.trimStart())) return [key, value];
+        try {
+          return [key, JSON.stringify(normalize(parseJson(value), callerIds))];
+        } catch {
+          return [key, value];
+        }
+      })
+      .sort(([a, av], [b, bv]) => a.localeCompare(b) || av.localeCompare(bv)),
+  ).toString();
 
 export const canonicalUrl = (url, callerIds = new Set(), options = {}) => {
   const parsed = new URL(url);
   return `${parsed.origin}${parsed.pathname}?${canonicalParams(parsed.searchParams, callerIds, options)}`;
 };
 
+export const requestKey = (method, url, body, callerIds = new Set(), options = {}) => {
+  if (options.requestOptions) options = { ...options, ...options.requestOptions(method, new URL(url)) };
+  body = options.wireBody?.(body, { method, url, callerIds }) ?? body;
+  const prefix = `${method.toUpperCase()} ${canonicalUrl(options.requestUrl?.(url, method) ?? url, callerIds, options)}`;
+  if (body == null || body === '') return prefix;
+  if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
+  if (body instanceof URLSearchParams) {
+    if (!options.requestBody) return `${prefix} ${canonicalParams(body, callerIds, options)}`;
+    body = Object.fromEntries(body);
+  }
+  let parsed;
+  try {
+    parsed = typeof body === 'string' ? parseJson(body) : body;
+  } catch {
+    if (typeof body === 'string' && body.includes('=')) {
+      const form = new URLSearchParams(body);
+      if (!options.requestBody) return `${prefix} ${canonicalParams(form, callerIds, options)}`;
+      parsed = Object.fromEntries(form);
+    } else {
+      return `${prefix} ${body}`;
+    }
+  }
+  parsed = options.requestBody?.(parsed, { method, url, callerIds }) ?? parsed;
+  return `${prefix} ${JSON.stringify(
+    normalize(
+      parsed,
+      callerIds,
+      true,
+      options.ignoreGeneratedBodyId ? { ...options, bodyContext: { method: method.toUpperCase(), url } } : options,
+    ),
+  )}`;
+};
 
 export const subscriptionMessage = (message) => {
-  const method = String(message.method ?? message.reqType ?? message.op ?? message.event ?? message.type ?? '').toUpperCase();
+  const method = String(
+    message.method ?? message.reqType ?? message.op ?? message.event ?? message.type ?? '',
+  ).toUpperCase();
   if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return undefined;
   const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
-  if (typeof message.channel === 'string' && Array.isArray(message.product_ids)) return {
-    op, topics: ['heartbeats', 'user'].includes(message.channel) ? [message.channel] : message.product_ids.map((product) => `${message.channel}.${product}`),
-  };
-  if (typeof message.channel === 'string' && message.product_ids === undefined) return { op, topics: [message.channel] };
+  if (typeof message.channel === 'string' && Array.isArray(message.product_ids)) {
+    return {
+      op,
+      topics: ['heartbeats', 'user'].includes(message.channel)
+        ? [message.channel]
+        : message.product_ids.map((product) => `${message.channel}.${product}`),
+    };
+  }
+  if (typeof message.channel === 'string' && message.product_ids === undefined)
+    return { op, topics: [message.channel] };
   const topics =
     message.params?.channels ??
     message.params ??
@@ -252,7 +194,9 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     if (message === undefined) return undefined;
   }
   message = options.subscriptionMessage?.(message) ?? message;
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
+  const method = String(
+    message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '',
+  ).toLowerCase();
   if (options.bitrueProtocol) {
     if (message?.ping !== undefined || message?.pong !== undefined) return undefined;
     if (message?.params?.cb_id !== undefined) {
@@ -262,15 +206,28 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   }
   if (options.bingxProtocol && (message?.ping !== undefined || message?.pong !== undefined)) return undefined;
   if (options.cryptoProtocol && method === 'public/respond-heartbeat') return undefined;
-  if (options.phemexProtocol && ['server.ping','server.pong'].includes(method)) return undefined;
-  if (['ping', 'pong', 'heartbeat'].includes(method) || (method === 'list_subscriptions' && /\/private\/ws$/.test(new URL(url).pathname) && Object.keys(message).every((key) => ['id','method'].includes(key)))) return undefined;
+  if (options.phemexProtocol && ['server.ping', 'server.pong'].includes(method)) return undefined;
+  // Binance's private watchdog queries its implicit user-stream subscriptions;
+  // it does not subscribe/unsubscribe a feed or mutate account state.
+  if (['ping', 'pong', 'heartbeat'].includes(method) ||
+      (method === 'list_subscriptions' && /\/private\/ws$/.test(new URL(url).pathname))) return undefined;
   if (message && typeof message === 'object') {
     message = { ...message };
     delete message.id;
     delete message.req_id;
-    if (options.rust === 'kucoin') delete message.response;
-    if (options.phemexProtocol && method === 'user.auth' && Array.isArray(message.params) && message.params.length === 4)
+    // Phemex's independent socket audit validates these clocks and HMAC bytes.
+    // Keep the API kind/key exact while comparing fresh connection signatures.
+    if (
+      options.phemexProtocol &&
+      method === 'user.auth' &&
+      Array.isArray(message.params) &&
+      message.params.length === 4
+    ) {
       message.params = [message.params[0], message.params[1], '<signature>', '<expiry>'];
+    }
+    // KuCoin TS disables public acknowledgements while Rust requests them.
+    // The audit independently checks token identity and privateChannel.
+    if (options.rust === 'kucoin') delete message.response;
     if (options.orderlyProtocol && method === 'auth' && message.params) {
       message.params = { ...message.params, timestamp: '<timestamp>', sign: '<signature>' };
     }
@@ -288,9 +245,13 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
       message.args = message.args.map((arg) => {
         const nested = typeof arg === 'string';
         const payload = nested ? parseJson(arg) : arg;
-        const normalized = { ...payload, timestamp: '<timestamp>', sign: '<signature>',
+        const normalized = {
+          ...payload,
+          timestamp: '<timestamp>',
+          sign: '<signature>',
           ...(nested && 'signature' in payload ? { signature: '<signature>' } : {}),
-          ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}) };
+          ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}),
+        };
         return nested ? JSON.stringify(normalized) : normalized;
       });
     }
@@ -312,29 +273,48 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
 };
 
 // Subscription batches and one-topic sends have the same required feed set.
-const fullSubscriptionKeys = (url, text, callerIds = new Set(), options = {}) => {
+export const subscriptionKeys = (url, text, callerIds = new Set(), options = {}) => {
   let message;
-  try { message = typeof text === 'string' ? parseJson(text) : text; }
-  catch {
+  try {
+    message = typeof text === 'string' ? parseJson(text) : text;
+  } catch {
     const key = subscriptionKey(url, text, callerIds, options);
     return key === undefined ? [] : [key];
   }
   message = options.subscriptionMessage?.(message) ?? message;
-  const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
+  const method = String(
+    message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '',
+  ).toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
-    if (options.rust === 'kucoin' && typeof message.topic === 'string') {
+    if (typeof message.channel === 'string' && Array.isArray(message.product_ids)) {
+      if (['heartbeats', 'user'].includes(message.channel))
+        return [subscriptionKey(url, { ...message, product_ids: [] }, callerIds, options)];
+      return message.product_ids.map((product) =>
+        subscriptionKey(url, { ...message, product_ids: [product] }, callerIds, options),
+      );
+    }
+    if (typeof message.channel === 'string' && message.product_ids === undefined)
+      return [subscriptionKey(url, { ...message, product_ids: [] }, callerIds, options)];
+    if (typeof message.topic === 'string') {
       const colon = message.topic.indexOf(':');
-      if (colon >= 0) return message.topic.slice(colon + 1).split(',').map((symbol) =>
-        subscriptionKey(url, { ...message, topic: `${message.topic.slice(0, colon)}:${symbol}` }, callerIds, options));
+      const channel = colon < 0 ? message.topic : message.topic.slice(0, colon);
+      const symbols = colon < 0 ? undefined : message.topic.slice(colon + 1);
+      return (symbols === undefined ? [channel] : symbols.split(',').map((symbol) => `${channel}:${symbol}`)).map(
+        (topic) => subscriptionKey(url, { ...message, topic }, callerIds, options),
+      );
     }
     if (options.cryptoProtocol && Array.isArray(message.params?.channels)) {
-      return message.params.channels.map((channel) => subscriptionKey(url,
-        { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options));
+      return message.params.channels.map((channel) =>
+        subscriptionKey(url, { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options),
+      );
     }
-    if ((options.productSubscriptions || typeof message.channel === 'string') && Array.isArray(message.product_ids)) return (['user','heartbeats'].includes(message.channel) ? [undefined] : message.product_ids).map((product) =>
-      subscriptionKey(url, { ...message, product_ids: product === undefined ? [] : [product] }, callerIds, options));
+    if (options.productSubscriptions && Array.isArray(message.product_ids))
+      return message.product_ids.map((product) =>
+        subscriptionKey(url, { ...message, product_ids: [product] }, callerIds, options),
+      );
     const field = Array.isArray(message.params) ? 'params' : Array.isArray(message.args) ? 'args' : undefined;
-    if (field) return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds, options));
+    if (field)
+      return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds, options));
   }
   // A quoted JSON string is not a bare GRVT heartbeat frame.
   const input = options.rust === 'grvt' && typeof text === 'string' && typeof message === 'string' ? text : message;
@@ -342,12 +322,7 @@ const fullSubscriptionKeys = (url, text, callerIds = new Set(), options = {}) =>
   return key === undefined ? [] : [key];
 };
 
-export const subscriptionKeys = (url, text, callerIds = new Set(), options = {}) => {
-  if (options.rust === 'grvt') return fullSubscriptionKeys(url, text, callerIds, options);
-  if (['Ping', 'Pong'].includes(text)) return [];
-  if (typeof text === 'string') { try { const m = JSON.parse(text); if (m?.ping !== undefined || m?.pong !== undefined) return []; } catch {} }
-  const legacy = legacySubscriptionKeys(url, typeof text === 'string' ? text : JSON.stringify(text));
-  return options.cryptoProtocol || options.bingxProtocol || options.mexcProtocol || options.blofinProtocol ||
-    options.fullSocketIdentity || options.bitrueProtocol || !legacy.length
-    ? fullSubscriptionKeys(url, text, callerIds, options) : legacy;
-};
+// Compatibility for existing helper callers; response selection stays centralized.
+export const isRead = (method, url) => !isWriteRequest(method, url);
+export const takeResponse = (queue, method, url, time = 0, commandIndex = Infinity, repeat = isRead(method, url)) =>
+  selectResponse(queue, time, { commandIndex, write: !repeat });

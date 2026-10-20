@@ -8,10 +8,11 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
-import { canonicalUrl } from './tape.mjs';
 import { configuredOptions, venueOf } from './venues.mjs';
+import { canonicalUrl } from './requests.mjs';
+import { Frame } from '../hosts/wasm/js/wire.mjs';
 import { createRecordingPolicy, createRecordingTimeline, recordingReady } from './polling.mjs';
-import { Frame, LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
+import { replayStoreReady } from './tape.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -25,30 +26,32 @@ const { values } = parseArgs({
 });
 const out = values.out ?? `sdk-rs/harness/tapes/${values.venue}.jsonl`;
 const venue = venueOf(values.venue);
-const credentialed = Boolean(values['options-env']);
-if (venue.recordSession && !credentialed) throw new Error('Session recording requires --options-env');
-const extraOptions = credentialed ? JSON.parse(process.env[values['options-env']] ?? 'null') : {};
-if (!extraOptions || typeof extraOptions !== 'object' || Array.isArray(extraOptions)) throw new Error('Recording options must be an object');
-const options = { ...configuredOptions(values.venue), ...venue.publicOptions, ...venue.recordOptions, publicDataOnly: true, ...extraOptions };
-const policy = createRecordingPolicy(venue, options, credentialed);
-const timeline = createRecordingTimeline(venue);
-let loaded = false, httpResponses = 0, windowStarted;
+let suppliedOptions = {};
+if (values['options-env']) {
+  try {
+    suppliedOptions = JSON.parse(process.env[values['options-env']]);
+    if (!suppliedOptions || typeof suppliedOptions !== 'object' || Array.isArray(suppliedOptions)) throw new Error();
+  } catch { throw new Error('Recording options environment variable must contain a JSON object'); }
+}
+if (venue.recordSession === true && !values['options-env'])
+  throw new Error('Session-only recording requires explicit credentials through --options-env');
+const options = { ...configuredOptions(values.venue), ...venue.publicOptions, ...venue.recordOptions, ...suppliedOptions, publicDataOnly: true };
+if (venue.recordSession === true && (!suppliedOptions.key || !suppliedOptions.secret))
+  throw new Error('Session-only recording requires explicit username and password in the options environment variable');
+const policy = createRecordingPolicy(venue, options, Boolean(values['options-env']));
 mkdirSync(dirname(out), { recursive: true });
 const tape = createWriteStream(out);
 const started = Date.now();
-let capturing = true;
+const timeline = createRecordingTimeline(venue);
 let recordingFailed = false;
+let loaded = false;
 const write = (record) => {
-  if (!capturing) return;
-  try { tape.write(`${JSON.stringify(policy.sanitize(timeline({ t: Date.now() - started, ...record }, loaded)))}\n`); }
-  catch {
-    recordingFailed = true;
-    throw new Error('Recording refused a protocol record that was not replay-safe');
-  }
+  try { return tape.write(`${JSON.stringify(timeline(policy.sanitize({ t: Date.now() - started, ...record }), loaded))}\n`); }
+  catch { recordingFailed = true; throw new Error('Recording refused a protocol record that was not replay-safe'); }
 };
-
-write({ type: 'meta', epoch: started, private: false });
-if (policy.replayOptions || options.endpoints) write({ type: 'config', options: policy.replayOptions ?? options });
+write({ type: 'meta', epoch: started, private: false, source: 'live', ...(values['tealstreet-ws-route'] ? { transport: 'tealstreet-ws-route' } : {}) });
+if (policy.replayOptions) write({ type: 'config', options: policy.replayOptions });
+else if (options.endpoints) write({ type: 'config', options });
 
 let live = nativeTransport();
 if (values['tealstreet-ws-route']) {
@@ -56,87 +59,110 @@ if (values['tealstreet-ws-route']) {
     import('../../packages/safe-cex/src/transport/engine.ts'),
     import('../../packages/safe-cex/src/transport/tealstreet/tealstreetTransport.ts'),
   ]);
-  live = createEngineTransport(values.venue, { ...options, transport: tealstreetTransport, tealstreetWsRoute: true, tealstreetProxy: false, tealstreetTunnel: false }, live);
+  live = createEngineTransport(values.venue, {
+    ...options, transport: tealstreetTransport, tealstreetWsRoute: true,
+    tealstreetProxy: false, tealstreetTunnel: false,
+  }, live);
 }
-const connections = new Map();
+const ordinals = new Map();
 let requestOrdinal = 0;
 const tickerSymbols = new Set();
-const closedUrls = new Set();
 const recording = {
   ...live,
   connect(url, handlers) {
     const key = canonicalUrl(url);
-    const connection = connections.get(key) ?? 0;
-    connections.set(key, connection + 1);
-    write({ type: 'connect', url, connection, socket: connection, initial: !closedUrls.has(key), channel: handlers.channel });
-    let closed = false;
-    const closeRecord = (code, local = false) => {
-      if (closed) return;
-      closed = true;
-      closedUrls.add(key);
-      write({ type: 'close', url, connection, socket: connection, code, local });
-    };
-    const socket = live.connect(url, {
+    const socket = ordinals.get(key) ?? 0;
+    ordinals.set(key, socket + 1);
+    const connection = live.connect(url, {
       ...handlers,
       onOpen: () => {
-        write({ type: 'open', url, connection, socket: connection });
+        write({ type: 'open', url, socket });
         handlers.onOpen();
       },
       onMessage: (text) => {
         frames++;
         for (const symbol of venue.recordTickerSymbols?.(text) ?? []) tickerSymbols.add(symbol);
-        write({ type: 'ws', url, connection, socket: connection, text });
+        write({ type: 'ws', url, socket, text });
         handlers.onMessage(text);
       },
       onBinary: (bytes) => {
         frames++;
-        write({ type: 'ws', url, connection, socket: connection, binary: Buffer.from(bytes).toString('base64') });
+        write({ type: 'ws', url, socket, binary: Buffer.from(bytes).toString('base64') });
         handlers.onBinary?.(bytes);
       },
       onClose: (code) => {
-        closeRecord(code);
+        write({ type: 'close', url, socket, code });
         handlers.onClose(code);
       },
     });
     return {
       send(text) {
         let message;
-        try { message = JSON.parse(text); } catch { /* Non-JSON heartbeat. */ }
-        if (message && venue.socketRequest?.(message)) write({ type: 'ws-send', url, connection, socket: connection, text });
-        socket.send(text);
+        try {
+          message = JSON.parse(text);
+        } catch {
+          /* Non-JSON heartbeat. */
+        }
+        if (message && venue.socketRequest?.(message)) write({ type: 'ws-send', url, socket, text });
+        connection.send(text);
       },
-      close: () => { closeRecord(1000, true); socket.close(); },
+      close: () => connection.close(),
     };
   },
   async request(request) {
-    // Equal requests may complete out of order; retain dispatch identity.
+    // Concurrent equal requests can finish out of order (e.g. socket tokens).
     const ordinal = requestOrdinal++;
-    const outgoing = request.route === 'publicCors' && venue.recordPublicCorsDirect ? { ...request, route: 'direct' } : request;
+    // A native recorder may explicitly declare direct egress for public CORS
+    // reads. Browser/account hosts still require their configured route.
+    const outgoing = request.route === 'publicCors' && venue.recordPublicCorsDirect
+      ? { ...request, route: 'direct' }
+      : request;
     const response = await live.request(outgoing);
-    const recorded = (body) => { httpResponses++; write({
-      type: 'http', requestOrdinal: ordinal, method: request.method, url: request.url,
-      ...(request.body === undefined ? {} : { requestBody: request.body }),
-      status: response.status, headers: response.headers ?? '', body,
-    }); };
+    const recorded = (body) => {
+      write({
+        type: 'http',
+        requestOrdinal: ordinal,
+        method: request.method,
+        url: request.url,
+        ...(request.body === undefined ? {} : { requestBody: request.body }),
+        status: response.status,
+        headers: response.headers ?? '',
+        body,
+      });
+      if (response.status >= 200 && response.status < 300) httpResponses++;
+    };
     if (response.body instanceof Uint8Array) {
       recorded(new TextDecoder().decode(response.body));
       return response;
     }
-    return { ...response, body: (async function* () {
-      const decoder = new TextDecoder();
-      let body = '';
-      for await (const chunk of response.body) {
-        body += decoder.decode(chunk, { stream: true });
-        yield chunk;
-      }
-      recorded(body + decoder.decode());
-    })() };
+    return {
+      ...response,
+      body: (async function* () {
+        const decoder = new TextDecoder();
+        let body = '';
+        for await (const chunk of response.body) {
+          body += decoder.decode(chunk, { stream: true });
+          yield chunk;
+        }
+        recorded(body + decoder.decode());
+      })(),
+    };
   },
 };
 
 const { WasmEngine } = await loadEngine();
 let frames = 0;
+let httpResponses = 0;
 let updates = 0;
+let recordingTimer;
+let startupTimer;
+let startedWindow = false;
+const beginWindow = () => {
+  if (startedWindow) return;
+  startedWindow = true;
+  clearTimeout(startupTimer);
+  recordingTimer = setTimeout(finish, Number(values.seconds) * 1000);
+};
 const seenBooks = new Set();
 const host = new EngineHost(
   new WasmEngine(
@@ -148,12 +174,12 @@ const host = new EngineHost(
     onFrame: (buffer) => {
       updates++;
       const frame = new Frame(buffer);
-      const publicMask = LOADED_FLAG.MARKETS | LOADED_FLAG.TICKERS;
-      loaded = ((frame.status()?.loaded & publicMask) === publicMask) || loaded;
-      if (loaded && windowStarted === undefined) windowStarted = Date.now();
       for (const book of frame.books()) seenBooks.add(book.market);
+      const status = frame.status();
+      if (status) loaded = replayStoreReady(status.loaded, false);
+      if (venue.recordAfterReady && loaded) beginWindow();
     },
-    onLog: policy.log,
+    onLog: (level, message) => policy.log(level, message),
   },
 );
 host.start();
@@ -161,20 +187,22 @@ for (const symbol of values.books.split(',').filter(Boolean)) {
   host.command({ op: 'subscribeOrderBook', symbol });
 }
 const flush = setInterval(() => host.flush(), 250);
-const stop = () => {
+function finish() {
+  clearTimeout(recordingTimer);
+  clearTimeout(startupTimer);
   clearInterval(flush);
   host.flush();
-  const completedWindow = !venue.recordAfterReady || (windowStarted !== undefined && Date.now() - windowStarted >= Number(values.seconds) * 1000);
-  capturing = false;
   host.dispose();
   tape.end(() => {
-    console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, books: seenBooks.size }));
-    process.exit(!recordingFailed && completedWindow && (!venue.recordTickerSymbols || values.books.split(',').filter(Boolean).every((symbol) => tickerSymbols.has(symbol))) && recordingReady(venue, { frames, httpResponses, loaded, books: seenBooks.size, requestedBooks: values.books.split(',').filter(Boolean).length }) ? 0 : 1);
+    console.log(
+      JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, httpResponses, books: seenBooks.size, ...(venue.recordTickerSymbols ? { tickerSymbols: tickerSymbols.size } : {}) }),
+    );
+    const requested = values.books.split(',').filter(Boolean);
+    const tickersReady = !venue.recordTickerSymbols || requested.every((symbol) => tickerSymbols.has(symbol));
+    process.exit(!recordingFailed && tickersReady && recordingReady(venue, {
+      frames, httpResponses, loaded, books: seenBooks.size, requestedBooks: requested.length,
+    }) ? 0 : 1);
   });
-};
-const duration = Number(values.seconds) * 1000;
-if (venue.recordAfterReady) {
-  const deadline = setInterval(() => {
-    if (windowStarted !== undefined && Date.now() - windowStarted >= duration || Date.now() - started >= 120_000 + duration) { clearInterval(deadline); stop(); }
-  }, 50);
-} else setTimeout(stop, duration);
+}
+if (venue.recordAfterReady) startupTimer = setTimeout(finish, 120_000);
+else beginWindow();

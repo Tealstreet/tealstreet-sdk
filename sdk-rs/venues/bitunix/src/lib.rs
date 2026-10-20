@@ -70,7 +70,7 @@ pub struct BitunixFutures {
     trading: trading::TradingState,
     sockets: Vec<Socket>,
     books: HashMap<String, BookState>,
-    candles: HashSet<(String, String)>,
+    candles: HashSet<(String, Interval)>,
     retry: Option<TimerId>,
     funding_times: HashMap<String, f64>,
 }
@@ -178,11 +178,9 @@ impl BitunixFutures {
         self.books
             .keys()
             .filter_map(|s| self.futures_topic(cx, s))
-            .chain(
-                self.candles.iter().map(|(s, i)| {
-                    format!("market_{}_klineop_{}", s.to_ascii_lowercase(), interval(i))
-                }),
-            )
+            .chain(self.candles.iter().map(|(s, i)| {
+                format!("market_{}_klineop_{}", s.to_ascii_lowercase(), interval(*i))
+            }))
             .collect()
     }
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, m: &Message<'_>) -> Result<(), String> {
@@ -253,14 +251,14 @@ impl BitunixFutures {
                 let intervals: Vec<_> = self
                     .candles
                     .iter()
-                    .filter(|(s, i)| s == &symbol && interval(i) == native)
-                    .map(|(_, i)| i.clone())
+                    .filter(|(s, i)| s == &symbol && interval(*i) == native)
+                    .map(|(_, i)| *i)
                     .collect();
                 if !intervals.is_empty() {
                     let d: Kline = serde_json::from_str(text).map_err(|e| e.to_string())?;
                     cx.store.update_ticker(&symbol, |t| t.last = d.close.0);
                     for i in intervals {
-                        cx.candle(&symbol, &i, candle(&d, false));
+                        cx.candle(&symbol, i, candle(&d, false));
                     }
                 }
             }
@@ -274,36 +272,26 @@ fn topic_frame(topic: &str, subscribe: bool) -> String {
         if subscribe { "sub" } else { "unsub" }
     )
 }
-fn interval(i: &str) -> &str {
+fn interval(i: Interval) -> &'static str {
     match i {
-        "1m" => "1min",
-        "3m" => "3min",
-        "5m" => "5min",
-        "15m" => "15min",
-        "30m" => "30min",
-        "1h" => "60min",
-        "1d" => "1day",
-        "1w" => "1week",
-        _ => i,
+        Interval::M1 => "1min",
+        Interval::M3 => "3min",
+        Interval::M5 => "5min",
+        Interval::M15 => "15min",
+        Interval::M30 => "30min",
+        Interval::H1 => "60min",
+        Interval::D1 => "1day",
+        Interval::W1 => "1week",
+        _ => i.as_str(),
     }
 }
-fn interval_ms(i: &str) -> Option<f64> {
-    let minutes = match i {
-        "1m" => 1,
-        "3m" => 3,
-        "5m" => 5,
-        "15m" => 15,
-        "30m" => 30,
-        "1h" => 60,
-        "2h" => 120,
-        "4h" => 240,
-        "6h" => 360,
-        "12h" => 720,
-        "1d" => 1440,
-        "1w" => 10080,
-        _ => return None,
-    };
-    Some(f64::from(minutes) * 60_000.0)
+fn interval_ms(i: Interval) -> Option<f64> {
+    use Interval::*;
+    matches!(
+        i,
+        M1 | M3 | M5 | M15 | M30 | H1 | H2 | H4 | H6 | H12 | D1 | W1
+    )
+    .then(|| i.ms())
 }
 fn candle(k: &Kline, rest: bool) -> Candle {
     Candle {
@@ -667,17 +655,17 @@ impl Venue for BitunixFutures {
                 symbol,
                 interval: i,
             } => {
-                if interval_ms(&i).is_none() {
+                if interval_ms(i).is_none() {
                     cx.log(LogLevel::Error, "Unsupported Bitunix candle interval");
                     return;
                 }
-                if self.candles.insert((symbol.clone(), i.clone())) {
+                if self.candles.insert((symbol.clone(), i)) {
                     self.send_topic(
                         cx,
                         &format!(
                             "market_{}_klineop_{}",
                             symbol.to_ascii_lowercase(),
-                            interval(&i)
+                            interval(i)
                         ),
                         true,
                     );
@@ -687,16 +675,16 @@ impl Venue for BitunixFutures {
                 symbol,
                 interval: i,
             } => {
-                if interval_ms(&i).is_none() {
+                if interval_ms(i).is_none() {
                     return;
                 }
-                self.candles.remove(&(symbol.clone(), i.clone()));
+                self.candles.remove(&(symbol.clone(), i));
                 self.send_topic(
                     cx,
                     &format!(
                         "market_{}_klineop_{}",
                         symbol.to_ascii_lowercase(),
-                        interval(&i)
+                        interval(i)
                     ),
                     false,
                 );
@@ -709,7 +697,7 @@ impl Venue for BitunixFutures {
                 from_ms,
                 to_ms,
             } => {
-                let Some(duration) = interval_ms(&interval) else {
+                let Some(duration) = interval_ms(interval) else {
                     cx.done(command, Err("Unsupported Bitunix candle interval".into()));
                     return;
                 };
@@ -727,7 +715,7 @@ impl Venue for BitunixFutures {
                 } else {
                     String::new()
                 };
-                cx.request(Method::Get,format!("{REST}{KLINE}?symbol={symbol}&interval={interval}&startTime={start}&endTime={end}{limit_query}"),self.headers(),None,Pending::Candles {command});
+                cx.request(Method::Get,format!("{REST}{KLINE}?symbol={symbol}&interval={}&startTime={start}&endTime={end}{limit_query}", interval.as_str()),self.headers(),None,Pending::Candles {command});
             }
             Command::Query { command, query } => self.query(cx, command, query),
             other => self.trading_command(cx, other),

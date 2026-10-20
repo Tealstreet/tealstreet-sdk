@@ -1,27 +1,22 @@
+import { isWriteRequest, selectResponse } from './requests.mjs';
 import { parseRequestJson } from './request-json.mjs';
-import { isRead } from './requests.mjs';
-
-export const implementationRecords = (records, impl) => {
-  if (impl !== undefined && !['ts', 'rust'].includes(impl)) throw new Error('Unknown replay implementation');
-  return records.filter((record) => {
-    if (record.impl === undefined) return true;
-    if (!['ts', 'rust'].includes(record.impl)) throw new Error(`Unknown ${record.type === 'http' ? 'HTTP' : 'tape'} record implementation`);
-    if (impl === undefined) throw new Error(`Tagged ${record.type === 'http' ? 'HTTP' : 'tape'} records require a replay implementation`);
-    return record.impl === impl;
-  });
-};
 
 // Reads may reuse their last snapshot; a mutation response is consumed once.
 export class Responses {
-  constructor(records, key, check, isWrite = (method, url) => !isRead(method, new URL(url, 'https://replay.invalid').href), fallbackKey, impl) {
-    records = implementationRecords(records, impl);
+  constructor(records, key, check, isWrite, checkUnusedWrites = true, impl) {
+    if (impl !== undefined && !['ts', 'rust'].includes(impl)) throw new Error('Unknown replay implementation');
+    this.checkUnusedWrites = checkUnusedWrites;
     this.key = key;
     this.check = check;
-    this.isWrite = typeof isWrite === 'function' ? isWrite : (method, url) => !isRead(method, new URL(url, 'https://replay.invalid').href);
-    this.fallbackKey = fallbackKey;
+    this.isWrite = isWrite ?? isWriteRequest;
     this.unserved = 0;
     this.queues = new Map();
     for (const record of records.filter((r) => r.type === 'http')) {
+      if (record.impl !== undefined) {
+        if (!['ts', 'rust'].includes(record.impl)) throw new Error('Unknown HTTP record implementation');
+        if (impl === undefined) throw new Error('Tagged HTTP records require a replay implementation');
+        if (record.impl !== impl) continue;
+      }
       const id = key(record.method, record.url, record.requestBody);
       if (!this.queues.has(id)) this.queues.set(id, []);
       this.queues.get(id).push(record);
@@ -36,57 +31,52 @@ export class Responses {
       queue.sort((a, b) => a.requestOrdinal - b.requestOrdinal);
     }
   }
-  respond(method, url, body, commandIndex = 0, timeOrMatch = 0, matchOrHeaders, signedHeaders) {
-    const legacyMatch = typeof timeOrMatch === 'function';
-    const onMatch = legacyMatch ? timeOrMatch : typeof matchOrHeaders === 'function' ? matchOrHeaders : undefined;
-    const time = legacyMatch ? (matchOrHeaders ?? 0) : timeOrMatch;
-    const headers = legacyMatch || onMatch ? signedHeaders : matchOrHeaders ?? signedHeaders;
-    const queue = this.check?.(method, url, body, headers) === false ? undefined :
-      this.queues.get(this.key(method, url, body)) ??
-      (this.fallbackKey && this.queues.get(this.fallbackKey(method, url, body)));
+  respond(method, url, body, commandIndex = 0, timeOrMatch = 0, timeOrHeaders, matchHeaders) {
+    // Time, signed headers and pre-consumption validation are independent inputs.
+    const onMatch = typeof timeOrMatch === 'function' ? timeOrMatch : undefined;
+    const elapsed = onMatch ? (timeOrHeaders ?? 0) : timeOrMatch;
+    const headers = onMatch ? matchHeaders : timeOrHeaders;
+    const queue = this.check?.(method, url, body, headers) === false ? undefined : this.queues.get(this.key(method, url, body));
     if (!queue?.length) {
       this.unserved++;
       return { status: 599, body: '' };
     }
-    const write = this.isWrite?.(method, url) ?? method !== 'GET';
-    if (write && ((queue[0].afterCommand ?? 0) > commandIndex || Math.max(queue[0].after ?? 0, queue[0].effectiveAt ?? 0, queue[0].availableAfter ?? 0, queue[0].availableAt ?? 0) > time)) {
+    const candidates = onMatch && queue ? [...queue] : queue;
+    const record = selectResponse(candidates, elapsed, { commandIndex, write: this.isWrite(method, url) });
+    if (!record) {
       this.unserved++;
       return { status: 599, body: '' };
     }
-    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= commandIndex && (r.after ?? 0) <= time && (r.effectiveAt ?? 0) <= time && (r.availableAfter ?? 0) <= time && (r.availableAt ?? 0) <= time);
-    if (!eligible.length) {
-      this.unserved++;
-      return { status: 599, body: '' };
+    if (onMatch) {
+      try {
+        onMatch(record);
+      } catch (error) {
+        this.unserved++;
+        throw error;
+      }
     }
-    const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
-    let current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
-    const timed = !write && current.some((r) => r.after !== undefined || r.effectiveAt !== undefined || r.availableAfter !== undefined || r.availableAt !== undefined);
-    if (timed) {
-      const after = Math.max(...current.map((r) => Math.max(r.after ?? 0, r.effectiveAt ?? 0, r.availableAfter ?? 0, r.availableAt ?? 0)));
-      current = current.filter((r) => Math.max(r.after ?? 0, r.effectiveAt ?? 0, r.availableAfter ?? 0, r.availableAt ?? 0) === after);
-    }
-    const record = write ? queue[0] : timed ? current.at(-1) : current[0];
-    onMatch?.(record);
-    if ((!timed && current.length > 1) || write) queue.splice(queue.indexOf(record), 1);
+    // Acknowledgements echo generated IDs from the matched request, never a fixed ID.
     let responseBody = record.body;
     if (/"\$(clientAlgoId|newClientOrderId|client_id)"/.test(responseBody)) {
-      const raw = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
-      const sent = typeof raw === 'string' ? parseRequestJson(raw) : raw ?? {};
-      responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId|client_id)"/g,
-        (_, field) => JSON.stringify(sent[field] ?? new URL(url).searchParams.get(field), (_key, value) => typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value));
+      const wireBody = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
+      const sent = typeof wireBody === 'string' ? parseRequestJson(wireBody) : wireBody;
+      responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId|client_id)"/g, (_, field) =>
+        JSON.stringify(sent?.[field] ?? new URL(url).searchParams.get(field), (_key, value) =>
+          typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value,
+        ),
+      );
     }
     if (responseBody.includes('"$request:')) {
-      const raw = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
-      const sent = typeof raw === 'string' ? parseRequestJson(raw) : raw;
+      const wireBody = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
+      const sent = typeof wireBody === 'string' ? parseRequestJson(wireBody) : wireBody;
       responseBody = responseBody.replace(/"\$request:([\w.]+)"/g, (_, path) =>
-        JSON.stringify(path.split('.').reduce((value, key) => value?.[key], sent) ?? null,
-          (_key, value) => typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value));
+        JSON.stringify(path.split('.').reduce((value, key) => value?.[key], sent) ?? null));
     }
-    return { status: record.status, headers: record.headers ?? '', body: responseBody,
-      ...(Object.hasOwn(record, 'comparisonRequestBody') ? { comparisonRequestBody: record.comparisonRequestBody } : {}),
-      ...(Number.isFinite(record.t) ? { recordedAt: record.t } : {}) };
+    if (onMatch && candidates.length !== queue.length) queue.splice(queue.indexOf(record), 1);
+    return { status: record.status, headers: record.headers ?? '', body: responseBody };
   }
   unusedWrites() {
-    return [...this.queues.values()].flat().filter((r) => (this.isWrite?.(r.method, r.url) ?? r.method !== 'GET')).length;
+    if (!this.checkUnusedWrites) return 0;
+    return [...this.queues.values()].flat().filter((r) => this.isWrite(r.method, r.url)).length;
   }
 }

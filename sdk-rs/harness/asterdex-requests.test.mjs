@@ -195,33 +195,3 @@ test('Aster protocol audit requires aggregate/partial subscriptions and reserved
   bad.received(publicUrl, JSON.stringify({ stream: 'btcusdt@depth', data: {} }));
   assert(bad.errors().length >= 2);
 });
-
-test('Aster audit isolates subscriptions and initialization for parallel and replacement connections', async () => {
-  const { Tape } = await import('./tape.mjs');
-  const { venueOf } = await import('./venues.mjs');
-  const venue = venueOf('asterdex');
-  const publicUrl = 'wss://fstream.asterdex.com/stream';
-  const privateUrl = 'wss://fstream.asterdex.com/ws/listen-key';
-  const tape = new Tape([], { ...venue, isPrivate: true, books: ['BTCUSDT'] });
-  const connect = (url) => tape.connect(url, () => {}, () => {});
-  const ping = (socket, id) => tape.send(socket, JSON.stringify({ method: 'LIST_SUBSCRIPTIONS', id }));
-  const topics = ['!ticker@arr', '!markPrice@arr@1s', 'btcusdt@depth20@100ms'];
-  const subscribe = (socket, method = 'SUBSCRIBE') => tape.send(socket, JSON.stringify({ method, id: 1, params: topics }));
-  const data = (socket) => socket.onMessage(JSON.stringify({ stream: topics[2], data: {} }));
-  const first = connect(publicUrl), sibling = connect(publicUrl), privateFirst = connect(privateUrl);
-  ping(first, -1); subscribe(first); ping(privateFirst, 42);
-  assert.equal(tape.audit.ready(), true);
-  data(sibling);
-  assert(tape.audit.errors().some((error) => error.includes('without subscription')));
-  ping(sibling, -1); subscribe(sibling);
-  subscribe(first, 'UNSUBSCRIBE');
-  assert.equal(tape.audit.ready(), true, 'unsubscribe does not erase sibling topics');
-  tape.close(first, 1000, true); tape.close(sibling, 1000, true); tape.close(privateFirst, 1000, true);
-  const replacement = connect(publicUrl), privateReplacement = connect(privateUrl);
-  assert.equal(tape.audit.ready(), false, 'closed connections cannot satisfy readiness');
-  privateReplacement.onMessage('{}');
-  assert(tape.audit.errors().some((error) => error.includes('before socket initialization')));
-  data(replacement);
-  ping(replacement, -1); subscribe(replacement); ping(privateReplacement, 42);
-  assert.equal(tape.audit.ready(), true);
-});

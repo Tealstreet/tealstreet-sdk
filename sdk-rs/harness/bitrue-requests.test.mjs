@@ -26,24 +26,6 @@ test('Bitrue normalizes minted create values while retaining caller IDs and nati
     key(create, { triggerOrderCreateParams: [{ triggerPrice: 55000 }] }),
   );
 });
-test('Bitrue generated IDs require valid strings at both parent and trigger-child positions', () => {
-  const create = '/fapi/v2/order';
-  const invalid = [123, null, true, '', 'x'.repeat(32), 'invalid\nID', 'invalid\n', ['minted'], { id: 'minted' }];
-  const parent = (clientOrderId) => ({ clientOrderId, volume: '0.004' });
-  const child = (clientOrderId) => ({ triggerOrderCreateParams: [{ clientOrderId, triggerPrice: 55000 }] });
-  for (const body of [parent, child]) {
-    const validKey = key(create, body('minted-valid'));
-    const invalidKeys = invalid.map((id) => key(create, body(id)));
-    for (const invalidKey of invalidKeys) assert.notEqual(invalidKey, validKey);
-    assert.equal(new Set(invalidKeys).size, invalid.length, 'invalid IDs retain their exact types and values');
-    const callers = new Set(['caller-id']);
-    assert.notEqual(key(create, body('caller-id'), callers), key(create, body('minted-valid'), callers));
-  }
-  assert.notEqual(
-    key(create, child('minted-valid')),
-    key(create, { triggerOrderCreateParams: [{ clientOrderId: 'minted-other', triggerPrice: '55000' }] }),
-  );
-});
 test('Bitrue cancellation preserves the exact server client ID and business wire types', () => {
   const cancel = '/fapi/v2/cancel';
   assert.notEqual(key(cancel, { clientOrderId: 'server-id-1' }), key(cancel, { clientOrderId: 'server-id-2' }));

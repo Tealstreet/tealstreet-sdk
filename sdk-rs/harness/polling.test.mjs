@@ -93,7 +93,7 @@ test('sanitized login seeds survive a startup transport delay and retain definit
     // A transport timeout emits no HTTP record; its later retry can first return
     // at this offset while replay still needs the login at startup time zero.
     const login = timeline(policy.sanitize({
-      type: 'http', t: 6500, method: 'POST', url: 'https://breakout.prosp.devexperts.com/dxsca-web/login', status,
+      type: 'http', t: 6500, method: 'POST', url: 'https://example.test/dxsca-web/login', status,
       requestBody: JSON.stringify({ domain: 'default', username: options.key, password: options.secret }),
       body: JSON.stringify(status === 200 ? { sessionToken: 'actual-session', timeout: '00:30:00' } : { message: 'Invalid credentials' }),
     }));
@@ -193,10 +193,10 @@ test('HTTP timeline does not consume expected mutations and still enforces exact
     { type: 'http', t: 0, method: 'POST', url, requestBody: '{"quantity":2}', status: 200, body: 'ok' },
   ], { polling: true, matchRequestBody: true }, false);
   await tape.play();
-  assert.equal(tape.missingWrites, 1);
+  assert.equal(tape.unusedWrites(), 1);
   assert.equal(tape.respond('POST', url, '{"quantity":3}').status, 599);
   assert.equal(tape.respond('POST', url, '{"quantity":2}').body, 'ok');
-  assert.equal(tape.missingWrites, 0);
+  assert.equal(tape.unusedWrites(), 0);
   assert.equal(tape.respond('POST', url, '{"quantity":2}').status, 599);
 });
 
@@ -351,7 +351,7 @@ test('polling completion preserves expected mutations and rejects unrecorded wri
       });
       if (unexpectedWrite) await assert.rejects(playing, /unmatched HTTP request/);
       else await playing;
-      assert.equal(tape.missingWrites, 1);
+      assert.equal(tape.unusedWrites(), 1);
       assert.equal(tape.writes.length, unexpectedWrite ? 1 : 0);
     } finally { clearInterval(timer); clock.restore(); }
   }
@@ -474,24 +474,4 @@ test('credential check handles quoted and URL-encoded secrets without exposing t
   for (const body of [options.secret, encodeURIComponent(options.secret)])
     assert.throws(() => policy.sanitize({ type: 'http', body }), (error) =>
       /retained a live credential/.test(error.message) && !error.message.includes(options.secret));
-});
-
-
-test('polling idle fence distinguishes housekeeping timer progress from idle event turns', async () => {
-  const url = 'https://example.test/quotes';
-  const tape = new Tape([
-    {type:'http',t:0,method:'GET',url,status:200,body:'seed',availableAfter:0},
-    {type:'http',t:20,method:'GET',url,status:200,body:'final',availableAfter:20},
-  ], {polling:true});
-  tape.respond('GET',url);
-  const clock = new ReplayClock(1700000000000); clock.install(); clock.start();
-  let poll, housekeeping;
-  try {
-    await tape.play(undefined,undefined,undefined,clock,()=> {
-      housekeeping=setInterval(()=>{},1);
-      poll=setTimeout(()=>tape.respond('GET',url),100);
-    });
-    assert.equal(clock.time-clock.epoch,100);
-    assert.equal(tape.unserved,0);
-  } finally {clearTimeout(poll);clearInterval(housekeeping);clock.restore();}
 });

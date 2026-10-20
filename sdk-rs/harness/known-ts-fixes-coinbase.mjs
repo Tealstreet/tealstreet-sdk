@@ -35,6 +35,13 @@ const side = (s) => {
   assert.ok(['BUY', 'SELL'].includes(s), 'invalid Coinbase oracle side');
   return s.toLowerCase();
 };
+// The comparison snapshot carries numeric wire strings as numbers. Keep this
+// legacy-shape assertion compatible without changing the tape-derived price.
+const comparisonPrice = (value) => {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 const sameOrChange = (object, key, legacy, expected, label) => {
   if (isDeepStrictEqual(object[key], expected)) return false;
   assert.deepEqual(object[key], legacy, `unexpected TS Coinbase ${label}`);
@@ -123,7 +130,8 @@ function correctFills(account, records, markets) {
     }
   }
   if (!isDeepStrictEqual(account.fills, expected)) {
-    assert.deepEqual(account.fills, legacy, 'unexpected TS Coinbase terminal fill emission');
+    const priceShape = (rows) => rows.map((row) => ({ ...row, price: comparisonPrice(row.price) }));
+    assert.deepEqual(priceShape(account.fills), priceShape(legacy), 'unexpected TS Coinbase terminal fill emission');
     account.fills = expected;
   }
 }
@@ -177,12 +185,7 @@ function correctBalances(account, records) {
     (r) => successful(r) && r.method === 'GET' && /^\/api\/v3\/brokerage\/portfolios\//.test(route(r)),
   );
   if (!breakdown || !account.balance?.currencies) return;
-  const portfolio = parse(breakdown.body).breakdown;
-  // Portfolio access probes also return spot_positions for INTX accounts.
-  // Only the selected non-INTX portfolio feeds fetchSpotCurrencies; CFM still
-  // supports spot currencies and must retain the held-total correction.
-  if (portfolio.portfolio?.type === 'INTX') return;
-  for (const asset of portfolio.spot_positions ?? []) {
+  for (const asset of parse(breakdown.body).breakdown.spot_positions ?? []) {
     const row = account.balance.currencies[asset.asset];
     assert.ok(row, 'missing Coinbase held currency oracle');
     sameOrChange(

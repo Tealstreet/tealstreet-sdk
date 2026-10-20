@@ -1,6 +1,4 @@
 // Independent Spot protocol oracle: official REST auth and WS v2 contracts.
-import { spotRequestKey } from './spot-request-key.mjs';
-import { uniqueRequestHeaders } from './protocol-headers.mjs';
 import { createHash, createHmac } from 'node:crypto';
 export const KRAKEN_SPOT_REPLAY = { key: 'replay-key', secret: 'cmVwbGF5LXNlY3JldA==' };
 export const krakenSpotSignature = (path, body, secret = KRAKEN_SPOT_REPLAY.secret) =>
@@ -13,27 +11,27 @@ export function createKrakenSpotRequestAudit(state = {}) {
   const minted = new Set();
   return ({ method, url, body, headers = {}, now = Date.now() }) => {
     const u = new URL(url);
-    if (u.username || u.password || u.hash || new Set(u.searchParams.keys()).size !== [...u.searchParams.keys()].length) throw Error('Kraken Spot unexpected URL fields');
     if (u.origin !== 'https://api.kraken.com') throw Error('Kraken Spot request must use upstream host');
-    const h = uniqueRequestHeaders(headers);
+    const entries = (Array.isArray(headers) ? headers : Object.entries(headers)).map(([k,v]) => [k.toLowerCase(), String(v)]);
+    if (new Set(entries.map(([k]) => k)).size !== entries.length) throw Error('Kraken Spot duplicate header');
+    const h = Object.fromEntries(entries);
     if (u.pathname.startsWith('/0/public/')) {
-      if (method !== 'GET' || Object.keys(h).some((name) => ['api-key','api-sign','authorization','coinbase-authorization','cookie'].includes(name))) throw Error('Kraken Spot public credential leak or method');
+      if (method !== 'GET' || h['api-key'] || h['api-sign']) throw Error('Kraken Spot public credential leak or method');
       return;
     }
     if (!u.pathname.startsWith('/0/private/') || method !== 'POST' || typeof body !== 'string')
       throw Error('Kraken Spot private request must use encoded POST');
-    if (u.search) throw Error('Kraken Spot private query parameters unsupported');
     const form = new URLSearchParams(body), nonce = form.get('nonce');
     if (new Set(form.keys()).size !== [...form.keys()].length) throw Error('Kraken Spot duplicate parameter');
-    if (h['api-key'] !== KRAKEN_SPOT_REPLAY.key || (typeof nonce !== 'string' || !nonce.length || /[^0-9]/.test(nonce))) throw Error('Kraken Spot missing authentication');
+    if (h['api-key'] !== KRAKEN_SPOT_REPLAY.key || !/^\d+$/.test(nonce ?? '')) throw Error('Kraken Spot missing authentication');
     const n = BigInt(nonce);
     if (n <= previous || Math.abs(Number(n / 1000n) - now) > 60_000) throw Error('Kraken Spot nonce must be fresh and increasing');
-    if (h['api-sign'] !== krakenSpotSignature(u.pathname, body)) throw Error('Kraken Spot signature must cover exact form and path');
     previous = n;
+    if (h['api-sign'] !== krakenSpotSignature(u.pathname, body)) throw Error('Kraken Spot signature must cover exact form and path');
     if (u.pathname.endsWith('/GetWebSocketsToken')) state.tokenRequests = (state.tokenRequests ?? 0) + 1;
     if (u.pathname.endsWith('/AddOrder')) {
       const id = form.get('cl_ord_id');
-      if ((typeof id !== 'string' || id.length !== 32 || /[^0-9a-f]/.test(id)) || minted.has(id) || form.has('userref'))
+      if (!/^[0-9a-f]{32}$/.test(id ?? '') || minted.has(id) || form.has('userref'))
         throw Error('Kraken Spot generated client ID missing, reused or conflicting');
       minted.add(id);
     }
@@ -64,12 +62,10 @@ export function validateKrakenSpotSocketFrame(socket, text) {
   if (['executions', 'balances'].includes(frame.channel) && !socket.spotChannels?.has(frame.channel))
     throw Error('Kraken Spot data arrived before authenticated subscription');
 }
-export const krakenSpotRequestBody = (body, { method = 'POST', url = 'https://api.kraken.com/0/private/AddOrder', callerIds = new Set() } = {}) => {
+export const krakenSpotRequestBody = (body) => {
   const result = { ...body };
-  const route = new URL(url).pathname;
-  if (method === 'POST' && route.startsWith('/0/private/')) delete result.nonce;
-  const id = result.cl_ord_id;
-  if (method === 'POST' && route === '/0/private/AddOrder' && typeof id === 'string' && id.length === 32 && !/[^0-9a-f]/.test(id) && !callerIds.has(id)) result.cl_ord_id = '<generated>';
+  delete result.nonce;
+  if (result.cl_ord_id !== undefined) result.cl_ord_id = '<generated>';
   return result;
 };
 export function krakenSpotCommandResult(result, command) {
@@ -82,6 +78,7 @@ export function krakenSpotCommandResult(result, command) {
     return { ok: [] };
   return result;
 }
+let audit, state;
 export const krakenspot = {
   rust: 'krakenspot',
   recordAfterReady: true,
@@ -95,78 +92,17 @@ export const krakenspot = {
   // Frames retain numeric currencies; TS-only raw response metadata is opaque.
   tsBalanceCurrencies: (currencies) => Object.fromEntries(Object.entries(currencies).map(([asset, row]) =>
     [asset, { free: row.free, used: row.used, total: row.total, upnl: row.upnl }])),
-  createRequestAudit: createKrakenSpotTransportAudit,
-  createSocketAudit: createKrakenSpotSocketAudit,
-  requestKey: (method, url, body, callerIds) => spotRequestKey(method, url, body, callerIds, krakenSpotRequestBody),
+  initializeReplay() { state = {}; audit = createKrakenSpotRequestAudit(state); },
+  validateRequest(request) { audit(request); },
+  validateSocketMessage: (socket, text, now) => validateKrakenSpotSocketMessage(socket, text, now, state),
+  validateSocketFrame: validateKrakenSpotSocketFrame,
   requestBody: krakenSpotRequestBody,
   commandResult: krakenSpotCommandResult,
   isWrite: (method, url) => method !== 'GET' && !/\/(Balance|OpenOrders|GetWebSocketsToken)$/.test(new URL(url).pathname),
-  // start() creates its final public socket only after the ticker seed. Earlier
-  // book listeners would attach to the lazy socket that startup replaces.
-  tsBooksReady: (exchange, store) => Boolean(store.loaded.tickers && exchange.publicWebsocket),
+  // start() creates its final public socket only after the ticker seed. Wait
+  // for that socket's open event too: registering before open queues a 100 ms
+  // retry as well as onOpen's resubscribe, making workload depend on auditing
+  // startup time. Both replay modes register after the same open boundary.
+  tsBooksReady: (exchange, store) => Boolean(store.loaded.tickers && exchange.publicWebsocket?.isConnected),
   tsBooksSubscribed: (exchange, count) => Object.values(exchange.publicWebsocket?.orderBookHandlers ?? {}).filter((v) => v.length).length >= count,
 };
-
-export function createKrakenSpotTransportAudit() {
-  const state = { tokenRequests: 0 };
-  return {
-    state,
-    validate: createKrakenSpotRequestAudit(),
-    response({ url, response }) {
-      if (new URL(url).pathname !== '/0/private/GetWebSocketsToken' || response.status !== 200) return;
-      const payload = JSON.parse(response.body);
-      if (!Array.isArray(payload.error) || payload.error.length || typeof payload.result?.token !== 'string' || !payload.result.token) throw Error('Kraken Spot invalid token acknowledgement');
-      state.tokenRequests++;
-      state.token = payload.result.token;
-    },
-  };
-}
-export function createKrakenSpotSocketAudit(_impl, { isPrivate, requestAudit } = {}) {
-  const states = new Map(), failures = [], tokenState = requestAudit?.state ?? {};
-  const state = (socket) => {
-    if (!states.has(socket)) states.set(socket, { closed: false, topics: new Set() });
-    return states.get(socket);
-  };
-  const checkUrl = (url) => {
-    const u = new URL(url);
-    if (!['wss://ws.kraken.com','wss://ws-auth.kraken.com'].includes(u.origin) || u.pathname !== '/v2' || u.search || u.hash || u.username || u.password) throw Error('Kraken Spot invalid socket URL');
-    return u.hostname === 'ws-auth.kraken.com';
-  };
-  return {
-    connected(url, socket) { checkUrl(url); state(socket); },
-    closed(_url, socket) { state(socket).closed = true; },
-    sent(url, text, socket) {
-      const privateSocket = checkUrl(url), own = state(socket), frame = JSON.parse(text);
-      if (own.closed) throw Error('Kraken Spot send on closed socket');
-      if (frame.method === 'ping') return;
-      const p = frame.params;
-      if (!['subscribe','unsubscribe'].includes(frame.method) || !p) throw Error('Kraken Spot unsupported socket message');
-      const privateChannel = ['executions','balances'].includes(p.channel);
-      if (privateChannel !== privateSocket || !['executions','balances','book','ticker','ohlc'].includes(p.channel)) throw Error('Kraken Spot wrong channel endpoint');
-      if (privateChannel) {
-        if (!tokenState.token || p.token !== tokenState.token) throw Error('Kraken Spot subscription before delivered token');
-        if (!socket.spotTokenRequest) {
-          if (tokenState.tokenRequests <= (tokenState.usedTokenRequests ?? 0)) throw Error('Kraken Spot reconnect requires fresh token');
-          socket.spotTokenRequest = tokenState.tokenRequests;
-          tokenState.usedTokenRequests = tokenState.tokenRequests;
-        }
-      }
-      const keys = privateChannel ? [p.channel] : (p.symbol ?? []).map((symbol) => `${p.channel}:${symbol}`);
-      if (!keys.length || keys.some((key) => typeof key !== 'string')) throw Error('Kraken Spot missing subscription identity');
-      for (const key of keys) if (frame.method === 'subscribe') own.topics.add(key); else own.topics.delete(key);
-    },
-    received(_url, text, socket) {
-      const own = state(socket), frame = JSON.parse(text);
-      if (own.closed) { failures.push('Kraken Spot data on closed socket'); return; }
-      if (['heartbeat','status'].includes(frame.channel) || ['subscribe','unsubscribe','pong'].includes(frame.method)) return;
-      const channel = frame.channel;
-      if (['executions','balances'].includes(channel)) {
-        if (!own.topics.has(channel)) failures.push('Kraken Spot private data without own subscription');
-      } else if (['ticker','book','ohlc'].includes(channel)) {
-        for (const row of frame.data ?? []) if (!own.topics.has(`${channel}:${row.symbol}`)) failures.push('Kraken Spot public data without own subscription');
-      } else failures.push('Kraken Spot unknown business channel');
-    },
-    ready: () => !isPrivate || [...states.values()].some((s) => !s.closed && ['executions','balances'].every((channel) => s.topics.has(channel))),
-    errors: () => [...new Set(failures)],
-  };
-}

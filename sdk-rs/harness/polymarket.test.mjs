@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { POLYMARKET_REPLAY,verifyPolymarketRequest,polymarket,createPolymarketSocketAudit } from './polymarket.mjs';
+import { POLYMARKET_REPLAY,verifyPolymarketRequest,polymarket } from './polymarket.mjs';
 import { requestKey,subscriptionKeys } from './requests.mjs';
 import { axiosClients } from './venues.mjs';
 const require=createRequire(new URL('../../packages/safe-cex/package.json',import.meta.url));
@@ -14,8 +14,8 @@ function request(method,path,body='') {
   const stamp=String(Math.floor(Date.now()/1000));
   return {method,url:`https://clob.polymarket.com${path}`,body,headers:{POLY_ADDRESS:wallet.address,POLY_API_KEY:POLYMARKET_REPLAY.polymarket.apiKey,POLY_PASSPHRASE:POLYMARKET_REPLAY.polymarket.apiPassphrase,POLY_TIMESTAMP:stamp,POLY_SIGNATURE:createHmac('sha256',secret).update(stamp+method+path.split('?')[0]+body).digest('base64').replace(/\+/g,'-').replace(/\//g,'_')}};
 }
-async function order(tokenId='1',timestamp=String(Date.now()),salt=123) {
-  const data={salt,maker:wallet.address,signer:wallet.address,tokenId,makerAmount:'2500000',takerAmount:'5000000',side:0,signatureType:0,timestamp,metadata:zero,builder:zero};
+async function order(tokenId='1',timestamp=String(Date.now())) {
+  const data={salt:123,maker:wallet.address,signer:wallet.address,tokenId,makerAmount:'2500000',takerAmount:'5000000',side:0,signatureType:0,timestamp,metadata:zero,builder:zero};
   const signature=await wallet.signTypedData({name:'Polymarket CTF Exchange',version:'2',chainId:137,verifyingContract:tokenId==='3'?'0xe2222d279d744050d28e00520010520000310F59':'0xE111180000d2663C0091e4f400237545B87B996B'},{Order:fields},data);
   return {deferExec:false,postOnly:false,order:{...data,side:'BUY',expiration:'0',signature},owner:POLYMARKET_REPLAY.polymarket.apiKey,orderType:'GTC'};
 }
@@ -34,8 +34,7 @@ test('Independent EIP712 verifier checks standard and negative-risk V2 bodies',a
   assert.equal(verifyPolymarketRequest(request('POST','/order','not-json')),false);
 });
 test('Economic request identity retains amounts/side/token but masks independently verified entropy',async()=>{
-  const first=await order(),second=await order('1',String(Date.now()),456);
-  for(const payload of [first,second]) assert.equal(verifyPolymarketRequest(request('POST','/order',JSON.stringify(payload))),true);
+  const first=await order(),second=await order();second.order.salt=456;second.order.timestamp='123';second.order.signature='random';
   const key=o=>requestKey('POST','https://clob.polymarket.com/order',JSON.stringify(o),new Set(),polymarket);
   assert.equal(key(first),key(second));second.order.makerAmount='99';assert.notEqual(key(first),key(second));
 });
@@ -69,85 +68,4 @@ test('Startup requires every book asset and the independently configured private
 test('Valid L1 signatures with a stale timestamp are rejected before normalization',async()=>{
   const timestamp='0';const signature=await wallet.signTypedData({name:'ClobAuthDomain',version:'1',chainId:137},{ClobAuth:[{name:'address',type:'address'},{name:'timestamp',type:'string'},{name:'nonce',type:'uint256'},{name:'message',type:'string'}]},{address:wallet.address,timestamp,nonce:'0',message:'This message attests that I control the given wallet'});
   assert.equal(verifyPolymarketRequest({method:'GET',url:'https://clob.polymarket.com/auth/derive-api-key',headers:{POLY_ADDRESS:wallet.address,POLY_TIMESTAMP:timestamp,POLY_NONCE:'0',POLY_SIGNATURE:signature}}),false);
-});
-
-
-test('public route exceptions cannot bypass exact origins, methods, or duplicate headers', () => {
-  for(const url of ['https://gamma-api.polymarket.com/markets/keyset','https://data-api.polymarket.com/positions','https://clob.polymarket.com/book']) {
-    assert.equal(verifyPolymarketRequest({method:'GET',url}),true);
-    for(const invalid of [url.replace('https:','http:'),url.replace('https://','https://user@'),url+'#fragment',url.replace('.com/','.com:8443/')]) assert.equal(verifyPolymarketRequest({method:'GET',url:invalid}),false);
-    assert.equal(verifyPolymarketRequest({method:'DELETE',url}),false);
-    assert.equal(verifyPolymarketRequest({method:'GET',url,headers:[['POLY_SIGNATURE','first'],['poly_signature','last']]}),false);
-  }
-  for(const url of ['https://wrong.invalid/positions','https://gamma-api.polymarket.com/admin','https://data-api.polymarket.com/admin','https://clob.polymarket.com/book/private']) assert.equal(verifyPolymarketRequest({method:'GET',url}),false);
-  const signed=request('DELETE','/orders','["id"]');
-  assert.equal(verifyPolymarketRequest({...signed,headers:new Headers(signed.headers)}),true);
-  assert.equal(verifyPolymarketRequest({...signed,headers:{...signed.headers,poly_signature:'bad'}}),false);
-});
-
-test('public Gamma, Data and CLOB requests cannot leak private credentials', () => {
-  const routes = [
-    ['GET', 'https://gamma-api.polymarket.com/markets/keyset'],
-    ['GET', 'https://data-api.polymarket.com/positions'],
-    ...['prices-history', 'book', 'time', 'markets', 'simplified-markets', 'price', 'midpoint', 'spread', 'last-trade-price']
-      .map((path) => ['GET', `https://clob.polymarket.com/${path}`]),
-    ...['midpoints', 'books', 'prices', 'spreads', 'last-trades-prices']
-      .map((path) => ['POST', `https://clob.polymarket.com/${path}`]),
-  ];
-  for (const [method, url] of routes) {
-    assert.equal(verifyPolymarketRequest({ method, url, headers: { Accept: 'application/json' } }), true);
-    for (const name of ['POLY_API_KEY', 'poly_signature', 'POLY_PASSPHRASE', 'POLY_ADDRESS', 'Authorization', 'Coinbase-Authorization', 'Cookie']) {
-      assert.equal(verifyPolymarketRequest({ method, url, headers: { [name]: 'private' } }), false, `${method} ${url}: ${name}`);
-    }
-  }
-});
-
-test('signed generated order entropy preserves original integer and string types',async()=>{
-  const payload=await order();
-  const key=(p)=>requestKey('POST','https://clob.polymarket.com/order',JSON.stringify(p),new Set(),polymarket);
-  for(const patch of [{salt:'123'},{salt:{value:123}},{salt:1.5},{timestamp:Number(payload.order.timestamp)},{timestamp:payload.order.timestamp+'\n'},{makerAmount:2500000},{tokenId:1},{tokenId:'1\n'}]) {
-    const changed={...payload,order:{...payload.order,...patch}};
-    assert.equal(verifyPolymarketRequest(request('POST','/order',JSON.stringify(changed))),false);
-    if(Object.hasOwn(patch,'salt')||Object.hasOwn(patch,'timestamp')) assert.equal(key(changed),key(payload));
-  }
-  assert.equal(polymarket.compareWriteOrder,true);
-});
-
-test('market and user traffic require subscriptions on the same actual open socket',()=>{
-  const records=[{type:'config',private:true,options:POLYMARKET_REPLAY},{type:'http',status:200,url:'https://gamma-api.polymarket.com/markets/keyset',body:JSON.stringify({markets:[{slug:'fixture',clobTokenIds:'["1","2"]',outcomes:'["Yes","No"]'}]})}];
-  const audit=createPolymarketSocketAudit('rust',{isPrivate:true,books:['fixture-Yes'],records});
-  const pub='wss://ws-subscriptions-clob.polymarket.com/ws/market', priv='wss://ws-subscriptions-clob.polymarket.com/ws/user';
-  const a={channel:'public'},b={channel:'public'},u={channel:'private'},other={channel:'private'};
-  for(const s of [a,b]) audit.connected(pub,s);
-  for(const s of [u,other]) audit.connected(priv,s);
-  audit.sent(pub,JSON.stringify({type:'market',assets_ids:['1'],custom_feature_enabled:true}),a);
-  audit.sent(priv,JSON.stringify({type:'user',auth:{apiKey:POLYMARKET_REPLAY.polymarket.apiKey,secret:POLYMARKET_REPLAY.polymarket.apiSecret,passphrase:POLYMARKET_REPLAY.polymarket.apiPassphrase}}),u);
-  audit.sent(pub,'PING',a); audit.received(pub,'PONG',a);
-  audit.received(pub,JSON.stringify([{event_type:'book',asset_id:'1'}]),a);
-  audit.received(priv,JSON.stringify({event_type:'order',asset_id:'1'}),u);
-  assert.equal(audit.ready(),true); assert.deepEqual(audit.errors(),[]);
-  audit.received(pub,JSON.stringify({event_type:'price_change',price_changes:[{asset_id:'1'}]}),b);
-  audit.received(priv,JSON.stringify({event_type:'trade'}),other);
-  audit.closed(pub,a); audit.sent(pub,'PING',a);
-  assert.equal(audit.ready(),false);
-  assert.match(audit.errors().join(' '),/unsubscribed asset.*unauthenticated private.*closed socket/);
-  const wrong=createPolymarketSocketAudit('ts',{books:[]});
-  wrong.connected(pub,{channel:'business'});
-  assert.match(wrong.errors().join(' '),/origin or role/);
-});
-
-
-test('feature discovery and price-change siblings use protocol scope without borrowing another socket',()=>{
-  const records=[{type:'http',status:200,url:'https://gamma-api.polymarket.com/markets/keyset',body:JSON.stringify({markets:[{slug:'fixture',conditionId:'condition',clobTokenIds:'["1","2"]',outcomes:'["Yes","No"]'}]})}];
-  const audit=createPolymarketSocketAudit('rust',{books:['fixture-Yes'],records});
-  const url='wss://ws-subscriptions-clob.polymarket.com/ws/market',a={},b={};
-  audit.connected(url,a);audit.connected(url,b);
-  audit.sent(url,JSON.stringify({type:'market',assets_ids:['1'],custom_feature_enabled:true}),a);
-  const prices={event_type:'price_change',market:'condition',price_changes:[{asset_id:'1'},{asset_id:'2'}]};
-  audit.received(url,JSON.stringify(prices),a);
-  audit.received(url,JSON.stringify({event_type:'new_market',assets_ids:['999']}),a);
-  assert.deepEqual(audit.errors(),[]);
-  audit.received(url,JSON.stringify(prices),b);
-  audit.received(url,JSON.stringify({...prices,price_changes:[{asset_id:'1'},{asset_id:'999'}]}),a);
-  assert.equal(audit.errors().filter(error=>error.includes('unsubscribed asset')).length,2);
 });

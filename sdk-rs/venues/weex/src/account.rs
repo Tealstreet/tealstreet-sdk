@@ -508,7 +508,9 @@ impl WeexFutures {
             return;
         }
         match request.kind {
-            Kind::Balance if request.revision == self.account.revision => {
+            // The next cycle corrects a read that raced an account event; fencing it
+            // starved the balance whenever events kept arriving.
+            Kind::Balance => {
                 // Missing USDT on a nonempty response is not a zero balance.
                 if let Some(balance) = request.balance {
                     cx.store.set_balance(balance);
@@ -721,9 +723,6 @@ impl WeexFutures {
             return true;
         };
         match event.e {
-            "account" => {
-                self.account.revision += 1;
-            }
             "positions" => {
                 self.account.revision += 1;
                 if let Ok(rows) = serde_json::from_str::<Vec<PositionRow<'_>>>(data.get()) {

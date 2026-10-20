@@ -1,6 +1,5 @@
 // Independent Node crypto oracle for the Futures wire; never use the Rust signer.
 import {createHash,createHmac} from 'node:crypto';
-import {parseRequestJson} from './request-json.mjs';
 import {parseUniqueJson as uniqueJson} from './json-unique.mjs';
 const KEY='replay-key';
 const SECRET=Buffer.from('replay-secret');
@@ -16,7 +15,7 @@ export function createKrakenRequestAudit({strict=true}={}){
    if(h.apikey||h.authent||h.nonce)throw Error('Kraken public request leaked credentials');return;
   }
   const n=h.nonce;if(h.apikey!==KEY||!/^\d+$/.test(n??''))throw Error('Kraken missing authentication');
-  const nonce=BigInt(n);if((strict&&nonce<=previous)||Math.abs(Number(nonce/1000n)-now)>60_000)throw Error('Kraken nonce not fresh and increasing');
+  const nonce=BigInt(n);if((strict&&nonce<=previous)||Math.abs(Number(nonce/1000n)-now)>60_000)throw Error('Kraken nonce not fresh and increasing');previous=nonce>previous?nonce:previous;
   const path=u.pathname.replace(/^\/derivatives/,'');
   const bytes=method==='GET'?u.search.slice(1):body??'';
   if(typeof bytes!=='string')throw Error('Kraken signed body must be encoded bytes');
@@ -26,10 +25,9 @@ export function createKrakenRequestAudit({strict=true}={}){
   if(h.authent!==krakenSignature(bytes+n+path))throw Error('Kraken signature does not cover sent encoded form/path');
   if(u.pathname==='/derivatives/api/v3/sendorder'){
    const id=new URLSearchParams(bytes).get('cliOrdId');
-   if(typeof id!=='string'||id.length<4||id.length>24||!id.startsWith('ts_')||/[^A-Za-z0-9]/.test(id.slice(3))||minted.has(id))throw Error('Kraken minted client ID missing, invalid or reused');
+   if(!/^ts_[A-Za-z0-9]{1,21}$/.test(id??'')||minted.has(id))throw Error('Kraken minted client ID missing, invalid or reused');
    minted.add(id);
   }
-  previous=nonce>previous?nonce:previous;
  };
 }
 export function validateKrakenSocketMessage(socket,text){
@@ -51,13 +49,9 @@ export function validateKrakenSocketFrame(socket,text){
  const feed=m.feed?.replace(/_snapshot$/,'');
  if(['fills','open_orders','open_positions'].includes(feed)&&!m.event&&!socket.krakenFeeds?.has(feed))throw Error('Kraken data arrived before authenticated subscription');
 }
-export function krakenRequestBody(body,{callerIds=new Set(), method, url}={}){
- // Only the documented batch wrapper can be unwrapped. Outer economic
- // fields must remain visible to exact matching rather than disappearing.
- const batch=method==='POST'&&url&&new URL(url).pathname==='/derivatives/api/v3/batchorder';
- const row=batch&&body&&typeof body==='object'&&!Array.isArray(body)&&Object.keys(body).length===1&&typeof body.json==='string'
-  ?parseRequestJson(body.json):body;
- const walk=v=>Array.isArray(v)?v.map(walk):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,k==='cliOrdId'&&method==='POST'&&new URL(url).pathname==='/derivatives/api/v3/sendorder'&&typeof x==='string'&&x.length>=4&&x.length<=24&&x.startsWith('ts_')&&!/[^A-Za-z0-9]/.test(x.slice(3))&&!callerIds.has(x)?'<generated>':walk(x)])):v;
+export function krakenRequestBody(body,{callerIds=new Set()}={}){
+ const row=body?.json?JSON.parse(body.json):body;
+ const walk=v=>Array.isArray(v)?v.map(walk):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,k==='cliOrdId'&&typeof x==='string'&&x.startsWith('ts_')&&!callerIds.has(x)?'<generated>':walk(x)])):v;
  return walk(row);
 }
 export function krakenCommandResult(result,command){

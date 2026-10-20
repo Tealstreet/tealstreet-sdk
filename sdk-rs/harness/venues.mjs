@@ -1,28 +1,50 @@
-import { initializeTxFlowCrypto, createTxFlowRequestValidator, validateTxFlowSocketMessage, txFlowRequestBody, createTxFlowSocketAudit } from './txflow-protocol.mjs';
-import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols, binanceRequestOptions, binanceDepthStream } from './binance-protocol.mjs';
-import { COINBASE_REPLAY, verifyCoinbaseRequest, verifyCoinbaseSubscribe, coinbaseSubscription, createCoinbaseSocketAudit } from './coinbase-protocol.mjs';
-import { polymarket } from './polymarket.mjs';
-import { breakoutprop } from './breakoutprop-requests.mjs';
-import { uniqueRequestHeaders } from './protocol-headers.mjs';
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
-import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
-import { APEX_SEED, apexWireBody, createApexSocketAudit, prepareApexReplay, prepareApexTs, validateApexRequest, apexRequestOptions } from './apexomni-protocol.mjs';
-import { createKrakenRequestAudit, validateKrakenSocketMessage, validateKrakenSocketFrame, krakenRequestBody, krakenCommandResult } from './kraken-protocol.mjs';
-let krakenRequestAudit;
-import { paradexProtocol } from './paradex-protocol.mjs';
-import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
+import { createHash, createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
+import {
+  COINBASE_REPLAY,
+  verifyCoinbaseRequest,
+  verifyCoinbaseSubscribe,
+  coinbaseSubscription,
+  createCoinbaseSocketAudit,
+} from './coinbase-protocol.mjs';
+import {
+  APEX_SEED,
+  apexWireBody,
+  createApexSocketAudit,
+  prepareApexReplay,
+  prepareApexTs,
+  validateApexRequest,
+} from './apexomni-protocol.mjs';
+import { createRequire } from 'node:module';
+import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
+import { parseRequestJson } from './request-json.mjs';
 import { hyperliquidspot } from './hyperliquidspot.mjs';
 import { krakenspot } from './krakenspot.mjs';
 import { kucoin } from './kucoin.mjs';
 import { kucoinspot } from './kucoinspot.mjs';
-import { createRequire } from 'node:module';
-import { asterRequestUrl, asterSocketAudit, createAsterRequestValidator, initializeAsterCrypto } from './asterdex-requests.mjs';
-import { parseRequestJson } from './request-json.mjs';
-import { subscriptionKeys, requestKey } from './requests.mjs';
+import { breakoutprop } from './breakoutprop-requests.mjs';
+import { polymarket } from './polymarket.mjs';
+import { requestKey, subscriptionKeys } from './requests.mjs';
+import {
+  asterRequestUrl,
+  asterSocketAudit,
+  createAsterRequestValidator,
+  initializeAsterCrypto,
+} from './asterdex-requests.mjs';
+import { paradexProtocol } from './paradex-protocol.mjs';
+import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 import { initializeLighterCrypto, createLighterVerifier, lighterRequestBody } from './lighter-crypto.mjs';
+import { initializeTxFlowCrypto, createTxFlowRequestValidator, validateTxFlowSocketMessage } from './txflow-protocol.mjs';
 
-
+import {
+  createKrakenRequestAudit,
+  validateKrakenSocketMessage,
+  validateKrakenSocketFrame,
+  krakenRequestBody,
+  krakenCommandResult,
+} from './kraken-protocol.mjs';
+let krakenRequestAudit;
 
 const root = '../../packages/safe-cex/src/exchanges';
 
@@ -43,14 +65,7 @@ const lighter = (name) => {
       count,
     isPrivateRecord: (record) => record.type === 'ws' && /account_all/.test(record.text ?? ''),
     isWrite: (method) => method !== 'GET',
-    requestBodies: true,
     requestBody: lighterRequestBody,
-    // HTTP queries retain unsupported fields; socket transport IDs keep their
-    // existing projection independently of signed HTTP request identity.
-    requestOptions: () => ({
-      preserveQueryFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
-      generatedId: () => false,
-    }),
     requestUrl(url) {
       const parsed = new URL(url);
       parsed.searchParams.delete('auth');
@@ -78,9 +93,7 @@ const bybit = (name, className) => ({
   compareInstrumentClassification: true,
   compareOptionTerms: true,
   rust: name,
-  family: 'bybit',
   subscriptionGenerations: true,
-  compareWriteOrder: true,
   ts: { module: `${root}/bybit/${name}.exchange.ts`, className, name },
   tsBooksSubscribed: (exchange, count) =>
     count === 0 ||
@@ -140,10 +153,7 @@ const bybit = (name, className) => ({
           return parsed.toString();
         }
       : undefined,
-  requestOptions: name === 'hyrotrader' ? (method, url) => ({
-    generatedBodyId: (key, value) => method === 'POST' && /^\/v5\/order\/create(?:-batch)?$/.test(url.pathname)
-      && key === 'orderLinkId' && typeof value === 'string' && value.length > 0 && value.length <= 36 && !/[^A-Za-z0-9_-]/.test(value),
-  }) : undefined,
+  generatedId: name === 'hyrotrader' ? (key) => key === 'orderLinkId' : undefined,
   isWrite: (method) => method === 'POST',
   requestKey: typedRequest,
   matchRequestBody: true,
@@ -194,7 +204,8 @@ const orderlyClasses = {
   what: 'WhatExchange',
   woofi: 'WoofiExchange',
 };
-const orderlyNative = (symbol) => symbol.replace(/^(.+)USDC(_[A-Za-z0-9_-]+)?$/, (_, base, suffix = '') => `PERP_${base}_USDC${suffix}`);
+const orderlyNative = (symbol) =>
+  symbol.replace(/^(.+)USDC(_[A-Za-z0-9_-]+)?$/, (_, base, suffix = '') => `PERP_${base}_USDC${suffix}`);
 const orderlyPrivateUrl = (url) => new URL(url).pathname.startsWith('/v2/ws/private/stream/');
 const orderlySocketRequest = (message) => {
   if (message.event !== 'request') return undefined;
@@ -318,7 +329,6 @@ const orderly = (alias) => {
       const connections = new Map();
       const failures = [];
       const socket = (url, generation = 1) => {
-        generation = generation?.generation ?? generation;
         const key = `${url} ${generation}`;
         if (!connections.has(key))
           connections.set(key, {
@@ -361,8 +371,7 @@ const orderly = (alias) => {
             if (message.event === 'subscribe') {
               state.channels.add(message.topic);
               if (state.channels.size > 100) failures.push('Orderly socket exceeds its 100-topic limit');
-            }
-            else state.channels.delete(message.topic);
+            } else state.channels.delete(message.topic);
           } else if (message.event === 'pong') {
             if (!state.serverPings) failures.push('unexpected Orderly heartbeat response');
             else state.serverPings--;
@@ -414,7 +423,6 @@ const orderly = (alias) => {
     },
   };
 };
-
 
 // Replay transport and signing clocks both default to wall-clock milliseconds.
 const validWeexTimestamp = (time, now) =>
@@ -501,11 +509,8 @@ const verifyBackpack = ({ method, url, headers, body, now = Date.now() }) => {
 };
 
 const okx = (name) => ({
-  family: 'okx',
   rust: name,
   requestKey: typedRequest,
-  preserveBodyFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
-  preserveQueryFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
   ts: {
     module: `${root}/okx/${name.startsWith('okxeu') ? 'okxeu' : 'okx'}.exchange.ts`,
     className: name.startsWith('okxeu') ? 'OKXEUExchange' : 'OKXExchange',
@@ -515,10 +520,10 @@ const okx = (name) => ({
   compareBalanceCurrencies: true,
   validateRequest({ method, url, body, headers }) {
     // Independent V5 HTTP proof before matching can erase clocks/aliases.
-    const parsed = new URL(url), h = uniqueRequestHeaders(headers);
+    const parsed = new URL(url), h = Object.fromEntries((Array.isArray(headers) ? headers : Object.entries(headers ?? {}))
+      .map(([key, value]) => [key.toLowerCase(), String(value)]));
     const host = name.startsWith('okxeu') ? 'eea.okx.com' : name.endsWith('demo') ? 'openapi.okx.com' : 'www.okx.com';
-    if (parsed.origin !== `https://${host}` || parsed.username || parsed.password || parsed.href.includes('#'))
-      throw new Error('Invalid OKX native HTTP origin');
+    if (parsed.protocol !== 'https:' || parsed.hostname !== host) throw new Error('Invalid OKX native HTTP host');
     const aliases = new Set(['c', 'clientOrderId', 'clientAlgoId', 'newClientOrderId', 'requestId', 'category', 'symbol']);
     for (const key of parsed.searchParams.keys()) if (aliases.has(key)) throw new Error(`Foreign OKX query alias ${key}`);
     if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
@@ -538,12 +543,7 @@ const okx = (name) => ({
     if (name.endsWith('demo') ? h['x-simulated-trading'] !== '1' : h['x-simulated-trading'] !== undefined)
       throw new Error('Invalid OKX simulated-trading header');
     const privatePath = /^\/api\/v5\/(account|trade)\//.test(parsed.pathname);
-    const authHeaders = ['ok-access-key', 'ok-access-sign', 'ok-access-timestamp', 'ok-access-passphrase'];
-    if (Object.hasOwn(h, 'authorization') || Object.keys(h).some((key) => key.startsWith('ok-access-') && !authHeaders.includes(key)))
-      throw new Error('Invalid OKX HTTP authentication header');
-    // TS leaves /public unsigned; private accounts fully sign /market reads.
-    // A partial credential set is never an unsigned public request.
-    if (!privatePath && !authHeaders.some((key) => Object.hasOwn(h, key))) return;
+    if (!privatePath && !h['ok-access-sign']) return;
     const timestamp = h['ok-access-timestamp'], time = Date.parse(timestamp);
     if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(timestamp ?? '') || !Number.isFinite(time)
       || Math.abs(time - Date.now()) > 30_000 || new Date(time).toISOString() !== timestamp
@@ -713,12 +713,8 @@ const okx = (name) => ({
   matchRequestBody: true,
   isWrite: (method) => method !== 'GET',
   // Caller IDs remain exact, even when the caller chooses a broker-prefixed ID.
-  requestOptions: (method, url) => ({
-    generatedBodyId: (key, value) => method === 'POST' &&
-      (key === 'clOrdId' && /^\/api\/v5\/trade\/(order|batch-orders)$/.test(url.pathname) ||
-       key === 'algoClOrdId' && url.pathname === '/api/v5/trade/order-algo') &&
-      typeof value === 'string' && /^e847386590ce4dBC[A-Za-z0-9]{0,16}$/.test(value),
-  }),
+  generatedBodyId: (key, value) =>
+    ['clOrdId', 'algoClOrdId'].includes(key) && typeof value === 'string' && value.startsWith('e847386590ce4dBC'),
   respondToPing: true,
   validateLogin: true,
   compareFillPrices: true,
@@ -730,7 +726,6 @@ export const mexcRequestBody = (body, { url = '' } = {}) => {
   const ids = new Set(['id', 'orderId', 'positionId']);
   const visit = (value, key = '') => {
     if (ids.has(key) || (key === '<root-id>' && /\/private\/order\/cancel$/.test(new URL(url).pathname))) {
-      if (typeof value === 'bigint') return String(value);
       if (JSON.isRawJSON(value)) return value.rawJSON;
       if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
     }
@@ -760,9 +755,6 @@ export const mexcRequestUrl = (url) => {
 
 const coinbase = (name) => ({
   family: 'coinbase',
-  preserveBodyFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
-  preserveQueryFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
-  generatedId: () => false,
   currencyBalances: true,
   rust: name,
   ts: {
@@ -774,10 +766,15 @@ const coinbase = (name) => ({
   options: { testnet: false, ...(name === 'coinbasespot' ? { spotOnly: true } : {}) },
   replayCredentials: COINBASE_REPLAY,
   privateSocket: 'advanced-trade-ws-user.coinbase.com',
+  // Public startup schedules ticker polling before replay begins. Registering
+  // books before socket open adds a 100 ms retry that otherwise shifts that
+  // poll's phase depending on audit cost. Use the same completed seed/open
+  // boundary in both modes; private startup keeps its existing readiness.
+  tsBooksReady: (exchange, store) => !exchange.isPublicDataOnly
+    || Boolean(store.loaded.markets && store.loaded.tickers && exchange.publicWebsocket?.isConnected),
   tsBooksSubscribed: (exchange, count) =>
     Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('level2.')).length >= count,
   verifyRequest: verifyCoinbaseRequest,
-  verifyPublicRequest: true,
   verifySubscribe: verifyCoinbaseSubscribe,
   subscriptionMessage: coinbaseSubscription,
   createSocketAudit: createCoinbaseSocketAudit,
@@ -799,11 +796,18 @@ const coinbase = (name) => ({
   compareClientIds: true,
   compareFillPrices: true,
   isWrite: (method) => method !== 'GET',
-  requestKey: typedRequest,
-  requestOptions: (method, url) => ({ generatedBodyId: (key, value) => method === 'POST' && url.pathname === '/api/v3/brokerage/orders'
-    && key === 'client_order_id' && typeof value === 'string' && value.startsWith('tealstreet-')
-    && value.length > 11 && value.length <= 32 && !/[^A-Za-z0-9]/.test(value.slice(11)) }),
+  generatedBodyId: (key, value) =>
+    key === 'client_order_id' && typeof value === 'string' && value.startsWith('tealstreet-'),
 });
+
+const headerValue = (headers, name) => (Array.isArray(headers) ? headers : Object.entries(headers ?? {}))
+  .find(([key]) => key.toLowerCase() === name)?.[1];
+function validBitunixSignature(key, nonce, timestamp, sign, query, body) {
+  const hash = (value) => createHash('sha256').update(value).digest('hex');
+  return key === 'replay-key' && typeof nonce === 'string' && nonce.length > 0
+    && /^\d+$/.test(String(timestamp)) && Number.isSafeInteger(Number(timestamp))
+    && sign === hash(hash(`${nonce}${timestamp}${key}${query}${body ?? ''}`) + 'replay-secret');
+}
 
 export const VENUES = {
   txflow: {
@@ -815,11 +819,6 @@ export const VENUES = {
     recordAfterReady: true,
     ts: { module: `${root}/../__tests__/reference/txflow/txflow.exchange.ts`, className: 'TxFlowExchange', name: 'txflow' },
     requestKey: typedRequest,
-    generatedId: () => false,
-    preserveBodyFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
-    preserveQueryFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
-    requestBody: txFlowRequestBody,
-    createSocketAudit: createTxFlowSocketAudit,
     requestBodies: true,
     matchRequestBody: true,
     volatileBodyFields: true,
@@ -838,6 +837,7 @@ export const VENUES = {
     tsBooksSubscribed: (exchange, count) => exchange.nodeSocket?.bookListeners.size >= count,
     tsSettings: (_exchange, store) => Object.entries(store.fetchedLeverage).map(([symbol, setting]) => ({ symbol, ...setting })),
   },
+  breakoutprop,
   grvt: (() => {
     // Public deterministic replay key. Never use this well-known key for funds.
     const secret = '0x' + '01'.repeat(32);
@@ -864,10 +864,9 @@ export const VENUES = {
         { name: 'limitPrice', type: 'uint64' }, { name: 'isBuyingContract', type: 'bool' },
       ],
     };
+    const attempts = new Map();
     return {
       rust: 'grvt',
-      preserveBodyFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
-      preserveQueryFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
       initializeReplay(_impl, options) {
         if (!options.publicDataOnly) initializeCrypto();
       },
@@ -876,7 +875,6 @@ export const VENUES = {
       options: { grvtSessionProxy: true, grvtTradingAccountId: '777' },
       replayCredentials: { key: 'grvt-replay-key', secret },
       requestBodies: true,
-      requestKey: typedRequest,
       generatedId: () => false,
       compareClientIds: true,
       compareFillPrices: true,
@@ -921,7 +919,7 @@ export const VENUES = {
         const parsed = new URL(url);
         if (method !== 'POST' || parsed.protocol !== 'https:' || !['market-data.grvt.io', 'trades.grvt.io', 'edge.grvt.io'].includes(parsed.hostname))
           throw new Error('GRVT must emit a real upstream REST URL');
-        const h = uniqueRequestHeaders(headers);
+        const h = Object.fromEntries((Array.isArray(headers) ? headers : Object.entries(headers ?? {})).map(([k, v]) => [k.toLowerCase(), String(v)]));
         if (parsed.hostname === 'market-data.grvt.io') {
           if (['cookie', 'x-ts-grvt-session', 'x-grvt-account-id', 'x-api-key'].some((key) => h[key]))
             throw new Error('GRVT public market data must not carry private credentials');
@@ -945,8 +943,7 @@ export const VENUES = {
           || !['GOOD_TILL_TIME', 'ALL_OR_NONE', 'IMMEDIATE_OR_CANCEL', 'FILL_OR_KILL'].includes(o.ti)
           || sig.ci !== '325' || sig.s?.toLowerCase() !== signer.toLowerCase()
           || ![27, 28].includes(sig.v) || !Number.isInteger(sig.n) || sig.n < 0 || sig.n > 0xffff_ffff
-          || typeof sig.e !== 'string' || typeof o.m.ct !== 'string' || typeof o.m.co !== 'string'
-          || (!sig.e || /[^0-9]/.test(sig.e)) || (!o.m.ct || /[^0-9]/.test(o.m.ct))
+          || !/^\d+$/.test(sig.e) || !/^\d+$/.test(o.m.ct)
           || !/^[1-9]\d*$/.test(o.m.co) || BigInt(o.m.co) <= 0n || BigInt(o.m.co) > 0x7fff_ffff_ffff_ffffn
           || typeof o.b !== 'string' || o.b.toLowerCase() !== builder || o.bf !== '0.03')
           throw new Error('Invalid GRVT signed order fields');
@@ -973,43 +970,34 @@ export const VENUES = {
         const recovered = verifyTypedData({ name: 'GRVT Exchange', version: '0', chainId: 325 }, types, message,
           Signature.from({ r: sig.r, s: sig.s1, v: sig.v }));
         if (recovered.toLowerCase() !== signer.toLowerCase()) throw new Error('Invalid GRVT EIP-712 signature');
+        const serialized = typeof body === 'string' ? body : JSON.stringify(body);
+        const previous = attempts.get(o.m.co);
+        if (previous && previous.body !== serialized) throw new Error('GRVT auth resend changed the signed order');
+        attempts.set(o.m.co, { body: serialized });
       },
       createRequestAudit() {
         // Credentials become valid only after the transport actually returns
         // a successful login. Requests alone cannot create or rotate a session.
         let current;
-        const attempts = new Map();
-        const fields = uniqueRequestHeaders;
+        const fields = (headers) => Object.fromEntries((Array.isArray(headers) ? headers : Object.entries(headers ?? {}))
+          .map(([key, value]) => [key.toLowerCase(), String(value)]));
         return {
           current: () => current && { ...current },
-          validate({ url, headers, body }) {
+          validate({ url, headers }) {
             if (new URL(url).hostname !== 'trades.grvt.io') return;
             const h = fields(headers);
             if (!current || h['x-ts-grvt-session'] !== current.cookie || h['x-grvt-account-id'] !== current.account
               || (h.cookie !== undefined && !h.cookie.split(';').map((v) => v.trim()).includes(`gravity=${current.cookie}`)))
               throw new Error('GRVT request did not use the current authenticated session');
-            if (new URL(url).pathname.endsWith('/create_order')) {
-              const serialized = typeof body === 'string' ? body : JSON.stringify(body);
-              const data = typeof body === 'string' ? parseRequestJson(body) : body;
-              const previous = attempts.get(data?.o?.m?.co);
-              if (previous && previous !== serialized) throw new Error('GRVT auth resend changed the signed order');
-            }
           },
-          response({ url, response, body: requestBody }) {
+          response({ url, response }) {
             const parsed = new URL(url);
             if (!['edge.grvt.io', 'trades.grvt.io'].includes(parsed.hostname)) return;
             let body;
             try { body = parseRequestJson(response.body); } catch { return; }
             const code = body?.c ?? body?.code ?? body?.e?.c ?? body?.e?.code ?? body?.error?.c ?? body?.error?.code;
             if (parsed.hostname === 'trades.grvt.io') {
-              if (String(code) === '1000') {
-                current = undefined;
-                if (parsed.pathname.endsWith('/create_order')) {
-                  const serialized = typeof requestBody === 'string' ? requestBody : JSON.stringify(requestBody);
-                  const data = typeof requestBody === 'string' ? parseRequestJson(requestBody) : requestBody;
-                  attempts.set(data?.o?.m?.co, serialized);
-                }
-              }
+              if (String(code) === '1000') current = undefined;
               return;
             }
             if (parsed.pathname !== '/auth/api_key/login' || response.status < 200 || response.status >= 300
@@ -1018,7 +1006,7 @@ export const VENUES = {
               const colon = line.indexOf(':');
               return [line.slice(0, colon).trim(), line.slice(colon + 1).trim()];
             });
-            const h = uniqueRequestHeaders(pairs.filter(([key]) => key.toLowerCase() !== 'set-cookie'));
+            const h = fields(pairs);
             const cookieHeader = pairs.filter(([key]) => key.toLowerCase() === 'set-cookie')
               .map(([, value]) => value).find((value) => /(?:^|[,;]\s*)gravity=/.test(value));
             const cookie = h['x-ts-grvt-session'] ?? cookieHeader?.match(/(?:^|[,;]\s*)gravity=([^;,\s]+)/)?.[1];
@@ -1033,7 +1021,7 @@ export const VENUES = {
       createSocketAudit: (_impl, { isPrivate, books, requestAudit }) => {
         const states = new Map(), failures = [];
         const state = (url, generation) => {
-          const key = generation && typeof generation === 'object' ? generation : `${url}#${generation ?? 1}`;
+          const key = `${url}#${generation ?? 1}`;
           if (!states.has(key)) states.set(key, { url, closed: false, authSent: false, ack: false, streams: new Set(), prefixCounts: new Map(), pings: 0, messages: 0 });
           return states.get(key);
         };
@@ -1137,105 +1125,135 @@ export const VENUES = {
   })(),
   coinbase: coinbase('coinbase'),
   coinbasespot: coinbase('coinbasespot'),
-  polymarket,
-  breakoutprop,
   phemex: {
     rust: 'phemex',
-    requestKey: typedRequest,
     phemexProtocol: true,
-    compareWriteOrder: true,
-    tsReplaySettled: (exchange, count) => Object.values(exchange.publicWebsocket.orderBookInnerState).filter((s) => s.isSnapshotLoaded).length >= count,
+    tsReplaySettled: (exchange, count) =>
+      Object.values(exchange.publicWebsocket.orderBookInnerState).filter((s) => s.isSnapshotLoaded).length >= count,
     ts: { module: `${root}/phemex/phemex.exchange.ts`, className: 'PhemexExchange', name: 'phemex' },
     matchRequestBody: true,
     compareFillPrices: true,
-    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.topics).filter((t) => t.startsWith('orderbook_p.subscribe')).length >= count,
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.topics).filter((t) => t.startsWith('orderbook_p.subscribe')).length >= count,
     isPrivateRecord: (r) => r.type === 'ws' && /"(accounts_p|positions_p|orders_p)"/.test(r.text),
-    requestOptions: (method, url) => ({ generatedQueryId: (name, value) => method === 'PUT' && url.pathname === '/g-orders/create'
-      && name === 'clOrdID' && typeof value === 'string' && value.startsWith('Tealstreet_') && value.length > 11 && value.length <= 32
-      && !/[^A-Za-z0-9]/.test(value.slice(11)) }),
+    generatedQueryId: (name, value) => name === 'clOrdID' && value.startsWith('Tealstreet_'),
     bootstrapFrame: (r) => r.bootstrap === true,
-    onSocketSend(socket, text) { if (JSON.parse(text).method === 'user.auth') socket.private = true; },
-    socketMatches: (socket, text) => { const m = JSON.parse(text); return Boolean(socket.private) === (m.id === 999 || ['accounts_p','positions_p','orders_p'].some((field) => Object.hasOwn(m, field))); },
-    pingReply(text) { const m = JSON.parse(text); return m.method === 'server.ping' ? JSON.stringify({ id: m.id, result: 'pong', error: null }) : null; },
+    onSocketSend(socket, text) {
+      if (JSON.parse(text).method === 'user.auth') socket.private = true;
+    },
+    socketMatches: (socket, text) =>
+      Boolean(socket.private) === (JSON.parse(text).id === 999 || /"(accounts_p|positions_p|orders_p)"/.test(text)),
+    pingReply(text) {
+      const m = JSON.parse(text);
+      return m.method === 'server.ping' ? JSON.stringify({ id: m.id, result: 'pong', error: null }) : null;
+    },
     validateRequest({ url, body = '', headers = {} }) {
       const parsed = new URL(url);
-      if (parsed.protocol !== 'https:' || !['api.phemex.com','testnet-api.phemex.com'].includes(parsed.hostname)) throw new Error('invalid Phemex upstream URL');
-      const entries = (Array.isArray(headers) ? headers : headers instanceof Headers ? [...headers.entries()] : Object.entries(headers))
-        .map(([key,value]) => [key.toLowerCase(), String(value)]);
-      if (new Set(entries.map(([key]) => key)).size !== entries.length) throw new Error('duplicate Phemex request header');
-      const h = Object.fromEntries(entries), expiry = h['x-phemex-request-expiry'];
+      const get = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
+      const expiry = get('x-phemex-request-expiry');
       if (!expiry && !parsed.pathname.startsWith('/g-') && !parsed.pathname.startsWith('/api-data/')) return;
-      if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
-      if (typeof body !== 'string') throw new Error('invalid Phemex request body');
       const query = decodeURIComponent(parsed.search.slice(1).replace(/\+/g, '%20'));
-      const expected = createHmac('sha256', 'replay-secret').update(parsed.pathname + query + expiry + body).digest('hex');
-      if (h['x-phemex-access-token'] !== 'replay-key' || h['x-phemex-request-signature'] !== expected || !/^[0-9]+$/.test(expiry ?? '')
-        || !Number.isSafeInteger(Number(expiry)) || Math.abs(Number(expiry) - Date.now() / 1000 - 60) > 5) throw new Error(`invalid Phemex request: ${parsed.pathname}`);
+      const expected = createHmac('sha256', 'replay-secret')
+        .update(parsed.pathname + query + expiry + (body || ''))
+        .digest('hex');
+      if (
+        get('x-phemex-access-token') !== 'replay-key' ||
+        get('x-phemex-request-signature') !== expected ||
+        !Number.isSafeInteger(Number(expiry)) ||
+        Math.abs(Number(expiry) - Date.now() / 1000 - 60) > 5
+      )
+        throw new Error(`invalid Phemex request: ${parsed.pathname}`);
     },
     createSocketAudit(_impl, { isPrivate, books }) {
-      const failures = [], sockets = new Map();
+      const failures = [],
+        topics = new Set(),
+        sockets = new Map();
       const socket = (url, generation = 1) => {
-        const key = generation && typeof generation === 'object' ? generation : `${url} ${generation}`;
-        if (!sockets.has(key)) sockets.set(key, { topics: new Set(), private: false, auth: false, acknowledged: false, subscribed: false, closed: false });
+        const key = `${url} ${generation}`;
+        if (!sockets.has(key))
+          sockets.set(key, { private: false, auth: false, acknowledged: false, subscribed: false, closed: false });
         return sockets.get(key);
       };
       return {
-        connected(url, generation) { socket(url, generation); },
-        closed(url, generation) { socket(url, generation).closed = true; },
+        connected(url, generation) {
+          socket(url, generation);
+        },
+        closed(url, generation) {
+          socket(url, generation).closed = true;
+        },
         sent(url, text, generation) {
-          const m = JSON.parse(text), state = socket(url, generation);
+          const m = JSON.parse(text),
+            state = socket(url, generation);
           if (m.method === 'user.auth') {
             state.private = true;
             state.acknowledged = false;
             state.subscribed = false;
             const [kind, key, sig, expiry] = m.params ?? [];
-            state.auth = !state.closed && m.id === 999 && kind === 'API' && key === 'replay-key' && Number.isSafeInteger(expiry) && Math.abs(expiry - Date.now() / 1000 - 60) < 5 && sig === createHmac('sha256', 'replay-secret').update(key + expiry).digest('hex');
+            state.auth =
+              !state.closed &&
+              m.id === 999 &&
+              kind === 'API' &&
+              key === 'replay-key' &&
+              Number.isSafeInteger(expiry) &&
+              Math.abs(expiry - Date.now() / 1000 - 60) < 5 &&
+              sig ===
+                createHmac('sha256', 'replay-secret')
+                  .update(key + expiry)
+                  .digest('hex');
             if (!state.auth) failures.push('invalid Phemex WS auth');
           }
-          if (m.method === 'orderbook_p.subscribe' && (m.params?.length !== 3 || m.params[1] !== false || m.params[2] !== 0)) failures.push('Phemex books require full depth0 at20ms');
+          if (
+            m.method === 'orderbook_p.subscribe' &&
+            (m.params?.length !== 3 || m.params[1] !== false || m.params[2] !== 0)
+          )
+            failures.push('Phemex books require full depth0 at20ms');
           if (m.method === 'aop_p.subscribe') {
             state.private = true;
-            if (state.closed || !state.acknowledged) failures.push('Phemex private subscribe preceded auth acknowledgement');
+            if (state.closed || !state.acknowledged)
+              failures.push('Phemex private subscribe preceded auth acknowledgement');
             else state.subscribed = true;
           }
-          if (m.method?.endsWith('.subscribe')) state.topics.add(m.method + ':' + (m.params?.[0] ?? ''));
-          if (m.method?.endsWith('.unsubscribe')) { state.topics.delete(m.method.replace(/\.unsubscribe$/, '.subscribe') + ':' + (m.params?.[0] ?? '')); if (m.method === 'aop_p.unsubscribe') state.subscribed = false; }
+          if (m.method?.endsWith('.subscribe')) topics.add(m.method + ':' + (m.params?.[0] ?? ''));
         },
         received(url, text, generation) {
-          const m = JSON.parse(text), state = socket(url, generation);
-          if (['accounts_p','positions_p','orders_p'].some((field) => Object.hasOwn(m, field)) && (state.closed || !state.acknowledged || !state.subscribed)) failures.push('Phemex private data preceded authenticated subscription');
-          if (m.orderbook_p && !state.topics.has('orderbook_p.subscribe:' + m.symbol)) failures.push('Phemex book data arrived without subscription');
-          if (m.method?.startsWith('perp_market24h_pack_p') && !state.topics.has('perp_market24h_pack_p.subscribe:')) failures.push('Phemex ticker data arrived without subscription');
+          const m = JSON.parse(text),
+            state = socket(url, generation);
           if (m.id !== 999 || state.closed) return;
           state.acknowledged = false;
           if (!state.auth) failures.push('Phemex auth ACK without request');
-          else if (m.error != null || m.result?.status !== 'success') failures.push('Phemex auth ACK did not confirm success');
+          else if (m.error != null || m.result?.status !== 'success')
+            failures.push('Phemex auth ACK did not confirm success');
           else state.acknowledged = true;
         },
         ready() {
           const privateSockets = [...sockets.values()].filter((state) => state.private && !state.closed);
-          const publicSockets = [...sockets.values()].filter((state) => !state.private && !state.closed);
-          const hasTopic = (topic) => publicSockets.some((state) => state.topics.has(topic));
-          return hasTopic('perp_market24h_pack_p.subscribe:') && books.every((s) => hasTopic('orderbook_p.subscribe:' + s)) && (!isPrivate || privateSockets.length > 0 && privateSockets.every((state) => state.acknowledged && state.subscribed));
+          return (
+            topics.has('perp_market24h_pack_p.subscribe:') &&
+            books.every((s) => topics.has('orderbook_p.subscribe:' + s)) &&
+            (!isPrivate ||
+              (privateSockets.length > 0 && privateSockets.every((state) => state.acknowledged && state.subscribed)))
+          );
         },
-        errors() { return failures; },
+        errors() {
+          return failures;
+        },
       };
     },
   },
 
-
   paradex: {
     ...paradexProtocol,
     rust: 'paradex',
-    requestKey: typedRequest,
     ts: { module: `${root}/paradex/paradex.exchange.ts`, className: 'ParadexExchange', name: 'paradex' },
     // Effective position leverage differs from configured cross-margin leverage.
-    tsSettings: (exchange, store) => store.markets.map(({ symbol }) => ({
-      symbol, marginType: 'cross', leverage: exchange.leverageSettings.get(symbol) ?? 10,
-    })),
+    tsSettings: (exchange, store) =>
+      store.markets.map(({ symbol }) => ({
+        symbol,
+        marginType: 'cross',
+        leverage: exchange.leverageSettings.get(symbol) ?? 10,
+      })),
     tsBooksSubscribed: (exchange, count) => exchange.publicWebsocket.orderbookCallbacks.size >= count,
   },
-
   apexomni: {
     rust: 'apexomni',
     ts: { module: `${root}/apexomni/apexomni.exchange.ts`, className: 'ApexOmniExchange', name: 'apexomni' },
@@ -1246,10 +1264,20 @@ export const VENUES = {
     prepareReplay: prepareApexReplay,
     prepareTs: prepareApexTs,
     wireBody: apexWireBody,
-    requestKey: typedRequest,
-    requestOptions: apexRequestOptions,
     matchRequestBody: true,
     generatedId: () => false,
+    generatedBodyId: (key) =>
+      [
+        'clientId',
+        'clientOrderId',
+        'tpClientOrderId',
+        'slClientOrderId',
+        'expiration',
+        'tpExpiration',
+        'slExpiration',
+        'tpSignature',
+        'slSignature',
+      ].includes(key),
     compareWriteOrder: true,
     compareFillPrices: true,
     compareClientIds: true,
@@ -1257,41 +1285,55 @@ export const VENUES = {
     createSocketAudit: createApexSocketAudit,
     validateRequest: validateApexRequest,
     independentLeverage: true,
-    tsSettings: (_exchange, store) => store.markets.map((market) => ({
-      symbol: market.symbol,
-      marginType: 'cross',
-      buyLeverage: store.positions.find((position) => position.symbol === market.symbol && position.side === 'long')?.leverage ?? 0,
-      sellLeverage: store.positions.find((position) => position.symbol === market.symbol && position.side === 'short')?.leverage ?? 0,
-    })),
-    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderBook200.H.')).length >= count,
+    tsSettings: (_exchange, store) =>
+      store.markets.map((market) => ({
+        symbol: market.symbol,
+        marginType: 'cross',
+        buyLeverage:
+          store.positions.find((position) => position.symbol === market.symbol && position.side === 'long')?.leverage ??
+          0,
+        sellLeverage:
+          store.positions.find((position) => position.symbol === market.symbol && position.side === 'short')
+            ?.leverage ?? 0,
+      })),
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderBook200.H.')).length >=
+      count,
     isWrite: (method) => method !== 'GET',
   },
   kraken: {
     rust: 'kraken',
-    compareBalanceCoins:true,
-    productSubscriptions:true,
-    tsBooksReady:(exchange,store)=>Boolean(store.loaded.tickers&&exchange.publicWebsocket),
-    tsSettings:(exchange,store)=>store.markets.map(m=>{
-      const position=store.positions.find(p=>p.symbol===m.symbol&&p.contracts>0);
-      return {symbol:m.symbol,leverage:exchange.leverageSettings.get(m.symbol)??position?.leverage??m.limits.leverage.max,marginType:exchange.marginTypePreferences.get(m.symbol)??position?.marginType??'cross'};
-    }),
-    ts: {module: `${root}/kraken/kraken.exchange.ts`, className: 'KrakenExchange', name: 'kraken'},
-    replayCredentials: {key:'replay-key',secret:'cmVwbGF5LXNlY3JldA=='},
-    tsBooksSubscribed: (exchange,count) => Object.values(exchange.publicWebsocket.orderBookHandlers).filter(v=>v.length).length>=count,
-    isPrivateRecord: record=>record.type==='ws'&&/"(?:fills|open_orders|open_positions|challenge)"/.test(record.text??''),
-    initializeReplay(impl){krakenRequestAudit=createKrakenRequestAudit({strict:impl==='rust'});},
-    validateRequest: request=>krakenRequestAudit(request),
-    validateSocketMessage:validateKrakenSocketMessage,
-    validateSocketFrame:validateKrakenSocketFrame,
-    requestBody:krakenRequestBody,
-    requestKey:typedRequest,
-    commandResult:krakenCommandResult,
-    requestBodies:true,
-    compareFillPrices:true,
-    compareWriteOrder:true,
-    isWrite:method=>method!=='GET',
+    compareBalanceCoins: true,
+    productSubscriptions: true,
+    tsBooksReady: (exchange, store) => Boolean(store.loaded.tickers && exchange.publicWebsocket),
+    tsSettings: (exchange, store) =>
+      store.markets.map((m) => {
+        const position = store.positions.find((p) => p.symbol === m.symbol && p.contracts > 0);
+        return {
+          symbol: m.symbol,
+          leverage: exchange.leverageSettings.get(m.symbol) ?? position?.leverage ?? m.limits.leverage.max,
+          marginType: exchange.marginTypePreferences.get(m.symbol) ?? position?.marginType ?? 'cross',
+        };
+      }),
+    ts: { module: `${root}/kraken/kraken.exchange.ts`, className: 'KrakenExchange', name: 'kraken' },
+    replayCredentials: { key: 'replay-key', secret: 'cmVwbGF5LXNlY3JldA==' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.values(exchange.publicWebsocket.orderBookHandlers).filter((v) => v.length).length >= count,
+    isPrivateRecord: (record) =>
+      record.type === 'ws' && /"(?:fills|open_orders|open_positions|challenge)"/.test(record.text ?? ''),
+    initializeReplay(impl) {
+      krakenRequestAudit = createKrakenRequestAudit({ strict: impl === 'rust' });
+    },
+    validateRequest: (request) => krakenRequestAudit(request),
+    validateSocketMessage: validateKrakenSocketMessage,
+    validateSocketFrame: validateKrakenSocketFrame,
+    requestBody: krakenRequestBody,
+    commandResult: krakenCommandResult,
+    requestBodies: true,
+    compareFillPrices: true,
+    compareWriteOrder: true,
+    isWrite: (method) => method !== 'GET',
   },
-
   asterdex: {
     initializeReplay: initializeAsterCrypto,
     rust: 'asterdex',
@@ -1301,16 +1343,19 @@ export const VENUES = {
     compareBalanceCurrencies: true,
     compareWriteOrder: true,
     requestUrl: asterRequestUrl,
-    // Aster does not mint client IDs: injected IDs remain part of exact identity.
-    generatedId: () => false,
-    requestKey: typedRequest,
     createRequestValidator: createAsterRequestValidator,
     createSocketAudit: asterSocketAudit,
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
-    tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.topics).filter((topic) => topic.endsWith('@depth20@100ms')).length >= count,
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.topics).filter((topic) => topic.endsWith('@depth20@100ms')).length >= count,
     startupSubscriptions: (records, books) => {
-      const url = records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/stream')?.url ?? 'wss://fstream.asterdex.com/stream';
-      return subscriptionKeys(url, { method: 'SUBSCRIBE', params: ['!ticker@arr', '!markPrice@arr@1s', ...books.map((symbol) => `${symbol.toLowerCase()}@depth20@100ms`)] });
+      const url =
+        records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/stream')?.url ??
+        'wss://fstream.asterdex.com/stream';
+      return subscriptionKeys(url, {
+        method: 'SUBSCRIBE',
+        params: ['!ticker@arr', '!markPrice@arr@1s', ...books.map((symbol) => `${symbol.toLowerCase()}@depth20@100ms`)],
+      });
     },
     prepareTsTransport: async (_exchange, adapter) => {
       const { default: axios } = await import('axios');
@@ -1318,23 +1363,18 @@ export const VENUES = {
       createRequire(import.meta.url)('axios').defaults.adapter = adapter;
     },
   },
-
-  kucoin: {
-    ...kucoin,
-    requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),
-  },
   ...Object.fromEntries([...Object.keys(ORDERLY_BROKERS), 'orderly'].map((name) => [name, orderly(name)])),
   ...Object.fromEntries(['lighter', 'lighter-robinhood'].map((name) => [name, lighter(name)])),
   woo: {
     rust: 'woo',
-    initialBookSnapshots: true,
     wooProtocol: true,
     subscriptionGenerations: true,
     ts: { module: `${root}/woo/woo.exchange.ts`, className: 'WOOXExchange', name: 'woo' },
     privateSocket: '/v2/ws/private/',
     matchRequestBody: true,
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('@orderbookupdate')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('@orderbookupdate')).length >=
+      count,
     respondToPing: true,
     createSocketAudit: createWooSocketAudit,
     validateRequest: validateWooRequest,
@@ -1352,47 +1392,64 @@ export const VENUES = {
     // Creation mints IDs; cancellation must retain the exact native target.
     generatedId: () => false,
     requestOptions: (method, url) => ({
-      // Match Bitrue's 1..31-character ID contract; malformed values must retain wire types.
-      generatedBodyId: method === 'POST' && url.pathname === '/fapi/v2/order'
-        ? (key, value) => key === 'clientOrderId' && typeof value === 'string' && value.length >= 1 && value.length <= 31 && !/[\r\n\u2028\u2029]/.test(value)
-        : undefined,
+      generatedBodyId:
+        method === 'POST' && url.pathname === '/fapi/v2/order' ? (key) => key === 'clientOrderId' : undefined,
     }),
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.includes('/listenKey'),
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('_simple_depth_step0')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('_simple_depth_step0'))
+        .length >= count,
     validateRequest: ({ method, url, body, headers }) => {
       const parsed = new URL(url);
       if (!['fapi.bitrue.com', 'fapiws-auth.bitrue.com'].includes(parsed.hostname))
         throw new Error('Bitrue must emit a real upstream URL');
-      const fields = Object.fromEntries(Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), String(value)]));
-      if (!fields['x-ch-apikey'] && method === 'GET' && parsed.hostname === 'fapi.bitrue.com' && parsed.pathname === '/fapi/v1/contracts') return;
+      const fields = Object.fromEntries(
+        Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), String(value)]),
+      );
+      if (
+        !fields['x-ch-apikey'] &&
+        method === 'GET' &&
+        parsed.hostname === 'fapi.bitrue.com' &&
+        parsed.pathname === '/fapi/v1/contracts'
+      )
+        return;
       if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
       const timestamp = fields['x-ch-ts'];
       const payload = timestamp + method + parsed.pathname + parsed.search + (body ?? '');
-      if (fields['x-ch-apikey'] !== 'replay-key' || !/^\d+$/.test(timestamp) ||
-          Math.abs(Date.now() - Number(timestamp)) > 60_000 ||
-          fields['x-ch-sign'] !== createHmac('sha256', 'replay-secret').update(payload).digest('hex'))
+      if (
+        fields['x-ch-apikey'] !== 'replay-key' ||
+        !/^\d+$/.test(timestamp) ||
+        Math.abs(Date.now() - Number(timestamp)) > 60_000 ||
+        fields['x-ch-sign'] !== createHmac('sha256', 'replay-secret').update(payload).digest('hex')
+      )
         throw new Error('Invalid Bitrue REST signature');
     },
     createSocketAudit: (_impl, { isPrivate, books }) => {
       const states = new Map();
       const failures = [];
-      const state = (url, socket) => {
-        const identity = socket ?? url;
-        if (!states.has(identity)) states.set(identity, { url, socket, channels: new Set(), pings: new Set() });
-        return states.get(identity);
+      const state = (url) => {
+        if (!states.has(url)) states.set(url, { channels: new Set(), pings: new Set() });
+        return states.get(url);
       };
       return {
-        received(url, text, socket) {
+        received(url, text) {
           const frame = JSON.parse(text);
-          const current = state(url, socket);
+          const current = state(url);
           if (frame.ping !== undefined) current.pings.add(JSON.stringify({ pong: frame.ping }));
-          else if (frame.event === 'ping') current.pings.add(JSON.stringify(frame.ts === undefined ? { event: 'pong' } : { event: 'pong', ts: frame.ts }));
-          if (frame.channel && (frame.tick || frame.data) && frame.event_rep !== 'rep' && !current.channels.has(frame.channel))
+          else if (frame.event === 'ping')
+            current.pings.add(
+              JSON.stringify(frame.ts === undefined ? { event: 'pong' } : { event: 'pong', ts: frame.ts }),
+            );
+          if (
+            frame.channel &&
+            (frame.tick || frame.data) &&
+            frame.event_rep !== 'rep' &&
+            !current.channels.has(frame.channel)
+          )
             failures.push('data arrived without subscription: ' + frame.channel);
         },
-        sent(url, text, socket) {
-          const current = state(url, socket);
+        sent(url, text) {
+          const current = state(url);
           if (text === 'pong') return;
           const frame = JSON.parse(text);
           if (frame.event === 'sub') current.channels.add(frame.params.channel);
@@ -1407,27 +1464,29 @@ export const VENUES = {
           }
         },
         ready() {
-          return !isPrivate || [...states.values()].some((s) => !s.socket?.closed && s.url.startsWith('wss://fapiws.bitrue.com/stream?listenKey=') && s.channels.has('user_account_update'));
+          return (
+            !isPrivate ||
+            [...states].some(
+              ([url, s]) =>
+                url.startsWith('wss://fapiws.bitrue.com/stream?listenKey=') && s.channels.has('user_account_update'),
+            )
+          );
         },
         errors() {
-          const publicChannels = new Map();
-          for (const s of states.values()) {
+          for (const [url, s] of states) {
             if (s.pings.size) failures.push('missing Bitrue heartbeat reply');
-            if (s.url.includes('fmarket-ws')) {
-              if (!publicChannels.has(s.url)) publicChannels.set(s.url, new Set());
-              for (const channel of s.channels) publicChannels.get(s.url).add(channel);
-            }
-          }
-          for (const channels of publicChannels.values()) for (const symbol of books) {
-            const native = 'e_' + symbol.replace(/^E-/, '').replaceAll('-', '').toLowerCase();
-            if (!channels.has(`market_${native}_simple_depth_step0`)) failures.push('missing Bitrue depth subscription: ' + symbol);
+            if (url.includes('fmarket-ws'))
+              for (const symbol of books) {
+                const native = 'e_' + symbol.replace(/^E-/, '').replaceAll('-', '').toLowerCase();
+                if (!s.channels.has(`market_${native}_simple_depth_step0`))
+                  failures.push('missing Bitrue depth subscription: ' + symbol);
+              }
           }
           return failures;
         },
       };
     },
   },
-
   bitunix: {
     rust: 'bitunix',
     ts: { module: `${root}/bitunix/bitunix.exchange.ts`, className: 'BitunixExchange', name: 'bitunix' },
@@ -1437,6 +1496,25 @@ export const VENUES = {
     isWrite: (method) => method !== 'GET',
     matchRequestBody: true,
     compareFillPrices: true,
+    // Documented double-SHA256 signature over nonce, timestamp, key, sorted
+    // query (key+value pairs) and body; public /market/ reads are unsigned.
+    validateRequest({ url, body = '', headers = {} }) {
+      const parsed = new URL(url);
+      if (parsed.pathname.includes('/market/')) return;
+      const query = [...parsed.searchParams].sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key}${value}`).join('');
+      if (!validBitunixSignature(headerValue(headers, 'api-key'), headerValue(headers, 'nonce'),
+        headerValue(headers, 'timestamp'), headerValue(headers, 'sign'), query, body))
+        throw new Error(`invalid Bitunix request signature: ${parsed.pathname}`);
+    },
+    validateSocketMessage(socket, text) {
+      const frame = JSON.parse(text);
+      if (frame.op !== 'login') return;
+      const arg = Array.isArray(frame.args) && frame.args.length === 1 ? frame.args[0] : {};
+      if (!validBitunixSignature(arg?.apiKey, arg?.nonce, arg?.timestamp, arg?.sign, '', ''))
+        throw new Error('invalid Bitunix socket login');
+      socket.loginVerified = true;
+    },
   },
   bitget: {
     rust: 'bitget',
@@ -1461,18 +1539,29 @@ export const VENUES = {
   bitgetinverse: {
     inverseNativeAmounts: true,
     rust: 'bitgetinverse',
-    ts: { module: `${root}/bitget/bitgetinverse.exchange.ts`, className: 'BitgetInverseExchange', name: 'bitgetinverse' },
+    ts: {
+      module: `${root}/bitget/bitgetinverse.exchange.ts`,
+      className: 'BitgetInverseExchange',
+      name: 'bitgetinverse',
+    },
     tsBooksSubscribed: (exchange, count) =>
-      Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('orderBook_') && handlers.length).length >= count,
+      Object.entries(exchange.publicWebsocket.messageHandlers).filter(
+        ([key, handlers]) => key.startsWith('orderBook_') && handlers.length,
+      ).length >= count,
     privateSocket: '/ws/private',
     options: { passphrase: 'replay-passphrase' },
   },
   backpack: {
     rust: 'backpack',
-    initialBookSnapshots: true,
-    ignoreGeneratedBodyId: (key, value, callerIds, context) => key === 'clientId' && !callerIds.has(String(value))
-      && context?.method === 'POST' && /^\/api\/v1\/orders?$/.test(new URL(context.url).pathname)
-      && typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 0xffff_ffff,
+    ignoreGeneratedBodyId: (key, value, callerIds, context) =>
+      key === 'clientId' &&
+      !callerIds.has(String(value)) &&
+      context?.method === 'POST' &&
+      /^\/api\/v1\/orders?$/.test(new URL(context.url).pathname) &&
+      typeof value === 'number' &&
+      Number.isSafeInteger(value) &&
+      value > 0 &&
+      value <= 0xffff_ffff,
     ts: { module: `${root}/backpack/backpack.exchange.ts`, className: 'BackpackExchange', name: 'backpack' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depth.')).length >= count,
@@ -1499,12 +1588,11 @@ export const VENUES = {
   krakenspot,
   hyperliquid: {
     rust: 'hyperliquid',
-    // Retain the weighted catalog bootstrap plus a full public-data window.
-    recordAfterReady: true,
-    matchRequestBody: true,
-    fullSocketIdentity: true,
-    requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds),
-    ts: { module: `${root}/hyperliquid/hyperliquid.exchange.ts`, className: 'HyperliquidExchange', name: 'hyperliquid' },
+    ts: {
+      module: `${root}/hyperliquid/hyperliquid.exchange.ts`,
+      className: 'HyperliquidExchange',
+      name: 'hyperliquid',
+    },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('l2Book.')).length >= count,
     privateSocket: undefined,
@@ -1567,9 +1655,6 @@ export const VENUES = {
   },
   mexc: {
     rust: 'mexc',
-    // Handler registration precedes socket open and REST depth completion.
-    // Both implementations publish the initial REST seeds before legacy replay.
-    initialBookSnapshots: true,
     mexcProtocol: true,
     requestBody: mexcRequestBody,
     requestUrl: mexcRequestUrl,
@@ -1635,7 +1720,8 @@ export const VENUES = {
   },
   weex: {
     rust: 'weex',
-      ts: { module: `${root}/weex/weex.exchange.ts`, className: 'WeexExchange', name: 'weex' },
+    requestKey: typedRequest,
+    ts: { module: `${root}/weex/weex.exchange.ts`, className: 'WeexExchange', name: 'weex' },
     privateSocket: '/v3/ws/private',
     matchRequestBody: true,
     volatileBodyFields: true,
@@ -1687,15 +1773,15 @@ export const VENUES = {
   },
   cryptocom: {
     rust: 'cryptocom',
-      ts: { module: root + '/cryptocom/cryptocom.exchange.ts', className: 'CryptocomExchange', name: 'cryptocom' },
+    requestKey: typedRequest,
+    ts: { module: root + '/cryptocom/cryptocom.exchange.ts', className: 'CryptocomExchange', name: 'cryptocom' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('book.')).length >= count,
     privateSocket: '/exchange/v1/user',
     matchRequestBody: true,
     cryptoProtocol: true,
     // Authentication is validated separately; economic params stay exact.
-    requestBodyParams: true,
-    requestBody: (body) => body?.params ?? body,
+    requestBody: (body) => (body?.method && body?.params ? body.params : body),
     publicTickers: (records) => {
       const seed = records.find((r) => r.type === 'http' && r.url.endsWith('/public/get-instruments'));
       return seed
@@ -1705,12 +1791,11 @@ export const VENUES = {
         : [];
     },
     // KNOWN_TS_FIXES: public-only startup returns before market subscriptions.
-    prepareTsReady: async (exchange, { isPrivate }) => {
-      if (isPrivate) return;
-      // Public-only start resolves while the socket is still CONNECTING.
-      // Sending then makes BaseWebSocket reconnect before its first open.
-      while (!exchange.publicWebsocket.isConnected) await new Promise((resolve) => setTimeout(resolve, 1));
-      exchange.publicWebsocket.subscribeToMarketData(exchange.store.markets.map((m) => ({ instrumentName: m.id, indexInstrumentName: m.info?.underlyingSymbol })));
+    prepareTsReady: (exchange, { isPrivate }) => {
+      if (!isPrivate)
+        exchange.publicWebsocket.subscribeToMarketData(
+          exchange.store.markets.map((m) => ({ instrumentName: m.id, indexInstrumentName: m.info?.underlyingSymbol })),
+        );
     },
     // KNOWN_TS_FIXES: the global ticker/book throttles drop updates across
     // symbols. Reset after every frame so each next update gets a leading call,
@@ -1846,11 +1931,6 @@ export const VENUES = {
     ['binanceinverse', 'BinanceInverseExchange'], ['binancespot', 'BinanceSpotExchange'],
   ].map(([name, className]) => [name, {
     rust: name,
-    family: 'binance',
-    generatedId: () => false,
-    preserveQueryFields: ['requestId'],
-    requestOptions: binanceRequestOptions,
-    compareWriteOrder: true,
     requestKey: typedRequest,
     validateRequest: validateBinanceRequest,
     subscriptionMessage: binanceSubscriptionMessage,
@@ -1860,7 +1940,6 @@ export const VENUES = {
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >= count,
     privateSocket: name === 'binancespot' ? '/ws-api/v3' : name === 'binancepm' ? '/pm/ws' : name === 'binanceinverse' ? '/ws/' : '/private/ws',
     volatileBodyFields: true,
-    ...(name === 'binance' ? { streamOf: binanceDepthStream } : {}),
     ...(name === 'binanceinverse' ? { coinNativeAmounts: true } : {}),
     ...(name === 'binancespot' ? {
       compareFillPrices: true,
@@ -1879,6 +1958,11 @@ export const VENUES = {
       prepareTs: prepareBinanceSpot,
     } : {}),
   }])),
+  polymarket,
+  kucoin: {
+    ...kucoin,
+    requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds, kucoin),
+  },
   kucoinspot,
   bybit: bybit('bybit', 'BybitExchange'),
   bybitinverse: bybit('bybitinverse', 'BybitInverseExchange'),
@@ -1896,8 +1980,11 @@ export const venueOf = (name) => {
 
 /** Every axios instance the exchange owns, so all of its REST goes to the tape. */
 export const axiosClients = (exchange) =>
-  [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance, ...Object.values(value && typeof value === 'object' ? value : {})]))]
-    .filter((value) => value?.defaults && value?.interceptors);
+  [...new Set(Object.values(exchange).flatMap((value) => [
+    value,
+    value?.axiosInstance,
+    ...Object.values(value && typeof value === 'object' ? value : {}),
+  ]))].filter((value) => value?.defaults && value?.interceptors);
 
 /** Native Hyro callers supply endpoints; the harness uses the same public config as TS. */
 export const configuredOptions = (name) => {

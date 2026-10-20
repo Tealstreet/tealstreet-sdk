@@ -1,44 +1,175 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { memoryMetricErrors, retainedMemory, settledMemory } from './memory.mjs';
+import { idleLoadedBaseline, measureBeforeCapture, memoryMetricErrors, retainedMemory, settledMemory } from './memory.mjs';
 
-test('retained frame backing buffers are included', () => {
-  const frame = new ArrayBuffer(16 * 1024 * 1024);
-  // GC may free heap while a transferred frame remains retained.
-  const before = { heapUsed: 100_000, arrayBuffers: 400_000 };
-  const after = { heapUsed: 90_000, arrayBuffers: 400_000 + frame.byteLength };
-  assert.equal(retainedMemory(before, after), frame.byteLength - 10_000);
+const metricsFor = (before, after, wasmBytes = 0, wasmBeforeBytes = 0) => ({
+  baselineKind: 'idle-loaded', measuredMode: 'performance',
+  cpuMs: 5, processCpuMs: 7, steadyCpuMs: 2, wallMs: 20,
+  idleLoadCpuMs: 1, idleLoadProcessCpuMs: 2, idleLoadWallMs: 5,
+  runtimeCpuMs: 4, runtimeProcessCpuMs: 5, runtimeWallMs: 15,
+  heapBeforeBytes: before.heapUsed, heapUsedBytes: after.heapUsed,
+  buffersBefore: before.arrayBuffers, buffersAfter: after.arrayBuffers,
+  heapRetainedBytes: after.heapUsed - before.heapUsed,
+  bufferRetainedBytes: after.arrayBuffers - before.arrayBuffers,
+  wasmBeforeBytes, wasmBytes, wasmRetainedBytes: wasmBytes - wasmBeforeBytes,
+  retainedBytes: retainedMemory(before, after, wasmBytes, wasmBeforeBytes),
 });
-test('linear wasm memory is counted exactly once', () => {
-  // Isolate allocation from neighboring tests, but keep any signed runtime
-  // buffer delta: even this child can reclaim unrelated V8 backing stores.
-  const { before, after, bytes } = JSON.parse(execFileSync(process.execPath, [
-    '--expose-gc', '--input-type=module', '--eval', `
-      globalThis.gc();
-      const before = process.memoryUsage();
-      const memory = new WebAssembly.Memory({ initial: 16 });
-      globalThis.gc();
-      const after = process.memoryUsage();
-      const bytes = memory.buffer.byteLength;
-      process.stdout.write(JSON.stringify({ before, after, bytes }));
-    `,
-  ], { encoding: 'utf8' }));
-  assert.equal(bytes, 16 * 65536);
-  assert.equal(
-    retainedMemory(before, after, bytes),
-    after.heapUsed - before.heapUsed + after.arrayBuffers - before.arrayBuffers + bytes,
-  );
 
-  // Frozen counters pin exact accounting independently of foreign GC noise.
-  // WASM is supplied separately; ordinary retained frame buffers still count.
-  const baseline = Object.freeze({ heapUsed: 100_000, arrayBuffers: 400_000 });
-  const wasmOnly = Object.freeze({ heapUsed: 90_000, arrayBuffers: 400_000 });
-  const frame = new ArrayBuffer(4096);
-  const withFrame = Object.freeze({ ...wasmOnly, arrayBuffers: wasmOnly.arrayBuffers + frame.byteLength });
-  assert.equal(retainedMemory(baseline, wasmOnly, bytes), bytes - 10_000);
-  assert.equal(retainedMemory(baseline, withFrame, bytes), bytes - 10_000 + frame.byteLength);
-  assert.equal(retainedMemory(baseline, { ...wasmOnly, arrayBuffers: 399_964 }, bytes), bytes - 10_036);
+test('retained frame backing buffers remain included when GC releases heap', () => {
+  const frameBytes = 16 * 1024 * 1024;
+  const before = { heapUsed: 100_000, arrayBuffers: 400_000 };
+  const after = { heapUsed: 90_000, arrayBuffers: 400_000 + frameBytes };
+  assert.equal(retainedMemory(before, after), frameBytes - 10_000);
+  assert.deepEqual(memoryMetricErrors(metricsFor(before, after)), []);
+});
+
+test('static WASM reservation is excluded and runtime linear-memory growth counted exactly once', () => {
+  const before = { heapUsed: 1000, arrayBuffers: 100 };
+  const after = { heapUsed: 1200, arrayBuffers: 200 };
+  const page = 65_536;
+  const memory = new WebAssembly.Memory({ initial: 16 });
+  const wasmBeforeBytes = memory.buffer.byteLength;
+  memory.grow(2);
+  const wasmBytes = memory.buffer.byteLength;
+  assert.equal(retainedMemory(before, after, wasmBytes, wasmBeforeBytes), 300 + 2 * page);
+  const metrics = metricsFor(before, after, wasmBytes, wasmBeforeBytes);
+  assert.equal(metrics.wasmRetainedBytes, 2 * page);
+  assert.deepEqual(memoryMetricErrors(metrics), []);
+});
+
+test('both implementations establish their idle baseline after setup, imports and tape loading', async () => {
+  for (const impl of ['ts', 'rust']) {
+    let memory = { heapUsed: 1000, arrayBuffers: 200 };
+    const calls = [];
+    const loaded = { impl, module: {} };
+    const { memory: before, loaded: result } = await idleLoadedBaseline({
+      async load() {
+        calls.push('initialize', 'import', 'tape');
+        memory = { heapUsed: 9000, arrayBuffers: 2200 };
+        await Promise.resolve();
+        return loaded;
+      },
+      async baseline() { calls.push('baseline'); return { ...memory }; },
+    });
+    calls.push('runtime');
+    assert.deepEqual(calls, ['initialize', 'import', 'tape', 'baseline', 'runtime']);
+    assert.equal(result, loaded);
+    memory = { heapUsed: 9300, arrayBuffers: 2300 };
+    assert.equal(metricsFor(before, memory).retainedBytes, 400);
+  }
+});
+
+test('idle loading and baseline failures propagate before runtime allocation', async () => {
+  for (const failed of ['load', 'baseline']) {
+    const calls = [];
+    await assert.rejects(idleLoadedBaseline({
+      async load() { calls.push('load'); if (failed === 'load') throw new Error(failed); return {}; },
+      async baseline() { calls.push('baseline'); throw new Error(failed); },
+    }), new RegExp(failed));
+    assert.deepEqual(calls, failed === 'load' ? ['load'] : ['load', 'baseline']);
+  }
+});
+
+test('memory sampling waits for implementation loading to finish', async () => {
+  let finishLoad;
+  let sampled = false;
+  const pending = idleLoadedBaseline({
+    load: () => new Promise((resolve) => { finishLoad = resolve; }),
+    baseline: async () => { sampled = true; return { heapUsed: 1000, arrayBuffers: 100 }; },
+  });
+  assert.equal(sampled, false);
+  const loaded = {};
+  finishLoad(loaded);
+  assert.equal((await pending).loaded, loaded);
+  assert.equal(sampled, true);
+});
+
+test('cold loading CPU is measured separately from baseline collection without estimates', async () => {
+  let thread = 1000;
+  let processCpu = 2000;
+  let wall = 10;
+  const { loadMetrics } = await idleLoadedBaseline({
+    sample: () => ({ thread: { user: thread, system: 0 }, process: { user: processCpu, system: 0 }, wall }),
+    async load() { thread += 5000; processCpu += 9000; wall += 20; return {}; },
+    async baseline() {
+      // GC and idle wait after load must not enter the captured CPU interval.
+      thread += 1000000; processCpu += 2000000; wall += 1000;
+      return { heapUsed: 1000, arrayBuffers: 100 };
+    },
+  });
+  assert.deepEqual(loadMetrics, { idleLoadCpuMs: 5, idleLoadProcessCpuMs: 9, idleLoadWallMs: 20 });
+});
+
+test('negative heap, buffer and aggregate deltas remain signed and valid', () => {
+  const variants = [
+    metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 900, arrayBuffers: 500 }, 100),
+    metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 100 }),
+    metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 900, arrayBuffers: 100 }),
+  ];
+  assert.equal(variants[0].heapRetainedBytes, -100);
+  assert.equal(variants[1].bufferRetainedBytes, -100);
+  assert.equal(variants[2].retainedBytes, -200);
+  for (const metrics of variants) assert.deepEqual(memoryMetricErrors(metrics), []);
+});
+
+test('invalid absolute counters and nonfinite deltas fail validation', () => {
+  const valid = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 300 }, 100);
+  for (const field of ['cpuMs', 'processCpuMs', 'steadyCpuMs', 'wallMs',
+    'idleLoadCpuMs', 'idleLoadProcessCpuMs', 'idleLoadWallMs', 'runtimeCpuMs', 'runtimeProcessCpuMs', 'runtimeWallMs', 'heapBeforeBytes', 'heapUsedBytes', 'buffersBefore', 'buffersAfter', 'wasmBeforeBytes', 'wasmBytes', 'wasmRetainedBytes']) {
+    for (const value of [-1, NaN, Infinity, -Infinity, null, undefined])
+      assert(memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)), `${field}=${value}`);
+  }
+  for (const field of ['heapRetainedBytes', 'bufferRetainedBytes', 'retainedBytes']) {
+    for (const value of [NaN, Infinity, -Infinity, null, undefined])
+      assert(memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)), `${field}=${value}`);
+  }
+  assert(memoryMetricErrors(undefined).length > 0);
+});
+
+test('the required metric schema rejects old before-import baselines and unknown modes', () => {
+  const valid = metricsFor({ heapUsed: 0, arrayBuffers: 0 }, { heapUsed: 0, arrayBuffers: 0 });
+  assert.deepEqual(memoryMetricErrors(valid), []);
+  for (const baselineKind of [undefined, 'before-import', null])
+    assert(memoryMetricErrors({ ...valid, baselineKind }).some((error) => error.includes('baselineKind')));
+  for (const measuredMode of [undefined, 'audit-free', null])
+    assert(memoryMetricErrors({ ...valid, measuredMode }).some((error) => error.includes('measuredMode')));
+  assert.deepEqual(memoryMetricErrors({ ...valid, measuredMode: 'correctness' }), []);
+});
+
+test('every reported delta and aggregate must exactly match the absolute samples', () => {
+  const valid = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 300 }, 300, 200);
+  for (const field of ['cpuMs', 'processCpuMs', 'wallMs', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmRetainedBytes', 'retainedBytes'])
+    assert(memoryMetricErrors({ ...valid, [field]: valid[field] + 1 }).some((error) => error.startsWith(`inconsistent ${field} (`)), field);
+  assert(memoryMetricErrors({ ...valid, wasmBeforeBytes: 400 }).some((error) => error.startsWith('inconsistent wasmRetainedBytes')));
+});
+
+test('performance measures CPU and retained memory before diagnostic reconstruction allocates', async () => {
+  const events = [];
+  let allocated = 100;
+  let cpu = 5;
+  const result = await measureBeforeCapture(() => {
+    events.push('capture');
+    allocated += 10000;
+    cpu += 100;
+    return { rows: [{ value: 'diagnostic' }] };
+  }, async () => {
+    events.push('stop-cpu');
+    const measuredCpu = cpu;
+    await Promise.resolve();
+    events.push('sample-memory');
+    return { cpuMs: measuredCpu, retainedBytes: allocated };
+  });
+  assert.deepEqual(events, ['stop-cpu', 'sample-memory', 'capture']);
+  assert.deepEqual(result.metrics, { cpuMs: 5, retainedBytes: 100 });
+  assert.equal(cpu, 105);
+  assert.equal(allocated, 10100);
+});
+
+test('performance measurement and reconstruction failures remain fatal', async () => {
+  let captured = false;
+  await assert.rejects(measureBeforeCapture(() => { captured = true; return {}; }, async () => { throw new Error('measure failed'); }), /measure failed/);
+  assert.equal(captured, false);
+  await assert.rejects(measureBeforeCapture(() => { throw new Error('capture failed'); }, async () => ({})), /capture failed/);
 });
 
 test('three equal samples do not hide a delayed loader-buffer release', async () => {
@@ -68,195 +199,126 @@ test('backing stores that never settle fail instead of choosing or clamping a sa
       sample: () => ({ arrayBuffers: time, heapUsed: 1000 }),
       timeoutMs: 200,
     }),
-    /Backing-buffer memory did not settle/,
+    (error) => {
+      assert.match(error.message, /Heap\/backing-buffer memory did not settle/);
+      assert.equal(error.sampleCount, 21);
+      assert.equal(error.transitionCount, 20);
+      assert.equal(error.lastArrayBuffers, 210);
+      assert.equal(error.elapsedMs, 210);
+      assert.match(error.message, /samples=21, transitions=20, lastArrayBuffers=210, elapsedMs=210/);
+      return true;
+    },
   );
 });
 
-// Incoming venue and protocol regressions.
-{
-const metricsFor=(before,after,wasmBytes=0)=>({heapBeforeBytes:before.heapUsed,heapUsedBytes:after.heapUsed,buffersBefore:before.arrayBuffers,buffersAfter:after.arrayBuffers,heapRetainedBytes:after.heapUsed-before.heapUsed,bufferRetainedBytes:after.arrayBuffers-before.arrayBuffers,wasmBytes,retainedBytes:retainedMemory(before,after,wasmBytes)});
-test('signed buffer retention remains in the exact positive net total', () => {
-  const metrics = metricsFor(
-    { heapUsed: 30_271_936, arrayBuffers: 2_324_049 },
-    { heapUsed: 33_195_616, arrayBuffers: 2_323_961 },
-  );
-  assert.equal(metrics.bufferRetainedBytes, -88);
-  assert.equal(metrics.retainedBytes, 2_923_592);
-  assert.deepEqual(memoryMetricErrors(metrics), []);
+test('a delayed heap release restarts quiet time and returns the current sample rather than the minimum', async () => {
+  let time = 0;
+  const baseline = await settledMemory({
+    collect() {},
+    pause: async () => { time += 10; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: 100, heapUsed: time < 80 ? 1000 : time === 80 ? 500 : 520 }),
+  });
+  assert.equal(time, 180);
+  assert.deepEqual(baseline, { arrayBuffers: 100, heapUsed: 520 });
 });
 
-test('signed heap retention combines exactly with buffers and WASM', () => {
-  const metrics = metricsFor(
-    { heapUsed: 1000, arrayBuffers: 200 },
-    { heapUsed: 900, arrayBuffers: 500 },
-    100,
-  );
-  assert.equal(metrics.heapRetainedBytes, -100);
-  assert.equal(metrics.retainedBytes, 300);
-  assert.deepEqual(memoryMetricErrors(metrics), []);
+test('a heap that keeps reaching new lows fails within the original deadline', async () => {
+  let time = 0;
+  await assert.rejects(settledMemory({
+    collect() {},
+    pause: async () => { time += 10; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: 100, heapUsed: 1000 - time }),
+    timeoutMs: 200,
+  }), (error) => {
+    assert.equal(error.sampleCount, 21);
+    assert.equal(error.transitionCount, 0);
+    assert.equal(error.heapTransitionCount, 19);
+    assert.equal(error.lastHeapUsed, 790);
+    assert.equal(error.elapsedMs, 210);
+    assert.match(error.message, /heapTransitions=19, lastHeapUsed=790/);
+    return true;
+  });
 });
 
-test('invalid absolute counters and nonfinite signed deltas fail validation', () => {
-  const valid = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 300 }, 100);
-  for (const field of ['heapBeforeBytes', 'heapUsedBytes', 'buffersBefore', 'buffersAfter', 'wasmBytes', 'retainedBytes']) {
-    for (const value of [-1, NaN, Infinity, -Infinity, null, undefined]) {
-      assert(memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)), `${field}=${value}`);
-    }
-  }
-  for (const field of ['heapRetainedBytes', 'bufferRetainedBytes']) {
-    for (const value of [NaN, Infinity, -Infinity, null, undefined]) {
-      assert(memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)), `${field}=${value}`);
-    }
-  }
-  assert(memoryMetricErrors(undefined).length > 0);
-});
-
-test('negative aggregate retention still invalidates the baseline', () => {
-  const metrics = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 900, arrayBuffers: 250 });
-  assert.equal(metrics.retainedBytes, -50);
-  assert(memoryMetricErrors(metrics).some((error) => error.startsWith('invalid retainedBytes (')));
-});
-
-test('reported deltas and aggregate must exactly match the absolute samples', () => {
-  const valid = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 300 }, 100);
-  for (const field of ['heapRetainedBytes', 'bufferRetainedBytes', 'retainedBytes']) {
-    assert(memoryMetricErrors({ ...valid, [field]: valid[field] + 1 }).some((error) => error.startsWith(`inconsistent ${field} (`)), field);
-  }
-  assert.deepEqual(memoryMetricErrors(metricsFor({ heapUsed: 0, arrayBuffers: 0 }, { heapUsed: 0, arrayBuffers: 0 })), []);
+test('memory sampling awaits collection and propagates collection failure', async () => {
+  let finishCollection;
+  let paused = false;
+  let sampled = false;
+  const failure = new Error('collection failed');
+  const pending = settledMemory({
+    collect: () => new Promise((resolve, reject) => { finishCollection = () => reject(failure); }),
+    pause: async () => { paused = true; },
+    sample: () => { sampled = true; return { heapUsed: 1000, arrayBuffers: 100 }; },
+  });
+  assert.equal(paused, false);
+  assert.equal(sampled, false);
+  finishCollection();
+  await assert.rejects(pending, (error) => error === failure);
+  assert.equal(paused, false);
+  assert.equal(sampled, false);
 });
 
 test('settled samples use real time when replay replaces global timers', async () => {
   const original = globalThis.setTimeout;
-  globalThis.setTimeout = () => { throw new Error('virtual timer must not pace memory samples'); };
+  globalThis.setTimeout = () => {
+    throw new Error('virtual timer must not pace memory samples');
+  };
   try {
-    assert.deepEqual(await settledMemory({
-      collect() {}, sample: () => ({ arrayBuffers: 42, heapUsed: 1000 }), quietMs: 0,
-    }), { arrayBuffers: 42, heapUsed: 1000 });
+    assert.deepEqual(
+      await settledMemory({
+        collect() {},
+        sample: () => ({ arrayBuffers: 42, heapUsed: 1000 }),
+        quietMs: 0,
+      }),
+      { arrayBuffers: 42, heapUsed: 1000 },
+    );
   } finally {
     globalThis.setTimeout = original;
   }
 });
-}
 
-test('pending collection completes before sampling with no intervening pause', async () => {
-  let release;
-  const pending = new Promise((resolve) => { release = resolve; });
-  const events = [];
-  let time = 0, collections = 0, published = false;
-  const result = settledMemory({
-    collect() { events.push('collect'); return ++collections === 1 ? pending : undefined; },
-    pause: async () => { events.push('pause'); time += 10; },
-    sample() { events.push('sample'); return { arrayBuffers: 42, heapUsed: 1000 }; },
-    now: () => time, quietMs: 0,
-  }).then((memory) => { published = true; return memory; });
-  await new Promise(setImmediate);
-  assert.deepEqual(events, ['pause', 'collect']);
-  assert.equal(published, false);
-  release();
-  assert.deepEqual(await result, { arrayBuffers: 42, heapUsed: 1000 });
-  assert.deepEqual(events, ['pause', 'collect', 'sample', 'pause', 'collect', 'sample', 'pause', 'collect', 'sample']);
-});
-
-test('default major collector is awaited across its asynchronous task boundary', async () => {
-  const original = globalThis.gc;
-  let pending = false, completed = 0;
+// A busy worker may need several full GCs to release cold loader storage.
+test('cold backing-store cleanup can exceed one second before the first quiet sample', async () => {
   let time = 0;
-  globalThis.gc = async (options) => {
-    assert.deepEqual(options, { type: 'major', execution: 'async', flavor: 'last-resort' });
-    pending = true;
-    await new Promise(setImmediate);
-    completed++;
-    pending = false;
+  const sampling = {
+    collect() {},
+    pause: async () => { time += 10; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: time < 1500 ? 2000 - time : 100, heapUsed: 1000 }),
   };
-  try {
-    await settledMemory({
-      pause: async () => { assert.equal(pending, false); time += 10; },
-      sample: () => { assert.equal(pending, false); assert(completed > 0); return { arrayBuffers: 42, heapUsed: 1000 }; },
-      now: () => time, quietMs: 0,
-    });
-    assert.equal(completed, 3);
-  } finally { if (original === undefined) delete globalThis.gc; else globalThis.gc = original; }
+  await assert.rejects(settledMemory({ ...sampling, timeoutMs: 1000 }), /memory did not settle/);
+  time = 0;
+  assert.deepEqual(await settledMemory(sampling), { arrayBuffers: 100, heapUsed: 1000 });
+  assert.equal(time, 1600);
 });
 
-test('collector rejection propagates unchanged and clears the real deadline timer', async () => {
-  const timers = () => process.getActiveResourcesInfo().filter((name) => name === 'Timeout').length;
-  const before = timers();
-  const failure = new Error('collection failed');
-  let sampled = false;
+test('the extended startup deadline still rejects continuously changing backing stores', async () => {
+  let time = 0;
   await assert.rejects(settledMemory({
-    collect: async () => { await new Promise(setImmediate); throw failure; },
-    sample: () => { sampled = true; return { arrayBuffers: 0 }; },
-    timeoutMs: 10_000,
-  }), (error) => error === failure);
-  assert.equal(sampled, false);
-  assert.equal(timers(), before);
+    collect() {},
+    pause: async () => { time += 100; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: time, heapUsed: 1000 }),
+  }), /memory did not settle/);
+  assert.equal(time, 5100);
 });
 
-test('a hung collector shares the total real deadline and cannot sample after late completion', async () => {
-  const original = globalThis.setTimeout;
-  const timers = () => process.getActiveResourcesInfo().filter((name) => name === 'Timeout').length;
-  const before = timers();
-  let release, entered, sampled = 0, calls = 0;
-  const pending = new Promise((resolve) => { release = resolve; });
-  const collecting = new Promise((resolve) => { entered = resolve; });
-  globalThis.setTimeout = () => { throw new Error('virtual timer cannot own collection deadline'); };
-  try {
-    const started = performance.now();
-    const result = settledMemory({
-      collect: () => { calls++; entered(); return pending; },
-      sample: () => { sampled++; return { arrayBuffers: 0 }; },
-      // This case isolates a hung collector, not time spent in the sampling pause.
-      // The real deadline remains live even with a fixed supplied sampling clock.
-      pause: async () => {}, now: () => 0,
-      timeoutMs: 30,
-    });
-    await collecting;
-    assert.equal(calls, 1);
-    await assert.rejects(result, /Backing-buffer memory did not settle/);
-    assert(performance.now() - started < 500, 'hung collection exceeded its bounded deadline');
-    assert.equal(timers(), before);
-    release();
-    await new Promise(setImmediate);
-    assert.equal(sampled, 0);
-    assert.equal(calls, 1);
-  } finally { globalThis.setTimeout = original; }
-});
-
-test('collection duration consumes the existing budget instead of restarting it', async () => {
-  let time = 0, sampled = 0, pauses = 0;
+// Collection diagnostics include the entire awaited collector lifecycle.
+test('timeout reports the longest asynchronous collection without changing its deadline', async () => {
+  let time = 0;
   await assert.rejects(settledMemory({
-    collect: async () => { time += 40; },
-    pause: async () => { pauses++; time += 10; },
-    sample: () => { sampled++; return { arrayBuffers: 42 }; },
-    now: () => time, timeoutMs: 100,
-  }), /Backing-buffer memory did not settle/);
-  assert.equal(time, 110);
-  assert.equal(pauses, 3);
-  assert.equal(sampled, 2);
-});
-
-test('allocations during settlement are collected before the retained sample', async () => {
-  let time = 0, uncollected = 0;
-  const memory = await settledMemory({
-    pause: async () => { time += 10; uncollected = 4_000_000; },
-    collect: async () => { await new Promise(setImmediate); uncollected = 0; },
-    sample: () => ({ arrayBuffers: 42, heapUsed: 1000 + uncollected }),
-    now: () => time, quietMs: 0,
+    collect: async () => { await Promise.resolve(); time += 25; },
+    pause: async () => { time += 5; },
+    now: () => time,
+    sample: () => ({ arrayBuffers: time, heapUsed: 1000 }),
+    timeoutMs: 200,
+  }), (error) => {
+    assert.equal(error.longestCollectionMs, 25);
+    assert.equal(error.elapsedMs, 210);
+    assert.equal(error.sampleCount, 7);
+    assert.match(error.message, /longestGC=25\.0ms/);
+    return true;
   });
-  assert.deepEqual(memory, { arrayBuffers: 42, heapUsed: 1000 });
-});
-
-test('a hung settlement pause shares the deadline and cannot start late collection', async () => {
-  let release, collections = 0, sampled = 0;
-  const pending = new Promise((resolve) => { release = resolve; });
-  await assert.rejects(settledMemory({
-    pause: () => pending,
-    collect: () => { collections++; },
-    sample: () => { sampled++; return { arrayBuffers: 0 }; },
-    timeoutMs: 30,
-  }), /Backing-buffer memory did not settle/);
-  release();
-  await new Promise(setImmediate);
-  assert.equal(collections, 0);
-  assert.equal(sampled, 0);
 });

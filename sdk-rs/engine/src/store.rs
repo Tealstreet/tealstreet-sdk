@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Default)]
 pub struct Store {
     markets: Vec<Market>,
+    quantity_units: u32,
     #[cfg(any(test, feature = "product-semantics"))]
     instrument_classifications: Option<Vec<InstrumentClassification>>,
     #[cfg(any(test, feature = "product-semantics"))]
@@ -126,6 +127,11 @@ pub struct Pending {
 }
 
 impl Store {
+    /// Every market's quantity convention, written into its MARKETS flags.
+    pub fn set_quantity_units(&mut self, units: crate::QuantityUnits) {
+        self.quantity_units = units as u32;
+    }
+
     pub fn markets(&self) -> &[Market] {
         &self.markets
     }
@@ -1198,7 +1204,10 @@ impl Store {
             ]
             .iter()
             .filter(|(set, _)| *set == Some(true))
-            .fold(0, |bits, (_, flag)| bits | flag)
+            .fold(
+                self.quantity_units << market_flag::UNITS_SHIFT,
+                |bits, (_, flag)| bits | flag,
+            )
         }));
         w.pad();
         let columns: [fn(&Market) -> f64; 10] = [
@@ -1940,6 +1949,23 @@ mod tests {
             !store.take_pending().changes.balance,
             "opt-in alone cannot publish a fabricated balance"
         );
+    }
+
+    #[test]
+    fn market_flags_carry_the_venue_quantity_units() {
+        let mut store = Store::default();
+        store.set_quantity_units(crate::QuantityUnits::ContractCount);
+        store.set_markets(vec![market("A"), market("B")]);
+        let frame = balance_frame(&mut store);
+        let (_, markets) = wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::MARKETS)
+            .unwrap();
+        let flags = &markets[4 + 2 * 16..4 + 2 * 16 + 8];
+        for flag in flags.chunks(4) {
+            let flag = u32::from_le_bytes(flag.try_into().unwrap());
+            assert_eq!(flag >> market_flag::UNITS_SHIFT & 0xf, 3);
+            assert_eq!(flag & market_flag::ACTIVE, market_flag::ACTIVE);
+        }
     }
 
     #[test]

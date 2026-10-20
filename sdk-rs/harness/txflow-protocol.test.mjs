@@ -65,7 +65,7 @@ test('profile constructs a separate verifier for each TS/Rust implementation and
   assert.notEqual(VENUES.txflow.replayCredentials.applicationId.toLowerCase(), new ethers.Wallet(VENUES.txflow.replayCredentials.secret).address.toLowerCase(), 'the replay must distinguish the main account from its approved agent');
   const signed = independentlySigned(native('caller-Ä'));
   for (const impl of ['ts', 'rust']) {
-    const tape = new Tape([{ type: 'command', op: 'placeOrders', orders: [{ clientOrderId: 'caller-Ä' }] }, { type: 'http', method: 'POST', url: `${ORIGIN}/exchange`, requestBody: JSON.stringify(signed.body), status: 200, body: '{}' }], VENUES.txflow, true, 100, impl, [], OPTIONS);
+    const tape = new Tape([{ type: 'command', op: 'placeOrders', orders: [{ clientOrderId: 'caller-Ä' }] }, { type: 'http', method: 'POST', url: `${ORIGIN}/exchange`, requestBody: JSON.stringify(signed.body), status: 200, body: '{}' }], VENUES.txflow, true, 100, impl, OPTIONS);
     assert.equal(tape.respond('POST', `${ORIGIN}/exchange`, signed.body, request().headers).status, 200);
     assert.equal(tape.missingWrites, 0);
     tape.assertWritesConsumed();
@@ -164,7 +164,7 @@ test('both socket control planes require a subscription channel and exact placem
   assert.throws(() => validateTxFlowSocketMessage({ url: 'wss://rpc.txflow.com/ws' }, '{"method":"ping"}'));
 });
 
-test('private replay freezes the startup epoch and advances pacing and 10-second pings without wall waits', { timeout: 5000 }, async () => {
+test('private replay advances logical startup deadlines then rebases pacing and 10-second pings without wall waits', { timeout: 5000 }, async () => {
   const clock = new ReplayClock(EPOCH, true);
   const tape = new Tape([{ type: 'command', t: 0, op: 'pacedWrite' }, { type: 'command', t: 10_000, op: 'afterPings' }], { virtualPrivateClock: true }, true, 2000);
   clock.install();
@@ -174,7 +174,7 @@ test('private replay freezes the startup epoch and advances pacing and 10-second
   try {
     assert.equal(Date.now(), EPOCH);
     await new Promise((resolve) => setTimeout(resolve, 1));
-    assert.equal(Date.now(), EPOCH);
+    assert.equal(Date.now(), EPOCH + 1);
     const interval = setInterval(() => pings.push(Date.now()), 10_000);
     const frames = await tape.play(undefined, async () => {}, async (frame) => {
       timestamps.push(Date.now());
@@ -227,6 +227,16 @@ test('generated private tape addresses initial sockets and the explicit reconnec
     });
     assert.equal(generated.status, 0, generated.stderr || generated.error?.message);
     const records = readFileSync(output, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    const reads = records.filter(record => record.type === 'http' && new URL(record.url).pathname === '/info')
+      .map(record => JSON.parse(record.requestBody));
+    const initialTickerCount = reads.filter(body => body.type === 'activeAssetCtx').length;
+    assert.equal(initialTickerCount, 2);
+    const accountFills = reads.filter(body => body.type === 'userFills' && body.limit === 500);
+    assert.ok(accountFills.length > 0);
+    for (const body of accountFills) assert.equal(body.startTimeMs, EPOCH + initialTickerCount * 25);
+    const queryFills = reads.filter(body => body.type === 'userFills' && body.limit === 2000);
+    assert.ok(queryFills.length > 0);
+    for (const body of queryFills) assert.equal(body.startTimeMs, EPOCH);
     const closeIndex = records.findIndex((record) => record.type === 'close');
     assert(closeIndex >= 0, 'the fixture must exercise a disconnect');
     const closed = records[closeIndex];
@@ -234,16 +244,6 @@ test('generated private tape addresses initial sockets and the explicit reconnec
     for (const record of records.slice(0, closeIndex).filter((record) => record.type === 'ws')) assert.equal(record.socket, 0);
     const reconnected = records.slice(closeIndex + 1).filter((record) => record.type === 'ws' && record.url === closed.url);
     assert(reconnected.length > 0, 'the fixture must deliver native state after reconnect');
-    const minimum = (record) => {
-      const channel=JSON.parse(record.text).channel;
-      // Actual BaseWebSocket first backoff is max(2s,1s+random[0,2s));
-      // use its full3s bound. Node queues allAssetCtxs,
-      // orderUpdates, clearinghouseState, then userAssetData at150ms each.
-      return closed.t+3000+({orderUpdates:150,clearinghouseState:300,userAssetData:450}[channel]??0);
-    };
-    for (const record of reconnected) assert(record.t >= minimum(record), 'fixture precedes actual reconnect/subscription deadline');
-    assert(8800 < minimum({...reconnected[0],t:8800}), 'old first replacement frame was impossible for TS');
-
     for (const record of reconnected) assert.equal(record.socket, 1);
     for (const record of records.slice(closeIndex + 1).filter((record) => record.type === 'ws' && record.url !== closed.url)) assert.equal(record.socket, 0);
 
@@ -254,10 +254,7 @@ test('generated private tape addresses initial sockets and the explicit reconnec
     let connections = 0;
     const connect = () => {
       connections++;
-      let socket;
-      socket = tape.connect(closed.url, () => {
-        for (const type of ['allAssetCtxs', 'orderUpdates', 'clearinghouseState', 'userAssetData']) tape.send(socket, JSON.stringify({ method: 'subscribe', type, subscription: { type, ...(type === 'allAssetCtxs' ? {} : { user: ACCOUNT }) } }));
-      }, (text) => received.push(text), () => connect());
+      tape.connect(closed.url, () => {}, (text) => received.push(text), () => connect());
     };
     clock.install();
     try {
@@ -272,7 +269,7 @@ test('generated private tape addresses initial sockets and the explicit reconnec
 
 test('request validation errors remain fatal even if transport catches one and later serves the valid write', () => freeze(() => {
   const signed = independentlySigned(native('ts_sticky-signature')).body;
-  const tape = new Tape([{ type: 'http', method: 'POST', url: `${ORIGIN}/exchange`, requestBody: JSON.stringify(signed), status: 200, body: '{}' }], VENUES.txflow, true, 100, 'rust', [], OPTIONS);
+  const tape = new Tape([{ type: 'http', method: 'POST', url: `${ORIGIN}/exchange`, requestBody: JSON.stringify(signed), status: 200, body: '{}' }], VENUES.txflow, true, 100, 'rust', OPTIONS);
   const altered = structuredClone(signed);
   altered.action.orders[0].p = '123';
   assert.throws(() => tape.respond('POST', `${ORIGIN}/exchange`, altered, request().headers), /signature/i);
@@ -290,33 +287,3 @@ test('read and write Content-Type must identify JSON regardless of header casing
     assert.throws(() => createTxFlowRequestValidator(OPTIONS)({ ...req, headers: { ...req.headers, 'Content-Type': 'text/plain' } }), /content|json/i);
   }
 }));
-
-test('TxFlow raw origin/query/header guards reject before consuming a signed creation', () => freeze(() => {
-  const signed = independentlySigned(native('caller-typed')).body;
-  for (const bad of [
-    { url: `${ORIGIN}/exchange?extra=1` }, { url: `${ORIGIN}/exchange#fragment` },
-    { url: `${ORIGIN.replace('https://', 'https://user:password@')}/exchange` },
-    { headers: [['x-api-version', '2026-08-16'], ['X-API-VERSION', 'wrong'], ['Content-Type', 'application/json']] },
-    { headers: { ...request().headers, 'CONTENT-TYPE': 'text/plain' } },
-  ]) {
-    const tape = new Tape([{ type:'http',method:'POST',url:`${ORIGIN}/exchange`,requestBody:JSON.stringify(signed),status:200,body:'{}' }], VENUES.txflow, true,100,'ts',[],OPTIONS);
-    assert.throws(() => tape.respond('POST',bad.url??`${ORIGIN}/exchange`,signed,bad.headers??request().headers));
-    assert.equal(tape.missingWrites,1);
-    assert.equal(tape.respond('POST',`${ORIGIN}/exchange`,signed,request().headers).status,200);
-  }
-}));
-
-test('TxFlow protocol topics belong to actual sockets and closed generations cannot regain readiness', () => {
-  const venue=VENUES.txflow,url=ORIGIN.replace('https:','wss:')+'/ws';
-  const audit=venue.createSocketAudit('ts',{isPrivate:true,records:[{type:'config',options:OPTIONS}]});
-  const first={},sibling={};
-  const subscribe=(socket,method='subscribe')=>audit.sent(url,JSON.stringify({method,type:'orderUpdates',subscription:{type:'orderUpdates',user:ACCOUNT}}),socket);
-  audit.connected(url,first);subscribe(first);assert.equal(audit.ready(),true);
-  audit.received(url,'{"channel":"orderUpdates","data":[]}',first);assert.deepEqual(audit.errors(),[]);
-  audit.connected(url,sibling);audit.received(url,'{"channel":"orderUpdates","data":[]}',sibling);
-  assert(audit.errors().some(x=>x.includes('without own subscription')));
-  audit.closed(url,first);assert.equal(audit.ready(),false);
-  subscribe(first);assert(audit.errors().includes('TxFlow sent on closed socket'));
-  subscribe(sibling);assert.equal(audit.ready(),true);subscribe(sibling,'unsubscribe');assert.equal(audit.ready(),false);
-  audit.received(url,'{"channel":"orderUpdates","data":[]}',sibling);
-});

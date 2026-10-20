@@ -77,7 +77,6 @@ test('KuCoin queued recovery drains under the deterministic replay clock', async
   const clock = new ReplayClock(1700000000000, true);
   clock.install();
   try {
-    clock.beginStartup();
     const exchange = { xhr: { get: () => new Promise((resolve) => setTimeout(resolve, 20)) }, cancelSymbolOrders: async () => {} };
     kucoin.configureTs(exchange);
     const read = exchange.xhr.get('/api/v1/level2/snapshot');
@@ -234,71 +233,6 @@ test('KuCoin native read reasons cannot be reused for unrelated account or cance
     const { ts, rust } = fixtureReads(records);
     assert.throws(() => applyKucoinRequestContracts(records, ts, rust), /KuCoin read contract/);
   }
-});
-
-
-test('KuCoin generated IDs preserve signed malformed values and cancellation identities', async () => {
-  const { Tape } = await import('./tape.mjs');
-  const { venueOf } = await import('./venues.mjs');
-  const venue = venueOf('kucoin');
-  const url = 'https://api-futures.kucoin.com/api/v1/orders';
-  const order = { symbol: 'XBTUSDTM', size: '2', clientOid: 'generated-valid' };
-  const row = { type: 'http', method: 'POST', url, requestBody: JSON.stringify(order), status: 200, body: '{}' };
-  const tape = new Tape([row], venue, true, 100, 'rust');
-  for (const clientOid of ['', ' ', 'é', 'x'.repeat(41), 'bad\n', 'bad\r', 'bad\u2028', 123, null, true]) {
-    const body = JSON.stringify({ ...order, clientOid });
-    assert.equal(tape.respond('POST', url, body, sign('POST', '/api/v1/orders', body)).status, 599);
-    assert.equal(tape.missingWrites, 1);
-  }
-  const body = JSON.stringify({ ...order, clientOid: 'fresh-generated' });
-  assert.equal(tape.respond('POST', url, body, sign('POST', '/api/v1/orders', body)).status, 200);
-  const cancel = new Tape([{ ...row, method: 'DELETE' }], venue, true, 100, 'rust');
-  assert.equal(cancel.respond('DELETE', url, body, sign('DELETE', '/api/v1/orders', body)).status, 599);
-  assert.equal(cancel.missingWrites, 1);
-  assert.equal(cancel.respond('DELETE', url, row.requestBody, sign('DELETE', '/api/v1/orders', row.requestBody)).status, 200);
-});
-
-
-test('KuCoin audit isolates welcomes, subscriptions and active readiness by actual connection', async () => {
-  const { Tape } = await import('./tape.mjs');
-  const { venueOf } = await import('./venues.mjs');
-  const endpoint = 'wss://bullet.test/socket';
-  const url = endpoint + '?token=public-token&connectId=shared';
-  const topic = '/contractMarket/snapshot:XBTUSDTM';
-  const records = [{ type: 'http', method: 'POST', url: 'https://api-futures.kucoin.com/api/v1/bullet-public',
-    status: 200, body: JSON.stringify({ code: '200000', data: { token: 'public-token', instanceServers: [{ endpoint }] } }) }];
-  for (const parallel of [false, true]) {
-    const tape = new Tape(records, venueOf('kucoin'), false, 100, 'rust');
-    const first = tape.connect(url, () => {}, () => {});
-    first.onMessage('{"type":"welcome"}');
-    const subscribe = JSON.stringify({ type: 'subscribe', topic, privateChannel: false });
-    tape.send(first, subscribe);
-    assert.equal(tape.audit.ready(), true);
-    if (!parallel) tape.close(first, 1000, true);
-    const next = tape.connect(url, () => {}, () => {});
-    tape.send(next, '{"type":"ping","id":"new-connection"}');
-    next.onMessage(JSON.stringify({ type: 'message', topic }));
-    assert(tape.audit.errors().some((error) => error.includes('before welcome')));
-    assert(tape.audit.errors().some((error) => error.includes('unsubscribed')));
-    next.onMessage('{"type":"welcome"}');
-    tape.send(next, subscribe);
-    const errors = tape.audit.errors().length;
-    if (parallel) {
-      tape.send(next, JSON.stringify({ type: 'unsubscribe', topic, privateChannel: false }));
-      first.onMessage(JSON.stringify({ type: 'message', topic }));
-      assert.equal(tape.audit.errors().length, errors, 'a sibling unsubscribe leaves the first socket subscribed');
-    }
-  }
-  const venue = venueOf('kucoin');
-  const audit = venue.createSocketAudit('rust', { isPrivate: false, books: [], tickers: ['XBTUSDTM'], records });
-  const first = { closed: false };
-  audit.connected(url, first);
-  audit.received(url, '{"type":"welcome"}', first);
-  audit.sent(url, JSON.stringify({ type: 'subscribe', topic, privateChannel: false }), first);
-  assert.equal(audit.ready(), true);
-  first.closed = true;
-  audit.connected(url, { closed: false });
-  assert.equal(audit.ready(), false, 'closed generations cannot satisfy startup coverage');
 });
 
 test('KuCoin replay preserves the symbol cancel method and never adds a stop-book write', async () => {

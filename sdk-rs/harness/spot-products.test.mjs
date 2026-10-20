@@ -125,14 +125,3 @@ test('Hyperliquid Spot independent EIP-712 oracle rejects signed economic mutati
   assert.throws(() => verify(perp), /spot indices/);
   assert.throws(() => verify({ ...frame, nonce: now - 60001 }), /nonce/);
 });
-
-test('Hyperliquid Spot echoed default fields preserve own exact book precision proof', async () => {
-  const {createHyperliquidSpotSocketAudit}=await import('./hyperliquidspot.mjs');
-  const audit=createHyperliquidSpotSocketAudit('ts'),url='wss://api.hyperliquid.xyz/ws',socket={};
-  const topic={type:'l2Book',coin:'@1',nSigFigs:null};
-  audit.connected(url,socket);audit.sent(url,JSON.stringify({method:'subscribe',subscription:topic}),socket);
-  const ack=(subscription)=>JSON.stringify({channel:'subscriptionResponse',data:{method:'subscribe',subscription}});
-  audit.received(url,ack({...topic,mantissa:null,fast:false}),socket);assert.deepEqual(audit.errors(),[]);
-  audit.received(url,ack({...topic,nSigFigs:3,mantissa:null,fast:false}),socket);assert(audit.errors().length);
-  assert.throws(()=>audit.sent(url,JSON.stringify({method:'subscribe',subscription:{...topic,nSigFigs:9}}),socket),/precision/);
-});

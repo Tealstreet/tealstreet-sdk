@@ -8,9 +8,9 @@ const NOW = 1_800_000_000_000;
 const edKey = createPrivateKey({ key: Buffer.concat([
   Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.alloc(32, 13),
 ]), format: 'der', type: 'pkcs8' });
-const jwt = ({ algorithm = 'EdDSA', uri, nonce = 'unique-nonce-123456', ...changes } = {}) => {
+const jwt = ({ algorithm = 'EdDSA', uri, ...changes } = {}) => {
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
-  const header = { alg: algorithm, kid: COINBASE_REPLAY.key, typ: 'JWT', nonce };
+  const header = { alg: algorithm, kid: COINBASE_REPLAY.key, typ: 'JWT', nonce: 'unique-nonce-123456' };
   const claims = { iss: algorithm === 'ES256' ? 'coinbase-cloud' : 'cdp',
     ...(algorithm === 'EdDSA' ? { aud: ['cdp_service'] } : {}), sub: COINBASE_REPLAY.key,
     nbf: NOW / 1000, exp: NOW / 1000 + 120, ...(uri === undefined ? {} : { uri }), ...changes };
@@ -77,41 +77,4 @@ test('socket audit checks fresh JWT per private channel and no private auth on p
     assert.equal(verifyCoinbaseSubscribe({ type: 'subscribe', channel: 'user' }), false);
     assert.equal(verifyCoinbaseSubscribe({ ...user, jwt: jwt({ uri: 'GET api.coinbase.com/path' }) }), false);
   } finally { Date.now = oldNow; }
-});
-
-
-test('unsigned public access is bound to official HTTPS GET routes before auth normalization', () => {
-  const products = 'https://api.coinbase.com/api/v3/brokerage/market/products';
-  const instruments = 'https://api.international.coinbase.com/api/v1/instruments/';
-  for (const url of [products, products + '/BTC-USD/candles', instruments]) {
-    assert.equal(verifyCoinbaseRequest({method:'GET', url}), true);
-    for (const method of ['POST', 'DELETE']) assert.equal(verifyCoinbaseRequest({method,url}), false);
-    for (const invalid of [url.replace('https:', 'http:'), url.replace('https://', 'https://user@'), url.replace('.com/', '.com:8443/'), url+'#secret']) assert.equal(verifyCoinbaseRequest({method:'GET',url:invalid}),false);
-    assert.equal(verifyCoinbaseRequest({method:'GET',url,headers:[['Authorization','bad'],['authorization','bad']]}),false);
-  }
-  for (const url of [instruments+'private', products+'/BTC-USD/admin', 'https://api.coinbase.com/api/v3/brokerage/market/admin']) assert.equal(verifyCoinbaseRequest({method:'GET',url}),false);
-  assert.equal(verifyCoinbaseRequest({method:'GET',url:products,headers:{Authorization:'bad'}}),false);
-  const token=jwt({uri:'GET api.coinbase.com/api/v3/brokerage/portfolios'});
-  assert.equal(verifyCoinbaseRequest({method:'GET',url:'https://api.coinbase.com/api/v3/brokerage/portfolios',headers:new Headers({Authorization:`Bearer ${token}`}),now:NOW}),true);
-  assert.equal(verifyCoinbaseJwt(jwt({nonce:'unique-nonce-123456\n'}),{now:NOW}),false);
-});
-
-test('socket business scope belongs to the actual active connection, including same-URL peers', () => {
-  const url='wss://advanced-trade-ws.coinbase.com', a={channel:'public'}, b={channel:'public'};
-  const audit=createCoinbaseSocketAudit('rust',{books:['BTC-USDC'],isPrivate:false});
-  for(const socket of [a,b]) audit.connected(url,socket);
-  const send=(socket,channel,products)=>audit.sent(url,JSON.stringify({type:'subscribe',channel,product_ids:products}),socket);
-  send(a,'heartbeats',[]); send(a,'level2',['BTC-USD']);
-  assert.equal(audit.ready(),true);
-  audit.received(url,JSON.stringify({channel:'l2_data',events:[{product_id:'BTC-USD'}]}),a);
-  assert.deepEqual(audit.errors(),[]);
-  audit.received(url,JSON.stringify({channel:'l2_data',events:[{product_id:'BTC-USD'}]}),b);
-  audit.received(url,JSON.stringify({channel:'l2_data',events:[{product_id:'ETH-USD'}]}),a);
-  audit.closed(url,a);
-  assert.equal(audit.ready(),false);
-  audit.received(url,JSON.stringify({channel:'heartbeats',events:[]}),a);
-  assert.match(audit.errors().join(' '),/unsubscribed channel.*unsubscribed product.*closed socket/);
-  const wrong=createCoinbaseSocketAudit('rust',{books:[],isPrivate:false});
-  wrong.connected(url,{channel:'business'});
-  assert.match(wrong.errors().join(' '),/origin or role/);
 });

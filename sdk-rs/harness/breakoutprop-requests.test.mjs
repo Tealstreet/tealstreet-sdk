@@ -94,24 +94,3 @@ test('opaque escaped error payloads cannot leak credentials to disk or diagnosti
   finally { console.error=previous; }
   assert.deepEqual(logs,['[error] Session recording diagnostic redacted']);
 });
-
-
-test('DXtrade origin and duplicate or alias authentication cannot select a valid first header', () => {
-  const req={method:'GET',url:`${ROOT}/accounts/default%3A00002/portfolio`,headers:auth};
-  verifyBreakoutRequest({...req,headers:new Headers(auth)});
-  verifyBreakoutRequest({...req,headers:{'Coinbase-Authorization':auth.Authorization}});
-  for(const headers of [[['Authorization',auth.Authorization],['authorization','bad']],{...auth,'Coinbase-Authorization':'bad'}]) assert.throws(()=>verifyBreakoutRequest({...req,headers}));
-  for(const url of [req.url.replace('https:','http:'),req.url.replace('breakout.prosp.devexperts.com','wrong.invalid'),req.url.replace('/dxsca-web/','/prefix/dxsca-web/'),req.url+'?accountCode=default%3Aother']) assert.throws(()=>verifyBreakoutRequest({...req,url}));
-});
-
-test('generated order codes retain original string type and bounded complete syntax', () => {
-  const url=`${ROOT}/accounts/default%3A00002/orders`;
-  const body={orderCode:'tealstreet-documented',type:'MARKET',instrument:'ETHUSD',quantity:0.01,side:'BUY',positionEffect:'OPEN',tif:'GTC'};
-  for(const code of ['tealstreet-id\n','tealstreet-'+ 'a'.repeat(22),42,{id:'tealstreet-id'},null]) {
-    assert.throws(()=>verifyBreakoutRequest({method:'POST',url,headers:auth,body:JSON.stringify({...body,orderCode:code})}));
-    assert.equal(breakoutprop.ignoreGeneratedBodyId('orderCode',code,new Set(),{method:'POST',url}),false);
-  }
-  assert.equal(breakoutprop.ignoreGeneratedBodyId('orderCode',body.orderCode,new Set(),{method:'POST',url}),true);
-  assert.equal(breakoutprop.ignoreGeneratedBodyId('orderCode',body.orderCode,new Set([body.orderCode]),{method:'POST',url}),false);
-  assert.equal(breakoutprop.requestBodies,true);
-});

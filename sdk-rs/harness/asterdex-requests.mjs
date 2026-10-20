@@ -131,19 +131,16 @@ export const createAsterRequestValidator = (options = {}) => {
 export const asterSocketAudit = (_impl, { isPrivate, books }) => {
   const states = new Map();
   const failures = [];
-  const state = (url, socket) => {
+  const state = (url) => {
     const parsed = new URL(url);
-    // The real connection object isolates parallel sockets and reconnects.
-    const key = socket ?? parsed.origin + parsed.pathname;
+    const key = parsed.origin + parsed.pathname;
     if (!states.has(key))
-      states.set(key, { closed: false, topics: new Set(), ping: false, private: parsed.pathname.startsWith('/ws/') });
+      states.set(key, { topics: new Set(), ping: false, private: parsed.pathname.startsWith('/ws/') });
     return states.get(key);
   };
   return {
-    connected(url, socket) { state(url, socket); },
-    closed(url, socket) { state(url, socket).closed = true; },
-    sent(url, text, socket) {
-      const current = state(url, socket);
+    sent(url, text) {
+      const current = state(url);
       const message = JSON.parse(text);
       if (message.method === 'LIST_SUBSCRIPTIONS') {
         if (message.id !== (current.private ? 42 : -1)) failures.push('Aster ping has the wrong reserved identity');
@@ -157,8 +154,8 @@ export const asterSocketAudit = (_impl, { isPrivate, books }) => {
         }
       } else failures.push('Unexpected Aster outbound socket method');
     },
-    received(url, text, socket) {
-      const current = state(url, socket);
+    received(url, text) {
+      const current = state(url);
       const message = JSON.parse(text);
       if (message.stream && !current.topics.has(message.stream))
         failures.push(`Aster data arrived without subscription: ${message.stream}`);
@@ -168,7 +165,7 @@ export const asterSocketAudit = (_impl, { isPrivate, books }) => {
       return (
         [...states.values()].some(
           (s) =>
-            !s.closed && !s.private &&
+            !s.private &&
             s.ping &&
             [
               '!ticker@arr',
@@ -176,7 +173,7 @@ export const asterSocketAudit = (_impl, { isPrivate, books }) => {
               ...books.map((symbol) => `${symbol.toLowerCase()}@depth20@100ms`),
             ].every((topic) => s.topics.has(topic)),
         ) &&
-        (!isPrivate || [...states.values()].some((s) => !s.closed && s.private && s.ping))
+        (!isPrivate || [...states.values()].some((s) => s.private && s.ping))
       );
     },
     errors() {

@@ -4,12 +4,16 @@ import { isWriteRequest } from './requests.mjs';
 export const replayTransportReady = (venue, openSockets, loaded = true) =>
   loaded && (venue.polling === true || openSockets > 0);
 export const deterministicReplay = (venue, isPrivate) => venue.polling === true || venue.virtualPrivateClock === true || !isPrivate;
+// Public/polling startup can finish at a different wall time when protocol
+// auditing is enabled. Keep its pending poll deadlines anchored to tape epoch,
+// just like an explicitly virtual private replay, instead of carrying that
+// startup wall-time jitter into the measured transport workload.
+export const frozenReplayStartup = (venue, isPrivate) => !isPrivate || venue.polling === true || venue.virtualPrivateClock === true;
 export const recordingReady = (venue, { frames, httpResponses, loaded, books, requestedBooks }) =>
   (venue.polling === true ? httpResponses > 0 && loaded : frames > 0) && books >= requestedBooks;
 
-// Keep pre-ready retries ordered and unstamped; their recorded completion time
-// is still honored on the absolute public clock. A future availability stamp
-// would make the successful startup retry ineligible before its request.
+// Replay starts its clock after startup. Keep pre-ready retries in their ordered,
+// unstamped sequence; stamping a later successful retry would deadlock startup.
 // Later snapshots retain their actual response time relative to tape epoch; the
 // final-anchor fence waits for a natural poll if startup shifted its phase.
 export const createRecordingTimeline = (venue) => (record, ready = false) => {

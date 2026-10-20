@@ -4,7 +4,6 @@ const privateTopics = ['/contractMarket/tradeOrders', '/contractMarket/advancedO
 const pendingReads = new WeakMap();
 export const kucoin = {
   rust: 'kucoin',
-  initialBookSnapshots: true,
   ts: { module: '../../packages/safe-cex/src/exchanges/kucoin/kucoin.exchange.ts', className: 'KucoinExchange', name: 'kucoin' },
   configureTs(exchange) {
     // Track before the 3 RPS queue: accelerated frames can finish while cached
@@ -35,13 +34,7 @@ export const kucoin = {
   startupMessage: (record) => { try { return JSON.parse(record.text).type === 'welcome'; } catch { return false; } },
   volatileQueryFields: ['connectId'],
   matchRequestBody: true,
-  requestOptions: (method, url) => ({
-    // connectId belongs only to the socket URL; every REST query field is economic.
-    volatileQueryFields: [],
-    generatedBodyId: (key, value) => method === 'POST' && ['/api/v1/orders', '/api/v1/st-orders'].includes(url.pathname)
-      && key === 'clientOid' && typeof value === 'string' && value.length > 0 && value.length <= 40
-      && !/[^A-Za-z0-9_-]/.test(value),
-  }),
+  generatedBodyId: (key, value) => key === 'clientOid' && typeof value === 'string',
   isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.includes('/bullet-'),
   isPrivateRecord: (record) => {
     if (record.type !== 'ws') return false;
@@ -74,21 +67,19 @@ export const kucoin = {
     }
     const connections = new Map();
     const failures = [];
-    const state = (url, socket) => {
-      const identity = socket ?? url;
-      if (!connections.has(identity)) {
+    const state = (url) => {
+      if (!connections.has(url)) {
         const parsed = new URL(url), token = tokens.get(parsed.searchParams.get('token'));
         if (!token || !url.startsWith(token.endpoint + '?')) failures.push('socket did not use bullet token and endpoint');
         if (!parsed.searchParams.get('connectId')) failures.push('socket missing connectId');
-        connections.set(identity, { url, socket, private: token?.private ?? false, topics: new Set(), pings: new Set(), welcomed: false });
+        connections.set(url, { private: token?.private ?? false, topics: new Set(), pings: new Set(), welcomed: false });
       }
-      return connections.get(identity);
+      return connections.get(url);
     };
-    const has = (topic) => [...connections.values()].some((c) => !c.socket?.closed && c.topics.has(topic));
+    const has = (topic) => [...connections.values()].some((c) => c.topics.has(topic));
     return {
-      connected(url, socket) { state(url, socket); },
-      sent(url, text, socket) {
-        const s = state(url, socket), m = JSON.parse(text);
+      sent(url, text) {
+        const s = state(url), m = JSON.parse(text);
         if (impl === 'rust' && ['subscribe', 'ping'].includes(m.type) && !s.welcomed) failures.push('KuCoin sent before welcome');
         if (m.type === 'login' || m.type === 'auth') failures.push('unexpected post-token authentication');
         if (m.type === 'ping') { if (m.id === undefined) failures.push('ping missing id'); s.pings.add(String(m.id)); }
@@ -101,8 +92,8 @@ export const kucoin = {
           if (s.topics.size > 400) failures.push('socket exceeds 400 subscriptions');
         }
       },
-      received(url, text, socket) {
-        const s = state(url, socket), m = JSON.parse(text);
+      received(url, text) {
+        const s = state(url), m = JSON.parse(text);
         if (m.type === 'welcome') s.welcomed = true;
         if (m.type === 'pong' && m.id !== undefined) s.pings.delete(String(m.id));
         if (m.type === 'message' && m.topic && !s.topics.has(m.topic)) failures.push(`unsubscribed KuCoin topic ${m.topic}`);

@@ -177,8 +177,6 @@ const stableInfo = (info) => {
 };
 export const lighterRequestBody = (body) => {
   if (!body || (!('tx_info' in body) && !('tx_infos' in body))) return body;
-  const fields = 'tx_infos' in body ? ['tx_types', 'tx_infos'] : ['tx_type', 'tx_info'];
-  if (Object.keys(body).some((field) => !fields.includes(field))) return body;
   const canonical = (type, text) => ({type,info:stableInfo(parseRequestJson(text))});
   if (body.tx_infos) return JSON.parse(body.tx_types).map((type,index) => canonical(type,JSON.parse(body.tx_infos)[index]));
   return canonical(Number(body.tx_type),body.tx_info);

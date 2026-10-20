@@ -38,7 +38,8 @@ const context = (price) => ({
   markPx: String(price), oraclePx: String(price), lastPrice: String(price), midPx: String(price),
   prevDayPx: String(price), funding: '0.01', openInterest: '2', dayNtlVlm: '1000', dayBaseVlm: '10', nextFundingTime: EPOCH + 3_600_000,
 });
-for (const [index, price] of [[1, 100], [2, 200]]) {
+const tickerSeeds = [[1, 100], [2, 200]];
+for (const [index, price] of tickerSeeds) {
   info('activeAssetCtx', { coin: String(index) }, {
     instrumentId: index, lastPrice: String(price), prevDayPx: String(price), markPx: String(price), oraclePx: String(price),
     openInterest: '2', dayNtlVlm: '1000', coinVlm: '10', nodeCtx: context(price),
@@ -58,10 +59,14 @@ const state = () => ({
 });
 // Polling always sees the latest command-owned native state. The startup-window
 // limit500 reconciliation read is distinct from indexed limit2000 query reads.
+// Both production consumers pace each initial activeAssetCtx seed by 25 ms,
+// including the last seed, before recording the account's execution window.
+// This is an input-declared startup schedule, never a replay-output rewrite.
+const accountStartupAt = EPOCH + tickerSeeds.length * 25;
 const snapshots = (extra = stage()) => {
   info('clearinghouseState', { user: USER, accountType: 'perp' }, state(), extra);
   info('frontendOpenOrders', { user: USER, offset: 0, limit: 500 }, orders, extra);
-  info('userFills', { user: USER, accountType: ['perp'], offset: 0, limit: 500, startTimeMs: EPOCH }, { data: executions, hasMore: false }, extra);
+  info('userFills', { user: USER, accountType: ['perp'], offset: 0, limit: 500, startTimeMs: accountStartupAt }, { data: executions, hasMore: false }, extra);
   info('activeAssetData', { user: USER, coin: '1' }, btcSetting, extra);
   info('activeAssetData', { user: USER, coin: '2' }, ethSetting, extra);
 };
@@ -138,14 +143,11 @@ command(6200, 'fetchIncome', { symbol: 'ETH-USDC', incomeType: 'FUNDING_FEE', ..
 command(6600, 'fetchIncome', { symbol: 'ETH-USDC', incomeType: 'COMMISSION', ...queryRange }); queryRead('userFills', [execution], filters); snapshots();
 
 records.push({ type: 'close', t: 7500, url: NODE, socket: 0, code: 1006 });
-// TS first reconnect waits max(2000ms,1000ms+random[0,2000));
-// allow the full3000ms bound, then node subscriptions pace at150ms.
-// Keep every event after both adapters have sent its own required subscription.
-update(11000, orders[0], 'Open', 1); ws(11100, 'clearinghouseState', state(), NODE, 1);
-ws(11200, 'userAssetData', { user: USER, coins: [btcSetting, ethSetting] }, NODE, 1);
-update(11300, marketOrder, 'Filled', 1);
-records.push({ type: 'ws', t: 11400, url: NODE, socket: 1, text: '{"method":"PONG"}' });
-ws(11500, 'pong', null, API);
+update(8800, orders[0], 'Open', 1); ws(8900, 'clearinghouseState', state(), NODE, 1);
+ws(9000, 'userAssetData', { user: USER, coins: [btcSetting, ethSetting] }, NODE, 1);
+update(9100, marketOrder, 'Filled', 1);
+records.push({ type: 'ws', t: 9200, url: NODE, socket: 1, text: '{"method":"PONG"}' });
+ws(9300, 'pong', null, API);
 mkdirSync(dirname(values.out), { recursive: true });
 writeFileSync(values.out, records.map((record) => JSON.stringify(record)).join('\n') + '\n');
 console.log(JSON.stringify({ out: values.out, events: records.filter((r) => r.type === 'ws').length, commands, writes: records.filter((r) => r.type === 'http' && r.url.endsWith('/exchange')).length, methods: ['order', 'cancel', 'modify2', 'updateLeverage', 'updateMarginMode', 'updatePositionMode'], expectedExecutions: 1 }));

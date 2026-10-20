@@ -17,7 +17,7 @@ try {
   rmSync(directory, { recursive: true, force: true });
 }
 const id = '2334151155877155281';
-const fill = (amount, price) => ({ id, symbol: 'E-BTC-USDT', side: 'buy', amount, price });
+const fill = (amount, price) => ({ id, symbol: 'E-BTC-USDT', side: 'buy', amount, price, executionId: null, fee: null, timestamp: null });
 const legacy = () => [fill(0.001, 100), fill(0.002, 130), fill(0.002, 170)];
 // Four observed one-contract executions. z=4 was never reported; z=2 is late.
 const native = () => [fill(0.001, 100), fill(0.001, 130), fill(0.001, 120), fill(0.001, 170)];

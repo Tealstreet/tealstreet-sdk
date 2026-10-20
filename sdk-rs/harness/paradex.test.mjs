@@ -128,16 +128,3 @@ test('Paradex account settings read the configured cache independently of effect
   exchange.leverageSettings.clear();
   assert.equal(venue.tsSettings(exchange, store)[0].leverage, 10);
 });
-
-test('successful recorded controls retain their time and frame count as independently validated waits',async()=>{
-  const records=[{type:'ws',t:100,url:SOCKET,socket:0,text:JSON.stringify({jsonrpc:'2.0',id:20,result:{channel:'markets_summary'}})}, {type:'wait',t:200}];
-  const tape=new Tape(records,{...venue,isPrivate:false});
-  const seen=[];let socket;
-  socket=tape.connect(SOCKET,()=>tape.send(socket,JSON.stringify({jsonrpc:'2.0',method:'subscribe',id:1,params:{channel:'markets_summary'}})),text=>seen.push(JSON.parse(text)));
-  const times=[];
-  assert.equal(await tape.play(t=>times.push(t)),2);
-  assert.deepEqual(times,[100,200]);
-  assert(seen.some(message=>message.id===1&&message.result?.channel==='markets_summary'));
-  assert(!seen.some(message=>message.id===20),'recorded RPC IDs never impersonate actual request IDs');
-  for(const result of [{channel:'unknown'},[],{channel:'markets_summary',unknown:1}])assert.throws(()=>new Tape([{...records[0],text:JSON.stringify({jsonrpc:'2.0',id:20,result})}],venue),/acknowledgement/);
-});

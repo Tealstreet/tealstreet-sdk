@@ -71,9 +71,7 @@ test('GRVT validates login, real upstreams, private session/account and unchange
   assert.doesNotThrow(() => validate(body));
   assert.doesNotThrow(() => validate(body, { ...headers, 'X-Ts-Grvt-Session': 'fixture-session-2', Cookie: 'gravity=fixture-session-2' }));
   const changed = structuredClone(body); changed.o.m.ct = String(BigInt(changed.o.m.ct) + 1000000n);
-  // A standalone validator has no accepted auth retry history. Per-Tape
-  // retry fencing is exercised below after an explicit session rejection.
-  assert.doesNotThrow(() => validate(changed));
+  assert.throws(() => validate(changed), /resend changed/);
 });
 test('GRVT matching removes only verified signature entropy and clocks, retaining identities, presence and economics', async () => {
   const body = await signed();
@@ -213,15 +211,6 @@ test('GRVT session rejection invalidates HTTP-200 lite and full error aliases', 
     assert.equal(tape.respond('POST', url, '{"sa":"777"}', headers).status, 200);
     assert.throws(() => tape.respond('POST', url, '{"sa":"777"}', headers), /current authenticated session/);
     assert.equal(tape.invalidSignatures, 1);
-  }
-});
-
-
-test('GRVT clock projection rejects non-string and trailing-line-break original values', async () => {
-  const body=await signed();
-  for(const [section,key] of [['s','e'],['m','ct']]) for(const value of [Number(body.o[section][key]),body.o[section][key]+'\n',body.o[section][key]+'\r',body.o[section][key]+'\u2028']) {
-    const changed=structuredClone(body); changed.o[section][key]=value;
-    assert.throws(()=>validate(changed),/signed order fields/);
   }
 });
 

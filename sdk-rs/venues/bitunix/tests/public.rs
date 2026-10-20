@@ -164,7 +164,7 @@ fn candle_reads_use_quote_volume_and_seconds() {
         Event::Command(Command::FetchCandles {
             command: 9,
             symbol: "BTCUSDT".into(),
-            interval: "1m".into(),
+            interval: safe_cex_engine::model::Interval::M1,
             limit: Some(1),
             from_ms: Some(0.0),
             to_ms: Some(1000.0),
@@ -382,13 +382,16 @@ fn public_envelopes_accept_arbitrary_field_order_and_reject_malformed_payloads()
 fn candle_requests_reject_malformed_intervals_and_compute_supported_durations() {
     let (mut e, _) = ready();
     e.drain_actions().for_each(drop);
-    for interval in ["", "é", "1é", "1", "0m", "NaNh", "1m&limit=1"] {
+    // Malformed text is rejected by the engine's typed Interval; Bitunix still
+    // refuses valid intervals its kline API does not offer.
+    use safe_cex_engine::model::Interval;
+    for interval in [Interval::S1, Interval::H3, Interval::Mo1] {
         e.handle(
             100_000_000.0,
             Event::Command(Command::FetchCandles {
                 command: 90,
                 symbol: "BTCUSDT".into(),
-                interval: interval.into(),
+                interval,
                 limit: Some(2),
                 from_ms: None,
                 to_ms: Some(100_000_000.0),
@@ -413,7 +416,7 @@ fn candle_requests_reject_malformed_intervals_and_compute_supported_durations() 
             Event::Command(Command::FetchCandles {
                 command: 91,
                 symbol: "BTCUSDT".into(),
-                interval: interval.into(),
+                interval: Interval::parse(interval).unwrap(),
                 limit: Some(2),
                 from_ms: None,
                 to_ms: Some(100_000_000.0),

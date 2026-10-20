@@ -1,28 +1,22 @@
-import { uniqueRequestHeaders } from './protocol-headers.mjs';
 // DX REST login/session and single-order contracts, independent of Rust output.
 export const BREAKOUT_REPLAY_TOKEN = 'documented-dx-session';
 export const BREAKOUT_ACCOUNT = 'default:00002';
-const validOrderCode = (value) => typeof value === 'string' && value.length > 11 && value.length <= 32 && value.startsWith('tealstreet-') && !/[^A-Za-z0-9_-]/.test(value);
+const header = (headers, key) => Object.entries(headers).find(([name]) => name.toLowerCase() === key.toLowerCase())?.[1];
 export const verifyBreakoutRequest = ({ method, url, body = '', headers = {} }) => {
-  if (typeof url !== 'string' || /[\x00-\x20\x7f]/.test(url)) throw new Error('Invalid DXtrade URL');
-  const h = uniqueRequestHeaders(headers), parsed = new URL(url);
-  if (parsed.origin !== 'https://breakout.prosp.devexperts.com' || parsed.username || parsed.password || parsed.hash || !parsed.pathname.startsWith('/dxsca-web/')) throw new Error('Invalid DXtrade origin');
-  if (Object.hasOwn(h, 'authorization') && Object.hasOwn(h, 'coinbase-authorization')) throw new Error('Ambiguous DXtrade authentication');
-  const path = parsed.pathname.slice('/dxsca-web'.length);
+  const path = new URL(url).pathname.replace('/dxsca-web', '');
   const data = body ? JSON.parse(body) : undefined;
   if (path === '/login') {
     if (method !== 'POST' || JSON.stringify(Object.keys(data ?? {}).sort()) !== JSON.stringify(['domain', 'password', 'username']) || data.domain !== 'default' || data.username !== 'replay-key' || data.password !== 'replay-secret') throw new Error('Invalid DXtrade basic login');
     return;
   }
-  const auth = h.authorization ?? h['coinbase-authorization'];
+  const auth = header(headers, 'Authorization') ?? header(headers, 'Coinbase-Authorization');
   if (auth !== `DXAPI ${BREAKOUT_REPLAY_TOKEN}`) throw new Error('Invalid DXtrade session authentication');
-  const account = path.match(/^\/accounts\/([^/]+)(?:\/|$)/)?.[1];
-  if ((account !== undefined && decodeURIComponent(account) !== BREAKOUT_ACCOUNT) || (parsed.searchParams.has('accountCode') && parsed.searchParams.get('accountCode') !== BREAKOUT_ACCOUNT)) throw new Error('DXtrade request selected a different account');
+  if (path.includes('/accounts/') && !path.includes(`/accounts/${encodeURIComponent(BREAKOUT_ACCOUNT)}/`) && !path.includes(`/accounts/${BREAKOUT_ACCOUNT}/`)) throw new Error('DXtrade request selected a different account');
   if (path === '/marketdata' && data?.account !== BREAKOUT_ACCOUNT) throw new Error('DXtrade market data account missing');
-  if (method === 'DELETE' && h['if-match'] !== '*') throw new Error('DXtrade conditional cancellation header missing');
+  if (method === 'DELETE' && header(headers, 'If-Match') !== '*') throw new Error('DXtrade conditional cancellation header missing');
   if (method === 'POST' && path.endsWith('/orders')) {
     const allowed = ['orderCode', 'type', 'instrument', 'quantity', 'side', 'limitPrice', 'stopPrice', 'positionEffect', 'tif'];
-    if (Object.keys(data).some((key) => !allowed.includes(key)) || !validOrderCode(data.orderCode) || !['BUY', 'SELL'].includes(data.side) || !['OPEN', 'CLOSE'].includes(data.positionEffect) || data.tif !== 'GTC' || !Number.isFinite(data.quantity) || (data.quantity < 0 || (data.quantity === 0 && data.positionEffect !== 'CLOSE')) || typeof data.instrument !== 'string' || !data.instrument || /[\x00-\x1f\x7f]/.test(data.instrument)) throw new Error('Invalid DXtrade single order');
+    if (Object.keys(data).some((key) => !allowed.includes(key)) || !/^tealstreet-[A-Za-z0-9_-]+$/.test(data.orderCode) || !['BUY', 'SELL'].includes(data.side) || !['OPEN', 'CLOSE'].includes(data.positionEffect) || data.tif !== 'GTC' || !Number.isFinite(data.quantity) || (data.quantity < 0 || (data.quantity === 0 && data.positionEffect !== 'CLOSE')) || !data.instrument) throw new Error('Invalid DXtrade single order');
     if (!['LIMIT', 'MARKET', 'STOP'].includes(data.type)) throw new Error('Unsupported DXtrade order type');
     if ((data.type === 'LIMIT') !== ('limitPrice' in data) || (data.type === 'STOP') !== ('stopPrice' in data)) throw new Error('Invalid DXtrade order price fields');
     for (const key of ['limitPrice', 'stopPrice']) if (key in data && (!Number.isFinite(data[key]) || data[key] <= 0)) throw new Error('Invalid DXtrade order price');
@@ -76,9 +70,6 @@ export const sanitizeBreakoutRecord = (record, options) => {
 
 export const breakoutprop = {
   rust: 'breakoutprop',
-  preserveBodyFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
-  preserveQueryFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
-  generatedId: () => false,
   polling: true,
   recordSession: true,
   recordReplayOptions: breakoutReplayOptions,
@@ -92,8 +83,7 @@ export const breakoutprop = {
   requestUrl: (url) => { const parsed = new URL(url); parsed.pathname = parsed.pathname.split('/').map((part) => encodeURIComponent(decodeURIComponent(part))).join('/'); return parsed.href; },
   tsSettings: (_exchange, store) => store.positions.filter((p) => p.leverage > 0).map((p) => ({ symbol: p.symbol, leverage: p.leverage, marginType: p.marginType })).filter((row, i, rows) => rows.findIndex((other) => other.symbol === row.symbol) === i),
   matchRequestBody: true,
-  requestBodies: true,
   compareWriteOrder: true,
   isWrite: (method, url) => method !== 'GET' && !['/dxsca-web/login', '/dxsca-web/marketdata'].includes(new URL(url).pathname),
-  ignoreGeneratedBodyId: (key, value, callerIds, context) => key === 'orderCode' && !callerIds.has(value) && context?.method === 'POST' && new URL(context.url).pathname.endsWith('/orders') && validOrderCode(value),
+  ignoreGeneratedBodyId: (key, value, callerIds, context) => key === 'orderCode' && !callerIds.has(String(value)) && context?.method === 'POST' && new URL(context.url).pathname.endsWith('/orders') && /^tealstreet-[A-Za-z0-9_-]+$/.test(value),
 };

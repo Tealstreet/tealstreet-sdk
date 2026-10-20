@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 
-import { Frame, NONE, SECTION, TICKER_FIELDS, TickerState, orderEnums, positionEnums } from './wire.mjs';
+import { Frame, NONE, SECTION, TICKER_FIELDS, TickerState, marketQuantityUnits, orderEnums, positionEnums } from './wire.mjs';
 
 const stringFrame = (strings) => {
   const encoder = new TextEncoder();
@@ -836,4 +836,39 @@ test('numeric-only frames remain readable without STRINGS while present tables v
   for (const reference of [1, -1, NaN, undefined]) {
     assert.throws(() => strings.string(reference), /invalid string reference/);
   }
+});
+
+test('capabilities decode the words engine/src/capabilities.rs pins', () => {
+  const capabilities = (flags, enums) =>
+    numericFrame([{ kind: SECTION.CAPABILITIES, length: 8, write: (view, at) => {
+      view.setUint32(at, flags, true);
+      view.setUint32(at + 4, enums, true);
+    } }]).capabilities();
+  assert.deepEqual(capabilities(1 | (1 << 10), 2 | (1 << 4) | (2 << 8) | (3 << 12) | (4 << 16)), {
+    clientOrderLookup: true,
+    fillHistory: false,
+    orderHistory: false,
+    incomeHistory: false,
+    fillsByOrderId: false,
+    accountLeverage: false,
+    accountMarginType: false,
+    cancelWithSymbols: false,
+    amendWithSymbol: false,
+    orderBookQuery: false,
+    options: true,
+    accountTier: false,
+    account: 'afterLoad',
+    cancelAll: 'eachPlacedSymbol',
+    leverageQuery: 'onMetadata',
+    maxLeverage: 'unsupported',
+    quantityUnits: 'inverseContractSized',
+  });
+  assert.throws(() => capabilities(0, 9), /unknown capability account/);
+  assert.equal(numericFrame([]).capabilities(), undefined);
+});
+
+test('market flags carry quantity units in bits 8..12', () => {
+  assert.equal(marketQuantityUnits(1), 'base');
+  assert.equal(marketQuantityUnits(1 | (3 << 8)), 'contractCount');
+  assert.throws(() => marketQuantityUnits(9 << 8), /unknown market quantity units/);
 });

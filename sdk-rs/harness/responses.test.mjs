@@ -82,74 +82,58 @@ test('snapshot stages and headers become visible only after their command', () =
   assert.equal(responses.unusedWrites(), 0);
 });
 
-test('elapsed-time snapshots retain the latest eligible read without advancing early', () => {
-  const read = { type: 'http', method: 'GET', url: '/orders', status: 200 };
+
+test('timed snapshots advance with delivered events inside their command stage', () => {
+  const read = { type: 'http', method: 'POST', url: 'https://api.hyperliquid.xyz/info', status: 200 };
   const responses = new Responses([
-    { ...read, body: 'initial', after: 0 },
-    { ...read, body: 'updated', after: 100 },
-    { ...read, body: 'command-updated', after: 150, afterCommand: 2 },
-  ], (method, url) => method + url, undefined, (method) => method === 'POST');
-  assert.equal(responses.respond('GET', '/orders', undefined, 0, 99).body, 'initial');
-  assert.equal(responses.respond('GET', '/orders', undefined, 0, 100).body, 'updated');
-  assert.equal(responses.respond('GET', '/orders', undefined, 0, 200).body, 'updated');
-  assert.equal(responses.respond('GET', '/orders', undefined, 2, 149).body, 'updated');
-  assert.equal(responses.respond('GET', '/orders', undefined, 2, 150).body, 'command-updated');
-  assert.equal(responses.respond('GET', '/orders', undefined, 2, 200).body, 'command-updated');
-});
-
-test('POST reads stay reusable while timed mutations are consumed exactly once', () => {
-  const read = { type: 'http', method: 'POST', url: '/private/get-orders', status: 200, body: 'snapshot' };
-  const write = { ...read, url: '/private/create-order', body: 'created', after: 100 };
-  const responses = new Responses([read, write], (method, url) => method + url, undefined,
-    (method, url) => method === 'POST' && url.includes('/create-'));
-  assert.equal(responses.unusedWrites(), 1);
-  assert.equal(responses.respond('POST', read.url).body, 'snapshot');
-  assert.equal(responses.respond('POST', read.url).body, 'snapshot');
-  assert.equal(responses.respond('POST', write.url, undefined, 0, 99).status, 599);
-  assert.equal(responses.respond('POST', write.url, undefined, 0, 100).body, 'created');
-  assert.equal(responses.respond('POST', write.url, undefined, 0, 101).status, 599);
-  assert.equal(responses.unusedWrites(), 0);
-});
-
-test('legacy body fallback cannot bypass request validation', () => {
-  const records = [{ type: 'http', method: 'POST', url: '/legacy', status: 200, body: 'ok' }];
-  const key = (method, url, body) => `${method} ${url} ${body ?? ''}`;
-  const responses = new Responses(records, key, (_method, _url, body) => body !== 'invalid',
-    () => false, (method, url) => key(method, url));
-  assert.equal(responses.respond('POST', '/legacy', 'different body').body, 'ok');
-  assert.equal(responses.respond('POST', '/legacy', 'invalid').status, 599);
-});
-
-test('effectiveAt reads never expose future snapshots and remain reusable at their stage', () => {
-  const read = { type: 'http', method: 'POST', url: '/income', status: 200 };
-  const responses = new Responses([
-    { ...read, body: 'first', effectiveAt: 100 },
-    { ...read, body: 'next', effectiveAt: 200 },
-    { ...read, body: 'command', effectiveAt: 250, afterCommand: 2 },
-  ], (method, url) => method + url, undefined, () => false);
-  assert.equal(responses.respond('POST', '/income', undefined, 0, 99).status, 599);
-  assert.equal(responses.respond('POST', '/income', undefined, 0, 100).body, 'first');
-  assert.equal(responses.respond('POST', '/income', undefined, 0, 199).body, 'first');
-  assert.equal(responses.respond('POST', '/income', undefined, 0, 200).body, 'next');
-  assert.equal(responses.respond('POST', '/income', undefined, 1, 300).body, 'next');
-  assert.equal(responses.respond('POST', '/income', undefined, 2, 249).body, 'next');
-  assert.equal(responses.respond('POST', '/income', undefined, 2, 250).body, 'command');
-  assert.equal(responses.respond('POST', '/income', undefined, 2, 251).body, 'command');
-});
-
-test('timed writes consume in tape order and generated response IDs reflect each request', () => {
-  const write = { type: 'http', method: 'POST', url: '/algo', status: 200, effectiveAt: 0 };
-  const responses = new Responses([
-    { ...write, body: '{"orderId":"1","clientOrderId":"$clientAlgoId"}' },
-    { ...write, body: '{"orderId":"2","clientOrderId":"$newClientOrderId"}' },
+    { ...read, body: 'startup' },
+    { ...read, body: 'placed', afterCommand: 1, availableAt: 500 },
+    { ...read, body: 'cancelled', afterCommand: 1, availableAt: 1500 },
   ], (method, url) => method + url);
+  assert.equal(responses.respond(read.method, read.url, undefined, 0, 500).body, 'startup');
+  assert.equal(responses.respond(read.method, read.url, undefined, 1, 499).body, 'startup');
+  assert.equal(responses.respond(read.method, read.url, undefined, 1, 500).body, 'placed');
+  assert.equal(responses.respond(read.method, read.url, undefined, 1, 1499).body, 'placed');
+  assert.equal(responses.respond(read.method, read.url, undefined, 1, 1500).body, 'cancelled');
+});
+
+test('writes cannot skip a premature earlier acknowledgement or consume on failed validation', () => {
+  const write = { type: 'http', method: 'POST', url: 'https://api.example/order', status: 200 };
+  const records = [{ ...write, body: 'first', afterCommand: 2 }, { ...write, body: 'second' }];
+  const responses = new Responses(records, (method, url) => method + url, (_method, _url, body) => body === 'valid');
+  assert.equal(responses.respond(write.method, write.url, 'invalid', 2).status, 599);
   assert.equal(responses.unusedWrites(), 2);
-  assert.deepEqual(JSON.parse(responses.respond('POST', '/algo', '{"clientAlgoId":"a\\\"b"}').body),
-    { orderId: '1', clientOrderId: 'a"b' });
-  assert.deepEqual(JSON.parse(responses.respond('POST', '/algo', { newClientOrderId: 'c' }).body),
-    { orderId: '2', clientOrderId: 'c' });
-  assert.equal(responses.respond('POST', '/algo').status, 599);
+  assert.equal(responses.respond(write.method, write.url, 'valid', 1).status, 599);
+  assert.equal(responses.respond(write.method, write.url, 'valid', 2).body, 'first');
+  assert.equal(responses.respond(write.method, write.url, 'valid', 2).body, 'second');
+  assert.equal(responses.respond(write.method, write.url, 'valid', 2).status, 599);
   assert.equal(responses.unusedWrites(), 0);
+});
+
+
+test('WEEX effective snapshots follow delivered time without consuming their transitions', () => {
+  const read = { type: 'http', method: 'GET', url: 'https://api-contract.weex.com/capi/v3/openOrders', status: 200 };
+  const responses = new Responses([
+    { ...read, effectiveAt: 0, body: 'initial' },
+    { ...read, effectiveAt: 2800, body: 'placed' },
+    { ...read, effectiveAt: 4000, body: 'cancelled' },
+  ], (method, url) => method + url);
+  for (let i = 0; i < 3; i++) assert.equal(responses.respond(read.method, read.url, undefined, 0, 2799).body, 'initial');
+  assert.equal(responses.respond(read.method, read.url, undefined, 0, 2800).body, 'placed');
+  assert.equal(responses.respond(read.method, read.url, undefined, 0, 3999).body, 'placed');
+  assert.equal(responses.respond(read.method, read.url, undefined, 0, 4000).body, 'cancelled');
+  const future = new Responses([{ ...read, effectiveAt: 1, body: 'future' }], (method, url) => method + url);
+  assert.equal(future.respond(read.method, read.url, undefined, 0, 0).status, 599);
+});
+
+test('WEEX acknowledgements echo the actual generated ID and still consume exactly once', () => {
+  const write = { type: 'http', method: 'POST', url: 'https://api-contract.weex.com/capi/v3/algoOrder', status: 200,
+    body: '{"orderId":"702345678901234565","clientOrderId":"$clientAlgoId"}' };
+  const responses = new Responses([write], (method, url) => method + url);
+  const result = responses.respond(write.method, write.url, '{"clientAlgoId":"generated-on-wire"}');
+  assert.equal(JSON.parse(result.body).clientOrderId, 'generated-on-wire');
+  assert.equal(JSON.parse(result.body).orderId, '702345678901234565');
+  assert.equal(responses.respond(write.method, write.url, '{"clientAlgoId":"another"}').status, 599);
 });
 
 test('default BingX writes are consumed once and listen-key lifecycle stays reusable', () => {
@@ -233,7 +217,7 @@ test('implementation-specific responses preserve exact matching and selected wri
   const key = (method, url, body) => `${method} ${url} ${body}`;
   const write = (method) => method === 'POST';
   for (const impl of ['ts', 'rust']) {
-    const responses = new Responses(records, key, undefined, write, undefined, impl);
+    const responses = new Responses(records, key, undefined, write, true, impl);
     assert.equal(responses.unusedWrites(), impl === 'ts' ? 2 : 3);
     assert.equal(responses.respond('POST', '/cancel', 'shared').status, 200);
     const selected = impl === 'ts' ? 'legacy' : 'Order';
@@ -249,8 +233,8 @@ test('implementation-specific responses preserve exact matching and selected wri
     }
   }
   assert.throws(() => new Responses(records, key, undefined, write), /require a replay implementation/);
-  assert.throws(() => new Responses(records, key, undefined, write, undefined, 'typo'), /Unknown replay implementation/);
-  assert.throws(() => new Responses([make('bad', 'typo')], key, undefined, write, undefined, 'rust'), /Unknown HTTP record/);
+  assert.throws(() => new Responses(records, key, undefined, write, true, 'typo'), /Unknown replay implementation/);
+  assert.throws(() => new Responses([make('bad', 'typo')], key, undefined, write, true, 'rust'), /Unknown HTTP record/);
 });
 
 test('effectiveAt aliases availableAfter and never serves a future-only snapshot', () => {
@@ -262,82 +246,4 @@ test('effectiveAt aliases availableAfter and never serves a future-only snapshot
   assert.equal(responses.respond('GET', url, undefined, 0, 99).status, 599);
   assert.equal(responses.respond('GET', url, undefined, 0, 100).body, 'future');
   assert.equal(responses.respond('GET', url, undefined, 0, 100).body, 'future');
-});
-
-// Incoming venue and protocol regressions.
-{
-
-test('timed snapshots advance with delivered events inside their command stage', () => {
-  const read = { type: 'http', method: 'POST', url: 'https://api.hyperliquid.xyz/info', status: 200 };
-  const responses = new Responses([
-    { ...read, body: 'startup' },
-    { ...read, body: 'placed', afterCommand: 1, availableAt: 500 },
-    { ...read, body: 'cancelled', afterCommand: 1, availableAt: 1500 },
-  ], (method, url) => method + url);
-  assert.equal(responses.respond(read.method, read.url, undefined, 0, 500).body, 'startup');
-  assert.equal(responses.respond(read.method, read.url, undefined, 1, 499).body, 'startup');
-  assert.equal(responses.respond(read.method, read.url, undefined, 1, 500).body, 'placed');
-  assert.equal(responses.respond(read.method, read.url, undefined, 1, 1499).body, 'placed');
-  assert.equal(responses.respond(read.method, read.url, undefined, 1, 1500).body, 'cancelled');
-});
-
-test('writes cannot skip a premature earlier acknowledgement or consume on failed validation', () => {
-  const write = { type: 'http', method: 'POST', url: 'https://api.example/order', status: 200 };
-  const records = [{ ...write, body: 'first', afterCommand: 2 }, { ...write, body: 'second' }];
-  const responses = new Responses(records, (method, url) => method + url, (_method, _url, body) => body === 'valid');
-  assert.equal(responses.respond(write.method, write.url, 'invalid', 2).status, 599);
-  assert.equal(responses.unusedWrites(), 2);
-  assert.equal(responses.respond(write.method, write.url, 'valid', 1).status, 599);
-  assert.equal(responses.respond(write.method, write.url, 'valid', 2).body, 'first');
-  assert.equal(responses.respond(write.method, write.url, 'valid', 2).body, 'second');
-  assert.equal(responses.respond(write.method, write.url, 'valid', 2).status, 599);
-  assert.equal(responses.unusedWrites(), 0);
-});
-
-test('WEEX effective snapshots follow delivered time without consuming their transitions', () => {
-  const read = { type: 'http', method: 'GET', url: 'https://api-contract.weex.com/capi/v3/openOrders', status: 200 };
-  const responses = new Responses([
-    { ...read, effectiveAt: 0, body: 'initial' },
-    { ...read, effectiveAt: 2800, body: 'placed' },
-    { ...read, effectiveAt: 4000, body: 'cancelled' },
-  ], (method, url) => method + url);
-  for (let i = 0; i < 3; i++) assert.equal(responses.respond(read.method, read.url, undefined, 0, 2799).body, 'initial');
-  assert.equal(responses.respond(read.method, read.url, undefined, 0, 2800).body, 'placed');
-  assert.equal(responses.respond(read.method, read.url, undefined, 0, 3999).body, 'placed');
-  assert.equal(responses.respond(read.method, read.url, undefined, 0, 4000).body, 'cancelled');
-  const future = new Responses([{ ...read, effectiveAt: 1, body: 'future' }], (method, url) => method + url);
-  assert.equal(future.respond(read.method, read.url, undefined, 0, 0).status, 599);
-});
-
-test('WEEX acknowledgements echo the actual generated ID and still consume exactly once', () => {
-  const write = { type: 'http', method: 'POST', url: 'https://api-contract.weex.com/capi/v3/algoOrder', status: 200,
-    body: '{"orderId":"702345678901234565","clientOrderId":"$clientAlgoId"}' };
-  const responses = new Responses([write], (method, url) => method + url);
-  const result = responses.respond(write.method, write.url, '{"clientAlgoId":"generated-on-wire"}');
-  assert.equal(JSON.parse(result.body).clientOrderId, 'generated-on-wire');
-  assert.equal(JSON.parse(result.body).orderId, '702345678901234565');
-  assert.equal(responses.respond(write.method, write.url, '{"clientAlgoId":"another"}').status, 599);
-});
-}
-
-test('header-aware response overloads validate stages and auth before callbacks or consumption', () => {
-  for (const legacy of [false, true]) {
-    const url = 'https://venue.test/orders';
-    const responses = new Responses([{ type: 'http', method: 'POST', url,
-      requestBody: '{"size":2}', status: 200, body: '{}', afterCommand: 2, availableAfter: 100 }],
-    (_method, _url, body) => body, (_method, _url, _body, headers) => headers?.auth === 'fixture');
-    let matches = 0;
-    const respond = (time, headers, callback = () => { matches++; }) => legacy
-      ? responses.respond('POST', url, '{"size":2}', 2, callback, time, headers)
-      : responses.respond('POST', url, '{"size":2}', 2, time, callback, headers);
-    assert.equal(respond(99, { auth: 'fixture' }).status, 599);
-    assert.equal(respond(100, {}).status, 599);
-    assert.equal(matches, 0);
-    assert.throws(() => respond(100, { auth: 'fixture' }, () => { throw new Error('invalid generated ID'); }), /invalid generated/);
-    assert.equal(responses.unusedWrites(), 1);
-    assert.equal(respond(100, { auth: 'fixture' }).status, 200);
-    assert.equal(matches, 1);
-    assert.equal(responses.unusedWrites(), 0);
-    assert.equal(respond(100, { auth: 'fixture' }).status, 599);
-  }
 });

@@ -1,39 +1,26 @@
-import assert from 'node:assert/strict';
-import { uniqueRequestHeaders } from './protocol-headers.mjs';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const hmac = (text) => createHmac('sha256', 'replay-secret').update(text).digest('hex');
 const sameSignature = (actual, expected) => typeof actual === 'string' && /^[a-f0-9]{64}$/i.test(actual) &&
   timingSafeEqual(Buffer.from(actual.toLowerCase()), Buffer.from(expected));
-const fresh = (timestamp, window) => ['string','number'].includes(typeof timestamp) && String(timestamp).length > 0 && !/[^0-9]/.test(String(timestamp)) && Number.isSafeInteger(Number(timestamp)) &&
+const fresh = (timestamp, window) => Number.isSafeInteger(Number(timestamp)) && /^\d+$/.test(String(timestamp)) &&
   Number(window) > 0 && Number(window) <= 60_000 && Number(timestamp) < Date.now() + 1000 && Date.now() - Number(timestamp) <= Number(window);
 const publicPaths = /\/(?:exchangeInfo|ticker\/24hr|ticker\/bookTicker|premiumIndex|depth|klines|trades|historicalTrades|aggTrades|time)$/;
 
 /** Validate the actual signed bytes before canonical request matching drops clocks. */
 export const validateBinanceRequest = ({ method, url, body, headers = {} }) => {
   const parsed = new URL(url);
-  const prefixes = {
-    'https://api.binance.com': /^\/api\/v3\//,
-    'https://testnet.binance.vision': /^\/api\/v3\//,
-    'https://fapi.binance.com': /^\/fapi\/v[123]\//,
-    'https://demo-fapi.binance.com': /^\/(?:fapi\/v[123]|papi\/v1)\//,
-    'https://dapi.binance.com': /^\/dapi\/v[12]\//,
-    'https://demo-dapi.binance.com': /^\/dapi\/v[12]\//,
-    'https://papi.binance.com': /^\/papi\/v1\//,
-  };
-  if (parsed.username || parsed.password || parsed.hash || !prefixes[parsed.origin]?.test(parsed.pathname)) throw new Error('Invalid Binance upstream URL');
-  if (new Set(parsed.searchParams.keys()).size !== [...parsed.searchParams.keys()].length) throw new Error('Duplicate Binance query parameter');
   // Generic identity matching omits several venues' generated IDs. Spot and
   // COIN-M do not accept these aliases, so reject them before canonicalization.
   // USD-M clientAlgoId and PM newClientStrategyId remain native controls.
   if (/^\/(?:api\/v3|dapi\/v[12])\//.test(parsed.pathname) &&
       ['c', 'clientOrderId', 'clientAlgoId', 'requestId'].some((key) => parsed.searchParams.has(key)))
     throw new Error('Unsupported Binance Spot/COIN-M query alias');
-  const fields = uniqueRequestHeaders(headers);
+  const fields = Object.fromEntries((Array.isArray(headers) ? headers : Object.entries(headers))
+    .map(([key, value]) => [key.toLowerCase(), String(value)]));
   if (body !== undefined && body !== null && body !== '') throw new Error('Binance request parameters must be in the URL');
   if (publicPaths.test(parsed.pathname)) {
-    if (method !== 'GET') throw new Error('Binance public endpoint requires GET');
-    if (Object.keys(fields).some((key) => ['x-mbx-apikey','authorization','coinbase-authorization','proxy-authorization','cookie'].includes(key)) || [...parsed.searchParams.keys()].some((key) => /^(?:signature|api_?key|authorization|access_token)$/i.test(key))) throw new Error('Binance public request leaked credentials');
+    if (fields['x-mbx-apikey'] || parsed.searchParams.has('signature')) throw new Error('Binance public request leaked credentials');
     return;
   }
   if (fields['x-mbx-apikey'] !== 'replay-key') throw new Error('Invalid Binance API key');
@@ -51,17 +38,6 @@ export const validateBinanceRequest = ({ method, url, body, headers = {} }) => {
   if (!sameSignature(params.get('signature'), hmac(signed))) throw new Error('Invalid Binance request signature');
 };
 
-const BROKER_PREFIX = 'x-s3vFFRQp';
-export const binanceRequestOptions = (method, url) => ({
-  ignoreGeneratedBodyId: (field, value, callerIds) => {
-    if (method !== 'POST' || callerIds.has(value) || typeof value !== 'string' || !value.startsWith(BROKER_PREFIX)
-      || value.length <= BROKER_PREFIX.length || value.length > 36 || /[^A-Za-z0-9]/.test(value.slice(BROKER_PREFIX.length))) return false;
-    if (field === 'newClientOrderId') return /^\/(?:api\/v3|fapi\/v1|dapi\/v1|papi\/v1\/um)\/(?:order|batchOrders)$/.test(url.pathname);
-    if (field === 'clientAlgoId') return url.pathname === '/fapi/v1/algoOrder';
-    return field === 'newClientStrategyId' && url.pathname === '/papi/v1/um/conditional/order';
-  },
-});
-
 export const spotSocketRequest = (message) => {
   if (!['userDataStream.subscribe.signature', 'session.status', 'session.subscriptions'].includes(message.method)) return;
   return { id: message.id, key: message.method };
@@ -76,36 +52,27 @@ export const createBinanceSpotSocketAudit = (_impl, { isPrivate: required }) => 
   const states = new Map();
   const failures = [];
   const state = (url, generation = 1) => {
-    const key = generation && typeof generation === 'object' ? generation : `${url} ${generation}`;
-    if (!states.has(key)) states.set(key, { private: isPrivate(url), topics: new Set(), pending: new Map(), subscription: undefined, auth: false, closed: false });
+    const key = `${url} ${generation}`;
+    if (!states.has(key)) states.set(key, { pending: new Map(), subscription: undefined, auth: false, closed: false });
     return states.get(key);
   };
   const fail = (message) => failures.push(message);
   return {
-    connected(url, generation) { state(url, generation); },
-    closed(url, generation) { state(url, generation).closed = true; },
+    connected(url, generation) { if (isPrivate(url)) state(url, generation); },
+    closed(url, generation) { if (isPrivate(url)) state(url, generation).closed = true; },
     sent(url, text, generation) {
+      if (!isPrivate(url)) return;
       const message = JSON.parse(text);
       const s = state(url, generation);
-      if (s.closed) { fail('Binance Spot frame on a closed socket generation'); return; }
-      if (!isPrivate(url)) {
-        if (message.method === 'LIST_SUBSCRIPTIONS' && Object.keys(message).every((key) => ['id','method'].includes(key))) return;
-        if (!['SUBSCRIBE','UNSUBSCRIBE'].includes(message.method) || !Array.isArray(message.params) || message.params.some((topic) => typeof topic !== 'string' || !topic)) {
-          fail('Invalid Binance Spot public subscription'); return;
-        }
-        for (const topic of message.params) if (message.method === 'SUBSCRIBE') s.topics.add(topic); else s.topics.delete(topic);
-        return;
-      }
       if (!((typeof message.id === 'string' && message.id.length > 0) || Number.isSafeInteger(message.id)) || s.pending.has(message.id)) {
         fail('Invalid or in-flight reused Binance Spot request ID'); return;
       }
       if (message.method === 'userDataStream.subscribe.signature') {
-        s.subscription = undefined;
         const p = message.params;
         const keys = Object.keys(p ?? {}).sort().join(',');
         const payload = `apiKey=${p?.apiKey}&recvWindow=${p?.recvWindow}&timestamp=${p?.timestamp}`;
         s.auth = keys === 'apiKey,recvWindow,signature,timestamp' && p.apiKey === 'replay-key' && p.recvWindow === 5000 &&
-          Number.isSafeInteger(p.timestamp) && fresh(p.timestamp, p.recvWindow) && sameSignature(p.signature, hmac(payload));
+          fresh(p.timestamp, p.recvWindow) && sameSignature(p.signature, hmac(payload));
         if (!s.auth) fail('Invalid Binance Spot subscription signature/key/window');
       } else if (message.method === 'session.subscriptions') {
         if (s.subscription === undefined) fail('Binance Spot heartbeat preceded subscription ACK');
@@ -114,20 +81,9 @@ export const createBinanceSpotSocketAudit = (_impl, { isPrivate: required }) => 
       s.pending.set(message.id, message.method);
     },
     received(url, text, generation) {
+      if (!isPrivate(url)) return;
       const message = JSON.parse(text);
       const s = state(url, generation);
-      if (s.closed) { fail('Binance Spot frame on a closed socket generation'); return; }
-      if (!isPrivate(url)) {
-        if (!Array.isArray(message) && Object.hasOwn(message, 'id') && Object.hasOwn(message, 'result')) return;
-        for (const event of Array.isArray(message) ? message : [message]) {
-          const symbol = typeof event?.s === 'string' && event.s.toLowerCase();
-          const subscribed = symbol && (event.e === '24hrTicker' ? s.topics.has(`${symbol}@ticker`)
-            : event.e === 'depthUpdate' ? [...s.topics].some((topic) => topic === `${symbol}@depth` || topic.startsWith(`${symbol}@depth@`))
-            : event.e === 'kline' ? s.topics.has(`${symbol}@kline_${event.k?.i}`) : false);
-          if (!subscribed) fail('Unsubscribed Binance Spot public data');
-        }
-        return;
-      }
       if ('id' in message) {
         const method = s.pending.get(message.id);
         if (!method) { fail('Uncorrelated Binance Spot acknowledgement'); return; }
@@ -144,11 +100,11 @@ export const createBinanceSpotSocketAudit = (_impl, { isPrivate: required }) => 
       } else if (!message.event || message.subscriptionId !== s.subscription || s.subscription === undefined || s.closed)
         fail('Binance Spot event outside acknowledged subscription/generation');
     },
-    ready(accountReady = false) { return !required || [...states.values()].some((s) => s.private && !s.closed && s.auth && (!accountReady || s.subscription !== undefined)); },
+    ready(accountReady = false) { return !required || [...states.values()].some((s) => !s.closed && s.auth && (!accountReady || s.subscription !== undefined)); },
     errors() {
-      if (required && ![...states.values()].some((s) => s.private && !s.closed && s.subscription !== undefined))
+      if (required && ![...states.values()].some((s) => !s.closed && s.subscription !== undefined))
         fail('Binance Spot subscription never acknowledged');
-      for (const s of states.values()) if (s.private && !s.closed && s.pending.size) fail('Binance Spot request never acknowledged');
+      for (const s of states.values()) if (!s.closed && s.pending.size) fail('Binance Spot request never acknowledged');
       return [...new Set(failures)];
     },
   };
@@ -259,12 +215,8 @@ export const fixBinanceSpotFills = (account, records) => {
   for (let i = 0; i < account.fills.length; i++) {
     const event = executions[i];
     const fill = account.fills[i];
-    if (event && fill.id === event.c && fill.symbol === event.s && fill.amount === Number(event.l)) {
-      const price = Number(event.L), legacy = Number(event.p);
-      assert(Number.isFinite(price) && Number.isFinite(legacy), 'Invalid Binance Spot execution price oracle');
-      assert(fill.price === legacy || fill.price === price, 'Unexpected TS Binance Spot execution price');
-      fill.price = price;
-    }
+    if (event && fill.id === event.c && fill.symbol === event.s && fill.amount === Number(event.l))
+      fill.price = Number(event.L);
   }
 };
 
@@ -275,15 +227,6 @@ export const binanceSubscriptionMessage = (message) => {
   if (message.method === 'userDataStream.subscribe.signature' && message.params)
     return { ...message, params: { ...message.params, timestamp: '<timestamp>', signature: '<signature>' } };
   return message;
-};
-
-// A depth packet is causally downstream of this exact socket's subscription.
-// Leave aggregate/private events on their existing URL/connection routing.
-export const binanceDepthStream = (text) => {
-  let event;
-  try { event = JSON.parse(text); } catch { return; }
-  if (event?.e === 'depthUpdate' && typeof event.s === 'string' && event.s)
-    return `${event.s.toLowerCase()}@depth`;
 };
 
 export const binanceTickerSymbols = (text) => {

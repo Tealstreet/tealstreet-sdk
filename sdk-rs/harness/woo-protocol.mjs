@@ -28,17 +28,16 @@ export const validateWooRequest = ({ method, url, body, headers = {} }) => {
 export const createWooSocketAudit = (_impl, { isPrivate, books = [] }) => {
   const states = new Map();
   const failures = [];
-  const state = (url, socket) => {
-    const identity = socket ?? url;
-    if (!states.has(identity)) states.set(identity, { url, socket, auth: false, ack: false, topics: new Set(), pings: 0, pongs: 0, pendingPongs: 0 });
-    return states.get(identity);
+  const state = (url) => {
+    if (!states.has(url)) states.set(url, { auth: false, ack: false, topics: new Set(), pings: 0, pongs: 0, pendingPongs: 0 });
+    return states.get(url);
   };
   const native = (symbol) => `PERP_${symbol.slice(0, -4)}_${symbol.slice(-4)}`;
   return {
-    connected(url, socket) { states.delete(socket ?? url); state(url, socket); },
-    sent(url, text, socket) {
+    connected(url) { states.delete(url); state(url); },
+    sent(url, text) {
       const message = JSON.parse(text);
-      const s = state(url, socket);
+      const s = state(url);
       if (message.event === 'auth') {
         const p = message.params;
         s.ack = false;
@@ -52,9 +51,9 @@ export const createWooSocketAudit = (_impl, { isPrivate, books = [] }) => {
       else if (message.event === 'ping') s.pings += 1;
       else if (message.event === 'pong') { s.pongs += 1; s.pendingPongs = Math.max(0, s.pendingPongs - 1); }
     },
-    received(url, text, socket) {
+    received(url, text) {
       const message = JSON.parse(text);
-      const s = state(url, socket);
+      const s = state(url);
       if (message.event === 'ping') s.pendingPongs += 1;
       if (message.event === 'auth' && message.success === true) {
         if (!s.auth) failures.push('WOO auth acknowledgement preceded a valid signature');
@@ -64,13 +63,12 @@ export const createWooSocketAudit = (_impl, { isPrivate, books = [] }) => {
       if (privateUrl(url) && !message.event && !s.ack) failures.push('WOO private data preceded authentication');
     },
     ready() {
-      const entries = [...states.values()].filter((s) => !s.socket?.closed);
-      return entries.some((s) => !privateUrl(s.url) && ['tickers','bbos','markprices',...books.map((b) => `${native(b)}@orderbookupdate`)].every((topic) => s.topics.has(topic))) &&
-        (!isPrivate || entries.some((s) => privateUrl(s.url) && s.auth));
+      const entries = [...states.entries()];
+      return entries.some(([url,s]) => !privateUrl(url) && ['tickers','bbos','markprices',...books.map((b) => `${native(b)}@orderbookupdate`)].every((topic) => s.topics.has(topic))) &&
+        (!isPrivate || entries.some(([url,s]) => privateUrl(url) && s.auth));
     },
     errors() {
-      for (const s of states.values()) {
-        const { url } = s;
+      for (const [url,s] of states) {
         if (!s.pings) failures.push(`WOO socket has no heartbeat ${url}`);
         if (s.pendingPongs) failures.push(`WOO server ping was not answered ${url}`);
         if (privateUrl(url) && isPrivate) {

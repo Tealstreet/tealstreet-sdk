@@ -89,7 +89,7 @@ fn queued_futures_public_headers_use_primary_or_unsigned_policy_at_dispatch() {
                 Event::Command(Command::FetchCandles {
                     command,
                     symbol: "XBTUSDTM".into(),
-                    interval: "1m".into(),
+                    interval: safe_cex_engine::model::Interval::M1,
                     limit: Some(1),
                     from_ms: None,
                     to_ms: Some(START as f64),

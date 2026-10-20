@@ -10,6 +10,8 @@ export function consumerFrame(
   delta?: number[],
   events = false,
   marketSymbols: readonly string[] = data.markets?.map((market) => market.symbol) ?? ['BTCUSDT'],
+  /** The venue's quantity-units code, written into market flag bits 8-11. */
+  quantityUnits = 0,
 ): ArrayBuffer {
   const strings: string[] = [];
   const ref = (value: string | undefined) => {
@@ -52,7 +54,8 @@ export function consumerFrame(
             (m.isSpot ? 4 : 0) |
             (m.isPerpetual ? 8 : 0) |
             (m.isExpiring ? 16 : 0) |
-            (m.isReadOnly ? 32 : 0),
+            (m.isReadOnly ? 32 : 0) |
+            (quantityUnits << 8),
         ),
       ],
       [

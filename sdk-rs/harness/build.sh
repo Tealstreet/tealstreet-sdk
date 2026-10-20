@@ -4,7 +4,7 @@
 # place of the combined engine, for gates; --families builds every family into
 # pkg/{web,node}/<family>, which browser and Worker loaders fetch per venue.
 set -euo pipefail
-venues="breakoutprop, asterdex, binance, binancespot, binanceinverse, binancepm, bitunix, kucoin, kucoinspot, bybit, hyperliquid, hyperliquidspot, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitrue, phemex, woo, lighter, lighter-robinhood, apexomni, kraken, krakenspot, paradex, coinbase, orderly or polymarket"
+venues="breakoutprop, asterdex, binance, bitunix, kucoin, kucoinspot, bybit, hyperliquid, hyperliquidspot, txflow, grvt, okx, cryptocom, weex, bingx, mexc, blofin, backpack, bitget, bitgetusdc, bitrue, phemex, woo, lighter, lighter-robinhood, apexomni, kraken, krakenspot, paradex, coinbase, orderly or polymarket"
 if [[ $# -gt 0 && ! ( $# -eq 2 && $1 == --venue ) && ! ( $# -eq 1 && $1 == --families ) ]]; then
   echo "Usage: $0 [--venue VENUE | --families]" >&2
   exit 2
@@ -13,7 +13,7 @@ fi
 family_args() {
   case "$1" in
     breakoutprop|asterdex|binance|bitunix|kucoin|kucoinspot|bybit|hyperliquid|txflow|grvt|okx|cryptocom|weex|bingx|mexc|blofin|backpack|bitget|bitrue|phemex|woo|lighter|apexomni|kraken|paradex|polymarket|coinbase|orderly) family=$1 ;;
-    binancespot|binanceinverse|binancepm) family=binance ;;
+    bitgetusdc) family=bitget ;;
     lighter-robinhood) family=lighter ;;
     hyperliquidspot) family=hyperliquid ;;
     krakenspot) family=kraken ;;
@@ -29,9 +29,6 @@ family_args() {
   elif [[ $family == bitrue ]]; then
     # Spend standalone size headroom on decoder throughput; combined builds keep the size profile.
     build_args+=(--config 'profile.release.package.safe-cex-venue-bitrue.opt-level=3')
-  elif [[ $family == okx ]]; then
-    # EU's steady public decoder needs throughput within the same standalone size budget.
-    build_args+=(--config 'profile.release.package.safe-cex-venue-okx.opt-level=3')
   fi
 }
 # Bind the last build for browsers/Workers and Node; Node bindings are

@@ -1,4 +1,3 @@
-import { requestKey } from './requests.mjs';
 // Expected conditional values come from the recorded venue, never the Rust output.
 const parse = (text) => JSON.parse(text, (_key, value, context) => {
   if (typeof value === 'number' && !Number.isSafeInteger(value) && Number.isInteger(value)) {
@@ -187,10 +186,10 @@ export function fixLighterCommands(results, records) {
   }
 }
 
-// Kraken TS emits repeated execution IDs and omits native statistics/holdings.
-// Reconstruct only documented fields from input; production books and their
-// intermediate timestamp/hash comparisons remain untouched.
+// Kraken TS truncates full depth to 100 and emits repeated execution IDs.
+// Reconstruct those two expected outputs from the recording, never Rust state.
 export function fixKrakenOutput(ts,records){
+ const books=new Map(Object.keys(ts.books).map(s=>[s,{seq:undefined,bids:new Map(),asks:new Map()}]));
  const markets=new Map(ts.markets.map(m=>[m.symbol,m]));
  const tickers=new Map((ts.tickers??[]).map(t=>[t.symbol,t]));
  const fills=[],seen=new Set();let coins;
@@ -224,7 +223,8 @@ export function fixKrakenOutput(ts,records){
    // TS derives fill cursors after flooring to seconds, and its income pager
    // requests an extra boundary page even when the native page was short.
    if(redundant.has(record)&&!records.some(other=>other!==record&&other.type==='http'&&other.method==='GET'&&other.url===record.url&&!redundant.has(other))){
-    extraReads.add(requestKey('GET',record.url));
+    const params=[...u.searchParams].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+    extraReads.add(`GET ${u.origin}${u.pathname}?${params}`);
    }
    if(u.pathname==='/derivatives/api/v3/accounts'&&data.result==='success'&&data.accounts){
     const holdings=new Map();
@@ -253,13 +253,23 @@ export function fixKrakenOutput(ts,records){
    if(!f.fill_id||seen.has(f.fill_id))continue;seen.add(f.fill_id);
    if(m.feed==='fills'&&markets.has(f.instrument))fills.push({id:String(f.order_id),symbol:f.instrument,side:f.buy?'buy':'sell',amount:Number(f.qty),price:Number(f.price)});
   }
+  const book=books.get(m.product_id);if(!book||!['book','book_snapshot'].includes(m.feed)||m.event)continue;
+  if(m.feed==='book_snapshot'){
+   if(book.seq!==undefined&&m.seq<=book.seq)continue;
+   if(!Array.isArray(m.bids)||!Array.isArray(m.asks))continue;
+   book.bids=new Map(m.bids.map(l=>[Number(l.price),Number(l.qty)]));book.asks=new Map(m.asks.map(l=>[Number(l.price),Number(l.qty)]));book.seq=m.seq;
+  }else{
+   if(book.seq===undefined||m.seq<=book.seq)continue;
+   if(m.seq!==book.seq+1){book.seq=undefined;book.bids.clear();book.asks.clear();continue;}
+   const side=m.side==='buy'?book.bids:book.asks,price=Number(m.price),qty=Number(m.qty);if(qty===0)side.delete(price);else side.set(price,qty);book.seq=m.seq;
+  }
  }
+ for(const[s,b]of books){if(b.seq===undefined)continue;const scale=markets.get(s)?.contractSize??1;ts.books[s]={bids:[...b.bids].filter(([,q])=>q>0).sort(([a],[b])=>b-a).map(([p,q])=>[p,q*scale]),asks:[...b.asks].filter(([,q])=>q>0).sort(([a],[b])=>a-b).map(([p,q])=>[p,q*scale])};}
  if(ts.account){
   ts.account.fills=fills;if(coins!==undefined)ts.account.balance.coins=coins;
   // Kraken publishes no position margin allocation; TS's base store invents 0.
   for(const p of ts.account.positions)if(p.marginSize===0)p.marginSize=null;
  }
  ts.requests=ts.requests.filter(key=>!extraReads.has(key));
- if(ts.outbound)ts.outbound=ts.outbound.filter(key=>!extraReads.has(key));
  ts.subscriptions=ts.subscriptions.filter(key=>!key.includes('"feed":"account_balances"'));
 }
